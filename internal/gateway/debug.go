@@ -353,6 +353,18 @@ type debugKVMemoryVars struct {
 	L2StageBytes          int64   `json:"l2_stage_bytes,omitempty"`
 	L2RestoreBytes        int64   `json:"l2_restore_bytes,omitempty"`
 	L2Evictions           int     `json:"l2_evictions,omitempty"`
+	L3Enabled             bool    `json:"l3_enabled"`
+	L3ReferencedBytes     int64   `json:"l3_referenced_bytes,omitempty"`
+	L3Hits                int     `json:"l3_hits,omitempty"`
+	L3Misses              int     `json:"l3_misses,omitempty"`
+	L3Faults              int     `json:"l3_faults,omitempty"`
+	L3HitTokens           int     `json:"l3_hit_tokens,omitempty"`
+	L3StageBytes          int64   `json:"l3_stage_bytes,omitempty"`
+	L3RestoreBytes        int64   `json:"l3_restore_bytes,omitempty"`
+	L3StageNanos          int64   `json:"l3_stage_nanos,omitempty"`
+	L3RestoreNanos        int64   `json:"l3_restore_nanos,omitempty"`
+	L3StageFaults         int     `json:"l3_stage_faults,omitempty"`
+	L3RestoreFaults       int     `json:"l3_restore_faults,omitempty"`
 }
 
 // debugMoEResidencyVars is the activated-expert residency block. Unlike the Prometheus family,
@@ -1305,6 +1317,18 @@ func debugKVMemory(p agent.Planner) *debugKVMemoryVars {
 		L2StageBytes:          st.L2StageBytes,
 		L2RestoreBytes:        st.L2RestoreBytes,
 		L2Evictions:           st.L2Evictions,
+		L3Enabled:             st.L3Enabled,
+		L3ReferencedBytes:     st.L3ReferencedBytes,
+		L3Hits:                st.L3Hits,
+		L3Misses:              st.L3Misses,
+		L3Faults:              st.L3Faults,
+		L3HitTokens:           st.L3HitTokens,
+		L3StageBytes:          st.L3StageBytes,
+		L3RestoreBytes:        st.L3RestoreBytes,
+		L3StageNanos:          st.L3StageNanos,
+		L3RestoreNanos:        st.L3RestoreNanos,
+		L3StageFaults:         st.L3StageFaults,
+		L3RestoreFaults:       st.L3RestoreFaults,
 	}
 }
 

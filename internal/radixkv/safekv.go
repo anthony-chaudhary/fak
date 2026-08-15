@@ -1,6 +1,7 @@
 package radixkv
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
@@ -130,6 +131,11 @@ func (s *ScopedTree) LookupSnapshot(owner CacheIdentity, tokens []int) (*model.P
 // LookupSnapshotTiered is LookupSnapshot with truthful physical source-tier
 // attribution. It searches every visible hot scope before consulting host DRAM.
 func (s *ScopedTree) LookupSnapshotTiered(owner CacheIdentity, tokens []int) (*model.PrefixSnapshot, []float32, int, ShareScope, SnapshotTier, error) {
+	return s.LookupSnapshotTieredContext(context.Background(), owner, tokens)
+}
+
+// LookupSnapshotTieredContext is the cancellable scoped L1→L2→L3 lookup.
+func (s *ScopedTree) LookupSnapshotTieredContext(ctx context.Context, owner CacheIdentity, tokens []int) (*model.PrefixSnapshot, []float32, int, ShareScope, SnapshotTier, error) {
 	if strings.TrimSpace(owner.Tenant) == "" {
 		return nil, nil, 0, ScopeTenant, SnapshotTierMiss, ErrCacheIdentity
 	}
@@ -138,7 +144,9 @@ func (s *ScopedTree) LookupSnapshotTiered(owner CacheIdentity, tokens []int) (*m
 	checks := []ShareScope{ScopeAgent, ScopeTenant, ScopeFleet}
 	bestHotScope, bestHotMatched := ScopeTenant, 0
 	bestHostScope, bestHostMatched := ScopeTenant, 0
-	var bestHot, bestHost *node
+	bestRemoteScope, bestRemoteMatched := ScopeTenant, 0
+	bestRemoteNS := ""
+	var bestHot, bestHost, bestRemote *node
 	for _, scope := range checks {
 		if scope == ScopeAgent && strings.TrimSpace(owner.Agent) == "" {
 			continue
@@ -154,6 +162,9 @@ func (s *ScopedTree) LookupSnapshotTiered(owner CacheIdentity, tokens []int) (*m
 			}
 			if candidate.hostSnapshot != nil && candidate.plen > bestHostMatched {
 				bestHost, bestHostMatched, bestHostScope = candidate, candidate.plen, scope
+			}
+			if candidate.remoteSnapshot != nil && candidate.plen > bestRemoteMatched {
+				bestRemote, bestRemoteMatched, bestRemoteScope, bestRemoteNS = candidate, candidate.plen, scope, ns
 			}
 		}
 		if n != nil {
@@ -171,7 +182,7 @@ func (s *ScopedTree) LookupSnapshotTiered(owner CacheIdentity, tokens []int) (*m
 		return snap, bestHot.Logits(), bestHotMatched, bestHotScope, SnapshotTierDeviceL1, nil
 	}
 	s.tree.l1Misses++
-	if !s.tree.HostL2Enabled() {
+	if !s.tree.HostL2Enabled() && !s.tree.RemoteSnapshotEnabled() {
 		return nil, nil, 0, ScopeTenant, SnapshotTierMiss, nil
 	}
 	if bestHost != nil {
@@ -185,7 +196,21 @@ func (s *ScopedTree) LookupSnapshotTiered(owner CacheIdentity, tokens []int) (*m
 		s.tree.l2RestoreBytes += bestHost.hostSnapshot.TransferBytes()
 		return snap, bestHost.Logits(), bestHostMatched, bestHostScope, SnapshotTierHostL2, nil
 	}
-	s.tree.l2Misses++
+	if s.tree.HostL2Enabled() {
+		s.tree.l2Misses++
+	}
+	if bestRemote != nil && s.tree.RemoteSnapshotEnabled() {
+		snap, found, err := s.tree.restoreSnapshotFromRemote(ctx, bestRemoteNS, bestRemote)
+		if err != nil {
+			return nil, nil, bestRemoteMatched, bestRemoteScope, SnapshotTierRemoteL3, err
+		}
+		if found {
+			return snap, bestRemote.Logits(), bestRemoteMatched, bestRemoteScope, SnapshotTierRemoteL3, nil
+		}
+	}
+	if s.tree.RemoteSnapshotEnabled() {
+		s.tree.l3Misses++
+	}
 	return nil, nil, 0, ScopeTenant, SnapshotTierMiss, nil
 }
 

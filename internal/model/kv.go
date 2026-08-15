@@ -53,7 +53,14 @@ func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
 	if s == nil || s.Cache == nil {
 		return nil, fmt.Errorf("model: cannot snapshot nil session cache")
 	}
-	out := &PrefixSnapshot{Cache: s.Cache.Clone(), Backend: s.Backend, Tokens: s.Cache.Len()}
+	tokens := s.Cache.Len()
+	if s.Backend != nil && s.halKV != nil {
+		// HAL attention KV is the physical position authority. Hybrid device paths
+		// may keep the host model cache positionless while all prefix state lives in
+		// halKV plus recurrent tensors.
+		tokens = s.halKV.Len()
+	}
+	out := &PrefixSnapshot{Cache: s.Cache.Clone(), Backend: s.Backend, Tokens: tokens}
 	if s.Backend == nil {
 		return out, nil
 	}

@@ -49,6 +49,18 @@ type KVMemoryStats struct {
 	L2StageBytes          int64
 	L2RestoreBytes        int64
 	L2Evictions           int
+	L3Enabled             bool
+	L3ReferencedBytes     int64
+	L3Hits                int
+	L3Misses              int
+	L3Faults              int
+	L3HitTokens           int
+	L3StageBytes          int64
+	L3RestoreBytes        int64
+	L3StageNanos          int64
+	L3RestoreNanos        int64
+	L3StageFaults         int
+	L3RestoreFaults       int
 }
 
 // KVMemoryReporter is the optional interface a local planner implements when it

@@ -107,6 +107,20 @@ func (fsDriver) ID() string { return "blobfs" }
 // its bearer secret — init passes FAK_BLOB_HTTP_URL / FAK_BLOB_HTTP_TOKEN; a test
 // passes an httptest server URL directly.
 func newRouterStore(dir, remote, token string) (*routerStore, error) {
+	return newRouterStoreWithLocalMirror(dir, remote, token, true)
+}
+
+// NewRemoteStore opens the l3kv span-keyed manifest over a blobhttp primary
+// without a local content mirror. The small manifest remains crash-safe locally;
+// every snapshot payload byte is PUT to and GET from the remote HTTP store.
+func NewRemoteStore(dir, remote, token string) (Store, error) {
+	if remote == "" {
+		return nil, fmt.Errorf("l3kv: remote snapshot store requires FAK_BLOB_HTTP_URL")
+	}
+	return newRouterStoreWithLocalMirror(dir, remote, token, false)
+}
+
+func newRouterStoreWithLocalMirror(dir, remote, token string, localMirror bool) (*routerStore, error) {
 	if dir == "" {
 		return nil, fmt.Errorf("l3kv: empty store directory")
 	}
@@ -125,7 +139,7 @@ func newRouterStore(dir, remote, token string) (*routerStore, error) {
 		// (blobfs first): a local mirror hit needs no network round-trip.
 		tiers[0].Accept = func(int) bool { return false }
 		tiers = append(tiers, storedrv.Tier{Driver: blobhttp.New(remote, blobhttp.WithBearer(token)), Durable: true})
-		mirror = true
+		mirror = localMirror
 	}
 	router, err := storedrv.New(tiers, mirror)
 	if err != nil {

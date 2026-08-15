@@ -20,10 +20,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
+	"github.com/anthony-chaudhary/fak/internal/l3kv"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -501,7 +503,27 @@ func (rt *serveRuntime) wireGateway(sf *serveFlags) {
 		fmt.Fprintf(os.Stderr, "fak serve: registered %d peer-DRAM lender(s) from %s → remote-DRAM paging rung active (#5083)\n", n, peerDRAMLenderEnvVar)
 	}
 
-	prefixBridge := newInKernelPrefixPressureBridge(rt.srv.InKernelKVPrefixPressureSource())
+	prefixSource := rt.srv.InKernelKVPrefixPressureSource()
+	if prefixSource != nil {
+		store, configured, err := l3kv.ConfiguredRemoteStore()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fak serve: native remote prefix L3:", err)
+			os.Exit(1)
+		}
+		if configured {
+			configurer, ok := prefixSource.(agent.KVPrefixRemoteConfigurer)
+			if !ok {
+				fmt.Fprintln(os.Stderr, "fak serve: native remote prefix L3: planner has no remote configuration seam")
+				os.Exit(1)
+			}
+			if err := configurer.ConfigureKVPrefixRemote(store); err != nil {
+				fmt.Fprintln(os.Stderr, "fak serve: native remote prefix L3:", err)
+				os.Exit(1)
+			}
+			fmt.Fprintln(os.Stderr, "fak serve: native complete-prefix L3 -> l3kv/blobhttp (versioned, scoped, digest-verified)")
+		}
+	}
+	prefixBridge := newInKernelPrefixPressureBridge(prefixSource)
 	if prefixBridge != nil {
 		wireKVPressureRelief(rt.srv, rt.chatBackend, prefixBridge, prefixBridge)
 	} else {

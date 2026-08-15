@@ -264,6 +264,18 @@ func TestKVMemoryMetricsAndDebugVars(t *testing.T) {
 		L2StageBytes:          5000,
 		L2RestoreBytes:        4000,
 		L2Evictions:           2,
+		L3Enabled:             true,
+		L3ReferencedBytes:     9000,
+		L3Hits:                3,
+		L3Misses:              2,
+		L3Faults:              1,
+		L3HitTokens:           30,
+		L3StageBytes:          12000,
+		L3RestoreBytes:        11000,
+		L3StageNanos:          250000000,
+		L3RestoreNanos:        500000000,
+		L3StageFaults:         1,
+		L3RestoreFaults:       2,
 	}}
 
 	text := srv.renderMetrics()
@@ -289,6 +301,7 @@ func TestKVMemoryMetricsAndDebugVars(t *testing.T) {
 		`fak_gateway_kv_prefix_tier_resident_bytes{backend="radixkv",tier="device_l1",scope="device"} 1000`,
 		`fak_gateway_kv_prefix_tier_resident_bytes{backend="radixkv",tier="device_l1",scope="host_metadata"} 200`,
 		`fak_gateway_kv_prefix_tier_resident_bytes{backend="radixkv",tier="host_dram_l2",scope="host"} 3000`,
+		`fak_gateway_kv_prefix_tier_resident_bytes{backend="radixkv",tier="remote_http_l3",scope="remote_referenced"} 9000`,
 		`fak_gateway_kv_prefix_tier_capacity_bytes{backend="radixkv",tier="host_dram_l2"} 4096`,
 		`fak_gateway_kv_prefix_tier_lookups_total{backend="radixkv",tier="device_l1",outcome="hit"} 4`,
 		`fak_gateway_kv_prefix_tier_lookups_total{backend="radixkv",tier="device_l1",outcome="miss"} 3`,
@@ -296,10 +309,20 @@ func TestKVMemoryMetricsAndDebugVars(t *testing.T) {
 		`fak_gateway_kv_prefix_tier_lookups_total{backend="radixkv",tier="host_dram_l2",outcome="hit"} 2`,
 		`fak_gateway_kv_prefix_tier_lookups_total{backend="radixkv",tier="host_dram_l2",outcome="miss"} 1`,
 		`fak_gateway_kv_prefix_tier_lookups_total{backend="radixkv",tier="host_dram_l2",outcome="fault"} 1`,
+		`fak_gateway_kv_prefix_tier_lookups_total{backend="radixkv",tier="remote_http_l3",outcome="hit"} 3`,
+		`fak_gateway_kv_prefix_tier_lookups_total{backend="radixkv",tier="remote_http_l3",outcome="miss"} 2`,
+		`fak_gateway_kv_prefix_tier_lookups_total{backend="radixkv",tier="remote_http_l3",outcome="fault"} 1`,
 		`fak_gateway_kv_prefix_tier_hit_tokens_total{backend="radixkv",tier="device_l1"} 40`,
 		`fak_gateway_kv_prefix_tier_hit_tokens_total{backend="radixkv",tier="host_dram_l2"} 20`,
+		`fak_gateway_kv_prefix_tier_hit_tokens_total{backend="radixkv",tier="remote_http_l3"} 30`,
 		`fak_gateway_kv_prefix_tier_transfer_bytes_total{backend="radixkv",tier="host_dram_l2",direction="stage"} 5000`,
 		`fak_gateway_kv_prefix_tier_transfer_bytes_total{backend="radixkv",tier="host_dram_l2",direction="restore"} 4000`,
+		`fak_gateway_kv_prefix_tier_transfer_bytes_total{backend="radixkv",tier="remote_http_l3",direction="stage"} 12000`,
+		`fak_gateway_kv_prefix_tier_transfer_bytes_total{backend="radixkv",tier="remote_http_l3",direction="restore"} 11000`,
+		`fak_gateway_kv_prefix_tier_transfer_latency_seconds_total{backend="radixkv",tier="remote_http_l3",direction="stage"} 0.25`,
+		`fak_gateway_kv_prefix_tier_transfer_latency_seconds_total{backend="radixkv",tier="remote_http_l3",direction="restore"} 0.5`,
+		`fak_gateway_kv_prefix_tier_transfer_faults_total{backend="radixkv",tier="remote_http_l3",direction="stage"} 1`,
+		`fak_gateway_kv_prefix_tier_transfer_faults_total{backend="radixkv",tier="remote_http_l3",direction="restore"} 2`,
 		`fak_gateway_kv_prefix_tier_evictions_total{backend="radixkv",tier="host_dram_l2"} 2`,
 	} {
 		if !strings.Contains(text, want) {
@@ -322,7 +345,11 @@ func TestKVMemoryMetricsAndDebugVars(t *testing.T) {
 		vars.KVMemory.L1HitTokens != 40 || vars.KVMemory.L2Hits != 2 || vars.KVMemory.L2Misses != 1 ||
 		vars.KVMemory.L2Faults != 1 || vars.KVMemory.L2HitTokens != 20 ||
 		vars.KVMemory.L2StageBytes != 5000 || vars.KVMemory.L2RestoreBytes != 4000 ||
-		vars.KVMemory.L2Evictions != 2 {
+		vars.KVMemory.L2Evictions != 2 || !vars.KVMemory.L3Enabled || vars.KVMemory.L3ReferencedBytes != 9000 ||
+		vars.KVMemory.L3Hits != 3 || vars.KVMemory.L3Misses != 2 || vars.KVMemory.L3Faults != 1 ||
+		vars.KVMemory.L3HitTokens != 30 || vars.KVMemory.L3StageBytes != 12000 || vars.KVMemory.L3RestoreBytes != 11000 ||
+		vars.KVMemory.L3StageNanos != 250000000 || vars.KVMemory.L3RestoreNanos != 500000000 ||
+		vars.KVMemory.L3StageFaults != 1 || vars.KVMemory.L3RestoreFaults != 2 {
 		t.Fatalf("debug kv_memory = %+v, want resident/lru/eviction fields", vars.KVMemory)
 	}
 }

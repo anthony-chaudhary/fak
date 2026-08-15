@@ -37,7 +37,7 @@ func (t *Tree) HostL2Enabled() bool {
 // PressuredSnapshotCandidates enumerates hot device payloads without copying
 // them. The byte count is the physical device residency reclaimed by demotion.
 func (t *Tree) PressuredSnapshotCandidates() (int64, []SnapshotPressureCandidate) {
-	if t == nil || !t.HostL2Enabled() {
+	if t == nil || (!t.HostL2Enabled() && !t.RemoteSnapshotEnabled()) {
 		return 0, nil
 	}
 	var resident int64
@@ -52,7 +52,7 @@ func (t *Tree) PressuredSnapshotCandidates() (int64, []SnapshotPressureCandidate
 		}
 		resident += device
 		out = append(out, SnapshotPressureCandidate{
-			Digest:      snapshotNodeDigest(ns, n),
+			Digest:      t.snapshotDigest(ns, n),
 			Tokens:      n.plen,
 			DeviceBytes: device,
 			LastUsed:    n.lastUsed,
@@ -108,7 +108,7 @@ func (t *Tree) EvictHotSnapshot(digest string) int {
 		return 0
 	}
 	n := t.findSnapshotByDigest(digest)
-	if n == nil || n.snapshot == nil || n.hostSnapshot == nil {
+	if n == nil || n.snapshot == nil || (n.hostSnapshot == nil && n.remoteSnapshot == nil) {
 		return 0
 	}
 	positions := n.plen
@@ -134,18 +134,14 @@ func (t *Tree) RestoreSnapshotFromHost(digest string) SnapshotTransfer {
 	if err != nil {
 		return SnapshotTransfer{Outcome: SnapshotTransferFault, Digest: digest, Positions: n.plen, Reason: err.Error()}
 	}
-	incoming := snapshotResidentBytes(snap, n.cachedLogits)
-	if !t.makeSnapshotRoom(incoming, n) {
-		snap.Close()
+	if err := t.installHotSnapshot(n, snap); err != nil {
 		return SnapshotTransfer{
 			Outcome:   SnapshotTransferFault,
 			Digest:    digest,
 			Positions: n.plen,
-			Reason:    ErrSnapshotByteBudget.Error(),
+			Reason:    err.Error(),
 		}
 	}
-	n.snapshot = snap
-	t.snapshotBytes += incoming
 	moved := n.hostSnapshot.TransferBytes()
 	t.l2RestoreBytes += moved
 	return SnapshotTransfer{
@@ -154,6 +150,17 @@ func (t *Tree) RestoreSnapshotFromHost(digest string) SnapshotTransfer {
 		Positions:  n.plen,
 		BytesMoved: moved,
 	}
+}
+
+func (t *Tree) installHotSnapshot(n *node, snap *model.PrefixSnapshot) error {
+	incoming := snapshotResidentBytes(snap, n.cachedLogits)
+	if !t.makeSnapshotRoom(incoming, n) {
+		snap.Close()
+		return ErrSnapshotByteBudget
+	}
+	n.snapshot = snap
+	t.snapshotBytes += incoming
+	return nil
 }
 
 func hostSnapshotResidentBytes(snap *model.HostPrefixSnapshot) int64 {
@@ -198,7 +205,7 @@ func (t *Tree) releaseHostSnapshot(n *node) {
 	t.hostSnapshotBytes -= hostSnapshotResidentBytes(n.hostSnapshot)
 	n.hostSnapshot.Close()
 	n.hostSnapshot = nil
-	if n.snapshot == nil {
+	if n.snapshot == nil && n.remoteSnapshot == nil {
 		n.cachedLogits = nil
 	}
 }
@@ -206,22 +213,30 @@ func (t *Tree) releaseHostSnapshot(n *node) {
 func (t *Tree) releaseSnapshotPayload(n *node) {
 	t.releaseHotSnapshot(n)
 	t.releaseHostSnapshot(n)
+	t.releaseRemoteSnapshot(n)
 }
 
 func (t *Tree) findSnapshotByDigest(digest string) *node {
+	_, n := t.findSnapshotByDigestNS(digest)
+	return n
+}
+
+func (t *Tree) findSnapshotByDigestNS(digest string) (string, *node) {
 	if digest == "" {
-		return nil
+		return "", nil
 	}
+	var foundNS string
 	var found *node
 	t.forEachNodeNS(func(ns string, n *node) {
-		if found != nil || (n.snapshot == nil && n.hostSnapshot == nil) {
+		if found != nil || (n.snapshot == nil && n.hostSnapshot == nil && n.remoteSnapshot == nil) {
 			return
 		}
-		if snapshotNodeDigest(ns, n) == digest {
+		if t.snapshotDigest(ns, n) == digest {
+			foundNS = ns
 			found = n
 		}
 	})
-	return found
+	return foundNS, found
 }
 
 func (t *Tree) forEachNode(fn func(*node)) {

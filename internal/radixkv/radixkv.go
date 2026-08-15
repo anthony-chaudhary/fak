@@ -47,6 +47,7 @@
 package radixkv
 
 import (
+	"context"
 	"errors"
 	"math"
 
@@ -66,6 +67,7 @@ const (
 	SnapshotTierMiss     SnapshotTier = ""
 	SnapshotTierDeviceL1 SnapshotTier = "device_l1"
 	SnapshotTierHostL2   SnapshotTier = "host_dram_l2"
+	SnapshotTierRemoteL3 SnapshotTier = "remote_http_l3"
 )
 
 // node is one vertex of the compressed radix tree. The edge parent→node carries `key`
@@ -87,6 +89,10 @@ type node struct {
 	// attention K/Kraw/V rows, positions, and hybrid recurrent state needed to
 	// materialize a fresh backend snapshot after the hot owner is evicted.
 	hostSnapshot *model.HostPrefixSnapshot
+	// remoteSnapshot is a verified reference to a complete serialized
+	// HostPrefixSnapshot in the configured l3kv/blobhttp tier. It owns no local
+	// payload bytes and remains usable after both local physical copies are gone.
+	remoteSnapshot *remoteSnapshotRef
 	// logits is the final-token distribution for this exact full prefix, when the caller
 	// provided it. It lets an exact-hit replay sample the first generated token without
 	// refeeding the prompt's final token just to recover logits. Splits intentionally do
@@ -153,6 +159,22 @@ type Tree struct {
 	l2StageBytes   int64
 	l2RestoreBytes int64
 	l2Evictions    int
+
+	remoteSnapshotStore SnapshotStore
+	remoteModelID       string
+	remoteBackend       compute.Backend
+	remoteConfig        model.Config
+	remoteSnapshotBytes int64
+	l3Hits              int
+	l3Misses            int
+	l3Faults            int
+	l3HitTokens         int
+	l3StageBytes        int64
+	l3RestoreBytes      int64
+	l3StageNanos        int64
+	l3RestoreNanos      int64
+	l3StageFaults       int
+	l3RestoreFaults     int
 
 	// policy is the legacy two-value enum, retained as the back-compat knob and the
 	// selector for the cost-aware eviction counter (Stats.CostEvictions). strategy is the
@@ -498,6 +520,11 @@ func (t *Tree) LookupSnapshot(tokens []int) (*node, *model.PrefixSnapshot, int, 
 
 // LookupSnapshotTiered is LookupSnapshot with truthful source-tier attribution.
 func (t *Tree) LookupSnapshotTiered(tokens []int) (*node, *model.PrefixSnapshot, int, SnapshotTier, error) {
+	return t.LookupSnapshotTieredContext(context.Background(), tokens)
+}
+
+// LookupSnapshotTieredContext is the request-cancellable L1→L2→L3 lookup.
+func (t *Tree) LookupSnapshotTieredContext(ctx context.Context, tokens []int) (*node, *model.PrefixSnapshot, int, SnapshotTier, error) {
 	n, _ := t.Lookup(tokens)
 	for candidate := n; candidate != nil; candidate = candidate.parent {
 		if candidate.snapshot == nil {
@@ -513,7 +540,7 @@ func (t *Tree) LookupSnapshotTiered(tokens []int) (*node, *model.PrefixSnapshot,
 		return n, snap, candidate.plen, SnapshotTierDeviceL1, nil
 	}
 	t.l1Misses++
-	if !t.HostL2Enabled() {
+	if !t.HostL2Enabled() && !t.RemoteSnapshotEnabled() {
 		return n, nil, 0, SnapshotTierMiss, nil
 	}
 	for candidate := n; candidate != nil; candidate = candidate.parent {
@@ -530,7 +557,24 @@ func (t *Tree) LookupSnapshotTiered(tokens []int) (*node, *model.PrefixSnapshot,
 		t.l2RestoreBytes += candidate.hostSnapshot.TransferBytes()
 		return n, snap, candidate.plen, SnapshotTierHostL2, nil
 	}
-	t.l2Misses++
+	if t.HostL2Enabled() {
+		t.l2Misses++
+	}
+	if t.RemoteSnapshotEnabled() {
+		for candidate := n; candidate != nil; candidate = candidate.parent {
+			if candidate.remoteSnapshot == nil {
+				continue
+			}
+			snap, found, err := t.restoreSnapshotFromRemote(ctx, "", candidate)
+			if err != nil {
+				return n, nil, candidate.plen, SnapshotTierRemoteL3, err
+			}
+			if found {
+				return n, snap, candidate.plen, SnapshotTierRemoteL3, nil
+			}
+		}
+		t.l3Misses++
+	}
 	return n, nil, 0, SnapshotTierMiss, nil
 }
 
@@ -603,7 +647,7 @@ func (t *Tree) releaseHotSnapshot(n *node) {
 	t.snapshotBytes -= snapshotResidentBytes(n.snapshot, n.cachedLogits)
 	n.snapshot.Close()
 	n.snapshot = nil
-	if n.hostSnapshot == nil {
+	if n.hostSnapshot == nil && n.remoteSnapshot == nil {
 		n.cachedLogits = nil
 	}
 }
@@ -672,7 +716,7 @@ func (n *node) Logits() []float32 {
 	if n == nil {
 		return nil
 	}
-	if n.snapshot != nil || n.hostSnapshot != nil {
+	if n.snapshot != nil || n.hostSnapshot != nil || n.remoteSnapshot != nil {
 		return append([]float32(nil), n.cachedLogits...)
 	}
 	return append([]float32(nil), n.logits...)
@@ -923,6 +967,18 @@ type Stats struct {
 	L2StageBytes            int64 `json:"l2_stage_bytes"`
 	L2RestoreBytes          int64 `json:"l2_restore_bytes"`
 	L2Evictions             int   `json:"l2_evictions"`
+	L3Enabled               bool  `json:"l3_enabled"`
+	L3ReferencedBytes       int64 `json:"l3_referenced_bytes"`
+	L3Hits                  int   `json:"l3_hits"`
+	L3Misses                int   `json:"l3_misses"`
+	L3Faults                int   `json:"l3_faults"`
+	L3HitTokens             int   `json:"l3_hit_tokens"`
+	L3StageBytes            int64 `json:"l3_stage_bytes"`
+	L3RestoreBytes          int64 `json:"l3_restore_bytes"`
+	L3StageNanos            int64 `json:"l3_stage_nanos"`
+	L3RestoreNanos          int64 `json:"l3_restore_nanos"`
+	L3StageFaults           int   `json:"l3_stage_faults"`
+	L3RestoreFaults         int   `json:"l3_restore_faults"`
 	Leaves                  int   // leaf nodes
 	MaxDepthTokens          int   // longest cached prefix
 	Evictions               int   // LRU leaf evictions performed
@@ -1004,6 +1060,18 @@ func (t *Tree) Stats() Stats {
 		L2StageBytes:          t.l2StageBytes,
 		L2RestoreBytes:        t.l2RestoreBytes,
 		L2Evictions:           t.l2Evictions,
+		L3Enabled:             t.RemoteSnapshotEnabled(),
+		L3ReferencedBytes:     t.remoteSnapshotBytes,
+		L3Hits:                t.l3Hits,
+		L3Misses:              t.l3Misses,
+		L3Faults:              t.l3Faults,
+		L3HitTokens:           t.l3HitTokens,
+		L3StageBytes:          t.l3StageBytes,
+		L3RestoreBytes:        t.l3RestoreBytes,
+		L3StageNanos:          t.l3StageNanos,
+		L3RestoreNanos:        t.l3RestoreNanos,
+		L3StageFaults:         t.l3StageFaults,
+		L3RestoreFaults:       t.l3RestoreFaults,
 		EvictionPolicy:        t.evictionStrategy().Name(),
 		LastEvictPolicy:       t.lastEvictPolicyName(),
 		LastEvictCandidates:   t.lastEvictCandidates,

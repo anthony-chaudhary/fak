@@ -375,6 +375,18 @@ func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
 	stats.L2StageBytes = st.L2StageBytes
 	stats.L2RestoreBytes = st.L2RestoreBytes
 	stats.L2Evictions = st.L2Evictions
+	stats.L3Enabled = st.L3Enabled
+	stats.L3ReferencedBytes = st.L3ReferencedBytes
+	stats.L3Hits = st.L3Hits
+	stats.L3Misses = st.L3Misses
+	stats.L3Faults = st.L3Faults
+	stats.L3HitTokens = st.L3HitTokens
+	stats.L3StageBytes = st.L3StageBytes
+	stats.L3RestoreBytes = st.L3RestoreBytes
+	stats.L3StageNanos = st.L3StageNanos
+	stats.L3RestoreNanos = st.L3RestoreNanos
+	stats.L3StageFaults = st.L3StageFaults
+	stats.L3RestoreFaults = st.L3RestoreFaults
 	return stats
 }
 
@@ -589,6 +601,7 @@ type inKernelGenerateResult struct {
 	// BEFORE servability (nil KV, exact-hit refeed, unsupported truncate) could trim the
 	// realized `matched` below it. cacheable >= matched always; 0 when reuse is off.
 	cacheable         int
+	sourceTier        radixkv.SnapshotTier
 	prefillS, decodeS float64
 	stopped           bool
 }
@@ -603,18 +616,19 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 			panic(r)
 		}
 	}()
-	gen, promptTok, cacheable, matched, prefillS, decodeS, stopped, err := p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit)
+	gen, promptTok, cacheable, matched, sourceTier, prefillS, decodeS, stopped, err := p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit)
 	if err != nil {
 		return inKernelGenerateResult{}, err
 	}
 	return inKernelGenerateResult{
-		gen:       gen,
-		promptTok: promptTok,
-		cacheable: cacheable,
-		matched:   matched,
-		prefillS:  prefillS,
-		decodeS:   decodeS,
-		stopped:   stopped,
+		gen:        gen,
+		promptTok:  promptTok,
+		cacheable:  cacheable,
+		matched:    matched,
+		sourceTier: sourceTier,
+		prefillS:   prefillS,
+		decodeS:    decodeS,
+		stopped:    stopped,
 	}, nil
 }
 
@@ -857,13 +871,14 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	}
 	cacheobs.Default.ObserveLabeled(cacheobs.Labels{Model: p.modelID, Tenant: tenant},
 		promptTok, genRes.cacheable, matched, eligibleTok)
-	// #3896 provenance axis: split this same turn's prefill by SOURCE, orthogonal to the
-	// depth split above. Every reused token here is a LOCAL prefix hit (the RadixAttention
-	// match on this box); the unmatched remainder was recomputed locally. No external /
-	// disaggregated KV tier feeds the live planner yet, so the external-transfer bucket stays
-	// a structural 0 — the honest witness that disaggregation has not landed. When an L3 /
-	// remote tier serves matches, that share moves into the external bucket at this same tap.
-	cacheobs.Default.ObserveBySource(cacheobs.SourceLocalHit, matched)
+	// #3896 provenance axis: remote L3 matches are external transfers; L1/L2
+	// matches stay local, and the unmatched suffix is local compute.
+	localHit, externalHit := matched, 0
+	if genRes.sourceTier == radixkv.SnapshotTierRemoteL3 {
+		localHit, externalHit = 0, matched
+	}
+	cacheobs.Default.ObserveBySource(cacheobs.SourceLocalHit, localHit)
+	cacheobs.Default.ObserveBySource(cacheobs.SourceExternalTransfer, externalHit)
 	cacheobs.Default.ObserveBySource(cacheobs.SourceLocalCompute, promptTok-matched)
 	compReuseEntry := cachemeta.FromProviderCache(cachemeta.ProviderCache{Provider: "fak-inkernel", ModelID: p.modelID, PromptTokens: int64(promptTok), CachedTokens: int64(matched)})
 

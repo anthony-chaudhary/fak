@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
 
 func (p *InKernelPlanner) generateReused(ids []int, maxNew int, temp, topP float64, topK int, stops map[int]bool, emit func(int) bool) (gen, promptTok, matched int, prefillS, decodeS float64, stopped bool) {
@@ -16,7 +17,7 @@ func (p *InKernelPlanner) generateReused(ids []int, maxNew int, temp, topP float
 }
 
 func (p *InKernelPlanner) generateReusedContext(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, stops map[int]bool, emit func(int) bool) (gen, promptTok, matched int, prefillS, decodeS float64, stopped bool, err error) {
-	gen, promptTok, _, matched, prefillS, decodeS, stopped, err = p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, nil, 0, 0, stops, emit)
+	gen, promptTok, _, matched, _, prefillS, decodeS, stopped, err = p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, nil, 0, 0, stops, emit)
 	return
 }
 
@@ -26,7 +27,7 @@ func (p *InKernelPlanner) generateReusedContext(ctx context.Context, ids []int, 
 // path, so every existing caller (which passes 0, 0) is unaffected. The per-token
 // generation-count histogram (counts) is built from THIS turn's decode loop only —
 // it is sized to the logits vocab on first use and never persists across turns.
-func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool) (gen, promptTok, cacheable, matched int, prefillS, decodeS float64, stopped bool, err error) {
+func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool) (gen, promptTok, cacheable, matched int, sourceTier radixkv.SnapshotTier, prefillS, decodeS float64, stopped bool, err error) {
 	promptTok = len(ids)
 	if len(ids) == 0 {
 		return
@@ -47,17 +48,19 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		var matchedKV *model.KVCache
 		var matchedSnapshot *model.PrefixSnapshot
 		var m int
+		var tier radixkv.SnapshotTier
 		if scoped && p.scopedTree != nil {
 			if p.backend != nil {
-				matchedSnapshot, cachedLogits, m, _, _, err = p.scopedTree.LookupSnapshotTiered(owner, ids)
+				matchedSnapshot, cachedLogits, m, _, tier, err = p.scopedTree.LookupSnapshotTieredContext(ctx, owner, ids)
 			} else {
 				matchedKV, cachedLogits, m, _, err = p.scopedTree.Lookup(owner, ids)
 			}
 		} else {
 			p.mu.Lock()
 			if p.backend != nil {
-				b, snap, legacyMatched, _, lookupErr := p.tree.LookupSnapshotTiered(ids)
+				b, snap, legacyMatched, lookupTier, lookupErr := p.tree.LookupSnapshotTieredContext(ctx, ids)
 				matchedSnapshot, m, err = snap, legacyMatched, lookupErr
+				tier = lookupTier
 				if m >= len(ids) {
 					cachedLogits = b.Logits()
 				}
@@ -91,11 +94,12 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 				return
 			}
 			matchedSnapshot.Close()
-			closeSession, matched = true, m
+			closeSession, matched, sourceTier = true, m, tier
 		} else if matchedKV != nil {
 			s = p.sessionFromPrefixClone(matchedKV)
 			closeSession = p.backend != nil
 			matched = m
+			sourceTier = radixkv.SnapshotTierDeviceL1
 		}
 		// Fully cached (an exact-duplicate transcript): the cached KV has the prefix but
 		// decode still needs the last-token logits to sample the first generated token. New
@@ -111,6 +115,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 					s.Close()
 				}
 				s, matched, closeSession = nil, 0, false
+				sourceTier = radixkv.SnapshotTierMiss
 			}
 		}
 	}

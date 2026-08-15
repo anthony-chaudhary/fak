@@ -31,7 +31,9 @@ package l3kv
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -41,6 +43,33 @@ import (
 // default KV backend live (byte-identical to today); set to a directory path to
 // enable the durable disk-backed L3 residency tier rooted there.
 const EnvSpec = "FAK_L3_KVBACKEND"
+
+const (
+	EnvRemoteURL   = "FAK_BLOB_HTTP_URL"
+	EnvRemoteToken = "FAK_BLOB_HTTP_TOKEN"
+)
+
+var (
+	configuredStore Store
+	configuredErr   error
+)
+
+// ConfiguredRemoteStore returns the process-wide l3kv/blobhttp store opened at
+// boot when both L3 and remote HTTP configuration are present. It is the single
+// production instance shared by the ABI backend and native prefix snapshots, so
+// two independent manifest maps can never race over the same directory.
+func ConfiguredRemoteStore() (Store, bool, error) {
+	if strings.TrimSpace(os.Getenv(EnvSpec)) == "" || strings.TrimSpace(os.Getenv(EnvRemoteURL)) == "" {
+		return nil, false, nil
+	}
+	if configuredErr != nil {
+		return nil, true, configuredErr
+	}
+	if configuredStore == nil {
+		return nil, true, fmt.Errorf("l3kv: remote store configured but unavailable")
+	}
+	return configuredStore, true, nil
+}
 
 // SpanStager is the additive capability a KV backend exposes so its fak-owned span
 // rows can be serialized off-box. StageSpanBytes returns the opaque serialization of
@@ -169,9 +198,20 @@ func init() {
 	// via FAK_BLOB_HTTP_TOKEN, read identically). Set, the pool becomes the router's
 	// primary put tier (a demote is confirmed off-box or FAULTs) with blobfs mirroring
 	// locally; unset, the durable on-box stand-in alone serves.
-	store, err := newRouterStore(dir, os.Getenv("FAK_BLOB_HTTP_URL"), os.Getenv("FAK_BLOB_HTTP_TOKEN"))
+	remote := os.Getenv(EnvRemoteURL)
+	var store Store
+	var err error
+	if remote != "" {
+		// A configured remote L3 is a true remote tier: no local payload mirror can
+		// satisfy a later read while being counted as off-host recovery.
+		store, err = NewRemoteStore(dir, remote, os.Getenv(EnvRemoteToken))
+	} else {
+		store, err = newRouterStore(dir, "", "")
+	}
 	if err != nil {
+		configuredErr = err
 		return
 	}
+	configuredStore = store
 	abi.RegisterKVBackend(Factory(store))
 }

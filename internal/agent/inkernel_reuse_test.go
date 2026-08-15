@@ -487,6 +487,79 @@ func TestInKernelBackendRestoresDemotedPrefixFromHostDRAML2(t *testing.T) {
 	}
 }
 
+type inKernelRemoteSnapshotStore struct{ data map[string][]byte }
+
+func (s *inKernelRemoteSnapshotStore) Put(_ context.Context, key string, payload []byte) error {
+	if s.data == nil {
+		s.data = map[string][]byte{}
+	}
+	s.data[key] = append([]byte(nil), payload...)
+	return nil
+}
+
+func (s *inKernelRemoteSnapshotStore) Get(_ context.Context, key string) ([]byte, bool, error) {
+	payload, ok := s.data[key]
+	return append([]byte(nil), payload...), ok, nil
+}
+
+func TestInKernelBackendWritesThroughAndRestoresQwenPrefixFromRemoteL3(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_RADIX", "on")
+	t.Setenv("FAK_INKERNEL_RADIX_HOST_L2_BYTES", "1073741824")
+	be := &countingBackend{Backend: compute.Default(), deviceMemory: true}
+	cfg := tinyHybridCfg()
+	p := NewInKernelPlanner(model.NewSynthetic(cfg), nil, "qwen35-remote-l3", false, be, false)
+	p.quant = false
+	store := &inKernelRemoteSnapshotStore{}
+	if err := p.ConfigureKVPrefixRemote(store); err != nil {
+		t.Fatal(err)
+	}
+	ids := synthIDs(cfg.VocabSize, 9, 6852)
+	run := func() (gen []int, matched int) {
+		_, _, matched, _, _, _, err := p.generateReusedContext(context.Background(), ids, 1, 0, 0, 0, map[int]bool{}, func(id int) bool {
+			gen = append(gen, id)
+			return false
+		})
+		if err != nil {
+			t.Fatalf("generateReused: %v", err)
+		}
+		return gen, matched
+	}
+
+	first, matched := run()
+	if matched != 0 || len(first) != 1 {
+		t.Fatalf("cold turn matched=%d generated=%d", matched, len(first))
+	}
+	_, candidates := p.KVPrefixPressuredCandidates()
+	if len(candidates) != 1 {
+		t.Fatalf("native pressure candidates=%+v", candidates)
+	}
+	digest := candidates[0].SpanDigest
+	staged := p.StageKVPrefixToHost(context.Background(), digest)
+	if staged.Outcome != radixkv.SnapshotTransferOK || staged.BytesMoved <= 0 || len(store.data) != 1 {
+		t.Fatalf("remote write-through=%+v objects=%d", staged, len(store.data))
+	}
+	if evicted := p.EvictHotKVPrefix(digest); evicted != len(ids) {
+		t.Fatalf("hot eviction=%d, want %d", evicted, len(ids))
+	}
+	p.mu.Lock()
+	hostEvicted := p.tree.EvictHostSnapshot(digest)
+	p.mu.Unlock()
+	if hostEvicted != len(ids) {
+		t.Fatalf("host eviction=%d, want %d", hostEvicted, len(ids))
+	}
+
+	second, matched := run()
+	if matched != len(ids) || !eqInts(second, first) {
+		t.Fatalf("remote-L3 replay matched=%d/%d tokens=%v want=%v", matched, len(ids), second, first)
+	}
+	stats := p.KVMemoryStats()
+	if !stats.L3Enabled || stats.L3Hits != 1 || stats.L3HitTokens != len(ids) ||
+		stats.L3StageBytes != staged.BytesMoved || stats.L3RestoreBytes != staged.BytesMoved ||
+		stats.L3Faults != 0 || stats.L3ReferencedBytes <= 0 || stats.L2HostResidentBytes != 0 {
+		t.Fatalf("remote-L3 counters=%+v", stats)
+	}
+}
+
 func TestInKernelReuseHybridSplitFallsBackInsteadOfPanicking(t *testing.T) {
 	cfg := tinyHybridCfg()
 	p := reusePlanner(true, false, cfg)
@@ -744,7 +817,7 @@ func TestInKernelAuthenticatedPrefixPrivateUntilPromoted(t *testing.T) {
 	ctxA := WithPrefixCacheIdentity(context.Background(), "tenant-a", "")
 	ctxB := WithPrefixCacheIdentity(context.Background(), "tenant-b", "")
 	run := func(ctx context.Context) (cacheable, matched int) {
-		_, _, cacheable, matched, _, _, _, err := p.generateReusedContextWithBias(ctx, ids, 0, 0, 0, 0, nil, 0, 0, map[int]bool{}, nil)
+		_, _, cacheable, matched, _, _, _, _, err := p.generateReusedContextWithBias(ctx, ids, 0, 0, 0, 0, nil, 0, 0, map[int]bool{}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

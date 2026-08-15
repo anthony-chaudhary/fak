@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
@@ -34,6 +35,24 @@ type KVPrefixPressureSource interface {
 	EvictHotKVPrefix(string) int
 }
 
+// KVPrefixRemoteConfigurer is the production boot-time extension implemented by
+// the native planner. Keeping it separate leaves the pressure transport contract
+// stable for bridges that do not own L3 configuration.
+type KVPrefixRemoteConfigurer interface {
+	ConfigureKVPrefixRemote(radixkv.SnapshotStore) error
+}
+
+// ConfigureKVPrefixRemote installs the l3kv/blobhttp byte owner on the same
+// radix tree that owns native L1/L2 snapshots.
+func (p *InKernelPlanner) ConfigureKVPrefixRemote(store radixkv.SnapshotStore) error {
+	if p == nil || p.tree == nil || p.m == nil || p.backend == nil {
+		return fmt.Errorf("agent: native backend prefix cache is unavailable")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.tree.ConfigureRemoteSnapshotStore(store, p.modelID, p.backend, p.m.Cfg)
+}
+
 func (p *InKernelPlanner) KVPrefixPressuredCandidates() (int64, []KVPrefixPressureCandidate) {
 	if p == nil || p.tree == nil || p.backend == nil || !p.backend.Caps().DeviceMemory {
 		return 0, nil
@@ -62,7 +81,18 @@ func (p *InKernelPlanner) StageKVPrefixToHost(ctx context.Context, digest string
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return lowerKVPrefixTransfer(p.tree.StageSnapshotToHost(digest))
+	local := p.tree.StageSnapshotToHost(digest)
+	if !p.tree.RemoteSnapshotEnabled() {
+		return lowerKVPrefixTransfer(local)
+	}
+	// Remote L3 is independently sufficient to preserve the hot owner. Attempt it
+	// even when host L2 is disabled or full; the capacity adapter may evict only
+	// after this confirmed Put returns OK.
+	remote := p.tree.StageSnapshotToRemote(ctx, digest)
+	if remote.Outcome != radixkv.SnapshotTransferOK {
+		return lowerKVPrefixTransfer(remote)
+	}
+	return lowerKVPrefixTransfer(remote)
 }
 
 func (p *InKernelPlanner) RestoreKVPrefixFromHost(ctx context.Context, digest string) KVPrefixTransfer {
@@ -74,7 +104,11 @@ func (p *InKernelPlanner) RestoreKVPrefixFromHost(ctx context.Context, digest st
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return lowerKVPrefixTransfer(p.tree.RestoreSnapshotFromHost(digest))
+	local := p.tree.RestoreSnapshotFromHost(digest)
+	if local.Outcome != radixkv.SnapshotTransferMiss || !p.tree.RemoteSnapshotEnabled() {
+		return lowerKVPrefixTransfer(local)
+	}
+	return lowerKVPrefixTransfer(p.tree.RestoreSnapshotFromRemote(ctx, digest))
 }
 
 func (p *InKernelPlanner) EvictHotKVPrefix(digest string) int {

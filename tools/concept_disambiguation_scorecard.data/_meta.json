@@ -2256,6 +2256,16 @@
           "category": "incidental",
           "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
           "token": "fak_gateway_kv_prefix_tier_evictions_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus telemetry for remote prefix transfer time; it observes no admission or refusal and matches this family only through the gateway substring.",
+          "token": "fak_gateway_kv_prefix_tier_transfer_latency_seconds_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus telemetry for remote prefix transfer faults; it observes failures but makes no admission or refusal decision and matches only through the gateway substring.",
+          "token": "fak_gateway_kv_prefix_tier_transfer_faults_total"
         }
       ],
       "exclude": [
@@ -2357,6 +2367,8 @@
         "fak_gateway_kv_prefix_tier_lookups_total",
         "fak_gateway_kv_prefix_tier_resident_bytes",
         "fak_gateway_kv_prefix_tier_transfer_bytes_total",
+        "fak_gateway_kv_prefix_tier_transfer_faults_total",
+        "fak_gateway_kv_prefix_tier_transfer_latency_seconds_total",
         "fetchGuardPreCompactSignalsHTTP",
         "firstGuardEnv",
         "fleetDogfoodGuardBaseURL",
@@ -5202,6 +5214,16 @@
           "category": "incidental",
           "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
           "token": "fak_gateway_kv_prefix_tier_evictions_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus telemetry emitted by the existing gateway metrics renderer; it is not a distinct gateway or engine architecture concept.",
+          "token": "fak_gateway_kv_prefix_tier_transfer_latency_seconds_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus telemetry emitted by the existing gateway metrics renderer; it is not a distinct gateway or engine architecture concept.",
+          "token": "fak_gateway_kv_prefix_tier_transfer_faults_total"
         }
       ],
       "id": "gateway-engine",
@@ -5251,6 +5273,8 @@
         "fak_gateway_kv_prefix_tier_lookups_total",
         "fak_gateway_kv_prefix_tier_resident_bytes",
         "fak_gateway_kv_prefix_tier_transfer_bytes_total",
+        "fak_gateway_kv_prefix_tier_transfer_faults_total",
+        "fak_gateway_kv_prefix_tier_transfer_latency_seconds_total",
         "gatewayPluginExecutor",
         "gatewayPluginFloor",
         "gateways",
@@ -6301,6 +6325,11 @@
           "category": "incidental",
           "reason": "Issue #6844 accounting-coverage registry symbol or stable mechanism enum for existing gateway/context/decision behavior; not a new subsystem concept.",
           "token": "context_elision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Cancellable variant of the existing radix prefix lookup API; Context is a standard request-cancellation parameter, not a new managed-context concept.",
+          "token": "LookupSnapshotTieredContext"
         }
       ],
       "id": "context-ctx",
@@ -6312,6 +6341,7 @@
         "ContextShedding",
         "ContextTokensSaved",
         "FAK_COMPACTION_THRASH_STOP",
+        "LookupSnapshotTieredContext",
         "MechanismStaleContext",
         "MetricFactRecall",
         "RestoreCalls",
@@ -7411,12 +7441,18 @@
           "category": "incidental",
           "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
           "token": "NewWithTierBudgetsAndEvictionPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation operation that releases the already-positioned host L2 snapshot owner while preserving another verified copy; not a distinct eviction-policy concept.",
+          "token": "EvictHostSnapshot"
         }
       ],
       "id": "evict",
       "ignore": [
         "CompactReasonPinEvictRefused",
         "EvictDigest",
+        "EvictHostSnapshot",
         "EvictHotKVPrefix",
         "EvictHotSnapshot",
         "EvictedByteCount",
