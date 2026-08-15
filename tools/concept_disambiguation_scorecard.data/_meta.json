@@ -7223,6 +7223,16 @@
           "category": "incidental",
           "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
           "token": "ErrKVHostSnapshotUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go package identifier for the exact-tuple evidence query implementation, not a new support-maturity rung.",
+          "token": "supportgraph"
+        },
+        {
+          "category": "incidental",
+          "reason": "Witness command name for supportgraph, not a new support-maturity concept.",
+          "token": "supportgraphdemo"
         }
       ],
       "id": "support-maturity",
@@ -7374,6 +7384,8 @@
         "sourcecoverage",
         "streamingsupported",
         "supported",
+        "supportgraph",
+        "supportgraphdemo",
         "supporting",
         "supportmaturitydebt",
         "supportmaturityscore",
@@ -7715,6 +7727,11 @@
           "category": "incidental",
           "reason": "A classifier-local machine-readable ambiguity result, not the kernel decision/adjudication concept.",
           "token": "DecisionRequest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Injectable command-reader function used to test the fak-dos adapter; it does not define a new decision kind or policy.",
+          "token": "nativeDecisions"
         }
       ],
       "id": "decision",
@@ -7753,6 +7770,7 @@
         "guardGoalQuestionDecision",
         "importDecision",
         "kinddecisionsabout",
+        "nativeDecisions",
         "naturalDecision",
         "observed_decisions",
         "partialretrydecision",

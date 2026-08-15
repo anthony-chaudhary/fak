@@ -1,0 +1,7 @@
+{
+ "schema":"fak-support-graph/1","edges":[
+  {"tuple":{"artifact":"coder-awq@sha256:111","architecture":"coder-v1","quant":"awq-w4a16-g128","layout":"awq-v2","backend":"backend@1.4.2","kernel":"awq-portable@0.9","runtime":"cuda@12.8","hardware":"l4-sm89@r3"},"required_baseline":["cuda>=12","sm>=80"],"recommended_baseline":["sm>=89","memory>=24GiB"],"evidence":[{"id":"l4-decode","state":"supported","tier":"witnessed","authority":"fak-lab","source":"device-decode:sha256:aaa","expires":"2026-09-15T00:00:00Z"}]},
+  {"tuple":{"artifact":"coder-awq@sha256:111","architecture":"coder-v1","quant":"awq-w4a16-g128","layout":"awq-v2","backend":"backend@1.4.2","kernel":"awq-fast@0.9","runtime":"cuda@12.8","hardware":"t4-sm75@r2"},"required_baseline":["sm>=80"],"evidence":[{"id":"vendor-claim","state":"supported","tier":"vendor","authority":"vendor","source":"support-table"},{"id":"device-refusal","state":"unsupported","tier":"witnessed","authority":"fak-lab","source":"device-decode:sha256:bbb","fallback":"awq-portable-cpu","penalty":"latency unmeasured"}]},
+  {"tuple":{"artifact":"old-awq@sha256:222","architecture":"coder-v1","quant":"awq-w4a16-g128","layout":"awq-v1","backend":"backend@1.2","kernel":"awq-old@0.5","runtime":"cuda@12.2","hardware":"l4-sm89@r1"},"required_baseline":["sm>=80"],"evidence":[{"id":"old-run","state":"supported","tier":"observed","authority":"lab","source":"run:old","expires":"2026-08-01T00:00:00Z"}]}
+ ]
+}
