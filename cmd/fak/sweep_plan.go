@@ -46,11 +46,13 @@ type originProbe func(path string) originRelation
 
 // dirtyEntry is one `git status --porcelain` record: a path, its XY status, untracked-ness.
 type dirtyEntry struct {
-	Path       string `json:"path"`
-	Status     string `json:"status"` // trimmed porcelain XY ("M", "A", "D", "??", ...)
-	Untracked  bool   `json:"untracked"`
-	MTime      int64  `json:"mtime,omitempty"`       // working-tree file mtime unix seconds, when stattable
-	AgeSeconds int64  `json:"age_seconds,omitempty"` // age at sweep time, when stattable
+	Path          string `json:"path"`
+	Status        string `json:"status"` // trimmed porcelain XY ("M", "A", "D", "??", ...)
+	Untracked     bool   `json:"untracked"`
+	IndexDirty    bool   `json:"-"`                     // porcelain X column; staged content must survive worktree filtering
+	WorktreeDirty bool   `json:"-"`                     // porcelain Y column; reconciled against content-aware git diff
+	MTime         int64  `json:"mtime,omitempty"`       // working-tree file mtime unix seconds, when stattable
+	AgeSeconds    int64  `json:"age_seconds,omitempty"` // age at sweep time, when stattable
 }
 
 // sweepEntry is a classified dirty path.
@@ -449,9 +451,11 @@ func parsePorcelainZ(out string) []dirtyEntry {
 		}
 		xy := rec[:2]
 		entries = append(entries, dirtyEntry{
-			Path:      rec[3:],
-			Status:    strings.TrimSpace(xy),
-			Untracked: xy == "??",
+			Path:          rec[3:],
+			Status:        strings.TrimSpace(xy),
+			Untracked:     xy == "??",
+			IndexDirty:    xy[0] != ' ' && xy[0] != '?',
+			WorktreeDirty: xy[1] != ' ' && xy[1] != '?',
 		})
 	}
 	return entries

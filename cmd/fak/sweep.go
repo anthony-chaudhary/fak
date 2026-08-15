@@ -311,8 +311,10 @@ func ensureTrailer(msg, lane string) string {
 	return strings.Join(lines, "\n")
 }
 
-// gitStatusDirty runs `git status --porcelain=v1 -z --no-renames` and parses the dirty entries.
-// --no-renames keeps every record a single NUL-terminated "XY PATH" so the parse is unambiguous.
+// gitStatusDirty starts with porcelain status for staged and untracked records, then reconciles
+// unstaged tracked records against Git's content-aware diff. On Windows, status can retain hundreds
+// of stat-cache/CRLF ghosts whose normalized blob is unchanged; presenting those as WIP makes the
+// commit queue both slower and misleading.
 func gitStatusDirty(ctx context.Context, root string) ([]dirtyEntry, error) {
 	out, code, err := gitRunner(ctx, root, "status", "--porcelain=v1", "-z", "--no-renames")
 	if err != nil {
@@ -321,7 +323,49 @@ func gitStatusDirty(ctx context.Context, root string) ([]dirtyEntry, error) {
 	if code != 0 {
 		return nil, fmt.Errorf("git status exited %d: %s", code, strings.TrimSpace(out))
 	}
-	return annotateDirtyAges(root, parsePorcelainZ(out), time.Now()), nil
+	entries := parsePorcelainZ(out)
+	if !hasWorktreeTracked(entries) {
+		return annotateDirtyAges(root, entries, time.Now()), nil
+	}
+
+	diffOut, code, err := gitRunner(ctx, root, "-c", "core.safecrlf=false", "diff", "--name-only", "-z", "--no-renames", "--")
+	if err != nil {
+		return nil, err
+	}
+	if code != 0 {
+		return nil, fmt.Errorf("git diff exited %d: %s", code, strings.TrimSpace(diffOut))
+	}
+	return annotateDirtyAges(root, filterContentDirty(entries, parseNULPaths(diffOut)), time.Now()), nil
+}
+
+func hasWorktreeTracked(entries []dirtyEntry) bool {
+	for _, entry := range entries {
+		if entry.WorktreeDirty && !entry.Untracked {
+			return true
+		}
+	}
+	return false
+}
+
+func parseNULPaths(out string) map[string]struct{} {
+	paths := make(map[string]struct{})
+	for _, path := range strings.Split(out, "\x00") {
+		if path != "" {
+			paths[normSweepPath(path)] = struct{}{}
+		}
+	}
+	return paths
+}
+
+func filterContentDirty(entries []dirtyEntry, unstaged map[string]struct{}) []dirtyEntry {
+	kept := make([]dirtyEntry, 0, len(entries))
+	for _, entry := range entries {
+		_, contentDirty := unstaged[normSweepPath(entry.Path)]
+		if entry.Untracked || entry.IndexDirty || !entry.WorktreeDirty || contentDirty {
+			kept = append(kept, entry)
+		}
+	}
+	return kept
 }
 
 func annotateDirtyAges(root string, entries []dirtyEntry, now time.Time) []dirtyEntry {

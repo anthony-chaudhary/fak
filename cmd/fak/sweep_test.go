@@ -590,6 +590,31 @@ func TestIsSweepJunk(t *testing.T) {
 	}
 }
 
+func TestFilterContentDirtyDropsStatCacheGhosts(t *testing.T) {
+	entries := parsePorcelainZ(" M real.go\x00 M ghost.go\x00M  staged.go\x00MM both.go\x00?? new.go\x00")
+	got := filterContentDirty(entries, map[string]struct{}{
+		"real.go": {},
+		"both.go": {},
+	})
+
+	var paths []string
+	for _, entry := range got {
+		paths = append(paths, entry.Path)
+	}
+	want := []string{"real.go", "staged.go", "both.go", "new.go"}
+	if fmt.Sprint(paths) != fmt.Sprint(want) {
+		t.Fatalf("paths = %v, want %v", paths, want)
+	}
+}
+
+func TestFilterContentDirtyKeepsStagedSideWhenWorktreeIsGhost(t *testing.T) {
+	entries := parsePorcelainZ("MM staged-and-ghost.go\x00")
+	got := filterContentDirty(entries, nil)
+	if len(got) != 1 || got[0].Path != "staged-and-ghost.go" {
+		t.Fatalf("got = %#v, want staged path retained", got)
+	}
+}
+
 func TestParsePorcelainZ(t *testing.T) {
 	// NUL-terminated "XY PATH" records, with a trailing empty field after the final NUL.
 	out := " M cmd/fak/sweep.go\x00?? newpkg/foo.go\x00 D internal/old/gone.go\x00"
