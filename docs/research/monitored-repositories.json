@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-14",
+  "updated_at": "2026-08-15",
   "methodology": "Harness-related repositories absent by exact owner/name from tracked fak docs were ranked by direct seam relevance, current development activity, adoption signal, and license clarity. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -57,6 +57,18 @@
       "checked_revision": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
       "stars_at_check": 272168,
       "last_push_at_check": "2026-08-13T00:36:31Z"
+    },
+    {
+      "repository": "local/tensor-build",
+      "url": "file:///C:/work/tb/tensor-build-main",
+      "status": "studied",
+      "priority": 6,
+      "why": "Local TensorBuild snapshot deeply studied for transferable identity, evidence-tier, artifact-reachability, operator-surface, disambiguation, and work-cost mechanisms; surviving gaps filed as #6874-#6876. Revision history and license remain unavailable, so concepts only were borrowed.",
+      "last_checked": "2026-08-15",
+      "checked_revision": "snapshot-sha256:bf4dd9267f31dea48b925602e3d1326f65ca3a1e02d3062afecf414af1614288",
+      "stars_at_check": 0,
+      "last_push_at_check": "",
+      "study_note": "docs/research/tensor-build-local-study-2026-08-15.md"
     }
   ]
 }

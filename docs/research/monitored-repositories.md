@@ -1,6 +1,6 @@
 # Monitored harness repositories
 
-**Checked:** 2026-08-14  
+**Checked:** 2026-08-15
 **Machine source:** [`monitored-repositories.json`](monitored-repositories.json)  
 **Refresh view:** `fak study-monitor --due-days 14` (add `--json` for automation)
 
@@ -15,6 +15,7 @@ This is the durable discovery queue for external harness repositories. It comple
 | 3 | [`langchain-ai/open-swe`](https://github.com/langchain-ai/open-swe) | An asynchronous coding-agent harness with sandbox, task lifecycle, desktop, evaluation, and session seams. | 10,553 stars; 80 commits in the seven-day window; pushed 2026-08-14. |
 | 4 | [`EveryInc/compound-engineering-plugin`](https://github.com/EveryInc/compound-engineering-plugin) | A cross-harness Codex/Claude/Cursor plugin whose plan-review-work-compound loop is directly comparable to fak's skill and evidence workflows. | 24,259 stars; 20 commits in the seven-day window; pushed 2026-08-14. |
 | 5 | [`obra/superpowers`](https://github.com/obra/superpowers) | The strongest adoption signal for a portable skills, hooks, planning, testing, and subagent-development methodology not already tracked by exact repository name. | 272,168 stars; release activity at pinned revision; pushed 2026-08-13. |
+| 6 | [`local/tensor-build`](tensor-build-local-study-2026-08-15.md) | Deep local-snapshot study of typed engine identity, result evidence, artifact reachability, agent/human control parity, disambiguation, and token-spend attribution. Three independently witnessed gaps became #6874-#6876. | Snapshot SHA-256 `bf4dd9267f31dea48b925602e3d1326f65ca3a1e02d3062afecf414af1614288`; 6,358 files; source history and license unavailable, so concepts only. |
 
 The GitHub API's 100-item page cap means “at least 100” is deliberate. Stars are only a discovery signal. A deep study still has to pin source, inspect implementation seams, check the license, query fak first, and independently witness any claimed gap.
 

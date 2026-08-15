@@ -101,3 +101,5 @@ Use `fak workpattern list|source|trajectory|report` to consume the canonical see
 - [S8q/S8r true pre-answer tool admission](micro-context-s8qr-true-tool-admission.md) — paired model-distinct consensus gold; two-stage admission matches quality while opening 50% fewer reads on the scoped envelope.
 
 - [S8s/S8t natural multi-tool decision surface](micro-context-s8st-natural-multitool-surface.md) — five evidence classes show fixed/adaptive/parallel crossover by tool cost, with quality gated first.
+
+- [`tensor-build-local-study-2026-08-15.md`](tensor-build-local-study-2026-08-15.md) — deep, snapshot-pinned study of local TensorBuild: typed engine identity, evidence tiers, artifact liveness, agent/human control parity, and work-cost attribution; dedupes current fak coverage and files #6874-#6876.
