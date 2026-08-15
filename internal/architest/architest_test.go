@@ -110,7 +110,7 @@ var tier = map[string]int{
 	"resumemetrics":        1,                // in-process expvar metrics for the resume/heal watchdog (#3803): expvar counters + strings only; imports nothing internal, off the hot path.
 	"resumebackoff":        2,                // pure resume signature backoff and cross-session park fold (#3584); stdlib only.
 	"commitlifecycle":      2,                // pure commit-to-ship lifecycle fold (#5989); stdlib-only, no git/filesystem/process I/O, off the hot path.
-	"wiplease":             1,                // pure live-WIP projection into lease geometry; stdlib-only ownership metadata, off the hot path.
+	"wiplease":             2,                // live-WIP projection into laneadmit lease geometry; imports laneadmit(2)+wipattr(1), off the hot path.
 	"wipref":               1,                // append-only working-tree checkpoint ref store under refs/fak/wip/ read by fak wip (sibling of leaseref's refs/fak/locks); stdlib-only, imports nothing internal, off the hot path.
 	"wipattr":              1,                // pure dirty-hunk-to-checkpoint attribution fold (#3874); stdlib-only, imports nothing internal, off the hot path.
 	"wiprecon":             1,                // pure crashed-checkpoint reconciliation decision fold (#3875); stdlib-only, imports nothing internal, off the hot path.
