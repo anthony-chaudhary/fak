@@ -1,0 +1,1 @@
+{"artifact":{"container_id":"some-future-container"},"future_only_field":{"nested":["a",1,true]},"provenance":{"method_id":"future-method","producer_id":"future-toolchain","producer_version":"2.0","training_stage":"post-training"},"schema":"quantmeta/v9","weight":{"bits_per_value":4,"format":"int4","granularity":"per-group","group_size":64}}

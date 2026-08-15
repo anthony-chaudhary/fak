@@ -1,0 +1,21 @@
+{
+  "schema": "quantmeta/v1",
+  "artifact": {"container_id": "safetensors"},
+  "weight": {
+    "format": "int4",
+    "bits_per_value": 4,
+    "granularity": "per-group",
+    "group_size": 128,
+    "symmetric": true,
+    "scale": {"format": "f16", "granularity": "per-group", "group_size": 128}
+  },
+  "provenance": {
+    "method_id": "gptq",
+    "method_version": "v2",
+    "training_stage": "post-training",
+    "calibration_disclosed": true,
+    "producer_id": "gptqmodel",
+    "producer_version": "1.9.0"
+  },
+  "desc_act": true
+}

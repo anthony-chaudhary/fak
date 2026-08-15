@@ -1,0 +1,25 @@
+{
+  "schema": "quantmeta/v1",
+  "artifact": {"container_id": "gguf", "container_version": "v3"},
+  "weight": {
+    "format": "ternary",
+    "bits_per_value": 1.58,
+    "granularity": "per-tensor",
+    "symmetric": true,
+    "scale": {"format": "f32", "granularity": "per-tensor"}
+  },
+  "activation": {
+    "format": "int8",
+    "bits_per_value": 8,
+    "granularity": "per-token",
+    "symmetric": true,
+    "scale": {"format": "f32", "granularity": "per-token"}
+  },
+  "provenance": {
+    "method_id": "bitnet-b1.58",
+    "training_stage": "trained-natively",
+    "calibration_disclosed": false,
+    "producer_id": "bitnet.cpp",
+    "producer_version": "1.0"
+  }
+}

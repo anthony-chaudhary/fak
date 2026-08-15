@@ -1,0 +1,31 @@
+{
+  "schema": "quantmeta/v1",
+  "artifact": {"container_id": "safetensors"},
+  "weight": {
+    "format": "fp8-e4m3",
+    "bits_per_value": 8,
+    "granularity": "per-tensor",
+    "symmetric": true,
+    "scale": {"format": "f32", "granularity": "per-tensor"}
+  },
+  "activation": {
+    "format": "fp8-e4m3",
+    "bits_per_value": 8,
+    "granularity": "per-token",
+    "symmetric": true,
+    "scale": {"format": "f32", "granularity": "per-token"}
+  },
+  "provenance": {
+    "method_id": "llm-compressor",
+    "training_stage": "post-training",
+    "calibration_disclosed": true,
+    "producer_id": "llm-compressor",
+    "producer_version": "0.6.0"
+  },
+  "envelope": {
+    "device_id": "NVIDIA H100 80GB HBM3",
+    "runtime_id": "vllm",
+    "runtime_version": "0.9.1",
+    "measured_on": "2026-08-04"
+  }
+}

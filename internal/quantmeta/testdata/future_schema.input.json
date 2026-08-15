@@ -1,0 +1,17 @@
+{
+  "schema": "quantmeta/v9",
+  "artifact": {"container_id": "some-future-container"},
+  "weight": {
+    "format": "int4",
+    "bits_per_value": 4,
+    "granularity": "per-group",
+    "group_size": 64
+  },
+  "provenance": {
+    "method_id": "future-method",
+    "training_stage": "post-training",
+    "producer_id": "future-toolchain",
+    "producer_version": "2.0"
+  },
+  "future_only_field": {"nested": ["a", 1, true]}
+}

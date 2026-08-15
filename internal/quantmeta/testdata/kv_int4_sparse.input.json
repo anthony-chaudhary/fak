@@ -1,0 +1,39 @@
+{
+  "schema": "quantmeta/v1",
+  "artifact": {"container_id": "safetensors"},
+  "weight": {
+    "format": "int8",
+    "bits_per_value": 8,
+    "granularity": "per-channel",
+    "symmetric": true,
+    "scale": {"format": "f16", "granularity": "per-channel"}
+  },
+  "kv": {
+    "key": {
+      "format": "int4",
+      "bits_per_value": 4,
+      "granularity": "per-head",
+      "symmetric": false,
+      "scale": {"format": "f16", "granularity": "per-head"},
+      "zero_point": {"present": true, "format": "f16", "granularity": "per-head"}
+    },
+    "value": {
+      "format": "int4",
+      "bits_per_value": 4,
+      "granularity": "per-head",
+      "symmetric": false,
+      "scale": {"format": "f16", "granularity": "per-head"},
+      "zero_point": {"present": true, "format": "f16", "granularity": "per-head"}
+    },
+    "sink_tokens_full_precision": 4,
+    "recent_window_full_precision": 128
+  },
+  "sparsity": {"pattern": "n:m", "n": 2, "m": 4},
+  "provenance": {
+    "method_id": "output-aware-kv",
+    "training_stage": "post-training",
+    "calibration_disclosed": true,
+    "producer_id": "example-toolchain",
+    "producer_version": "0.3.1"
+  }
+}

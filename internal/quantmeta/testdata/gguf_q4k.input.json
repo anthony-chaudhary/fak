@@ -1,0 +1,21 @@
+{
+  "schema": "quantmeta/v1",
+  "artifact": {"container_id": "gguf", "container_version": "v3"},
+  "weight": {
+    "format": "int4",
+    "bits_per_value": 4.5,
+    "granularity": "per-block",
+    "group_size": 32,
+    "symmetric": false,
+    "scale": {"format": "f16", "granularity": "per-block", "group_size": 32},
+    "zero_point": {"present": true, "format": "f16", "granularity": "per-block"},
+    "llama_cpp_type": "Q4_K_M"
+  },
+  "provenance": {
+    "method_id": "llama.cpp-k-quant",
+    "training_stage": "post-training",
+    "calibration_disclosed": false,
+    "producer_id": "llama.cpp",
+    "producer_version": "b4321"
+  }
+}

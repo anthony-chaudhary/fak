@@ -1,0 +1,20 @@
+{
+  "schema": "quantmeta/v1",
+  "artifact": {"container_id": "safetensors"},
+  "weight": {
+    "format": "codebook",
+    "bits_per_value": 2,
+    "granularity": "per-group",
+    "group_size": 8,
+    "symmetric": true,
+    "scale": {"format": "f16", "granularity": "per-group", "group_size": 8},
+    "codebook": {"kind": "learned-lookup", "entries": 256, "vector_dim": 8, "residual_stages": 2}
+  },
+  "provenance": {
+    "method_id": "residual-codebook",
+    "training_stage": "post-training",
+    "calibration_disclosed": true,
+    "producer_id": "example-toolchain",
+    "producer_version": "0.1.0"
+  }
+}

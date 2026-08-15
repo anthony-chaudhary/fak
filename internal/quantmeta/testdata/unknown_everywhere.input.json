@@ -1,0 +1,38 @@
+{
+  "schema": "quantmeta/v1",
+  "artifact": {"container_id": "safetensors", "vendor_container_note": "unknown-at-artifact"},
+  "weight": {
+    "format": "int4",
+    "bits_per_value": 4,
+    "granularity": "per-group",
+    "group_size": 128,
+    "symmetric": false,
+    "scale": {"format": "f16", "granularity": "per-group", "group_size": 128, "vendor_scale_note": "unknown-at-scale"},
+    "zero_point": {"present": true, "format": "f16", "granularity": "per-group", "vendor_zp_note": "unknown-at-zero-point"},
+    "codebook": {"kind": "learned-lookup", "entries": 16, "vendor_codebook_note": "unknown-at-codebook"},
+    "vendor_weight_note": "unknown-at-tensor"
+  },
+  "kv": {
+    "key": {"format": "int4", "bits_per_value": 4, "granularity": "per-head", "vendor_kv_key_note": "unknown-at-kv-tensor"},
+    "value": {"format": "int4", "bits_per_value": 4, "granularity": "per-head"},
+    "sink_tokens_full_precision": 4,
+    "vendor_kv_note": "unknown-at-kv"
+  },
+  "sparsity": {"pattern": "n:m", "n": 2, "m": 4, "vendor_sparsity_note": "unknown-at-sparsity"},
+  "provenance": {
+    "method_id": "vendor-method",
+    "training_stage": "post-training",
+    "calibration_disclosed": false,
+    "producer_id": "vendor-toolchain",
+    "producer_version": "0.0.1",
+    "vendor_provenance_note": "unknown-at-provenance"
+  },
+  "envelope": {
+    "device_id": "Example Device",
+    "runtime_id": "example-runtime",
+    "runtime_version": "1.2.3",
+    "measured_on": "2026-08-10",
+    "vendor_envelope_note": "unknown-at-envelope"
+  },
+  "vendor_top_note": "unknown-at-descriptor"
+}
