@@ -6461,6 +6461,21 @@
           "category": "incidental",
           "reason": "A classifier-local hash binding one remembered choice to an exact path/task, not a managed-context subsystem.",
           "token": "ContextKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Study-local conversion weight, not a reusable context mechanism or product concept",
+          "token": "ContextTokenSeconds"
+        },
+        {
+          "category": "incidental",
+          "reason": "Study report conversion subtotal, not a context subsystem",
+          "token": "ContextSeconds"
+        },
+        {
+          "category": "incidental",
+          "reason": "Study comparison row identifier, not a contextual configuration concept",
+          "token": "ContextualID"
         }
       ],
       "id": "context-ctx",
@@ -6470,8 +6485,11 @@
         "CompactionContract",
         "ContextKey",
         "ContextLimit",
+        "ContextSeconds",
         "ContextShedding",
+        "ContextTokenSeconds",
         "ContextTokensSaved",
+        "ContextualID",
         "FAK_COMPACTION_THRASH_STOP",
         "LookupSnapshotTieredContext",
         "MechanismStaleContext",
@@ -8635,6 +8653,21 @@
           "category": "incidental",
           "reason": "Local deterministic candidate-list helper for one relation; resolver search plumbing, not a new plan concept.",
           "token": "relationCandidates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Study report accounting field, not an execution-plan concept",
+          "token": "ExplanationSeconds"
+        },
+        {
+          "category": "incidental",
+          "reason": "Study report accounting field, not an execution-plan concept",
+          "token": "SetupSeconds"
+        },
+        {
+          "category": "incidental",
+          "reason": "Study report accounting field, not an execution-plan concept",
+          "token": "MaintenanceSeconds"
         }
       ],
       "exclude": [
@@ -8657,10 +8690,12 @@
         "DecodeInterleavePlan",
         "EventPlanUpdated",
         "ExplainFilingPlan",
+        "ExplanationSeconds",
         "FleetBenchPlanDoc",
         "KVPrefixPressureCandidate",
         "KVPrefixPressuredCandidates",
         "KindCandidate",
+        "MaintenanceSeconds",
         "MergePlan",
         "MotifCatalogPlanFanoutReconcile",
         "NoteCandidates",
@@ -8680,6 +8715,7 @@
         "ReconcilePlan",
         "RecoveryReplan",
         "RemoteDrainCandidate",
+        "SetupSeconds",
         "SinkCandidate",
         "SinkCandidates",
         "SnapshotPressureCandidate",

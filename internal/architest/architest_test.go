@@ -91,6 +91,7 @@ var tier = map[string]int{
 	"harnessinit":          1, // external product scaffold renderer; stdlib-only and outside kernel hot paths (#6788).
 	"harnessdiscover":      1, // provenance-bearing scoped declaration discovery before contextual selection (#6898).
 	"harnessclassify":      1, // deterministic explicit-first domain/task classification before contextual selection (#6900).
+	"harnesscrossover":     1, // pure reproducible net-work comparison for contextual versus tuned native profiles (#6903).
 	"harnesscompose":       1, // typed inert asset overlap semantics before dependency solving and launch (#6904).
 	"harnesspreview":       2, // deterministic contextual lock-risk diff over classifier, composition, and resolver facts (#6902).
 	"harnessresolve":       2, // deterministic product lock over typed assets plus stackresolve dependency facts (#6792).

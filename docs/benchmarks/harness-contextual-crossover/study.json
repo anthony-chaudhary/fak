@@ -1,0 +1,503 @@
+{
+  "schema": "fak.harness-crossover-study/v1alpha1",
+  "id": "contextual-vs-tuned-native-2026-08-15",
+  "tasks": [
+    {
+      "id": "c1",
+      "domain": "coding"
+    },
+    {
+      "id": "l1",
+      "domain": "legal"
+    },
+    {
+      "id": "i1",
+      "domain": "integrated"
+    },
+    {
+      "id": "c2",
+      "domain": "coding"
+    },
+    {
+      "id": "l2",
+      "domain": "legal"
+    },
+    {
+      "id": "i2",
+      "domain": "integrated"
+    },
+    {
+      "id": "c3",
+      "domain": "coding"
+    },
+    {
+      "id": "l3",
+      "domain": "legal"
+    },
+    {
+      "id": "i3",
+      "domain": "integrated"
+    }
+  ],
+  "weights": {
+    "switch_action_seconds": 15,
+    "wrong_layer_seconds": 300,
+    "context_token_seconds": 0.002
+  },
+  "alternatives": [
+    {
+      "id": "codex-tuned-native",
+      "kind": "native-profile",
+      "documentation": [
+        {
+          "url": "https://developers.openai.com/codex/config-basic",
+          "retrieved": "2026-08-15",
+          "note": "user/project config, precedence, and named profiles"
+        },
+        {
+          "url": "https://developers.openai.com/codex/guides/agents-md",
+          "retrieved": "2026-08-15",
+          "note": "global and repository AGENTS.md hierarchy"
+        }
+      ],
+      "setup": {
+        "value": 480,
+        "provenance": "modeled"
+      },
+      "maintenance": {
+        "value": 120,
+        "provenance": "modeled"
+      },
+      "runs": [
+        {
+          "task_id": "c1",
+          "switch_actions": 0,
+          "explanation": {
+            "value": 15,
+            "provenance": "modeled"
+          },
+          "context_tokens": 800,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "l1",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 15,
+            "provenance": "modeled"
+          },
+          "context_tokens": 800,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "i1",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 15,
+            "provenance": "modeled"
+          },
+          "context_tokens": 800,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "c2",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 15,
+            "provenance": "modeled"
+          },
+          "context_tokens": 800,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "l2",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 15,
+            "provenance": "modeled"
+          },
+          "context_tokens": 800,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "i2",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 15,
+            "provenance": "modeled"
+          },
+          "context_tokens": 800,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "c3",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 15,
+            "provenance": "modeled"
+          },
+          "context_tokens": 800,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "l3",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 15,
+            "provenance": "modeled"
+          },
+          "context_tokens": 800,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "i3",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 15,
+            "provenance": "modeled"
+          },
+          "context_tokens": 800,
+          "provenance": "modeled"
+        }
+      ]
+    },
+    {
+      "id": "claude-code-tuned-native",
+      "kind": "native-profile",
+      "documentation": [
+        {
+          "url": "https://docs.anthropic.com/en/docs/claude-code/settings",
+          "retrieved": "2026-08-15",
+          "note": "managed, user, project, and local settings"
+        },
+        {
+          "url": "https://docs.anthropic.com/en/docs/claude-code/memory",
+          "retrieved": "2026-08-15",
+          "note": "managed, project, user, and local CLAUDE.md hierarchy"
+        }
+      ],
+      "setup": {
+        "value": 510,
+        "provenance": "modeled"
+      },
+      "maintenance": {
+        "value": 120,
+        "provenance": "modeled"
+      },
+      "runs": [
+        {
+          "task_id": "c1",
+          "switch_actions": 0,
+          "explanation": {
+            "value": 15,
+            "provenance": "modeled"
+          },
+          "context_tokens": 850,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "l1",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 15,
+            "provenance": "modeled"
+          },
+          "context_tokens": 850,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "i1",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 15,
+            "provenance": "modeled"
+          },
+          "context_tokens": 850,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "c2",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 15,
+            "provenance": "modeled"
+          },
+          "context_tokens": 850,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "l2",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 15,
+            "provenance": "modeled"
+          },
+          "context_tokens": 850,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "i2",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 15,
+            "provenance": "modeled"
+          },
+          "context_tokens": 850,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "c3",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 15,
+            "provenance": "modeled"
+          },
+          "context_tokens": 850,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "l3",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 15,
+            "provenance": "modeled"
+          },
+          "context_tokens": 850,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "i3",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 15,
+            "provenance": "modeled"
+          },
+          "context_tokens": 850,
+          "provenance": "modeled"
+        }
+      ]
+    },
+    {
+      "id": "copilot-tuned-native",
+      "kind": "native-profile",
+      "documentation": [
+        {
+          "url": "https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot",
+          "retrieved": "2026-08-15",
+          "note": "repository-wide and path-specific instructions"
+        }
+      ],
+      "setup": {
+        "value": 420,
+        "provenance": "modeled"
+      },
+      "maintenance": {
+        "value": 100,
+        "provenance": "modeled"
+      },
+      "runs": [
+        {
+          "task_id": "c1",
+          "switch_actions": 0,
+          "explanation": {
+            "value": 20,
+            "provenance": "modeled"
+          },
+          "context_tokens": 750,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "l1",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 20,
+            "provenance": "modeled"
+          },
+          "context_tokens": 750,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "i1",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 20,
+            "provenance": "modeled"
+          },
+          "context_tokens": 750,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "c2",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 20,
+            "provenance": "modeled"
+          },
+          "context_tokens": 750,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "l2",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 20,
+            "provenance": "modeled"
+          },
+          "context_tokens": 750,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "i2",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 20,
+            "provenance": "modeled"
+          },
+          "context_tokens": 750,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "c3",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 20,
+            "provenance": "modeled"
+          },
+          "context_tokens": 750,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "l3",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 20,
+            "provenance": "modeled"
+          },
+          "context_tokens": 750,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "i3",
+          "switch_actions": 1,
+          "explanation": {
+            "value": 20,
+            "provenance": "modeled"
+          },
+          "context_tokens": 750,
+          "provenance": "modeled"
+        }
+      ]
+    },
+    {
+      "id": "fak-contextual",
+      "kind": "contextual-harness",
+      "documentation": [
+        {
+          "url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/harness-preview.md",
+          "retrieved": "2026-08-15",
+          "note": "automatic selection, verified lock, and risk-only preview"
+        }
+      ],
+      "setup": {
+        "value": 900,
+        "provenance": "modeled"
+      },
+      "maintenance": {
+        "value": 180,
+        "provenance": "modeled"
+      },
+      "runs": [
+        {
+          "task_id": "c1",
+          "switch_actions": 0,
+          "explanation": {
+            "value": 8,
+            "provenance": "modeled"
+          },
+          "context_tokens": 500,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "l1",
+          "switch_actions": 0,
+          "explanation": {
+            "value": 8,
+            "provenance": "modeled"
+          },
+          "context_tokens": 500,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "i1",
+          "switch_actions": 0,
+          "explanation": {
+            "value": 8,
+            "provenance": "modeled"
+          },
+          "context_tokens": 500,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "c2",
+          "switch_actions": 0,
+          "explanation": {
+            "value": 8,
+            "provenance": "modeled"
+          },
+          "context_tokens": 500,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "l2",
+          "switch_actions": 0,
+          "explanation": {
+            "value": 8,
+            "provenance": "modeled"
+          },
+          "context_tokens": 500,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "i2",
+          "switch_actions": 0,
+          "explanation": {
+            "value": 8,
+            "provenance": "modeled"
+          },
+          "context_tokens": 500,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "c3",
+          "switch_actions": 0,
+          "explanation": {
+            "value": 8,
+            "provenance": "modeled"
+          },
+          "context_tokens": 500,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "l3",
+          "switch_actions": 0,
+          "explanation": {
+            "value": 8,
+            "provenance": "modeled"
+          },
+          "context_tokens": 500,
+          "provenance": "modeled"
+        },
+        {
+          "task_id": "i3",
+          "switch_actions": 0,
+          "explanation": {
+            "value": 8,
+            "provenance": "modeled"
+          },
+          "context_tokens": 500,
+          "provenance": "modeled"
+        }
+      ]
+    }
+  ]
+}

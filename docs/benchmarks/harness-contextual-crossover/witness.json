@@ -1,0 +1,92 @@
+{
+  "schema": "fak.harness-crossover-report/v1alpha1",
+  "study_id": "contextual-vs-tuned-native-2026-08-15",
+  "task_domains": [
+    "coding",
+    "legal",
+    "integrated",
+    "coding",
+    "legal",
+    "integrated",
+    "coding",
+    "legal",
+    "integrated"
+  ],
+  "switches": 8,
+  "winner": "copilot-tuned-native",
+  "results": [
+    {
+      "id": "copilot-tuned-native",
+      "kind": "native-profile",
+      "cost": {
+        "setup_seconds": 420,
+        "maintenance_seconds": 100,
+        "switch_seconds": 120,
+        "wrong_layer_seconds": 0,
+        "explanation_seconds": 180,
+        "context_seconds": 13.5,
+        "total_seconds": 833.5
+      },
+      "provenance": [
+        "modeled"
+      ]
+    },
+    {
+      "id": "codex-tuned-native",
+      "kind": "native-profile",
+      "cost": {
+        "setup_seconds": 480,
+        "maintenance_seconds": 120,
+        "switch_seconds": 120,
+        "wrong_layer_seconds": 0,
+        "explanation_seconds": 135,
+        "context_seconds": 14.399999999999999,
+        "total_seconds": 869.4
+      },
+      "provenance": [
+        "modeled"
+      ]
+    },
+    {
+      "id": "claude-code-tuned-native",
+      "kind": "native-profile",
+      "cost": {
+        "setup_seconds": 510,
+        "maintenance_seconds": 120,
+        "switch_seconds": 120,
+        "wrong_layer_seconds": 0,
+        "explanation_seconds": 135,
+        "context_seconds": 15.299999999999997,
+        "total_seconds": 900.3
+      },
+      "provenance": [
+        "modeled"
+      ]
+    },
+    {
+      "id": "fak-contextual",
+      "kind": "contextual-harness",
+      "cost": {
+        "setup_seconds": 900,
+        "maintenance_seconds": 180,
+        "switch_seconds": 0,
+        "wrong_layer_seconds": 0,
+        "explanation_seconds": 72,
+        "context_seconds": 9,
+        "total_seconds": 1161
+      },
+      "provenance": [
+        "modeled"
+      ]
+    }
+  ],
+  "crossover": {
+    "contextual_id": "fak-contextual",
+    "native_id": "copilot-tuned-native",
+    "fixed_delta_seconds": 452,
+    "per_switch_delta_seconds": -15.5625,
+    "break_even_switches": 29.044176706827308,
+    "interpretation": "contextual harness becomes cheaper after 29.04 domain switches"
+  },
+  "verdict": "native-profile wins under declared costs"
+}

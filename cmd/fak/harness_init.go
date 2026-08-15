@@ -14,6 +14,9 @@ import (
 func cmdHarness(argv []string) { os.Exit(runHarness(os.Stdout, os.Stderr, argv)) }
 
 func runHarness(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == "study" {
+		return runHarnessStudy(stdout, stderr, argv[1:])
+	}
 	if len(argv) > 0 && argv[0] == "preview" {
 		return runHarnessPreview(stdout, stderr, argv[1:])
 	}
@@ -36,7 +39,7 @@ func runHarness(stdout, stderr io.Writer, argv []string) int {
 		return runHarnessProtocol(stdout, stderr, argv[1:])
 	}
 	if len(argv) == 0 || argv[0] != "init" {
-		fmt.Fprintln(stderr, "usage: fak harness <init|classify|compose|discover|preview|resolve|select|protocol>")
+		fmt.Fprintln(stderr, "usage: fak harness <init|classify|compose|discover|preview|resolve|select|study|protocol>")
 		return 2
 	}
 	fs := flag.NewFlagSet("harness init", flag.ContinueOnError)
