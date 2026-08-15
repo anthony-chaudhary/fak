@@ -58,9 +58,9 @@ func agentOutputProfiles() []agentOutputProfile {
 
 func agentWorkProfiles() []agentOutputProfile {
 	return []agentOutputProfile{
-		{Selection: "standard", Canonical: "standard", Family: "standard", Implementation: "native", Intensity: "off", Status: "shipped", Meaning: "No implementation-policy steering."},
+		{Selection: "standard", Canonical: "standard", Family: "standard", Implementation: "native", Intensity: "off", Status: "shipped", Meaning: "Explicitly disable implementation-policy steering."},
 		{Selection: "ponytail:low", Canonical: "ponytail:native:low", Family: "ponytail", Implementation: "native", Intensity: "low", Status: "shipped", Meaning: "Briefly check for a simpler route before adding machinery."},
-		{Selection: "ponytail:medium", Canonical: "ponytail:native:medium", Family: "ponytail", Implementation: "native", Intensity: "medium", Status: "shipped", Meaning: "Recommended simplicity ladder with full correctness carve-outs."},
+		{Selection: "ponytail:medium", Canonical: "ponytail:native:medium", Family: "ponytail", Implementation: "native", Intensity: "medium", Status: "default", Meaning: "Simplicity ladder with full correctness carve-outs."},
 		{Selection: "ponytail:high", Canonical: "ponytail:native:high", Family: "ponytail", Implementation: "native", Intensity: "high", Status: "shipped", Meaning: "Actively resist avoidable complexity; require justification for machinery."},
 		{Selection: "ponytail:original:*", Family: "ponytail", Implementation: "original", Intensity: "low|medium|high", Status: "not-yet", Meaning: "Reserved for a pinned, attributed upstream adapter."},
 	}
@@ -86,7 +86,7 @@ func printAgentOutputProfiles(w io.Writer, argv []string) error {
 	for _, p := range profiles {
 		fmt.Fprintf(w, "  %-24s %-8s %s\n", p.Selection, p.Status, p.Meaning)
 	}
-	fmt.Fprintln(w, "\nWork profiles (independent opt-in; default is standard):")
+	fmt.Fprintln(w, "\nWork profiles (independent axis; default is ponytail:medium):")
 	for _, p := range agentWorkProfiles() {
 		fmt.Fprintf(w, "  %-24s %-8s %s\n", p.Selection, p.Status, p.Meaning)
 	}

@@ -1015,3 +1015,15 @@ missing fields, nonzero exits, and non-JSON output.
 
 Runnable hidden/exposed example and self-check:
 [`examples/skill-program/`](../examples/skill-program/).
+
+## `fak study-monitor`
+
+Render and validate the durable external-repository queue used by the `study-repo` and `scout-loop` skills:
+
+```bash
+fak study-monitor
+fak study-monitor --due-days 7 --json
+fak study-monitor --registry docs/research/monitored-repositories.json --as-of 2026-08-14
+```
+
+The command reads `docs/research/monitored-repositories.json` by default, sorts by priority, and reports each source's status, pinned checked revision, `last_checked` age, and whether it is due for refresh. `--as-of` exists for deterministic witnesses and tests. The command does not contact GitHub or mutate the registry; scouts update all check fields together after inspecting the source.

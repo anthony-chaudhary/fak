@@ -574,6 +574,9 @@ func main() {
 		cmdHorizonRecovery(os.Args[2:])
 	case "dogfood-issues":
 		cmdDogfoodIssues(os.Args[2:])
+	case "study-monitor":
+		// Durable source registry for recurring study/scout passes.
+		os.Exit(runStudyMonitor(os.Stdout, os.Stderr, os.Args[2:]))
 	case "idea-scout":
 		// The research-to-issue feeder as a verb (cmd/fak/ideascout.go over
 		// internal/ideascout). It shipped with a full Go port of tools/idea_scout.py, a
@@ -1043,7 +1046,7 @@ func cmdAgent(argv []string) {
 	verbFlagUsage(fs, "agent")
 	task := fs.String("task", agent.DefaultTask, "the user task the agent must complete")
 	outputStyle := fs.String("output-style", "full", "response shape: full|native:{low|medium|high}|caveman:{low|medium|high}; caveman:* is safe native shorthand (see `fak agent profiles`)")
-	workProfile := fs.String("work-profile", "standard", "implementation policy: standard|ponytail:{low|medium|high}; ponytail:* is safe native shorthand (see `fak agent profiles`)")
+	workProfile := fs.String("work-profile", agentDefaultWorkProfile, "implementation policy: ponytail:{low|medium|high}|standard; defaults to ponytail:medium, standard disables it (see `fak agent profiles`)")
 	provider := fs.String("provider", "openai", "provider transcript wire: openai, anthropic, gemini, or xai")
 	baseURL := fs.String("base-url", "", "provider base URL (OpenAI-compatible: .../v1; Gemini native: .../v1beta; Anthropic native: https://api.anthropic.com)")
 	model := fs.String("model", "gemini-2.5-flash", "model id")

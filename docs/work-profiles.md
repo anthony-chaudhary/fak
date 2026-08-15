@@ -1,16 +1,16 @@
 # Work profiles: choose how fak approaches implementation
 
-Work profiles are **opt-in implementation policy** for the owned `fak agent` loop. They answer
+Work profiles are **implementation policy** for the owned `fak agent` loop. They answer
 "how strongly should the agent challenge avoidable complexity?" Response profiles answer a
-different question: "how compact should the final prose be?" You can select either, both, or neither.
+different question: "how compact should the final prose be?" You can select either axis independently, and explicitly disable either one.
 
 ```bash
 fak agent profiles
 fak agent --work-profile ponytail:medium --output-style caveman:low --offline
 ```
 
-The default is `standard`, which adds no work-policy steering. The recommended opt-in starting point
-is `ponytail:medium`. Disable it explicitly with `--work-profile standard`.
+The default is `ponytail:medium`; every fak-owned agent loop therefore receives the medium
+simplicity policy unless the operator overrides it. Disable it explicitly with `--work-profile standard`.
 
 ## Low, medium, or high?
 

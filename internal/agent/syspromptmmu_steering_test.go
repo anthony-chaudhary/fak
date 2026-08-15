@@ -48,6 +48,7 @@ func breakpointIndex(t *testing.T, b SystemBlock) int {
 // level-explicit OFF build — the forward path is exactly what it was before #5047.
 func TestOwnedSystemBlockSteeringOffByDefault(t *testing.T) {
 	t.Setenv(syspromptmmu.SteeringEnvVar, "")
+	t.Setenv(syspromptmmu.WorkProfileEnvVar, "standard")
 
 	def := BuildOwnedSystemBlock(steerItems(), spmmuPassWitness)
 	off := buildOwnedSystemBlockAt(steerItems(), spmmuPassWitness, syspromptmmu.SteeringOff)

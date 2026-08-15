@@ -50,6 +50,22 @@ func TestWorkProfileIntensityIsMonotonicAndStable(t *testing.T) {
 	}
 }
 
+func TestWorkProfileFromEnvDefaultsToPonytailMedium(t *testing.T) {
+	for _, getenv := range []func(string) string{nil, func(string) string { return "" }} {
+		got := WorkProfileFromEnv(getenv)
+		if got.Profile != WorkProfilePonytailNativeMed || !got.Applied {
+			t.Fatalf("WorkProfileFromEnv default = %+v", got)
+		}
+	}
+}
+
+func TestWorkProfileFromEnvCanExplicitlyDisableDefault(t *testing.T) {
+	got := WorkProfileFromEnv(func(string) string { return "standard" })
+	if got.Profile != WorkProfileStandard || got.Applied {
+		t.Fatalf("WorkProfileFromEnv standard = %+v", got)
+	}
+}
+
 func TestWorkProfileFromEnvReadsSeparateKnob(t *testing.T) {
 	got := WorkProfileFromEnv(func(key string) string {
 		if key != WorkProfileEnvVar {

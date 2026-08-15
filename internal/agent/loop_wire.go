@@ -1,5 +1,7 @@
 package agent
 
+import "github.com/anthony-chaudhary/fak/internal/syspromptmmu"
+
 // loop_wire.go — the two RunOptions a WIRE caller needs to hand the owned loop a real
 // served request instead of a reconstruction (#6657).
 //
@@ -38,7 +40,7 @@ func WithToolCatalog(tools []ToolDef) RunOption {
 // then either the wired conversation or the historical single task message.
 func (c runConfig) seedMessages(task string) []Message {
 	msgs := make([]Message, 0, len(c.conversation)+2)
-	msgs = append(msgs, Message{Role: RoleSystem, Content: SystemPrompt})
+	msgs = append(msgs, Message{Role: RoleSystem, Content: ownedAgentSystemPrompt()})
 	if len(c.conversation) > 0 {
 		return append(msgs, c.conversation...)
 	}
@@ -52,4 +54,12 @@ func (c runConfig) seedTools() []ToolDef {
 		return c.toolCatalog
 	}
 	return ToolCatalog()
+}
+
+func ownedAgentSystemPrompt() string {
+	block := BuildOwnedSystemBlock([][]byte{[]byte(SystemPrompt)}, func(syspromptmmu.BaseEdit) bool { return true })
+	if len(block.Value) == 0 {
+		return SystemPrompt
+	}
+	return string(block.Value)
 }

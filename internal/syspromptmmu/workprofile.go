@@ -13,6 +13,7 @@ const WorkProfileEnvVar = "FAK_WORK_PROFILE"
 
 const (
 	WorkProfileStandard           = "standard"
+	WorkProfileDefault            = "ponytail:medium"
 	WorkProfilePonytailNativeLow  = "ponytail:native:low"
 	WorkProfilePonytailNativeMed  = "ponytail:native:medium"
 	WorkProfilePonytailNativeHigh = "ponytail:native:high"
@@ -72,8 +73,12 @@ func DescribeWorkProfile(name string) WorkProfileReadout {
 
 // WorkProfileFromEnv reads the operator selection through an injected lookup.
 func WorkProfileFromEnv(getenv func(string) string) WorkProfileReadout {
-	if getenv == nil {
-		return DescribeWorkProfile("")
+	selected := ""
+	if getenv != nil {
+		selected = strings.TrimSpace(getenv(WorkProfileEnvVar))
 	}
-	return DescribeWorkProfile(getenv(WorkProfileEnvVar))
+	if selected == "" {
+		selected = WorkProfileDefault
+	}
+	return DescribeWorkProfile(selected)
 }

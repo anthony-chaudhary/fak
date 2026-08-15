@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
+	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 
 	"github.com/anthony-chaudhary/fak/internal/refutil"
@@ -89,18 +91,20 @@ type ArmMetrics struct {
 
 // RunResult is the full A/B outcome.
 type RunResult struct {
-	AppVersion    string     `json:"app_version"`
-	Task          string     `json:"task"`
-	Model         string     `json:"model"`
-	Provider      string     `json:"provider,omitempty"` // transcript wire for live runs
-	BaseURL       string     `json:"base_url,omitempty"` // provider root, never includes secrets
-	MaxTurns      int        `json:"max_turns"`
-	Fak           ArmMetrics `json:"fak"`
-	Baseline      ArmMetrics `json:"baseline"`
-	TurnsSaved    int        `json:"turns_saved"`    // baseline.Turns - fak.Turns (comparable ONLY if BothCompleted)
-	TokensSaved   int        `json:"tokens_saved"`   // baseline total - fak total
-	BothCompleted bool       `json:"both_completed"` // the turn delta is comparable iff this is true
-	Live          bool       `json:"live"`           // true if a real network model drove it
+	AppVersion         string     `json:"app_version"`
+	Task               string     `json:"task"`
+	Model              string     `json:"model"`
+	Provider           string     `json:"provider,omitempty"` // transcript wire for live runs
+	BaseURL            string     `json:"base_url,omitempty"` // provider root, never includes secrets
+	MaxTurns           int        `json:"max_turns"`
+	WorkProfile        string     `json:"work_profile"`
+	WorkProfileWitness string     `json:"work_profile_witness,omitempty"`
+	Fak                ArmMetrics `json:"fak"`
+	Baseline           ArmMetrics `json:"baseline"`
+	TurnsSaved         int        `json:"turns_saved"`    // baseline.Turns - fak.Turns (comparable ONLY if BothCompleted)
+	TokensSaved        int        `json:"tokens_saved"`   // baseline total - fak total
+	BothCompleted      bool       `json:"both_completed"` // the turn delta is comparable iff this is true
+	Live               bool       `json:"live"`           // true if a real network model drove it
 	// MeanTurnLatencyMs is the fak arm's observed mean end-to-end per-turn latency
 	// (ElapsedMs / Turns), and TimeSavedSeconds prices the spared round-trips at it:
 	// turns_saved x mean-per-turn-latency — the SAME pricing the live info panel and
@@ -285,9 +289,11 @@ func Run(ctx context.Context, p Planner, task string, maxTurns int, opts ...RunO
 
 	_, isLive := p.(*HTTPPlanner)
 
+	workProfile := syspromptmmu.WorkProfileFromEnv(os.Getenv)
 	res := &RunResult{
 		AppVersion: appversion.Current(),
 		Task:       task, Model: p.Model(), MaxTurns: maxTurns,
+		WorkProfile: workProfile.Profile, WorkProfileWitness: workProfile.Witness,
 		Fak: fakM, Baseline: baseM,
 		TurnsSaved:    baseM.Turns - fakM.Turns,
 		TokensSaved:   (baseM.PromptTokens + baseM.CompletionTokens) - (fakM.PromptTokens + fakM.CompletionTokens),

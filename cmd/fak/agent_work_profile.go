@@ -8,6 +8,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
 )
 
+const agentDefaultWorkProfile = syspromptmmu.WorkProfileDefault
+
 func resolveAgentWorkProfile(raw string) (syspromptmmu.WorkProfileReadout, error) {
 	profile := syspromptmmu.DescribeWorkProfile(raw)
 	if !profile.Known {
