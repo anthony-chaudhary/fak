@@ -92,6 +92,7 @@ var tier = map[string]int{
 	"harnessdiscover":      1, // provenance-bearing scoped declaration discovery before contextual selection (#6898).
 	"harnessclassify":      1, // deterministic explicit-first domain/task classification before contextual selection (#6900).
 	"harnesscompose":       1, // typed inert asset overlap semantics before dependency solving and launch (#6904).
+	"harnesspreview":       2, // deterministic contextual lock-risk diff over classifier, composition, and resolver facts (#6902).
 	"harnessresolve":       2, // deterministic product lock over typed assets plus stackresolve dependency facts (#6792).
 	"harnessselect":        1, // context-layer selection and explain trace; stdlib-only before product composition.
 	"stackresolve":         1, // stdlib-only generic dependency search and receipts; domain facts enter through Provider (#6891).
