@@ -165,6 +165,7 @@ func TestOwnedSystemBlockSteeringIdempotent(t *testing.T) {
 }
 
 func TestNamedCavemanStyleFlowsThroughOwnedSystemBlock(t *testing.T) {
+	t.Setenv(syspromptmmu.WorkProfileEnvVar, "standard")
 	t.Setenv(syspromptmmu.StyleEnvVar, "caveman:native:medium")
 	t.Setenv(syspromptmmu.SteeringEnvVar, "4") // named style takes precedence
 
@@ -172,8 +173,7 @@ func TestNamedCavemanStyleFlowsThroughOwnedSystemBlock(t *testing.T) {
 	if b.Steering != 2 || b.Style != "caveman:native:medium" || b.StyleFamily != syspromptmmu.StyleFamilyCaveman+":"+syspromptmmu.StyleFamilyNative || b.StyleIntensity != "medium" {
 		t.Fatalf("named style readout = steering=%d style=%q family=%q intensity=%q", b.Steering, b.Style, b.StyleFamily, b.StyleIntensity)
 	}
-	seg, _ := syspromptmmu.StyleSegment("caveman:native:medium")
-	if !bytes.Contains(b.Value, seg.Content) {
+	if !strings.Contains(string(b.Value), "Signal-first level 2 (focused)") {
 		t.Fatal("owned system block does not carry selected named style bytes")
 	}
 }

@@ -40,6 +40,7 @@ func spmmuDecodeBlocks(t *testing.T, value []byte) []struct {
 // witness: the owned loop authors/queries its own system block — spine pinned first, overlay
 // authored through ApplyEdit, realized prefix proven cache-stable.
 func TestBuildOwnedSystemBlockPinsSpineFirstAndStaysCacheStable(t *testing.T) {
+	t.Setenv(syspromptmmu.WorkProfileEnvVar, "standard")
 	items := [][]byte{
 		[]byte("capability card: search_flights(origin, destination, date) — queried on demand"),
 		[]byte("capability card: book_flight(flight_id) — queried on demand"),
@@ -87,6 +88,7 @@ func TestBuildOwnedSystemBlockPinsSpineFirstAndStaysCacheStable(t *testing.T) {
 // witness admits no overlay (the agent never grades its own edit), so the block carries the
 // bare spine — still cache-stable, because the spine is untouched.
 func TestBuildOwnedSystemBlockFailsClosedWithoutWitness(t *testing.T) {
+	t.Setenv(syspromptmmu.WorkProfileEnvVar, "standard")
 	items := [][]byte{[]byte("unwitnessed card — must be refused")}
 	b := BuildOwnedSystemBlock(items, nil)
 
