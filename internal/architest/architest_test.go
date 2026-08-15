@@ -578,6 +578,7 @@ var tier = map[string]int{
 	"humanctl":              1,
 	"toolcatalog":           1,
 	"projectassets":         1, // stdlib-only project asset registry and parity adapter; off the runtime hot path.
+	"wavefuel":              1, // stdlib-only fleet-wave operator-receipt contract witness.
 	"workaccount":           1, // stdlib-only WORK DONE mechanism coverage registry and validator; off the runtime hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
