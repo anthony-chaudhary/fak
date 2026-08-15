@@ -350,6 +350,7 @@ var tier = map[string]int{
 	"nightrun":            2, // RUN-IT-ALL-NIGHT local-capability data-collection planner: probes the box + ranks feasible-here collection tasks over the benchmark grid; imports benchcatalog(1)+stdlib, off the hot path.
 	"claimcheck":          1, // pure net-true-value claim grader; stdlib-only, off the hot path.
 	"ideascout":           2, // inbound arXiv/GitHub idea scout and issue planner; stdlib-only shell/network I/O off the hot path.
+	"studymonitor":        2, // stdlib-only external source registry validator and report renderer; off the runtime hot path.
 	"loopindex":           1, // pure S0 agentic-loop scorecard: folds orient->plan->act->verify->ship->learn probes into loop-index + loopindex_debt; stdlib-only, off the hot path.
 	"loopmap":             2, // queryable loop-stage -> tool map over loopindex(1); off the hot path.
 	"superloop":           2, // operator-intent meta-loop: pure registry+Classify(super-vs-normal)+Walk(worst-first worklist) over member loops/scorecards/gardens, plus the C6 model-fit eval (#3043) grading read-only meta decisions; imports modelroute(1) for the single-sourced risk class, off the hot path.
@@ -540,6 +541,7 @@ var tier = map[string]int{
 	"kvquantmeta":           1,
 	"quantdetect":           1,
 	"fp4runtime":            1, // stdlib-only FP4/microscaling runtime, GPU-architecture, and accumulator compatibility contract; no model kernel.
+	"fp4meta":               1, // stdlib-only neutral FP4 artifact, recipe, scale, runtime, and hardware metadata contract; no model kernel.
 	"bitnetruntime":         1, // stdlib-only BitNet runtime delegation and host-compatibility contract; discovers external runtimes but does not execute a model kernel.
 	"quantpolicy":           1, // stdlib-only structural quantization capability policy; no quantizer, conversion, runtime, or model kernel.
 	"requanteval":           1,
