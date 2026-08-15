@@ -20,6 +20,8 @@ import (
 )
 
 const (
+	defaultLiveTimeout = 30 * time.Second
+
 	SnapshotSchemaV1 = "fak.quantwatch.snapshot/v1"
 	ResultSchemaV1   = "fak.quantwatch.result/v1"
 
@@ -251,6 +253,13 @@ type LiveRequest struct {
 	GitHubAPI          string
 }
 
+func liveClient(client *http.Client) *http.Client {
+	if client != nil {
+		return client
+	}
+	return &http.Client{Timeout: defaultLiveTimeout}
+}
+
 // FetchLive records a receipt for every attempted source and returns a ranked
 // result even when one source abstains. It never downloads model artifacts.
 func FetchLive(ctx context.Context, client *http.Client, req LiveRequest) Result {
@@ -266,9 +275,7 @@ func FetchLive(ctx context.Context, client *http.Client, req LiveRequest) Result
 		got.Sources = []SourceReceipt{{Name: "live-request", QueryTime: req.QueryTime, Abstained: true, Reason: ReasonBoundExceeded, Detail: "max_per_source must be <= 100"}}
 		return got
 	}
-	if client == nil {
-		client = http.DefaultClient
-	}
+	client = liveClient(client)
 	if req.ArxivEndpoint == "" {
 		req.ArxivEndpoint = "https://export.arxiv.org/api/query"
 	}
