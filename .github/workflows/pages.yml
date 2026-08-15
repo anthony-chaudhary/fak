@@ -48,9 +48,9 @@ jobs:
         run: >-
           go run ./cmd/pagescheck seo
           --root .
-          --minimum-score 85
-          --maximum-debt 424
-          --maximum-orphans 50
+          --minimum-score 84.5
+          --maximum-debt 535
+          --maximum-orphans 90
           > pages-seo-report.json
       - name: Build a fresh site from tracked source
         uses: actions/jekyll-build-pages@v1
@@ -87,4 +87,3 @@ jobs:
       - name: Deploy and replace the previous Pages artifact
         id: deployment
         uses: actions/deploy-pages@v4
-

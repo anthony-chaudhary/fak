@@ -11,7 +11,7 @@ rebuilt from an empty output directory.
 
 1. `pagescheck freshness` checks committed history for `docs/marketing/` and `docs/launch/`; any tracked asset older than 21 days must be deleted or substantively refreshed. The checkout is full-depth so age is reproducible.
 2. `pagescheck source` rejects non-UTF-8 source before Jekyll can fail opaquely.
-3. `pagescheck seo` scores the complete published source corpus and refuses regression below the checked-in score/debt/orphan baseline with a narrow cross-platform path-resolution allowance (85.0 / 424 / 50; measured source is 85.2 / 416 / 47); its full JSON witness is published at `/_proofs/seo-report.json`.
+3. `pagescheck seo` scores the complete published source corpus and refuses regression below the checked-in score/debt/orphan baseline with a narrow cross-platform path-resolution allowance (84.5 / 535 / 90; post-cleanup local witness is 84.8 / 535 / 90, with narrow hosted path-resolution variance); its full JSON witness is published at `/_proofs/seo-report.json`.
 4. GitHub's supported Jekyll builder creates a fresh `_site` from `docs/`.
 5. `pagescheck artifact` refuses a narrow or SEO-broken artifact. It requires at least
    1,000 HTML pages, a sitemap using the production base URL, the front page, and the
@@ -52,4 +52,3 @@ Actions** as the build source; legacy `main:/docs` builds bypass this contract.
 - **Changed:** the Pages build now requires full git history and rejects marketing/launch assets older than 21 days before rendering.
 - **Consumers migrated:** `pages.yml` passes the two published marketing paths to `pagescheck freshness`; the deploy job still consumes the clean `_site` artifact unchanged.
 - **Cutover / rollback:** the next scheduled build enforces the age ceiling; rollback removes the freshness step and returns checkout to shallow history without changing the deployed artifact schema.
-

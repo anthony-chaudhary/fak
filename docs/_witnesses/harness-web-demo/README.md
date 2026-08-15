@@ -19,7 +19,7 @@ go run ./cmd/harnesswebdemo -addr 127.0.0.1:8791
 playwright screenshot --device="Desktop Chrome" --full-page URL OUTPUT.png
 ```
 
-The render tests assert semantic message/tool payload projection, approval/failure controls, `aria-live`, responsive layout metadata, Content-Security-Policy, and the second skin. `go run ./cmd/harnesswebdemo -selfcheck` additionally drives normal, reconnect, approval, and failure protocol paths and emits an HTML SHA-256 receipt.
+The render tests assert semantic message/tool payload projection, approval/failure controls, `aria-live`, responsive layout metadata, Content-Security-Policy, and the second skin. `go run ./cmd/harnesswebdemo -selfcheck` additionally drives message start/delta/completion, reconnect, approval, and failure protocol paths and emits an HTML SHA-256 receipt.
 
 ## Boundary
 
