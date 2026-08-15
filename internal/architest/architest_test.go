@@ -91,12 +91,10 @@ var tier = map[string]int{
 	"harnessinit":          1, // external product scaffold renderer; stdlib-only and outside kernel hot paths (#6788).
 	"harnessdiscover":      1, // provenance-bearing scoped declaration discovery before contextual selection (#6898).
 	"harnessclassify":      1, // deterministic explicit-first domain/task classification before contextual selection (#6900).
-	"harnesscompose":       1, // typed inert asset overlap semantics before dependency solving and launch (#6904).
 	"harnessselect":        1, // context-layer selection and explain trace; stdlib-only before product composition.
 	"stackresolve":         1, // stdlib-only generic dependency search and receipts; domain facts enter through Provider (#6891).
 	"supportgraph":         1, // stdlib-only exact-tuple support evidence and freshness query before model/hardware composition (#6895).
 	"workloadfit":          2, // purpose-specific fitness mechanism over stackresolve contracts; keeps soft ranking outside composition gates (#6893).
-	"stackpreflight":       3, // launch integrator joining dependency, workload-fitness, and support-evidence receipts (#6897).
 	"amdgpu":               2, // AMD GPU fact probe and perf-counter JSON fold for Windows harness diagnostics; imports windowgate(1), off the hot path.
 	"accounts":             2, "accountobs": 1, "guardaudit": 2, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 2, "cacheobs": 1, "cachevalue": 2, "canon": 1, "compute": 2, "deletioncert": 1, "demoui": 2, "ggufload": 2, "gpulease": 2, "fleetreap": 2, "hfhub": 2, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 2, "model": 2, "orphanscan": 1, "pathlint": 1, "pathutil": 1, "privatepath": 2, "provenance": 1, "swebench": 2, "urllint": 1, "webbench": 2,
 	// stdlib-only foundation leaves (import nothing internal); off the hot path.
@@ -282,6 +280,7 @@ var tier = map[string]int{
 	"sessionreset":        3, // budget-reset carryover builder: a pluggable Contributor registry that folds a drained session's transcript into the "human-like" seed a fresh session is re-armed with (durable facts via ctxmmu's shipped prior + task recap + warm-prefix descriptor via vcachechain + verbatim tail). Mechanism: imports ctxmmu(2)+vcachechain(2)+stdlib, NOT the wire agent type; off the hot path, registers nothing into the kernel.
 	"taskmgr":             2, // process-local task/step/resource/ETA snapshot fold; stdlib-only, off the hot path.
 	"issuepolicy":         2, // pure spine-first GitHub issue candidate policy; stdlib-only, off the hot path.
+	"issuecentrality":     1, // deterministic issue problem-centrality classifier and audit leaf.
 	"issuecohort":         2, // pure batch cohort planner: folds many issuecontract candidates into concurrency-safe waves (disjoint-tree), a split-first queue, triage, and duplicate-key groups; imports issuecontract(1)+stdlib, off the hot path.
 	"issuefanout":         2, // pure spine-first fan-out planner: expands one shipped working spine into contract-ready QA/dogfood/productization/observability/integration follow-on candidates + an observability scorecard fold over git/gh witnesses; imports issuecontract(1)+pkg/scorecard+stdlib, off the hot path.
 	"issuehygiene":        2, // pure issue-creation/tagging pickup-readiness scorecard (fak score issue-hygiene): folds the open backlog's class/priority coverage, worker-ready body sections, and near-dup avoidance into issue_hygiene_debt; imports issuededup(1)+pkg/scorecard+stdlib, off the hot path (the gh fetch lives in cmd/fak).

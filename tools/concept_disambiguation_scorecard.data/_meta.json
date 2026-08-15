@@ -5882,6 +5882,11 @@
           "category": "incidental",
           "reason": "Discovery refresh metadata is a closed cache lifecycle label, not an authorization policy or capability grant.",
           "token": "RefreshPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "A harness-asset overlap helper enforcing monotonic deny semantics, not the canonical runtime policy merge subsystem.",
+          "token": "mergePolicy"
         }
       ],
       "exclude": [
@@ -5971,6 +5976,7 @@
         "hookPostureFor",
         "liveToolPolicy",
         "manageParityPosture",
+        "mergePolicy",
         "multi_capability",
         "naturalAdjudicator",
         "naturalPolicySummary",
