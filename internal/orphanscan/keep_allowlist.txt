@@ -31,6 +31,16 @@
 
 # --- cmd/fak (lane `cmd`, held by another loop at the time of writing) ---
 
+cmd/fak cmdCUDAArch # baseline: command implementation exists but the current verb registry does not reference this wrapper; owning cmd lane must wire or delete it.
+cmd/fak cmdCapabilities # baseline: command implementation exists but the current verb registry does not reference this wrapper; owning cmd lane must wire or delete it.
+cmd/fak cmdDevWorkspace # baseline: command implementation exists but the current verb registry does not reference this wrapper; owning cmd lane must wire or delete it.
+cmd/fak cmdFleetcap # baseline: command implementation exists but the current verb registry does not reference this wrapper; owning cmd lane must wire or delete it.
+cmd/fak cmdGHSpamComments # baseline: command implementation exists but the current verb registry does not reference this wrapper; owning cmd lane must wire or delete it.
+cmd/fak defaultChildRegistrationLedgerPath # baseline: extracted default-path helper has no current call site; owning cmd lane must wire or delete it.
+cmd/fak defaultFleetBusInstanceID # baseline: extracted fleet-bus identity helper has no current call site; owning cmd lane must wire or delete it.
+cmd/fak joinArgs # baseline: render helper has no current call site; owning cmd lane must wire or delete it.
+cmd/fak sortedHistoryRecords # baseline: history sort helper has no current call site; owning cmd lane must wire or delete it.
+cmd/fak writeIndexRepo # baseline: test helper has no current call site; owning cmd lane must wire or delete it.
 cmd/fak cmdGitSpawnBench # baseline: redundant wrapper, not a dropped feature — the `bench gitspawn` sub-dispatch (cmd/fak/main.go) calls runGitSpawnBench directly, so this cmd* shim has no call site. Fix is to delete the shim.
 cmd/fak cmdRunaway # baseline: genuinely unreachable verb — cmd/fak/main.go has no `case "runaway":`, yet cmd/fak/runaway.go re-execs `<self> runaway --json`, so that self-call cannot resolve. Fix is to add the dispatch case.
 cmd/fak dispatchPreflightChurn # baseline: leftover wrapper from the dispatchPreflightChurnState split — the live caller (cmd/fak/dispatch_tick_preflight.go) uses the ...State form. Fix is to delete the wrapper.
