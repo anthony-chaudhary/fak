@@ -59,3 +59,20 @@ func TestCentralityAuditSelectedMigrationPreview(t *testing.T) {
 		}
 	}
 }
+
+func TestCentralityAuditSampleCLI(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "issues.json")
+	data := `[{"number":3,"title":"P0","body":"","labels":[{"name":"priority/P0"},{"name":"security"}],"milestone":{"title":"m1"}},{"number":1,"title":"now","body":"","labels":[{"name":"gen/now"},{"name":"managed-context"}],"milestone":{"title":"m1"}},{"number":2,"title":"stratum","body":"","labels":[{"name":"observability"}],"milestone":null}]`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := runCentralityAudit([]string{"--input", path, "--sample"}, &out, &bytes.Buffer{}, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"schema": "fak-issue-centrality-sample/1"`, `"p0_total": 1`, `"gen_now_total": 1`, `"milestoneless_total": 1`, `"family": "observability"`} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("sample missing %q:\n%s", want, out.String())
+		}
+	}
+}

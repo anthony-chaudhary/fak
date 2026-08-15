@@ -29,6 +29,8 @@ func runCentralityAudit(args []string, stdout, stderr io.Writer, now func() time
 	limit := fs.Int("limit", 5000, "maximum open issues to collect")
 	jsonOut := fs.Bool("json", false, "emit the stable JSON report")
 	selectionsPath := fs.String("selections", "", "preview exact body patches for explicitly selected issue classifications")
+	sample := fs.Bool("sample", false, "emit a reproducible P0, gen/now, and milestone-less family sample")
+	perFamily := fs.Int("per-family", 1, "milestone-less rows selected per capability-family stratum")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -38,6 +40,9 @@ func runCentralityAudit(args []string, stdout, stderr io.Writer, now func() time
 	if *limit < 1 {
 		return fmt.Errorf("--limit must be positive")
 	}
+	if *perFamily < 1 {
+		return fmt.Errorf("--per-family must be positive")
+	}
 
 	var data []byte
 	var err error
@@ -46,7 +51,11 @@ func runCentralityAudit(args []string, stdout, stderr io.Writer, now func() time
 		data, err = os.ReadFile(*input)
 		scope, provenance = "fixture issues", *input
 	} else {
-		argv := []string{"issue", "list", "--state", "open", "--limit", fmt.Sprint(*limit), "--json", "number,title,body"}
+		fields := "number,title,body"
+		if *sample {
+			fields = "number,title,body,labels,milestone"
+		}
+		argv := []string{"issue", "list", "--state", "open", "--limit", fmt.Sprint(*limit), "--json", fields}
 		if *repo != "" {
 			argv = append(argv, "--repo", *repo)
 			scope = "open issues in " + *repo
@@ -57,6 +66,16 @@ func runCentralityAudit(args []string, stdout, stderr io.Writer, now func() time
 	}
 	if err != nil {
 		return fmt.Errorf("collect portfolio: %w", err)
+	}
+	if *sample {
+		var portfolio []issuecentrality.PortfolioIssue
+		if decodeErr := json.Unmarshal(data, &portfolio); decodeErr != nil {
+			return fmt.Errorf("decode issue portfolio sample: %w", decodeErr)
+		}
+		result := issuecentrality.BuildSample(portfolio, issuecentrality.SampleOptions{PerFamily: *perFamily})
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
 	}
 	issues, err := issuecentrality.Decode(data)
 	if err != nil {
