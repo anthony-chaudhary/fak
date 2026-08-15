@@ -1,0 +1,27 @@
+{
+  "schema": "fak-project-assets/1",
+  "skills": {
+    "canonical_root": ".claude/skills",
+    "codex_root": ".agents/skills",
+    "include": ["SKILL.md"],
+    "exclude": []
+  },
+  "memories": {
+    "canonical_root": ".claude/memory",
+    "include": ["*.md"],
+    "exclude": [{"pattern": "MEMORY.md", "reason": "index only; recall reads the canonical memory records"}],
+    "startup_command": "fak memory recall --intent <task> --json"
+  },
+  "goal_prompts": {
+    "canonical_root": ".claude/goal-prompts",
+    "include": ["ask-hard-questions.md", "fix-reversibility-classifier.md", "port-python-to-go-witnessed.md", "questions-to-tickets.md", "resolve-cache-value-issue-witnessed.md", "resolve-dispatch-program-issue-witnessed.md", "resolve-modeltier-issue-witnessed.md", "resolve-top-issue-fable.md", "resolve-top-issue-ultracode.md", "resolve-top-issue-witnessed.md", "scout-and-study-witnessed.md"],
+    "exclude": [
+      {"pattern": "resolve-[0-9]*.md", "reason": "issue-numbered run fuel is ephemeral, not a reusable template"}
+    ]
+  },
+  "harnesses": {
+    "claude": {"skills": "canonical .claude/skills", "memories": "canonical .claude/memory", "goal_prompts": "classified canonical templates"},
+    "codex": {"skills": "generated .agents/skills adapters", "memories": "startup recall command", "goal_prompts": "classified canonical templates"},
+    "fak-native": {"skills": "manifest canonical paths", "memories": "startup recall command", "goal_prompts": "manifest classified templates"}
+  }
+}

@@ -571,6 +571,7 @@ var tier = map[string]int{
 	"managedocs":            1,
 	"humanctl":              1,
 	"toolcatalog":           1,
+	"projectassets":         1, // stdlib-only project asset registry and parity adapter; off the runtime hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
