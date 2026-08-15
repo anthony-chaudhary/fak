@@ -29,6 +29,30 @@ either it exists as a witness, or it exists as a tracked issue. `fak issue
 fanout` enforces this mechanically â€” it **refuses to plan** without a
 `--spine` witness.
 
+### Shift the finish line left at issue creation
+
+Every armed issue must make two judgments before implementation begins:
+
+- **Core through-line** — the shortest causal path from the proposed change, through the real
+  seam, to one observable user/operator outcome and its witness. If removing a step still
+  produces the stated outcome and witness, that step is not core.
+- **Gold-plating boundary** — name tempting work that improves completeness, elegance, breadth,
+  or hypothetical future reuse but is not needed for that causal path. This is a routing
+  decision, not a dismissal: file independently valuable items as follow-ons instead of silently
+  expanding the current issue.
+
+Use this counterfactual at triage: **if we omit this item, can the named user still traverse the
+working spine and can the named witness still prove the outcome?** Yes means gold plating for
+this issue; no means core. Safety, compatibility, and fail-closed behavior required to run the
+spine are core. Broad edge matrices, abstractions for uncommitted consumers, polish without an
+outcome change, and optimization without a measured bottleneck are gold plating by default.
+
+The issue contract renders these decisions as `## Core through-line` and
+`## Gold-plating boundary` (legacy `In scope` / `Out of scope` headings remain readable). The
+`Done condition` must close the through-line; the `Witness` must observe its final outcome. This
+keeps "core" from becoming a synonym for everything the author wants and makes scope creep
+visible before dispatch.
+
 Why: a spine is a witness; a plan is a claim. The repo refuses unproven claims
 (`not yet` discipline) â€” the spine is what converts "we will" into "it does".
 It is also the cheapest moment to discover the design is wrong.

@@ -226,7 +226,7 @@ func missingSections(body string) []string {
 	var missing []string
 	for _, s := range requiredSections {
 		if s.field == "scope" {
-			if hasHeading(body, "Scope") || (hasHeading(body, "In scope") && hasHeading(body, "Out of scope")) {
+			if hasHeading(body, "Scope") || ((hasHeading(body, "Core through-line") || hasHeading(body, "In scope")) && (hasHeading(body, "Gold-plating boundary") || hasHeading(body, "Out of scope"))) {
 				continue
 			}
 			missing = append(missing, "scope")

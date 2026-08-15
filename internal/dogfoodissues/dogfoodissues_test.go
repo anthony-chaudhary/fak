@@ -177,7 +177,7 @@ func TestReviewedPlanAcceptsScopedColonKeyItem(t *testing.T) {
 	if strings.Join(row.Labels, ",") != "guardrsi,needs-project" {
 		t.Fatalf("labels = %+v, want guardrsi+needs-project", row.Labels)
 	}
-	for _, want := range []string{"Working spine", "Priority context", "Work unit", "Expected steps", "Trigger", "Batch policy", "In scope", "Acceptance gate", "Path hints"} {
+	for _, want := range []string{"Working spine", "Priority context", "Work unit", "Expected steps", "Trigger", "Batch policy", "Core through-line", "Acceptance gate", "Path hints"} {
 		if !strings.Contains(row.Body, want) {
 			t.Fatalf("body missing %q\n---\n%s", want, row.Body)
 		}

@@ -23,6 +23,16 @@ failure/edge/platform/concurrency/soak envelope; optimize only after the working
 path provides the real baseline. Do not count a component benchmark, comparison
 matrix, or disconnected mock as the spine.
 
+Before arming the issue, write both contract sections:
+
+- `Core through-line`: shortest change -> real seam -> observable outcome -> witness path.
+- `Gold-plating boundary`: tempting breadth, polish, abstraction, or optimization that the
+  named outcome and witness still work without; route valuable items to follow-ons.
+
+Counterfactual: if omitting an item still leaves the named user able to traverse the spine
+and the witness able to prove the outcome, it is gold plating for this issue. Required
+safety, compatibility, and fail-closed behavior stay core.
+
 | Work shape | Minimal spine bar |
 |---|---|
 | user-facing | LCD demo (`docs/run-the-demos.md`): one command, deterministic, no key/network/GPU, `-selfcheck` |

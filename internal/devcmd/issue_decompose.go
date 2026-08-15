@@ -381,8 +381,8 @@ func scaffoldChildren(d issuepolicy.IssueDraft, budget int) []decomposeChildSpec
 func scaffoldChildBody(parent int, parentTitle string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## Parent context\nDecomposed from #%d: %s\n\n", parent, parentTitle)
-	b.WriteString("## In scope\n<!-- TODO: the one atomic slice this child owns -->\n\n")
-	b.WriteString("## Out of scope\n<!-- TODO -->\n\n")
+	b.WriteString("## Core through-line\n<!-- TODO: the shortest causal path from this child change to its user-visible outcome -->\n\n")
+	b.WriteString("## Gold-plating boundary\n<!-- TODO: tempting quality or completeness work that does not strengthen the path above; file separately -->\n\n")
 	b.WriteString("## Lane\n<!-- TODO -->\n\n")
 	b.WriteString("## Likely files\n<!-- TODO -->\n\n")
 	b.WriteString("## Expected steps\n<!-- TODO: <= 8 -->\n\n")

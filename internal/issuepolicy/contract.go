@@ -747,8 +747,8 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		Coordination:           issueDraftAgentNotes(section("Coordination", "Coordination notes", "Handoff notes")),
 		Trigger:                agentSectionValue(section("Trigger", "Creation trigger")),
 		BatchPolicy:            agentSectionValue(section("Batch policy", "Noise control", "Spam control")),
-		InScope:                section("In scope"),
-		OutOfScope:             section("Out of scope"),
+		InScope:                section("Core through-line", "In scope"),
+		OutOfScope:             section("Gold-plating boundary", "Out of scope"),
 		RootPoint:              section("Root point"),
 		OriginSignal:           section("Origin signal"),
 		PreventsRecurrence:     section("Prevents recurrence"),
@@ -951,7 +951,7 @@ func missingRequiredIssueSections(body string, c Candidate) []string {
 		}
 		return false
 	}
-	hasScope := hasSection("Scope") || (hasSection("In scope") && hasSection("Out of scope"))
+	hasScope := hasSection("Scope") || (hasSection("Core through-line", "In scope") && hasSection("Gold-plating boundary", "Out of scope"))
 	checks := []struct {
 		field string
 		ok    bool

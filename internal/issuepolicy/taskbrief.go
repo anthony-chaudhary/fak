@@ -38,7 +38,7 @@ func assessIssueBrief(d IssueDraft, c Candidate) BriefReadiness {
 		"alternative":  valueFrame["today"],
 		"advantage":    valueFrame["better because"],
 		"outcome":      firstNonEmpty(sections["outcome"], c.RootPoint, c.WhyNow),
-		"scope":        firstNonEmpty(sections["scope / tree"], sections["scope"], c.InScope),
+		"scope":        firstNonEmpty(sections["core through-line"], sections["scope / tree"], sections["scope"], c.InScope),
 		"dependencies": firstNonEmpty(sections["dependencies"], dependencyDeclaration(c)),
 		"acceptance":   firstNonEmpty(sections["acceptance"], sections["definition of done"], c.DoneCondition, c.AcceptanceGate),
 		"witness":      firstNonEmpty(sections["witness / proof"], sections["witness"], c.Witness),

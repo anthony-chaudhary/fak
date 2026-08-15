@@ -422,6 +422,30 @@ func TestReviewCandidateLiveRequiresAgentContext(t *testing.T) {
 	}
 }
 
+func TestReviewIssueDraftParsesShiftLeftScopeSections(t *testing.T) {
+	body := strings.Join([]string{
+		"## Parent context", "#99",
+		"## Current state", "Issue contracts use generic scope headings.",
+		"## Why this is next", "Scope creep is decided after dispatch.",
+		"## Working spine", "Issue author -> contract review -> dispatch.",
+		"## Core through-line", "Rename the decision points and preserve parser compatibility.",
+		"## Gold-plating boundary", "Do not redesign unrelated scoring or routing.",
+		"## Done condition", "New contracts expose both decisions before dispatch.",
+		"## Witness", "Parser test and rendered body assertions pass.",
+		"## Acceptance gate", "go test ./internal/issuepolicy",
+		"## Closure binding", "Close with the witnessed commit.",
+		"## Lane", "issuepolicy",
+	}, "\n\n")
+
+	c := CandidateFromIssueDraft(IssueDraft{Number: 1, Title: "issuepolicy: shift scope left", Body: body})
+	if c.InScope != "Rename the decision points and preserve parser compatibility." {
+		t.Fatalf("core through-line = %q", c.InScope)
+	}
+	if c.OutOfScope != "Do not redesign unrelated scoring or routing." {
+		t.Fatalf("gold-plating boundary = %q", c.OutOfScope)
+	}
+}
+
 func TestReviewIssueDraftParsesStandardSections(t *testing.T) {
 	review := ReviewIssueDraft(IssueDraft{
 		Number: 1440,
