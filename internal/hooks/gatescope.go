@@ -96,6 +96,8 @@ func gateScopes() []gateScopeRow {
 			"reads each complete candidate-index source file independently; no sibling-state dependency"},
 		{"DUPLICATION", "gate_duplication.go", SeamPreCommit, ClassWorktree,
 			"neighborBytes reads sibling sources off disk deliberately (its own doc): a MOVED block is correctly not flagged there, where the staged-blob read would still see the old copy and cry duplicate — and it is advisory by default, so a peer-dirty read cannot refuse a commit"},
+		{"COMMENT_QUALITY", "gate_commentquality.go", SeamPreCommit, ClassWorktree,
+			"reviews changed implementation comments from the staged diff; full-file reads provide comment context and the gate remains advisory by default"},
 		{"COMMIT_MSG", "gate_commitmsg.go", SeamCommitMsg, ClassWorktree,
 			"judges the commit MESSAGE, not a tree — its input is already scoped to this commit and no peer WIP can reach it"},
 		{"FRESH_DELETION", "gate_freshdeletion.go", SeamCommitMsg, ClassWorktree,
