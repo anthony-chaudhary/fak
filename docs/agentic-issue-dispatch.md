@@ -124,6 +124,15 @@ legacy `unclassified` rows remain visible. Directory, title, labels, and parent 
 synthesize a class—the only source is `CandidateFromIssueDraft` / `ProblemFrame` from the
 issue-contract seam.
 
+`fak-dev issue fanout` follows the same rule for generated work. Every taxonomy child
+declares its own ready canonical frame before it can enter cohort planning: QA, dogfood,
+product, observability, integration, and docs children are Enabling toward the shipped
+spine's observable Core outcome; release-claim children are Stewardship toward the honest
+release obligation. These classes come from each child template's job, never from the parent
+title, labels, directory, or centrality. The JSON fanout plan carries the frame unchanged
+into cohort and dispatch output.
+
+
 These five sections are the *structure* axis of ticket scope. The full scope
 contract â€” structure, size (the S0â€“S4 ladder), atomicity, write-scope, cohort
 placement, and work-class, each with the verb that measures it and the fix when

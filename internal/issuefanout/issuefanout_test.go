@@ -152,3 +152,43 @@ func TestBuildConcurrentDeterminism(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildGivesEveryChildCanonicalChildSpecificProblemFrame(t *testing.T) {
+	plan, err := Build(Input{Title: "Cache spine", Leaf: "cache", SpineRef: "abc123", Max: 15})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range plan.Candidates {
+		frame := candidate.ProblemFrame
+		if frame.Schema != issuepolicy.ProblemFrameSchema || !frame.Enforced || !frame.Ready {
+			t.Fatalf("%s frame = %+v", candidate.Key, frame)
+		}
+		if frame.Centrality == issuepolicy.CentralityEnabling && frame.CentralityTarget == "" {
+			t.Fatalf("%s enabling frame lost Core target", candidate.Key)
+		}
+		if frame.Centrality == issuepolicy.CentralityStewardship && frame.CentralityTarget == "" {
+			t.Fatalf("%s stewardship frame lost obligation", candidate.Key)
+		}
+		for _, id := range []string{"p1", "p2", "p3", "p4"} {
+			if check := frame.Checks[id]; !check.Valid || check.Evidence == "" {
+				t.Fatalf("%s %s = %+v", candidate.Key, id, check)
+			}
+		}
+	}
+}
+
+func TestBuildDoesNotInheritProblemFrameFromParentMetadata(t *testing.T) {
+	left, err := Build(Input{Title: "Core parent", Leaf: "core", SpineRef: "abc", ParentRef: "Core epic", Max: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	right, err := Build(Input{Title: "Peripheral parent", Leaf: "peripheral", SpineRef: "abc", ParentRef: "Peripheral epic", Max: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range left.Candidates {
+		if !reflect.DeepEqual(left.Candidates[i].ProblemFrame, right.Candidates[i].ProblemFrame) {
+			t.Fatalf("parent metadata changed child frame:\nleft=%+v\nright=%+v", left.Candidates[i].ProblemFrame, right.Candidates[i].ProblemFrame)
+		}
+	}
+}

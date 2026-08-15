@@ -449,6 +449,22 @@ func RenderOutcomes(c OutcomeCounts) string {
 		c.Total(), c.Success, c.Refused, c.Error)
 }
 
+func fanoutProblemFrame(t template) issuepolicy.ProblemFrame {
+	centrality := issuepolicy.CentralityEnabling
+	target := "the shipped spine's observable Core outcome"
+	if t.area == "release" {
+		centrality = issuepolicy.CentralityStewardship
+		target = "honest release claims remain bound to witnessed shipped behavior"
+	}
+	checks := map[string]issuepolicy.ProblemCheck{
+		"p1": {ID: "p1", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "the child captures its own bounded follow-on context while reusing the shipped spine", Valid: true},
+		"p2": {ID: "p2", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "the child closes a named operating or evidence gap instead of expanding the spine", Valid: true},
+		"p3": {ID: "p3", Status: issuepolicy.ProblemCheckPreserved, Evidence: "the child stays independently dispatchable and can be reprioritized without changing sibling scope", Valid: true},
+		"p4": {ID: "p4", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "the child carries its witness through the real follow-on planning and dispatch path", Valid: true},
+	}
+	return issuepolicy.ProblemFrame{Schema: issuepolicy.ProblemFrameSchema, Ready: true, Enforced: true, Centrality: centrality, CentralityTarget: target, Checks: checks}
+}
+
 // expand substitutes one template into a fully-scoped candidate.
 func expand(t template, in Input) issuepolicy.Candidate {
 	paths := in.Paths
@@ -466,6 +482,7 @@ func expand(t template, in Input) issuepolicy.Candidate {
 		"{paths}", strings.Join(paths, ", "),
 	)
 	c := issuepolicy.Candidate{
+		ProblemFrame:  fanoutProblemFrame(t),
 		Key:           "fanout-" + in.Leaf + "-" + t.slug,
 		Title:         r.Replace(t.title),
 		Generation:    t.generation,

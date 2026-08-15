@@ -2,11 +2,14 @@ package devcmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/issuefanout"
 )
 
 func writeFanoutExistingFixture(t *testing.T, body string) string {
@@ -94,5 +97,27 @@ func TestIssueFanoutOfflineDefaultUnchangedByLiveFlags(t *testing.T) {
 	}
 	if !strings.HasPrefix(out.String(), "fanout: 3 contract-ready follow-ons") {
 		t.Fatalf("offline output changed:\n%s", out.String())
+	}
+}
+
+func TestIssueFanoutJSONCarriesCanonicalProblemFramesToCohortInput(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := runIssueFanout(&out, &errb, []string{
+		"--title", "frame spine", "--leaf", "framespine", "--spine", "abc123", "--max", "3", "--json",
+	})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errb.String())
+	}
+	var plan issuefanout.Plan
+	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Candidates) != 3 {
+		t.Fatalf("candidates=%d", len(plan.Candidates))
+	}
+	for _, candidate := range plan.Candidates {
+		if !candidate.ProblemFrame.Enforced || !candidate.ProblemFrame.Ready || len(candidate.ProblemFrame.Checks) != 4 {
+			t.Fatalf("%s frame = %+v", candidate.Key, candidate.ProblemFrame)
+		}
 	}
 }
