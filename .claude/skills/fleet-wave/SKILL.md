@@ -28,7 +28,7 @@ metadata:
 | [`super-loop`](../super-loop/SKILL.md) | the raw bulk launcher and its regimes. `/fleet-wave` is the **goal-shaped** door over it: one wave, one closing target, one deadline. |
 | [`wave-harvest`](../wave-harvest/SKILL.md) | the reconcile half. Phase 5 **calls it**; it is not copied here. |
 | [`refusals.md`](refusals.md) | the worker refusal + park rules — the one canonical copy, read by every worker **by path**. |
-| [`fuel-wave.md`](fuel-wave.md) | the fuel pointer template rendered per wave — budget-aware by construction; `go test ./internal/wavefuel/...` refuses a regression. |
+| [`fuel-wave.md`](fuel-wave.md) | the per-wave **operator receipt** template — records target, deadline, and ownership rules; native dispatch renders bounded child fuel from each live issue. |
 | [`monitor.md`](monitor.md) | the read-only watcher preamble. |
 | [`RATIONALE.md`](RATIONALE.md) | the evidence behind every rule here. **No worker loads it** — keep it that way. |
 
@@ -38,27 +38,23 @@ metadata:
 
 Settle all four before Phase 3. Each one has silently voided a whole wave.
 
-**1. `-PointerFile` — FIXED (#5895, `2b2710ee71`), and pass it anyway.**
-Both launchers used to default to `.claude/goal-prompts/resolve-tickets-witnessed.md`,
-which a rename had deleted from the tree, so `Test-Path` threw `pointer file not found` on
-**every** spawn and a bare `-Count 30 -Launch` was zero workers. The default now names
-`resolve-top-issue-witnessed.md`, and `TestDetachedLauncherDefaultsSpawnFromABareInvocation`
-(`cmd/dispatchworker/guard_test.go`) pins for both launchers that the default pointer
-exists and renders under the char cap — a rename cannot silently reintroduce it.
-⭐ **Still pass `-PointerFile` explicitly here**, because this skill launches a *per-wave*
-rendered pointer (Phase 2) and that filename is the wave's attribution.
+**1. The native `fak dispatch wave` contract is the one launch path.**
+The PowerShell `launch_wave_detached.ps1` / `launch_goal_detached.ps1` pair remains a
+legacy launcher for direct `/goal` pointers, but `/fleet-wave` does **not** call it. Native
+dispatch owns account allocation, issue contracts, guarded worker commands, and bounded
+per-issue fuel. Mixing the two paths caused stale `-PointerFile`, `-ExtendStanding`, and
+`-Launch` instructions to survive after the CLI had moved on. ⛔ **Do not pass launcher-only
+flags to `fak dispatch wave`, and do not substitute the legacy launcher after a native
+plan refusal.** A refusal is the result to report or fix, not permission to change control
+planes.
 
-**2. The `/goal` condition is hard-capped at 4000 characters.**
-`launch_goal_detached.ps1` builds `"/goal " + <pointer body>` and throws when
-`$cond.Length > 4000`. ⛔ **That length is in CHARS, so never quote a byte count as the
-margin.** Measured: `resolve-top-issue-witnessed.md` is 3988 **bytes** but 3960 **chars**
-(14 multibyte glyphs), so the condition renders at 3966 — **34 chars** of headroom, not
-the 6 the byte count suggests. The Phase 2 `wc -c` gate below is byte-based and therefore
-*conservative*: it refuses early, which is the safe direction, but it is not the number
-the launcher compares. ⇒ **The tensorbuild model of concatenating four preambles into the prompt does not
-port.** Worker rules live in repo files the worker *reads*
-([`refusals.md`](refusals.md), the witnessed spec); the fuel stays a *pointer*. Re-measure
-after any edit — the check is one line and it is in Phase 2.
+**2. `fuel-wave.md` is an operator receipt, not a `/goal` condition.**
+Render it under `.fak/wave/` to preserve the wave id, deadline, target, and rules used by
+the orchestrator. It may exceed the legacy launcher's 4000-character `/goal` cap because
+it is never passed to that launcher. Each native dispatch tick renders its own bounded
+worker fuel from the selected live GitHub issue. The regression witness in
+`internal/wavefuel` refuses any skill text that routes this receipt into `-PointerFile` or
+revives stale launcher flags.
 
 **3. The N you asked for is an aspiration, and the binding term is usually NOT the cap.**
 Every spawn re-checks `dispatch_preflight.py`, whose cap is
@@ -109,7 +105,7 @@ python tools/dispatch_status.py --fast
 
 | card says | do |
 |---|---|
-| `FleetIssueDispatch` installed + enabled and its action verifies for this workspace | Proceed with `-ExtendStanding` on dry-run and launch. This joins its global worker/account/admission and issue-intent control plane instead of creating a second queue owner. |
+| `FleetIssueDispatch` installed + enabled and its action verifies for this workspace | Proceed through native `fak dispatch wave`; it joins the global worker/account/admission and issue-intent control plane instead of creating a second queue owner. |
 | task/process present but the extension contract does **not** verify | ⛔ **STOP — AUTOMATION_COLLISION.** A name or an empty worker snapshot is not permission to share the queue. |
 | no standing gardener | Proceed to Phase 1 in standalone mode. |
 
@@ -175,7 +171,7 @@ short. Measured 2026-08-08 the card read `supply: DRAINING arrival −0.167/h vs
 0.083/h` with `loop-closed 106→106` flat over the window — a 30-in-4h target is well above
 that rate, which makes it fine to *pursue* and dishonest to *promise*.
 
-## Phase 2 — Render the fuel, and MEASURE it against the cap
+## Phase 2 — Render the operator receipt
 
 ```bash
 WAVE=fw$(date -u +%m%d%H%M)                       # single-use; never reuse a wave id
@@ -183,16 +179,12 @@ DEADLINE=$(date -u -d '+4 hours' +%Y-%m-%dT%H:%MZ)
 mkdir -p .fak/wave
 sed -e "s/{{WAVE}}/$WAVE/g" -e "s/{{DEADLINE}}/$DEADLINE/g" \
     .claude/skills/fleet-wave/fuel-wave.md > ".fak/wave/$WAVE.md"
-
-# ⛔ THE GATE. Over 4000 and every spawn throws; the wave is zero workers.
-b=$(wc -c < ".fak/wave/$WAVE.md"); echo "cond=$((b+6)) cap=4000"; [ $((b+6)) -lt 4000 ] || echo "REFUSING — shrink the fuel"
 ```
 
-⭐ **The rendered filename is the wave's attribution, for free.** The launcher sets
-`$tag = <pointer basename>` and writes `<LogDir>/$tag-$stamp.{out.log,err.log,pid,in.txt}`,
-so a per-wave pointer name makes every log, pid crumb and stdin capture self-identifying.
-Reuse a pointer name across waves and the previous wave's artifacts answer your probes as
-if they were this run's — a stale predecessor vouching for a corpse.
+⭐ **This file is an operator receipt, not child fuel.** Keep it for attribution and
+reconciliation, but never pass it as `-PointerFile` and never compare it with the legacy
+4000-character `/goal` ceiling. Native dispatch records issue/lane/account/PID/run paths
+in its typed receipt and renders bounded per-issue worker fuel itself.
 
 ## Phase 3 — DRY-RUN, then launch **once**
 
@@ -225,18 +217,16 @@ a child prompt argument.
 Do not pass stale `--deadline`, `--fuel-dir`, `--dry-run`, `--launch`, or `--accounts` flags
 unless installed help advertises them. The deadline remains the monitor/refill stop condition.
 
-Launch exactly once after explicit intent and a clean dry run. When the verified scheduled
-gardener is present, use `-ExtendStanding` on **both** dry-run and launch so the ownership
-contract cannot change between them:
+Launch exactly once after explicit intent and a clean dry run:
 
 ```powershell
-& $launcher -Count $admit -PointerFile $fuelPath -WorkKind engineering -ExtendStanding -Launch -Workspace $workspace
+fak dispatch wave --count 30 --backend codex --work-kind codex --max-workers 30 `
+  --goal high-priority --workspace . --live --json
 ```
 
-Without a standing gardener, omit `-ExtendStanding` and launch standalone.
-```
-
-`--count` requests account-session slots; `--max-workers` is the hard process ceiling. The
+When the verified standing gardener is present, this native command joins the shared
+account/admission/intent control plane; there is no separate `-ExtendStanding` flag in the
+installed contract. `--count` requests account-session slots; `--max-workers` is the hard process ceiling. The
 switcher binds each child to its assigned `CODEX_HOME`. Record wave ID, issue/lane/account,
 PID, and run/log paths from the receipt. Never globally switch the interactive account, copy
 credentials, or replace this path with raw `Start-Process` calls.
@@ -334,8 +324,8 @@ fak dispatch closure-audit --workspace . --json
 
 | # | trap | tell |
 |---|---|---|
-| 1 | ~~default `-PointerFile` does not exist~~ **fixed #5895** | was: every spawn throws `pointer file not found`; wave = 0 workers. Now pinned by a guard test |
-| 2 | fuel over 4000 chars | `goal condition is N chars (>4000 cap)` — thrown per spawn. **Chars, not bytes** — a byte count understates the margin |
+| 1 | mixing native and legacy launchers | stale `-PointerFile`, `-ExtendStanding`, or `-Launch` appears beside `fak dispatch wave` — use the native dry-run/`--live` pair only |
+| 2 | treating the operator receipt as child fuel | a 4000-character gate is applied to `.fak/wave/$WAVE.md` — native dispatch renders bounded child fuel itself |
 | 3 | asking for N > what seats allow | plan shows `granted` ≪ `requested`; the binding term is usually `seat_free`, **not** `cap` |
 | 3b | ~~default `-Workspace` names a sibling clone~~ **fixed #5895** | was: `REFUSE_INSPECT … guard not found: …\tools\proc_resource_guard.py`, cap=4, granted=0. Both launchers now derive from `$PSScriptRoot` |
 | 4 | hand-wrapping workers in your own `fak guard` | whole wave dies together when the parent gateway exits |
