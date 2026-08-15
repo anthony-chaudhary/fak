@@ -1,6 +1,6 @@
-# Local native harness web UI spine
+# Local native harness web UI
 
-`harnesswebdemo` is the smallest separately built browser surface over fak's public `pkg/harnesskit` contract. It serves embedded assets on loopback, submits a deterministic offline turn, renders semantic message/tool events, and reconnects from an exclusive sequence cursor. It does not import `internal/`, parse terminal output, or expose a remote listener.
+`harnesswebdemo` is a separately built browser product over fak's public `pkg/harnesskit` contract. It serves embedded assets on loopback, submits deterministic offline turns, renders semantic messages, tools, artifacts, approvals, and typed failures, and reconnects from an exclusive sequence cursor. It does not import `internal/`, parse terminal output, or expose a remote listener.
 
 ```text
 go run ./cmd/harnesswebdemo -selfcheck
@@ -8,4 +8,15 @@ go run ./cmd/harnesswebdemo
 # open http://127.0.0.1:8787
 ```
 
-The selfcheck captures the HTML render, posts a real HTTP run request, validates five `fak.harness.run/v1` envelopes, resumes after cursor 3, and reports a render SHA-256. This is the runnable local spine for #6882, not completion of parent #6790: approvals, failures, accessibility checks, a second skin, and captured live-browser screenshots remain in that parent.
+The page includes three offline operating scenarios:
+
+- **Tool run:** message → tool progress → artifact → completion.
+- **Approval run:** a scoped approval request; approve or deny exactly once before the run continues.
+- **Failure run:** a typed retryable error and terminal failed run.
+
+“Switch skin” proves that branding/layout tokens can change without rebuilding the kernel. The selfcheck captures the HTML, drives all three scenarios over HTTP, validates `fak.harness.run/v1` envelopes, resumes after a cursor, and reports a SHA-256 receipt.
+
+This is a practical local product-development surface, not yet a complete coding-harness replacement: a live model/tool adapter, durable sessions across process restart, authenticated non-loopback deployment, full screen-reader/browser automation, and the independent second implementation remain follow-ons under #6790.
+
+Captured normal, approval, and failure renders are indexed in [the operating-envelope witness](_witnesses/harness-web-demo/README.md).
+
