@@ -189,7 +189,6 @@ func cmdManageCommand(commandName string, argv []string) {
 	restartSeedHandback := fs.Bool("restart-seed-handback", false, "with --restart-on-budget: for a recognized headless/no-continue child (e.g. a deliberately fresh-session `claude -p`), inject the carryover seed_text as the relaunch's initial prompt via --append-system-prompt INSTEAD of reattaching the prior transcript with --continue. The seed is bounded to a documented token budget and any truncation is logged (no silent drop). An unrecognized agent stays a no-op with its seed left on disk (#3056).")
 	landlockHooks := fs.Bool("landlock-hooks", false, "LINUX-ONLY defense-in-depth: run the spawned agent under a Landlock profile that makes the git hook surface (.git/hooks + core.hooksPath) READ-ONLY while the rest of the tree stays writable, so a laundered write cannot drop an executable hook. OFF by default; fails OPEN (logs + spawns unrestricted) on a kernel without Landlock or on a non-Linux host. Also settable via "+guard.EnvOptIn+"=1.")
 	dojoMode := fs.Bool("dojo", false, "enable live dojo mode: write a start-marker for this guard session, then persist a scored vcache live row at shutdown when provider-cache telemetry exists.")
-	promotionThreshold := fs.Int("promotion-threshold", guardPromotionDefaultThreshold, "clean complain-mode admits required before rendering a guard allow promotion offer")
 	ggufPath := fs.String("gguf", "", "run a SMALL MODEL IN-KERNEL as the local upstream — no API key, no network, no second server. fak loads these GGUF weights into its OWN engine and serves them to the wrapped agent, so the whole `local model + your coding harness + kernel floor` stack is ONE command (`fak guard --gguf qwen2.5:7b -- claude`). Accepts a model alias (`fak ls`), an hf://owner/repo/file.gguf URI (downloaded on demand), or a local .gguf path. Every tool call the agent proposes is still adjudicated by the same capability floor and recorded in the same audit journal — only the inference moves onto YOUR box. Alone, the local model IS the upstream (mutually exclusive with --remote-serve); with --alongside or an explicit --base-url it serves ALONGSIDE the API upstream instead (see --alongside).")
 	alongside := fs.Bool("alongside", false, "with --gguf: serve the small local model ALONGSIDE the API upstream instead of REPLACING it (the dual planner). The wrapped agent's normal turns proxy to the provider exactly as a plain `fak guard` session (same OAuth/passthrough, same prompt-cache preservation), while any request addressed to the --gguf model's alias — or the literal model id \"local\" — decodes in-kernel on your box with no upstream call and no tokens billed (e.g. point a cheap subagent tier at it). Implied by --gguf + an explicit --base-url.")
 	localAuto := fs.Bool("local", false, "auto-detect a local OpenAI-compatible model server you are ALREADY running (Ollama, LM Studio, Qwen3.6 dogfood, or llama.cpp) and wire guard's upstream to it with zero flags — `fak guard --local -- codex` becomes a governed local coding loop with no base-URL hunting. Probes, fail-soft (~300ms each), Ollama (127.0.0.1:11434, honors OLLAMA_HOST), then LM Studio (127.0.0.1:1234), then Qwen3.6 dogfood (127.0.0.1:8131), then llama.cpp (127.0.0.1:8080); the first live one wins and a coding-tuned served model is preferred. If --gguf is ALSO passed it wins (that is the no-server in-kernel path); if nothing is detected and no --gguf, fak fails loud with how to start a server. Mutually exclusive with --base-url / --remote-serve.")
@@ -449,7 +448,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	}
 
 	rt, floorSource, policyDigest, policyDur := loadGuardCapabilityFloor(*policyPath)
-	configureGuardPromotionLedger(rt.Adjudicator.Complain, *promotionThreshold)
+	configureGuardPromotionLedger(rt.Adjudicator.Complain, guardPromotionDefaultThreshold)
 	var err error
 
 	// 1b. Default the durable DECISION JOURNAL on. fak guard is the disinterested
@@ -1464,41 +1463,4 @@ func cmdManageCommand(commandName string, argv []string) {
 		return
 	}
 	runGuardChildAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
-}
-
-// abortChildWiring aborts a launch whose child wiring could not be completed. By the time the
-// hook/extension installers run the gateway is already up, so every one of these failures has
-// to end the same way: tear the gateway's context down FIRST, then say which setup died, then
-// exit. Routing them through one abort is what keeps a half-wired child from ever being
-// spawned against a gateway that outlives the failure. what names the setup in the message
-// ("Claude Stop hook setup", "Pi extension setup", ...) and code is its exit status.
-func abortChildWiring(cancel context.CancelFunc, what string, err error, code int) {
-	cancel()
-	fmt.Fprintf(os.Stderr, "fak guard: %s failed: %v\n", what, err)
-	os.Exit(code)
-}
-
-// guardSharedHookSettingsPath resolves the ONE `--settings` file every guard hook installer
-// converges on. The installers run in a fixed order (PreCompact, Stop, toolproc, SessionStart):
-// the first one enabled creates the file and injects `--settings`, and each later one
-// read-modify-writes that same file instead of writing a second.
-//
-// Convergence therefore has to be resolved from what the earlier installers CREATED — which is
-// what their install records report — not from what they were OFFERED. SessionStart used to be
-// handed toolproc's INPUT path, so with PreCompact and Stop both off it saw an empty path even
-// though toolproc had just created a file: it wrote a SECOND settings file and appended a second
-// `--settings`. Claude resolves `--settings` last-wins, so the fold in appendClaudeSettingsArg
-// (#5510) strips the earlier occurrence and refuses its `hooks` key with SETTINGS_HOOKS_DROPPED
-// — the argv still carries exactly one `--settings`, but the child starts with toolproc's three
-// observation hooks missing (#5526).
-//
-// Records are consulted newest-installer-first: an installer that MERGED records the file it
-// merged into, so the latest non-empty SettingsPath always names the converged file.
-func guardSharedHookSettingsPath(toolproc guardToolprocInstall, stop guardStopHookInstall, preCompact guardPreCompactInstall) string {
-	for _, path := range []string{toolproc.SettingsPath, stop.SettingsPath, preCompact.SettingsPath} {
-		if strings.TrimSpace(path) != "" {
-			return path
-		}
-	}
-	return ""
 }
