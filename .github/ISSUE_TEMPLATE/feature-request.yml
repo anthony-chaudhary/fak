@@ -28,6 +28,22 @@ body:
         - label: P3 — Fast, bounded adaptation (workloads change faster than static infrastructure; broad rewrites are too slow)
         - label: P4 — Integrated operations (operators cannot discover, run, observe, recover, or govern it through the real path)
   - type: textarea
+    id: problem_frame
+    attributes:
+      label: Problem frame
+      description: >-
+        Classify this as Core, Enabling (name the Core outcome), Stewardship
+        (name the obligation), or Peripheral. For each P1-P4 row, write
+        advanced, preserved, or N/A plus a concrete reason; short answers are fine.
+      placeholder: |-
+        Centrality: Enabling (named Core outcome)
+        P1 Context: preserved - reason
+        P2 Net value: advanced - reason
+        P3 Adaptation: N/A - concrete reason
+        P4 Operations: preserved - reason
+    validations:
+      required: true
+  - type: textarea
     id: operator_value
     attributes:
       label: Today → better → witness

@@ -425,3 +425,30 @@ func hasTopLevelKey(doc, key string) bool {
 	}
 	return false
 }
+
+func TestHumanIssueTemplatesPromptForCanonicalProblemFrame(t *testing.T) {
+	root := filepath.Dir(internalDir(t))
+	for _, name := range []string{"feature-request.yml", "bug-report.yml"} {
+		data, err := os.ReadFile(filepath.Join(root, ".github", "ISSUE_TEMPLATE", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := string(data)
+		for _, want := range []string{
+			"id: problem_frame",
+			"Centrality: Enabling (named Core outcome)",
+			"P1 Context: preserved - reason",
+			"P2 Net value: advanced - reason",
+			"P3 Adaptation: N/A - concrete reason",
+			"P4 Operations: preserved - reason",
+			"required: true",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s missing canonical problem-frame prompt %q", name, want)
+			}
+		}
+		if !strings.Contains(body, "Enabling") || !strings.Contains(body, "name the Core outcome") || !strings.Contains(body, "Stewardship") || !strings.Contains(body, "name the obligation") {
+			t.Errorf("%s does not explain targeted centrality classes", name)
+		}
+	}
+}
