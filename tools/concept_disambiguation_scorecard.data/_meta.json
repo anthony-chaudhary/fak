@@ -5887,6 +5887,16 @@
           "category": "incidental",
           "reason": "A harness-asset overlap helper enforcing monotonic deny semantics, not the canonical runtime policy merge subsystem.",
           "token": "mergePolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Package name for launch-time receipt integration; not a new policy capability.",
+          "token": "stackpreflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "Witness command name for stackpreflight; not a new policy capability.",
+          "token": "stackpreflightdemo"
         }
       ],
       "exclude": [
@@ -6010,6 +6020,8 @@
         "semanticSubmission",
         "sessionCapabilityCorpus",
         "sessionCapabilityDefinition",
+        "stackpreflight",
+        "stackpreflightdemo",
         "tailPolicyReport",
         "tailPolicyResult",
         "tailPolicySchema",
