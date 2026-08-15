@@ -239,6 +239,10 @@ func TestGuardInfoWorkDoneReconcilesStaleElisionWithoutCompactionOverlap(t *test
 	v.TokenSavings.StaleReadElide.Units = 2
 	v.TokenSavings.StaleReadElide.SavedBytes = 2400
 	v.TokenSavings.StaleReadElide.SavedTokens = 600
+	v.TokenSavings.NativeMCPFilter.Fired = 3
+	v.TokenSavings.NativeMCPFilter.Units = 15
+	v.TokenSavings.NativeMCPFilter.SavedBytes = 4000
+	v.TokenSavings.NativeMCPFilter.SavedTokens = 1000
 
 	w := guardInfoWorkDoneFromVars(v)
 	var context guardInfoWorkDoneSource
@@ -247,7 +251,7 @@ func TestGuardInfoWorkDoneReconcilesStaleElisionWithoutCompactionOverlap(t *test
 			context = source
 		}
 	}
-	wantContext := float64(v.CacheAttribution.FakCompactionShedTokens + 600)
+	wantContext := float64(v.CacheAttribution.FakCompactionShedTokens + 600 + 1000)
 	if context.InputTokenEquiv != wantContext {
 		t.Fatalf("context reduction=%v, want compaction+elision=%v", context.InputTokenEquiv, wantContext)
 	}
@@ -259,14 +263,14 @@ func TestGuardInfoWorkDoneReconcilesStaleElisionWithoutCompactionOverlap(t *test
 		t.Fatalf("sources=%v do not reconcile to total=%v", reconciled, w.Metrics.InputTokensAvoided.Value)
 	}
 	rendered := strings.Join(guardInfoWorkDoneSourceRows(w), "\n")
-	if !strings.Contains(rendered, "context reduction") || !strings.Contains(rendered, "~72.6k input") {
+	if !strings.Contains(rendered, "context reduction") || !strings.Contains(rendered, "~73.6k input") {
 		t.Fatalf("captured render lost elision receipt:\n%s", rendered)
 	}
 	encoded, err := json.Marshal(guardInfoSessionWorkDoneQuery(v, time.Unix(0, 0)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(encoded), `"id":"context_reduction"`) || !strings.Contains(string(encoded), `"input_token_equiv":72600`) {
+	if !strings.Contains(string(encoded), `"id":"context_reduction"`) || !strings.Contains(string(encoded), `"input_token_equiv":73600`) {
 		t.Fatalf("query lost elision receipt: %s", encoded)
 	}
 }

@@ -14,7 +14,7 @@ func TestTokenSavingsDebugDefaultReceipt(t *testing.T) {
 	s.elideStaleReads = true
 	s.compactHistoryBudget = 2048
 	got := s.debugVars(time.Now()).TokenSavings
-	if got.NativeMCPFilter.State != "active" || got.NativeMCPFilter.SavedBytes == 0 {
+	if got.NativeMCPFilter.State != "active" || got.NativeMCPFilter.Fired != 0 || got.NativeMCPFilter.SavedBytes != 0 {
 		t.Fatalf("native receipt=%+v", got.NativeMCPFilter)
 	}
 	for name, lever := range map[string]debugTokenSavingLever{
@@ -23,6 +23,17 @@ func TestTokenSavingsDebugDefaultReceipt(t *testing.T) {
 		if lever.State != "ready" || lever.Reason != "not_observed" || lever.Rollback == "" {
 			t.Errorf("%s receipt=%+v", name, lever)
 		}
+	}
+}
+
+func TestTokenSavingsDebugToolFilterCumulativeReceipt(t *testing.T) {
+	s := newDeferServer(t, false)
+	status := MCPToolFilterStatus{Mode: "active", ToolsBefore: 9, ToolsAfter: 4, SavedBytes: 1001}
+	s.metrics.observeToolFilter(status)
+	s.metrics.observeToolFilter(status)
+	got := s.debugVars(time.Now()).TokenSavings.NativeMCPFilter
+	if got.Fired != 2 || got.Units != 10 || got.SavedBytes != 2002 || got.SavedTokens != 502 {
+		t.Fatalf("filter receipt=%+v", got)
 	}
 }
 

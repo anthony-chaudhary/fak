@@ -105,7 +105,7 @@ func guardInfoWorkDoneFromVars(v guardInfoVars) guardInfoWorkDone {
 		}
 	}
 	if a := v.CacheAttribution; a != nil {
-		w.Sources = guardInfoWorkDoneSources(*a, v.TokenSavings.StaleReadElide)
+		w.Sources = guardInfoWorkDoneSources(*a, v.TokenSavings)
 	} else {
 		w.Sources = []guardInfoWorkDoneSource{guardInfoUnknownWorkSource()}
 	}
@@ -228,7 +228,7 @@ func guardInfoUnavailableWindowWorkDone(w guardInfoWorkDone, reason string) guar
 	return w
 }
 
-func guardInfoWorkDoneSources(a guardInfoCacheAttribution, stale guardvars.TokenSavingLever) []guardInfoWorkDoneSource {
+func guardInfoWorkDoneSources(a guardInfoCacheAttribution, savings guardvars.TokenSavingsVars) []guardInfoWorkDoneSource {
 	const tokenGroup = "input_token_equiv_owner/v1"
 	const callGroup = "avoided_model_call_path/v1"
 	var out []guardInfoWorkDoneSource
@@ -240,7 +240,7 @@ func guardInfoWorkDoneSources(a guardInfoCacheAttribution, stale guardvars.Token
 		add(guardInfoWorkDoneSource{ID: "provider_cache", Owner: "provider", Disposition: "loaded", Label: "provider prefix cache",
 			InputTokenEquiv: a.ProviderTokenEquiv, Evidence: "observed", ExclusivityGroup: tokenGroup})
 	}
-	contextTokens := a.FakCompactionShedTokens + stale.SavedTokens
+	contextTokens := a.FakCompactionShedTokens + savings.StaleReadElide.SavedTokens + savings.NativeMCPFilter.SavedTokens
 	if contextTokens > 0 {
 		add(guardInfoWorkDoneSource{ID: "context_reduction", Owner: "fak", Disposition: "reduced", Label: "context reduction",
 			InputTokenEquiv: float64(contextTokens), Evidence: "witnessed", ExclusivityGroup: tokenGroup})
@@ -249,7 +249,7 @@ func guardInfoWorkDoneSources(a guardInfoCacheAttribution, stale guardvars.Token
 		add(guardInfoWorkDoneSource{ID: "fak_prefix_reuse", Owner: "fak", Disposition: "loaded", Label: "fak prefix reuse",
 			InputTokenEquiv: float64(a.FakKVPrefixReusedTokens), Evidence: "witnessed", ExclusivityGroup: tokenGroup})
 	}
-	classifiedFakTokens := float64(a.FakCompactionShedTokens + a.FakKVPrefixReusedTokens + stale.SavedTokens)
+	classifiedFakTokens := float64(a.FakCompactionShedTokens + a.FakKVPrefixReusedTokens + savings.StaleReadElide.SavedTokens + savings.NativeMCPFilter.SavedTokens)
 	if a.FakTokenEquiv > classifiedFakTokens {
 		add(guardInfoWorkDoneSource{ID: "unknown", Owner: "fak", Disposition: "unknown", Label: "unclassified context reduction",
 			InputTokenEquiv: a.FakTokenEquiv - classifiedFakTokens, Evidence: "unavailable", ExclusivityGroup: tokenGroup})

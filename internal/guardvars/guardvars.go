@@ -59,7 +59,8 @@ type SessionVars struct {
 // prompt tokens).
 // TokenSavingsVars is the privacy-safe aggregate receipt block emitted by /debug/vars.
 type TokenSavingsVars struct {
-	StaleReadElide TokenSavingLever `json:"stale_read_elide"`
+	NativeMCPFilter TokenSavingLever `json:"native_mcp_filter"`
+	StaleReadElide  TokenSavingLever `json:"stale_read_elide"`
 }
 
 type TokenSavingLever struct {

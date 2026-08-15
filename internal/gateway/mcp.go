@@ -192,6 +192,7 @@ func (s *Server) handleMethod(ctx context.Context, method string, params json.Ra
 		// recovery path is unavailable. The receipt lets operators distinguish
 		// real savings from a safe bailout without parsing logs.
 		tools, filter := s.toolsListView()
+		s.metrics.observeToolFilter(filter)
 		return mcpCacheHint(map[string]any{
 			"tools": tools,
 			"_meta": map[string]any{"fak/tool_filter": filter},

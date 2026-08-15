@@ -221,6 +221,13 @@ type gatewayMetrics struct {
 	deferStandDownTurns   uint64
 	deferStandDownReasons map[string]uint64
 
+	// Aggregate-only native tool-filter receipts; never descriptors, names, or schemas.
+	toolFilterMu     sync.Mutex
+	toolFilterEvents uint64
+	toolFilterTools  uint64
+	toolFilterBytes  uint64
+	toolFilterTokens uint64
+
 	// Aggregate-only stale-read elision receipts; never paths or content.
 	staleElideMu     sync.Mutex
 	staleElideTurns  uint64

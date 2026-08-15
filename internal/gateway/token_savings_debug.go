@@ -27,15 +27,14 @@ type debugTokenSavingLever struct {
 
 func (s *Server) tokenSavingsVars(sum AdjudicationSummary) debugTokenSavingsVars {
 	mcp := s.MCPToolFilterStatusSnapshot()
+	filterEvents, filterTools, filterBytes, filterTokens := s.metrics.toolFilterSnapshot()
 	native := debugTokenSavingLever{
 		Configured: true, State: mcp.Mode, Reason: mcp.Reason,
-		Units:      uint64(mcp.ToolsBefore - mcp.ToolsAfter),
-		SavedBytes: uint64(max(mcp.SavedBytes, 0)),
-		Rollback:   "FAK_ABLATE_MCP_TOOL_FILTER=1",
+		Fired: filterEvents, Units: filterTools,
+		SavedBytes: filterBytes, SavedTokens: filterTokens,
+		Rollback: "FAK_ABLATE_MCP_TOOL_FILTER=1",
 	}
-	if mcp.Mode == "active" {
-		native.Fired = 1
-	} else {
+	if mcp.Mode != "active" {
 		native.State = "bypassed"
 	}
 

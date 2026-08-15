@@ -1022,6 +1022,28 @@ func (c *latencyCounter) observe(seconds float64) {
 	}
 }
 
+// observeToolFilter records one tools/list projection after it is actually served.
+func (m *gatewayMetrics) observeToolFilter(status MCPToolFilterStatus) {
+	if m == nil || status.Mode != "active" || status.SavedBytes <= 0 || status.ToolsBefore <= status.ToolsAfter {
+		return
+	}
+	m.toolFilterMu.Lock()
+	defer m.toolFilterMu.Unlock()
+	m.toolFilterEvents++
+	m.toolFilterTools += uint64(status.ToolsBefore - status.ToolsAfter)
+	m.toolFilterBytes += uint64(status.SavedBytes)
+	m.toolFilterTokens += uint64((status.SavedBytes + estBytesPerToken - 1) / estBytesPerToken)
+}
+
+func (m *gatewayMetrics) toolFilterSnapshot() (events, tools, bytes, tokens uint64) {
+	if m == nil {
+		return 0, 0, 0, 0
+	}
+	m.toolFilterMu.Lock()
+	defer m.toolFilterMu.Unlock()
+	return m.toolFilterEvents, m.toolFilterTools, m.toolFilterBytes, m.toolFilterTokens
+}
+
 // observeStaleElide records one eligible stale-read elision attempt using only
 // bounded reason enums and aggregate counts. No path, content, or trace is kept.
 func (m *gatewayMetrics) observeStaleElide(reason string, elided, shedBytes, shedTokens int) {
