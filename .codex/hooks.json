@@ -7,8 +7,7 @@
             "type": "command",
             "command": "if [ \"${FAK_CODEX_RAW_RECOVERY:-}\" = \"break-glass\" ]; then echo 'fak codex guard: BREAK-GLASS raw Codex recovery active; fak capability floor and guard audit are not running' >&2; else fak sessions codex-loop-hook 2>/dev/null || true; fi",
             "commandWindows": "if /i \"%FAK_CODEX_RAW_RECOVERY%\"==\"break-glass\" (echo fak codex guard: BREAK-GLASS raw Codex recovery active; fak capability floor and guard audit are not running 1>&2) else (fak sessions codex-loop-hook 2>nul || exit /b 0)",
-            "timeout": 30,
-            "statusMessage": "Checking fak continuation guard"
+            "timeout": 30
           }
         ]
       }

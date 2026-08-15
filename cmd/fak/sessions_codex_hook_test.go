@@ -19,6 +19,7 @@ type codexProjectCommandHook struct {
 	Type           string `json:"type"`
 	Command        string `json:"command"`
 	CommandWindows string `json:"commandWindows"`
+	StatusMessage  string `json:"statusMessage"`
 }
 
 func TestCodexLoopHookBlocksActiveDirectContinuation(t *testing.T) {
@@ -486,6 +487,9 @@ func loadCodexProjectHook(t *testing.T) codexProjectCommandHook {
 	groups := doc.Hooks["UserPromptSubmit"]
 	if len(groups) != 1 || len(groups[0].Hooks) != 1 {
 		t.Fatalf("UserPromptSubmit hook groups = %+v, want exactly one command hook", groups)
+	}
+	if groups[0].Hooks[0].StatusMessage != "" {
+		t.Fatalf("UserPromptSubmit leaked per-turn status %q", groups[0].Hooks[0].StatusMessage)
 	}
 	return groups[0].Hooks[0]
 }

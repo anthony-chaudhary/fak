@@ -92,7 +92,6 @@ func installCodexContinuationHook(manifest map[string]any) {
 	filtered = append(filtered, map[string]any{"hooks": []any{map[string]any{
 		"type": "command", "command": codexContinuationHookCommand,
 		"commandWindows": codexContinuationHookCommandWindows, "timeout": float64(30),
-		"statusMessage": "Checking fak continuation guard",
 	}}})
 	hooks["UserPromptSubmit"] = filtered
 }

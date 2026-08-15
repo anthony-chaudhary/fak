@@ -48,6 +48,9 @@ func TestCodexContinuationHookInstallPreservesAndIsIdempotent(t *testing.T) {
 	if got := bytes.Count(second, []byte("fak sessions codex-loop-hook")); got != 2 {
 		t.Fatalf("command occurrences=%d, want 2 (POSIX + Windows in one entry): %s", got, raw)
 	}
+	if bytes.Contains(second, []byte("statusMessage")) {
+		t.Fatalf("continuation hook leaked a per-turn status line: %s", raw)
+	}
 }
 
 func TestCodexContinuationHookInstallDryRunDoesNotWrite(t *testing.T) {
