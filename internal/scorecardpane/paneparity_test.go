@@ -59,7 +59,6 @@ var knownPaneDivergence = map[string]string{
 	"negation_tax_debt":      "go-only: negation-tax folded in the Go pane only",
 	"negation_operator_debt": "go-only: negation-operator folded in the Go pane only",
 	"residual_count":         "go-only: the osp_residual card (#5022) folded in the Go pane only — its SCORECARDS row lands under the `tools` lane, which a live peer lease held when the card was wired; add the row and delete this line",
-	"flow_debt":              "go-only: the flow card (#6198) folded in the Go pane only — its producer is `go run ./cmd/fak score flow`, a Go verb with no Python script, and #6198 scopes out any new Python producer or baseline row; mirror the row into SCORECARDS and delete this line",
 }
 
 // knownKeyDrift enumerates debt keys folded in BOTH panes but under a different card
