@@ -58,6 +58,16 @@ These are measured features. On the current 50-turn × 5-agent Qwen2.5-1.5B Q8 w
   <img src="visuals/75-token-savings-frontdoor.svg" alt="Measured token economics for fak manage sessions versus a tuned warm-cache baseline" width="900">
 </p>
 
+## Configure outcomes above implementations
+
+fak is building a **portable intent** plane: name the behavior you want at a product layer,
+then let a typed, versioned binding resolve it to the plugin, skill, prompt, model option, or
+native mechanism available in each harness. A shared conversation-style profile, for example,
+should not require every recipient to know or adopt the same implementation codename. The
+contract and boundaries are in the [canonical problem map](docs/problems-we-solve.md#cross-cutting-outcome-portable-intent);
+the runtime proof is tracked in [#6878](https://github.com/anthony-chaudhary/fak/issues/6878) and
+is **not yet a shipped capability**.
+
 ## Use the whole harness—or make your own
 
 `fak manage` is the all-in-one default: launch an existing coding agent and let fak own the boundary. `fak serve` is the composable default: write any loop or UI you want against a familiar OpenAI-compatible endpoint while fak keeps routing, context, policy, and evidence in one place.

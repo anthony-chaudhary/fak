@@ -67,6 +67,36 @@ same checkpoint rather than in disconnected side systems.
 **Witness:** the real end-to-end path works and exposes enough state to diagnose, recover, and
 enforce its contract.
 
+## Cross-cutting outcome: portable intent
+
+The four rows above also support a broader user outcome: **portable intent**. A person should be
+able to state the behavior they want at a named product layer without first learning which
+plugin, skill, prompt fragment, model option, or native implementation happens to provide it.
+For example, a conversation preference should name the desired style and its constraints; it
+should not require the user to know that one harness calls a possible implementation
+“Caveman.” A team can then review and share the semantic declaration instead of persuading
+every recipient to install the same mechanism.
+
+Portable intent separates two identities:
+
+- the **intent** is a versioned, typed value owned by its layer, such as a conversation-style
+  preference with required fidelity and an authority ceiling;
+- a **binding** is the replaceable, provenance-carrying mechanism that realizes that intent in
+  one environment.
+
+This is not a fifth P-number or a universal ontology. Each layer owns a bounded vocabulary and
+composition rules while a common envelope carries scope, compatibility, provenance, resolution,
+and receipts. The outcome connects all four checks: compact semantic declarations can reduce
+repeated setup (P1); any gain must beat direct configuration net of resolver and verification
+cost (P2); bindings make implementation churn bounded and reversible (P3); and the real path
+must resolve, apply, explain, refuse semantic loss, and read back the effect (P4).
+
+The roadmap is tracked in [#6877](https://github.com/anthony-chaudhary/fak/issues/6877). The
+required first proof is [#6878](https://github.com/anthony-chaudhary/fak/issues/6878): one
+implementation-independent conversation profile running through two different bindings, with
+an unsupported required meaning refused before launch. Until that witness lands, portable
+intent is a direction and contract, **not a shipped runtime claim**.
+
 ## The all-work problem checklist
 
 Run this checklist at **framing, spine design, implementation, witness, and review**. “All must
