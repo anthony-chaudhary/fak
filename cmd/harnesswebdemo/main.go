@@ -68,11 +68,13 @@ func (s *store) create(message string) string {
 		)
 	default:
 		state.events = append(state.events,
-			event(runID, 2, harnesskit.EventMessageCompleted, harnesskit.MessagePayload{MessageID: "message-2", Role: "assistant", Text: "offline reply: " + message}),
-			event(runID, 3, harnesskit.EventToolStarted, harnesskit.ToolPayload{CallID: "selfcheck-tool", Name: "record_selfcheck", Status: "running"}),
-			event(runID, 4, harnesskit.EventToolCompleted, harnesskit.ToolPayload{CallID: "selfcheck-tool", Name: "record_selfcheck", Status: "completed", Summary: "record_selfcheck: ok"}),
-			event(runID, 5, harnesskit.EventArtifactPublished, harnesskit.ArtifactPayload{ArtifactID: "receipt-1", MediaType: "text/plain", URI: "memory://selfcheck-receipt", Name: "Offline receipt"}),
-			event(runID, 6, harnesskit.EventRunCompleted, harnesskit.RunPayload{Status: "completed"}),
+			event(runID, 2, harnesskit.EventMessageStarted, harnesskit.MessagePayload{MessageID: "message-2", Role: "assistant"}),
+			event(runID, 3, harnesskit.EventMessageDelta, harnesskit.MessagePayload{MessageID: "message-2", Text: "offline reply: "}),
+			event(runID, 4, harnesskit.EventMessageCompleted, harnesskit.MessagePayload{MessageID: "message-2", Role: "assistant", Text: "offline reply: " + message}),
+			event(runID, 5, harnesskit.EventToolStarted, harnesskit.ToolPayload{CallID: "selfcheck-tool", Name: "record_selfcheck", Status: "running"}),
+			event(runID, 6, harnesskit.EventToolCompleted, harnesskit.ToolPayload{CallID: "selfcheck-tool", Name: "record_selfcheck", Status: "completed", Summary: "record_selfcheck: ok"}),
+			event(runID, 7, harnesskit.EventArtifactPublished, harnesskit.ArtifactPayload{ArtifactID: "receipt-1", MediaType: "text/plain", URI: "memory://selfcheck-receipt", Name: "Offline receipt"}),
+			event(runID, 8, harnesskit.EventRunCompleted, harnesskit.RunPayload{Status: "completed"}),
 		)
 	}
 	s.runs[runID] = state
@@ -192,16 +194,16 @@ func selfcheck(out io.Writer) error {
 		return err
 	}
 	events := s.after(normal, 0)
-	if len(events) != 6 {
-		return fmt.Errorf("normal events=%d want 6", len(events))
+	if len(events) != 8 {
+		return fmt.Errorf("normal events=%d want 8", len(events))
 	}
 	for _, e := range events {
 		if err := e.Validate(); err != nil {
 			return err
 		}
 	}
-	resumed := s.after(normal, 4)
-	if len(resumed) != 2 || resumed[0].Sequence != 5 {
+	resumed := s.after(normal, 6)
+	if len(resumed) != 2 || resumed[0].Sequence != 7 {
 		return fmt.Errorf("resume=%v", resumed)
 	}
 	approval, err := postRun(client, ts.URL, "approval: inspect workspace")
