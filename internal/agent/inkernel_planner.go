@@ -297,6 +297,25 @@ func inKernelRadixEvictionPolicyFromEnv() radixkv.EvictionPolicy {
 // Model reports the model id (for /v1/models provenance + the planner seam).
 func (p *InKernelPlanner) Model() string { return p.modelID }
 
+// StreamingSupported enables the gateway's semantic SSE path for in-kernel runs.
+// The backend projects each completed turn as one content delta; tool lifecycle
+// progress still arrives independently from the owned loop.
+func (p *InKernelPlanner) StreamingSupported() bool { return true }
+
+// CompleteStream emits assistant prose while leaving tool calls buffered for adjudication.
+func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
+	completion, err := p.Complete(ctx, messages, tools, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if sink != nil && completion.Message.Content != "" {
+		if err := sink(completion.Message.Content); err != nil {
+			return nil, err
+		}
+	}
+	return completion, nil
+}
+
 // KVMemoryStats reports the in-process KV prefix cache's physical resident shape.
 // Native backend snapshots are split into hot device bytes, hot host metadata, and
 // the independently owned host-DRAM L2. Proxy/provider counters never enter here.
