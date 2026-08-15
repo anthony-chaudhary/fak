@@ -21,6 +21,8 @@ type dispatchWavePrice struct {
 	Requested            int                               `json:"requested"`
 	Granted              int                               `json:"granted"`
 	EffectiveCap         int                               `json:"effective_cap"`
+	FreshStartCap        int                               `json:"fresh_start_cap"`
+	FreshStarts          int                               `json:"fresh_starts"`
 	CandidateCount       int                               `json:"candidate_count"`
 	CandidateStepBudget  int                               `json:"candidate_step_budget,omitempty"`
 	ScopedCount          int                               `json:"scoped_count"`
@@ -49,7 +51,11 @@ type dispatchWavePrice struct {
 	ExpectedRework       int                               `json:"expected_rework"`
 }
 
-const dispatchWaveReasonWaveCap = "wave-cap"
+const (
+	dispatchWaveReasonWaveCap     = "wave-cap"
+	dispatchWaveReasonFreshWIPCap = "fresh-wip-cap"
+	dispatchWaveDefaultFreshCap   = 1
+)
 
 type dispatchWaveCandidate struct {
 	ID           string                    `json:"id"`
@@ -125,6 +131,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	workspace := fs.String("workspace", "", "workspace root (default: current directory)")
 	count := fs.Int("count", 2, "number of account session slots to allocate")
 	maxWorkers := fs.Int("max-workers", dispatchtick.DefaultMaxWorkers, "hard cap on live workers, enforced by each tick's preflight")
+	freshStartCap := fs.Int("fresh-start-cap", dispatchWaveDefaultFreshCap, "maximum never-attempted issues admitted this wave (attempted WIP is not counted)")
 	backend := fs.String("backend", "codex", "worker backend (claude|opencode|codex); default codex")
 	workKind := fs.String("work-kind", "", "switcher work kind (default follows --backend)")
 	goal := fs.String("goal", "", "durable dispatch loop goal id (for example throughput or high-priority); forwarded to each tick")
@@ -149,6 +156,10 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 		root = wd
+	}
+	if *freshStartCap < 0 {
+		fmt.Fprintln(stderr, "fak dispatch wave: --fresh-start-cap must be >= 0")
+		return 2
 	}
 	backendNorm, err := dispatchtick.NormalizeBackend(*backend)
 	if err != nil {
@@ -213,7 +224,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	var executionPlan []dispatchWaveExecutionPlan
 	const maxPrelaunchReprice = 8
 	for attempt := 0; ; attempt++ {
-		price, err := priceDispatchWavePayloadFiltered(root, router, *count, len(lanes), *lane, excludedLanes, dispatchtick.DefaultCooldownMinutes, heldIssues, profile)
+		price, err := priceDispatchWavePayloadFilteredWithFreshCap(root, router, *count, len(lanes), *lane, excludedLanes, dispatchtick.DefaultCooldownMinutes, heldIssues, *freshStartCap, profile)
 		if err != nil {
 			rec["stop_reason"] = "price fan-out: " + err.Error()
 			return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
@@ -369,6 +380,12 @@ func priceDispatchWavePayload(root string, router dispatchtick.RouterPayload, re
 }
 
 func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPayload, requested, granted int, explicitLane string, excluded []string, cooldownMin int, excludedIssues map[int]bool, goalProfile ...string) (dispatchWavePrice, error) {
+	// Library callers retain the historical no-extra-cap behavior unless they choose the
+	// explicit admission helper. The live CLI path above always supplies its default-on cap.
+	return priceDispatchWavePayloadFilteredWithFreshCap(root, router, requested, granted, explicitLane, excluded, cooldownMin, excludedIssues, requested, goalProfile...)
+}
+
+func priceDispatchWavePayloadFilteredWithFreshCap(root string, router dispatchtick.RouterPayload, requested, granted int, explicitLane string, excluded []string, cooldownMin int, excludedIssues map[int]bool, freshStartCap int, goalProfile ...string) (dispatchWavePrice, error) {
 	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
 	profile := dispatchWaveGoalProfile(goalProfile)
 	// One runs-directory scan feeds every view this pricing pass needs -- held lanes, live
@@ -533,13 +550,25 @@ func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPay
 		FinishFirst:     true,
 	})
 	limit := minInt(requested, granted)
-	runLanes := append([]string(nil), res.Keep...)
-	if limit < len(runLanes) {
-		runLanes = runLanes[:limit]
-	}
 	selected := map[string]bool{}
-	for _, id := range runLanes {
+	freshCapHeld := map[string]bool{}
+	runLanes := make([]string, 0, limit)
+	freshStarts := 0
+	for _, id := range res.Keep {
+		if len(runLanes) >= limit {
+			break
+		}
+		cand := meta[id]
+		attempted := cand.Issue > 0 && !snap.latest[cand.Issue].IsZero()
+		if !attempted && freshStarts >= freshStartCap {
+			freshCapHeld[id] = true
+			continue
+		}
+		runLanes = append(runLanes, id)
 		selected[id] = true
+		if !attempted {
+			freshStarts++
+		}
 	}
 	rows := make([]dispatchWaveCandidate, 0, len(res.Order))
 	runTargets := make([]dispatchWaveCandidate, 0, len(runLanes))
@@ -556,6 +585,9 @@ func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPay
 		cand.Rank = row.Rank
 		cand.Selected = selected[row.ID]
 		cand.Reason = dispatchWaveCandidateReason(row, cand.Selected)
+		if freshCapHeld[row.ID] {
+			cand.Reason = dispatchWaveReasonFreshWIPCap
+		}
 		rows = append(rows, cand)
 		if cand.Selected {
 			runTargets = append(runTargets, cand)
@@ -568,7 +600,10 @@ func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPay
 	for _, target := range runTargets {
 		runLaneNames = append(runLaneNames, target.Lane)
 	}
-	return dispatchWaveBuildPrice(requested, granted, cands, rows, runTargets, runLanes, runLaneNames, held, exclude, res), nil
+	price := dispatchWaveBuildPrice(requested, granted, cands, rows, runTargets, runLanes, runLaneNames, held, exclude, res)
+	price.FreshStartCap = freshStartCap
+	price.FreshStarts = freshStarts
+	return price, nil
 }
 
 // dispatchWaveBuildPrice folds the priced candidate rows, the selected run targets, and the
@@ -1345,9 +1380,9 @@ func renderDispatchWave(rec map[string]any) string {
 		}
 	}
 	if price, ok := rec["price"].(dispatchWavePrice); ok {
-		fmt.Fprintf(&b, "  priced fan-out: action=%s run=%s effective_cap=%d run_steps=%d candidate_steps=%d collisions_avoided=%d lanes_utilized=%d serialization_wasted=%d safe_concurrency=%d (%d%%) scope=%d%% same_lane_parallelism=%d repartition=%d\n",
+		fmt.Fprintf(&b, "  priced fan-out: action=%s run=%s effective_cap=%d fresh_starts=%d/%d run_steps=%d candidate_steps=%d collisions_avoided=%d lanes_utilized=%d serialization_wasted=%d safe_concurrency=%d (%d%%) scope=%d%% same_lane_parallelism=%d repartition=%d\n",
 			price.Action,
-			strings.Join(price.RunLanes, ","), price.EffectiveCap, price.RunStepBudget, price.CandidateStepBudget, price.CollisionsAvoided, price.LanesUtilized,
+			strings.Join(price.RunLanes, ","), price.EffectiveCap, price.FreshStarts, price.FreshStartCap, price.RunStepBudget, price.CandidateStepBudget, price.CollisionsAvoided, price.LanesUtilized,
 			price.SerializationWasted, price.SafeConcurrency, price.SafeConcurrencyPct,
 			price.ScopeCoveragePct, price.SameLaneParallelism, len(price.Repartition))
 		if len(price.RunTargets) > 0 {
