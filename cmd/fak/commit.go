@@ -22,6 +22,11 @@ import (
 // is overridden in tests so runCommit is exercised without a real git or repo.
 var commitFn = safecommit.Commit
 
+// commitLaneBusyFn is an advisory, lock-free pressure check. The authoritative acquisition
+// remains inside safecommit.Commit; this seam only prevents queued contenders from starting
+// expensive build checks while a live writer already owns the lane.
+var commitLaneBusyFn = commitLaneBusy
+
 // runCommitCommand routes `fak commit [<sub>]` to its subcommand handler and returns the
 // process exit code. main.go calls it directly (inside the observed-git-operation wrapper)
 // so the exit is recorded with the rest of the git lane.
@@ -175,6 +180,15 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 			renderPreview(stderr, rep, "")
 			return safecommit.ExitRefused
 		}
+	}
+
+	if busy, holderPID := commitLaneBusyFn(root); busy {
+		fmt.Fprintln(stderr, "LOCK_BUSY: commit lane is already held; skipped build-check to avoid slowing the active writer")
+		if holderPID > 0 {
+			fmt.Fprintf(stderr, "  holder pid: %d\n", holderPID)
+		}
+		fmt.Fprintln(stderr, "  next: wait for `fak commit status` to report ready, then retry")
+		return safecommit.ExitLockBusy
 	}
 
 	// COMMITTED_RED gate (#4152): compile the PROSPECTIVE committed tree — HEAD's committed
@@ -586,6 +600,15 @@ func renderCommitDrainResult(stdout io.Writer, res commitDrainResult) {
 	if res.Pathset != nil && !res.Pathset.OK {
 		fmt.Fprintf(stdout, "  pathset mismatch: missing=%v extra=%v\n", res.Pathset.Missing, res.Pathset.Extra)
 	}
+}
+
+// commitLaneBusy returns true only when the advisory lock names a process that is
+// currently alive and still attributable to the lock. Stale/reused-PID locks flow to the
+// authoritative safecommit acquisition, which owns their guarded recovery.
+func commitLaneBusy(dir string) (bool, int) {
+	lockPath := wipCommitLockPath(context.Background(), dir)
+	probe := safecommit.ProbeLock(lockPath)
+	return probe.Exists && probe.Alive && !probe.Foreign, probe.HolderPID
 }
 
 // stdin is overridable in tests; defaults to os.Stdin.

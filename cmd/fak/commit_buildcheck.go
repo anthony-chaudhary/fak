@@ -88,7 +88,7 @@ func extractUndefinedSymbol(buildOutput string) string {
 // not decide the commit's fate: safecommit.DecideBuildCheck owns that, so "the check could not
 // run" is a first-class state on the wire instead of a stderr line the caller never sees
 // (#6006).
-func commitBuildCheckGate(stderr io.Writer, root string, paths []string) (safecommit.BuildCheckOutcome, string) {
+var commitBuildCheckGate = func(stderr io.Writer, root string, paths []string) (safecommit.BuildCheckOutcome, string) {
 	pkgs := commitBuildCheckPackages(paths)
 	if len(pkgs) == 0 {
 		return safecommit.BuildCheckNotApplicable, "" // non-Go commit: nothing to gate

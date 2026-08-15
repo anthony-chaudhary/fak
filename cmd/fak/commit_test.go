@@ -25,6 +25,65 @@ func withCommitFn(t *testing.T, fn func(context.Context, safecommit.Options) (sa
 	t.Cleanup(func() { commitFn = prev })
 }
 
+func TestRunCommitBusyLaneSkipsBuildCheckAndCommit(t *testing.T) {
+	oldBusy, oldBuild, oldCommit := commitLaneBusyFn, commitBuildCheckGate, commitFn
+	t.Cleanup(func() {
+		commitLaneBusyFn, commitBuildCheckGate, commitFn = oldBusy, oldBuild, oldCommit
+	})
+
+	commitLaneBusyFn = func(string) (bool, int) { return true, 4242 }
+	buildCalled := false
+	commitBuildCheckGate = func(io.Writer, string, []string) (safecommit.BuildCheckOutcome, string) {
+		buildCalled = true
+		return safecommit.BuildCheckPassed, ""
+	}
+	commitCalled := false
+	commitFn = func(context.Context, safecommit.Options) (safecommit.Result, error) {
+		commitCalled = true
+		return safecommit.Result{}, nil
+	}
+
+	var out, errOut bytes.Buffer
+	code := runCommit(&out, &errOut, []string{"--path", "cmd/fak/main.go", "-m", "fix(cmd): reduce commit stampedes (fak cmd)"})
+	if code != safecommit.ExitLockBusy {
+		t.Fatalf("code = %d, want %d; stderr=%s", code, safecommit.ExitLockBusy, errOut.String())
+	}
+	if buildCalled || commitCalled {
+		t.Fatalf("busy lane called build=%v commit=%v, want neither", buildCalled, commitCalled)
+	}
+	if got := errOut.String(); !strings.Contains(got, "skipped build-check") || !strings.Contains(got, "holder pid: 4242") {
+		t.Fatalf("stderr = %q, want fast-refusal evidence", got)
+	}
+}
+
+func TestRunCommitLaneClearStillBuildChecksAndCommits(t *testing.T) {
+	oldBusy, oldBuild, oldCommit := commitLaneBusyFn, commitBuildCheckGate, commitFn
+	t.Cleanup(func() {
+		commitLaneBusyFn, commitBuildCheckGate, commitFn = oldBusy, oldBuild, oldCommit
+	})
+
+	commitLaneBusyFn = func(string) (bool, int) { return false, 0 }
+	buildCalled := false
+	commitBuildCheckGate = func(io.Writer, string, []string) (safecommit.BuildCheckOutcome, string) {
+		buildCalled = true
+		return safecommit.BuildCheckPassed, ""
+	}
+	commitCalled := false
+	commitFn = func(_ context.Context, opts safecommit.Options) (safecommit.Result, error) {
+		commitCalled = true
+		return safecommit.Result{Committed: true, SHA: "abc123", Paths: opts.Paths}, nil
+	}
+
+	var out, errOut bytes.Buffer
+	code := runCommit(&out, &errOut, []string{"--path", "cmd/fak/main.go", "-m", "fix(cmd): retain clear-lane checks (fak cmd)"})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr=%s", code, errOut.String())
+	}
+	if !buildCalled || !commitCalled {
+		t.Fatalf("clear lane called build=%v commit=%v, want both", buildCalled, commitCalled)
+	}
+}
+
 func TestRunCommit_noPathsIsUsageError(t *testing.T) {
 	var out, errb bytes.Buffer
 	code := runCommit(&out, &errb, []string{"-m", "msg"})
