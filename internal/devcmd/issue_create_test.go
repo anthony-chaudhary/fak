@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/categorybaseline"
 )
 
 func TestIssueCreateDryRunDoesNotInvokeRunner(t *testing.T) {
@@ -181,5 +183,55 @@ func TestIssueCreateRefusesMissingProjectWorkNumbers(t *testing.T) {
 	code := runIssueCreateWith(&stdout, &stderr, []string{"--title", "unknown", "--body", "body", "--dry-run"}, nil)
 	if code != 2 || !strings.Contains(stderr.String(), "estimate-points") {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+}
+
+func TestIssueCreateClassificationValidatesTrackedBaseline(t *testing.T) {
+	registry := categorybaseline.Normalize(categorybaseline.Registry{Categories: []categorybaseline.Category{{Name: "agent-work-profile", Layers: []string{"default-medium", "provider-effectiveness"}, CompletedLayer: "default-medium", NextLayer: "provider-effectiveness", Witness: "witness"}}})
+	got, err := issueCreateClassifyBody("## For\noperator", "Agent-Work-Profile", "Provider-Effectiveness", registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "## Category\n\nagent-work-profile") || !strings.Contains(got, "## Layer\n\nprovider-effectiveness") {
+		t.Fatalf("classified body = %q", got)
+	}
+	for _, tc := range []struct {
+		name     string
+		category string
+		layer    string
+		want     string
+	}{
+		{name: "missing layer", category: "agent-work-profile", want: "--layer is required"},
+		{name: "unknown layer", category: "agent-work-profile", layer: "gold-plating", want: "not declared"},
+		{name: "orphan layer", layer: "provider-effectiveness", want: "requires --category"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := issueCreateClassifyBody("body", tc.category, tc.layer, registry); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestIssueCreateDryRunEmitsCategoryLayer(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runIssueCreateWith(&stdout, &stderr, []string{"--title", "next depth", "--body", "body", "--category", "agent-work-profile", "--layer", "provider-effectiveness", "--dry-run", "--raw-body", "--json"}, nil)
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var got struct {
+		Args []string `json:"args"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	body := ""
+	for i, arg := range got.Args {
+		if arg == "--body" && i+1 < len(got.Args) {
+			body = got.Args[i+1]
+		}
+	}
+	if !strings.Contains(body, "## Category\n\nagent-work-profile") || !strings.Contains(body, "## Layer\n\nprovider-effectiveness") {
+		t.Fatalf("body = %q args=%v", body, got.Args)
 	}
 }

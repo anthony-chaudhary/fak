@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/categorybaseline"
 	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
@@ -32,6 +34,47 @@ func runIssueCreate(stdout, stderr io.Writer, argv []string) int {
 	return runIssueCreateWith(stdout, stderr, argv, nil)
 }
 
+func issueCreateClassifyBody(body, category, layer string, registry categorybaseline.Registry) (string, error) {
+	category = strings.ToLower(strings.TrimSpace(category))
+	layer = strings.ToLower(strings.TrimSpace(layer))
+	hasMetadata := regexp.MustCompile(`(?im)^##\s+(Category|Layer)\s*$`).MatchString(body)
+	if category == "" && layer == "" && !hasMetadata {
+		return body, nil
+	}
+	if category == "" && layer == "" {
+		return "", fmt.Errorf("body already contains Category/Layer metadata; pass it through --category and --layer so it can be validated")
+	}
+	if category == "" {
+		return "", fmt.Errorf("--layer requires --category")
+	}
+	var declaration *categorybaseline.Category
+	for i := range registry.Categories {
+		if registry.Categories[i].Name == category {
+			declaration = &registry.Categories[i]
+			break
+		}
+	}
+	if declaration != nil {
+		if layer == "" {
+			return "", fmt.Errorf("category %q is baseline-governed; --layer is required", category)
+		}
+		known := false
+		for _, candidate := range declaration.Layers {
+			known = known || candidate == layer
+		}
+		if !known {
+			return "", fmt.Errorf("layer %q is not declared for category %q (known: %s)", layer, category, strings.Join(declaration.Layers, ","))
+		}
+	}
+	if layer == "" {
+		return "", fmt.Errorf("--category requires --layer")
+	}
+	if hasMetadata {
+		return "", fmt.Errorf("body already contains Category/Layer metadata; pass it only through --category and --layer")
+	}
+	return strings.TrimRight(body, "\r\n") + "\n\n## Category\n\n" + category + "\n\n## Layer\n\n" + layer + "\n", nil
+}
+
 // runIssueCreateWith is fak's smooth, structurally-ungated path for filing one GitHub
 // issue: it shells to `gh issue create` from the trusted fak binary (runner defaults to
 // runTaskHandoffGH, taskmgr.go:343-351) rather than the model proposing raw `gh issue
@@ -55,6 +98,8 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 	targetEnvelope := fs.String("target-envelope", "", "production target envelope entries (required unless body declares them)")
 	witnessedEnvelope := fs.String("witnessed-envelope", "", "directly witnessed envelope entries (required unless body declares them)")
 	rawBody := fs.Bool("raw-body", false, "do not append/review project-work metadata (only for non-dispatchable administrative issues)")
+	category := fs.String("category", "", "explicit category for baseline-aware dispatch")
+	layer := fs.String("layer", "", "ordered layer within --category")
 	repo := fs.String("repo", "", "owner/name override (default: gh infers from cwd)")
 	dryRun := fs.Bool("dry-run", false, "render the issue + gh argv without calling gh")
 	asJSON := fs.Bool("json", false, "emit the machine-readable result")
@@ -107,6 +152,12 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 			return 2
 		}
 	}
+	classifiedBody, err := issueCreateClassifyBody(resolvedBody, *category, *layer, categorybaseline.Load("."))
+	if err != nil {
+		fmt.Fprintf(stderr, "fak-dev issue create: %v\n", err)
+		return 2
+	}
+	resolvedBody = classifiedBody
 
 	labelList := issueFanoutSplit(*labels)
 	args := []string{"issue", "create", "--title", *title, "--body", resolvedBody}

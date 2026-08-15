@@ -1243,7 +1243,7 @@ func issueUsage(w io.Writer) {
                      [--live --dedupe-checked --dedupe-cap N] [--max-wave N]
   fak-dev issue fanout   --title T --leaf L --spine REF [--parent REF]
                      [--paths p1,p2] [--areas a1,a2] [--max N] [--json]
-  fak-dev issue create   --title T (--body B | --body-file F) [--labels l1,l2]
+  fak-dev issue create   --title T (--body B | --body-file F) [--labels l1,l2] [--category C --layer L]
                      [--repo owner/name] [--dry-run] [--json]
   fak-dev issue edit     --issue N [--title T] [--body B | --body-file F]
                      [--add-label l1,l2] [--remove-label l1,l2]
