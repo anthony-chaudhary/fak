@@ -83,6 +83,9 @@ param(
   # Skip the per-spawn dispatch_preflight.py gate in the child launcher. An EXPLICIT
   # operator override that removes the no-DoS floor for the whole wave. Never automate.
   [switch]$SkipPreflight,
+  # Join the known scheduled issue gardener instead of acting as a second queue owner.
+  [switch]$ExtendStanding,
+  [string]$StandingTaskName = "FleetIssueDispatch",
   # Actually spawn the workers. Without it, this is a dry-run that only prints the plan.
   [switch]$Launch,
   # Emit a machine-readable dry-run plan and spawn nothing. Refuses with -Launch.
@@ -96,6 +99,36 @@ $repoRoot = Split-Path -Parent $PSScriptRoot   # tools/ -> repo root
 if (-not $LogDir) { $LogDir = Join-Path $Workspace '.goal-runs' }
 if ($Json -and $Launch) {
   throw "-Json is a dry-run plan format; remove -Launch or run the text launcher explicitly."
+}
+
+function Get-StandingGardenerContract {
+  param([string]$TaskName, [string]$ExpectedWorkspace)
+  $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+  if ($null -eq $task) {
+    return [ordered]@{ ok = $false; reason = 'STANDING_GARDENER_NOT_FOUND'; task_name = $TaskName }
+  }
+  $action = @($task.Actions) | Select-Object -First 1
+  $expectedRoot = [IO.Path]::GetFullPath($ExpectedWorkspace).TrimEnd([char]92, [char]'/')
+  $actionRoot = ''
+  if ($null -ne $action -and -not [string]::IsNullOrWhiteSpace([string]$action.WorkingDirectory)) {
+    try { $actionRoot = [IO.Path]::GetFullPath([string]$action.WorkingDirectory).TrimEnd([char]92, [char]'/') } catch { $actionRoot = '' }
+  }
+  $arguments = if ($null -ne $action) { [string]$action.Arguments } else { '' }
+  $isIssueGardener = $arguments -match 'issue_resolve_dispatch\.py' -and $arguments -match '(?:^|\s)--live(?:\s|$)'
+  $sameWorkspace = $actionRoot -and $actionRoot -ieq $expectedRoot
+  $enabled = [bool]$task.Settings.Enabled
+  $healthyState = [string]$task.State -in @('Ready', 'Running')
+  if (-not ($isIssueGardener -and $sameWorkspace -and $enabled -and $healthyState)) {
+    return [ordered]@{
+      ok = $false; reason = 'STANDING_GARDENER_CONTRACT_MISMATCH'; task_name = $TaskName
+      state = [string]$task.State; enabled = $enabled; action = $arguments
+      action_workspace = $actionRoot; expected_workspace = $expectedRoot
+    }
+  }
+  return [ordered]@{
+    ok = $true; reason = 'STANDING_GARDENER_JOINED'; task_name = $TaskName
+    state = [string]$task.State; action = $arguments; workspace = $expectedRoot
+  }
 }
 
 function Resolve-FakExe {
@@ -460,6 +493,8 @@ function New-WavePlanPayload {
     live = $false
     launch = $false
     requested = $Requested
+    extension_mode = $(if ($ExtendStanding) { 'extend-standing' } else { 'standalone' })
+    standing_gardener = $standingGardener
     allocation_requested = $AllocationRequested
     granted = $Granted
     size = $(if ($Wave) { Get-ObjectInt -Object $Wave -Name 'size' } else { $Granted })
@@ -499,6 +534,18 @@ $fak = Resolve-FakExe -RepoRoot $repoRoot -Explicit $FakExe
 $allocationCount = $Count
 $preflightShortfall = 0
 $wavePreflight = $null
+$standingGardener = $null
+if ($ExtendStanding) {
+  $standingGardener = Get-StandingGardenerContract -TaskName $StandingTaskName -ExpectedWorkspace $Workspace
+  if (-not $standingGardener.ok) {
+    $refusal = [ordered]@{
+      schema = 'fleet-wave-standing-extension/1'; requested = $Count; granted = 0
+      shortfall = $Count; extension_mode = 'extend-standing'; standing_gardener = $standingGardener
+    }
+    if ($Json) { $refusal | ConvertTo-Json -Depth 12 } else { Write-Error "$($standingGardener.reason): cannot extend $StandingTaskName" }
+    exit 2
+  }
+}
 if (-not $SkipPreflight) {
   $wavePreflightMaxWorkers = $(if ($PreflightMaxWorkers -gt 0) { $PreflightMaxWorkers } else { $Count })
   $wavePreflight = Invoke-WavePreflight -RepoRoot $repoRoot -Workspace $Workspace -MaxWorkers $wavePreflightMaxWorkers -WorkKind $WorkKind -Product $Product
@@ -675,6 +722,7 @@ foreach ($l in $w.lanes) {
     }
     if ($AllowTierFallback) { $fwd.AllowTierFallback = $true }
     if ($SkipPreflight)     { $fwd.SkipPreflight = $true }
+    if ($ExtendStanding)    { $fwd.ExtendStanding = $true; $fwd.StandingTaskName = $StandingTaskName }
     & $launcher @fwd
     $results += [pscustomobject]@{ lane = $lane; account = $l.tag; pool = $l.pool; dispatched = $true; deferred = $false; reason = '' }
   } catch {

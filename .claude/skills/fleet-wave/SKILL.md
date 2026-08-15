@@ -109,9 +109,9 @@ python tools/dispatch_status.py --fast
 
 | card says | do |
 |---|---|
-| `FleetIssueDispatch` installed + enabled, workers live, commits landing | ⛔ **STOP — do not launch.** A hand-launched wave beside a live cron is double-dispatch on the same slots and lanes. Relay the card; adjust the loop, don't start a second. |
-| installed but **stalled** (enabled, `live=0`, no recent commits) | Don't stack on top — **fixing why the cron is blocked IS the work**. |
-| no such task, **or** the operator explicitly asked for this attended wave | Proceed to Phase 1. |
+| `FleetIssueDispatch` installed + enabled and its action verifies for this workspace | Proceed with `-ExtendStanding` on dry-run and launch. This joins its global worker/account/admission and issue-intent control plane instead of creating a second queue owner. |
+| task/process present but the extension contract does **not** verify | ⛔ **STOP — AUTOMATION_COLLISION.** A name or an empty worker snapshot is not permission to share the queue. |
+| no standing gardener | Proceed to Phase 1 in standalone mode. |
 
 ⛔ **`lane lease: N held — dead-holder=N` is NOT a blocker and must NOT be reaped.**
 Measured 2026-08-08: 48 of 48 lane leases were dead-holder, some 559 h old. The admission
@@ -225,11 +225,15 @@ a child prompt argument.
 Do not pass stale `--deadline`, `--fuel-dir`, `--dry-run`, `--launch`, or `--accounts` flags
 unless installed help advertises them. The deadline remains the monitor/refill stop condition.
 
-Launch exactly once after explicit intent and a clean dry run:
+Launch exactly once after explicit intent and a clean dry run. When the verified scheduled
+gardener is present, use `-ExtendStanding` on **both** dry-run and launch so the ownership
+contract cannot change between them:
 
 ```powershell
-fak dispatch wave --count 30 --backend codex --work-kind codex --max-workers 30 `
-  --goal high-priority --workspace . --live --json
+& $launcher -Count $admit -PointerFile $fuelPath -WorkKind engineering -ExtendStanding -Launch -Workspace $workspace
+```
+
+Without a standing gardener, omit `-ExtendStanding` and launch standalone.
 ```
 
 `--count` requests account-session slots; `--max-workers` is the hard process ceiling. The

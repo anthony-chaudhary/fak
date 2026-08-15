@@ -363,6 +363,19 @@ class LauncherWiringTest(unittest.TestCase):
         self.assertIn("Start-Sleep", text)                  # the paced delay
         self.assertIn("Get-Random", text)                   # + jitter to de-sync spawns
 
+    def test_wave_can_explicitly_extend_the_scheduled_issue_gardener(self):
+        text = self.WAVE.read_text(encoding="utf-8")
+        self.assertIn("[switch]$ExtendStanding", text)
+        self.assertIn("Get-StandingGardenerContract", text)
+        self.assertIn("issue_resolve_dispatch\\.py", text)
+        self.assertIn("STANDING_GARDENER_CONTRACT_MISMATCH", text)
+        self.assertIn("extension_mode", text)
+
+    def test_standing_extension_is_forwarded_to_the_live_launch(self):
+        text = self.WAVE.read_text(encoding="utf-8")
+        self.assertIn("$fwd.ExtendStanding = $true", text)
+        self.assertIn("$fwd.StandingTaskName = $StandingTaskName", text)
+
 
 if __name__ == "__main__":
     unittest.main()
