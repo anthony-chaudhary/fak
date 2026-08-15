@@ -1,0 +1,30 @@
+{
+  "schema": "fak.fp4meta/v1",
+  "variant": "e2m1",
+  "encoding": {
+    "bits": 4,
+    "sign_bits": 1,
+    "exponent_bits": 2,
+    "mantissa_bits": 1,
+    "exponent_bias": 1,
+    "finite_only": true
+  },
+  "scale": {
+    "scope": "per_tensor",
+    "encoding": "binary32"
+  },
+  "accumulator": "fp32",
+  "artifact": {
+    "format": "safetensors",
+    "version": "1"
+  },
+  "recipe": {
+    "id": "plain-e2m1",
+    "version": "1"
+  },
+  "hardware": {
+    "vendor": "",
+    "architecture": "",
+    "measured": false
+  }
+}

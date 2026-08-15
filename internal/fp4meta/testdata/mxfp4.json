@@ -1,0 +1,34 @@
+{
+  "schema": "fak.fp4meta/v1",
+  "variant": "mxfp4",
+  "encoding": {
+    "bits": 4,
+    "sign_bits": 1,
+    "exponent_bits": 2,
+    "mantissa_bits": 1,
+    "exponent_bias": 1,
+    "finite_only": true
+  },
+  "scale": {
+    "scope": "per_block",
+    "block_size": 32,
+    "encoding": "ue8m0",
+    "exponent_bits": 8,
+    "exponent_bias": 127,
+    "exponent_only": true
+  },
+  "accumulator": "fp32",
+  "artifact": {
+    "format": "safetensors",
+    "version": "1"
+  },
+  "recipe": {
+    "id": "mxfp4-style",
+    "version": "1"
+  },
+  "hardware": {
+    "vendor": "",
+    "architecture": "",
+    "measured": false
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "schema": "fak.fp4meta/v1",
+  "variant": "nvfp4",
+  "encoding": {
+    "bits": 4,
+    "sign_bits": 1,
+    "exponent_bits": 2,
+    "mantissa_bits": 1,
+    "exponent_bias": 1,
+    "finite_only": true
+  },
+  "scale": {
+    "scope": "per_block",
+    "block_size": 16,
+    "encoding": "e4m3",
+    "exponent_bits": 4,
+    "exponent_bias": 7
+  },
+  "accumulator": "fp16",
+  "artifact": {
+    "format": "safetensors",
+    "version": "1"
+  },
+  "recipe": {
+    "id": "nvfp4-style",
+    "version": "1"
+  },
+  "runtime": {
+    "id": "example-runtime",
+    "version": "2"
+  },
+  "hardware": {
+    "vendor": "nvidia",
+    "architecture": "sm100",
+    "measured": true,
+    "witness": "sha256:fixture"
+  }
+}
