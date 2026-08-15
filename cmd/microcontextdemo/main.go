@@ -354,765 +354,910 @@ func run(ctx context.Context, cfg config) (report, error) {
 	}
 	return r, nil
 }
+
+type demoOptions struct {
+	cfg                           config
+	verifyPath                    string
+	abOutput                      string
+	verifyABPath                  string
+	s3Output                      string
+	verifyS3Path                  string
+	s3Resident                    int
+	s3Low                         int
+	s3Warm                        int
+	s3Turns                       int
+	s3Memory                      uint64
+	descriptorOutput              string
+	verifyDescriptorPath          string
+	multiTurnDescriptorOutput     string
+	verifyMultiTurnDescriptorPath string
+	verifyS2BPath                 string
+	compatOutput                  string
+	verifyCompatPath              string
+	batchModelPath                string
+	batchHardware                 string
+	batchOutput                   string
+	verifyBatchPath               string
+	batchSize                     int
+	effectsOutput                 string
+	verifyEffectsPath             string
+	verifyAPIOnlyPath             string
+	qualityInput                  string
+	qualityOutput                 string
+	verifyQualityPath             string
+	qualitySamples                int
+	largeInputOutput              string
+	verifyLargeInputPath          string
+	largeInputSelfcheck           bool
+	selectorOutput                string
+	verifySelectorPath            string
+	selectorSelfcheck             bool
+	toolEnrichmentOutput          string
+	verifyToolEnrichmentPath      string
+	toolEnrichmentSelfcheck       bool
+	provenanceFoldOutput          string
+	verifyProvenanceFoldPath      string
+	provenanceFoldSelfcheck       bool
+	falsificationOutput           string
+	verifyFalsificationPath       string
+	falsificationSelfcheck        bool
+	effectBatchOutput             string
+	verifyEffectBatchPath         string
+	corpusInputPath               string
+	corpusPublicPath              string
+	corpusAnswersPath             string
+	corpusReportPath              string
+	corpusSource                  string
+	verifyCorpusPublic            string
+	verifyCorpusAnswers           string
+	verifyCorpusReport            string
+	gradeCorpusAnswers            string
+	gradeCorpusSubmission         string
+	gradeCorpusOutput             string
+	tunedBaselinesPublic          string
+	tunedBaselinesAnswers         string
+	tunedBaselinesOutput          string
+	verifyTunedBaselinesPath      string
+	routingVOIOutput              string
+	verifyRoutingVOIPath          string
+	filterToolSchedulerFold       string
+	filterToolSchedulerOutput     string
+	verifyFilterToolSchedulerPath string
+	liveFilterToolPacket          string
+	liveFilterToolFold            string
+	liveFilterToolOutput          string
+	verifyLiveFilterToolPath      string
+	disagreementPacket            string
+	disagreementFold              string
+	disagreementLive              string
+	disagreementOutput            string
+	verifyDisagreementPath        string
+	counterfactualSource          string
+	counterfactualCorpusOut       string
+	counterfactualCorpusIn        string
+	counterfactualJudgmentOut     string
+	counterfactualAdjudicator     string
+	counterfactualFoldA           string
+	counterfactualFoldB           string
+	counterfactualFoldOut         string
+	verifyCounterfactualCorpus    string
+	verifyCounterfactualFold      string
+	trueAdmissionOut              string
+	verifyTrueAdmissionPath       string
+	naturalCorpusOut              string
+	naturalCorpusIn               string
+	naturalJudgeOut               string
+	naturalAdjudicator            string
+	naturalFoldA                  string
+	naturalFoldB                  string
+	naturalFoldOut                string
+	verifyNaturalCorpus           string
+	verifyNaturalFold             string
+	naturalSurfaceOut             string
+	verifyNaturalSurfacePath      string
+	filterToolSchedulerTrials     int
+	routingVOISeed                int64
+	semanticCorpus                string
+	semanticPacketOutput          string
+	semanticPacketInput           string
+	semanticJudgmentOutput        string
+	semanticEndpoint              string
+	semanticAPIKey                string
+	semanticModel                 string
+	semanticAdjudicator           string
+	semanticPromptVersion         string
+	semanticPerSplit              int
+	semanticFoldPacket            string
+	semanticFoldA                 string
+	semanticFoldB                 string
+	semanticGoldOutput            string
+	semanticTriplePacket          string
+	semanticTripleOldA            string
+	semanticTripleOldB            string
+	semanticTripleV2A             string
+	semanticTripleV2B             string
+	semanticTripleOutput          string
+	semanticGradeGold             string
+	semanticGradeSubmission       string
+	semanticGradeOutput           string
+	semanticGradeSplit            string
+	verifySemanticGoldPath        string
+	verifySemanticGradePath       string
+	liveMatrixPacket              string
+	liveMatrixGold                string
+	liveMatrixOutput              string
+	verifyLiveMatrixPath          string
+	liveMatrixEndpoint            string
+	liveMatrixAPIKey              string
+	liveMatrixModel               string
+	liveMatrixClass               string
+	liveMatrixHardware            string
+	liveMatrixNativeBatch         string
+	liveMatrixPrefixCache         string
+	liveMatrixPricing             string
+	liveMatrixTrials              int
+	liveMatrixWorkers             int
+	liveMatrixInputPrice          float64
+	liveMatrixOutputPrice         float64
+	strongMatrixPacket            string
+	strongMatrixGold              string
+	strongMatrixOutput            string
+	verifyStrongMatrixPath        string
+	strongMatrixEndpoint          string
+	strongMatrixAPIKey            string
+	strongMatrixModel             string
+	strongMatrixClass             string
+	strongMatrixHardware          string
+	strongMatrixBatch             string
+	strongMatrixCache             string
+	strongMatrixPricing           string
+	strongMatrixTrials            int
+	strongMatrixWorkers           int
+	strongMatrixK                 int
+	strongMatrixChunk             int
+	tailPacket                    string
+	tailGold                      string
+	tailOutput                    string
+	verifyTailPath                string
+	tailEndpoint                  string
+	tailAPIKey                    string
+	tailModel                     string
+	tailClass                     string
+	tailHardware                  string
+	tailTrials                    int
+	tailWorkers                   int
+	tailSufficiency               int
+	tailWindowMS                  int64
+	tailTaskMS                    int64
+	tailHedgeMS                   int64
+	routingVOITrials              int
+	routingVOIRecords             int
+	effectBatchSelfcheck          bool
+	fairnessOutput                string
+	verifyFairnessPath            string
+	gradeInput                    string
+	gradeOutput                   string
+	verifyGradePath               string
+}
+
 func main() {
-	var cfg config
-	var verifyPath string
-	var abOutput string
-	var verifyABPath string
-	var s3Output string
-	var verifyS3Path string
-	var s3Resident, s3Low, s3Warm, s3Turns int
-	var s3Memory uint64
-	var descriptorOutput string
-	var verifyDescriptorPath string
-	var multiTurnDescriptorOutput string
-	var verifyMultiTurnDescriptorPath string
-	var verifyS2BPath string
-	var compatOutput, verifyCompatPath string
-	var batchModelPath, batchHardware, batchOutput, verifyBatchPath string
-	var batchSize int
-	var effectsOutput, verifyEffectsPath string
-	var verifyAPIOnlyPath string
-	var qualityInput, qualityOutput, verifyQualityPath string
-	var qualitySamples int
-	var largeInputOutput, verifyLargeInputPath string
-	var largeInputSelfcheck bool
-	var selectorOutput, verifySelectorPath string
-	var selectorSelfcheck bool
-	var toolEnrichmentOutput, verifyToolEnrichmentPath string
-	var toolEnrichmentSelfcheck bool
-	var provenanceFoldOutput, verifyProvenanceFoldPath string
-	var provenanceFoldSelfcheck bool
-	var falsificationOutput, verifyFalsificationPath string
-	var falsificationSelfcheck bool
-	var effectBatchOutput, verifyEffectBatchPath string
-	var corpusInputPath, corpusPublicPath, corpusAnswersPath, corpusReportPath string
-	var corpusSource, verifyCorpusPublic, verifyCorpusAnswers, verifyCorpusReport string
-	var gradeCorpusAnswers, gradeCorpusSubmission, gradeCorpusOutput string
-	var tunedBaselinesPublic, tunedBaselinesAnswers, tunedBaselinesOutput, verifyTunedBaselinesPath string
-	var routingVOIOutput, verifyRoutingVOIPath string
-	var filterToolSchedulerFold, filterToolSchedulerOutput, verifyFilterToolSchedulerPath string
-	var liveFilterToolPacket, liveFilterToolFold, liveFilterToolOutput, verifyLiveFilterToolPath string
-	var disagreementPacket, disagreementFold, disagreementLive, disagreementOutput, verifyDisagreementPath string
-	var counterfactualSource, counterfactualCorpusOut, counterfactualCorpusIn, counterfactualJudgmentOut, counterfactualAdjudicator, counterfactualFoldA, counterfactualFoldB, counterfactualFoldOut, verifyCounterfactualCorpus, verifyCounterfactualFold, trueAdmissionOut, verifyTrueAdmissionPath string
-	var naturalCorpusOut, naturalCorpusIn, naturalJudgeOut, naturalAdjudicator, naturalFoldA, naturalFoldB, naturalFoldOut, verifyNaturalCorpus, verifyNaturalFold, naturalSurfaceOut, verifyNaturalSurfacePath string
-	var filterToolSchedulerTrials int
-	var routingVOISeed int64
-	var semanticCorpus, semanticPacketOutput, semanticPacketInput, semanticJudgmentOutput string
-	var semanticEndpoint, semanticAPIKey, semanticModel, semanticAdjudicator, semanticPromptVersion string
-	var semanticPerSplit int
-	var semanticFoldPacket, semanticFoldA, semanticFoldB, semanticGoldOutput string
-	var semanticTriplePacket, semanticTripleOldA, semanticTripleOldB, semanticTripleV2A, semanticTripleV2B, semanticTripleOutput string
-	var semanticGradeGold, semanticGradeSubmission, semanticGradeOutput, semanticGradeSplit string
-	var verifySemanticGoldPath, verifySemanticGradePath string
-	var liveMatrixPacket, liveMatrixGold, liveMatrixOutput, verifyLiveMatrixPath string
-	var liveMatrixEndpoint, liveMatrixAPIKey, liveMatrixModel, liveMatrixClass, liveMatrixHardware string
-	var liveMatrixNativeBatch, liveMatrixPrefixCache, liveMatrixPricing string
-	var liveMatrixTrials, liveMatrixWorkers int
-	var liveMatrixInputPrice, liveMatrixOutputPrice float64
-	var strongMatrixPacket, strongMatrixGold, strongMatrixOutput, verifyStrongMatrixPath string
-	var strongMatrixEndpoint, strongMatrixAPIKey, strongMatrixModel, strongMatrixClass, strongMatrixHardware string
-	var strongMatrixBatch, strongMatrixCache, strongMatrixPricing string
-	var strongMatrixTrials, strongMatrixWorkers, strongMatrixK, strongMatrixChunk int
-	var tailPacket, tailGold, tailOutput, verifyTailPath, tailEndpoint, tailAPIKey, tailModel, tailClass, tailHardware string
-	var tailTrials, tailWorkers, tailSufficiency int
-	var tailWindowMS, tailTaskMS, tailHedgeMS int64
-	var routingVOITrials, routingVOIRecords int
-	var effectBatchSelfcheck bool
-	var fairnessOutput, verifyFairnessPath string
-	var gradeInput, gradeOutput, verifyGradePath string
-	flag.IntVar(&cfg.Contexts, "contexts", 10000, "logical micro-contexts")
-	flag.IntVar(&cfg.Workers, "workers", 64, "bounded physical worker slots")
-	flag.DurationVar(&cfg.Delay, "synthetic-latency", 100*time.Microsecond, "synthetic endpoint latency per context")
-	flag.BoolVar(&cfg.Selfcheck, "selfcheck", false, "enforce spine invariants")
-	flag.StringVar(&cfg.Endpoint, "endpoint", "", "OpenAI-compatible endpoint root; empty uses the synthetic S0 endpoint")
-	flag.StringVar(&cfg.APIKey, "api-key", "", "endpoint API key (prefer environment expansion by the caller)")
-	flag.StringVar(&cfg.Model, "model", "", "live endpoint model id")
-	flag.StringVar(&cfg.Provider, "provider", "", "provider provenance label")
-	flag.StringVar(&cfg.Hardware, "hardware", "", "hardware provenance label")
-	flag.StringVar(&cfg.LiveInput, "live-issues", "", "bounded gh issue-list JSON snapshot to use as work units")
-	flag.DurationVar(&cfg.RequestTimeout, "request-timeout", 2*time.Minute, "per-request live endpoint timeout")
-	flag.DurationVar(&cfg.RunTimeout, "run-timeout", 15*time.Minute, "overall run timeout (0 disables the deadline)")
-	flag.BoolVar(&cfg.ControlledSoak, "controlled-soak", false, "exercise the S5 canary/rollback, overload queue, cancellation, bounded retry, and hibernation contract")
-	flag.IntVar(&cfg.APIShape.RequestsPerMinute, "api-rpm", 0, "API-only request-per-minute admission limit (0 disables adapter admission)")
-	flag.IntVar(&cfg.APIShape.TokensPerMinute, "api-tpm", 0, "API-only estimated token-per-minute admission limit")
-	flag.IntVar(&cfg.APIShape.Concurrency, "api-concurrency", 0, "API-only provider concurrency admission limit")
-	flag.Int64Var(&cfg.APIShape.MaxSpendMicros, "api-spend-micros", 0, "API-only estimated spend envelope in provider micro-units")
-	flag.Int64Var(&cfg.APIShape.PromptMicrosPerToken, "api-prompt-micros-per-token", 0, "API-only estimated prompt cost per token")
-	flag.Int64Var(&cfg.APIShape.OutputMicrosPerToken, "api-output-micros-per-token", 0, "API-only estimated output cost per token")
-	flag.StringVar(&cfg.APIShape.ReuseControl, "api-cache-control", "byte-identical-prefix", "API-only cache control shape")
-	flag.StringVar(&cfg.APIShape.ReuseEvidence, "api-cache-telemetry", "opaque", "API-only cache telemetry shape")
-	flag.StringVar(&verifyPath, "verify", "", "verify a captured S1 JSON artifact and exit")
-	flag.StringVar(&abOutput, "prefix-ab", "", "run the S2 prefix A/B and write JSON to this path (or - for stdout)")
-	flag.StringVar(&verifyABPath, "verify-prefix-ab", "", "verify a captured S2 prefix A/B artifact and exit")
-	flag.StringVar(&s3Output, "hibernate-restart", "", "run the S3 hibernation/restart witness and write JSON to this path (or - for stdout)")
-	flag.StringVar(&verifyS3Path, "verify-hibernate-restart", "", "verify a captured S3 artifact and exit")
-	flag.IntVar(&s3Resident, "resident-high", 32, "S3 hard resident context cap")
-	flag.IntVar(&s3Low, "resident-low", 16, "S3 warm-band low watermark")
-	flag.IntVar(&s3Warm, "warm-cap", 8, "S3 warm reserve cap")
-	flag.IntVar(&s3Turns, "turns", 2, "S3 synthetic turns per logical context")
-	flag.Uint64Var(&s3Memory, "memory-envelope", 64<<20, "S3 peak Go allocation delta envelope in bytes")
-	flag.StringVar(&descriptorOutput, "descriptor-bench", "", "run the 1,000-context descriptor/harness benchmark and write JSON")
-	flag.StringVar(&verifyDescriptorPath, "verify-descriptor-bench", "", "verify a captured descriptor benchmark artifact and exit")
-	flag.StringVar(&multiTurnDescriptorOutput, "multi-turn-descriptor", "", "run the 1,000-context multi-turn descriptor witness and write JSON")
-	flag.StringVar(&verifyMultiTurnDescriptorPath, "verify-multi-turn-descriptor", "", "verify a captured multi-turn descriptor witness and exit")
-	flag.StringVar(&verifyS2BPath, "verify-kernel-prefix-ab", "", "verify a controlled in-kernel prefix-cache A/B artifact and exit")
-	flag.StringVar(&compatOutput, "compatibility-witness", "", "run compatibility scheduler witness and write JSON")
-	flag.StringVar(&verifyCompatPath, "verify-compatibility", "", "verify compatibility artifact")
-	registerBatchExecutionFlags(flag.CommandLine, &batchModelPath, &batchHardware, &batchOutput, &verifyBatchPath, &batchSize)
-	flag.StringVar(&effectsOutput, "effects-witness", "", "run effect-safety witness and write JSON")
-	flag.StringVar(&verifyEffectsPath, "verify-effects", "", "verify effect-safety artifact")
-	flag.StringVar(&verifyAPIOnlyPath, "verify-api-only", "", "verify captured S6 API-only artifact")
-	flag.BoolVar(&largeInputSelfcheck, "large-input-selfcheck", false, "run the fixture-backed 1,000-record large-input operator proof")
-	flag.StringVar(&largeInputOutput, "large-input-output", "", "write the large-input operator proof artifact")
-	flag.StringVar(&verifyLargeInputPath, "verify-large-input", "", "verify a captured large-input operator artifact")
-	flag.BoolVar(&selectorSelfcheck, "filter-selector-selfcheck", false, "run the adaptive filter-selector proof")
-	flag.StringVar(&selectorOutput, "filter-selector-output", "", "write the adaptive filter-selector proof artifact")
-	flag.StringVar(&verifySelectorPath, "verify-filter-selector", "", "verify a captured filter-selector artifact")
-	flag.BoolVar(&toolEnrichmentSelfcheck, "tool-enrichment-selfcheck", false, "run the read-only tool-enrichment fan-out proof")
-	flag.StringVar(&toolEnrichmentOutput, "tool-enrichment-output", "", "write the read-only tool-enrichment proof artifact")
-	flag.StringVar(&verifyToolEnrichmentPath, "verify-tool-enrichment", "", "verify a captured tool-enrichment artifact")
-	flag.BoolVar(&provenanceFoldSelfcheck, "provenance-fold-selfcheck", false, "run the provenance-preserving hierarchical fold proof")
-	flag.StringVar(&provenanceFoldOutput, "provenance-fold-output", "", "write the hierarchical fold proof artifact")
-	flag.StringVar(&verifyProvenanceFoldPath, "verify-provenance-fold", "", "verify a captured hierarchical fold artifact")
-	flag.BoolVar(&falsificationSelfcheck, "falsification-selfcheck", false, "run the tuned-baseline falsification benchmark")
-	flag.StringVar(&falsificationOutput, "falsification-output", "", "write the falsification benchmark artifact")
-	flag.StringVar(&verifyFalsificationPath, "verify-falsification", "", "verify a captured falsification artifact")
-	flag.BoolVar(&effectBatchSelfcheck, "effect-batch-selfcheck", false, "run the witnessed effect-batch proof")
-	flag.StringVar(&effectBatchOutput, "effect-batch-output", "", "write the effect-batch proof artifact")
-	flag.StringVar(&verifyEffectBatchPath, "verify-effect-batch", "", "verify a captured effect-batch artifact")
-	flag.StringVar(&corpusInputPath, "corpus-input", "", "freeze a public GitHub issue JSON export into leakage-controlled corpus artifacts")
-	flag.StringVar(&corpusPublicPath, "corpus-public-output", "", "public candidate-input corpus output")
-	flag.StringVar(&corpusAnswersPath, "corpus-answers-output", "", "separate answer bundle output")
-	flag.StringVar(&corpusReportPath, "corpus-report-output", "", "corpus provenance/leak/grade report output")
-	flag.StringVar(&corpusSource, "corpus-source", "github.com/anthony-chaudhary/fak/issues", "source provenance label")
-	flag.StringVar(&verifyCorpusPublic, "verify-corpus-public", "", "verify public corpus with answer/report artifacts")
-	flag.StringVar(&verifyCorpusAnswers, "verify-corpus-answers", "", "answer bundle paired with --verify-corpus-public")
-	flag.StringVar(&verifyCorpusReport, "verify-corpus-report", "", "report paired with --verify-corpus-public")
-	flag.StringVar(&gradeCorpusAnswers, "grade-corpus-answers", "", "hidden answer bundle for independent grading")
-	flag.StringVar(&gradeCorpusSubmission, "grade-corpus-submission", "", "candidate submission to grade")
-	flag.StringVar(&gradeCorpusOutput, "grade-corpus-output", "", "write independent grade report")
-	flag.StringVar(&tunedBaselinesPublic, "tuned-baselines-public", "", "public corpus for tuned baseline dry-run")
-	flag.StringVar(&tunedBaselinesAnswers, "tuned-baselines-answers", "", "answer bundle for tuning/grading")
-	flag.StringVar(&tunedBaselinesOutput, "tuned-baselines-output", "", "write tuned baseline report")
-	flag.StringVar(&verifyTunedBaselinesPath, "verify-tuned-baselines", "", "verify a tuned baseline report")
-	flag.StringVar(&routingVOIOutput, "routing-voi-output", "", "run adaptive filter/tool routing experiment")
-	flag.StringVar(&verifyRoutingVOIPath, "verify-routing-voi", "", "verify an adaptive routing experiment")
-	flag.StringVar(&filterToolSchedulerFold, "filter-tool-scheduler-fold", "", "stabilized tool fold input for scheduler matrix")
-	flag.StringVar(&filterToolSchedulerOutput, "filter-tool-scheduler-output", "", "write filter/tool scheduler matrix")
-	flag.IntVar(&filterToolSchedulerTrials, "filter-tool-scheduler-trials", 5, "controlled trials per scheduler policy")
-	flag.StringVar(&verifyFilterToolSchedulerPath, "verify-filter-tool-scheduler", "", "verify filter/tool scheduler matrix")
-	flag.StringVar(&liveFilterToolPacket, "live-filter-tool-packet", "", "frozen semantic packet for live filter/tool matrix")
-	flag.StringVar(&liveFilterToolFold, "live-filter-tool-fold", "", "stabilized fold for live filter/tool matrix")
-	flag.StringVar(&liveFilterToolOutput, "live-filter-tool-output", "", "write live filter/tool scheduler matrix")
-	flag.StringVar(&disagreementPacket, "disagreement-audit-packet", "", "frozen semantic packet for live disagreement audit")
-	flag.StringVar(&disagreementFold, "disagreement-audit-fold", "", "stabilized fold for live disagreement audit")
-	flag.StringVar(&disagreementLive, "disagreement-audit-live", "", "S8o live artifact for disagreement audit")
-	flag.StringVar(&disagreementOutput, "disagreement-audit-output", "", "write live disagreement audit")
-	flag.StringVar(&verifyDisagreementPath, "verify-disagreement-audit", "", "verify a live disagreement audit artifact")
-	flag.StringVar(&counterfactualSource, "counterfactual-source", "", "source semantic packet for paired counterfactual corpus")
-	flag.StringVar(&counterfactualCorpusOut, "counterfactual-corpus-output", "", "write paired counterfactual corpus")
-	flag.StringVar(&counterfactualCorpusIn, "counterfactual-corpus", "", "paired counterfactual corpus")
-	flag.StringVar(&counterfactualJudgmentOut, "counterfactual-judgment-output", "", "write counterfactual judgments")
-	flag.StringVar(&counterfactualAdjudicator, "counterfactual-adjudicator", "", "counterfactual adjudicator identity")
-	flag.StringVar(&counterfactualFoldA, "counterfactual-fold-a", "", "first model-distinct judgment bundle")
-	flag.StringVar(&counterfactualFoldB, "counterfactual-fold-b", "", "second model-distinct judgment bundle")
-	flag.StringVar(&counterfactualFoldOut, "counterfactual-fold-output", "", "write counterfactual consensus fold")
-	flag.StringVar(&verifyCounterfactualCorpus, "verify-counterfactual-corpus", "", "counterfactual corpus to verify")
-	flag.StringVar(&verifyCounterfactualFold, "verify-counterfactual-fold", "", "counterfactual fold to verify")
-	flag.StringVar(&trueAdmissionOut, "true-admission-output", "", "write true pre-answer admission matrix")
-	flag.StringVar(&verifyTrueAdmissionPath, "verify-true-admission", "", "verify true pre-answer admission matrix")
-	flag.StringVar(&naturalCorpusOut, "natural-multitool-corpus-output", "", "write natural multi-tool corpus")
-	flag.StringVar(&naturalCorpusIn, "natural-multitool-corpus", "", "natural multi-tool corpus")
-	flag.StringVar(&naturalJudgeOut, "natural-multitool-judgment-output", "", "write natural multi-tool judgments")
-	flag.StringVar(&naturalAdjudicator, "natural-multitool-adjudicator", "", "natural multi-tool adjudicator identity")
-	flag.StringVar(&naturalFoldA, "natural-multitool-fold-a", "", "first natural judgment bundle")
-	flag.StringVar(&naturalFoldB, "natural-multitool-fold-b", "", "second natural judgment bundle")
-	flag.StringVar(&naturalFoldOut, "natural-multitool-fold-output", "", "write natural consensus fold")
-	flag.StringVar(&verifyNaturalCorpus, "verify-natural-multitool-corpus", "", "natural corpus to verify")
-	flag.StringVar(&verifyNaturalFold, "verify-natural-multitool-fold", "", "natural fold to verify")
-	flag.StringVar(&naturalSurfaceOut, "natural-multitool-surface-output", "", "write natural decision surface")
-	flag.StringVar(&verifyNaturalSurfacePath, "verify-natural-multitool-surface", "", "verify natural decision surface")
-	flag.StringVar(&verifyLiveFilterToolPath, "verify-live-filter-tool", "", "verify live filter/tool scheduler matrix")
-	flag.Int64Var(&routingVOISeed, "routing-voi-seed", 6105, "deterministic routing experiment seed")
-	flag.IntVar(&routingVOITrials, "routing-voi-trials", 24, "routing experiment repetitions")
-	flag.IntVar(&routingVOIRecords, "routing-voi-records", 200, "records per mixture and trial")
-	flag.StringVar(&semanticCorpus, "semantic-packet-corpus", "", "public corpus used to build a blinded semantic packet")
-	flag.StringVar(&semanticPacketOutput, "semantic-packet-output", "", "write a blinded semantic annotation packet")
-	flag.IntVar(&semanticPerSplit, "semantic-per-split", 16, "semantic packet records per tune/test split")
-	flag.StringVar(&semanticPacketInput, "semantic-adjudicate-packet", "", "semantic packet to adjudicate through a live endpoint")
-	flag.StringVar(&semanticJudgmentOutput, "semantic-adjudicate-output", "", "write one adjudicator bundle")
-	flag.StringVar(&semanticEndpoint, "semantic-endpoint", "", "OpenAI-compatible endpoint root for semantic adjudication")
-	flag.StringVar(&semanticAPIKey, "semantic-api-key", "", "API key for semantic endpoint")
-	flag.StringVar(&semanticModel, "semantic-model", "", "semantic adjudicator model id")
-	flag.StringVar(&semanticAdjudicator, "semantic-adjudicator", "", "independent adjudicator identity")
-	flag.StringVar(&semanticPromptVersion, "semantic-prompt-version", semanticPromptV1, "semantic adjudication rubric version")
-	flag.StringVar(&semanticFoldPacket, "semantic-fold-packet", "", "packet bound to two independent adjudicators")
-	flag.StringVar(&semanticFoldA, "semantic-fold-a", "", "first independent adjudicator bundle")
-	flag.StringVar(&semanticFoldB, "semantic-fold-b", "", "second independent adjudicator bundle")
-	flag.StringVar(&semanticGoldOutput, "semantic-gold-output", "", "write hidden semantic consensus/abstention answers")
-	flag.StringVar(&semanticTriplePacket, "semantic-triple-packet", "", "packet for three-adjudicator tool fold")
-	flag.StringVar(&semanticTripleOldA, "semantic-triple-old-a", "", "legacy adjudicator A")
-	flag.StringVar(&semanticTripleOldB, "semantic-triple-old-b", "", "legacy adjudicator B for old agreement")
-	flag.StringVar(&semanticTripleV2A, "semantic-triple-v2-a", "", "v2 adjudicator A")
-	flag.StringVar(&semanticTripleV2B, "semantic-triple-v2-b", "", "v2 adjudicator B")
-	flag.StringVar(&semanticTripleOutput, "semantic-triple-output", "", "three-adjudicator tool fold output")
-	flag.StringVar(&semanticGradeGold, "semantic-grade-gold", "", "hidden semantic answers for blind grading")
-	flag.StringVar(&semanticGradeSubmission, "semantic-grade-submission", "", "candidate semantic submission")
-	flag.StringVar(&semanticGradeOutput, "semantic-grade-output", "", "write semantic blind grade")
-	flag.StringVar(&semanticGradeSplit, "semantic-grade-split", "test", "split to grade")
-	flag.StringVar(&verifySemanticGoldPath, "verify-semantic-gold", "", "verify semantic consensus artifact")
-	flag.StringVar(&verifySemanticGradePath, "verify-semantic-grade", "", "verify semantic blind grade")
-	flag.StringVar(&liveMatrixPacket, "live-matrix-packet", "", "S8i public semantic packet")
-	flag.StringVar(&liveMatrixGold, "live-matrix-gold", "", "hidden S8i semantic gold")
-	flag.StringVar(&liveMatrixOutput, "live-matrix-output", "", "write live comparative matrix")
-	flag.StringVar(&verifyLiveMatrixPath, "verify-live-matrix", "", "verify live semantic matrix")
-	flag.StringVar(&liveMatrixEndpoint, "live-matrix-endpoint", "", "OpenAI-compatible endpoint")
-	flag.StringVar(&liveMatrixAPIKey, "live-matrix-api-key", "", "live endpoint API key")
-	flag.StringVar(&liveMatrixModel, "live-matrix-model", "", "live endpoint model")
-	flag.StringVar(&liveMatrixClass, "live-matrix-endpoint-class", "", "public provenance class")
-	flag.StringVar(&liveMatrixHardware, "live-matrix-hardware", "", "public hardware provenance")
-	flag.StringVar(&liveMatrixNativeBatch, "live-matrix-native-batch", "unsupported", "endpoint native batching capability")
-	flag.StringVar(&liveMatrixPrefixCache, "live-matrix-prefix-cache", "usage-observed-only", "endpoint prefix-cache capability")
-	flag.StringVar(&liveMatrixPricing, "live-matrix-pricing", "unavailable", "pricing snapshot provenance")
-	flag.IntVar(&liveMatrixTrials, "live-matrix-trials", 3, "repeated trials per pipeline")
-	flag.IntVar(&liveMatrixWorkers, "live-matrix-workers", 8, "bounded micro-context concurrency")
-	flag.Float64Var(&liveMatrixInputPrice, "live-matrix-input-per-mtok", -1, "input USD per million tokens; negative means unavailable")
-	flag.Float64Var(&liveMatrixOutputPrice, "live-matrix-output-per-mtok", -1, "output USD per million tokens; negative means unavailable")
-	flag.StringVar(&strongMatrixPacket, "strong-matrix-packet", "", "S8i packet for strengthened baselines")
-	flag.StringVar(&strongMatrixGold, "strong-matrix-gold", "", "hidden S8i gold")
-	flag.StringVar(&strongMatrixOutput, "strong-matrix-output", "", "write strengthened live matrix")
-	flag.StringVar(&verifyStrongMatrixPath, "verify-strong-matrix", "", "verify strengthened live matrix")
-	flag.StringVar(&strongMatrixEndpoint, "strong-matrix-endpoint", "", "OpenAI-compatible endpoint")
-	flag.StringVar(&strongMatrixAPIKey, "strong-matrix-api-key", "", "endpoint API key")
-	flag.StringVar(&strongMatrixModel, "strong-matrix-model", "", "endpoint model")
-	flag.StringVar(&strongMatrixClass, "strong-matrix-endpoint-class", "", "endpoint class")
-	flag.StringVar(&strongMatrixHardware, "strong-matrix-hardware", "", "hardware provenance")
-	flag.StringVar(&strongMatrixBatch, "strong-matrix-native-batch", "unsupported", "native batching capability")
-	flag.StringVar(&strongMatrixCache, "strong-matrix-prefix-cache", "usage-observed-only", "prefix-cache capability")
-	flag.StringVar(&strongMatrixPricing, "strong-matrix-pricing", "unavailable", "pricing provenance")
-	flag.IntVar(&strongMatrixTrials, "strong-matrix-trials", 2, "held-out trials")
-	flag.IntVar(&strongMatrixWorkers, "strong-matrix-workers", 8, "request admission limit")
-	flag.IntVar(&strongMatrixK, "strong-matrix-retrieval-k", 3, "top-k tune examples")
-	flag.IntVar(&strongMatrixChunk, "strong-matrix-chunk-size", 4, "parallel chunk size")
-	flag.StringVar(&tailPacket, "tail-policy-packet", "", "S8i packet for tail policies")
-	flag.StringVar(&tailGold, "tail-policy-gold", "", "hidden S8i gold")
-	flag.StringVar(&tailOutput, "tail-policy-output", "", "write live tail-policy matrix")
-	flag.StringVar(&verifyTailPath, "verify-tail-policy", "", "verify live tail-policy matrix")
-	flag.StringVar(&tailEndpoint, "tail-policy-endpoint", "", "OpenAI-compatible endpoint")
-	flag.StringVar(&tailAPIKey, "tail-policy-api-key", "", "endpoint API key")
-	flag.StringVar(&tailModel, "tail-policy-model", "", "endpoint model")
-	flag.StringVar(&tailClass, "tail-policy-endpoint-class", "", "endpoint provenance class")
-	flag.StringVar(&tailHardware, "tail-policy-hardware", "", "hardware provenance")
-	flag.IntVar(&tailTrials, "tail-policy-trials", 2, "trials per policy")
-	flag.IntVar(&tailWorkers, "tail-policy-workers", 8, "bounded workers")
-	flag.IntVar(&tailSufficiency, "tail-policy-sufficiency", 12, "confirmed records before early stop")
-	flag.Int64Var(&tailWindowMS, "tail-policy-window-ms", 15000, "per-window deadline milliseconds")
-	flag.Int64Var(&tailTaskMS, "tail-policy-task-ms", 60000, "global task deadline milliseconds")
-	flag.Int64Var(&tailHedgeMS, "tail-policy-hedge-ms", 6000, "bounded hedge delay milliseconds")
-	flag.StringVar(&qualityInput, "quality-input", "", "ingest one run witness into a quality ledger")
-	flag.StringVar(&qualityOutput, "quality-output", "", "write the quality ledger")
-	flag.IntVar(&qualitySamples, "quality-samples", 16, "maximum sampled context IDs")
-	flag.StringVar(&verifyQualityPath, "verify-quality", "", "verify a captured quality ledger")
-	flag.StringVar(&fairnessOutput, "fairness-witness", "", "run the S7 mixed-tenant fairness fixture")
-	flag.StringVar(&verifyFairnessPath, "verify-fairness", "", "verify a captured S7 fairness artifact")
-	flag.StringVar(&gradeInput, "health-input", "", "quality ledger to grade for micro-context health")
-	flag.StringVar(&gradeOutput, "health-scorecard", "", "write micro-context health scorecard")
-	flag.StringVar(&verifyGradePath, "verify-health-scorecard", "", "verify micro-context health scorecard")
+	var o demoOptions
+	registerDemoFlagsA(&o)
+	registerDemoFlagsB(&o)
 	flag.Parse()
-	if verifyFairnessPath != "" {
-		runVerify("verify-fairness", verifyFairnessPath, verifyFairnessArtifact)
-		return
+	runDemoOptions(o)
+}
+
+func registerDemoFlagsA(o *demoOptions) {
+	flag.IntVar(&o.cfg.Contexts, "contexts", 10000, "logical micro-contexts")
+	flag.IntVar(&o.cfg.Workers, "workers", 64, "bounded physical worker slots")
+	flag.DurationVar(&o.cfg.Delay, "synthetic-latency", 100*time.Microsecond, "synthetic endpoint latency per context")
+	flag.BoolVar(&o.cfg.Selfcheck, "selfcheck", false, "enforce spine invariants")
+	flag.StringVar(&o.cfg.Endpoint, "endpoint", "", "OpenAI-compatible endpoint root; empty uses the synthetic S0 endpoint")
+	flag.StringVar(&o.cfg.APIKey, "api-key", "", "endpoint API key (prefer environment expansion by the caller)")
+	flag.StringVar(&o.cfg.Model, "model", "", "live endpoint model id")
+	flag.StringVar(&o.cfg.Provider, "provider", "", "provider provenance label")
+	flag.StringVar(&o.cfg.Hardware, "hardware", "", "hardware provenance label")
+	flag.StringVar(&o.cfg.LiveInput, "live-issues", "", "bounded gh issue-list JSON snapshot to use as work units")
+	flag.DurationVar(&o.cfg.RequestTimeout, "request-timeout", 2*time.Minute, "per-request live endpoint timeout")
+	flag.DurationVar(&o.cfg.RunTimeout, "run-timeout", 15*time.Minute, "overall run timeout (0 disables the deadline)")
+	flag.BoolVar(&o.cfg.ControlledSoak, "controlled-soak", false, "exercise the S5 canary/rollback, overload queue, cancellation, bounded retry, and hibernation contract")
+	flag.IntVar(&o.cfg.APIShape.RequestsPerMinute, "api-rpm", 0, "API-only request-per-minute admission limit (0 disables adapter admission)")
+	flag.IntVar(&o.cfg.APIShape.TokensPerMinute, "api-tpm", 0, "API-only estimated token-per-minute admission limit")
+	flag.IntVar(&o.cfg.APIShape.Concurrency, "api-concurrency", 0, "API-only provider concurrency admission limit")
+	flag.Int64Var(&o.cfg.APIShape.MaxSpendMicros, "api-spend-micros", 0, "API-only estimated spend envelope in provider micro-units")
+	flag.Int64Var(&o.cfg.APIShape.PromptMicrosPerToken, "api-prompt-micros-per-token", 0, "API-only estimated prompt cost per token")
+	flag.Int64Var(&o.cfg.APIShape.OutputMicrosPerToken, "api-output-micros-per-token", 0, "API-only estimated output cost per token")
+	flag.StringVar(&o.cfg.APIShape.ReuseControl, "api-cache-control", "byte-identical-prefix", "API-only cache control shape")
+	flag.StringVar(&o.cfg.APIShape.ReuseEvidence, "api-cache-telemetry", "opaque", "API-only cache telemetry shape")
+	flag.StringVar(&o.verifyPath, "verify", "", "verify a captured S1 JSON artifact and exit")
+	flag.StringVar(&o.abOutput, "prefix-ab", "", "run the S2 prefix A/B and write JSON to this path (or - for stdout)")
+	flag.StringVar(&o.verifyABPath, "verify-prefix-ab", "", "verify a captured S2 prefix A/B artifact and exit")
+	flag.StringVar(&o.s3Output, "hibernate-restart", "", "run the S3 hibernation/restart witness and write JSON to this path (or - for stdout)")
+	flag.StringVar(&o.verifyS3Path, "verify-hibernate-restart", "", "verify a captured S3 artifact and exit")
+	flag.IntVar(&o.s3Resident, "resident-high", 32, "S3 hard resident context cap")
+	flag.IntVar(&o.s3Low, "resident-low", 16, "S3 warm-band low watermark")
+	flag.IntVar(&o.s3Warm, "warm-cap", 8, "S3 warm reserve cap")
+	flag.IntVar(&o.s3Turns, "turns", 2, "S3 synthetic turns per logical context")
+	flag.Uint64Var(&o.s3Memory, "memory-envelope", 64<<20, "S3 peak Go allocation delta envelope in bytes")
+	flag.StringVar(&o.descriptorOutput, "descriptor-bench", "", "run the 1,000-context descriptor/harness benchmark and write JSON")
+	flag.StringVar(&o.verifyDescriptorPath, "verify-descriptor-bench", "", "verify a captured descriptor benchmark artifact and exit")
+	flag.StringVar(&o.multiTurnDescriptorOutput, "multi-turn-descriptor", "", "run the 1,000-context multi-turn descriptor witness and write JSON")
+	flag.StringVar(&o.verifyMultiTurnDescriptorPath, "verify-multi-turn-descriptor", "", "verify a captured multi-turn descriptor witness and exit")
+	flag.StringVar(&o.verifyS2BPath, "verify-kernel-prefix-ab", "", "verify a controlled in-kernel prefix-cache A/B artifact and exit")
+	flag.StringVar(&o.compatOutput, "compatibility-witness", "", "run compatibility scheduler witness and write JSON")
+	flag.StringVar(&o.verifyCompatPath, "verify-compatibility", "", "verify compatibility artifact")
+	registerBatchExecutionFlags(flag.CommandLine, &o.batchModelPath, &o.batchHardware, &o.batchOutput, &o.verifyBatchPath, &o.batchSize)
+	flag.StringVar(&o.effectsOutput, "effects-witness", "", "run effect-safety witness and write JSON")
+	flag.StringVar(&o.verifyEffectsPath, "verify-effects", "", "verify effect-safety artifact")
+	flag.StringVar(&o.verifyAPIOnlyPath, "verify-api-only", "", "verify captured S6 API-only artifact")
+	flag.BoolVar(&o.largeInputSelfcheck, "large-input-selfcheck", false, "run the fixture-backed 1,000-record large-input operator proof")
+	flag.StringVar(&o.largeInputOutput, "large-input-output", "", "write the large-input operator proof artifact")
+	flag.StringVar(&o.verifyLargeInputPath, "verify-large-input", "", "verify a captured large-input operator artifact")
+	flag.BoolVar(&o.selectorSelfcheck, "filter-selector-selfcheck", false, "run the adaptive filter-selector proof")
+	flag.StringVar(&o.selectorOutput, "filter-selector-output", "", "write the adaptive filter-selector proof artifact")
+	flag.StringVar(&o.verifySelectorPath, "verify-filter-selector", "", "verify a captured filter-selector artifact")
+	flag.BoolVar(&o.toolEnrichmentSelfcheck, "tool-enrichment-selfcheck", false, "run the read-only tool-enrichment fan-out proof")
+	flag.StringVar(&o.toolEnrichmentOutput, "tool-enrichment-output", "", "write the read-only tool-enrichment proof artifact")
+	flag.StringVar(&o.verifyToolEnrichmentPath, "verify-tool-enrichment", "", "verify a captured tool-enrichment artifact")
+	flag.BoolVar(&o.provenanceFoldSelfcheck, "provenance-fold-selfcheck", false, "run the provenance-preserving hierarchical fold proof")
+	flag.StringVar(&o.provenanceFoldOutput, "provenance-fold-output", "", "write the hierarchical fold proof artifact")
+	flag.StringVar(&o.verifyProvenanceFoldPath, "verify-provenance-fold", "", "verify a captured hierarchical fold artifact")
+	flag.BoolVar(&o.falsificationSelfcheck, "falsification-selfcheck", false, "run the tuned-baseline falsification benchmark")
+	flag.StringVar(&o.falsificationOutput, "falsification-output", "", "write the falsification benchmark artifact")
+	flag.StringVar(&o.verifyFalsificationPath, "verify-falsification", "", "verify a captured falsification artifact")
+	flag.BoolVar(&o.effectBatchSelfcheck, "effect-batch-selfcheck", false, "run the witnessed effect-batch proof")
+	flag.StringVar(&o.effectBatchOutput, "effect-batch-output", "", "write the effect-batch proof artifact")
+	flag.StringVar(&o.verifyEffectBatchPath, "verify-effect-batch", "", "verify a captured effect-batch artifact")
+	flag.StringVar(&o.corpusInputPath, "corpus-input", "", "freeze a public GitHub issue JSON export into leakage-controlled corpus artifacts")
+	flag.StringVar(&o.corpusPublicPath, "corpus-public-output", "", "public candidate-input corpus output")
+	flag.StringVar(&o.corpusAnswersPath, "corpus-answers-output", "", "separate answer bundle output")
+	flag.StringVar(&o.corpusReportPath, "corpus-report-output", "", "corpus provenance/leak/grade report output")
+	flag.StringVar(&o.corpusSource, "corpus-source", "github.com/anthony-chaudhary/fak/issues", "source provenance label")
+	flag.StringVar(&o.verifyCorpusPublic, "verify-corpus-public", "", "verify public corpus with answer/report artifacts")
+	flag.StringVar(&o.verifyCorpusAnswers, "verify-corpus-answers", "", "answer bundle paired with --verify-corpus-public")
+	flag.StringVar(&o.verifyCorpusReport, "verify-corpus-report", "", "report paired with --verify-corpus-public")
+	flag.StringVar(&o.gradeCorpusAnswers, "grade-corpus-answers", "", "hidden answer bundle for independent grading")
+	flag.StringVar(&o.gradeCorpusSubmission, "grade-corpus-submission", "", "candidate submission to grade")
+	flag.StringVar(&o.gradeCorpusOutput, "grade-corpus-output", "", "write independent grade report")
+	flag.StringVar(&o.tunedBaselinesPublic, "tuned-baselines-public", "", "public corpus for tuned baseline dry-run")
+	flag.StringVar(&o.tunedBaselinesAnswers, "tuned-baselines-answers", "", "answer bundle for tuning/grading")
+	flag.StringVar(&o.tunedBaselinesOutput, "tuned-baselines-output", "", "write tuned baseline report")
+	flag.StringVar(&o.verifyTunedBaselinesPath, "verify-tuned-baselines", "", "verify a tuned baseline report")
+	flag.StringVar(&o.routingVOIOutput, "routing-voi-output", "", "run adaptive filter/tool routing experiment")
+	flag.StringVar(&o.verifyRoutingVOIPath, "verify-routing-voi", "", "verify an adaptive routing experiment")
+	flag.StringVar(&o.filterToolSchedulerFold, "filter-tool-scheduler-fold", "", "stabilized tool fold input for scheduler matrix")
+	flag.StringVar(&o.filterToolSchedulerOutput, "filter-tool-scheduler-output", "", "write filter/tool scheduler matrix")
+	flag.IntVar(&o.filterToolSchedulerTrials, "filter-tool-scheduler-trials", 5, "controlled trials per scheduler policy")
+	flag.StringVar(&o.verifyFilterToolSchedulerPath, "verify-filter-tool-scheduler", "", "verify filter/tool scheduler matrix")
+	flag.StringVar(&o.liveFilterToolPacket, "live-filter-tool-packet", "", "frozen semantic packet for live filter/tool matrix")
+	flag.StringVar(&o.liveFilterToolFold, "live-filter-tool-fold", "", "stabilized fold for live filter/tool matrix")
+	flag.StringVar(&o.liveFilterToolOutput, "live-filter-tool-output", "", "write live filter/tool scheduler matrix")
+	flag.StringVar(&o.disagreementPacket, "disagreement-audit-packet", "", "frozen semantic packet for live disagreement audit")
+	flag.StringVar(&o.disagreementFold, "disagreement-audit-fold", "", "stabilized fold for live disagreement audit")
+	flag.StringVar(&o.disagreementLive, "disagreement-audit-live", "", "S8o live artifact for disagreement audit")
+	flag.StringVar(&o.disagreementOutput, "disagreement-audit-output", "", "write live disagreement audit")
+	flag.StringVar(&o.verifyDisagreementPath, "verify-disagreement-audit", "", "verify a live disagreement audit artifact")
+	flag.StringVar(&o.counterfactualSource, "counterfactual-source", "", "source semantic packet for paired counterfactual corpus")
+	flag.StringVar(&o.counterfactualCorpusOut, "counterfactual-corpus-output", "", "write paired counterfactual corpus")
+	flag.StringVar(&o.counterfactualCorpusIn, "counterfactual-corpus", "", "paired counterfactual corpus")
+	flag.StringVar(&o.counterfactualJudgmentOut, "counterfactual-judgment-output", "", "write counterfactual judgments")
+	flag.StringVar(&o.counterfactualAdjudicator, "counterfactual-adjudicator", "", "counterfactual adjudicator identity")
+	flag.StringVar(&o.counterfactualFoldA, "counterfactual-fold-a", "", "first model-distinct judgment bundle")
+	flag.StringVar(&o.counterfactualFoldB, "counterfactual-fold-b", "", "second model-distinct judgment bundle")
+	flag.StringVar(&o.counterfactualFoldOut, "counterfactual-fold-output", "", "write counterfactual consensus fold")
+	flag.StringVar(&o.verifyCounterfactualCorpus, "verify-counterfactual-corpus", "", "counterfactual corpus to verify")
+	flag.StringVar(&o.verifyCounterfactualFold, "verify-counterfactual-fold", "", "counterfactual fold to verify")
+}
+
+func registerDemoFlagsB(o *demoOptions) {
+	flag.StringVar(&o.trueAdmissionOut, "true-admission-output", "", "write true pre-answer admission matrix")
+	flag.StringVar(&o.verifyTrueAdmissionPath, "verify-true-admission", "", "verify true pre-answer admission matrix")
+	flag.StringVar(&o.naturalCorpusOut, "natural-multitool-corpus-output", "", "write natural multi-tool corpus")
+	flag.StringVar(&o.naturalCorpusIn, "natural-multitool-corpus", "", "natural multi-tool corpus")
+	flag.StringVar(&o.naturalJudgeOut, "natural-multitool-judgment-output", "", "write natural multi-tool judgments")
+	flag.StringVar(&o.naturalAdjudicator, "natural-multitool-adjudicator", "", "natural multi-tool adjudicator identity")
+	flag.StringVar(&o.naturalFoldA, "natural-multitool-fold-a", "", "first natural judgment bundle")
+	flag.StringVar(&o.naturalFoldB, "natural-multitool-fold-b", "", "second natural judgment bundle")
+	flag.StringVar(&o.naturalFoldOut, "natural-multitool-fold-output", "", "write natural consensus fold")
+	flag.StringVar(&o.verifyNaturalCorpus, "verify-natural-multitool-corpus", "", "natural corpus to verify")
+	flag.StringVar(&o.verifyNaturalFold, "verify-natural-multitool-fold", "", "natural fold to verify")
+	flag.StringVar(&o.naturalSurfaceOut, "natural-multitool-surface-output", "", "write natural decision surface")
+	flag.StringVar(&o.verifyNaturalSurfacePath, "verify-natural-multitool-surface", "", "verify natural decision surface")
+	flag.StringVar(&o.verifyLiveFilterToolPath, "verify-live-filter-tool", "", "verify live filter/tool scheduler matrix")
+	flag.Int64Var(&o.routingVOISeed, "routing-voi-seed", 6105, "deterministic routing experiment seed")
+	flag.IntVar(&o.routingVOITrials, "routing-voi-trials", 24, "routing experiment repetitions")
+	flag.IntVar(&o.routingVOIRecords, "routing-voi-records", 200, "records per mixture and trial")
+	flag.StringVar(&o.semanticCorpus, "semantic-packet-corpus", "", "public corpus used to build a blinded semantic packet")
+	flag.StringVar(&o.semanticPacketOutput, "semantic-packet-output", "", "write a blinded semantic annotation packet")
+	flag.IntVar(&o.semanticPerSplit, "semantic-per-split", 16, "semantic packet records per tune/test split")
+	flag.StringVar(&o.semanticPacketInput, "semantic-adjudicate-packet", "", "semantic packet to adjudicate through a live endpoint")
+	flag.StringVar(&o.semanticJudgmentOutput, "semantic-adjudicate-output", "", "write one adjudicator bundle")
+	flag.StringVar(&o.semanticEndpoint, "semantic-endpoint", "", "OpenAI-compatible endpoint root for semantic adjudication")
+	flag.StringVar(&o.semanticAPIKey, "semantic-api-key", "", "API key for semantic endpoint")
+	flag.StringVar(&o.semanticModel, "semantic-model", "", "semantic adjudicator model id")
+	flag.StringVar(&o.semanticAdjudicator, "semantic-adjudicator", "", "independent adjudicator identity")
+	flag.StringVar(&o.semanticPromptVersion, "semantic-prompt-version", semanticPromptV1, "semantic adjudication rubric version")
+	flag.StringVar(&o.semanticFoldPacket, "semantic-fold-packet", "", "packet bound to two independent adjudicators")
+	flag.StringVar(&o.semanticFoldA, "semantic-fold-a", "", "first independent adjudicator bundle")
+	flag.StringVar(&o.semanticFoldB, "semantic-fold-b", "", "second independent adjudicator bundle")
+	flag.StringVar(&o.semanticGoldOutput, "semantic-gold-output", "", "write hidden semantic consensus/abstention answers")
+	flag.StringVar(&o.semanticTriplePacket, "semantic-triple-packet", "", "packet for three-adjudicator tool fold")
+	flag.StringVar(&o.semanticTripleOldA, "semantic-triple-old-a", "", "legacy adjudicator A")
+	flag.StringVar(&o.semanticTripleOldB, "semantic-triple-old-b", "", "legacy adjudicator B for old agreement")
+	flag.StringVar(&o.semanticTripleV2A, "semantic-triple-v2-a", "", "v2 adjudicator A")
+	flag.StringVar(&o.semanticTripleV2B, "semantic-triple-v2-b", "", "v2 adjudicator B")
+	flag.StringVar(&o.semanticTripleOutput, "semantic-triple-output", "", "three-adjudicator tool fold output")
+	flag.StringVar(&o.semanticGradeGold, "semantic-grade-gold", "", "hidden semantic answers for blind grading")
+	flag.StringVar(&o.semanticGradeSubmission, "semantic-grade-submission", "", "candidate semantic submission")
+	flag.StringVar(&o.semanticGradeOutput, "semantic-grade-output", "", "write semantic blind grade")
+	flag.StringVar(&o.semanticGradeSplit, "semantic-grade-split", "test", "split to grade")
+	flag.StringVar(&o.verifySemanticGoldPath, "verify-semantic-gold", "", "verify semantic consensus artifact")
+	flag.StringVar(&o.verifySemanticGradePath, "verify-semantic-grade", "", "verify semantic blind grade")
+	flag.StringVar(&o.liveMatrixPacket, "live-matrix-packet", "", "S8i public semantic packet")
+	flag.StringVar(&o.liveMatrixGold, "live-matrix-gold", "", "hidden S8i semantic gold")
+	flag.StringVar(&o.liveMatrixOutput, "live-matrix-output", "", "write live comparative matrix")
+	flag.StringVar(&o.verifyLiveMatrixPath, "verify-live-matrix", "", "verify live semantic matrix")
+	flag.StringVar(&o.liveMatrixEndpoint, "live-matrix-endpoint", "", "OpenAI-compatible endpoint")
+	flag.StringVar(&o.liveMatrixAPIKey, "live-matrix-api-key", "", "live endpoint API key")
+	flag.StringVar(&o.liveMatrixModel, "live-matrix-model", "", "live endpoint model")
+	flag.StringVar(&o.liveMatrixClass, "live-matrix-endpoint-class", "", "public provenance class")
+	flag.StringVar(&o.liveMatrixHardware, "live-matrix-hardware", "", "public hardware provenance")
+	flag.StringVar(&o.liveMatrixNativeBatch, "live-matrix-native-batch", "unsupported", "endpoint native batching capability")
+	flag.StringVar(&o.liveMatrixPrefixCache, "live-matrix-prefix-cache", "usage-observed-only", "endpoint prefix-cache capability")
+	flag.StringVar(&o.liveMatrixPricing, "live-matrix-pricing", "unavailable", "pricing snapshot provenance")
+	flag.IntVar(&o.liveMatrixTrials, "live-matrix-trials", 3, "repeated trials per pipeline")
+	flag.IntVar(&o.liveMatrixWorkers, "live-matrix-workers", 8, "bounded micro-context concurrency")
+	flag.Float64Var(&o.liveMatrixInputPrice, "live-matrix-input-per-mtok", -1, "input USD per million tokens; negative means unavailable")
+	flag.Float64Var(&o.liveMatrixOutputPrice, "live-matrix-output-per-mtok", -1, "output USD per million tokens; negative means unavailable")
+	flag.StringVar(&o.strongMatrixPacket, "strong-matrix-packet", "", "S8i packet for strengthened baselines")
+	flag.StringVar(&o.strongMatrixGold, "strong-matrix-gold", "", "hidden S8i gold")
+	flag.StringVar(&o.strongMatrixOutput, "strong-matrix-output", "", "write strengthened live matrix")
+	flag.StringVar(&o.verifyStrongMatrixPath, "verify-strong-matrix", "", "verify strengthened live matrix")
+	flag.StringVar(&o.strongMatrixEndpoint, "strong-matrix-endpoint", "", "OpenAI-compatible endpoint")
+	flag.StringVar(&o.strongMatrixAPIKey, "strong-matrix-api-key", "", "endpoint API key")
+	flag.StringVar(&o.strongMatrixModel, "strong-matrix-model", "", "endpoint model")
+	flag.StringVar(&o.strongMatrixClass, "strong-matrix-endpoint-class", "", "endpoint class")
+	flag.StringVar(&o.strongMatrixHardware, "strong-matrix-hardware", "", "hardware provenance")
+	flag.StringVar(&o.strongMatrixBatch, "strong-matrix-native-batch", "unsupported", "native batching capability")
+	flag.StringVar(&o.strongMatrixCache, "strong-matrix-prefix-cache", "usage-observed-only", "prefix-cache capability")
+	flag.StringVar(&o.strongMatrixPricing, "strong-matrix-pricing", "unavailable", "pricing provenance")
+	flag.IntVar(&o.strongMatrixTrials, "strong-matrix-trials", 2, "held-out trials")
+	flag.IntVar(&o.strongMatrixWorkers, "strong-matrix-workers", 8, "request admission limit")
+	flag.IntVar(&o.strongMatrixK, "strong-matrix-retrieval-k", 3, "top-k tune examples")
+	flag.IntVar(&o.strongMatrixChunk, "strong-matrix-chunk-size", 4, "parallel chunk size")
+	flag.StringVar(&o.tailPacket, "tail-policy-packet", "", "S8i packet for tail policies")
+	flag.StringVar(&o.tailGold, "tail-policy-gold", "", "hidden S8i gold")
+	flag.StringVar(&o.tailOutput, "tail-policy-output", "", "write live tail-policy matrix")
+	flag.StringVar(&o.verifyTailPath, "verify-tail-policy", "", "verify live tail-policy matrix")
+	flag.StringVar(&o.tailEndpoint, "tail-policy-endpoint", "", "OpenAI-compatible endpoint")
+	flag.StringVar(&o.tailAPIKey, "tail-policy-api-key", "", "endpoint API key")
+	flag.StringVar(&o.tailModel, "tail-policy-model", "", "endpoint model")
+	flag.StringVar(&o.tailClass, "tail-policy-endpoint-class", "", "endpoint provenance class")
+	flag.StringVar(&o.tailHardware, "tail-policy-hardware", "", "hardware provenance")
+	flag.IntVar(&o.tailTrials, "tail-policy-trials", 2, "trials per policy")
+	flag.IntVar(&o.tailWorkers, "tail-policy-workers", 8, "bounded workers")
+	flag.IntVar(&o.tailSufficiency, "tail-policy-sufficiency", 12, "confirmed records before early stop")
+	flag.Int64Var(&o.tailWindowMS, "tail-policy-window-ms", 15000, "per-window deadline milliseconds")
+	flag.Int64Var(&o.tailTaskMS, "tail-policy-task-ms", 60000, "global task deadline milliseconds")
+	flag.Int64Var(&o.tailHedgeMS, "tail-policy-hedge-ms", 6000, "bounded hedge delay milliseconds")
+	flag.StringVar(&o.qualityInput, "quality-input", "", "ingest one run witness into a quality ledger")
+	flag.StringVar(&o.qualityOutput, "quality-output", "", "write the quality ledger")
+	flag.IntVar(&o.qualitySamples, "quality-samples", 16, "maximum sampled context IDs")
+	flag.StringVar(&o.verifyQualityPath, "verify-quality", "", "verify a captured quality ledger")
+	flag.StringVar(&o.fairnessOutput, "fairness-witness", "", "run the S7 mixed-tenant fairness fixture")
+	flag.StringVar(&o.verifyFairnessPath, "verify-fairness", "", "verify a captured S7 fairness artifact")
+	flag.StringVar(&o.gradeInput, "health-input", "", "quality ledger to grade for micro-context health")
+	flag.StringVar(&o.gradeOutput, "health-scorecard", "", "write micro-context health scorecard")
+	flag.StringVar(&o.verifyGradePath, "verify-health-scorecard", "", "verify micro-context health scorecard")
+}
+
+func runDemoCommands1(o demoOptions) bool {
+	if o.verifyFairnessPath != "" {
+		runVerify("verify-fairness", o.verifyFairnessPath, verifyFairnessArtifact)
+		return true
 	}
-	if fairnessOutput != "" {
-		if err := writeFairness(fairnessOutput); err != nil {
+	if o.fairnessOutput != "" {
+		if err := writeFairness(o.fairnessOutput); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		return
+		return true
 	}
-	if verifyGradePath != "" {
-		runVerify("verify-health-scorecard", verifyGradePath, verifyHealthArtifact)
-		return
+	if o.verifyGradePath != "" {
+		runVerify("verify-health-scorecard", o.verifyGradePath, verifyHealthArtifact)
+		return true
 	}
-	if gradeOutput != "" {
-		if err := writeHealthGrade(gradeInput, gradeOutput); err != nil {
+	if o.gradeOutput != "" {
+		if err := writeHealthGrade(o.gradeInput, o.gradeOutput); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		return
+		return true
 	}
-	if corpusInputPath != "" {
-		if err := freezeCorpus(corpusInputPath, corpusPublicPath, corpusAnswersPath, corpusReportPath, corpusSource); err != nil {
+	if o.corpusInputPath != "" {
+		if err := freezeCorpus(o.corpusInputPath, o.corpusPublicPath, o.corpusAnswersPath, o.corpusReportPath, o.corpusSource); err != nil {
 			fmt.Fprintf(os.Stderr, "microcontextdemo: corpus freeze: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS corpus public=%s answers=%s report=%s\n", corpusPublicPath, corpusAnswersPath, corpusReportPath)
-		return
+		fmt.Printf("PASS corpus public=%s answers=%s report=%s\n", o.corpusPublicPath, o.corpusAnswersPath, o.corpusReportPath)
+		return true
 	}
-	if tailPacket != "" {
-		if err := runTailPolicyMatrix(tailPacket, tailGold, tailOutput, tailEndpoint, tailAPIKey, tailModel, tailClass, tailHardware, tailTrials, tailWorkers, tailWindowMS, tailTaskMS, tailHedgeMS, tailSufficiency); err != nil {
+	if o.tailPacket != "" {
+		if err := runTailPolicyMatrix(o.tailPacket, o.tailGold, o.tailOutput, o.tailEndpoint, o.tailAPIKey, o.tailModel, o.tailClass, o.tailHardware, o.tailTrials, o.tailWorkers, o.tailWindowMS, o.tailTaskMS, o.tailHedgeMS, o.tailSufficiency); err != nil {
 			fmt.Fprintf(os.Stderr, "microcontextdemo: tail policy: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS tail policy %s\n", tailOutput)
-		return
+		fmt.Printf("PASS tail policy %s\n", o.tailOutput)
+		return true
 	}
-	if verifyTailPath != "" {
-		runVerify("verify-tail-policy", verifyTailPath, verifyTailPolicyMatrix)
-		return
+	if o.verifyTailPath != "" {
+		runVerify("verify-tail-policy", o.verifyTailPath, verifyTailPolicyMatrix)
+		return true
 	}
-	if strongMatrixPacket != "" {
-		if err := runStrongLiveMatrix(strongMatrixPacket, strongMatrixGold, strongMatrixOutput, strongMatrixEndpoint, strongMatrixAPIKey, strongMatrixModel, strongMatrixClass, strongMatrixHardware, strongMatrixBatch, strongMatrixCache, strongMatrixPricing, strongMatrixTrials, strongMatrixWorkers, strongMatrixK, strongMatrixChunk); err != nil {
+	if o.strongMatrixPacket != "" {
+		if err := runStrongLiveMatrix(o.strongMatrixPacket, o.strongMatrixGold, o.strongMatrixOutput, o.strongMatrixEndpoint, o.strongMatrixAPIKey, o.strongMatrixModel, o.strongMatrixClass, o.strongMatrixHardware, o.strongMatrixBatch, o.strongMatrixCache, o.strongMatrixPricing, o.strongMatrixTrials, o.strongMatrixWorkers, o.strongMatrixK, o.strongMatrixChunk); err != nil {
 			fmt.Fprintf(os.Stderr, "microcontextdemo: strong matrix: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS strong matrix %s\n", strongMatrixOutput)
-		return
+		fmt.Printf("PASS strong matrix %s\n", o.strongMatrixOutput)
+		return true
 	}
-	if verifyStrongMatrixPath != "" {
-		runVerify("verify-strong-matrix", verifyStrongMatrixPath, verifyStrongLiveMatrix)
-		return
+	if o.verifyStrongMatrixPath != "" {
+		runVerify("verify-strong-matrix", o.verifyStrongMatrixPath, verifyStrongLiveMatrix)
+		return true
 	}
-	if liveMatrixPacket != "" {
-		if err := runLiveSemanticMatrix(liveMatrixPacket, liveMatrixGold, liveMatrixOutput, liveMatrixEndpoint, liveMatrixAPIKey, liveMatrixModel, liveMatrixClass, liveMatrixHardware, liveMatrixNativeBatch, liveMatrixPrefixCache, liveMatrixPricing, liveMatrixInputPrice, liveMatrixOutputPrice, liveMatrixTrials, liveMatrixWorkers); err != nil {
+	if o.liveMatrixPacket != "" {
+		if err := runLiveSemanticMatrix(o.liveMatrixPacket, o.liveMatrixGold, o.liveMatrixOutput, o.liveMatrixEndpoint, o.liveMatrixAPIKey, o.liveMatrixModel, o.liveMatrixClass, o.liveMatrixHardware, o.liveMatrixNativeBatch, o.liveMatrixPrefixCache, o.liveMatrixPricing, o.liveMatrixInputPrice, o.liveMatrixOutputPrice, o.liveMatrixTrials, o.liveMatrixWorkers); err != nil {
 			fmt.Fprintf(os.Stderr, "microcontextdemo: live matrix: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS live matrix %s\n", liveMatrixOutput)
-		return
+		fmt.Printf("PASS live matrix %s\n", o.liveMatrixOutput)
+		return true
 	}
-	if verifyLiveMatrixPath != "" {
-		runVerify("verify-live-matrix", verifyLiveMatrixPath, verifyLiveSemanticMatrix)
-		return
+	if o.verifyLiveMatrixPath != "" {
+		runVerify("verify-live-matrix", o.verifyLiveMatrixPath, verifyLiveSemanticMatrix)
+		return true
 	}
-	if semanticTriplePacket != "" {
-		if semanticTripleOldA == "" || semanticTripleOldB == "" || semanticTripleV2A == "" || semanticTripleV2B == "" || semanticTripleOutput == "" {
+	if o.semanticTriplePacket != "" {
+		if o.semanticTripleOldA == "" || o.semanticTripleOldB == "" || o.semanticTripleV2A == "" || o.semanticTripleV2B == "" || o.semanticTripleOutput == "" {
 			fmt.Fprintln(os.Stderr, "microcontextdemo: semantic triple fold requires all inputs and output")
 			os.Exit(2)
 		}
-		if err := foldSemanticToolTriple(semanticTriplePacket, semanticTripleOldA, semanticTripleOldB, semanticTripleV2A, semanticTripleV2B, semanticTripleOutput); err != nil {
+		if err := foldSemanticToolTriple(o.semanticTriplePacket, o.semanticTripleOldA, o.semanticTripleOldB, o.semanticTripleV2A, o.semanticTripleV2B, o.semanticTripleOutput); err != nil {
 			fmt.Fprintf(os.Stderr, "microcontextdemo: semantic triple fold: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS semantic triple fold %s\n", semanticTripleOutput)
-		return
+		fmt.Printf("PASS semantic triple fold %s\n", o.semanticTripleOutput)
+		return true
 	}
-	if semanticFoldPacket != "" {
-		if err := foldSemanticAdjudicators(semanticFoldPacket, semanticFoldA, semanticFoldB, semanticGoldOutput); err != nil {
+	if o.semanticFoldPacket != "" {
+		if err := foldSemanticAdjudicators(o.semanticFoldPacket, o.semanticFoldA, o.semanticFoldB, o.semanticGoldOutput); err != nil {
 			fmt.Fprintf(os.Stderr, "microcontextdemo: semantic fold: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS semantic fold %s\n", semanticGoldOutput)
-		return
+		fmt.Printf("PASS semantic fold %s\n", o.semanticGoldOutput)
+		return true
 	}
-	if semanticGradeSubmission != "" {
-		if err := gradeSemanticFiles(semanticGradeGold, semanticGradeSubmission, semanticGradeOutput, semanticGradeSplit); err != nil {
+	if o.semanticGradeSubmission != "" {
+		if err := gradeSemanticFiles(o.semanticGradeGold, o.semanticGradeSubmission, o.semanticGradeOutput, o.semanticGradeSplit); err != nil {
 			fmt.Fprintf(os.Stderr, "microcontextdemo: semantic grade: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS semantic grade %s\n", semanticGradeOutput)
-		return
+		fmt.Printf("PASS semantic grade %s\n", o.semanticGradeOutput)
+		return true
 	}
-	if verifySemanticGoldPath != "" {
-		runVerify("verify-semantic-gold", verifySemanticGoldPath, verifySemanticGold)
-		return
+	if o.verifySemanticGoldPath != "" {
+		runVerify("verify-semantic-gold", o.verifySemanticGoldPath, verifySemanticGold)
+		return true
 	}
-	if verifySemanticGradePath != "" {
-		runVerify("verify-semantic-grade", verifySemanticGradePath, verifySemanticGrade)
-		return
+	if o.verifySemanticGradePath != "" {
+		runVerify("verify-semantic-grade", o.verifySemanticGradePath, verifySemanticGrade)
+		return true
 	}
-	if semanticCorpus != "" {
-		if err := makeSemanticPacket(semanticCorpus, semanticPacketOutput, semanticPerSplit); err != nil {
+	if o.semanticCorpus != "" {
+		if err := makeSemanticPacket(o.semanticCorpus, o.semanticPacketOutput, o.semanticPerSplit); err != nil {
 			fmt.Fprintf(os.Stderr, "microcontextdemo: semantic packet: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS semantic packet %s\n", semanticPacketOutput)
-		return
+		fmt.Printf("PASS semantic packet %s\n", o.semanticPacketOutput)
+		return true
 	}
-	if semanticPacketInput != "" {
-		if err := runSemanticAdjudicator(semanticPacketInput, semanticJudgmentOutput, semanticEndpoint, semanticAPIKey, semanticModel, semanticAdjudicator, semanticPromptVersion); err != nil {
+	if o.semanticPacketInput != "" {
+		if err := runSemanticAdjudicator(o.semanticPacketInput, o.semanticJudgmentOutput, o.semanticEndpoint, o.semanticAPIKey, o.semanticModel, o.semanticAdjudicator, o.semanticPromptVersion); err != nil {
 			fmt.Fprintf(os.Stderr, "microcontextdemo: semantic adjudicator: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS semantic adjudicator %s\n", semanticJudgmentOutput)
-		return
+		fmt.Printf("PASS semantic adjudicator %s\n", o.semanticJudgmentOutput)
+		return true
 	}
-	if verifyLiveFilterToolPath != "" {
-		runVerify("verify-live-filter-tool", verifyLiveFilterToolPath, verifyLiveFilterToolMatrix)
-		return
+	if o.verifyLiveFilterToolPath != "" {
+		runVerify("verify-live-filter-tool", o.verifyLiveFilterToolPath, verifyLiveFilterToolMatrix)
+		return true
 	}
-	if naturalCorpusOut != "" {
-		if err := buildNaturalCorpus(naturalCorpusOut); err != nil {
+	if o.naturalCorpusOut != "" {
+		if err := buildNaturalCorpus(o.naturalCorpusOut); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS natural corpus %s\n", naturalCorpusOut)
-		return
+		fmt.Printf("PASS natural corpus %s\n", o.naturalCorpusOut)
+		return true
 	}
-	if naturalJudgeOut != "" {
-		endpoint, apiKey := semanticEndpoint, semanticAPIKey
+	return false
+}
+
+func runDemoCommands2A(o demoOptions) bool {
+	if o.naturalJudgeOut != "" {
+		endpoint, apiKey := o.semanticEndpoint, o.semanticAPIKey
 		if endpoint == "" {
 			endpoint = os.Getenv("OPENAI_BASE_URL")
 		}
 		if apiKey == "" {
 			apiKey = os.Getenv("OPENAI_API_KEY")
 		}
-		if err := runNaturalJudge(context.Background(), naturalCorpusIn, naturalJudgeOut, endpoint, apiKey, semanticModel, naturalAdjudicator); err != nil {
+		if err := runNaturalJudge(context.Background(), o.naturalCorpusIn, o.naturalJudgeOut, endpoint, apiKey, o.semanticModel, o.naturalAdjudicator); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS natural judgments %s\n", naturalJudgeOut)
-		return
+		fmt.Printf("PASS natural judgments %s\n", o.naturalJudgeOut)
+		return true
 	}
-	if naturalFoldOut != "" {
-		if err := foldNatural(naturalCorpusIn, naturalFoldA, naturalFoldB, naturalFoldOut); err != nil {
+	if o.naturalFoldOut != "" {
+		if err := foldNatural(o.naturalCorpusIn, o.naturalFoldA, o.naturalFoldB, o.naturalFoldOut); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS natural fold %s\n", naturalFoldOut)
-		return
+		fmt.Printf("PASS natural fold %s\n", o.naturalFoldOut)
+		return true
 	}
-	if naturalSurfaceOut != "" {
-		endpoint, apiKey := semanticEndpoint, semanticAPIKey
+	if o.naturalSurfaceOut != "" {
+		endpoint, apiKey := o.semanticEndpoint, o.semanticAPIKey
 		if endpoint == "" {
 			endpoint = os.Getenv("OPENAI_BASE_URL")
 		}
 		if apiKey == "" {
 			apiKey = os.Getenv("OPENAI_API_KEY")
 		}
-		if err := runNaturalSurface(context.Background(), naturalCorpusIn, verifyNaturalFold, naturalSurfaceOut, endpoint, apiKey, liveMatrixModel); err != nil {
+		if err := runNaturalSurface(context.Background(), o.naturalCorpusIn, o.verifyNaturalFold, o.naturalSurfaceOut, endpoint, apiKey, o.liveMatrixModel); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS natural surface %s\n", naturalSurfaceOut)
-		return
+		fmt.Printf("PASS natural surface %s\n", o.naturalSurfaceOut)
+		return true
 	}
-	if verifyNaturalFold != "" {
-		if err := verifyNatural(verifyNaturalCorpus, verifyNaturalFold); err != nil {
+	if o.verifyNaturalFold != "" {
+		if err := verifyNatural(o.verifyNaturalCorpus, o.verifyNaturalFold); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS natural verified %s\n", verifyNaturalFold)
-		return
+		fmt.Printf("PASS natural verified %s\n", o.verifyNaturalFold)
+		return true
 	}
-	if verifyNaturalSurfacePath != "" {
-		if err := verifyNaturalSurface(verifyNaturalSurfacePath); err != nil {
+	if o.verifyNaturalSurfacePath != "" {
+		if err := verifyNaturalSurface(o.verifyNaturalSurfacePath); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS natural surface verified %s\n", verifyNaturalSurfacePath)
-		return
+		fmt.Printf("PASS natural surface verified %s\n", o.verifyNaturalSurfacePath)
+		return true
 	}
-	if counterfactualCorpusOut != "" {
-		if err := buildCounterfactualCorpus(counterfactualSource, counterfactualCorpusOut); err != nil {
+	if o.counterfactualCorpusOut != "" {
+		if err := buildCounterfactualCorpus(o.counterfactualSource, o.counterfactualCorpusOut); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS counterfactual corpus %s\n", counterfactualCorpusOut)
-		return
+		fmt.Printf("PASS counterfactual corpus %s\n", o.counterfactualCorpusOut)
+		return true
 	}
-	if counterfactualJudgmentOut != "" {
-		endpoint, apiKey := semanticEndpoint, semanticAPIKey
+	if o.counterfactualJudgmentOut != "" {
+		endpoint, apiKey := o.semanticEndpoint, o.semanticAPIKey
 		if endpoint == "" {
 			endpoint = os.Getenv("OPENAI_BASE_URL")
 		}
 		if apiKey == "" {
 			apiKey = os.Getenv("OPENAI_API_KEY")
 		}
-		if err := runCounterfactualAdjudicator(context.Background(), counterfactualCorpusIn, counterfactualJudgmentOut, endpoint, apiKey, semanticModel, counterfactualAdjudicator); err != nil {
+		if err := runCounterfactualAdjudicator(context.Background(), o.counterfactualCorpusIn, o.counterfactualJudgmentOut, endpoint, apiKey, o.semanticModel, o.counterfactualAdjudicator); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS counterfactual judgments %s\n", counterfactualJudgmentOut)
-		return
+		fmt.Printf("PASS counterfactual judgments %s\n", o.counterfactualJudgmentOut)
+		return true
 	}
-	if counterfactualFoldOut != "" {
-		if err := foldCounterfactual(counterfactualCorpusIn, counterfactualFoldA, counterfactualFoldB, counterfactualFoldOut); err != nil {
+	if o.counterfactualFoldOut != "" {
+		if err := foldCounterfactual(o.counterfactualCorpusIn, o.counterfactualFoldA, o.counterfactualFoldB, o.counterfactualFoldOut); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS counterfactual fold %s\n", counterfactualFoldOut)
-		return
+		fmt.Printf("PASS counterfactual fold %s\n", o.counterfactualFoldOut)
+		return true
 	}
-	if trueAdmissionOut != "" {
-		endpoint, apiKey := semanticEndpoint, semanticAPIKey
+	if o.trueAdmissionOut != "" {
+		endpoint, apiKey := o.semanticEndpoint, o.semanticAPIKey
 		if endpoint == "" {
 			endpoint = os.Getenv("OPENAI_BASE_URL")
 		}
 		if apiKey == "" {
 			apiKey = os.Getenv("OPENAI_API_KEY")
 		}
-		if err := runTrueAdmission(context.Background(), counterfactualCorpusIn, verifyCounterfactualFold, trueAdmissionOut, endpoint, apiKey, liveMatrixModel); err != nil {
+		if err := runTrueAdmission(context.Background(), o.counterfactualCorpusIn, o.verifyCounterfactualFold, o.trueAdmissionOut, endpoint, apiKey, o.liveMatrixModel); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS true admission %s\n", trueAdmissionOut)
-		return
+		fmt.Printf("PASS true admission %s\n", o.trueAdmissionOut)
+		return true
 	}
-	if verifyCounterfactualFold != "" {
-		if err := verifyCounterfactual(verifyCounterfactualCorpus, verifyCounterfactualFold); err != nil {
+	if o.verifyCounterfactualFold != "" {
+		if err := verifyCounterfactual(o.verifyCounterfactualCorpus, o.verifyCounterfactualFold); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS counterfactual verified %s\n", verifyCounterfactualFold)
-		return
+		fmt.Printf("PASS counterfactual verified %s\n", o.verifyCounterfactualFold)
+		return true
 	}
-	if verifyTrueAdmissionPath != "" {
-		if err := verifyTrueAdmission(verifyTrueAdmissionPath); err != nil {
+	return false
+}
+
+func runDemoCommands2B(o demoOptions) bool {
+	if o.verifyTrueAdmissionPath != "" {
+		if err := verifyTrueAdmission(o.verifyTrueAdmissionPath); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS true admission verified %s\n", verifyTrueAdmissionPath)
-		return
+		fmt.Printf("PASS true admission verified %s\n", o.verifyTrueAdmissionPath)
+		return true
 	}
-	if verifyDisagreementPath != "" {
-		if err := verifyDisagreementAudit(verifyDisagreementPath); err != nil {
+	if o.verifyDisagreementPath != "" {
+		if err := verifyDisagreementAudit(o.verifyDisagreementPath); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS: verified %s\n", verifyDisagreementPath)
-		return
+		fmt.Printf("PASS: verified %s\n", o.verifyDisagreementPath)
+		return true
 	}
-	if disagreementOutput != "" {
-		endpoint, apiKey := semanticEndpoint, semanticAPIKey
+	if o.disagreementOutput != "" {
+		endpoint, apiKey := o.semanticEndpoint, o.semanticAPIKey
 		if endpoint == "" {
 			endpoint = os.Getenv("OPENAI_BASE_URL")
 		}
 		if apiKey == "" {
 			apiKey = os.Getenv("OPENAI_API_KEY")
 		}
-		if disagreementPacket == "" || disagreementFold == "" || disagreementLive == "" {
+		if o.disagreementPacket == "" || o.disagreementFold == "" || o.disagreementLive == "" {
 			fmt.Fprintln(os.Stderr, "disagreement audit requires packet, fold, and live artifact")
 			os.Exit(2)
 		}
-		if err := runDisagreementAudit(context.Background(), disagreementPacket, disagreementFold, disagreementLive, disagreementOutput, endpoint, apiKey, liveMatrixModel); err != nil {
+		if err := runDisagreementAudit(context.Background(), o.disagreementPacket, o.disagreementFold, o.disagreementLive, o.disagreementOutput, endpoint, apiKey, o.liveMatrixModel); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS disagreement audit %s\n", disagreementOutput)
-		return
+		fmt.Printf("PASS disagreement audit %s\n", o.disagreementOutput)
+		return true
 	}
-	if liveFilterToolOutput != "" {
-		endpoint, apiKey := semanticEndpoint, semanticAPIKey
+	if o.liveFilterToolOutput != "" {
+		endpoint, apiKey := o.semanticEndpoint, o.semanticAPIKey
 		if endpoint == "" {
 			endpoint = os.Getenv("OPENAI_BASE_URL")
 		}
 		if apiKey == "" {
 			apiKey = os.Getenv("OPENAI_API_KEY")
 		}
-		if liveFilterToolPacket == "" || liveFilterToolFold == "" {
+		if o.liveFilterToolPacket == "" || o.liveFilterToolFold == "" {
 			fmt.Fprintln(os.Stderr, "microcontextdemo: live filter/tool packet and fold required")
 			os.Exit(2)
 		}
-		if err := runLiveFilterToolMatrix(context.Background(), liveFilterToolPacket, liveFilterToolFold, liveFilterToolOutput, endpoint, apiKey, liveMatrixModel); err != nil {
+		if err := runLiveFilterToolMatrix(context.Background(), o.liveFilterToolPacket, o.liveFilterToolFold, o.liveFilterToolOutput, endpoint, apiKey, o.liveMatrixModel); err != nil {
 			fmt.Fprintf(os.Stderr, "microcontextdemo: live filter/tool: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS live filter/tool %s\n", liveFilterToolOutput)
-		return
+		fmt.Printf("PASS live filter/tool %s\n", o.liveFilterToolOutput)
+		return true
 	}
-	if verifyFilterToolSchedulerPath != "" {
-		runVerify("verify-filter-tool-scheduler", verifyFilterToolSchedulerPath, verifyFilterToolScheduler)
-		return
+	if o.verifyFilterToolSchedulerPath != "" {
+		runVerify("verify-filter-tool-scheduler", o.verifyFilterToolSchedulerPath, verifyFilterToolScheduler)
+		return true
 	}
-	if filterToolSchedulerOutput != "" {
-		if filterToolSchedulerFold == "" {
+	if o.filterToolSchedulerOutput != "" {
+		if o.filterToolSchedulerFold == "" {
 			fmt.Fprintln(os.Stderr, "microcontextdemo: -filter-tool-scheduler-fold required")
 			os.Exit(2)
 		}
-		if err := runFilterToolScheduler(filterToolSchedulerFold, filterToolSchedulerOutput, filterToolSchedulerTrials); err != nil {
+		if err := runFilterToolScheduler(o.filterToolSchedulerFold, o.filterToolSchedulerOutput, o.filterToolSchedulerTrials); err != nil {
 			fmt.Fprintf(os.Stderr, "microcontextdemo: filter/tool scheduler: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS filter/tool scheduler %s\n", filterToolSchedulerOutput)
-		return
+		fmt.Printf("PASS filter/tool scheduler %s\n", o.filterToolSchedulerOutput)
+		return true
 	}
-	if routingVOIOutput != "" {
-		if err := runRoutingVOI(routingVOIOutput, routingVOISeed, routingVOITrials, routingVOIRecords); err != nil {
+	if o.routingVOIOutput != "" {
+		if err := runRoutingVOI(o.routingVOIOutput, o.routingVOISeed, o.routingVOITrials, o.routingVOIRecords); err != nil {
 			fmt.Fprintf(os.Stderr, "microcontextdemo: routing VOI: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS routing VOI %s\n", routingVOIOutput)
-		return
+		fmt.Printf("PASS routing VOI %s\n", o.routingVOIOutput)
+		return true
 	}
-	if verifyRoutingVOIPath != "" {
-		runVerify("verify-routing-voi", verifyRoutingVOIPath, verifyRoutingVOI)
-		return
+	if o.verifyRoutingVOIPath != "" {
+		runVerify("verify-routing-voi", o.verifyRoutingVOIPath, verifyRoutingVOI)
+		return true
 	}
-	if tunedBaselinesPublic != "" {
-		if err := runTunedBaselines(tunedBaselinesPublic, tunedBaselinesAnswers, tunedBaselinesOutput); err != nil {
+	if o.tunedBaselinesPublic != "" {
+		if err := runTunedBaselines(o.tunedBaselinesPublic, o.tunedBaselinesAnswers, o.tunedBaselinesOutput); err != nil {
 			fmt.Fprintf(os.Stderr, "microcontextdemo: tuned baselines: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS tuned baselines %s\n", tunedBaselinesOutput)
-		return
+		fmt.Printf("PASS tuned baselines %s\n", o.tunedBaselinesOutput)
+		return true
 	}
-	if verifyTunedBaselinesPath != "" {
-		runVerify("verify-tuned-baselines", verifyTunedBaselinesPath, verifyTunedBaselines)
-		return
+	if o.verifyTunedBaselinesPath != "" {
+		runVerify("verify-tuned-baselines", o.verifyTunedBaselinesPath, verifyTunedBaselines)
+		return true
 	}
-	if gradeCorpusSubmission != "" {
-		if err := gradeSubmissionFiles(gradeCorpusAnswers, gradeCorpusSubmission, gradeCorpusOutput); err != nil {
+	if o.gradeCorpusSubmission != "" {
+		if err := gradeSubmissionFiles(o.gradeCorpusAnswers, o.gradeCorpusSubmission, o.gradeCorpusOutput); err != nil {
 			fmt.Fprintf(os.Stderr, "microcontextdemo: corpus grade: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("PASS corpus grade %s\n", gradeCorpusOutput)
-		return
+		fmt.Printf("PASS corpus grade %s\n", o.gradeCorpusOutput)
+		return true
 	}
-	if verifyCorpusPublic != "" || verifyCorpusAnswers != "" || verifyCorpusReport != "" {
+	return false
+}
+
+func runDemoCommands3(o demoOptions) bool {
+	if o.verifyCorpusPublic != "" || o.verifyCorpusAnswers != "" || o.verifyCorpusReport != "" {
 		verifyCorpusSet := func(string) error {
-			return verifyCorpusArtifacts(verifyCorpusPublic, verifyCorpusAnswers, verifyCorpusReport)
+			return verifyCorpusArtifacts(o.verifyCorpusPublic, o.verifyCorpusAnswers, o.verifyCorpusReport)
 		}
-		if verifyCorpusPublic != "" {
-			runVerify("verify-corpus-public", verifyCorpusPublic, verifyCorpusSet)
+		if o.verifyCorpusPublic != "" {
+			runVerify("verify-corpus-public", o.verifyCorpusPublic, verifyCorpusSet)
 		}
-		if verifyCorpusAnswers != "" {
-			runVerify("verify-corpus-answers", verifyCorpusAnswers, verifyCorpusSet)
+		if o.verifyCorpusAnswers != "" {
+			runVerify("verify-corpus-answers", o.verifyCorpusAnswers, verifyCorpusSet)
 		}
-		if verifyCorpusReport != "" {
-			runVerify("verify-corpus-report", verifyCorpusReport, verifyCorpusSet)
+		if o.verifyCorpusReport != "" {
+			runVerify("verify-corpus-report", o.verifyCorpusReport, verifyCorpusSet)
 		}
-		return
+		return true
 	}
-	if verifyEffectBatchPath != "" {
-		runVerify("verify-effect-batch", verifyEffectBatchPath, verifyEffectBatchArtifact)
-		return
+	if o.verifyEffectBatchPath != "" {
+		runVerify("verify-effect-batch", o.verifyEffectBatchPath, verifyEffectBatchArtifact)
+		return true
 	}
-	if effectBatchSelfcheck {
-		if err := runEffectBatchSelfcheck(effectBatchOutput); err != nil {
+	if o.effectBatchSelfcheck {
+		if err := runEffectBatchSelfcheck(o.effectBatchOutput); err != nil {
 			fmt.Fprintf(os.Stderr, "effect-batch selfcheck: %v\n", err)
 			os.Exit(1)
 		}
-		return
+		return true
 	}
-	if verifyFalsificationPath != "" {
-		runVerify("verify-falsification", verifyFalsificationPath, verifyFalsificationArtifact)
-		return
+	if o.verifyFalsificationPath != "" {
+		runVerify("verify-falsification", o.verifyFalsificationPath, verifyFalsificationArtifact)
+		return true
 	}
-	if falsificationSelfcheck {
-		if err := runFalsificationBench(falsificationOutput); err != nil {
+	if o.falsificationSelfcheck {
+		if err := runFalsificationBench(o.falsificationOutput); err != nil {
 			fmt.Fprintf(os.Stderr, "falsification selfcheck: %v\n", err)
 			os.Exit(1)
 		}
-		return
+		return true
 	}
-	if verifyProvenanceFoldPath != "" {
-		runVerify("verify-provenance-fold", verifyProvenanceFoldPath, verifyProvenanceFoldArtifact)
-		return
+	if o.verifyProvenanceFoldPath != "" {
+		runVerify("verify-provenance-fold", o.verifyProvenanceFoldPath, verifyProvenanceFoldArtifact)
+		return true
 	}
-	if provenanceFoldSelfcheck {
-		if err := runProvenanceFoldSelfcheck(provenanceFoldOutput); err != nil {
+	if o.provenanceFoldSelfcheck {
+		if err := runProvenanceFoldSelfcheck(o.provenanceFoldOutput); err != nil {
 			fmt.Fprintf(os.Stderr, "provenance-fold selfcheck: %v\n", err)
 			os.Exit(1)
 		}
-		return
+		return true
 	}
-	if verifyToolEnrichmentPath != "" {
-		runVerify("verify-tool-enrichment", verifyToolEnrichmentPath, verifyToolEnrichmentArtifact)
-		return
+	if o.verifyToolEnrichmentPath != "" {
+		runVerify("verify-tool-enrichment", o.verifyToolEnrichmentPath, verifyToolEnrichmentArtifact)
+		return true
 	}
-	if toolEnrichmentSelfcheck {
-		if err := runToolEnrichmentSelfcheck(context.Background(), toolEnrichmentOutput, cfg.Workers); err != nil {
+	if o.toolEnrichmentSelfcheck {
+		if err := runToolEnrichmentSelfcheck(context.Background(), o.toolEnrichmentOutput, o.cfg.Workers); err != nil {
 			fmt.Fprintf(os.Stderr, "tool-enrichment selfcheck: %v\n", err)
 			os.Exit(1)
 		}
-		return
+		return true
 	}
-	if verifySelectorPath != "" {
-		runVerify("verify-filter-selector", verifySelectorPath, verifySelectorArtifact)
-		return
+	if o.verifySelectorPath != "" {
+		runVerify("verify-filter-selector", o.verifySelectorPath, verifySelectorArtifact)
+		return true
 	}
-	if selectorSelfcheck || selectorOutput != "" {
+	if o.selectorSelfcheck || o.selectorOutput != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		r, err := buildSelectorReport(ctx, cfg.Workers)
+		r, err := buildSelectorReport(ctx, o.cfg.Workers)
 		r = compactSelectorReport(r)
 		b, merr := json.MarshalIndent(r, "", "  ")
-		if merr == nil && selectorOutput != "" {
-			merr = os.WriteFile(selectorOutput, append(b, '\n'), 0o644)
+		if merr == nil && o.selectorOutput != "" {
+			merr = os.WriteFile(o.selectorOutput, append(b, '\n'), 0o644)
 		}
 		if merr != nil {
 			fmt.Fprintln(os.Stderr, merr)
 			os.Exit(1)
 		}
-		if selectorOutput == "" {
+		if o.selectorOutput == "" {
 			fmt.Println(string(b))
 		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		return
+		return true
 	}
-	if verifyLargeInputPath != "" {
-		runVerify("verify-large-input", verifyLargeInputPath, verifyLargeInputArtifact)
-		return
+	if o.verifyLargeInputPath != "" {
+		runVerify("verify-large-input", o.verifyLargeInputPath, verifyLargeInputArtifact)
+		return true
 	}
-	if largeInputSelfcheck || largeInputOutput != "" {
+	if o.largeInputSelfcheck || o.largeInputOutput != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		r, err := buildLargeInputReport(ctx, cfg.Contexts, cfg.Workers)
+		r, err := buildLargeInputReport(ctx, o.cfg.Contexts, o.cfg.Workers)
 		// The proof artifact keeps aggregate source accounting and citations; the
 		// in-memory/test witness retains all 1,000 typed facts.
 		r.Baseline.Facts = nil
 		b, merr := json.MarshalIndent(r, "", "  ")
-		if merr == nil && largeInputOutput != "" {
-			merr = os.WriteFile(largeInputOutput, append(b, '\n'), 0o644)
+		if merr == nil && o.largeInputOutput != "" {
+			merr = os.WriteFile(o.largeInputOutput, append(b, '\n'), 0o644)
 		}
 		if merr != nil {
 			fmt.Fprintln(os.Stderr, merr)
 			os.Exit(1)
 		}
-		if largeInputOutput == "" {
+		if o.largeInputOutput == "" {
 			fmt.Println(string(b))
 		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		return
+		return true
 	}
-	if verifyQualityPath != "" {
-		runVerify("verify-quality", verifyQualityPath, verifyQualityLedgerArtifact)
-		return
+	if o.verifyQualityPath != "" {
+		runVerify("verify-quality", o.verifyQualityPath, verifyQualityLedgerArtifact)
+		return true
 	}
-	if qualityInput != "" {
-		if qualityOutput == "" {
+	if o.qualityInput != "" {
+		if o.qualityOutput == "" {
 			fmt.Fprintln(os.Stderr, "quality-output is required")
 			os.Exit(2)
 		}
-		if err := writeQualityLedger(qualityInput, qualityOutput, qualitySamples); err != nil {
+		if err := writeQualityLedger(o.qualityInput, o.qualityOutput, o.qualitySamples); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		return
+		return true
 	}
-	if verifyAPIOnlyPath != "" {
-		runVerify("verify-api-only", verifyAPIOnlyPath, verifyAPIOnlyArtifact)
-		return
+	if o.verifyAPIOnlyPath != "" {
+		runVerify("verify-api-only", o.verifyAPIOnlyPath, verifyAPIOnlyArtifact)
+		return true
 	}
-	if verifyPath != "" {
-		runVerify("verify", verifyPath, verifyArtifact)
-		return
+	if o.verifyPath != "" {
+		runVerify("verify", o.verifyPath, verifyArtifact)
+		return true
 	}
-	if verifyABPath != "" {
-		runVerify("verify-prefix-ab", verifyABPath, verifyABArtifact)
-		return
+	if o.verifyABPath != "" {
+		runVerify("verify-prefix-ab", o.verifyABPath, verifyABArtifact)
+		return true
 	}
-	if verifyS2BPath != "" {
-		runVerify("verify-kernel-prefix-ab", verifyS2BPath, verifyS2BArtifact)
-		return
+	if o.verifyS2BPath != "" {
+		runVerify("verify-kernel-prefix-ab", o.verifyS2BPath, verifyS2BArtifact)
+		return true
 	}
-	if verifyEffectsPath != "" {
-		runVerify("verify-effects", verifyEffectsPath, verifyEffectsArtifact)
-		return
+	if o.verifyEffectsPath != "" {
+		runVerify("verify-effects", o.verifyEffectsPath, verifyEffectsArtifact)
+		return true
 	}
-	if effectsOutput != "" {
+	if o.effectsOutput != "" {
 		r, err := buildEffectsReport()
 		b, e := json.MarshalIndent(r, "", "  ")
 		if e == nil {
-			e = os.WriteFile(effectsOutput, append(b, '\n'), 0o644)
+			e = os.WriteFile(o.effectsOutput, append(b, '\n'), 0o644)
 		}
 		if e != nil {
 			fmt.Fprintln(os.Stderr, e)
@@ -1122,28 +1267,32 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		return
+		return true
 	}
-	if verifyBatchPath != "" {
-		runVerify("verify-compat-batch-execution", verifyBatchPath, verifyBatchExecutionArtifact)
-		return
+	return false
+}
+
+func runDemoCommands4(o demoOptions) bool {
+	if o.verifyBatchPath != "" {
+		runVerify("verify-compat-batch-execution", o.verifyBatchPath, verifyBatchExecutionArtifact)
+		return true
 	}
-	if batchOutput != "" {
-		if err := runBatchExecution(batchModelPath, batchHardware, batchOutput, batchSize); err != nil {
+	if o.batchOutput != "" {
+		if err := runBatchExecution(o.batchModelPath, o.batchHardware, o.batchOutput, o.batchSize); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		return
+		return true
 	}
-	if verifyCompatPath != "" {
-		runVerify("verify-compatibility", verifyCompatPath, verifyCompatibilityArtifact)
-		return
+	if o.verifyCompatPath != "" {
+		runVerify("verify-compatibility", o.verifyCompatPath, verifyCompatibilityArtifact)
+		return true
 	}
-	if compatOutput != "" {
+	if o.compatOutput != "" {
 		r, err := buildCompatReport()
 		b, e := json.MarshalIndent(r, "", "  ")
 		if e == nil {
-			e = os.WriteFile(compatOutput, append(b, '\n'), 0o644)
+			e = os.WriteFile(o.compatOutput, append(b, '\n'), 0o644)
 		}
 		if e != nil {
 			fmt.Fprintln(os.Stderr, e)
@@ -1153,19 +1302,19 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		return
+		return true
 	}
-	if verifyMultiTurnDescriptorPath != "" {
-		runVerify("verify-multi-turn-descriptor", verifyMultiTurnDescriptorPath, verifyMultiTurnDescriptorArtifact)
-		return
+	if o.verifyMultiTurnDescriptorPath != "" {
+		runVerify("verify-multi-turn-descriptor", o.verifyMultiTurnDescriptorPath, verifyMultiTurnDescriptorArtifact)
+		return true
 	}
-	if multiTurnDescriptorOutput != "" {
+	if o.multiTurnDescriptorOutput != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		defer cancel()
-		r, err := runMultiTurnDescriptor(ctx, cfg.Contexts, cfg.Workers, s3Turns)
+		r, err := runMultiTurnDescriptor(ctx, o.cfg.Contexts, o.cfg.Workers, o.s3Turns)
 		b, merr := json.MarshalIndent(r, "", "  ")
 		if merr == nil {
-			merr = os.WriteFile(multiTurnDescriptorOutput, append(b, '\n'), 0o644)
+			merr = os.WriteFile(o.multiTurnDescriptorOutput, append(b, '\n'), 0o644)
 		}
 		if merr != nil {
 			fmt.Fprintln(os.Stderr, merr)
@@ -1175,19 +1324,19 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		return
+		return true
 	}
-	if verifyDescriptorPath != "" {
-		runVerify("verify-descriptor-bench", verifyDescriptorPath, verifyDescriptorArtifact)
-		return
+	if o.verifyDescriptorPath != "" {
+		runVerify("verify-descriptor-bench", o.verifyDescriptorPath, verifyDescriptorArtifact)
+		return true
 	}
-	if descriptorOutput != "" {
+	if o.descriptorOutput != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		defer cancel()
-		r, err := runDescriptorBenchmark(ctx, cfg.Contexts)
+		r, err := runDescriptorBenchmark(ctx, o.cfg.Contexts)
 		b, merr := json.MarshalIndent(r, "", "  ")
 		if merr == nil {
-			merr = os.WriteFile(descriptorOutput, append(b, '\n'), 0o644)
+			merr = os.WriteFile(o.descriptorOutput, append(b, '\n'), 0o644)
 		}
 		if merr != nil {
 			fmt.Fprintln(os.Stderr, merr)
@@ -1197,18 +1346,18 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		return
+		return true
 	}
-	if verifyS3Path != "" {
-		runVerify("verify-hibernate-restart", verifyS3Path, verifyS3Artifact)
-		return
+	if o.verifyS3Path != "" {
+		runVerify("verify-hibernate-restart", o.verifyS3Path, verifyS3Artifact)
+		return true
 	}
-	if s3Output != "" {
+	if o.s3Output != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		defer cancel()
-		r, err := runS3(ctx, s3Config{Contexts: cfg.Contexts, Workers: cfg.Workers, ResidentHigh: s3Resident, ResidentLow: s3Low, WarmCap: s3Warm, Turns: s3Turns, MemoryBytes: s3Memory})
+		r, err := runS3(ctx, s3Config{Contexts: o.cfg.Contexts, Workers: o.cfg.Workers, ResidentHigh: o.s3Resident, ResidentLow: o.s3Low, WarmCap: o.s3Warm, Turns: o.s3Turns, MemoryBytes: o.s3Memory})
 		var werr error
-		if s3Output == "-" {
+		if o.s3Output == "-" {
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
 			werr = enc.Encode(r)
@@ -1217,7 +1366,7 @@ func main() {
 			if marshalErr != nil {
 				werr = marshalErr
 			} else {
-				werr = os.WriteFile(s3Output, append(b, '\n'), 0o644)
+				werr = os.WriteFile(o.s3Output, append(b, '\n'), 0o644)
 			}
 		}
 		if werr != nil {
@@ -1228,13 +1377,13 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		return
+		return true
 	}
-	if abOutput != "" {
+	if o.abOutput != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 		defer cancel()
-		r, err := runAB(ctx, cfg)
-		if writeErr := writeAB(abOutput, r); writeErr != nil {
+		r, err := runAB(ctx, o.cfg)
+		if writeErr := writeAB(o.abOutput, r); writeErr != nil {
 			fmt.Fprintln(os.Stderr, writeErr)
 			os.Exit(1)
 		}
@@ -1242,17 +1391,17 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		return
+		return true
 	}
 	lineage, lineageErr := microagent.LineageFromEnv()
 	if lineageErr != nil {
 		fmt.Fprintln(os.Stderr, lineageErr)
 		os.Exit(1)
 	}
-	cfg.Lineage = lineage
-	ctx, cancel := overallDeadline(context.Background(), cfg.RunTimeout)
+	o.cfg.Lineage = lineage
+	ctx, cancel := overallDeadline(context.Background(), o.cfg.RunTimeout)
 	defer cancel()
-	r, err := run(ctx, cfg)
+	r, err := run(ctx, o.cfg)
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(r)
@@ -1260,6 +1409,14 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	return false
+}
+
+func runDemoOptions(o demoOptions) {
+	if runDemoCommands1(o) || runDemoCommands2A(o) || runDemoCommands2B(o) || runDemoCommands3(o) || runDemoCommands4(o) {
+		return
+	}
+
 }
 
 func overallDeadline(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
