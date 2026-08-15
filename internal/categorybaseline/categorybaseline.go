@@ -112,3 +112,66 @@ func index(xs []string, x string) int {
 	}
 	return -1
 }
+
+func Upsert(r Registry, c Category) (Registry, bool) {
+	r = Normalize(r)
+	candidate := Normalize(Registry{Categories: []Category{c}})
+	if len(candidate.Categories) != 1 {
+		return r, false
+	}
+	c = candidate.Categories[0]
+	found := false
+	for i := range r.Categories {
+		if r.Categories[i].Name == c.Name {
+			r.Categories[i] = c
+			found = true
+		}
+	}
+	if !found {
+		r.Categories = append(r.Categories, c)
+	}
+	return Normalize(r), true
+}
+
+func Remove(r Registry, name string) Registry {
+	name = norm(name)
+	out := r.Categories[:0]
+	for _, c := range r.Categories {
+		if c.Name != name {
+			out = append(out, c)
+		}
+	}
+	r.Categories = out
+	return Normalize(r)
+}
+
+func Save(root string, r Registry) error {
+	r = Normalize(r)
+	path := filepath.Join(root, filepath.FromSlash(DefaultPath))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".category-baselines-*.tmp")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(name, path)
+}

@@ -22,6 +22,8 @@ func runMaturity(stdout, stderr io.Writer, argv []string) int {
 		switch argv[0] {
 		case "route", "issues":
 			return runMaturityRoute(stdout, stderr, argv[1:])
+		case "baseline":
+			return runMaturityBaseline(stdout, stderr, argv[1:])
 		}
 	}
 	nextSubcommand := false

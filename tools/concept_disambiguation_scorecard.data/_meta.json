@@ -4684,6 +4684,16 @@
           "category": "incidental",
           "reason": "Report field carrying the existing work-profile fragment digest; it does not introduce a new proof concept.",
           "token": "WorkProfileWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Injected process runner seam for tests, not a proof claim type",
+          "token": "maturityBaselineRunWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI argument slice, not proof evidence",
+          "token": "witnessArgs"
         }
       ],
       "id": "witness-proof",
@@ -4770,6 +4780,7 @@
         "kpiWitnessedProgress",
         "latestGuardCompactionWitness",
         "liveTreeWitness",
+        "maturityBaselineRunWitness",
         "maxWitnessFileBytes",
         "mergeDispatchWitnessRecords",
         "microCacheWitness",
@@ -4808,6 +4819,7 @@
         "verifyCheckpointWitness",
         "want_witness",
         "withdefaultoriginwitnesses",
+        "witnessArgs",
         "witnessDigest",
         "witnessGitRunner",
         "witnessOutcomeID",
@@ -6970,6 +6982,31 @@
           "category": "incidental",
           "reason": "typed import exclusion reason, not a capability maturity state",
           "token": "unsupported_extension"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI subcommand dispatcher, not a new maturity concept",
+          "token": "runMaturityBaseline"
+        },
+        {
+          "category": "incidental",
+          "reason": "Injected command runner seam, not a maturity state",
+          "token": "maturityBaselineRunWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI usage renderer, not a maturity state",
+          "token": "maturityBaselineUsage"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI promotion handler, not a maturity state",
+          "token": "runMaturityBaselinePromote"
+        },
+        {
+          "category": "test-only",
+          "reason": "Behavioral test name, not a product maturity concept",
+          "token": "TestMaturityBaselinePromotionIsWitnessGatedAndImmediatelyEnforced"
         }
       ],
       "id": "support-maturity",
@@ -7051,6 +7088,7 @@
         "SupportLocalOnly",
         "SupportPartial",
         "SupportsRoutedExpertKQuant",
+        "TestMaturityBaselinePromotionIsWitnessGatedAndImmediatelyEnforced",
         "TierStatusSupported",
         "TierStatusUnsupported",
         "UNKNOWN_FORMAT",
@@ -7094,6 +7132,8 @@
         "immaturity",
         "joinCoverageScores",
         "manageParityPosture",
+        "maturityBaselineRunWitness",
+        "maturityBaselineUsage",
         "nativeReasonMessageRoleUnsupported",
         "normalizeAchievedMaturity",
         "numareplicapolicyunsupported",
@@ -7105,6 +7145,8 @@
         "recurrentevictunsupportederror",
         "resolveParityPublication",
         "robustnessTasks",
+        "runMaturityBaseline",
+        "runMaturityBaselinePromote",
         "scoreparity",
         "seenSupport",
         "setup_parity_clean",
