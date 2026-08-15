@@ -49,6 +49,15 @@ func OwnershipVerbs(verbs []Verb) []Verb {
 	seen := make(map[string]bool, len(out))
 	for _, verb := range out {
 		seen[verb.Name] = true
+		if verb.Tier == TierDev {
+			continue
+		}
+		for _, alias := range verb.Aliases {
+			if !seen[alias] {
+				out = append(out, Verb{Name: alias, Tier: verb.Tier})
+				seen[alias] = true
+			}
+		}
 	}
 	// Extracted fak-dev commands no longer appear in cmd/fak's switch-derived
 	// catalog. The explicit tier registry remains their creation/admission seam,
