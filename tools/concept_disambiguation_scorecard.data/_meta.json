@@ -5850,6 +5850,11 @@
           "category": "incidental",
           "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
           "token": "NewWithTierBudgetsAndEvictionPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Tuple carrier only transports the existing preflight result across a timeout boundary.",
+          "token": "dispatchWavePreflightResult"
         }
       ],
       "exclude": [
@@ -5919,6 +5924,7 @@
         "contractLeafByCapability",
         "counterfactualAdjudicator",
         "dispatchPreflightChurnState",
+        "dispatchWavePreflightResult",
         "endpointAdjudicate",
         "endpointAdjudication",
         "executeLivePipeline",

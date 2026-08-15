@@ -180,7 +180,18 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	product, allocationCount, preflightShortfall, preflight := dispatchWavePreflightAlloc(root, stderr, *maxWorkers, wk, backendNorm, *count)
+	preflightResult, preflightErr := dispatchWaveDependency(dispatchWaveDependencyTimeout, "dispatch preflight", func() (dispatchWavePreflightResult, error) {
+		product, allocationCount, shortfall, preflight := dispatchWavePreflightAlloc(root, stderr, *maxWorkers, wk, backendNorm, *count)
+		return dispatchWavePreflightResult{Product: product, AllocationCount: allocationCount, Shortfall: shortfall, Payload: preflight}, nil
+	})
+	if preflightErr != nil {
+		rec := newDispatchWaveRecord(root, *live, backendNorm, wk, goalID, profile, *count, 0, map[string]any{"error": preflightErr.Error()})
+		rec["granted"] = 0
+		rec["shortfall"] = *count
+		rec["stop_reason"] = preflightErr.Error()
+		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
+	}
+	product, allocationCount, preflightShortfall, preflight := preflightResult.Product, preflightResult.AllocationCount, preflightResult.Shortfall, preflightResult.Payload
 
 	rec := newDispatchWaveRecord(root, *live, backendNorm, wk, goalID, profile, *count, allocationCount, preflight)
 	if allocationCount <= 0 {
@@ -828,6 +839,13 @@ func dispatchTickArgsForLaunchTarget(cand dispatchWaveCandidate) []string {
 }
 
 const dispatchWaveDependencyTimeout = 30 * time.Second
+
+type dispatchWavePreflightResult struct {
+	Product         string
+	AllocationCount int
+	Shortfall       int
+	Payload         map[string]any
+}
 
 func dispatchWaveDependency[T any](timeout time.Duration, name string, run func() (T, error)) (T, error) {
 	type result struct {

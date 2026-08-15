@@ -30,6 +30,18 @@ func TestDispatchWaveRouteIssuesBoundedReturnsTypedTimeout(t *testing.T) {
 	}
 }
 
+func TestDispatchWaveBoundedDependencyTimesOut(t *testing.T) {
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	_, err := dispatchWaveDependency(20*time.Millisecond, "dispatch preflight", func() (dispatchWavePreflightResult, error) {
+		<-release
+		return dispatchWavePreflightResult{}, nil
+	})
+	if err == nil || err.Error() != "dispatch preflight timed out after 20ms" {
+		t.Fatalf("error = %v, want typed preflight timeout", err)
+	}
+}
+
 func TestDispatchWaveBoundedDependencyPreservesUpstreamError(t *testing.T) {
 	upstream := errors.New("upstream refused")
 	_, err := dispatchWaveDependency(time.Second, "account allocation", func() (int, error) {
