@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Opener resolves one URL scheme to a random-access object and its byte size.
@@ -35,11 +37,36 @@ func WithHTTPClient(client *http.Client) Option {
 	}
 }
 
+// downloadClient bounds the phases that can hang on a dead peer (connect, TLS,
+// response headers) but leaves Client.Timeout at 0: a model blob streams for
+// minutes, so a whole-request deadline would cut a healthy multi-GB body off
+// mid-stream.
+const (
+	defaultConnectTimeout        = 30 * time.Second
+	defaultTLSHandshakeTimeout   = 30 * time.Second
+	defaultResponseHeaderTimeout = 60 * time.Second
+)
+
+func downloadClient() *http.Client {
+	return downloadClientWithTimeouts(defaultConnectTimeout, defaultTLSHandshakeTimeout, defaultResponseHeaderTimeout)
+}
+
+func downloadClientWithTimeouts(connectTimeout, tlsTimeout, headerTimeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: 0,
+		Transport: &http.Transport{
+			DialContext:           (&net.Dialer{Timeout: connectTimeout}).DialContext,
+			TLSHandshakeTimeout:   tlsTimeout,
+			ResponseHeaderTimeout: headerTimeout,
+		},
+	}
+}
+
 // New returns a registry with local-file and HTTPS transports installed.
 func New(opts ...Option) *Registry {
 	r := &Registry{opener: make(map[string]Opener)}
 	r.opener["file"] = openFile
-	r.opener["https"] = httpOpener(http.DefaultClient)
+	r.opener["https"] = httpOpener(downloadClient())
 	for _, opt := range opts {
 		if opt != nil {
 			opt(r)
