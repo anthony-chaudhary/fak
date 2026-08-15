@@ -1,0 +1,497 @@
+package harnessresolve
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/harnesscompose"
+	"github.com/anthony-chaudhary/fak/internal/stackresolve"
+)
+
+const Schema = "fak.harness-product/v1alpha1"
+const LockSchema = "fak.harness-product-lock/v1alpha1"
+
+type Manifest struct {
+	Schema        string                  `json:"schema"`
+	Roots         []string                `json:"roots"`
+	Components    []Component             `json:"components"`
+	Compatibility Compatibility           `json:"compatibility,omitempty"`
+	Budget        Budget                  `json:"budget,omitempty"`
+	Assets        harnesscompose.Manifest `json:"assets"`
+}
+
+type Component struct {
+	ID            string                `json:"id"`
+	Version       string                `json:"version"`
+	Digest        string                `json:"digest"`
+	Source        string                `json:"source"`
+	Provides      []string              `json:"provides,omitempty"`
+	Requires      []Requirement         `json:"requires,omitempty"`
+	Conflicts     []string              `json:"conflicts,omitempty"`
+	Compatibility Compatibility         `json:"compatibility,omitempty"`
+	Cost          Budget                `json:"cost,omitempty"`
+	Evidence      stackresolve.Evidence `json:"evidence"`
+}
+
+type Requirement struct {
+	Capability string `json:"capability"`
+	Range      string `json:"range,omitempty"`
+	Optional   bool   `json:"optional,omitempty"`
+}
+
+type Compatibility struct {
+	OS       []string `json:"os,omitempty"`
+	Arch     []string `json:"arch,omitempty"`
+	Contract string   `json:"contract,omitempty"`
+}
+
+type Budget struct {
+	ContextTokens int `json:"context_tokens,omitempty"`
+	MemoryMiB     int `json:"memory_mib,omitempty"`
+	Workers       int `json:"workers,omitempty"`
+}
+
+type Environment struct {
+	OS       string `json:"os"`
+	Arch     string `json:"arch"`
+	Contract string `json:"contract"`
+}
+
+type LockedComponent struct {
+	ID       string   `json:"id"`
+	Version  string   `json:"version"`
+	Digest   string   `json:"digest"`
+	Source   string   `json:"source"`
+	Reason   string   `json:"reason"`
+	Provider string   `json:"provider"`
+	Provides []string `json:"provides,omitempty"`
+}
+
+type Lock struct {
+	Schema      string                          `json:"schema"`
+	ID          string                          `json:"id"`
+	Environment Environment                     `json:"environment"`
+	Budget      Budget                          `json:"budget"`
+	Components  []LockedComponent               `json:"components"`
+	Assets      []harnesscompose.EffectiveAsset `json:"assets"`
+	AssetTrace  []harnesscompose.Trace          `json:"asset_trace"`
+	Decisions   []stackresolve.Decision         `json:"decisions"`
+}
+
+type Explanation struct {
+	Capability string `json:"capability"`
+	Range      string `json:"range,omitempty"`
+	From       string `json:"from"`
+	Chosen     string `json:"chosen"`
+	Reason     string `json:"reason"`
+}
+
+type Result struct {
+	Lock    Lock          `json:"lock"`
+	Explain []Explanation `json:"explain"`
+}
+
+func Parse(raw []byte) (Manifest, error) {
+	var manifest Manifest
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&manifest); err != nil {
+		return Manifest{}, fmt.Errorf("parse product: %w", err)
+	}
+	if manifest.Schema != Schema {
+		return Manifest{}, fmt.Errorf("schema must be %q", Schema)
+	}
+	if len(manifest.Roots) == 0 {
+		return Manifest{}, fmt.Errorf("at least one root is required")
+	}
+	seen := map[string]bool{}
+	for _, component := range manifest.Components {
+		if component.ID == "" || component.Version == "" || component.Digest == "" || component.Source == "" {
+			return Manifest{}, fmt.Errorf("component id/version/digest/source are required")
+		}
+		key := component.ID + "@" + component.Version
+		if seen[key] {
+			return Manifest{}, fmt.Errorf("duplicate component %q", key)
+		}
+		seen[key] = true
+		if _, err := parseVersion(component.Version); err != nil {
+			return Manifest{}, fmt.Errorf("component %q: %w", component.ID, err)
+		}
+		if !strings.HasPrefix(component.Digest, "sha256:") || len(strings.TrimPrefix(component.Digest, "sha256:")) == 0 {
+			return Manifest{}, fmt.Errorf("component %q digest must be sha256:<value>", component.ID)
+		}
+		for _, req := range component.Requires {
+			if req.Capability == "" {
+				return Manifest{}, fmt.Errorf("component %q has empty requirement", component.ID)
+			}
+			if _, err := parseRange(req.Range); err != nil {
+				return Manifest{}, fmt.Errorf("component %q requirement %q: %w", component.ID, req.Capability, err)
+			}
+		}
+	}
+	return manifest, nil
+}
+
+func Resolve(ctx context.Context, manifest Manifest, selectedLayers []string, env Environment) (Result, error) {
+	assets, err := harnesscompose.Compose(manifest.Assets, selectedLayers)
+	if err != nil {
+		return Result{}, fmt.Errorf("compose assets: %w", err)
+	}
+	if err := checkCompatibility(manifest.Compatibility, env, "product"); err != nil {
+		return Result{}, err
+	}
+	components, err := bindRequirements(manifest.Components)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := checkCycles(components); err != nil {
+		return Result{}, err
+	}
+	stack := make([]stackresolve.Component, 0, len(components))
+	byID := map[string]Component{}
+	for _, component := range components {
+		if err := checkCompatibility(component.Compatibility, env, "component "+component.ID); err != nil {
+			return Result{}, err
+		}
+		byID[component.ID] = component
+		relations := make([]stackresolve.Relation, 0, len(component.Requires)+len(component.Conflicts))
+		for _, req := range component.Requires {
+			relations = append(relations, stackresolve.Relation{Kind: relationKind(req.Optional), Target: req.Capability, Evidence: component.Evidence})
+		}
+		for _, conflict := range component.Conflicts {
+			relations = append(relations, stackresolve.Relation{Kind: stackresolve.Conflicts, Target: conflict, Evidence: component.Evidence})
+		}
+		stack = append(stack, stackresolve.Component{ID: component.ID, Kind: "harness-component", Version: component.Version, Provides: component.Provides, Relations: relations, Evidence: component.Evidence})
+	}
+	receipt, err := stackresolve.Resolve(ctx, "harness-product", manifest.Roots, stackresolve.ManifestProvider{Manifest: stackresolve.Manifest{Schema: "fak.stack.manifest/v1", Components: stack}})
+	if err != nil {
+		return Result{}, err
+	}
+	if receipt.Status != "allow" {
+		return Result{}, fmt.Errorf("dependency resolution refused: %s %s", conflictCode(receipt), conflictWanted(receipt))
+	}
+	used := Budget{}
+	locked := make([]LockedComponent, 0, len(receipt.Selected))
+	for _, selected := range receipt.Selected {
+		component, ok := byID[selected.ID]
+		if !ok {
+			return Result{}, fmt.Errorf("selected component %q missing metadata", selected.ID)
+		}
+		used = addBudget(used, component.Cost)
+		locked = append(locked, LockedComponent{ID: component.ID, Version: component.Version, Digest: component.Digest, Source: component.Source, Reason: decisionReason(receipt.Decisions, selected.ID), Provider: providerFor(receipt.Decisions, selected.ID), Provides: sortedStrings(component.Provides)})
+	}
+	if err := withinBudget(used, manifest.Budget); err != nil {
+		return Result{}, err
+	}
+	sort.Slice(locked, func(i, j int) bool { return locked[i].ID < locked[j].ID })
+	lock := Lock{Schema: LockSchema, Environment: env, Budget: used, Components: locked, Assets: assets.Assets, AssetTrace: assets.Trace, Decisions: receipt.Decisions}
+	lock.ID, err = lockID(lock)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Lock: lock, Explain: explanations(components, receipt.Selected)}, nil
+}
+
+func bindRequirements(input []Component) ([]Component, error) {
+	components := append([]Component(nil), input...)
+	sort.Slice(components, func(i, j int) bool {
+		if components[i].ID != components[j].ID {
+			return components[i].ID < components[j].ID
+		}
+		return components[i].Version < components[j].Version
+	})
+	providers := map[string][]Component{}
+	for _, component := range components {
+		providers[component.ID] = appendProvider(providers[component.ID], component)
+		for _, capability := range component.Provides {
+			providers[capability] = appendProvider(providers[capability], component)
+		}
+	}
+	for i := range components {
+		for j := range components[i].Requires {
+			req := &components[i].Requires[j]
+			matches := make([]Component, 0)
+			for _, candidate := range providers[req.Capability] {
+				ok, err := matchRange(candidate.Version, req.Range)
+				if err != nil {
+					return nil, err
+				}
+				if ok {
+					matches = append(matches, candidate)
+				}
+			}
+			if len(matches) == 0 {
+				if req.Optional {
+					continue
+				}
+				return nil, fmt.Errorf("component %q missing dependency %s %s", components[i].ID, req.Capability, req.Range)
+			}
+			if len(matches) > 1 {
+				return nil, fmt.Errorf("component %q dependency %s %s has ambiguous providers %s", components[i].ID, req.Capability, req.Range, providerNames(matches))
+			}
+			req.Capability = matches[0].ID
+		}
+	}
+	return components, nil
+}
+
+func checkCycles(components []Component) error {
+	edges := map[string][]string{}
+	ids := map[string]bool{}
+	for _, c := range components {
+		ids[c.ID] = true
+		for _, r := range c.Requires {
+			if !r.Optional || ids[r.Capability] {
+				edges[c.ID] = append(edges[c.ID], r.Capability)
+			}
+		}
+	}
+	state := map[string]int{}
+	path := []string{}
+	var visit func(string) error
+	visit = func(id string) error {
+		if state[id] == 1 {
+			return fmt.Errorf("dependency cycle: %s -> %s", strings.Join(path, " -> "), id)
+		}
+		if state[id] == 2 {
+			return nil
+		}
+		state[id] = 1
+		path = append(path, id)
+		for _, next := range edges[id] {
+			if err := visit(next); err != nil {
+				return err
+			}
+		}
+		path = path[:len(path)-1]
+		state[id] = 2
+		return nil
+	}
+	keys := make([]string, 0, len(edges))
+	for id := range edges {
+		keys = append(keys, id)
+	}
+	sort.Strings(keys)
+	for _, id := range keys {
+		if err := visit(id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkCompatibility(c Compatibility, env Environment, subject string) error {
+	if len(c.OS) > 0 && !contains(c.OS, env.OS) {
+		return fmt.Errorf("%s incompatible OS %q", subject, env.OS)
+	}
+	if len(c.Arch) > 0 && !contains(c.Arch, env.Arch) {
+		return fmt.Errorf("%s incompatible arch %q", subject, env.Arch)
+	}
+	if c.Contract != "" && c.Contract != env.Contract {
+		return fmt.Errorf("%s requires contract %q, got %q", subject, c.Contract, env.Contract)
+	}
+	return nil
+}
+func addBudget(a, b Budget) Budget {
+	return Budget{ContextTokens: a.ContextTokens + b.ContextTokens, MemoryMiB: a.MemoryMiB + b.MemoryMiB, Workers: a.Workers + b.Workers}
+}
+func withinBudget(used, limit Budget) error {
+	if limit.ContextTokens > 0 && used.ContextTokens > limit.ContextTokens {
+		return fmt.Errorf("context budget exceeded: %d > %d", used.ContextTokens, limit.ContextTokens)
+	}
+	if limit.MemoryMiB > 0 && used.MemoryMiB > limit.MemoryMiB {
+		return fmt.Errorf("memory budget exceeded: %d > %d", used.MemoryMiB, limit.MemoryMiB)
+	}
+	if limit.Workers > 0 && used.Workers > limit.Workers {
+		return fmt.Errorf("worker budget exceeded: %d > %d", used.Workers, limit.Workers)
+	}
+	return nil
+}
+func lockID(lock Lock) (string, error) {
+	copy := lock
+	copy.ID = ""
+	raw, err := json.Marshal(copy)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+func providerNames(cs []Component) string {
+	names := make([]string, len(cs))
+	for i, c := range cs {
+		names[i] = c.ID + "@" + c.Version
+	}
+	sort.Strings(names)
+	return strings.Join(names, ",")
+}
+func contains(values []string, want string) bool {
+	for _, v := range values {
+		if v == want {
+			return true
+		}
+	}
+	return false
+}
+
+type version [3]int
+
+func parseVersion(raw string) (version, error) {
+	raw = strings.TrimPrefix(strings.TrimSpace(raw), "v")
+	parts := strings.Split(raw, ".")
+	if len(parts) != 3 {
+		return version{}, fmt.Errorf("version %q must be MAJOR.MINOR.PATCH", raw)
+	}
+	var v version
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return version{}, fmt.Errorf("invalid version %q", raw)
+		}
+		v[i] = n
+	}
+	return v, nil
+}
+
+type versionRange struct {
+	op string
+	v  version
+}
+
+func parseRange(raw string) (versionRange, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return versionRange{op: ">=", v: version{}}, nil
+	}
+	for _, op := range []string{">=", "<=", "==", ">", "<"} {
+		if strings.HasPrefix(raw, op) {
+			v, err := parseVersion(strings.TrimSpace(strings.TrimPrefix(raw, op)))
+			return versionRange{op: op, v: v}, err
+		}
+	}
+	v, err := parseVersion(raw)
+	return versionRange{op: "==", v: v}, err
+}
+func matchRange(raw, constraint string) (bool, error) {
+	v, err := parseVersion(raw)
+	if err != nil {
+		return false, err
+	}
+	r, err := parseRange(constraint)
+	if err != nil {
+		return false, err
+	}
+	cmp := 0
+	for i := 0; i < 3; i++ {
+		if v[i] < r.v[i] {
+			cmp = -1
+			break
+		}
+		if v[i] > r.v[i] {
+			cmp = 1
+			break
+		}
+	}
+	switch r.op {
+	case ">=":
+		return cmp >= 0, nil
+	case "<=":
+		return cmp <= 0, nil
+	case ">":
+		return cmp > 0, nil
+	case "<":
+		return cmp < 0, nil
+	default:
+		return cmp == 0, nil
+	}
+}
+
+func relationKind(optional bool) stackresolve.RelationKind {
+	if optional {
+		return stackresolve.Optional
+	}
+	return stackresolve.Requires
+}
+func decisionReason(decisions []stackresolve.Decision, id string) string {
+	for _, decision := range decisions {
+		if decision.Chosen == id {
+			return string(decision.Relation) + " " + decision.Wanted + " from " + decision.From
+		}
+	}
+	return "selected root"
+}
+func providerFor(decisions []stackresolve.Decision, id string) string {
+	for _, decision := range decisions {
+		if decision.Chosen == id {
+			return decision.Evidence.Source
+		}
+	}
+	return "manifest"
+}
+
+func conflictCode(receipt stackresolve.Receipt) string {
+	if receipt.Conflict == nil {
+		return "UNKNOWN"
+	}
+	return receipt.Conflict.Code
+}
+func conflictWanted(receipt stackresolve.Receipt) string {
+	if receipt.Conflict == nil {
+		return "unknown"
+	}
+	return receipt.Conflict.Wanted
+}
+
+func explanations(components []Component, selected []stackresolve.Component) []Explanation {
+	selectedSet := map[string]bool{}
+	for _, c := range selected {
+		selectedSet[c.ID] = true
+	}
+	out := []Explanation{}
+	for _, c := range components {
+		if !selectedSet[c.ID] {
+			continue
+		}
+		if len(c.Requires) == 0 {
+			out = append(out, Explanation{From: c.ID, Chosen: c.ID, Reason: "selected root or provider"})
+		}
+		for _, r := range c.Requires {
+			if selectedSet[r.Capability] {
+				out = append(out, Explanation{Capability: r.Capability, Range: r.Range, From: c.ID, Chosen: r.Capability, Reason: "required dependency"})
+			}
+		}
+		for _, capability := range c.Provides {
+			out = append(out, Explanation{Capability: capability, From: c.ID, Chosen: c.ID, Reason: "declared capability provider"})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Capability != out[j].Capability {
+			return out[i].Capability < out[j].Capability
+		}
+		if out[i].From != out[j].From {
+			return out[i].From < out[j].From
+		}
+		return out[i].Chosen < out[j].Chosen
+	})
+	return out
+}
+func sortedStrings(in []string) []string {
+	out := append([]string(nil), in...)
+	sort.Strings(out)
+	return out
+}
+
+func appendProvider(in []Component, component Component) []Component {
+	for _, existing := range in {
+		if existing.ID == component.ID && existing.Version == component.Version {
+			return in
+		}
+	}
+	return append(in, component)
+}

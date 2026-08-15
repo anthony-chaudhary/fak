@@ -7771,6 +7771,11 @@
           "category": "incidental",
           "reason": "Adapter I/O helper for authoritative lease-state revalidation; it does not define a decision kind or policy.",
           "token": "readLiveLanes"
+        },
+        {
+          "category": "incidental",
+          "reason": "A product-lock explanation formatter over stackresolve receipts, not a separate kernel decision concept.",
+          "token": "decisionReason"
         }
       ],
       "id": "decision",
@@ -7798,6 +7803,7 @@
         "SessionClientDecisionRequest",
         "TotalDecisionOverhead",
         "appendsteerdecisions",
+        "decisionReason",
         "decisionStderr",
         "decision_ms_per_request",
         "decision_records",
