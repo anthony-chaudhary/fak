@@ -1426,7 +1426,7 @@ func cmdManageCommand(commandName string, argv []string) {
 
 	// Seed the guard child into the opt-in process task manager at origin, with the
 	// durable policy/budget/Stop-ledger paths that already exist before launch.
-	policyEvidence := writeGuardPolicyOriginEvidence(guardTraceID, *policyPath)
+	policyEvidence := guardPolicyOriginEvidencePath(guardTraceID, *policyPath)
 	budgetEvidence := writeGuardBudgetEnvelopeEvidence(guardTraceID, contextBudgetLimit, maxDurationLimit.String())
 	registerGuardChildOriginTask(guardTraceID, command[0], policyEvidence, resume.IdentityLedgerPath(resolveSweepRegDir("")), budgetEvidence, stopHookInstall.StopsLedger)
 	command, restoreNativeHooks, err := installManagedNativeHooks(command)

@@ -5860,6 +5860,16 @@
           "category": "incidental",
           "reason": "Local reverse index from provided capability to candidate component IDs; it is resolver implementation data, not a new policy-capability concept.",
           "token": "byCapability"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal path-construction helper for zero-byte guard origin witnesses; it does not define or select a capability policy.",
+          "token": "PolicyOriginEvidencePath"
+        },
+        {
+          "category": "incidental",
+          "reason": "Discovery refresh metadata is a closed cache lifecycle label, not an authorization policy or capability grant.",
+          "token": "RefreshPolicy"
         }
       ],
       "exclude": [
@@ -5896,10 +5906,12 @@
         "POLICY_CONFLICT",
         "PolicyHash",
         "PolicyMediaType",
+        "PolicyOriginEvidencePath",
         "PolicyRevision",
         "ProgressCallAdjudicated",
         "ReasonArmCapabilityBundled",
         "ReasonArmCapabilityUnnamed",
+        "RefreshPolicy",
         "RetryPolicy",
         "ReusePolicy",
         "ReviseForCapabilityFailure",

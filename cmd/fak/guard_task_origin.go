@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/guard"
 	"github.com/anthony-chaudhary/fak/internal/taskmgr"
 )
 
@@ -46,20 +47,13 @@ func guardChildOriginEvidence(policyPath, transcriptPath, budgetEnvelope, stopsL
 	}
 	refs := make([]taskmgr.EvidenceRef, 0, len(candidates))
 	for _, candidate := range candidates {
-		path := strings.TrimSpace(candidate.path)
-		if path == "" {
+		// Origin evidence is a durable location contract: guard.EnsureOriginEvidence
+		// creates an empty evidence file when the producer has not appended its first
+		// row yet, so PathWitness verifies the location rather than marking a valid
+		// pre-launch task refused.
+		path, ok := guard.EnsureOriginEvidence(candidate.path)
+		if !ok {
 			continue
-		}
-		if abs, err := filepath.Abs(path); err == nil {
-			path = abs
-		}
-		// Origin evidence is a durable location contract. Create an empty evidence
-		// file when the producer has not appended its first row yet, so PathWitness
-		// verifies the location rather than marking a valid pre-launch task refused.
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			if os.MkdirAll(filepath.Dir(path), 0o755) != nil || os.WriteFile(path, nil, 0o600) != nil {
-				continue
-			}
 		}
 		refs = append(refs, taskmgr.EvidenceRef{
 			Kind: taskmgr.PathRefKind,
@@ -70,25 +64,12 @@ func guardChildOriginEvidence(policyPath, transcriptPath, budgetEnvelope, stopsL
 	return refs
 }
 
-func writeGuardPolicyOriginEvidence(traceID, explicitPath string) string {
-	if path := strings.TrimSpace(explicitPath); path != "" {
-		return path
-	}
-	if strings.TrimSpace(traceID) == "" {
-		return ""
-	}
-	root := repoRoot()
-	if root == "" {
-		return ""
-	}
-	path := filepath.Join(root, ".fak", "guard-origin", strings.TrimSpace(traceID)+"-policy.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return ""
-	}
-	if err := os.WriteFile(path, guardDefaultPolicyJSON, 0o600); err != nil {
-		return ""
-	}
-	return path
+// guardPolicyOriginEvidencePath names the durable policy evidence location for the
+// launch. It writes nothing: the location is proven with the same 0-byte placeholder
+// as its siblings above, instead of copying the embedded 34KB capability floor per
+// trace (#6093).
+func guardPolicyOriginEvidencePath(traceID, explicitPath string) string {
+	return guard.PolicyOriginEvidencePath(repoRoot(), traceID, explicitPath)
 }
 func writeGuardBudgetEnvelopeEvidence(traceID string, contextTokens int, maxDuration string) string {
 	if strings.TrimSpace(traceID) == "" {
