@@ -215,7 +215,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	excludedLanes := splitCommaList(*excludeLane)
-	router, err := dispatchRouteIssues(root, stderr)
+	router, err := dispatchWaveRouteIssuesBounded(root, stderr, dispatchWaveDependencyTimeout)
 	if err != nil {
 		rec["stop_reason"] = "price fan-out: " + err.Error()
 		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
@@ -239,7 +239,12 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 			rec["stop_reason"] = "priced fan-out found no launchable lane"
 			return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 		}
-		executionAudit := auditDispatchWaveExecutionPlan(root, *maxWorkers, excludedLanes, executionPlan, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit)
+		executionAudit, auditErr := auditDispatchWaveExecutionPlanBounded(root, *maxWorkers, excludedLanes, executionPlan, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit, dispatchWaveDependencyTimeout)
+		if auditErr != nil {
+			rec["execution_plan_audit"] = executionAudit
+			rec["stop_reason"] = auditErr.Error()
+			return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
+		}
 		rec["execution_plan_audit"] = executionAudit
 		prelaunchGate := dispatchWavePrelaunchGateFromAudit(executionPlanID, executionAudit)
 		rec["prelaunch_gate"] = prelaunchGate
@@ -820,6 +825,41 @@ func dispatchTickArgsForLaunchTarget(cand dispatchWaveCandidate) []string {
 		args = append(args, "--lease-tree", strings.Join(cand.Tree, ","))
 	}
 	return args
+}
+
+const dispatchWaveDependencyTimeout = 30 * time.Second
+
+func dispatchWaveDependency[T any](timeout time.Duration, name string, run func() (T, error)) (T, error) {
+	type result struct {
+		value T
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		value, err := run()
+		done <- result{value: value, err: err}
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case got := <-done:
+		return got.value, got.err
+	case <-timer.C:
+		var zero T
+		return zero, fmt.Errorf("%s timed out after %s", name, timeout)
+	}
+}
+
+func dispatchWaveRouteIssuesBounded(root string, stderr io.Writer, timeout time.Duration) (dispatchtick.RouterPayload, error) {
+	return dispatchWaveDependency(timeout, "issue-contract discovery", func() (dispatchtick.RouterPayload, error) {
+		return dispatchRouteIssues(root, stderr)
+	})
+}
+
+func auditDispatchWaveExecutionPlanBounded(root string, maxWorkers int, exclude []string, plan []dispatchWaveExecutionPlan, codexLoopGate string, codexLoopGateSinceHours float64, codexLoopGateLimit int, timeout time.Duration) ([]dispatchWaveExecutionAudit, error) {
+	return dispatchWaveDependency(timeout, "prelaunch contract audit", func() ([]dispatchWaveExecutionAudit, error) {
+		return auditDispatchWaveExecutionPlan(root, maxWorkers, exclude, plan, codexLoopGate, codexLoopGateSinceHours, codexLoopGateLimit), nil
+	})
 }
 
 func auditDispatchWaveExecutionPlan(root string, maxWorkers int, exclude []string, plan []dispatchWaveExecutionPlan, codexLoopGate string, codexLoopGateSinceHours float64, codexLoopGateLimit int) []dispatchWaveExecutionAudit {

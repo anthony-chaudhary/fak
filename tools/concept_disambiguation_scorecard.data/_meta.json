@@ -8415,6 +8415,11 @@
           "category": "incidental",
           "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
           "token": "SnapshotPressureCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Timeout wrapper preserves the existing execution-plan concept and only bounds its wait.",
+          "token": "auditDispatchWaveExecutionPlanBounded"
         }
       ],
       "exclude": [
@@ -8467,6 +8472,7 @@
         "SweepPlanMain",
         "SweepPlanPairwise",
         "WriteMergePlan",
+        "auditDispatchWaveExecutionPlanBounded",
         "buildMainPlan",
         "bytes_per_candidate",
         "candidateID",
