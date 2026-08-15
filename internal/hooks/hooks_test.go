@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -292,6 +293,24 @@ func TestScanMessageNeedles_skipsTrailersCommentsScissors(t *testing.T) {
 	// A needle in the real prose body IS a leak -> still flagged (no weakening).
 	if f := ScanMessageNeedles("fix: x\n\nbody has "+needle+" leak\n", ""); len(f) == 0 {
 		t.Error("a needle in the prose body must be flagged")
+	}
+}
+
+func TestScrubHardwareNamesAndGitHubArgs(t *testing.T) {
+	cpu, gpu := "da"+"33", "dgx"+"1"
+	got := ScrubHardwareNames("move " + cpu + " to " + gpu + "; keep " + gpu + "-archive")
+	want := "move CPU server to GPU server; keep " + gpu + "-archive"
+	if got != want {
+		t.Fatalf("ScrubHardwareNames() = %q, want %q", got, want)
+	}
+	in := []string{"issue", "create", "--title", cpu + " run", "--body", "on " + gpu, "--label", cpu}
+	args := ScrubGitHubTextArgs(in)
+	wantArgs := []string{"issue", "create", "--title", "CPU server run", "--body", "on GPU server", "--label", cpu}
+	if !reflect.DeepEqual(args, wantArgs) {
+		t.Fatalf("ScrubGitHubTextArgs() = %#v, want %#v", args, wantArgs)
+	}
+	if in[3] != cpu+" run" {
+		t.Fatalf("input mutated: %#v", in)
 	}
 }
 

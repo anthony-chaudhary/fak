@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -98,7 +99,7 @@ const issueGHTimeout = 30 * time.Second
 func runTaskHandoffGH(args []string) (string, string, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), issueGHTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd := exec.CommandContext(ctx, "gh", hooks.ScrubGitHubTextArgs(args)...)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	var out, errb strings.Builder
 	cmd.Stdout = &out

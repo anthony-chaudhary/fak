@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
@@ -70,14 +71,14 @@ func runLeaserefAnnounce(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak leaseref announce: --action must be one of acquire|renew|release (got %q)\n", *action)
 		return 2
 	}
-	body := leaseref.RenderAnnounce(leaseref.AnnounceRecord{
+	body := hooks.ScrubHardwareNames(leaseref.RenderAnnounce(leaseref.AnnounceRecord{
 		LeaseID:    *id,
 		Holder:     *holder,
 		Generation: *gen,
 		Tree:       trees,
 		TTLSeconds: *ttl,
 		Action:     *action,
-	})
+	}))
 	if *dryRun {
 		fmt.Fprintln(stdout, body)
 		return 0

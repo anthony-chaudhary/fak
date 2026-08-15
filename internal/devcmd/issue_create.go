@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/categorybaseline"
+	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
@@ -16,6 +17,64 @@ import (
 // shape as taskHandoffRunner (taskmgr.go:174) so a nil runner can default straight to the
 // existing runTaskHandoffGH (taskmgr.go:343) instead of a second exec.Command wrapper.
 type issueCreateRunner func(args []string) (stdout, stderr string, ok bool)
+
+var issueCreateHeadingRE = regexp.MustCompile(`^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$`)
+
+// issueCreateShiftLeftScope makes the two scope decisions explicit before an issue
+// reaches GitHub. Legacy headings remain accepted, but newly filed contracts use the
+// names that state the decision an author must make rather than generic containers.
+func issueCreateShiftLeftScope(body string) (string, error) {
+	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
+	type decision struct {
+		line  int
+		level string
+		value string
+	}
+	var core, boundary []decision
+	for i, raw := range lines {
+		m := issueCreateHeadingRE.FindStringSubmatch(raw)
+		if m == nil {
+			continue
+		}
+		heading := strings.ToLower(strings.Join(strings.Fields(strings.Trim(m[2], "`*_:# ")), " "))
+		if heading != "core through-line" && heading != "in scope" && heading != "gold-plating boundary" && heading != "out of scope" {
+			continue
+		}
+		end := len(lines)
+		for j := i + 1; j < len(lines); j++ {
+			if issueCreateHeadingRE.MatchString(lines[j]) {
+				end = j
+				break
+			}
+		}
+		valueLines := make([]string, 0, end-i-1)
+		for _, line := range lines[i+1 : end] {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" || (strings.HasPrefix(trimmed, "<!--") && strings.HasSuffix(trimmed, "-->")) {
+				continue
+			}
+			valueLines = append(valueLines, trimmed)
+		}
+		d := decision{line: i, level: m[1], value: strings.TrimSpace(strings.Join(valueLines, "\n"))}
+		if heading == "core through-line" || heading == "in scope" {
+			core = append(core, d)
+		} else {
+			boundary = append(boundary, d)
+		}
+	}
+	if len(core) != 1 || len(boundary) != 1 {
+		return "", fmt.Errorf("default issue contracts require exactly one ## Core through-line and one ## Gold-plating boundary (legacy In scope/Out of scope are accepted; use --raw-body only for a deliberate non-contract issue)")
+	}
+	if core[0].value == "" {
+		return "", fmt.Errorf("Core through-line is empty: name the shortest change -> real seam -> observable outcome -> witness path")
+	}
+	if boundary[0].value == "" {
+		return "", fmt.Errorf("Gold-plating boundary is empty: name tempting work the outcome and witness still work without, or state why none exists")
+	}
+	lines[core[0].line] = core[0].level + " Core through-line"
+	lines[boundary[0].line] = boundary[0].level + " Gold-plating boundary"
+	return strings.Join(lines, "\n"), nil
+}
 
 // issueCreateResult is the --json shape: the rendered gh argv is always included (even on
 // a dry run) so a caller can see exactly what would run or did run.
@@ -114,6 +173,7 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 		fmt.Fprintln(stderr, "fak-dev issue create: --title is required")
 		return 2
 	}
+	*title = hooks.ScrubHardwareNames(*title)
 	if strings.TrimSpace(*body) != "" && strings.TrimSpace(*bodyFile) != "" {
 		fmt.Fprintln(stderr, "fak-dev issue create: pass exactly one of --body or --body-file")
 		return 2
@@ -127,12 +187,18 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 		}
 		resolvedBody = string(b)
 	}
+	resolvedBody = hooks.ScrubHardwareNames(resolvedBody)
 	if strings.TrimSpace(resolvedBody) == "" {
 		fmt.Fprintln(stderr, "fak-dev issue create: --body or --body-file is required")
 		return 2
 	}
 	if !*rawBody {
 		var err error
+		resolvedBody, err = issueCreateShiftLeftScope(resolvedBody)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak-dev issue create: %v\n", err)
+			return 2
+		}
 		resolvedBody, err = issuepolicy.AppendProjectWorkDefaults(resolvedBody, issuepolicy.ProjectWorkAuthoring{
 			EstimatePoints: *estimatePoints, ParentBaseline: *parentBaselinePoints,
 			ContributionPoints: *contributionPoints, CompletionStandard: *completionStandard,

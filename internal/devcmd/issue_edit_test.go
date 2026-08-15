@@ -227,3 +227,20 @@ func TestIssueEditLabelClampFailsOpenOnListError(t *testing.T) {
 		t.Fatalf("fail-open must warn: %s", errb.String())
 	}
 }
+
+func TestIssueEditScrubsProtectedTitleAndBody(t *testing.T) {
+	cpu, gpu := "da"+"33", "dgx"+"1"
+	var got []string
+	runner := func(args []string) (string, string, bool) {
+		got = append([]string(nil), args...)
+		return "https://example.invalid/9\n", "", true
+	}
+	var out, errb bytes.Buffer
+	if code := runIssueEditWith(&out, &errb, []string{"--issue", "9", "--title", cpu + " recovery", "--body", "parity with " + gpu}, runner); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errb.String())
+	}
+	joined := strings.Join(got, "\n")
+	if !strings.Contains(joined, "CPU server recovery") || !strings.Contains(joined, "parity with GPU server") {
+		t.Fatalf("gh argv not scrubbed: %#v", got)
+	}
+}

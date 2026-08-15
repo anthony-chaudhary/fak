@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -60,5 +61,14 @@ func TestCommandTimeoutNilParentAndCancelWired(t *testing.T) {
 	cmd.Err = nil
 	if err := cmd.Run(); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run after cancel = %v, want context.Canceled", err)
+	}
+}
+
+func TestCommandScrubsProtectedNamesFromGitHubBody(t *testing.T) {
+	cpu, gpu := "da"+"33", "dgx"+"1"
+	cmd := Command(context.Background(), "issue", "comment", "7", "--body", "compare "+cpu+" with "+gpu)
+	joined := strings.Join(cmd.Args, "\n")
+	if !strings.Contains(joined, "compare CPU server with GPU server") || strings.Contains(strings.ToLower(joined), cpu) || strings.Contains(strings.ToLower(joined), gpu) {
+		t.Fatalf("Command args not scrubbed: %#v", cmd.Args)
 	}
 }

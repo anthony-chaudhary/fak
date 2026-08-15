@@ -8,6 +8,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/hooks"
 )
 
 // issueEditResult is the --json shape for `fak-dev issue edit`: the rendered gh argv
@@ -83,6 +85,8 @@ func runIssueEditWith(stdout, stderr io.Writer, argv []string, runner issueCreat
 		haveBody = true
 	}
 
+	*title = hooks.ScrubHardwareNames(*title)
+	resolvedBody = hooks.ScrubHardwareNames(resolvedBody)
 	addLabels := issueFanoutSplit(*addLabel)
 	removeLabels := issueFanoutSplit(*removeLabel)
 	haveTitle := strings.TrimSpace(*title) != ""

@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -27,7 +28,7 @@ const DefaultTimeout = 60 * time.Second
 // is disabled so a missing auth session fails fast with an error instead of
 // blocking on TTY input.
 func Command(ctx context.Context, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd := exec.CommandContext(ctx, "gh", hooks.ScrubGitHubTextArgs(args)...)
 	cmd.Env = append(os.Environ(), "GH_PROMPT_DISABLED=1", "GH_NO_UPDATE_NOTIFIER=1")
 	windowgate.ConfigureBackgroundCommand(cmd)
 	return cmd

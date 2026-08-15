@@ -54,3 +54,12 @@ func TestRunLeaserefAnnounceViewUsage(t *testing.T) {
 		t.Fatalf("announce-view with no --issue: exit = %d, want 2", code)
 	}
 }
+
+func TestRunLeaserefAnnounceScrubsProtectedHolder(t *testing.T) {
+	cpu := "da" + "33"
+	var out, errb strings.Builder
+	code := runLeaserefAnnounce(&out, &errb, []string{"--id", "foo", "--holder", cpu + "/sess", "--generation", "3", "--tree", "internal/foo/**", "--ttl", "3600", "--action", "acquire", "--dry-run"})
+	if code != 0 || !strings.Contains(out.String(), "CPU server/sess") || strings.Contains(strings.ToLower(out.String()), cpu) {
+		t.Fatalf("body not scrubbed: code=%d body=%q stderr=%q", code, out.String(), errb.String())
+	}
+}

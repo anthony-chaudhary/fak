@@ -11,6 +11,52 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/categorybaseline"
 )
 
+func TestIssueCreateShiftLeftScopeRequiresBothDecisions(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "missing both", body: "## Current state\nwork", want: "require exactly one"},
+		{name: "empty core", body: "## Core through-line\n<!-- TODO -->\n\n## Gold-plating boundary\nNo extras.", want: "Core through-line is empty"},
+		{name: "empty boundary", body: "## Core through-line\nChange -> seam -> outcome -> witness.\n\n## Gold-plating boundary\n", want: "Gold-plating boundary is empty"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			code := runIssueCreateWith(&out, &errb, []string{"--title", "t", "--body", tc.body, "--dry-run"}, nil)
+			if code != 2 || !strings.Contains(errb.String(), tc.want) {
+				t.Fatalf("code=%d stderr=%q, want %q", code, errb.String(), tc.want)
+			}
+		})
+	}
+}
+
+func TestIssueCreateShiftLeftScopeCanonicalizesLegacyHeadings(t *testing.T) {
+	body := "## Parent context\n#99\n\n## In scope\nChange -> real seam -> observable outcome -> witness.\n\n## Out of scope\nDo not add unrelated polish."
+	var out, errb bytes.Buffer
+	code := runIssueCreateWith(&out, &errb, []string{
+		"--title", "scoped", "--body", body,
+		"--estimate-points", "1", "--parent-baseline-points", "1",
+		"--target-envelope", "- acceptance pass rate: = 100 percent",
+		"--witnessed-envelope", "- acceptance pass rate: = 100 percent",
+		"--dry-run", "--json",
+	}, nil)
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errb.String())
+	}
+	var got issueCreateResult
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	bodyArg := got.Args[5]
+	if !strings.Contains(bodyArg, "## Core through-line") || !strings.Contains(bodyArg, "## Gold-plating boundary") {
+		t.Fatalf("body did not canonicalize shift-left decisions:\n%s", bodyArg)
+	}
+	if strings.Contains(bodyArg, "## In scope") || strings.Contains(bodyArg, "## Out of scope") {
+		t.Fatalf("body retained generic scope headings:\n%s", bodyArg)
+	}
+}
+
 func TestIssueCreateDryRunDoesNotInvokeRunner(t *testing.T) {
 	called := false
 	runner := func(args []string) (string, string, bool) {
@@ -140,7 +186,7 @@ func TestIssueCreateJSONOutput(t *testing.T) {
 
 func TestIssueCreateDefaultsProjectWorkToProduction(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := runIssueCreateWith(&stdout, &stderr, []string{"--title", "scoped", "--body", "## Parent context\n#4638", "--estimate-points", "3", "--parent-baseline-points", "8", "--target-envelope", "- paths: >= 1 command", "--witnessed-envelope", "- paths: 1 command", "--dry-run", "--json"}, nil)
+	code := runIssueCreateWith(&stdout, &stderr, []string{"--title", "scoped", "--body", "## Parent context\n#4638\n\n## Core through-line\nChange -> seam -> outcome -> witness.\n\n## Gold-plating boundary\nDo not add unrelated polish.", "--estimate-points", "3", "--parent-baseline-points", "8", "--target-envelope", "- paths: >= 1 command", "--witnessed-envelope", "- paths: 1 command", "--dry-run", "--json"}, nil)
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
@@ -162,7 +208,7 @@ func TestIssueCreateDefaultsProjectWorkToProduction(t *testing.T) {
 }
 
 func TestIssueCreatePreservesExplicitDemo(t *testing.T) {
-	body := "## Parent context\n#4638\n\n## Work estimate\nEstimate: 1 point.\n\n## Overall completion contribution\nContribution: 1/8 points.\n\n## Completion standard\ndemo"
+	body := "## Parent context\n#4638\n\n## Core through-line\nChange -> seam -> outcome -> witness.\n\n## Gold-plating boundary\nDo not add unrelated polish.\n\n## Work estimate\nEstimate: 1 point.\n\n## Overall completion contribution\nContribution: 1/8 points.\n\n## Completion standard\ndemo"
 	var stdout, stderr bytes.Buffer
 	code := runIssueCreateWith(&stdout, &stderr, []string{"--title", "demo", "--body", body, "--dry-run", "--json"}, nil)
 	if code != 0 {
@@ -180,7 +226,7 @@ func TestIssueCreatePreservesExplicitDemo(t *testing.T) {
 
 func TestIssueCreateRefusesMissingProjectWorkNumbers(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := runIssueCreateWith(&stdout, &stderr, []string{"--title", "unknown", "--body", "body", "--dry-run"}, nil)
+	code := runIssueCreateWith(&stdout, &stderr, []string{"--title", "unknown", "--body", "## Core through-line\nChange -> seam -> outcome -> witness.\n\n## Gold-plating boundary\nDo not add unrelated polish.", "--dry-run"}, nil)
 	if code != 2 || !strings.Contains(stderr.String(), "estimate-points") {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
@@ -233,5 +279,26 @@ func TestIssueCreateDryRunEmitsCategoryLayer(t *testing.T) {
 	}
 	if !strings.Contains(body, "## Category\n\nagent-work-profile") || !strings.Contains(body, "## Layer\n\nprovider-effectiveness") {
 		t.Fatalf("body = %q args=%v", body, got.Args)
+	}
+}
+
+func TestIssueCreateScrubsProtectedTitleAndBodyFile(t *testing.T) {
+	cpu, gpu := "da"+"33", "dgx"+"1"
+	bodyFile := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(bodyFile, []byte("compare "+cpu+" with "+gpu), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	runner := func(args []string) (string, string, bool) {
+		got = append([]string(nil), args...)
+		return "https://example.invalid/7\n", "", true
+	}
+	var out, errb bytes.Buffer
+	if code := runIssueCreateWith(&out, &errb, []string{"--title", "move " + cpu + " to " + gpu, "--body-file", bodyFile, "--raw-body"}, runner); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errb.String())
+	}
+	joined := strings.Join(got, "\n")
+	if !strings.Contains(joined, "move CPU server to GPU server") || !strings.Contains(joined, "compare CPU server with GPU server") {
+		t.Fatalf("gh argv not scrubbed: %#v", got)
 	}
 }

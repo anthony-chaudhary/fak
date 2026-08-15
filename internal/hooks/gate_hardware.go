@@ -202,6 +202,49 @@ func ScanMessageHardwareTells(msg string) []Finding {
 	return findings
 }
 
+// ScrubHardwareNames replaces protected lab-node labels with role-based public names.
+// It uses the HARDWARE_TELL boundaries so outbound metadata is safe before egress.
+func ScrubHardwareNames(text string) string {
+	text = replaceHardwareMatches(text, hardwareDGXNRE, "GPU server")
+	text = replaceHardwareMatches(text, hardwareDA33RE, "CPU server")
+	return text
+}
+
+// ScrubGitHubTextArgs copies gh argv and scrubs outbound issue/PR text values.
+func ScrubGitHubTextArgs(args []string) []string {
+	out := append([]string(nil), args...)
+	for i := 0; i+1 < len(out); i++ {
+		switch out[i] {
+		case "--title", "--body", "-t", "-b":
+			out[i+1] = ScrubHardwareNames(out[i+1])
+			i++
+		}
+	}
+	return out
+}
+
+func replaceHardwareMatches(text string, re *regexp.Regexp, replacement string) string {
+	locs := re.FindAllStringIndex(text, -1)
+	if len(locs) == 0 {
+		return text
+	}
+	var b strings.Builder
+	last := 0
+	for _, loc := range locs {
+		if !hardwareDGXNBoundaryOK(text[loc[1]:]) {
+			continue
+		}
+		b.WriteString(text[last:loc[0]])
+		b.WriteString(replacement)
+		last = loc[1]
+	}
+	if last == 0 {
+		return text
+	}
+	b.WriteString(text[last:])
+	return b.String()
+}
+
 func hardwareLineHasTell(line string) bool {
 	if hardwareDGXWordRE.MatchString(line) || hardwareSXM4RE.MatchString(line) {
 		return true
