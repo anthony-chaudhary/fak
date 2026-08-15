@@ -1,6 +1,10 @@
 package gateway
 
-import "sort"
+import (
+	"sort"
+
+	"github.com/anthony-chaudhary/fak/internal/guardvars"
+)
 
 // debugTokenSavingsVars is the bounded, privacy-safe answer to four operator
 // questions: is each default armed, did it actually fire, why did it bail, and
@@ -11,18 +15,26 @@ type debugTokenSavingsVars struct {
 	ColdToolDefer   debugTokenSavingLever `json:"cold_tool_defer"`
 	StaleReadElide  debugTokenSavingLever `json:"stale_read_elide"`
 	HistoryCompact  debugTokenSavingLever `json:"history_compact"`
+	ModelRouting    debugTokenSavingLever `json:"model_routing"`
 }
 
 type debugTokenSavingLever struct {
-	Configured  bool              `json:"configured"`
-	State       string            `json:"state"` // active | ready | bypassed | off
-	Reason      string            `json:"reason"`
-	Fired       uint64            `json:"fired"`
-	Units       uint64            `json:"units"`
-	SavedBytes  uint64            `json:"saved_bytes,omitempty"`
-	SavedTokens uint64            `json:"saved_tokens,omitempty"`
-	BailReasons map[string]uint64 `json:"bail_reasons,omitempty"`
-	Rollback    string            `json:"rollback"`
+	Configured     bool              `json:"configured"`
+	State          string            `json:"state"` // active | ready | bypassed | off
+	Reason         string            `json:"reason"`
+	Fired          uint64            `json:"fired"`
+	Units          uint64            `json:"units"`
+	SavedBytes     uint64            `json:"saved_bytes,omitempty"`
+	SavedTokens    uint64            `json:"saved_tokens,omitempty"`
+	BailReasons    map[string]uint64 `json:"bail_reasons,omitempty"`
+	Rollback       string            `json:"rollback"`
+	Evidence       string            `json:"evidence,omitempty"`
+	Unavailable    string            `json:"unavailable_reason,omitempty"`
+	Baseline       string            `json:"baseline,omitempty"`
+	Fingerprint    string            `json:"compatibility_fingerprint,omitempty"`
+	ModeledTokens  float64           `json:"modeled_input_tokens_delta,omitempty"`
+	ModeledCalls   float64           `json:"modeled_model_calls_delta,omitempty"`
+	ModeledSeconds float64           `json:"modeled_latency_seconds_delta,omitempty"`
 }
 
 func (s *Server) tokenSavingsVars(sum AdjudicationSummary) debugTokenSavingsVars {
@@ -73,6 +85,15 @@ func (s *Server) tokenSavingsVars(sum AdjudicationSummary) debugTokenSavingsVars
 		stale.State, stale.Reason = "ready", "not_observed"
 	}
 
+	routeSummary := s.metrics.routingSummary()
+	routeEffect, deferEffect := calibratedWorkEffects(s.routeManifestVersion(), uint64(max(routeSummary.Total, 0)), sum.DeferColdTurns)
+	applyCalibratedEffect(&deferLever, deferEffect)
+	routeLever := debugTokenSavingLever{Configured: s.route != nil, State: "ready", Reason: "observed_decisions"}
+	applyCalibratedEffect(&routeLever, routeEffect)
+	if s.route == nil {
+		routeLever.State, routeLever.Reason = "off", "configured_off"
+	}
+
 	compact := debugTokenSavingLever{
 		Configured: s.compactHistoryBudget > 0, Fired: sum.CompactionFired,
 		Units: sum.CompactionDroppedTurns, SavedTokens: sum.CompactionShedTokens,
@@ -89,7 +110,7 @@ func (s *Server) tokenSavingsVars(sum AdjudicationSummary) debugTokenSavingsVars
 	default:
 		compact.State, compact.Reason = "ready", "not_observed"
 	}
-	return debugTokenSavingsVars{native, deferLever, stale, compact}
+	return debugTokenSavingsVars{NativeMCPFilter: native, ColdToolDefer: deferLever, StaleReadElide: stale, HistoryCompact: compact, ModelRouting: routeLever}
 }
 
 func topReason(reasons map[string]uint64) string {
@@ -108,4 +129,10 @@ func topReason(reasons map[string]uint64) string {
 		}
 	}
 	return best
+}
+
+func applyCalibratedEffect(dst *debugTokenSavingLever, src guardvars.TokenSavingLever) {
+	dst.Fired, dst.Units = src.Fired, src.Units
+	dst.Evidence, dst.Unavailable, dst.Baseline, dst.Fingerprint = src.Evidence, src.Unavailable, src.Baseline, src.Fingerprint
+	dst.ModeledTokens, dst.ModeledCalls, dst.ModeledSeconds = src.ModeledTokens, src.ModeledCalls, src.ModeledSeconds
 }

@@ -61,13 +61,22 @@ type SessionVars struct {
 type TokenSavingsVars struct {
 	NativeMCPFilter TokenSavingLever `json:"native_mcp_filter"`
 	StaleReadElide  TokenSavingLever `json:"stale_read_elide"`
+	ColdToolDefer   TokenSavingLever `json:"cold_tool_defer"`
+	ModelRouting    TokenSavingLever `json:"model_routing"`
 }
 
 type TokenSavingLever struct {
-	Fired       uint64 `json:"fired"`
-	Units       uint64 `json:"units"`
-	SavedBytes  uint64 `json:"saved_bytes,omitempty"`
-	SavedTokens uint64 `json:"saved_tokens,omitempty"`
+	Fired          uint64  `json:"fired"`
+	Units          uint64  `json:"units"`
+	SavedBytes     uint64  `json:"saved_bytes,omitempty"`
+	SavedTokens    uint64  `json:"saved_tokens,omitempty"`
+	Evidence       string  `json:"evidence,omitempty"`
+	Unavailable    string  `json:"unavailable_reason,omitempty"`
+	Baseline       string  `json:"baseline,omitempty"`
+	Fingerprint    string  `json:"compatibility_fingerprint,omitempty"`
+	ModeledTokens  float64 `json:"modeled_input_tokens_delta,omitempty"`
+	ModeledCalls   float64 `json:"modeled_model_calls_delta,omitempty"`
+	ModeledSeconds float64 `json:"modeled_latency_seconds_delta,omitempty"`
 }
 
 type CacheAttributionVars struct {

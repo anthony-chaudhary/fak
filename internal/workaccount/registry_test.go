@@ -50,7 +50,7 @@ func TestBuildReportIsDeterministic(t *testing.T) {
 			t.Fatalf("not sorted: %#v", r.Mechanisms)
 		}
 	}
-	if r.Counts[Accounted] != 7 || r.Counts[Unavailable] != 1 || r.Counts[Overlapping] != 1 || r.Counts[Excluded] != 1 {
+	if r.Counts[Accounted] != 7 || r.Counts[Unavailable] != 0 || r.Counts[Overlapping] != 2 || r.Counts[Excluded] != 1 {
 		t.Fatalf("counts=%#v", r.Counts)
 	}
 }

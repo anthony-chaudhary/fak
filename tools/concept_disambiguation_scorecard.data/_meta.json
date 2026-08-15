@@ -2226,6 +2226,36 @@
           "category": "incidental",
           "reason": "Issue #6843 work-history DTO, retention constant, comparison status, privacy helper, or render/query helper within the existing WORK DONE product seam; not a new guard gate concept.",
           "token": "guardInfoWorkHistoryExport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "fak_gateway_kv_prefix_tier_resident_bytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "fak_gateway_kv_prefix_tier_capacity_bytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "fak_gateway_kv_prefix_tier_lookups_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "fak_gateway_kv_prefix_tier_hit_tokens_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "fak_gateway_kv_prefix_tier_transfer_bytes_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "fak_gateway_kv_prefix_tier_evictions_total"
         }
       ],
       "exclude": [
@@ -2321,6 +2351,12 @@
         "exposureGated",
         "extensionFixtureCells",
         "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
+        "fak_gateway_kv_prefix_tier_capacity_bytes",
+        "fak_gateway_kv_prefix_tier_evictions_total",
+        "fak_gateway_kv_prefix_tier_hit_tokens_total",
+        "fak_gateway_kv_prefix_tier_lookups_total",
+        "fak_gateway_kv_prefix_tier_resident_bytes",
+        "fak_gateway_kv_prefix_tier_transfer_bytes_total",
         "fetchGuardPreCompactSignalsHTTP",
         "firstGuardEnv",
         "fleetDogfoodGuardBaseURL",
@@ -5116,6 +5152,56 @@
           "category": "incidental",
           "reason": "Issue #6844 accounting-coverage registry symbol or stable mechanism enum for existing gateway/context/decision behavior; not a new subsystem concept.",
           "token": "response_vdso_memo"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "inKernelPrefixPressureBridge"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "newInKernelPrefixPressureBridge"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "FAK_INKERNEL_RADIX_HOST_L2_BYTES"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "InKernelKVPrefixPressureSource"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "fak_gateway_kv_prefix_tier_resident_bytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "fak_gateway_kv_prefix_tier_capacity_bytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "fak_gateway_kv_prefix_tier_lookups_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "fak_gateway_kv_prefix_tier_hit_tokens_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "fak_gateway_kv_prefix_tier_transfer_bytes_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "fak_gateway_kv_prefix_tier_evictions_total"
         }
       ],
       "id": "gateway-engine",
@@ -5132,7 +5218,9 @@
         "EngineRead",
         "EngineReductionPct",
         "EngineWrite",
+        "FAK_INKERNEL_RADIX_HOST_L2_BYTES",
         "GatewaySeat",
+        "InKernelKVPrefixPressureSource",
         "KERNEL_TRANSFORM_REQUIRES_CLIENT_PREVIEW",
         "KernelTurns",
         "NewSessionAffinityGateway",
@@ -5157,12 +5245,19 @@
         "engineering",
         "engineers",
         "fak_gateway_compaction_thrash_sessions_total",
+        "fak_gateway_kv_prefix_tier_capacity_bytes",
+        "fak_gateway_kv_prefix_tier_evictions_total",
+        "fak_gateway_kv_prefix_tier_hit_tokens_total",
+        "fak_gateway_kv_prefix_tier_lookups_total",
+        "fak_gateway_kv_prefix_tier_resident_bytes",
+        "fak_gateway_kv_prefix_tier_transfer_bytes_total",
         "gatewayPluginExecutor",
         "gatewayPluginFloor",
         "gateways",
         "globEngine",
         "grepEngine",
         "inKernelPlannerEPCoordinated",
+        "inKernelPrefixPressureBridge",
         "kernel32",
         "kernelSession",
         "kernelValue",
@@ -5175,6 +5270,7 @@
         "microcache",
         "microcachedemo",
         "nativeReasonMessageRoleUnsupported",
+        "newInKernelPrefixPressureBridge",
         "query_public_policy",
         "resolveCallEngine",
         "resolveSpawnEngine",
@@ -5725,6 +5821,11 @@
           "category": "incidental",
           "reason": "aggregate receipt structure for managed hook states; not an independent policy concept",
           "token": "hookPosture"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "NewWithTierBudgetsAndEvictionPolicy"
         }
       ],
       "exclude": [
@@ -5754,6 +5855,7 @@
         "FAK_PREFLIGHT_ALLOW_BIN_SKEW",
         "HeldSchedulePolicy",
         "MaxPostures",
+        "NewWithTierBudgetsAndEvictionPolicy",
         "OrgPolicyCachePath",
         "OrgPolicyCachePathEnv",
         "OrgPolicyURLEnv",
@@ -7050,6 +7152,11 @@
           "category": "incidental",
           "reason": "Issue #6844 accounting-coverage registry symbol or stable mechanism enum for existing gateway/context/decision behavior; not a new subsystem concept.",
           "token": "marshalWorkCoverageForTest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "ErrKVHostSnapshotUnsupported"
         }
       ],
       "id": "support-maturity",
@@ -7070,6 +7177,7 @@
         "DefaultSetupParityReport",
         "DescriptionCoverage",
         "DomainCoverage",
+        "ErrKVHostSnapshotUnsupported",
         "ErrUnsupported",
         "ErrUnsupportedColdStart",
         "ErrUnsupportedFormat",
@@ -7263,21 +7371,69 @@
           "category": "incidental",
           "reason": "Unexported helper that counts the REPLAYABLE rows in a contract's class split for the in-band note; a read over an existing record, not an eviction concept.",
           "token": "replayableEvictedCount"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "KVDigestEvictor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "EvictDigest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "L2Evictions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "EvictHotKVPrefix"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "EvictHotSnapshot"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "digestEvictor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "fak_gateway_kv_prefix_tier_evictions_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "NewWithTierBudgetsAndEvictionPolicy"
         }
       ],
       "id": "evict",
       "ignore": [
         "CompactReasonPinEvictRefused",
-        "evictable",
+        "EvictDigest",
+        "EvictHotKVPrefix",
+        "EvictHotSnapshot",
         "EvictedByteCount",
+        "EvictionsPerHit",
+        "KVDigestEvictor",
+        "L2Evictions",
+        "NewWithTierBudgetsAndEvictionPolicy",
+        "ReasonPinEvictRefused",
+        "digestEvictor",
         "evictIDs",
+        "evictSupported",
+        "evictable",
         "evicting",
         "eviction",
-        "EvictionsPerHit",
         "evicts",
-        "evictSupported",
+        "fak_gateway_kv_prefix_tier_evictions_total",
         "noteEviction",
-        "ReasonPinEvictRefused",
         "recordEvictChoice",
         "replayableEvictedCount"
       ],
@@ -7447,6 +7603,36 @@
           "category": "incidental",
           "reason": "Issue #6844 accounting-coverage registry symbol or stable mechanism enum for existing gateway/context/decision behavior; not a new subsystem concept.",
           "token": "routing_defer_decision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Telemetry field reports observed routing/defer counts; it is not a decision policy or distinct domain concept.",
+          "token": "observed_decisions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Calibration payload field names one numeric coefficient and does not define a reusable decision concept.",
+          "token": "InputTokensDeltaPerDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Calibration payload field names one numeric coefficient and does not define a reusable decision concept.",
+          "token": "ModelCallsDeltaPerDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Calibration payload field names one numeric coefficient and does not define a reusable decision concept.",
+          "token": "LatencySecondsDeltaPerDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local aggregate variable counts defer observations; it is not a decision policy or distinct domain concept.",
+          "token": "deferDecisions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local aggregate variable counts route observations; it is not a decision policy or distinct domain concept.",
+          "token": "routeDecisions"
         }
       ],
       "id": "decision",
@@ -7462,8 +7648,11 @@
         "DecisionSamples",
         "EvaluateHeldSchedule",
         "GenerationContentionDecisionContract",
+        "InputTokensDeltaPerDecision",
+        "LatencySecondsDeltaPerDecision",
         "LaunchDecision",
         "MeasureHeldDecisionOverhead",
+        "ModelCallsDeltaPerDecision",
         "OBSERVER_DECISION_IGNORED",
         "PlanStepDecision",
         "ReuseDecision",
@@ -7474,6 +7663,7 @@
         "decision_ms_per_request",
         "decision_records",
         "decision_surface",
+        "deferDecisions",
         "deterministicSelectorDecision",
         "fixtureSelectStage",
         "gooddecisionratio",
@@ -7481,9 +7671,11 @@
         "importDecision",
         "kinddecisionsabout",
         "naturalDecision",
+        "observed_decisions",
         "partialretrydecision",
         "pluginDecisionFromVerdict",
         "predictHeld",
+        "routeDecisions",
         "routing_defer_decision",
         "scheduleOutcome",
         "selectorDecision",
@@ -8167,6 +8359,26 @@
           "category": "incidental",
           "reason": "Issue #6840 baseline descriptor implementation or DTO field for the existing work-done query; not a new guard gate or planning subsystem concept.",
           "token": "CandidateArm"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "KVPrefixPressureCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "KVPrefixPressuredCandidates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "PressuredSnapshotCandidates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier within issue #6851 native PrefixSnapshot host-DRAM L2; not a separate operator concept.",
+          "token": "SnapshotPressureCandidate"
         }
       ],
       "exclude": [
@@ -8190,6 +8402,8 @@
         "EventPlanUpdated",
         "ExplainFilingPlan",
         "FleetBenchPlanDoc",
+        "KVPrefixPressureCandidate",
+        "KVPrefixPressuredCandidates",
         "KindCandidate",
         "MergePlan",
         "MotifCatalogPlanFanoutReconcile",
@@ -8205,12 +8419,14 @@
         "PlanResolver",
         "PlanStepDecision",
         "PlanUnits",
+        "PressuredSnapshotCandidates",
         "ReadMergePlan",
         "ReconcilePlan",
         "RecoveryReplan",
         "RemoteDrainCandidate",
         "SinkCandidate",
         "SinkCandidates",
+        "SnapshotPressureCandidate",
         "SweepPlanGreedy",
         "SweepPlanMain",
         "SweepPlanPairwise",
