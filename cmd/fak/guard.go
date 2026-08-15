@@ -1430,6 +1430,14 @@ func cmdManageCommand(commandName string, argv []string) {
 	policyEvidence := writeGuardPolicyOriginEvidence(guardTraceID, *policyPath)
 	budgetEvidence := writeGuardBudgetEnvelopeEvidence(guardTraceID, contextBudgetLimit, maxDurationLimit.String())
 	registerGuardChildOriginTask(guardTraceID, command[0], policyEvidence, resume.IdentityLedgerPath(resolveSweepRegDir("")), budgetEvidence, stopHookInstall.StopsLedger)
+	command, restoreNativeHooks, err := installManagedNativeHooks(command)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak %s: install native hooks: %v\n", commandName, err)
+		cancel()
+		return
+	}
+	defer restoreNativeHooks()
+
 	// 6. Run the wrapped agent, then tear the gateway down and report the session.
 	rotationRuntime := guardRotationRuntimeFor(command, resolvedRotateMode)
 	spawnMeta := newGuardChildSpawnMetadata(guardTraceID, policyDigest, up, rt, command)

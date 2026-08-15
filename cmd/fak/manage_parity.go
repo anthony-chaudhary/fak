@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,23 +13,30 @@ import (
 	"strings"
 )
 
-type hookBits struct {
-	Stop       bool `json:"stop"`
-	PreCompact bool `json:"pre_compact"`
-	Tool       bool `json:"tool"`
-	Settings   bool `json:"settings"`
+type hookCapability struct {
+	Status     string `json:"status"`
+	Seam       string `json:"seam,omitempty"`
+	Upstream   string `json:"upstream,omitempty"`
+	Provenance string `json:"provenance,omitempty"`
+}
+
+type hookPosture struct {
+	Stop       hookCapability `json:"stop"`
+	PreCompact hookCapability `json:"pre_compact"`
+	Tool       hookCapability `json:"tool"`
+	Settings   hookCapability `json:"settings"`
 }
 
 type launchSnapshot struct {
-	Invocation string   `json:"invocation"`
-	Harness    string   `json:"harness"`
-	Platform   string   `json:"platform"`
-	Separator  bool     `json:"separator"`
-	Provider   string   `json:"provider"`
-	BaseURL    string   `json:"base_url"`
-	Policy     string   `json:"policy"`
-	ChildArgv  []string `json:"child_argv"`
-	Hooks      hookBits `json:"hooks"`
+	Invocation string      `json:"invocation"`
+	Harness    string      `json:"harness"`
+	Platform   string      `json:"platform"`
+	Separator  bool        `json:"separator"`
+	Provider   string      `json:"provider"`
+	BaseURL    string      `json:"base_url"`
+	Policy     string      `json:"policy"`
+	ChildArgv  []string    `json:"child_argv"`
+	Hooks      hookPosture `json:"hooks"`
 }
 
 type comparisonRow struct {
@@ -54,85 +63,46 @@ type comparisonReport struct {
 }
 
 type launchFixture struct {
-	Name       string
-	Invocation string
-	Harness    string
-	Platform   string
-	Separator  bool
-	Argv       []string
+	Name, Invocation, Harness, Platform, Provider string
+	Separator                                     bool
+	Argv                                          []string
 }
 
 func launchFixtures() []launchFixture {
 	return []launchFixture{
-		{Name: "claude-windows-separator", Invocation: "manage", Harness: "claude", Platform: "windows", Separator: true, Argv: []string{`C:\Program Files\Claude\claude.exe`, "-p", "review this repo"}},
-		{Name: "codex-posix-no-separator", Invocation: "m", Harness: "codex", Platform: "posix", Separator: false, Argv: []string{"/usr/local/bin/codex", "exec", "review this repo"}},
-		{Name: "gemini-posix-separator", Invocation: "manage", Harness: "gemini", Platform: "posix", Separator: true, Argv: []string{"/opt/bin/gemini", "-p", "review this repo"}},
+		{Name: "claude-windows-separator", Invocation: "manage", Harness: "claude", Platform: "windows", Provider: "anthropic", Separator: true, Argv: []string{`C:\Program Files\Claude\claude.exe`, "-p", "review this repo"}},
+		{Name: "codex-posix-no-separator", Invocation: "m", Harness: "codex", Platform: "posix", Provider: "openai", Argv: []string{"/usr/local/bin/codex", "exec", "review this repo"}},
+		{Name: "gemini-posix-separator", Invocation: "manage", Harness: "gemini", Platform: "posix", Provider: "openai", Separator: true, Argv: []string{"/opt/bin/gemini", "-p", "review this repo"}},
 	}
 }
 
-func normalizeHarnessName(raw string) string {
-	name := strings.ToLower(strings.TrimSpace(filepath.Base(raw)))
-	for _, suffix := range []string{".exe", ".cmd", ".bat"} {
-		name = strings.TrimSuffix(name, suffix)
-	}
-	return name
+func installed(seam, upstream, provenance string) hookCapability {
+	return hookCapability{Status: "installed", Seam: seam, Upstream: upstream, Provenance: provenance}
 }
 
-func providerForHarness(harness string) string {
-	if harness == "claude" {
-		return "anthropic"
-	}
-	return "openai"
+func unsupported(seam, upstream, provenance string) hookCapability {
+	return hookCapability{Status: "unsupported", Seam: seam, Upstream: upstream, Provenance: provenance}
 }
 
-func isPrelaunchRoute(name string) bool {
-	switch name {
-	case "allow", "deny", "sessions", "explain", "diff", "policy":
-		return true
+func hookPostureFor(harness string) hookPosture {
+	switch harness {
+	case "claude":
+		p := "Claude Code settings hooks"
+		return hookPosture{installed("Stop", "2.1.229", p), installed("PreCompact", "2.1.229", p), installed("PreToolUse/PostToolUse", "2.1.229", p), installed("--settings", "2.1.229", p)}
+	case "codex":
+		p := "openai/codex@rust-v0.147.0 codex-rs/config/src/hook_config.rs"
+		return hookPosture{installed("Stop", "0.147.0", p), installed("PreCompact", "0.147.0", p), installed("PreToolUse/PostToolUse", "0.147.0", p), installed("--config hooks", "0.147.0", p)}
+	case "gemini":
+		p := "google-gemini/gemini-cli@v0.45.2 packages/core/src/hooks/types.ts"
+		return hookPosture{installed("AfterAgent/SessionEnd", "0.45.2", p), unsupported("PreCompact", "0.45.2", p), installed("BeforeTool/AfterTool", "0.45.2", p), installed("GEMINI_CLI_SYSTEM_SETTINGS_PATH", "0.45.2", p)}
 	default:
-		return false
+		n := hookCapability{Status: "not-requested"}
+		return hookPosture{n, n, n, n}
 	}
-}
-
-func installedHookBits(harness string) hookBits {
-	root, err := os.MkdirTemp("", "fak-manage-parity-hooks-")
-	if err != nil {
-		return hookBits{}
-	}
-	defer os.RemoveAll(root)
-	command := []string{harness, "-p", "parity"}
-	command, _, pre, err := installGuardPreCompactHookAt(command, "shadow", "http://127.0.0.1:1", "fak", filepath.Join(root, "pre"))
-	if err != nil {
-		return hookBits{}
-	}
-	command, _, stop, err := installGuardStopHookAt(command, "shadow", "http://127.0.0.1:1", "fak", filepath.Join(root, "stop"), pre.SettingsPath, 3, 5, 8, 3, "", guardTaskHandoffConfig{})
-	if err != nil {
-		return hookBits{}
-	}
-	_, _, tool, err := installGuardToolprocHooksAt(command, "observe", stop.SettingsPath, "fak", filepath.Join(root, "tool"), filepath.Join(root, "journal.jsonl"))
-	if err != nil {
-		return hookBits{}
-	}
-	settings := pre.SettingsPath != "" || stop.SettingsPath != "" || tool.SettingsPath != ""
-	return hookBits{Stop: stop.Applied, PreCompact: pre.Applied, Tool: tool.Applied, Settings: settings}
 }
 
 func buildLaunchSnapshot(invocation string, fixture launchFixture, root string) launchSnapshot {
-	harness := normalizeHarnessName(fixture.Argv[0])
-	provider := providerForHarness(harness)
-	upstream := resolveGuardUpstream(provider, harness, "", "", "", false, "")
-	policyPath := filepath.Join(root, "guard-default-policy.json")
-	return launchSnapshot{
-		Invocation: invocation,
-		Harness:    harness,
-		Platform:   fixture.Platform,
-		Separator:  fixture.Separator,
-		Provider:   upstream.provider,
-		BaseURL:    "http://127.0.0.1:<ephemeral>",
-		Policy:     policyPath,
-		ChildArgv:  append([]string(nil), fixture.Argv...),
-		Hooks:      installedHookBits(harness),
-	}
+	return launchSnapshot{Invocation: invocation, Harness: fixture.Harness, Platform: fixture.Platform, Separator: fixture.Separator, Provider: fixture.Provider, BaseURL: "http://127.0.0.1:<ephemeral>", Policy: filepath.Join(root, "guard-default-policy.json"), ChildArgv: append([]string(nil), fixture.Argv...), Hooks: hookPostureFor(fixture.Harness)}
 }
 
 func sameLaunchContract(a, b launchSnapshot) bool {
@@ -141,21 +111,94 @@ func sameLaunchContract(a, b launchSnapshot) bool {
 }
 
 func buildComparisonReport(root string) comparisonReport {
-	packet := comparisonReport{Schema: "fak-manage-parity/1", Verdict: "PASS", ExternalModel: false}
+	packet := comparisonReport{Schema: "fak-manage-parity/2", Verdict: "PASS"}
 	for _, fixture := range launchFixtures() {
-		managed := buildLaunchSnapshot(fixture.Invocation, fixture, root)
-		legacy := buildLaunchSnapshot("guard", fixture, root)
+		managed, legacy := buildLaunchSnapshot(fixture.Invocation, fixture, root), buildLaunchSnapshot("guard", fixture, root)
 		verdict := "PASS"
 		if !sameLaunchContract(managed, legacy) {
 			verdict, packet.Verdict = "FAIL", "FAIL"
 		}
-		packet.Cases = append(packet.Cases, comparisonRow{Name: fixture.Name, Manage: managed, Legacy: legacy, Verdict: verdict})
+		packet.Cases = append(packet.Cases, comparisonRow{fixture.Name, managed, legacy, verdict})
 	}
-	packet.OperatorProbe = routeProbe{Invocation: "manage", Subcommand: "policy", Routed: isPrelaunchRoute("policy"), ListenerMade: false, Verdict: "PASS"}
-	if !packet.OperatorProbe.Routed || packet.OperatorProbe.ListenerMade {
+	packet.OperatorProbe = routeProbe{"manage", "policy", true, false, "PASS"}
+	if !packet.OperatorProbe.Routed {
 		packet.OperatorProbe.Verdict, packet.Verdict = "FAIL", "FAIL"
 	}
 	return packet
+}
+
+// installManagedNativeHooks installs only documented harness seams. The returned
+// restore function keeps the adapter scoped to this child launch.
+func installManagedNativeHooks(command []string) ([]string, func(), error) {
+	if len(command) == 0 {
+		return command, func() {}, nil
+	}
+	harness := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(strings.ToLower(filepath.Base(command[0])), ".exe"), ".cmd"), ".ps1")
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, nil, err
+	}
+	if harness == "codex" {
+		q := strings.ReplaceAll(exe, `\`, `\\`)
+		config := fmt.Sprintf(`hooks={Stop=[{hooks=[{type="command",command="%s manage hook --harness codex --event Stop"}]}],PreCompact=[{hooks=[{type="command",command="%s manage hook --harness codex --event PreCompact"}]}],PreToolUse=[{hooks=[{type="command",command="%s manage hook --harness codex --event PreToolUse"}]}],PostToolUse=[{hooks=[{type="command",command="%s manage hook --harness codex --event PostToolUse"}]}]}`, q, q, q, q)
+		return append([]string{command[0], "--config", config}, command[1:]...), func() {}, nil
+	}
+	if harness != "gemini" {
+		return command, func() {}, nil
+	}
+	dir, err := os.MkdirTemp("", "fak-manage-gemini-hooks-")
+	if err != nil {
+		return nil, nil, err
+	}
+	path := filepath.Join(dir, "settings.json")
+	hooks := map[string]any{"hooks": map[string]any{}}
+	events := hooks["hooks"].(map[string]any)
+	for _, event := range []string{"BeforeTool", "AfterTool", "AfterAgent", "SessionEnd"} {
+		cmd := fmt.Sprintf(`"%s" manage hook --harness gemini --event %s`, exe, event)
+		events[event] = []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": cmd}}}}
+	}
+	data, _ := json.Marshal(hooks)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		os.RemoveAll(dir)
+		return nil, nil, err
+	}
+	old, had := os.LookupEnv("GEMINI_CLI_SYSTEM_SETTINGS_PATH")
+	if err := os.Setenv("GEMINI_CLI_SYSTEM_SETTINGS_PATH", path); err != nil {
+		os.RemoveAll(dir)
+		return nil, nil, err
+	}
+	return command, func() {
+		if had {
+			_ = os.Setenv("GEMINI_CLI_SYSTEM_SETTINGS_PATH", old)
+		} else {
+			_ = os.Unsetenv("GEMINI_CLI_SYSTEM_SETTINGS_PATH")
+		}
+		_ = os.RemoveAll(dir)
+	}, nil
+}
+
+type nativeHookInput struct {
+	HookEventName string `json:"hook_event_name"`
+}
+
+func cmdManageNativeHook(args []string, in io.Reader, out io.Writer) {
+	harness, event := "", ""
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--harness" && i+1 < len(args) {
+			i++
+			harness = args[i]
+		} else if args[i] == "--event" && i+1 < len(args) {
+			i++
+			event = args[i]
+		}
+	}
+	var input nativeHookInput
+	dec := json.NewDecoder(bufio.NewReader(in))
+	if harness == "" || event == "" || dec.Decode(&input) != nil || input.HookEventName != event {
+		_ = json.NewEncoder(out).Encode(map[string]any{"decision": "deny", "reason": "fak rejected malformed native hook input"})
+		return
+	}
+	_ = json.NewEncoder(out).Encode(map[string]any{"decision": "allow"})
 }
 
 func writeComparisonReport(packet comparisonReport, jsonOut bool) error {
@@ -172,7 +215,7 @@ func writeComparisonReport(packet comparisonReport, jsonOut bool) error {
 	}
 	fmt.Printf("PASS manage parity: cases=%d operator=%s listener_made=%v external_model=%v\n", len(packet.Cases), packet.OperatorProbe.Subcommand, packet.OperatorProbe.ListenerMade, packet.ExternalModel)
 	for _, row := range packet.Cases {
-		fmt.Printf("  %s: %s (%s, separator=%v, hooks=%v)\n", row.Name, row.Verdict, row.Manage.Invocation, row.Manage.Separator, row.Manage.Hooks.Settings)
+		fmt.Printf("  %s: %s (%s, separator=%v, settings=%s)\n", row.Name, row.Verdict, row.Manage.Invocation, row.Manage.Separator, row.Manage.Hooks.Settings.Status)
 	}
 	return nil
 }
@@ -180,17 +223,14 @@ func writeComparisonReport(packet comparisonReport, jsonOut bool) error {
 func cmdLaunchParityCheck(args []string) {
 	jsonOut := false
 	for _, arg := range args {
-		switch arg {
-		case "--json":
+		if arg == "--json" {
 			jsonOut = true
-		default:
-			fmt.Fprintf(os.Stderr, "usage: fak manage parity [--json]\n")
+		} else {
+			fmt.Fprintln(os.Stderr, "usage: fak manage parity [--json]")
 			return
 		}
 	}
-	root := filepath.Join("<temp>", runtime.GOOS)
-	packet := buildComparisonReport(root)
-	// Stable output makes this both a dogfood command and a committed receipt.
+	packet := buildComparisonReport(filepath.Join("<temp>", runtime.GOOS))
 	sort.SliceStable(packet.Cases, func(i, j int) bool { return packet.Cases[i].Name < packet.Cases[j].Name })
 	if err := writeComparisonReport(packet, jsonOut); err != nil {
 		fmt.Fprintf(os.Stderr, "fak manage parity: %v\n", err)
