@@ -2608,6 +2608,24 @@ func TestShellSelfModifyGuardWiredInDecide(t *testing.T) {
 // A NEW engine under a NEW id is correctly allowed (the map is plural by design); only a
 // second registrant of an EXISTING id is the regression this gate catches.
 var engineDriverRole = map[string]map[string]string{
+	"codetools.bash": {
+		"codetools": "bounded coding Bash engine",
+	},
+	"codetools.edit": {
+		"codetools": "bounded coding edit engine",
+	},
+	"codetools.glob": {
+		"codetools": "bounded coding glob engine",
+	},
+	"codetools.grep": {
+		"codetools": "bounded coding grep engine",
+	},
+	"codetools.read": {
+		"codetools": "bounded coding read engine",
+	},
+	"codetools.write": {
+		"codetools": "bounded coding write engine",
+	},
 	"dynamo":     {"engine": "the Dynamo EngineDriver adapter for ridden P/D serving pools"},
 	"inkernel":   {"modelengine": "the in-kernel Go model-fusion engine (dogfood default)"},
 	"fakread":    {"agent": "the read-only engine for fak_read gateway calls"},
