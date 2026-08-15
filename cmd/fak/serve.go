@@ -180,6 +180,7 @@ type serveFlags struct {
 func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	verbFlagUsage(fs, "serve")
+	configureServeHelp(fs)
 	sf := &serveFlags{}
 	sf.configPath = fs.String("config", "", "load reviewable deployment defaults from fak.toml (explicit flags override; no implicit ambient lookup)")
 	sf.printEffectiveConfig = fs.Bool("print-effective-config", false, "print supported effective serve configuration with value provenance, then exit without binding a listener")
@@ -258,6 +259,9 @@ func cmdServe(argv []string) {
 	// must be the FIRST statement so flag parse + policy + weight load are accounted.
 	t0 := time.Now()
 	fs, sf := newServeFlagSet()
+	if serveHelpRequested(fs, argv) {
+		os.Exit(0)
+	}
 	configPath, err := serveConfigPath(argv)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)

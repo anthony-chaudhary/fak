@@ -124,6 +124,15 @@ func cmdHelp(args []string) {
 	case "--full", "full":
 		usageWall(os.Stdout)
 	default:
+		if strings.EqualFold(args[0], "serve") {
+			topic := ""
+			if len(args) > 1 {
+				topic = strings.ToLower(args[1])
+			}
+			fs, _ := newServeFlagSet()
+			printServeHelp(os.Stdout, fs, topic)
+			return
+		}
 		if printVerbHelp(os.Stdout, args[0]) {
 			return
 		}
@@ -214,7 +223,8 @@ func verbFlagUsage(fs *flag.FlagSet, tok string) {
 			return
 		}
 		fmt.Fprintln(w)
-		fs.PrintDefaults()
+		printConciseFlagDefaults(w, fs)
+		fmt.Fprintf(w, "\nDetailed guide: fak help %s\n", tok)
 	}
 }
 
