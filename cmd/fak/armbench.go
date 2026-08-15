@@ -39,6 +39,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/armbench"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 func cmdArmbench(argv []string) { os.Exit(runArmbench(os.Stdout, os.Stderr, argv)) }
@@ -206,6 +207,7 @@ func armbenchEmitDemo(stdout, stderr io.Writer, argv []string) int {
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	if *dir == "" {
 		fmt.Fprintln(stderr, "fak armbench emit-demo: --dir is required")
 		return 2

@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/harnessinit"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 func cmdHarness(argv []string) { os.Exit(runHarness(os.Stdout, os.Stderr, argv)) }
@@ -29,7 +30,7 @@ func runHarness(stdout, stderr io.Writer, argv []string) int {
 	if err := fs.Parse(argv[1:]); err != nil {
 		return 2
 	}
-	result, err := harnessinit.Init(harnessinit.Options{Dir: *dir, Module: *module, FAKVersion: *version})
+	result, err := harnessinit.Init(harnessinit.Options{Dir: pathutil.ExpandTilde(*dir), Module: *module, FAKVersion: *version})
 	if err != nil {
 		fmt.Fprintf(stderr, "fak harness init: %v\n", err)
 		return 1

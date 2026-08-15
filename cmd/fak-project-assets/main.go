@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/projectassets"
 	"io"
 	"os"
@@ -26,7 +27,7 @@ func runProjectAssets(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stderr, "unknown action %q\n", action)
 		return 2
 	}
-	r, e := projectassets.Build(*dir, action == "sync")
+	r, e := projectassets.Build(pathutil.ExpandTilde(*dir), action == "sync")
 	if e != nil {
 		fmt.Fprintf(stderr, "project-assets: %v\n", e)
 		return 1

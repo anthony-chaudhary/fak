@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 const schema = "fak-nvidia-nemo-api-demo-audit/1"
@@ -64,6 +66,7 @@ func main() {
 	generated := flag.String("generated-utc", "", "stable RFC3339 timestamp for a checked-in manifest")
 	flag.Parse()
 
+	*dir = pathutil.ExpandTilde(*dir)
 	names, err := filepath.Glob(filepath.Join(*dir, *pattern))
 	must(err)
 	sort.Strings(names)

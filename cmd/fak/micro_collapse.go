@@ -14,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/microagent"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -167,7 +168,7 @@ func cmdMicroCollapseRepoPulse(args []string) {
 	if err := fs.Parse(args); err != nil {
 		return
 	}
-	r, err := runRepoPulse(*dir)
+	r, err := runRepoPulse(pathutil.ExpandTilde(*dir))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "fak micro collapse repo-pulse:", err)
 		return
