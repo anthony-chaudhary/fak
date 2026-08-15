@@ -14,11 +14,14 @@ import (
 func cmdHarness(argv []string) { os.Exit(runHarness(os.Stdout, os.Stderr, argv)) }
 
 func runHarness(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == "select" {
+		return runHarnessSelect(stdout, stderr, argv[1:])
+	}
 	if len(argv) > 0 && argv[0] == "protocol" {
 		return runHarnessProtocol(stdout, stderr, argv[1:])
 	}
 	if len(argv) == 0 || argv[0] != "init" {
-		fmt.Fprintln(stderr, "usage: fak harness init --dir PATH --module MODULE [--fak-version VERSION] [--json]")
+		fmt.Fprintln(stderr, "usage: fak harness <init|select|protocol>")
 		return 2
 	}
 	fs := flag.NewFlagSet("harness init", flag.ContinueOnError)
