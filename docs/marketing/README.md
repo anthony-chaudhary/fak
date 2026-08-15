@@ -15,8 +15,6 @@ recently, and where does it fit when the AI market shifts?" It has two jobs:
 
 | Artifact | Owner | Purpose |
 |---|---|---|
-| [`updates.json`](updates.json) | `fak marketing aeo` | schema.org `ItemList` of recent git-witnessed ships. |
-| [`disambiguation-terms.json`](disambiguation-terms.json) | `fak marketing aeo` | schema.org `DefinedTermSet` for core, localized, and market-event search terms. |
 | [`config-answers.json`](config-answers.json) | `fak marketing aeo` | schema.org `FAQPage` with concise, cited answers to configuration questions. |
 | [`configuration.md`](../fak/configuration.md) | `fak marketing aeo` | crawlable configuration Q&A with matching visible answers and inline FAQPage JSON-LD. |
 | [`llms-updates.txt`](https://github.com/anthony-chaudhary/fak/blob/main/llms-updates.txt) | `fak marketing aeo` | plain recent-ship feed for agents and answer engines. |

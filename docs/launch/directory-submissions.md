@@ -136,7 +136,7 @@ Spaces are the one directory where a visitor **runs** a claim instead of reading
 no weights (so no model card — that's the fence, not a gap), but the committed
 [`spaces/hf-demo/`](https://github.com/anthony-chaudhary/fak/tree/main/spaces/hf-demo) **Docker
 Space** runs three offline witnesses in-browser: policy DENY/ALLOW, provable deletion
-(`max|Δ|=0`), and the turn tax — no key, no GPU. Full playbook: [`huggingface.md`](huggingface.md).
+(`max|Δ|=0`), and the turn tax — no key, no GPU. Runnable source: [`spaces/hf-demo/`](../../spaces/hf-demo/README.md).
 
 - **Create:** <https://huggingface.co/new-space> → SDK **Docker**, name `fak-demo`, license `apache-2.0`, public.
 - **Push:** the three files in `spaces/hf-demo/` (`README.md` carries the HF `sdk: docker` front-matter, plus `Dockerfile` and `app.py`) to the Space git remote — it builds automatically.

@@ -356,7 +356,7 @@ cited as measured; no projection appears without its label.
   TARGET; power/energy/$ = SIMULATED; "kernel/syscall" = intuition pump, not
   ring isolation. Sources:
   [`positioning-brief.md`](positioning-brief.md),
-  [`docs/launch/README.md`](README.md) §"The one rule that governs all of it".
+  the claim fences in [`docs/adoption/launch-kit.md`](../adoption/launch-kit.md).
 
 *This doc ships words, not code. It extends the launch kit; it does not duplicate
 it.*
