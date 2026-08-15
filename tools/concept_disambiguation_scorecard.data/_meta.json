@@ -2266,6 +2266,11 @@
           "category": "incidental",
           "reason": "Prometheus telemetry for remote prefix transfer faults; it observes failures but makes no admission or refusal decision and matches only through the gateway substring.",
           "token": "fak_gateway_kv_prefix_tier_transfer_faults_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private memory-co-travel parser for the shared rollout vocabulary; it does not define a new guard gate or policy boundary.",
+          "token": "parseGate"
         }
       ],
       "exclude": [
@@ -2544,6 +2549,7 @@
         "normalizeGuardOperatorQuestionMode",
         "observer_guard",
         "pairedBaselineGuardTimeout",
+        "parseGate",
         "prepareGuardChildRegistration",
         "prepushGateContract",
         "printGuardAllowExpiries",

@@ -217,15 +217,24 @@ func TestRolloutModeGuardCanaryOffDefaultUnknown(t *testing.T) {
 		t.Fatalf("off mode must leave live selection untouched and compute nothing, got %+v", d)
 	}
 
-	// DEFAULT (broad default-on) is OUT OF SCOPE — the guard refuses it.
+	// ON (broad default-on) is OUT OF SCOPE — the guard refuses it. It is a KNOWN
+	// rung of the shared ladder and still unreachable here: naming it the shared
+	// way must not make it look implemented (#6090).
 	def := base
-	def.Mode = RolloutDefault
+	def.Mode = RolloutOn
 	d := EvaluateRollout(def)
 	if !d.ModeValid {
-		t.Fatalf("default is a known mode")
+		t.Fatalf("on is a known rung of the shared ladder")
 	}
-	if d.Applied || d.AppliedTier != 1 || d.Reason != RolloutReasonDefaultOutOfScope {
+	if d.Applied || d.AppliedTier != 1 || d.Reason != RolloutReasonOnOutOfScope {
 		t.Fatalf("default-on routing must be refused, got %+v", d)
+	}
+	// The retired private spelling is NOT a rung any more: it fails closed like any
+	// other unknown string, rather than quietly reaching the refusal arm.
+	retired := base
+	retired.Mode = RolloutMode("default")
+	if r := EvaluateRollout(retired); r.ModeValid || r.Applied || r.Reason != RolloutReasonUnknownMode {
+		t.Fatalf("the retired %q spelling must fail closed, got %+v", "default", r)
 	}
 
 	// An unknown mode fails closed.

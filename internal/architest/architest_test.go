@@ -90,6 +90,7 @@ var tier = map[string]int{
 	"harnessres":           1, // cross-platform, stdlib-only process resource sampler for the fak guard harness (CPU/mem/IO); imports nothing internal, off the hot path (#2045, epic #2044).
 	"harnessinit":          1, // external product scaffold renderer; stdlib-only and outside kernel hot paths (#6788).
 	"harnessdiscover":      1, // provenance-bearing scoped declaration discovery before contextual selection (#6898).
+	"harnessclassify":      1, // deterministic explicit-first domain/task classification before contextual selection (#6900).
 	"harnessselect":        1, // context-layer selection and explain trace; stdlib-only before product composition.
 	"stackresolve":         1, // stdlib-only generic dependency search and receipts; domain facts enter through Provider (#6891).
 	"amdgpu":               2, // AMD GPU fact probe and perf-counter JSON fold for Windows harness diagnostics; imports windowgate(1), off the hot path.
@@ -133,6 +134,7 @@ var tier = map[string]int{
 	"balance":              2,                // night-balance readout folding resume-recovery + work-mix into a degradation verdict; imports resume(1)+superloop(1), off the hot path.
 	"focusscore":           2,                // fleet convergence/breadth focus scorecard over the trajctl objective tree; imports trajctl(1)+pkg/scorecard, off the hot path.
 	"memgate":              2,                // memory-pressure admission fold for heavy model loads; stdlib + windowgate shell helpers, off the hot path.
+	"rolloutmode":          1,                // stdlib-only closed rollout vocabulary and caller-selected parse fallback (#6090).
 	"memorycotravel":       1,                // stdlib-only project memory co-travel gate/ledger for shadow/live carryover between config roots; off the hot path.
 	"memoryindex":          2,                // stdlib-only memory-index reconciliation mechanism; off the hot path.
 	"memorystability":      1,                // stdlib-only fleet-memory stability governor over drift trajectories; off the hot path.

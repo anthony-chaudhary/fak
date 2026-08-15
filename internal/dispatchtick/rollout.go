@@ -1,6 +1,9 @@
 package dispatchtick
 
-import "github.com/anthony-chaudhary/fak/internal/modelroute"
+import (
+	"github.com/anthony-chaudhary/fak/internal/modelroute"
+	"github.com/anthony-chaudhary/fak/internal/rolloutmode"
+)
 
 // ---------------------------------------------------------------------------
 // THE ROLLOUT GUARD — the safety gate between "tier-aware routing is computed"
@@ -17,18 +20,18 @@ import "github.com/anthony-chaudhary/fak/internal/modelroute"
 //
 //	tier route (C5)  ->  ROLLOUT GUARD (THIS)  ->  live worker selection
 //
-// THE WORKING PATH IS shadow -> canary -> default, and the guard makes each step
+// THE WORKING PATH IS shadow -> canary -> on, and the guard makes each step
 // refuse to become the next until parity is witnessed:
 //
-//   - OFF (the default): the live path is untouched. No would-choose is computed,
-//     nothing is applied. This is what proves "default behavior is unchanged".
+//   - OFF (this leaf's default): the live path is untouched. No would-choose is
+//     computed, nothing is applied. This proves "default behavior is unchanged".
 //   - SHADOW: compute would_choose_tier BESIDE the current selection and report
 //     the delta. It NEVER switches a worker — Applied is false by construction, so
 //     the readout can prove the shadow fields without launching anything.
 //   - CANARY: apply the cheaper tier route, but ONLY to low-risk routine (T2)
 //     watchdog/meta work, and roll back automatically on a quality or refusal
 //     regression. Any non-routine class stays on the live selection untouched.
-//   - DEFAULT (broad default-on routing): OUT OF SCOPE for this leaf. The guard
+//   - ON (broad default-on routing): OUT OF SCOPE for this leaf. The guard
 //     REFUSES it — a rollout guard that would silently promote to default-on is no
 //     guard at all. Promotion past canary needs a separate witness.
 //
@@ -50,37 +53,31 @@ import "github.com/anthony-chaudhary/fak/internal/modelroute"
 // Work-tier comparisons still route through modelroute so the T0<T1<T2 inversion
 // (C3's trap) can never leak in.
 
-// RolloutMode is the closed vocabulary of rollout stages. An unrecognized mode
-// fails closed (treated as no application) rather than silently routing.
-type RolloutMode string
+// RolloutMode is this leaf's name for the repo-wide closed rollout vocabulary
+// (internal/rolloutmode) — the semantics below are where that ladder was first
+// written out, and #6090 lifted the type so three leaves stop spelling the same
+// rungs three ways. An unrecognized mode fails closed here (treated as no
+// application) rather than silently routing; the shared parser leaves that
+// direction to the caller precisely so this guard can choose it.
+type RolloutMode = rolloutmode.Mode
 
 const (
-	// RolloutOff is the default: the live selection is untouched and no
+	// RolloutOff is this leaf's default: the live selection is untouched and no
 	// would-choose is computed. The gen/next posture — gated until promotion.
-	RolloutOff RolloutMode = "off"
+	RolloutOff = rolloutmode.Off
 	// RolloutShadow computes would_choose_tier beside the current selection and
 	// reports the delta. It never switches a worker.
-	RolloutShadow RolloutMode = "shadow"
+	RolloutShadow = rolloutmode.Shadow
 	// RolloutCanary applies the cheaper tier route to routine (T2) meta work only,
 	// rolling back on a quality/refusal regression.
-	RolloutCanary RolloutMode = "canary"
-	// RolloutDefault is broad default-on routing — OUT OF SCOPE for this leaf. The
-	// guard refuses to apply it; promotion past canary needs a separate witness.
-	RolloutDefault RolloutMode = "default"
+	RolloutCanary = rolloutmode.Canary
+	// RolloutOn is the shared ladder's APPLIED rung (broad default-on routing) —
+	// OUT OF SCOPE for this leaf and NOT reachable here. Spelling it the shared way
+	// does not implement it: EvaluateRollout answers RolloutOn with
+	// RolloutReasonOnOutOfScope and applies nothing, exactly as it answered the old
+	// private `default` spelling. Promotion past canary needs a separate witness.
+	RolloutOn = rolloutmode.On
 )
-
-// rolloutModes is the canonical, stable order a status surface can enumerate.
-var rolloutModes = []RolloutMode{RolloutOff, RolloutShadow, RolloutCanary, RolloutDefault}
-
-// Valid reports whether m is one of the four defined rollout modes.
-func (m RolloutMode) Valid() bool {
-	for _, r := range rolloutModes {
-		if m == r {
-			return true
-		}
-	}
-	return false
-}
 
 // Closed-vocabulary reason strings — a status/dry-run surface renders these
 // verbatim, so every rollout verdict is explainable without free text.
@@ -93,7 +90,7 @@ const (
 	RolloutReasonCanaryNotCheaper    = "canary-would-choose-not-cheaper-live-selection-kept"
 	RolloutReasonCanaryRouteRefused  = "canary-tier-route-refused-live-selection-kept"
 	RolloutReasonCanaryRolledBack    = "canary-rolled-back-on-quality-or-refusal-regression"
-	RolloutReasonDefaultOutOfScope   = "default-on-routing-out-of-scope-needs-promotion-witness"
+	RolloutReasonOnOutOfScope        = "default-on-routing-out-of-scope-needs-promotion-witness"
 	RolloutReasonUnknownMode         = "unknown-rollout-mode-refused-fail-closed"
 )
 
@@ -199,10 +196,10 @@ func EvaluateRollout(in RolloutInput) RolloutDecision {
 		d.Reason = RolloutReasonOffCurrentSelection
 		return d
 
-	case RolloutDefault:
+	case RolloutOn:
 		// The rollout guard's refusal: broad default-on routing is out of scope for
 		// this leaf. Named and visible, never a silent promotion.
-		d.Reason = RolloutReasonDefaultOutOfScope
+		d.Reason = RolloutReasonOnOutOfScope
 		return d
 	}
 

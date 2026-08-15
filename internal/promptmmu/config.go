@@ -1,66 +1,56 @@
 package promptmmu
 
+import "github.com/anthony-chaudhary/fak/internal/rolloutmode"
+
 // config.go is the flag + observability rung (epic #751 rung 4, #754): the curate
 // mode the host flag selects, and the legible drop record the gateway logs out of
-// band. It mirrors the co-travel / reset-on-budget gate convention: a closed mode
-// vocabulary with a SAFE default, a shadow rung that computes the plan without
-// mutating the body, and an off rung. Curate is the single mode-gated host branch
-// (off/shadow/on over a REAL body); the cmd/fak flag string + the gateway log
-// emission are the deferred cross-lane halves; the mode semantics + the
-// shadow-never-mutates guard live here so the spine and its host agree on one closed
-// set and the host cannot re-implement the guard wrongly.
+// band. It mirrors the co-travel / reset-on-budget gate convention — because since
+// #6090 it IS that convention: the rungs come from internal/rolloutmode, the one
+// closed off/shadow/canary/on ladder, so this leaf no longer spells them privately.
+// Curate is the single mode-gated host branch (off/shadow/on over a REAL body); the
+// cmd/fak flag string + the gateway log emission are the deferred cross-lane halves;
+// the mode semantics + the shadow-never-mutates guard live here so the spine and its
+// host agree on one closed set and the host cannot re-implement the guard wrongly.
 
-// Mode is the closed curate-mode vocabulary the host flag resolves to. The DEFAULT
-// is on (curate out of the box, epic posture); shadow is the safe dogfood rung that
-// computes the plan and reports what WOULD prune WITHOUT mutating the body; off
-// disables the prune entirely.
-type Mode string
+// Mode is the shared rollout ladder (internal/rolloutmode), used here as the curate
+// mode the host flag resolves to. This leaf's DEFAULT is on (curate out of the box,
+// epic posture); shadow is the safe dogfood rung that computes the plan and reports
+// what WOULD prune WITHOUT mutating the body; off disables the prune entirely.
+type Mode = rolloutmode.Mode
 
 const (
 	// ModeOn curates: compute the plan AND apply the cache-safe splice. The
 	// default posture (an empty/unset flag resolves here via ParseMode).
-	ModeOn Mode = "on"
+	ModeOn = rolloutmode.On
 	// ModeShadow computes the plan and reports the WouldPrune set but does NOT
 	// mutate the body — the safe dogfood rung (invariant 3: a drop is auditable
 	// out of band before it is ever applied).
-	ModeShadow Mode = "shadow"
+	ModeShadow = rolloutmode.Shadow
 	// ModeOff disables the curate: the body is forwarded byte-identical.
-	ModeOff Mode = "off"
+	ModeOff = rolloutmode.Off
 )
 
 // DefaultMode is the out-of-the-box posture: curate both directions (epic #751).
 const DefaultMode = ModeOn
 
+// curateModes is the SUBSET of the shared ladder this leaf implements. There is no
+// canary rung over a prompt body: a canary needs a narrow declared scope to apply
+// inside and a regression signal to roll back on, and a per-request splice has
+// neither — shadow already gives the auditable dry run. Naming the subset means
+// "canary" is refused here like any other unrecognized flag rather than silently
+// behaving as on.
+var curateModes = []Mode{ModeOff, ModeShadow, ModeOn}
+
 // ParseMode resolves a host flag string to a Mode. Empty (flag unset) ⇒ the
 // default-on posture; an unrecognized value resolves to DefaultMode with ok=false
 // so the host can warn rather than silently disabling the curate (fail toward the
-// epic's on-by-default posture, never silently off). Recognized values are
-// case-insensitive-exact: "on", "shadow", "off".
+// epic's on-by-default posture, never silently off). That fail-OPEN direction is
+// this leaf's own choice, which is why the shared parser takes the fallback from
+// the caller instead of hardcoding one (#6090) — a routing guard picks the opposite.
+// Recognized values are exact: "on", "shadow", "off".
 func ParseMode(s string) (m Mode, ok bool) {
-	switch s {
-	case "":
-		return DefaultMode, true
-	case string(ModeOn):
-		return ModeOn, true
-	case string(ModeShadow):
-		return ModeShadow, true
-	case string(ModeOff):
-		return ModeOff, true
-	default:
-		return DefaultMode, false
-	}
+	return rolloutmode.ParseIn(s, curateModes, DefaultMode)
 }
-
-// Applies reports whether this mode mutates the body (only ModeOn does). The host
-// calls CompactInboundTools regardless to get the WouldPrune set, then applies the
-// result only when Applies is true — so ModeShadow and ModeOff share one code path
-// that differs by this single bit.
-func (m Mode) Applies() bool { return m == ModeOn }
-
-// Computes reports whether this mode computes the plan at all. ModeOff short-circuits
-// (no plan, no log); ModeOn and ModeShadow both compute (the shadow rung logs without
-// mutating).
-func (m Mode) Computes() bool { return m == ModeOn || m == ModeShadow }
 
 // Observation is the legible, content-free record of one curate decision, for the
 // host to log out of band (invariant 3 — no silent vanish). It carries only tool

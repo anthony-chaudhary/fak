@@ -9,10 +9,12 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/rolloutmode"
 )
 
 const (
-	DefaultGate      = "shadow"
+	DefaultGate      = string(rolloutmode.Shadow)
 	DefaultStrategy  = "additive"
 	DefaultLedgerCap = 8 * 1024 * 1024
 )
@@ -48,13 +50,20 @@ var Strategies = map[string]Decision{
 	"newest_mtime": NewestMtime,
 }
 
-func Gate() string {
-	g := strings.ToLower(strings.TrimSpace(os.Getenv("FAK_MEMORY_COTRAVEL")))
-	if g == "shadow" || g == "live" || g == "off" {
-		return g
+var memoryCotravelModes = []rolloutmode.Mode{rolloutmode.Off, rolloutmode.Shadow, rolloutmode.On}
+
+func parseGate(raw string) rolloutmode.Mode {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	// Accept the retired applied-rung spelling at the environment boundary while
+	// rendering and recording only the shared canonical `on` rung (#6090).
+	if raw == "live" {
+		raw = rolloutmode.On.String()
 	}
-	return DefaultGate
+	m, _ := rolloutmode.ParseIn(raw, memoryCotravelModes, rolloutmode.Shadow)
+	return m
 }
+
+func Gate() string { return parseGate(os.Getenv("FAK_MEMORY_COTRAVEL")).String() }
 
 func StrategyName() string {
 	s := strings.ToLower(strings.TrimSpace(os.Getenv("FAK_MEMORY_MERGE")))
@@ -133,8 +142,8 @@ type Options struct {
 }
 
 func CotravelMemory(srcCfg, dstCfg, slug, sid string, opts Options) Record {
-	g := opts.Gate
-	if g == "" {
+	g := parseGate(opts.Gate).String()
+	if strings.TrimSpace(opts.Gate) == "" {
 		g = Gate()
 	}
 	strat := opts.Strategy
@@ -163,7 +172,7 @@ func CotravelMemory(srcCfg, dstCfg, slug, sid string, opts Options) Record {
 		DstMemory:    dstMem,
 		SrcHasMemory: isDir(srcMem),
 	}
-	if g == "off" {
+	if g == rolloutmode.Off.String() {
 		rec.Plan = []PlanItem{}
 		rec.Copied = []string{}
 		rec.Skipped = []string{}
@@ -178,7 +187,7 @@ func CotravelMemory(srcCfg, dstCfg, slug, sid string, opts Options) Record {
 			rec.Skipped = append(rec.Skipped, item.Name)
 		}
 	}
-	if g == "shadow" {
+	if g == rolloutmode.Shadow.String() {
 		rec.Copied = []string{}
 		AppendLedger(rec)
 		return rec

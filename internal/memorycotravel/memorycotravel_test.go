@@ -92,7 +92,7 @@ func TestCotravelGates(t *testing.T) {
 	write(t, filepath.Join(src, "conflict.md"), "A-version")
 	write(t, filepath.Join(dst, "conflict.md"), "B-version")
 	write(t, filepath.Join(dst, "dest-only.md"), "B-private")
-	rec := CotravelMemory(a, b, testSlug, testSID, Options{Gate: "live", Strategy: "additive"})
+	rec := CotravelMemory(a, b, testSlug, testSID, Options{Gate: "on", Strategy: "additive"})
 	if got := sorted(rec.Copied); len(got) != 1 || got[0] != "fresh.md" {
 		t.Fatalf("copied = %v", rec.Copied)
 	}
@@ -146,7 +146,7 @@ func TestDstSlugAndDefaults(t *testing.T) {
 	src := memDir(t, a, testSlug)
 	write(t, filepath.Join(src, "note.md"), "owner-memory")
 	other := "C--work-slack-helpers"
-	rec := CotravelMemory(a, b, testSlug, testSID, Options{DstSlug: other, Gate: "live", Strategy: "additive"})
+	rec := CotravelMemory(a, b, testSlug, testSID, Options{DstSlug: other, Gate: "on", Strategy: "additive"})
 	if rec.DstSlug != other {
 		t.Fatalf("dst slug = %s", rec.DstSlug)
 	}
@@ -158,13 +158,17 @@ func TestDstSlugAndDefaults(t *testing.T) {
 	if Gate() != "shadow" || StrategyName() != "additive" {
 		t.Fatalf("bad defaults: %s/%s", Gate(), StrategyName())
 	}
+	t.Setenv("FAK_MEMORY_COTRAVEL", "live")
+	if Gate() != "on" {
+		t.Fatalf("legacy live gate = %q, want canonical on", Gate())
+	}
 	tmp = t.TempDir()
 	ledgerInto(t, tmp)
 	a, b = filepath.Join(tmp, "A"), filepath.Join(tmp, "B")
 	if err := os.MkdirAll(filepath.Join(a, "projects", testSlug), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	rec = CotravelMemory(a, b, testSlug, testSID, Options{Gate: "live"})
+	rec = CotravelMemory(a, b, testSlug, testSID, Options{Gate: "on"})
 	if rec.SrcHasMemory || len(rec.Plan) != 0 || len(rec.Copied) != 0 {
 		t.Fatalf("no-source-memory should be clean: %+v", rec)
 	}
