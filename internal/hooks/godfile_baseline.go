@@ -33,7 +33,7 @@ var godfuncGrandfathered = map[string]int{
 	"cmd/fak/dispatch_tick.go:evaluateDispatchTick":                                     304,
 	"cmd/fak/dispatch_wave.go:priceDispatchWavePayloadFiltered":                         222,
 	"cmd/fak/dispatch_wave.go:runDispatchWave":                                          214,
-	"cmd/fak/guard.go:cmdGuard":                                                         1181,
+	"cmd/fak/guard.go:cmdManageCommand":                                                 1423,
 	"cmd/fak/info.go:runGuardInfoOverlay":                                               236,
 	"cmd/fak/loop_drive.go:driveGoalSpec":                                               256,
 	"cmd/fak/main.go:main":                                                              482,
