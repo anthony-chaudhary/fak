@@ -1,0 +1,5361 @@
+{
+  "schema": "fak-validator-retry-ablation/1",
+  "started_utc": "2026-08-15T23:47:53Z",
+  "host": {
+    "platform": "Linux-6.8.0-1063-gcp-x86_64-with-glibc2.35",
+    "torch": "2.13.0+cu130",
+    "transformers": "5.15.0",
+    "cuda": "13.0",
+    "gpu": "NVIDIA L4"
+  },
+  "protocol": {
+    "catalog": [
+      {
+        "name": "search_kb",
+        "args": {
+          "query": "string"
+        }
+      },
+      {
+        "name": "get_order",
+        "args": {
+          "order_id": "string"
+        }
+      },
+      {
+        "name": "list_tickets",
+        "args": {
+          "status": "open|closed"
+        }
+      },
+      {
+        "name": "create_ticket",
+        "args": {
+          "title": "string",
+          "priority": "low|high"
+        }
+      },
+      {
+        "name": "update_address",
+        "args": {
+          "order_id": "string",
+          "city": "string"
+        }
+      },
+      {
+        "name": "refund_payment",
+        "args": {
+          "payment_id": "string",
+          "amount": "integer"
+        }
+      },
+      {
+        "name": "cancel_order",
+        "args": {
+          "order_id": "string"
+        }
+      },
+      {
+        "name": "send_email",
+        "args": {
+          "to": "string",
+          "subject": "string"
+        }
+      },
+      {
+        "name": "search_orders",
+        "args": {
+          "query": "string"
+        }
+      },
+      {
+        "name": "search_tickets",
+        "args": {
+          "query": "string"
+        }
+      },
+      {
+        "name": "get_payment",
+        "args": {
+          "payment_id": "string"
+        }
+      },
+      {
+        "name": "get_ticket",
+        "args": {
+          "ticket_id": "string"
+        }
+      },
+      {
+        "name": "list_orders",
+        "args": {
+          "status": "open|closed"
+        }
+      },
+      {
+        "name": "list_payments",
+        "args": {
+          "status": "open|closed"
+        }
+      },
+      {
+        "name": "create_order",
+        "args": {
+          "title": "string",
+          "priority": "low|high"
+        }
+      },
+      {
+        "name": "create_refund_request",
+        "args": {
+          "title": "string",
+          "priority": "low|high"
+        }
+      },
+      {
+        "name": "update_ticket",
+        "args": {
+          "ticket_id": "string",
+          "status": "open|closed"
+        }
+      },
+      {
+        "name": "update_payment",
+        "args": {
+          "payment_id": "string",
+          "status": "open|closed"
+        }
+      },
+      {
+        "name": "refund_order",
+        "args": {
+          "order_id": "string",
+          "amount": "integer"
+        }
+      },
+      {
+        "name": "cancel_payment",
+        "args": {
+          "payment_id": "string"
+        }
+      },
+      {
+        "name": "cancel_ticket",
+        "args": {
+          "ticket_id": "string"
+        }
+      },
+      {
+        "name": "send_sms",
+        "args": {
+          "to": "string",
+          "subject": "string"
+        }
+      },
+      {
+        "name": "send_notification",
+        "args": {
+          "to": "string",
+          "subject": "string"
+        }
+      },
+      {
+        "name": "archive_order",
+        "args": {
+          "order_id": "string"
+        }
+      }
+    ],
+    "tasks": [
+      {
+        "id": "search-01",
+        "request": "Find the knowledge-base article about password reset.",
+        "tool": "search_kb",
+        "args": {
+          "query": "password reset"
+        }
+      },
+      {
+        "id": "search-02",
+        "request": "Search the knowledge base for two-factor authentication.",
+        "tool": "search_kb",
+        "args": {
+          "query": "two-factor authentication"
+        }
+      },
+      {
+        "id": "search-03",
+        "request": "Look up return policy in the knowledge base.",
+        "tool": "search_kb",
+        "args": {
+          "query": "return policy"
+        }
+      },
+      {
+        "id": "order-01",
+        "request": "Get order ORD-1042.",
+        "tool": "get_order",
+        "args": {
+          "order_id": "ORD-1042"
+        }
+      },
+      {
+        "id": "order-02",
+        "request": "Retrieve order ZX-900.",
+        "tool": "get_order",
+        "args": {
+          "order_id": "ZX-900"
+        }
+      },
+      {
+        "id": "order-03",
+        "request": "Show the details for order A-17.",
+        "tool": "get_order",
+        "args": {
+          "order_id": "A-17"
+        }
+      },
+      {
+        "id": "list-01",
+        "request": "List open tickets.",
+        "tool": "list_tickets",
+        "args": {
+          "status": "open"
+        }
+      },
+      {
+        "id": "list-02",
+        "request": "Show closed support tickets.",
+        "tool": "list_tickets",
+        "args": {
+          "status": "closed"
+        }
+      },
+      {
+        "id": "ticket-01",
+        "request": "Create a high-priority ticket titled Login failure.",
+        "tool": "create_ticket",
+        "args": {
+          "title": "Login failure",
+          "priority": "high"
+        }
+      },
+      {
+        "id": "ticket-02",
+        "request": "Open a low-priority ticket titled Typo on homepage.",
+        "tool": "create_ticket",
+        "args": {
+          "title": "Typo on homepage",
+          "priority": "low"
+        }
+      },
+      {
+        "id": "ticket-03",
+        "request": "Create a high-priority support ticket named Payment declined.",
+        "tool": "create_ticket",
+        "args": {
+          "title": "Payment declined",
+          "priority": "high"
+        }
+      },
+      {
+        "id": "address-01",
+        "request": "Change order ORD-7's city to Boston.",
+        "tool": "update_address",
+        "args": {
+          "order_id": "ORD-7",
+          "city": "Boston"
+        }
+      },
+      {
+        "id": "address-02",
+        "request": "Update the delivery city for order K-22 to Seattle.",
+        "tool": "update_address",
+        "args": {
+          "order_id": "K-22",
+          "city": "Seattle"
+        }
+      },
+      {
+        "id": "address-03",
+        "request": "Set order P100's city to Austin.",
+        "tool": "update_address",
+        "args": {
+          "order_id": "P100",
+          "city": "Austin"
+        }
+      },
+      {
+        "id": "refund-01",
+        "request": "Refund payment PAY-88 by 25 dollars.",
+        "tool": "refund_payment",
+        "args": {
+          "payment_id": "PAY-88",
+          "amount": 25
+        }
+      },
+      {
+        "id": "refund-02",
+        "request": "Issue a 7 dollar refund for payment P-19.",
+        "tool": "refund_payment",
+        "args": {
+          "payment_id": "P-19",
+          "amount": 7
+        }
+      },
+      {
+        "id": "refund-03",
+        "request": "Refund 120 dollars from payment TX-4.",
+        "tool": "refund_payment",
+        "args": {
+          "payment_id": "TX-4",
+          "amount": 120
+        }
+      },
+      {
+        "id": "cancel-01",
+        "request": "Cancel order ORD-55.",
+        "tool": "cancel_order",
+        "args": {
+          "order_id": "ORD-55"
+        }
+      },
+      {
+        "id": "cancel-02",
+        "request": "Cancel the order numbered C-901.",
+        "tool": "cancel_order",
+        "args": {
+          "order_id": "C-901"
+        }
+      },
+      {
+        "id": "cancel-03",
+        "request": "Please cancel order Q3.",
+        "tool": "cancel_order",
+        "args": {
+          "order_id": "Q3"
+        }
+      },
+      {
+        "id": "email-01",
+        "request": "Email a@b.com with subject Welcome.",
+        "tool": "send_email",
+        "args": {
+          "to": "a@b.com",
+          "subject": "Welcome"
+        }
+      },
+      {
+        "id": "email-02",
+        "request": "Send an email to ops@example.com with the subject Server alert.",
+        "tool": "send_email",
+        "args": {
+          "to": "ops@example.com",
+          "subject": "Server alert"
+        }
+      },
+      {
+        "id": "email-03",
+        "request": "Email lee@example.org; use Receipt ready as the subject.",
+        "tool": "send_email",
+        "args": {
+          "to": "lee@example.org",
+          "subject": "Receipt ready"
+        }
+      },
+      {
+        "id": "email-04",
+        "request": "Send mail to help@example.net with subject Case closed.",
+        "tool": "send_email",
+        "args": {
+          "to": "help@example.net",
+          "subject": "Case closed"
+        }
+      }
+    ],
+    "prompts": {
+      "contract": "Select one tool for the request. Return exactly one JSON object with keys tool and args. Do not add prose.",
+      "skeleton": "Select one tool for the request. Copy this exact JSON shape, replacing the placeholders: {\"tool\":\"TOOL_NAME\",\"args\":{}}. Keep the key tool; never rename it to name. Fill args with every required argument. Do not add prose."
+    },
+    "cap": 128,
+    "retry_rule": "retry once iff deterministic structural validator rejects; retry includes original request, prior output, exact validation error, and catalog; semantically wrong but structurally valid calls are not oracle-retried",
+    "decode": {
+      "do_sample": false,
+      "temperature": 0.0
+    }
+  },
+  "models": [
+    {
+      "path": "/home/USER/models/qwen25-3b-instruct",
+      "weights_sha256": "8229c6ddee3ba5c33ce55182898c0a5c6cadf98086cea8c71b3f1f01f346fcae",
+      "weight_files": [
+        "model-00001-of-00002.safetensors",
+        "model-00002-of-00002.safetensors"
+      ],
+      "config": {
+        "architectures": [
+          "Qwen2ForCausalLM"
+        ],
+        "attention_dropout": 0.0,
+        "bos_token_id": 151643,
+        "eos_token_id": 151645,
+        "hidden_act": "silu",
+        "hidden_size": 2048,
+        "initializer_range": 0.02,
+        "intermediate_size": 11008,
+        "max_position_embeddings": 32768,
+        "max_window_layers": 70,
+        "model_type": "qwen2",
+        "num_attention_heads": 16,
+        "num_hidden_layers": 36,
+        "num_key_value_heads": 2,
+        "rms_norm_eps": 1e-06,
+        "rope_theta": 1000000.0,
+        "sliding_window": 32768,
+        "tie_word_embeddings": true,
+        "torch_dtype": "bfloat16",
+        "transformers_version": "4.43.1",
+        "use_cache": true,
+        "use_sliding_window": false,
+        "vocab_size": 151936
+      },
+      "thinking_control": "not applicable",
+      "arms": {
+        "contract": {
+          "total": 24,
+          "first_structural_valid": 23,
+          "first_correct": 23,
+          "retry_eligible": 1,
+          "retry_attempted": 1,
+          "retry_structural_valid": 1,
+          "retry_correct": 0,
+          "final_structural_valid": 24,
+          "final_correct": 23,
+          "total_output_tokens": 449,
+          "median_total_latency_ms": 823.487,
+          "rows": [
+            {
+              "id": "search-01",
+              "expected_tool": "search_kb",
+              "expected_args": {
+                "query": "password reset"
+              },
+              "first": {
+                "text": "{\"tool\":\"search_kb\",\"args\":{\"query\":\"password reset\"}}",
+                "output_tokens": 14,
+                "latency_ms": 4339.427,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_kb",
+                  "args": {
+                    "query": "password reset"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 14,
+              "total_latency_ms": 4339.427
+            },
+            {
+              "id": "search-02",
+              "expected_tool": "search_kb",
+              "expected_args": {
+                "query": "two-factor authentication"
+              },
+              "first": {
+                "text": "{\"tool\":\"search_kb\",\"args\":{\"query\":\"two-factor authentication\"}}",
+                "output_tokens": 15,
+                "latency_ms": 620.214,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_kb",
+                  "args": {
+                    "query": "two-factor authentication"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 15,
+              "total_latency_ms": 620.214
+            },
+            {
+              "id": "search-03",
+              "expected_tool": "search_kb",
+              "expected_args": {
+                "query": "return policy"
+              },
+              "first": {
+                "text": "{\"tool\":\"search_kb\",\"args\":{\"query\":\"return policy\"}}",
+                "output_tokens": 14,
+                "latency_ms": 583.336,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_kb",
+                  "args": {
+                    "query": "return policy"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 14,
+              "total_latency_ms": 583.336
+            },
+            {
+              "id": "order-01",
+              "expected_tool": "get_order",
+              "expected_args": {
+                "order_id": "ORD-1042"
+              },
+              "first": {
+                "text": "{\"tool\":\"get_order\",\"args\":{\"order_id\":\"ORD-1042\"}}",
+                "output_tokens": 19,
+                "latency_ms": 787.734,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "get_order",
+                  "args": {
+                    "order_id": "ORD-1042"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 19,
+              "total_latency_ms": 787.734
+            },
+            {
+              "id": "order-02",
+              "expected_tool": "get_order",
+              "expected_args": {
+                "order_id": "ZX-900"
+              },
+              "first": {
+                "text": "{\"tool\":\"get_order\",\"args\":{\"order_id\":\"ZX-900\"}}",
+                "output_tokens": 18,
+                "latency_ms": 740.903,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "get_order",
+                  "args": {
+                    "order_id": "ZX-900"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 18,
+              "total_latency_ms": 740.903
+            },
+            {
+              "id": "order-03",
+              "expected_tool": "get_order",
+              "expected_args": {
+                "order_id": "A-17"
+              },
+              "first": {
+                "text": "{\"tool\":\"get_order\",\"args\":{\"order_id\":\"A-17\"}}",
+                "output_tokens": 17,
+                "latency_ms": 704.819,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "get_order",
+                  "args": {
+                    "order_id": "A-17"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 17,
+              "total_latency_ms": 704.819
+            },
+            {
+              "id": "list-01",
+              "expected_tool": "list_tickets",
+              "expected_args": {
+                "status": "open"
+              },
+              "first": {
+                "text": "{\"tool\":\"list_tickets\",\"args\":{\"status\":\"open\"}}",
+                "output_tokens": 13,
+                "latency_ms": 544.798,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "list_tickets",
+                  "args": {
+                    "status": "open"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 13,
+              "total_latency_ms": 544.798
+            },
+            {
+              "id": "list-02",
+              "expected_tool": "list_tickets",
+              "expected_args": {
+                "status": "closed"
+              },
+              "first": {
+                "text": "{\"tool\":\"search_tickets\",\"args\":{\"status\":\"closed\"}}",
+                "output_tokens": 13,
+                "latency_ms": 546.418,
+                "structural_valid": false,
+                "validation_error": "args keys for search_tickets must be exactly ['query']",
+                "parsed": {
+                  "tool": "search_tickets",
+                  "args": {
+                    "status": "closed"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"search_tickets\",\"args\":{\"query\":\"closed\"}}",
+                "output_tokens": 13,
+                "latency_ms": 538.175,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_tickets",
+                  "args": {
+                    "query": "closed"
+                  }
+                },
+                "correct": false
+              },
+              "final_structural_valid": true,
+              "final_correct": false,
+              "total_output_tokens": 26,
+              "total_latency_ms": 1084.593
+            },
+            {
+              "id": "ticket-01",
+              "expected_tool": "create_ticket",
+              "expected_args": {
+                "title": "Login failure",
+                "priority": "high"
+              },
+              "first": {
+                "text": "{\"tool\":\"create_ticket\",\"args\":{\"title\":\"Login failure\",\"priority\":\"high\"}}",
+                "output_tokens": 18,
+                "latency_ms": 742.99,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "create_ticket",
+                  "args": {
+                    "title": "Login failure",
+                    "priority": "high"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 18,
+              "total_latency_ms": 742.99
+            },
+            {
+              "id": "ticket-02",
+              "expected_tool": "create_ticket",
+              "expected_args": {
+                "title": "Typo on homepage",
+                "priority": "low"
+              },
+              "first": {
+                "text": "{\"tool\":\"create_ticket\",\"args\":{\"title\":\"Typo on homepage\",\"priority\":\"low\"}}",
+                "output_tokens": 20,
+                "latency_ms": 832.695,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "create_ticket",
+                  "args": {
+                    "title": "Typo on homepage",
+                    "priority": "low"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 832.695
+            },
+            {
+              "id": "ticket-03",
+              "expected_tool": "create_ticket",
+              "expected_args": {
+                "title": "Payment declined",
+                "priority": "high"
+              },
+              "first": {
+                "text": "{\"tool\":\"create_ticket\",\"args\":{\"title\":\"Payment declined\",\"priority\":\"high\"}}",
+                "output_tokens": 18,
+                "latency_ms": 755.892,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "create_ticket",
+                  "args": {
+                    "title": "Payment declined",
+                    "priority": "high"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 18,
+              "total_latency_ms": 755.892
+            },
+            {
+              "id": "address-01",
+              "expected_tool": "update_address",
+              "expected_args": {
+                "order_id": "ORD-7",
+                "city": "Boston"
+              },
+              "first": {
+                "text": "{\"tool\":\"update_address\",\"args\":{\"order_id\":\"ORD-7\",\"city\":\"Boston\"}}",
+                "output_tokens": 20,
+                "latency_ms": 823.871,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "update_address",
+                  "args": {
+                    "order_id": "ORD-7",
+                    "city": "Boston"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 823.871
+            },
+            {
+              "id": "address-02",
+              "expected_tool": "update_address",
+              "expected_args": {
+                "order_id": "K-22",
+                "city": "Seattle"
+              },
+              "first": {
+                "text": "{\"tool\":\"update_address\",\"args\":{\"order_id\":\"K-22\",\"city\":\"Seattle\"}}",
+                "output_tokens": 21,
+                "latency_ms": 868.28,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "update_address",
+                  "args": {
+                    "order_id": "K-22",
+                    "city": "Seattle"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 21,
+              "total_latency_ms": 868.28
+            },
+            {
+              "id": "address-03",
+              "expected_tool": "update_address",
+              "expected_args": {
+                "order_id": "P100",
+                "city": "Austin"
+              },
+              "first": {
+                "text": "{\"tool\":\"update_address\",\"args\":{\"order_id\":\"P100\",\"city\":\"Austin\"}}",
+                "output_tokens": 21,
+                "latency_ms": 864.966,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "update_address",
+                  "args": {
+                    "order_id": "P100",
+                    "city": "Austin"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 21,
+              "total_latency_ms": 864.966
+            },
+            {
+              "id": "refund-01",
+              "expected_tool": "refund_payment",
+              "expected_args": {
+                "payment_id": "PAY-88",
+                "amount": 25
+              },
+              "first": {
+                "text": "{\"tool\":\"refund_payment\",\"args\":{\"payment_id\":\"PAY-88\",\"amount\":25}}",
+                "output_tokens": 22,
+                "latency_ms": 904.745,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "refund_payment",
+                  "args": {
+                    "payment_id": "PAY-88",
+                    "amount": 25
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 22,
+              "total_latency_ms": 904.745
+            },
+            {
+              "id": "refund-02",
+              "expected_tool": "refund_payment",
+              "expected_args": {
+                "payment_id": "P-19",
+                "amount": 7
+              },
+              "first": {
+                "text": "{\"tool\":\"refund_payment\",\"args\":{\"payment_id\":\"P-19\",\"amount\":7}}",
+                "output_tokens": 21,
+                "latency_ms": 870.838,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "refund_payment",
+                  "args": {
+                    "payment_id": "P-19",
+                    "amount": 7
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 21,
+              "total_latency_ms": 870.838
+            },
+            {
+              "id": "refund-03",
+              "expected_tool": "refund_payment",
+              "expected_args": {
+                "payment_id": "TX-4",
+                "amount": 120
+              },
+              "first": {
+                "text": "{\"tool\":\"refund_payment\",\"args\":{\"payment_id\":\"TX-4\",\"amount\":120}}",
+                "output_tokens": 22,
+                "latency_ms": 904.245,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "refund_payment",
+                  "args": {
+                    "payment_id": "TX-4",
+                    "amount": 120
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 22,
+              "total_latency_ms": 904.245
+            },
+            {
+              "id": "cancel-01",
+              "expected_tool": "cancel_order",
+              "expected_args": {
+                "order_id": "ORD-55"
+              },
+              "first": {
+                "text": "{\"tool\":\"cancel_order\",\"args\":{\"order_id\":\"ORD-55\"}}",
+                "output_tokens": 17,
+                "latency_ms": 705.731,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "cancel_order",
+                  "args": {
+                    "order_id": "ORD-55"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 17,
+              "total_latency_ms": 705.731
+            },
+            {
+              "id": "cancel-02",
+              "expected_tool": "cancel_order",
+              "expected_args": {
+                "order_id": "C-901"
+              },
+              "first": {
+                "text": "{\"tool\":\"cancel_order\",\"args\":{\"order_id\":\"C-901\"}}",
+                "output_tokens": 18,
+                "latency_ms": 744.581,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "cancel_order",
+                  "args": {
+                    "order_id": "C-901"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 18,
+              "total_latency_ms": 744.581
+            },
+            {
+              "id": "cancel-03",
+              "expected_tool": "cancel_order",
+              "expected_args": {
+                "order_id": "Q3"
+              },
+              "first": {
+                "text": "{\"tool\":\"cancel_order\",\"args\":{\"order_id\":\"Q3\"}}",
+                "output_tokens": 15,
+                "latency_ms": 625.027,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "cancel_order",
+                  "args": {
+                    "order_id": "Q3"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 15,
+              "total_latency_ms": 625.027
+            },
+            {
+              "id": "email-01",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "a@b.com",
+                "subject": "Welcome"
+              },
+              "first": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"a@b.com\",\"subject\":\"Welcome\"}}",
+                "output_tokens": 20,
+                "latency_ms": 823.104,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "a@b.com",
+                    "subject": "Welcome"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 823.104
+            },
+            {
+              "id": "email-02",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "ops@example.com",
+                "subject": "Server alert"
+              },
+              "first": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"ops@example.com\",\"subject\":\"Server alert\"}}",
+                "output_tokens": 20,
+                "latency_ms": 826.675,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "ops@example.com",
+                    "subject": "Server alert"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 826.675
+            },
+            {
+              "id": "email-03",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "lee@example.org",
+                "subject": "Receipt ready"
+              },
+              "first": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"lee@example.org\",\"subject\":\"Receipt ready\"}}",
+                "output_tokens": 20,
+                "latency_ms": 824.511,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "lee@example.org",
+                    "subject": "Receipt ready"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 824.511
+            },
+            {
+              "id": "email-04",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "help@example.net",
+                "subject": "Case closed"
+              },
+              "first": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"help@example.net\",\"subject\":\"Case closed\"}}",
+                "output_tokens": 20,
+                "latency_ms": 826.018,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "help@example.net",
+                    "subject": "Case closed"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 826.018
+            }
+          ]
+        },
+        "skeleton": {
+          "total": 24,
+          "first_structural_valid": 23,
+          "first_correct": 23,
+          "retry_eligible": 1,
+          "retry_attempted": 1,
+          "retry_structural_valid": 1,
+          "retry_correct": 0,
+          "final_structural_valid": 24,
+          "final_correct": 23,
+          "total_output_tokens": 449,
+          "median_total_latency_ms": 799.49,
+          "rows": [
+            {
+              "id": "search-01",
+              "expected_tool": "search_kb",
+              "expected_args": {
+                "query": "password reset"
+              },
+              "first": {
+                "text": "{\"tool\":\"search_kb\",\"args\":{\"query\":\"password reset\"}}",
+                "output_tokens": 14,
+                "latency_ms": 586.907,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_kb",
+                  "args": {
+                    "query": "password reset"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 14,
+              "total_latency_ms": 586.907
+            },
+            {
+              "id": "search-02",
+              "expected_tool": "search_kb",
+              "expected_args": {
+                "query": "two-factor authentication"
+              },
+              "first": {
+                "text": "{\"tool\":\"search_kb\",\"args\":{\"query\":\"two-factor authentication\"}}",
+                "output_tokens": 15,
+                "latency_ms": 624.226,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_kb",
+                  "args": {
+                    "query": "two-factor authentication"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 15,
+              "total_latency_ms": 624.226
+            },
+            {
+              "id": "search-03",
+              "expected_tool": "search_kb",
+              "expected_args": {
+                "query": "return policy"
+              },
+              "first": {
+                "text": "{\"tool\":\"search_kb\",\"args\":{\"query\":\"return policy\"}}",
+                "output_tokens": 14,
+                "latency_ms": 585.725,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_kb",
+                  "args": {
+                    "query": "return policy"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 14,
+              "total_latency_ms": 585.725
+            },
+            {
+              "id": "order-01",
+              "expected_tool": "get_order",
+              "expected_args": {
+                "order_id": "ORD-1042"
+              },
+              "first": {
+                "text": "{\"tool\":\"get_order\",\"args\":{\"order_id\":\"ORD-1042\"}}",
+                "output_tokens": 19,
+                "latency_ms": 782.485,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "get_order",
+                  "args": {
+                    "order_id": "ORD-1042"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 19,
+              "total_latency_ms": 782.485
+            },
+            {
+              "id": "order-02",
+              "expected_tool": "get_order",
+              "expected_args": {
+                "order_id": "ZX-900"
+              },
+              "first": {
+                "text": "{\"tool\":\"get_order\",\"args\":{\"order_id\":\"ZX-900\"}}",
+                "output_tokens": 18,
+                "latency_ms": 745.112,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "get_order",
+                  "args": {
+                    "order_id": "ZX-900"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 18,
+              "total_latency_ms": 745.112
+            },
+            {
+              "id": "order-03",
+              "expected_tool": "get_order",
+              "expected_args": {
+                "order_id": "A-17"
+              },
+              "first": {
+                "text": "{\"tool\":\"get_order\",\"args\":{\"order_id\":\"A-17\"}}",
+                "output_tokens": 17,
+                "latency_ms": 705.395,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "get_order",
+                  "args": {
+                    "order_id": "A-17"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 17,
+              "total_latency_ms": 705.395
+            },
+            {
+              "id": "list-01",
+              "expected_tool": "list_tickets",
+              "expected_args": {
+                "status": "open"
+              },
+              "first": {
+                "text": "{\"tool\":\"list_tickets\",\"args\":{\"status\":\"open\"}}",
+                "output_tokens": 13,
+                "latency_ms": 542.157,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "list_tickets",
+                  "args": {
+                    "status": "open"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 13,
+              "total_latency_ms": 542.157
+            },
+            {
+              "id": "list-02",
+              "expected_tool": "list_tickets",
+              "expected_args": {
+                "status": "closed"
+              },
+              "first": {
+                "text": "{\"tool\":\"search_tickets\",\"args\":{\"status\":\"closed\"}}",
+                "output_tokens": 13,
+                "latency_ms": 545.573,
+                "structural_valid": false,
+                "validation_error": "args keys for search_tickets must be exactly ['query']",
+                "parsed": {
+                  "tool": "search_tickets",
+                  "args": {
+                    "status": "closed"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"search_tickets\",\"args\":{\"query\":\"closed\"}}",
+                "output_tokens": 13,
+                "latency_ms": 544.891,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_tickets",
+                  "args": {
+                    "query": "closed"
+                  }
+                },
+                "correct": false
+              },
+              "final_structural_valid": true,
+              "final_correct": false,
+              "total_output_tokens": 26,
+              "total_latency_ms": 1090.464
+            },
+            {
+              "id": "ticket-01",
+              "expected_tool": "create_ticket",
+              "expected_args": {
+                "title": "Login failure",
+                "priority": "high"
+              },
+              "first": {
+                "text": "{\"tool\":\"create_ticket\",\"args\":{\"title\":\"Login failure\",\"priority\":\"high\"}}",
+                "output_tokens": 18,
+                "latency_ms": 747.195,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "create_ticket",
+                  "args": {
+                    "title": "Login failure",
+                    "priority": "high"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 18,
+              "total_latency_ms": 747.195
+            },
+            {
+              "id": "ticket-02",
+              "expected_tool": "create_ticket",
+              "expected_args": {
+                "title": "Typo on homepage",
+                "priority": "low"
+              },
+              "first": {
+                "text": "{\"tool\":\"create_ticket\",\"args\":{\"title\":\"Typo on homepage\",\"priority\":\"low\"}}",
+                "output_tokens": 20,
+                "latency_ms": 825.011,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "create_ticket",
+                  "args": {
+                    "title": "Typo on homepage",
+                    "priority": "low"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 825.011
+            },
+            {
+              "id": "ticket-03",
+              "expected_tool": "create_ticket",
+              "expected_args": {
+                "title": "Payment declined",
+                "priority": "high"
+              },
+              "first": {
+                "text": "{\"tool\":\"create_ticket\",\"args\":{\"title\":\"Payment declined\",\"priority\":\"high\"}}",
+                "output_tokens": 18,
+                "latency_ms": 745.037,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "create_ticket",
+                  "args": {
+                    "title": "Payment declined",
+                    "priority": "high"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 18,
+              "total_latency_ms": 745.037
+            },
+            {
+              "id": "address-01",
+              "expected_tool": "update_address",
+              "expected_args": {
+                "order_id": "ORD-7",
+                "city": "Boston"
+              },
+              "first": {
+                "text": "{\"tool\":\"update_address\",\"args\":{\"order_id\":\"ORD-7\",\"city\":\"Boston\"}}",
+                "output_tokens": 20,
+                "latency_ms": 825.801,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "update_address",
+                  "args": {
+                    "order_id": "ORD-7",
+                    "city": "Boston"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 825.801
+            },
+            {
+              "id": "address-02",
+              "expected_tool": "update_address",
+              "expected_args": {
+                "order_id": "K-22",
+                "city": "Seattle"
+              },
+              "first": {
+                "text": "{\"tool\":\"update_address\",\"args\":{\"order_id\":\"K-22\",\"city\":\"Seattle\"}}",
+                "output_tokens": 21,
+                "latency_ms": 865.603,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "update_address",
+                  "args": {
+                    "order_id": "K-22",
+                    "city": "Seattle"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 21,
+              "total_latency_ms": 865.603
+            },
+            {
+              "id": "address-03",
+              "expected_tool": "update_address",
+              "expected_args": {
+                "order_id": "P100",
+                "city": "Austin"
+              },
+              "first": {
+                "text": "{\"tool\":\"update_address\",\"args\":{\"order_id\":\"P100\",\"city\":\"Austin\"}}",
+                "output_tokens": 21,
+                "latency_ms": 863.613,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "update_address",
+                  "args": {
+                    "order_id": "P100",
+                    "city": "Austin"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 21,
+              "total_latency_ms": 863.613
+            },
+            {
+              "id": "refund-01",
+              "expected_tool": "refund_payment",
+              "expected_args": {
+                "payment_id": "PAY-88",
+                "amount": 25
+              },
+              "first": {
+                "text": "{\"tool\":\"refund_payment\",\"args\":{\"payment_id\":\"PAY-88\",\"amount\":25}}",
+                "output_tokens": 22,
+                "latency_ms": 903.98,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "refund_payment",
+                  "args": {
+                    "payment_id": "PAY-88",
+                    "amount": 25
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 22,
+              "total_latency_ms": 903.98
+            },
+            {
+              "id": "refund-02",
+              "expected_tool": "refund_payment",
+              "expected_args": {
+                "payment_id": "P-19",
+                "amount": 7
+              },
+              "first": {
+                "text": "{\"tool\":\"refund_payment\",\"args\":{\"payment_id\":\"P-19\",\"amount\":7}}",
+                "output_tokens": 21,
+                "latency_ms": 867.415,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "refund_payment",
+                  "args": {
+                    "payment_id": "P-19",
+                    "amount": 7
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 21,
+              "total_latency_ms": 867.415
+            },
+            {
+              "id": "refund-03",
+              "expected_tool": "refund_payment",
+              "expected_args": {
+                "payment_id": "TX-4",
+                "amount": 120
+              },
+              "first": {
+                "text": "{\"tool\":\"refund_payment\",\"args\":{\"payment_id\":\"TX-4\",\"amount\":120}}",
+                "output_tokens": 22,
+                "latency_ms": 905.918,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "refund_payment",
+                  "args": {
+                    "payment_id": "TX-4",
+                    "amount": 120
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 22,
+              "total_latency_ms": 905.918
+            },
+            {
+              "id": "cancel-01",
+              "expected_tool": "cancel_order",
+              "expected_args": {
+                "order_id": "ORD-55"
+              },
+              "first": {
+                "text": "{\"tool\":\"cancel_order\",\"args\":{\"order_id\":\"ORD-55\"}}",
+                "output_tokens": 17,
+                "latency_ms": 705.474,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "cancel_order",
+                  "args": {
+                    "order_id": "ORD-55"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 17,
+              "total_latency_ms": 705.474
+            },
+            {
+              "id": "cancel-02",
+              "expected_tool": "cancel_order",
+              "expected_args": {
+                "order_id": "C-901"
+              },
+              "first": {
+                "text": "{\"tool\":\"cancel_order\",\"args\":{\"order_id\":\"C-901\"}}",
+                "output_tokens": 18,
+                "latency_ms": 741.257,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "cancel_order",
+                  "args": {
+                    "order_id": "C-901"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 18,
+              "total_latency_ms": 741.257
+            },
+            {
+              "id": "cancel-03",
+              "expected_tool": "cancel_order",
+              "expected_args": {
+                "order_id": "Q3"
+              },
+              "first": {
+                "text": "{\"tool\":\"cancel_order\",\"args\":{\"order_id\":\"Q3\"}}",
+                "output_tokens": 15,
+                "latency_ms": 623.155,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "cancel_order",
+                  "args": {
+                    "order_id": "Q3"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 15,
+              "total_latency_ms": 623.155
+            },
+            {
+              "id": "email-01",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "a@b.com",
+                "subject": "Welcome"
+              },
+              "first": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"a@b.com\",\"subject\":\"Welcome\"}}",
+                "output_tokens": 20,
+                "latency_ms": 823.227,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "a@b.com",
+                    "subject": "Welcome"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 823.227
+            },
+            {
+              "id": "email-02",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "ops@example.com",
+                "subject": "Server alert"
+              },
+              "first": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"ops@example.com\",\"subject\":\"Server alert\"}}",
+                "output_tokens": 20,
+                "latency_ms": 818.956,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "ops@example.com",
+                    "subject": "Server alert"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 818.956
+            },
+            {
+              "id": "email-03",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "lee@example.org",
+                "subject": "Receipt ready"
+              },
+              "first": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"lee@example.org\",\"subject\":\"Receipt ready\"}}",
+                "output_tokens": 20,
+                "latency_ms": 816.495,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "lee@example.org",
+                    "subject": "Receipt ready"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 816.495
+            },
+            {
+              "id": "email-04",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "help@example.net",
+                "subject": "Case closed"
+              },
+              "first": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"help@example.net\",\"subject\":\"Case closed\"}}",
+                "output_tokens": 20,
+                "latency_ms": 820.644,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "help@example.net",
+                    "subject": "Case closed"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 820.644
+            }
+          ]
+        }
+      }
+    },
+    {
+      "path": "/home/USER/models/smollm3-3b",
+      "weights_sha256": "a23fcc3bd5d5908c861e9f985327ddd3277edbe5c659cd2b0ff2017a1e372dcd",
+      "weight_files": [
+        "model-00001-of-00002.safetensors",
+        "model-00002-of-00002.safetensors"
+      ],
+      "config": {
+        "architectures": [
+          "SmolLM3ForCausalLM"
+        ],
+        "attention_bias": false,
+        "attention_dropout": 0.0,
+        "bos_token_id": 128000,
+        "eos_token_id": 128012,
+        "hidden_act": "silu",
+        "hidden_size": 2048,
+        "initializer_range": 0.02,
+        "intermediate_size": 11008,
+        "layer_types": [
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention"
+        ],
+        "max_position_embeddings": 65536,
+        "max_window_layers": 28,
+        "mlp_bias": false,
+        "model_type": "smollm3",
+        "no_rope_layer_interval": 4,
+        "no_rope_layers": [
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          0
+        ],
+        "num_attention_heads": 16,
+        "num_hidden_layers": 36,
+        "num_key_value_heads": 4,
+        "pad_token_id": 128004,
+        "pretraining_tp": 2,
+        "rms_norm_eps": 1e-06,
+        "rope_scaling": null,
+        "rope_theta": 5000000.0,
+        "sliding_window": null,
+        "tie_word_embeddings": true,
+        "torch_dtype": "bfloat16",
+        "transformers_version": "4.54.0.dev0",
+        "use_cache": false,
+        "use_sliding_window": false,
+        "vocab_size": 128256
+      },
+      "thinking_control": "/no_think plus enable_thinking=False",
+      "arms": {
+        "contract": {
+          "total": 24,
+          "first_structural_valid": 24,
+          "first_correct": 23,
+          "retry_eligible": 0,
+          "retry_attempted": 0,
+          "retry_structural_valid": 0,
+          "retry_correct": 0,
+          "final_structural_valid": 24,
+          "final_correct": 23,
+          "total_output_tokens": 543,
+          "median_total_latency_ms": 961.691,
+          "rows": [
+            {
+              "id": "search-01",
+              "expected_tool": "search_kb",
+              "expected_args": {
+                "query": "password reset"
+              },
+              "first": {
+                "text": "{\"tool\": \"search_kb\", \"args\": {\"query\": \"password reset\"}}",
+                "output_tokens": 18,
+                "latency_ms": 737.613,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_kb",
+                  "args": {
+                    "query": "password reset"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 18,
+              "total_latency_ms": 737.613
+            },
+            {
+              "id": "search-02",
+              "expected_tool": "search_kb",
+              "expected_args": {
+                "query": "two-factor authentication"
+              },
+              "first": {
+                "text": "{\"tool\": \"search_kb\", \"args\": {\"query\": \"two-factor authentication\"}}",
+                "output_tokens": 19,
+                "latency_ms": 770.653,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_kb",
+                  "args": {
+                    "query": "two-factor authentication"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 19,
+              "total_latency_ms": 770.653
+            },
+            {
+              "id": "search-03",
+              "expected_tool": "search_kb",
+              "expected_args": {
+                "query": "return policy"
+              },
+              "first": {
+                "text": "{\"tool\": \"search_kb\", \"args\": {\"query\": \"return policy\"}}",
+                "output_tokens": 18,
+                "latency_ms": 735.194,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_kb",
+                  "args": {
+                    "query": "return policy"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 18,
+              "total_latency_ms": 735.194
+            },
+            {
+              "id": "order-01",
+              "expected_tool": "get_order",
+              "expected_args": {
+                "order_id": "ORD-1042"
+              },
+              "first": {
+                "text": "{\"tool\": \"get_order\", \"args\": {\"order_id\": \"ORD-1042\"}}",
+                "output_tokens": 21,
+                "latency_ms": 845.141,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "get_order",
+                  "args": {
+                    "order_id": "ORD-1042"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 21,
+              "total_latency_ms": 845.141
+            },
+            {
+              "id": "order-02",
+              "expected_tool": "get_order",
+              "expected_args": {
+                "order_id": "ZX-900"
+              },
+              "first": {
+                "text": "{\"tool\": \"get_order\", \"args\": {\"order_id\": \"ZX-900\"}}",
+                "output_tokens": 20,
+                "latency_ms": 808.144,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "get_order",
+                  "args": {
+                    "order_id": "ZX-900"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 808.144
+            },
+            {
+              "id": "order-03",
+              "expected_tool": "get_order",
+              "expected_args": {
+                "order_id": "A-17"
+              },
+              "first": {
+                "text": "{\"tool\": \"get_order\", \"args\": {\"order_id\": \"A-17\"}}",
+                "output_tokens": 20,
+                "latency_ms": 807.221,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "get_order",
+                  "args": {
+                    "order_id": "A-17"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 807.221
+            },
+            {
+              "id": "list-01",
+              "expected_tool": "list_tickets",
+              "expected_args": {
+                "status": "open"
+              },
+              "first": {
+                "text": "{\"tool\": \"list_tickets\", \"args\": {\"status\": \"open\"}}",
+                "output_tokens": 17,
+                "latency_ms": 689.42,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "list_tickets",
+                  "args": {
+                    "status": "open"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 17,
+              "total_latency_ms": 689.42
+            },
+            {
+              "id": "list-02",
+              "expected_tool": "list_tickets",
+              "expected_args": {
+                "status": "closed"
+              },
+              "first": {
+                "text": "{\"tool\": \"list_tickets\", \"args\": {\"status\": \"closed\"}}",
+                "output_tokens": 17,
+                "latency_ms": 686.791,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "list_tickets",
+                  "args": {
+                    "status": "closed"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 17,
+              "total_latency_ms": 686.791
+            },
+            {
+              "id": "ticket-01",
+              "expected_tool": "create_ticket",
+              "expected_args": {
+                "title": "Login failure",
+                "priority": "high"
+              },
+              "first": {
+                "text": "{\"tool\": \"create_ticket\", \"args\": {\"title\": \"Login failure\", \"priority\": \"high\"}}",
+                "output_tokens": 24,
+                "latency_ms": 963.378,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "create_ticket",
+                  "args": {
+                    "title": "Login failure",
+                    "priority": "high"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 24,
+              "total_latency_ms": 963.378
+            },
+            {
+              "id": "ticket-02",
+              "expected_tool": "create_ticket",
+              "expected_args": {
+                "title": "Typo on homepage",
+                "priority": "low"
+              },
+              "first": {
+                "text": "{\"tool\": \"create_ticket\", \"args\": {\"title\": \"Typo on homepage\", \"priority\": \"low\"}}",
+                "output_tokens": 26,
+                "latency_ms": 1036.853,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "create_ticket",
+                  "args": {
+                    "title": "Typo on homepage",
+                    "priority": "low"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 26,
+              "total_latency_ms": 1036.853
+            },
+            {
+              "id": "ticket-03",
+              "expected_tool": "create_ticket",
+              "expected_args": {
+                "title": "Payment declined",
+                "priority": "high"
+              },
+              "first": {
+                "text": "{\"tool\": \"create_ticket\", \"args\": {\"title\": \"Payment declined\", \"priority\": \"high\"}}",
+                "output_tokens": 24,
+                "latency_ms": 960.004,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "create_ticket",
+                  "args": {
+                    "title": "Payment declined",
+                    "priority": "high"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 24,
+              "total_latency_ms": 960.004
+            },
+            {
+              "id": "address-01",
+              "expected_tool": "update_address",
+              "expected_args": {
+                "order_id": "ORD-7",
+                "city": "Boston"
+              },
+              "first": {
+                "text": "{\"tool\": \"update_address\", \"args\": {\"order_id\": \"ORD-7\", \"city\": \"Boston\"}}",
+                "output_tokens": 26,
+                "latency_ms": 1039.312,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "update_address",
+                  "args": {
+                    "order_id": "ORD-7",
+                    "city": "Boston"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 26,
+              "total_latency_ms": 1039.312
+            },
+            {
+              "id": "address-02",
+              "expected_tool": "update_address",
+              "expected_args": {
+                "order_id": "K-22",
+                "city": "Seattle"
+              },
+              "first": {
+                "text": "{\"tool\": \"update_address\", \"args\": {\"order_id\": \"K-22\", \"city\": \"Seattle\"}}",
+                "output_tokens": 26,
+                "latency_ms": 1040.59,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "update_address",
+                  "args": {
+                    "order_id": "K-22",
+                    "city": "Seattle"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 26,
+              "total_latency_ms": 1040.59
+            },
+            {
+              "id": "address-03",
+              "expected_tool": "update_address",
+              "expected_args": {
+                "order_id": "P100",
+                "city": "Austin"
+              },
+              "first": {
+                "text": "{\"tool\": \"update_address\", \"args\": {\"order_id\": \"P100\", \"city\": \"Austin\"}}",
+                "output_tokens": 25,
+                "latency_ms": 1004.886,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "update_address",
+                  "args": {
+                    "order_id": "P100",
+                    "city": "Austin"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 25,
+              "total_latency_ms": 1004.886
+            },
+            {
+              "id": "refund-01",
+              "expected_tool": "refund_payment",
+              "expected_args": {
+                "payment_id": "PAY-88",
+                "amount": 25
+              },
+              "first": {
+                "text": "{\"tool\": \"refund_payment\", \"args\": {\"payment_id\": \"PAY-88\", \"amount\": 25}}",
+                "output_tokens": 26,
+                "latency_ms": 1041.289,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "refund_payment",
+                  "args": {
+                    "payment_id": "PAY-88",
+                    "amount": 25
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 26,
+              "total_latency_ms": 1041.289
+            },
+            {
+              "id": "refund-02",
+              "expected_tool": "refund_payment",
+              "expected_args": {
+                "payment_id": "P-19",
+                "amount": 7
+              },
+              "first": {
+                "text": "{\"tool\": \"refund_payment\", \"args\": {\"payment_id\": \"P-19\", \"amount\": 7}}",
+                "output_tokens": 26,
+                "latency_ms": 1041.981,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "refund_payment",
+                  "args": {
+                    "payment_id": "P-19",
+                    "amount": 7
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 26,
+              "total_latency_ms": 1041.981
+            },
+            {
+              "id": "refund-03",
+              "expected_tool": "refund_payment",
+              "expected_args": {
+                "payment_id": "TX-4",
+                "amount": 120
+              },
+              "first": {
+                "text": "{\"tool\": \"refund_payment\", \"args\": {\"payment_id\": \"TX-4\", \"amount\": 120}}",
+                "output_tokens": 26,
+                "latency_ms": 1045.872,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "refund_payment",
+                  "args": {
+                    "payment_id": "TX-4",
+                    "amount": 120
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 26,
+              "total_latency_ms": 1045.872
+            },
+            {
+              "id": "cancel-01",
+              "expected_tool": "cancel_order",
+              "expected_args": {
+                "order_id": "ORD-55"
+              },
+              "first": {
+                "text": "{\"tool\": \"cancel_order\", \"args\": {\"order_id\": \"ORD-55\"}}",
+                "output_tokens": 20,
+                "latency_ms": 809.211,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "cancel_order",
+                  "args": {
+                    "order_id": "ORD-55"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 809.211
+            },
+            {
+              "id": "cancel-02",
+              "expected_tool": "cancel_order",
+              "expected_args": {
+                "order_id": "C-901"
+              },
+              "first": {
+                "text": "{\"tool\": \"cancel_order\", \"args\": {\"order_id\": \"C-901\"}}",
+                "output_tokens": 20,
+                "latency_ms": 810.818,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "cancel_order",
+                  "args": {
+                    "order_id": "C-901"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 810.818
+            },
+            {
+              "id": "cancel-03",
+              "expected_tool": "cancel_order",
+              "expected_args": {
+                "order_id": "Q3"
+              },
+              "first": {
+                "text": "{\"tool\": \"cancel_order\", \"args\": {\"order_id\": \"Q3\"}}",
+                "output_tokens": 19,
+                "latency_ms": 767.445,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "cancel_order",
+                  "args": {
+                    "order_id": "Q3"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 19,
+              "total_latency_ms": 767.445
+            },
+            {
+              "id": "email-01",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "a@b.com",
+                "subject": "Welcome"
+              },
+              "first": {
+                "text": "{\"tool\": \"send_email\", \"args\": {\"to\": \"a@b.com\", \"subject\": \"Welcome\"}}",
+                "output_tokens": 26,
+                "latency_ms": 1041.496,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "a@b.com",
+                    "subject": "Welcome"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 26,
+              "total_latency_ms": 1041.496
+            },
+            {
+              "id": "email-02",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "ops@example.com",
+                "subject": "Server alert"
+              },
+              "first": {
+                "text": "{\"tool\": \"send_email\", \"args\": {\"to\": \"ops@example.com\", \"subject\": \"Server alert\"}}",
+                "output_tokens": 26,
+                "latency_ms": 1043.979,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "ops@example.com",
+                    "subject": "Server alert"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 26,
+              "total_latency_ms": 1043.979
+            },
+            {
+              "id": "email-03",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "lee@example.org",
+                "subject": "Receipt ready"
+              },
+              "first": {
+                "text": "{\"tool\": \"send_email\", \"args\": {\"to\": \"lee@example.org\", \"subject\": \"Receipt ready\"}}",
+                "output_tokens": 26,
+                "latency_ms": 1047.509,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "lee@example.org",
+                    "subject": "Receipt ready"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 26,
+              "total_latency_ms": 1047.509
+            },
+            {
+              "id": "email-04",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "help@example.net",
+                "subject": "Case closed"
+              },
+              "first": {
+                "text": "{\"tool\": \"send_email\", \"args\": {\"to\": \"help@example.net\", \"subject\": \"Case closed.\"}}",
+                "output_tokens": 27,
+                "latency_ms": 1082.787,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "help@example.net",
+                    "subject": "Case closed."
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": false,
+              "total_output_tokens": 27,
+              "total_latency_ms": 1082.787
+            }
+          ]
+        },
+        "skeleton": {
+          "total": 24,
+          "first_structural_valid": 23,
+          "first_correct": 22,
+          "retry_eligible": 1,
+          "retry_attempted": 1,
+          "retry_structural_valid": 0,
+          "retry_correct": 0,
+          "final_structural_valid": 23,
+          "final_correct": 22,
+          "total_output_tokens": 445,
+          "median_total_latency_ms": 733.67,
+          "rows": [
+            {
+              "id": "search-01",
+              "expected_tool": "search_kb",
+              "expected_args": {
+                "query": "password reset"
+              },
+              "first": {
+                "text": "{\"tool\":\"search_kb\",\"args\":{\"query\":\"password reset\"}}",
+                "output_tokens": 14,
+                "latency_ms": 580.126,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_kb",
+                  "args": {
+                    "query": "password reset"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 14,
+              "total_latency_ms": 580.126
+            },
+            {
+              "id": "search-02",
+              "expected_tool": "search_kb",
+              "expected_args": {
+                "query": "two-factor authentication"
+              },
+              "first": {
+                "text": "{\"tool\":\"search_kb\",\"args\":{\"query\":\"two-factor authentication\"}}",
+                "output_tokens": 15,
+                "latency_ms": 612.204,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_kb",
+                  "args": {
+                    "query": "two-factor authentication"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 15,
+              "total_latency_ms": 612.204
+            },
+            {
+              "id": "search-03",
+              "expected_tool": "search_kb",
+              "expected_args": {
+                "query": "return policy"
+              },
+              "first": {
+                "text": "{\"tool\":\"search_kb\",\"args\":{\"query\":\"return policy\"}}",
+                "output_tokens": 14,
+                "latency_ms": 577.03,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_kb",
+                  "args": {
+                    "query": "return policy"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 14,
+              "total_latency_ms": 577.03
+            },
+            {
+              "id": "order-01",
+              "expected_tool": "get_order",
+              "expected_args": {
+                "order_id": "ORD-1042"
+              },
+              "first": {
+                "text": "{\"tool\":\"get_order\",\"args\":{\"order_id\":\"ORD-1042\"}}",
+                "output_tokens": 17,
+                "latency_ms": 693.463,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "get_order",
+                  "args": {
+                    "order_id": "ORD-1042"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 17,
+              "total_latency_ms": 693.463
+            },
+            {
+              "id": "order-02",
+              "expected_tool": "get_order",
+              "expected_args": {
+                "order_id": "ZX-900"
+              },
+              "first": {
+                "text": "{\"tool\":\"get_order\",\"args\":{\"order_id\":\"ZX-900\"}}",
+                "output_tokens": 16,
+                "latency_ms": 659.34,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "get_order",
+                  "args": {
+                    "order_id": "ZX-900"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 16,
+              "total_latency_ms": 659.34
+            },
+            {
+              "id": "order-03",
+              "expected_tool": "get_order",
+              "expected_args": {
+                "order_id": "A-17"
+              },
+              "first": {
+                "text": "{\"tool\":\"get_order\",\"args\":{\"order_id\":\"A-17\"}}",
+                "output_tokens": 16,
+                "latency_ms": 655.468,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "get_order",
+                  "args": {
+                    "order_id": "A-17"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 16,
+              "total_latency_ms": 655.468
+            },
+            {
+              "id": "list-01",
+              "expected_tool": "list_tickets",
+              "expected_args": {
+                "status": "open"
+              },
+              "first": {
+                "text": "{\"tool\":\"list_tickets\",\"args\":{\"status\":\"open\"}}",
+                "output_tokens": 13,
+                "latency_ms": 541.216,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "list_tickets",
+                  "args": {
+                    "status": "open"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 13,
+              "total_latency_ms": 541.216
+            },
+            {
+              "id": "list-02",
+              "expected_tool": "list_tickets",
+              "expected_args": {
+                "status": "closed"
+              },
+              "first": {
+                "text": "{\"tool\":\"list_tickets\",\"args\":{\"status\":\"closed\"}}",
+                "output_tokens": 13,
+                "latency_ms": 540.589,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "list_tickets",
+                  "args": {
+                    "status": "closed"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 13,
+              "total_latency_ms": 540.589
+            },
+            {
+              "id": "ticket-01",
+              "expected_tool": "create_ticket",
+              "expected_args": {
+                "title": "Login failure",
+                "priority": "high"
+              },
+              "first": {
+                "text": "{\"tool\":\"create_ticket\",\"args\":{\"title\":\"Login failure\",\"priority\":\"high\"}}",
+                "output_tokens": 18,
+                "latency_ms": 734.206,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "create_ticket",
+                  "args": {
+                    "title": "Login failure",
+                    "priority": "high"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 18,
+              "total_latency_ms": 734.206
+            },
+            {
+              "id": "ticket-02",
+              "expected_tool": "create_ticket",
+              "expected_args": {
+                "title": "Typo on homepage",
+                "priority": "low"
+              },
+              "first": {
+                "text": "{\"tool\":\"list_tickets\",\"args\":{\"status\":\"open|closed\",\"query\":\"Typo on homepage\"}}",
+                "output_tokens": 22,
+                "latency_ms": 890.837,
+                "structural_valid": false,
+                "validation_error": "args keys for list_tickets must be exactly ['status']",
+                "parsed": {
+                  "tool": "list_tickets",
+                  "args": {
+                    "status": "open|closed",
+                    "query": "Typo on homepage"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"list_tickets\",\"args\":{\"status\":\"open|closed\",\"query\":\"Typo on homepage\"}}",
+                "output_tokens": 22,
+                "latency_ms": 898.895,
+                "structural_valid": false,
+                "validation_error": "args keys for list_tickets must be exactly ['status']",
+                "parsed": {
+                  "tool": "list_tickets",
+                  "args": {
+                    "status": "open|closed",
+                    "query": "Typo on homepage"
+                  }
+                },
+                "correct": false
+              },
+              "final_structural_valid": false,
+              "final_correct": false,
+              "total_output_tokens": 44,
+              "total_latency_ms": 1789.732
+            },
+            {
+              "id": "ticket-03",
+              "expected_tool": "create_ticket",
+              "expected_args": {
+                "title": "Payment declined",
+                "priority": "high"
+              },
+              "first": {
+                "text": "{\"tool\":\"create_ticket\",\"args\":{\"title\":\"Payment declined\",\"priority\":\"high\"}}",
+                "output_tokens": 18,
+                "latency_ms": 733.135,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "create_ticket",
+                  "args": {
+                    "title": "Payment declined",
+                    "priority": "high"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 18,
+              "total_latency_ms": 733.135
+            },
+            {
+              "id": "address-01",
+              "expected_tool": "update_address",
+              "expected_args": {
+                "order_id": "ORD-7",
+                "city": "Boston"
+              },
+              "first": {
+                "text": "{\"tool\":\"update_address\",\"args\":{\"order_id\":\"ORD-7\",\"city\":\"Boston\"}}",
+                "output_tokens": 20,
+                "latency_ms": 814.497,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "update_address",
+                  "args": {
+                    "order_id": "ORD-7",
+                    "city": "Boston"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 814.497
+            },
+            {
+              "id": "address-02",
+              "expected_tool": "update_address",
+              "expected_args": {
+                "order_id": "K-22",
+                "city": "Seattle"
+              },
+              "first": {
+                "text": "{\"tool\":\"update_address\",\"args\":{\"order_id\":\"K-22\",\"city\":\"Seattle\"}}",
+                "output_tokens": 20,
+                "latency_ms": 811.75,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "update_address",
+                  "args": {
+                    "order_id": "K-22",
+                    "city": "Seattle"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 811.75
+            },
+            {
+              "id": "address-03",
+              "expected_tool": "update_address",
+              "expected_args": {
+                "order_id": "P100",
+                "city": "Austin"
+              },
+              "first": {
+                "text": "{\"tool\":\"update_address\",\"args\":{\"order_id\":\"P100\",\"city\":\"Austin\"}}",
+                "output_tokens": 19,
+                "latency_ms": 778.195,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "update_address",
+                  "args": {
+                    "order_id": "P100",
+                    "city": "Austin"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 19,
+              "total_latency_ms": 778.195
+            },
+            {
+              "id": "refund-01",
+              "expected_tool": "refund_payment",
+              "expected_args": {
+                "payment_id": "PAY-88",
+                "amount": 25
+              },
+              "first": {
+                "text": "{\"tool\":\"refund_payment\",\"args\":{\"payment_id\":\"PAY-88\",\"amount\":25}}",
+                "output_tokens": 20,
+                "latency_ms": 813.052,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "refund_payment",
+                  "args": {
+                    "payment_id": "PAY-88",
+                    "amount": 25
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 813.052
+            },
+            {
+              "id": "refund-02",
+              "expected_tool": "refund_payment",
+              "expected_args": {
+                "payment_id": "P-19",
+                "amount": 7
+              },
+              "first": {
+                "text": "{\"tool\":\"refund_payment\",\"args\":{\"payment_id\":\"P-19\",\"amount\":7}}",
+                "output_tokens": 20,
+                "latency_ms": 801.186,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "refund_payment",
+                  "args": {
+                    "payment_id": "P-19",
+                    "amount": 7
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 801.186
+            },
+            {
+              "id": "refund-03",
+              "expected_tool": "refund_payment",
+              "expected_args": {
+                "payment_id": "TX-4",
+                "amount": 120
+              },
+              "first": {
+                "text": "{\"tool\":\"refund_payment\",\"args\":{\"payment_id\":\"TX-4\",\"amount\":120}}",
+                "output_tokens": 20,
+                "latency_ms": 816.769,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "refund_payment",
+                  "args": {
+                    "payment_id": "TX-4",
+                    "amount": 120
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 816.769
+            },
+            {
+              "id": "cancel-01",
+              "expected_tool": "cancel_order",
+              "expected_args": {
+                "order_id": "ORD-55"
+              },
+              "first": {
+                "text": "{\"tool\":\"cancel_order\",\"args\":{\"order_id\":\"ORD-55\"}}",
+                "output_tokens": 16,
+                "latency_ms": 656.293,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "cancel_order",
+                  "args": {
+                    "order_id": "ORD-55"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 16,
+              "total_latency_ms": 656.293
+            },
+            {
+              "id": "cancel-02",
+              "expected_tool": "cancel_order",
+              "expected_args": {
+                "order_id": "C-901"
+              },
+              "first": {
+                "text": "{\"tool\":\"cancel_order\",\"args\":{\"order_id\":\"C-901\"}}",
+                "output_tokens": 16,
+                "latency_ms": 656.337,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "cancel_order",
+                  "args": {
+                    "order_id": "C-901"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 16,
+              "total_latency_ms": 656.337
+            },
+            {
+              "id": "cancel-03",
+              "expected_tool": "cancel_order",
+              "expected_args": {
+                "order_id": "Q3"
+              },
+              "first": {
+                "text": "{\"tool\":\"cancel_order\",\"args\":{\"order_id\":\"Q3\"}}",
+                "output_tokens": 15,
+                "latency_ms": 619.498,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "cancel_order",
+                  "args": {
+                    "order_id": "Q3"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 15,
+              "total_latency_ms": 619.498
+            },
+            {
+              "id": "email-01",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "a@b.com",
+                "subject": "Welcome"
+              },
+              "first": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"a@b.com\",\"subject\":\"Welcome\"}}",
+                "output_tokens": 20,
+                "latency_ms": 811.389,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "a@b.com",
+                    "subject": "Welcome"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 811.389
+            },
+            {
+              "id": "email-02",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "ops@example.com",
+                "subject": "Server alert"
+              },
+              "first": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"ops@example.com\",\"subject\":\"Server alert\"}}",
+                "output_tokens": 20,
+                "latency_ms": 814.091,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "ops@example.com",
+                    "subject": "Server alert"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 814.091
+            },
+            {
+              "id": "email-03",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "lee@example.org",
+                "subject": "Receipt ready"
+              },
+              "first": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"lee@example.org\",\"subject\":\"Receipt ready\"}}",
+                "output_tokens": 20,
+                "latency_ms": 813.539,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "lee@example.org",
+                    "subject": "Receipt ready"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 813.539
+            },
+            {
+              "id": "email-04",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "help@example.net",
+                "subject": "Case closed"
+              },
+              "first": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"help@example.net\",\"subject\":\"Case closed.\"}}",
+                "output_tokens": 21,
+                "latency_ms": 851.751,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "help@example.net",
+                    "subject": "Case closed."
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": false,
+              "total_output_tokens": 21,
+              "total_latency_ms": 851.751
+            }
+          ]
+        }
+      }
+    },
+    {
+      "path": "/home/USER/models/Phi-3.5-mini-instruct",
+      "weights_sha256": "12be042c8285552d8b4617959a43f66e259bbb84ff27b7469ffe89b6cb27deda",
+      "weight_files": [
+        "model-00001-of-00002.safetensors",
+        "model-00002-of-00002.safetensors"
+      ],
+      "config": {
+        "_name_or_path": "Phi-3.5-mini-instruct",
+        "architectures": [
+          "Phi3ForCausalLM"
+        ],
+        "attention_dropout": 0.0,
+        "auto_map": {
+          "AutoConfig": "configuration_phi3.Phi3Config",
+          "AutoModelForCausalLM": "modeling_phi3.Phi3ForCausalLM"
+        },
+        "bos_token_id": 1,
+        "embd_pdrop": 0.0,
+        "eos_token_id": 32000,
+        "hidden_act": "silu",
+        "hidden_size": 3072,
+        "initializer_range": 0.02,
+        "intermediate_size": 8192,
+        "max_position_embeddings": 131072,
+        "model_type": "phi3",
+        "num_attention_heads": 32,
+        "num_hidden_layers": 32,
+        "num_key_value_heads": 32,
+        "original_max_position_embeddings": 4096,
+        "pad_token_id": 32000,
+        "resid_pdrop": 0.0,
+        "rms_norm_eps": 1e-05,
+        "rope_scaling": {
+          "long_factor": [
+            1.0800000429153442,
+            1.1100000143051147,
+            1.1399999856948853,
+            1.340000033378601,
+            1.5899999141693115,
+            1.600000023841858,
+            1.6200000047683716,
+            2.620000123977661,
+            3.2300000190734863,
+            3.2300000190734863,
+            4.789999961853027,
+            7.400000095367432,
+            7.700000286102295,
+            9.09000015258789,
+            12.199999809265137,
+            17.670000076293945,
+            24.46000099182129,
+            28.57000160217285,
+            30.420001983642578,
+            30.840002059936523,
+            32.590003967285156,
+            32.93000411987305,
+            42.320003509521484,
+            44.96000289916992,
+            50.340003967285156,
+            50.45000457763672,
+            57.55000305175781,
+            57.93000411987305,
+            58.21000289916992,
+            60.1400032043457,
+            62.61000442504883,
+            62.62000274658203,
+            62.71000289916992,
+            63.1400032043457,
+            63.1400032043457,
+            63.77000427246094,
+            63.93000411987305,
+            63.96000289916992,
+            63.970001220703125,
+            64.02999877929688,
+            64.06999969482422,
+            64.08000183105469,
+            64.12000274658203,
+            64.41000366210938,
+            64.4800033569336,
+            64.51000213623047,
+            64.52999877929688,
+            64.83999633789062
+          ],
+          "short_factor": [
+            1.0,
+            1.0199999809265137,
+            1.0299999713897705,
+            1.0299999713897705,
+            1.0499999523162842,
+            1.0499999523162842,
+            1.0499999523162842,
+            1.0499999523162842,
+            1.0499999523162842,
+            1.0699999332427979,
+            1.0999999046325684,
+            1.1099998950958252,
+            1.1599998474121094,
+            1.1599998474121094,
+            1.1699998378753662,
+            1.2899998426437378,
+            1.339999794960022,
+            1.679999828338623,
+            1.7899998426437378,
+            1.8199998140335083,
+            1.8499997854232788,
+            1.8799997568130493,
+            1.9099997282028198,
+            1.9399996995925903,
+            1.9899996519088745,
+            2.0199997425079346,
+            2.0199997425079346,
+            2.0199997425079346,
+            2.0199997425079346,
+            2.0199997425079346,
+            2.0199997425079346,
+            2.0299997329711914,
+            2.0299997329711914,
+            2.0299997329711914,
+            2.0299997329711914,
+            2.0299997329711914,
+            2.0299997329711914,
+            2.0299997329711914,
+            2.0299997329711914,
+            2.0299997329711914,
+            2.0799996852874756,
+            2.0899996757507324,
+            2.189999580383301,
+            2.2199995517730713,
+            2.5899994373321533,
+            2.729999542236328,
+            2.749999523162842,
+            2.8399994373321533
+          ],
+          "type": "longrope"
+        },
+        "rope_theta": 10000.0,
+        "sliding_window": 262144,
+        "tie_word_embeddings": false,
+        "torch_dtype": "bfloat16",
+        "transformers_version": "4.43.3",
+        "use_cache": true,
+        "attention_bias": false,
+        "vocab_size": 32064
+      },
+      "thinking_control": "not applicable",
+      "arms": {
+        "contract": {
+          "total": 24,
+          "first_structural_valid": 8,
+          "first_correct": 6,
+          "retry_eligible": 16,
+          "retry_attempted": 16,
+          "retry_structural_valid": 16,
+          "retry_correct": 16,
+          "final_structural_valid": 24,
+          "final_correct": 22,
+          "total_output_tokens": 893,
+          "median_total_latency_ms": 1776.682,
+          "rows": [
+            {
+              "id": "search-01",
+              "expected_tool": "search_kb",
+              "expected_args": {
+                "query": "password reset"
+              },
+              "first": {
+                "text": "{\"tool\":\"search_kb\",\"args\":{\"query\":\"password reset\"}}",
+                "output_tokens": 16,
+                "latency_ms": 652.455,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_kb",
+                  "args": {
+                    "query": "password reset"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 16,
+              "total_latency_ms": 652.455
+            },
+            {
+              "id": "search-02",
+              "expected_tool": "search_kb",
+              "expected_args": {
+                "query": "two-factor authentication"
+              },
+              "first": {
+                "text": "{\"tool\":\"search_kb\",\"args\":{\"query\":\"two-factor authentication\"}}",
+                "output_tokens": 18,
+                "latency_ms": 717.571,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_kb",
+                  "args": {
+                    "query": "two-factor authentication"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 18,
+              "total_latency_ms": 717.571
+            },
+            {
+              "id": "search-03",
+              "expected_tool": "search_kb",
+              "expected_args": {
+                "query": "return policy"
+              },
+              "first": {
+                "text": "{\"tool\":\"search_kb\",\"args\":\"return policy\"}",
+                "output_tokens": 13,
+                "latency_ms": 538.862,
+                "structural_valid": false,
+                "validation_error": "args must be a JSON object",
+                "parsed": {
+                  "tool": "search_kb",
+                  "args": "return policy"
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"search_kb\",\"args\":{\"query\":\"return policy\"}}",
+                "output_tokens": 16,
+                "latency_ms": 690.182,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_kb",
+                  "args": {
+                    "query": "return policy"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 29,
+              "total_latency_ms": 1229.044
+            },
+            {
+              "id": "order-01",
+              "expected_tool": "get_order",
+              "expected_args": {
+                "order_id": "ORD-1042"
+              },
+              "first": {
+                "text": "{\"name\":\"get_order\",\"args\":{\"order_id\":\"ORD-1042\"}}",
+                "output_tokens": 22,
+                "latency_ms": 867.238,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "get_order",
+                  "args": {
+                    "order_id": "ORD-1042"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"get_order\",\"args\":{\"order_id\":\"ORD-1042\"}}",
+                "output_tokens": 22,
+                "latency_ms": 909.569,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "get_order",
+                  "args": {
+                    "order_id": "ORD-1042"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 44,
+              "total_latency_ms": 1776.807
+            },
+            {
+              "id": "order-02",
+              "expected_tool": "get_order",
+              "expected_args": {
+                "order_id": "ZX-900"
+              },
+              "first": {
+                "text": "{\"name\":\"get_order\",\"args\":{\"order_id\":\"ZX-900\"}}",
+                "output_tokens": 22,
+                "latency_ms": 863.458,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "get_order",
+                  "args": {
+                    "order_id": "ZX-900"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"get_order\",\"args\":{\"order_id\":\"ZX-900\"}}",
+                "output_tokens": 22,
+                "latency_ms": 906.21,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "get_order",
+                  "args": {
+                    "order_id": "ZX-900"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 44,
+              "total_latency_ms": 1769.668
+            },
+            {
+              "id": "order-03",
+              "expected_tool": "get_order",
+              "expected_args": {
+                "order_id": "A-17"
+              },
+              "first": {
+                "text": "{\"name\":\"get_order\",\"args\":{\"order_id\":\"A-17\"}}\n",
+                "output_tokens": 21,
+                "latency_ms": 827.815,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "get_order",
+                  "args": {
+                    "order_id": "A-17"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"get_order\",\"args\":{\"order_id\":\"A-17\"}}",
+                "output_tokens": 20,
+                "latency_ms": 834.282,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "get_order",
+                  "args": {
+                    "order_id": "A-17"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 41,
+              "total_latency_ms": 1662.097
+            },
+            {
+              "id": "list-01",
+              "expected_tool": "list_tickets",
+              "expected_args": {
+                "status": "open"
+              },
+              "first": {
+                "text": "{\"tool\":\"search_tickets\",\"args\":{\"query\":\"open\"}}",
+                "output_tokens": 16,
+                "latency_ms": 646.936,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_tickets",
+                  "args": {
+                    "query": "open"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": false,
+              "total_output_tokens": 16,
+              "total_latency_ms": 646.936
+            },
+            {
+              "id": "list-02",
+              "expected_tool": "list_tickets",
+              "expected_args": {
+                "status": "closed"
+              },
+              "first": {
+                "text": "{\"tool\":\"search_tickets\",\"args\":{\"query\":\"closed\"}}",
+                "output_tokens": 16,
+                "latency_ms": 652.102,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_tickets",
+                  "args": {
+                    "query": "closed"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": false,
+              "total_output_tokens": 16,
+              "total_latency_ms": 652.102
+            },
+            {
+              "id": "ticket-01",
+              "expected_tool": "create_ticket",
+              "expected_args": {
+                "title": "Login failure",
+                "priority": "high"
+              },
+              "first": {
+                "text": "{\"name\":\"create_ticket\",\"args\":{\"title\":\"Login failure\",\"priority\":\"high\"}}",
+                "output_tokens": 22,
+                "latency_ms": 871.349,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "create_ticket",
+                  "args": {
+                    "title": "Login failure",
+                    "priority": "high"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"create_ticket\",\"args\":{\"title\":\"Login failure\",\"priority\":\"high\"}}",
+                "output_tokens": 22,
+                "latency_ms": 905.209,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "create_ticket",
+                  "args": {
+                    "title": "Login failure",
+                    "priority": "high"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 44,
+              "total_latency_ms": 1776.558
+            },
+            {
+              "id": "ticket-02",
+              "expected_tool": "create_ticket",
+              "expected_args": {
+                "title": "Typo on homepage",
+                "priority": "low"
+              },
+              "first": {
+                "text": "{\"name\":\"create_ticket\",\"args\":{\"title\":\"Typo on homepage\",\"priority\":\"low\"}}",
+                "output_tokens": 25,
+                "latency_ms": 969.975,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "create_ticket",
+                  "args": {
+                    "title": "Typo on homepage",
+                    "priority": "low"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"create_ticket\",\"args\":{\"title\":\"Typo on homepage\",\"priority\":\"low\"}}",
+                "output_tokens": 25,
+                "latency_ms": 1004.547,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "create_ticket",
+                  "args": {
+                    "title": "Typo on homepage",
+                    "priority": "low"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 50,
+              "total_latency_ms": 1974.522
+            },
+            {
+              "id": "ticket-03",
+              "expected_tool": "create_ticket",
+              "expected_args": {
+                "title": "Payment declined",
+                "priority": "high"
+              },
+              "first": {
+                "text": "{\"name\":\"create_ticket\",\"args\":{\"title\":\"Payment declined\",\"priority\":\"high\"}}",
+                "output_tokens": 24,
+                "latency_ms": 943.644,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "create_ticket",
+                  "args": {
+                    "title": "Payment declined",
+                    "priority": "high"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"create_ticket\",\"args\":{\"title\":\"Payment declined\",\"priority\":\"high\"}}",
+                "output_tokens": 24,
+                "latency_ms": 965.103,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "create_ticket",
+                  "args": {
+                    "title": "Payment declined",
+                    "priority": "high"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 48,
+              "total_latency_ms": 1908.747
+            },
+            {
+              "id": "address-01",
+              "expected_tool": "update_address",
+              "expected_args": {
+                "order_id": "ORD-7",
+                "city": "Boston"
+              },
+              "first": {
+                "text": "{\"name\":\"update_address\",\"args\":{\"order_id\":\"ORD-7\",\"city\":\"Boston\"}}",
+                "output_tokens": 24,
+                "latency_ms": 944.011,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "update_address",
+                  "args": {
+                    "order_id": "ORD-7",
+                    "city": "Boston"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"update_address\",\"args\":{\"order_id\":\"ORD-7\",\"city\":\"Boston\"}}",
+                "output_tokens": 24,
+                "latency_ms": 968.754,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "update_address",
+                  "args": {
+                    "order_id": "ORD-7",
+                    "city": "Boston"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 48,
+              "total_latency_ms": 1912.765
+            },
+            {
+              "id": "address-02",
+              "expected_tool": "update_address",
+              "expected_args": {
+                "order_id": "K-22",
+                "city": "Seattle"
+              },
+              "first": {
+                "text": "{\"name\":\"update_address\",\"args\":{\"order_id\":\"K-22\",\"city\":\"Seattle\"}}",
+                "output_tokens": 25,
+                "latency_ms": 977.352,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "update_address",
+                  "args": {
+                    "order_id": "K-22",
+                    "city": "Seattle"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"update_address\",\"args\":{\"order_id\":\"K-22\",\"city\":\"Seattle\"}}",
+                "output_tokens": 25,
+                "latency_ms": 1005.492,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "update_address",
+                  "args": {
+                    "order_id": "K-22",
+                    "city": "Seattle"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 50,
+              "total_latency_ms": 1982.844
+            },
+            {
+              "id": "address-03",
+              "expected_tool": "update_address",
+              "expected_args": {
+                "order_id": "P100",
+                "city": "Austin"
+              },
+              "first": {
+                "text": "{\"tool\":\"update_address\",\"args\":{\"order_id\":\"P100\",\"city\":\"Austin\"}}",
+                "output_tokens": 26,
+                "latency_ms": 1018.282,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "update_address",
+                  "args": {
+                    "order_id": "P100",
+                    "city": "Austin"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 26,
+              "total_latency_ms": 1018.282
+            },
+            {
+              "id": "refund-01",
+              "expected_tool": "refund_payment",
+              "expected_args": {
+                "payment_id": "PAY-88",
+                "amount": 25
+              },
+              "first": {
+                "text": "{\"name\":\"refund_payment\",\"args\":{\"payment_id\":\"PAY-88\",\"amount\":25}}",
+                "output_tokens": 26,
+                "latency_ms": 1016.517,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "refund_payment",
+                  "args": {
+                    "payment_id": "PAY-88",
+                    "amount": 25
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"refund_payment\",\"args\":{\"payment_id\":\"PAY-88\",\"amount\":25}}",
+                "output_tokens": 26,
+                "latency_ms": 1044.486,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "refund_payment",
+                  "args": {
+                    "payment_id": "PAY-88",
+                    "amount": 25
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 52,
+              "total_latency_ms": 2061.003
+            },
+            {
+              "id": "refund-02",
+              "expected_tool": "refund_payment",
+              "expected_args": {
+                "payment_id": "P-19",
+                "amount": 7
+              },
+              "first": {
+                "text": "{\"name\":\"refund_payment\",\"args\":{\"payment_id\":\"P-19\",\"amount\":7}}",
+                "output_tokens": 24,
+                "latency_ms": 945.858,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "refund_payment",
+                  "args": {
+                    "payment_id": "P-19",
+                    "amount": 7
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"refund_payment\",\"args\":{\"payment_id\":\"P-19\",\"amount\":7}}",
+                "output_tokens": 24,
+                "latency_ms": 971.437,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "refund_payment",
+                  "args": {
+                    "payment_id": "P-19",
+                    "amount": 7
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 48,
+              "total_latency_ms": 1917.295
+            },
+            {
+              "id": "refund-03",
+              "expected_tool": "refund_payment",
+              "expected_args": {
+                "payment_id": "TX-4",
+                "amount": 120
+              },
+              "first": {
+                "text": "{\"name\":\"refund_payment\",\"args\":{\"payment_id\":\"TX-4\",\"amount\":120}}",
+                "output_tokens": 25,
+                "latency_ms": 977.745,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "refund_payment",
+                  "args": {
+                    "payment_id": "TX-4",
+                    "amount": 120
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"refund_payment\",\"args\":{\"payment_id\":\"TX-4\",\"amount\":120}}",
+                "output_tokens": 25,
+                "latency_ms": 1007.175,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "refund_payment",
+                  "args": {
+                    "payment_id": "TX-4",
+                    "amount": 120
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 50,
+              "total_latency_ms": 1984.92
+            },
+            {
+              "id": "cancel-01",
+              "expected_tool": "cancel_order",
+              "expected_args": {
+                "order_id": "ORD-55"
+              },
+              "first": {
+                "text": "{\"tool\":\"cancel_order\",\"args\":{\"order_id\":\"ORD-55\"}}",
+                "output_tokens": 20,
+                "latency_ms": 798.977,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "cancel_order",
+                  "args": {
+                    "order_id": "ORD-55"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 20,
+              "total_latency_ms": 798.977
+            },
+            {
+              "id": "cancel-02",
+              "expected_tool": "cancel_order",
+              "expected_args": {
+                "order_id": "C-901"
+              },
+              "first": {
+                "text": "{\"tool\":\"cancel_order\",\"args\":{\"order_id\":\"C-901\"}}",
+                "output_tokens": 21,
+                "latency_ms": 835.652,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "cancel_order",
+                  "args": {
+                    "order_id": "C-901"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 21,
+              "total_latency_ms": 835.652
+            },
+            {
+              "id": "cancel-03",
+              "expected_tool": "cancel_order",
+              "expected_args": {
+                "order_id": "Q3"
+              },
+              "first": {
+                "text": "{\"tool\":\"cancel_order\",\"args\":{\"order_id\":\"Q3\"}}",
+                "output_tokens": 18,
+                "latency_ms": 723.408,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "cancel_order",
+                  "args": {
+                    "order_id": "Q3"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 18,
+              "total_latency_ms": 723.408
+            },
+            {
+              "id": "email-01",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "a@b.com",
+                "subject": "Welcome"
+              },
+              "first": {
+                "text": "{\"name\":\"send_email\",\"args\":{\"to\":\"a@b.com\",\"subject\":\"Welcome\"}}",
+                "output_tokens": 24,
+                "latency_ms": 946.858,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "send_email",
+                  "args": {
+                    "to": "a@b.com",
+                    "subject": "Welcome"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"a@b.com\",\"subject\":\"Welcome\"}}",
+                "output_tokens": 24,
+                "latency_ms": 972.544,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "a@b.com",
+                    "subject": "Welcome"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 48,
+              "total_latency_ms": 1919.402
+            },
+            {
+              "id": "email-02",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "ops@example.com",
+                "subject": "Server alert"
+              },
+              "first": {
+                "text": "{\"name\":\"send_email\",\"args\":{\"to\":\"ops@example.com\",\"subject\":\"Server alert\"}}",
+                "output_tokens": 24,
+                "latency_ms": 944.927,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "send_email",
+                  "args": {
+                    "to": "ops@example.com",
+                    "subject": "Server alert"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"ops@example.com\",\"subject\":\"Server alert\"}}",
+                "output_tokens": 24,
+                "latency_ms": 971.426,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "ops@example.com",
+                    "subject": "Server alert"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 48,
+              "total_latency_ms": 1916.353
+            },
+            {
+              "id": "email-03",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "lee@example.org",
+                "subject": "Receipt ready"
+              },
+              "first": {
+                "text": "{\"name\":\"send_email\",\"args\":{\"to\":\"lee@example.org\",\"subject\":\"Receipt ready\"}}",
+                "output_tokens": 25,
+                "latency_ms": 983.073,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "send_email",
+                  "args": {
+                    "to": "lee@example.org",
+                    "subject": "Receipt ready"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"lee@example.org\",\"subject\":\"Receipt ready\"}}",
+                "output_tokens": 25,
+                "latency_ms": 1010.069,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "lee@example.org",
+                    "subject": "Receipt ready"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 50,
+              "total_latency_ms": 1993.142
+            },
+            {
+              "id": "email-04",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "help@example.net",
+                "subject": "Case closed"
+              },
+              "first": {
+                "text": "{\"name\":\"send_email\",\"args\":{\"to\":\"help@example.net\",\"subject\":\"Case closed\"}}",
+                "output_tokens": 24,
+                "latency_ms": 942.044,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "send_email",
+                  "args": {
+                    "to": "help@example.net",
+                    "subject": "Case closed"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"help@example.net\",\"subject\":\"Case closed\"}}",
+                "output_tokens": 24,
+                "latency_ms": 971.751,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "help@example.net",
+                    "subject": "Case closed"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 48,
+              "total_latency_ms": 1913.795
+            }
+          ]
+        },
+        "skeleton": {
+          "total": 24,
+          "first_structural_valid": 4,
+          "first_correct": 4,
+          "retry_eligible": 20,
+          "retry_attempted": 20,
+          "retry_structural_valid": 20,
+          "retry_correct": 20,
+          "final_structural_valid": 24,
+          "final_correct": 24,
+          "total_output_tokens": 970,
+          "median_total_latency_ms": 1819.891,
+          "rows": [
+            {
+              "id": "search-01",
+              "expected_tool": "search_kb",
+              "expected_args": {
+                "query": "password reset"
+              },
+              "first": {
+                "text": "{\"tool\":\"search_kb\",\"args\":{\"query\":\"password reset\"}}",
+                "output_tokens": 16,
+                "latency_ms": 691.067,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_kb",
+                  "args": {
+                    "query": "password reset"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 16,
+              "total_latency_ms": 691.067
+            },
+            {
+              "id": "search-02",
+              "expected_tool": "search_kb",
+              "expected_args": {
+                "query": "two-factor authentication"
+              },
+              "first": {
+                "text": "{\"tool\":\"search_kb\",\"args\":{\"query\":\"two-factor authentication\"}}",
+                "output_tokens": 18,
+                "latency_ms": 758.506,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_kb",
+                  "args": {
+                    "query": "two-factor authentication"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 18,
+              "total_latency_ms": 758.506
+            },
+            {
+              "id": "search-03",
+              "expected_tool": "search_kb",
+              "expected_args": {
+                "query": "return policy"
+              },
+              "first": {
+                "text": "{\"tool\":\"search_kb\",\"args\":{\"query\":\"return policy\"}}",
+                "output_tokens": 16,
+                "latency_ms": 690.22,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "search_kb",
+                  "args": {
+                    "query": "return policy"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 16,
+              "total_latency_ms": 690.22
+            },
+            {
+              "id": "order-01",
+              "expected_tool": "get_order",
+              "expected_args": {
+                "order_id": "ORD-1042"
+              },
+              "first": {
+                "text": "{\"name\":\"get_order\",\"args\":{\"order_id\":\"ORD-1042\"}}",
+                "output_tokens": 22,
+                "latency_ms": 911.029,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "get_order",
+                  "args": {
+                    "order_id": "ORD-1042"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"get_order\",\"args\":{\"order_id\":\"ORD-1042\"}}",
+                "output_tokens": 22,
+                "latency_ms": 906.692,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "get_order",
+                  "args": {
+                    "order_id": "ORD-1042"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 44,
+              "total_latency_ms": 1817.721
+            },
+            {
+              "id": "order-02",
+              "expected_tool": "get_order",
+              "expected_args": {
+                "order_id": "ZX-900"
+              },
+              "first": {
+                "text": "{\"name\":\"get_order\",\"args\":{\"order_id\":\"ZX-900\"}}",
+                "output_tokens": 22,
+                "latency_ms": 902.467,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "get_order",
+                  "args": {
+                    "order_id": "ZX-900"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"get_order\",\"args\":{\"order_id\":\"ZX-900\"}}",
+                "output_tokens": 22,
+                "latency_ms": 900.725,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "get_order",
+                  "args": {
+                    "order_id": "ZX-900"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 44,
+              "total_latency_ms": 1803.192
+            },
+            {
+              "id": "order-03",
+              "expected_tool": "get_order",
+              "expected_args": {
+                "order_id": "A-17"
+              },
+              "first": {
+                "text": "{\"name\":\"get_order\",\"args\":{\"order_id\":\"A-17\"}}",
+                "output_tokens": 20,
+                "latency_ms": 823.684,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "get_order",
+                  "args": {
+                    "order_id": "A-17"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"get_order\",\"args\":{\"order_id\":\"A-17\"}}",
+                "output_tokens": 20,
+                "latency_ms": 838.282,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "get_order",
+                  "args": {
+                    "order_id": "A-17"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 40,
+              "total_latency_ms": 1661.966
+            },
+            {
+              "id": "list-01",
+              "expected_tool": "list_tickets",
+              "expected_args": {
+                "status": "open"
+              },
+              "first": {
+                "text": "{\"name\":\"list_tickets\",\"args\":{\"status\":\"open\"}}",
+                "output_tokens": 16,
+                "latency_ms": 682.286,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "list_tickets",
+                  "args": {
+                    "status": "open"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"list_tickets\",\"args\":{\"status\":\"open\"}}",
+                "output_tokens": 16,
+                "latency_ms": 690.121,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "list_tickets",
+                  "args": {
+                    "status": "open"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 32,
+              "total_latency_ms": 1372.407
+            },
+            {
+              "id": "list-02",
+              "expected_tool": "list_tickets",
+              "expected_args": {
+                "status": "closed"
+              },
+              "first": {
+                "text": "{\"name\":\"list_tickets\",\"args\":{\"status\":\"closed\"}}",
+                "output_tokens": 16,
+                "latency_ms": 692.19,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "list_tickets",
+                  "args": {
+                    "status": "closed"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"list_tickets\",\"args\":{\"status\":\"closed\"}}",
+                "output_tokens": 16,
+                "latency_ms": 688.032,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "list_tickets",
+                  "args": {
+                    "status": "closed"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 32,
+              "total_latency_ms": 1380.222
+            },
+            {
+              "id": "ticket-01",
+              "expected_tool": "create_ticket",
+              "expected_args": {
+                "title": "Login failure",
+                "priority": "high"
+              },
+              "first": {
+                "text": "{\"name\":\"create_ticket\",\"args\":{\"title\":\"Login failure\",\"priority\":\"high\"}}",
+                "output_tokens": 22,
+                "latency_ms": 912.567,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "create_ticket",
+                  "args": {
+                    "title": "Login failure",
+                    "priority": "high"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"create_ticket\",\"args\":{\"title\":\"Login failure\",\"priority\":\"high\"}}",
+                "output_tokens": 22,
+                "latency_ms": 909.495,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "create_ticket",
+                  "args": {
+                    "title": "Login failure",
+                    "priority": "high"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 44,
+              "total_latency_ms": 1822.062
+            },
+            {
+              "id": "ticket-02",
+              "expected_tool": "create_ticket",
+              "expected_args": {
+                "title": "Typo on homepage",
+                "priority": "low"
+              },
+              "first": {
+                "text": "{\"name\":\"create_ticket\",\"args\":{\"title\":\"Typo on homepage\",\"priority\":\"low\"}}",
+                "output_tokens": 25,
+                "latency_ms": 1006.895,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "create_ticket",
+                  "args": {
+                    "title": "Typo on homepage",
+                    "priority": "low"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"create_ticket\",\"args\":{\"title\":\"Typo on homepage\",\"priority\":\"low\"}}",
+                "output_tokens": 25,
+                "latency_ms": 1006.153,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "create_ticket",
+                  "args": {
+                    "title": "Typo on homepage",
+                    "priority": "low"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 50,
+              "total_latency_ms": 2013.048
+            },
+            {
+              "id": "ticket-03",
+              "expected_tool": "create_ticket",
+              "expected_args": {
+                "title": "Payment declined",
+                "priority": "high"
+              },
+              "first": {
+                "text": "{\"name\":\"create_ticket\",\"args\":{\"title\":\"Payment declined\",\"priority\":\"high\"}}",
+                "output_tokens": 24,
+                "latency_ms": 978.611,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "create_ticket",
+                  "args": {
+                    "title": "Payment declined",
+                    "priority": "high"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"create_ticket\",\"args\":{\"title\":\"Payment declined\",\"priority\":\"high\"}}",
+                "output_tokens": 24,
+                "latency_ms": 964.994,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "create_ticket",
+                  "args": {
+                    "title": "Payment declined",
+                    "priority": "high"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 48,
+              "total_latency_ms": 1943.605
+            },
+            {
+              "id": "address-01",
+              "expected_tool": "update_address",
+              "expected_args": {
+                "order_id": "ORD-7",
+                "city": "Boston"
+              },
+              "first": {
+                "text": "{\"name\":\"update_address\",\"args\":{\"order_id\":\"ORD-7\",\"city\":\"Boston\"}}",
+                "output_tokens": 24,
+                "latency_ms": 979.493,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "update_address",
+                  "args": {
+                    "order_id": "ORD-7",
+                    "city": "Boston"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"update_address\",\"args\":{\"order_id\":\"ORD-7\",\"city\":\"Boston\"}}",
+                "output_tokens": 24,
+                "latency_ms": 968.648,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "update_address",
+                  "args": {
+                    "order_id": "ORD-7",
+                    "city": "Boston"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 48,
+              "total_latency_ms": 1948.141
+            },
+            {
+              "id": "address-02",
+              "expected_tool": "update_address",
+              "expected_args": {
+                "order_id": "K-22",
+                "city": "Seattle"
+              },
+              "first": {
+                "text": "{\"name\":\"update_address\",\"args\":{\"order_id\":\"K-22\",\"city\":\"Seattle\"}}",
+                "output_tokens": 25,
+                "latency_ms": 1013.857,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "update_address",
+                  "args": {
+                    "order_id": "K-22",
+                    "city": "Seattle"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"update_address\",\"args\":{\"order_id\":\"K-22\",\"city\":\"Seattle\"}}",
+                "output_tokens": 25,
+                "latency_ms": 1002.904,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "update_address",
+                  "args": {
+                    "order_id": "K-22",
+                    "city": "Seattle"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 50,
+              "total_latency_ms": 2016.761
+            },
+            {
+              "id": "address-03",
+              "expected_tool": "update_address",
+              "expected_args": {
+                "order_id": "P100",
+                "city": "Austin"
+              },
+              "first": {
+                "text": "{\"tool\":\"update_address\",\"args\":{\"order_id\":\"P100\",\"city\":\"Austin\"}}",
+                "output_tokens": 26,
+                "latency_ms": 1050.837,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "update_address",
+                  "args": {
+                    "order_id": "P100",
+                    "city": "Austin"
+                  }
+                },
+                "correct": true
+              },
+              "retry_eligible": false,
+              "retry": null,
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 26,
+              "total_latency_ms": 1050.837
+            },
+            {
+              "id": "refund-01",
+              "expected_tool": "refund_payment",
+              "expected_args": {
+                "payment_id": "PAY-88",
+                "amount": 25
+              },
+              "first": {
+                "text": "{\"name\":\"refund_payment\",\"args\":{\"payment_id\":\"PAY-88\",\"amount\":25}}",
+                "output_tokens": 26,
+                "latency_ms": 1049.981,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "refund_payment",
+                  "args": {
+                    "payment_id": "PAY-88",
+                    "amount": 25
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"refund_payment\",\"args\":{\"payment_id\":\"PAY-88\",\"amount\":25}}",
+                "output_tokens": 26,
+                "latency_ms": 1040.507,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "refund_payment",
+                  "args": {
+                    "payment_id": "PAY-88",
+                    "amount": 25
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 52,
+              "total_latency_ms": 2090.488
+            },
+            {
+              "id": "refund-02",
+              "expected_tool": "refund_payment",
+              "expected_args": {
+                "payment_id": "P-19",
+                "amount": 7
+              },
+              "first": {
+                "text": "{\"name\":\"refund_payment\",\"args\":{\"payment_id\":\"P-19\",\"amount\":7}}",
+                "output_tokens": 24,
+                "latency_ms": 983.843,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "refund_payment",
+                  "args": {
+                    "payment_id": "P-19",
+                    "amount": 7
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"refund_payment\",\"args\":{\"payment_id\":\"P-19\",\"amount\":7}}",
+                "output_tokens": 24,
+                "latency_ms": 963.946,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "refund_payment",
+                  "args": {
+                    "payment_id": "P-19",
+                    "amount": 7
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 48,
+              "total_latency_ms": 1947.789
+            },
+            {
+              "id": "refund-03",
+              "expected_tool": "refund_payment",
+              "expected_args": {
+                "payment_id": "TX-4",
+                "amount": 120
+              },
+              "first": {
+                "text": "{\"name\":\"refund_payment\",\"args\":{\"payment_id\":\"TX-4\",\"amount\":120}}",
+                "output_tokens": 25,
+                "latency_ms": 1011.259,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "refund_payment",
+                  "args": {
+                    "payment_id": "TX-4",
+                    "amount": 120
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"refund_payment\",\"args\":{\"payment_id\":\"TX-4\",\"amount\":120}}",
+                "output_tokens": 25,
+                "latency_ms": 1003.735,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "refund_payment",
+                  "args": {
+                    "payment_id": "TX-4",
+                    "amount": 120
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 50,
+              "total_latency_ms": 2014.994
+            },
+            {
+              "id": "cancel-01",
+              "expected_tool": "cancel_order",
+              "expected_args": {
+                "order_id": "ORD-55"
+              },
+              "first": {
+                "text": "{\"name\":\"cancel_order\",\"args\":{\"order_id\":\"ORD-55\"}}",
+                "output_tokens": 20,
+                "latency_ms": 833.364,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "cancel_order",
+                  "args": {
+                    "order_id": "ORD-55"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"cancel_order\",\"args\":{\"order_id\":\"ORD-55\"}}",
+                "output_tokens": 20,
+                "latency_ms": 826.002,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "cancel_order",
+                  "args": {
+                    "order_id": "ORD-55"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 40,
+              "total_latency_ms": 1659.366
+            },
+            {
+              "id": "cancel-02",
+              "expected_tool": "cancel_order",
+              "expected_args": {
+                "order_id": "C-901"
+              },
+              "first": {
+                "text": "{\"name\":\"cancel_order\",\"args\":{\"order_id\":\"C-901\"}}",
+                "output_tokens": 21,
+                "latency_ms": 870.847,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "cancel_order",
+                  "args": {
+                    "order_id": "C-901"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"cancel_order\",\"args\":{\"order_id\":\"C-901\"}}",
+                "output_tokens": 21,
+                "latency_ms": 866.482,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "cancel_order",
+                  "args": {
+                    "order_id": "C-901"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 42,
+              "total_latency_ms": 1737.329
+            },
+            {
+              "id": "cancel-03",
+              "expected_tool": "cancel_order",
+              "expected_args": {
+                "order_id": "Q3"
+              },
+              "first": {
+                "text": "{\"name\":\"cancel_order\",\"args\":{\"order_id\":\"Q3\"}}",
+                "output_tokens": 18,
+                "latency_ms": 749.315,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "cancel_order",
+                  "args": {
+                    "order_id": "Q3"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"cancel_order\",\"args\":{\"order_id\":\"Q3\"}}",
+                "output_tokens": 18,
+                "latency_ms": 763.146,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "cancel_order",
+                  "args": {
+                    "order_id": "Q3"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 36,
+              "total_latency_ms": 1512.461
+            },
+            {
+              "id": "email-01",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "a@b.com",
+                "subject": "Welcome"
+              },
+              "first": {
+                "text": "{\"name\":\"send_email\",\"args\":{\"to\":\"a@b.com\",\"subject\":\"Welcome\"}}",
+                "output_tokens": 24,
+                "latency_ms": 979.132,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "send_email",
+                  "args": {
+                    "to": "a@b.com",
+                    "subject": "Welcome"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"a@b.com\",\"subject\":\"Welcome\"}}",
+                "output_tokens": 24,
+                "latency_ms": 966.086,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "a@b.com",
+                    "subject": "Welcome"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 48,
+              "total_latency_ms": 1945.218
+            },
+            {
+              "id": "email-02",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "ops@example.com",
+                "subject": "Server alert"
+              },
+              "first": {
+                "text": "{\"name\":\"send_email\",\"args\":{\"to\":\"ops@example.com\",\"subject\":\"Server alert\"}}",
+                "output_tokens": 24,
+                "latency_ms": 974.907,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "send_email",
+                  "args": {
+                    "to": "ops@example.com",
+                    "subject": "Server alert"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"ops@example.com\",\"subject\":\"Server alert\"}}",
+                "output_tokens": 24,
+                "latency_ms": 963.27,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "ops@example.com",
+                    "subject": "Server alert"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 48,
+              "total_latency_ms": 1938.177
+            },
+            {
+              "id": "email-03",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "lee@example.org",
+                "subject": "Receipt ready"
+              },
+              "first": {
+                "text": "{\"name\":\"send_email\",\"args\":{\"to\":\"lee@example.org\",\"subject\":\"Receipt ready\"}}",
+                "output_tokens": 25,
+                "latency_ms": 1014.483,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "send_email",
+                  "args": {
+                    "to": "lee@example.org",
+                    "subject": "Receipt ready"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"lee@example.org\",\"subject\":\"Receipt ready\"}}",
+                "output_tokens": 25,
+                "latency_ms": 1001.517,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "lee@example.org",
+                    "subject": "Receipt ready"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 50,
+              "total_latency_ms": 2016.0
+            },
+            {
+              "id": "email-04",
+              "expected_tool": "send_email",
+              "expected_args": {
+                "to": "help@example.net",
+                "subject": "Case closed"
+              },
+              "first": {
+                "text": "{\"name\":\"send_email\",\"args\":{\"to\":\"help@example.net\",\"subject\":\"Case closed\"}}",
+                "output_tokens": 24,
+                "latency_ms": 982.184,
+                "structural_valid": false,
+                "validation_error": "top-level keys must be exactly tool and args; use tool, never name",
+                "parsed": {
+                  "name": "send_email",
+                  "args": {
+                    "to": "help@example.net",
+                    "subject": "Case closed"
+                  }
+                },
+                "correct": false
+              },
+              "retry_eligible": true,
+              "retry": {
+                "text": "{\"tool\":\"send_email\",\"args\":{\"to\":\"help@example.net\",\"subject\":\"Case closed\"}}",
+                "output_tokens": 24,
+                "latency_ms": 963.018,
+                "structural_valid": true,
+                "validation_error": "",
+                "parsed": {
+                  "tool": "send_email",
+                  "args": {
+                    "to": "help@example.net",
+                    "subject": "Case closed"
+                  }
+                },
+                "correct": true
+              },
+              "final_structural_valid": true,
+              "final_correct": true,
+              "total_output_tokens": 48,
+              "total_latency_ms": 1945.202
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "finished_utc": "2026-08-15T23:51:44Z"
+}
