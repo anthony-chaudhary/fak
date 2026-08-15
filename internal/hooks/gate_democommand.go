@@ -41,7 +41,7 @@ var (
 		`go\s+-C\s+(?P<dir>[^\s` + "`" + `<>]+)\s+(?P<verb>run|test|build)\s+(?:[^\r\n` + "`" + `<]*?\s)?\./cmd/(?P<name>[A-Za-z0-9_-]+)/?` + demoTailCls + `)`)
 	demoScriptCmdRE = regexp.MustCompile(`(?P<command>(?:bash|sh)\s+(?P<path>tools/[A-Za-z0-9_./-]+\.sh)` + demoTailCls + `)`)
 	demoPyToolCmdRE = regexp.MustCompile(`(?P<command>python(?:3)?\s+(?P<path>tools/[A-Za-z0-9_./-]+\.py)` + demoTailCls + `)`)
-	demoMakeCmdRE   = regexp.MustCompile(`(?P<command>make\s+(?P<target>[A-Za-z0-9_.-]+)` + demoTailCls + `)`)
+	demoMakeCmdRE   = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])(?P<command>make\s+(?P<target>[A-Za-z0-9_.-]+)` + demoTailCls + `)`)
 	// MAKE_TARGET_RE without the `(?!=)` lookahead — the caller checks the post-colon byte.
 	demoMakeTargetRE = regexp.MustCompile(`^(?P<target>[A-Za-z0-9_.-]+)\s*:`)
 	demoBareInlineRE = regexp.MustCompile(`(?:<code>|` + "`" + `)\s*(?P<target>\./cmd/[A-Za-z0-9_-]+)\s*(?:</code>|` + "`" + `)`)

@@ -8,7 +8,7 @@ from the same four-query public corpus.
 A normal per-agent implementation sends all 256 calls upstream. fak sends the
 first four, fills its content-addressed vDSO from real `EvComplete` events, and
 serves the remaining 252 locally. The same spine also proves the two boundaries
-that make fleet sharing safe:
+that keep fleet sharing safe:
 
 - a denied payment action is refused before the engine sees it;
 - a public tool explicitly marked shareable hits across agents, while an
