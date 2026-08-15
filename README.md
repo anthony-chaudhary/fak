@@ -6,7 +6,7 @@
 
 **Manage the AI agent you already use.**
 
-fak is one Go binary between an agent and its model/tools. Keep Claude Code, Codex, OpenCode, or your own client—and its UI, login, and model—while fak reuses stable work, compacts long sessions, enforces tool policy, journals activity, and recovers interrupted runs. The same native modules can also compose fleets of small, bounded agents in one process.
+fak is an all-in-one agent boundary: one Go binary for model routing, context reuse, tool policy, journaling, and recovery. Put Claude Code, Codex, OpenCode, or a harness you write yourself on one side; keep its UI, login, cloud or local model, and tools on the other. The same native modules can also compose fleets of small, bounded agents in one process.
 
 > **Start here:** install fak, then run `fak guard -- claude` to wrap the agent you already use with one drop-in command. It forwards your existing subscription credential—no separate API key—and places fak's managed-context decisions plus default-deny policy floor in front of every turn. The deterministic no-key proof remains below.
 
@@ -16,7 +16,7 @@ fak is one Go binary between an agent and its model/tools. Keep Claude Code, Cod
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Go Reference](https://pkg.go.dev/badge/github.com/anthony-chaudhary/fak.svg)](https://pkg.go.dev/github.com/anthony-chaudhary/fak) [![Release](https://img.shields.io/github/v/release/anthony-chaudhary/fak?color=blue&label=release&sort=semver)](https://github.com/anthony-chaudhary/fak/releases/latest) [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8.svg)](go.mod) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/anthony-chaudhary/fak)
 
-<!-- readme-verified: 2026-08-09 vs VERSION 0.43.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
+<!-- readme-verified: 2026-08-15 vs VERSION 0.43.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
 
 **Current focus: spend fewer tokens and turns.** See the [performance-first capability map](docs/CAPABILITIES.md) for the shipped turn-tax controls, stable-prefix reuse, managed context, per-call model routing, cache-value accounting, and out-of-band session controls. The security floor remains shipped and indexed, but it supports this efficiency story rather than leading it.
 
@@ -36,7 +36,7 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 fak manage --provider openai -- codex    # provider is normally auto-detected
 ```
 
-`guard` starts a private gateway, points the child agent at it, and passes its model wire and credentials through unchanged. Add a capability floor with `--policy examples/dev-agent-policy.json`; opt into API billing with `--api-key-env`; or use local inference with `--local` or `--gguf`. On exit, fak reports reuse, context, and policy decisions.
+`guard` starts a private gateway, points the child agent at it, and passes its model wire and credentials through unchanged. Add a capability floor with `--policy examples/dev-agent-policy.json`; opt into API billing with `--api-key-env`; or use local inference with `--local` or `--gguf`. Use that whole harness, or make your own loop against `fak serve`'s OpenAI-compatible API and MCP/tool boundary. On exit, fak reports reuse, context, and policy decisions.
 
 See [INSTALL.md](INSTALL.md) for manual downloads, containers, source builds, and release verification, or [first-run troubleshooting](docs/adoption/troubleshooting-first-run.md) if the command refuses to start.
 
@@ -58,15 +58,29 @@ These are measured features. On the current 50-turn × 5-agent Qwen2.5-1.5B Q8 w
   <img src="visuals/75-token-savings-frontdoor.svg" alt="Measured token economics for fak manage sessions versus a tuned warm-cache baseline" width="900">
 </p>
 
-## Pick an operating shape
+## Use the whole harness—or make your own
+
+`fak manage` is the all-in-one default: launch an existing coding agent and let fak own the boundary. `fak serve` is the composable default: write any loop or UI you want against a familiar OpenAI-compatible endpoint while fak keeps routing, context, policy, and evidence in one place.
 
 | Goal | Command | Details |
 |---|---|---|
-| Manage one existing agent | `fak manage claude` (or `fak m claude`) | [Claude](docs/integrations/claude.md), [Codex](docs/integrations/openai-codex.md), [all hosts](docs/supported/README.md), [policy](POLICY.md) |
-| Expose a shared endpoint | `fak serve --base-url http://localhost:11434/v1 --model qwen2.5:1.5b` | OpenAI, Anthropic, or MCP in front of an existing server; use `--gguf FILE` to stand alone. [Server quickstart](docs/fak/server-quickstart.md) |
+| All-in-one managed agent | `fak manage claude` (or `fak m claude`) | Least-friction launch; model traffic and tool calls cross one observable boundary. [Claude](docs/integrations/claude.md) · [Codex](docs/integrations/openai-codex.md) · [all hosts](docs/supported/README.md) |
+| Make your own harness | `fak serve --base-url http://localhost:11434/v1 --model qwen3.5:4b` | Your client owns the loop; fak supplies OpenAI, Anthropic, and MCP endpoints plus the tool checkpoint. [Server quickstart](docs/fak/server-quickstart.md) |
 | Prove behavior offline | `fak agent --offline` | Deterministically demonstrates repair, reuse, policy denial, and result quarantine; writes `agent-report.json`. [Walkthrough](GETTING-STARTED.md#2-tier-0--try-the-kernel-zero-downloads-2-min) |
 | Run many bounded agents | `go run ./cmd/microfleetdemo -selfcheck` | Proves 24 agents in one process, four resident at once, with shared base/model state, fair scheduling, hibernation, policy, and egress control. [Concept](docs/concepts/micro-agents.md) · [measured demo](cmd/microfleetdemo/README.md) |
 | Use a Mac's local model from Claude Code | `fak mac` | Targets an existing `fak serve` gateway without replacing Claude's UI. [Setup and expectations](docs/fak/mac-agent-ui.md) |
+
+### Local model defaults that fit real devices
+
+Start with **`qwen3.5:4b`** in Ollama: its current quantized image is about 3.4 GB, supports tools, and is the practical default for an 8 GB-class GPU or a 16 GB unified-memory laptop. Move to **`qwen3.5:9b`** (about 6.6 GB) when you have roughly 12 GB of GPU memory or 24 GB of unified memory and want more coding/tool-use quality. Small context windows leave more room for weights and speed; long agent sessions need additional memory for the growing model cache.
+
+```bash
+ollama pull qwen3.5:4b
+fak serve --base-url http://localhost:11434/v1 --model qwen3.5:4b
+# Point any OpenAI-compatible SDK or home-grown loop at http://127.0.0.1:8080/v1
+```
+
+These are front-door defaults, not a model lock-in: fak fronts any model exposed by Ollama, llama.cpp, LM Studio, vLLM, SGLang, or another OpenAI-compatible server. For a literal one-process stack, pass a compatible GGUF file with `fak serve --gguf FILE`; that in-kernel engine is the bit-exact correctness path, while an external server remains the production-throughput default. See [supported models](docs/supported/models.md) for the gateway/native distinction.
 
 ```bash
 fak agent --offline
