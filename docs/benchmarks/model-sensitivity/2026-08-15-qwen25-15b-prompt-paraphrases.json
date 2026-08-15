@@ -1,0 +1,1560 @@
+{
+  "schema": "fak-small-model-scaffold-ablation/3",
+  "started_utc": "2026-08-15T20:37:25Z",
+  "host": {
+    "platform": "Linux-6.8.0-1063-gcp-x86_64-with-glibc2.35",
+    "torch": "2.13.0+cu130",
+    "transformers": "5.15.0",
+    "cuda": "13.0",
+    "gpu": "NVIDIA L4"
+  },
+  "protocol": {
+    "scoring": "greedy generation; first explicit answer-letter phrase",
+    "temperature": 0.0,
+    "tasks": 24,
+    "arms": [
+      "contract_min",
+      "contract_jsonless",
+      "contract_role",
+      "scaffold_check",
+      "scaffold_eliminate",
+      "scaffold_twopass"
+    ]
+  },
+  "models": [
+    {
+      "path": "/home/USER/models/qwen25-15b-instruct",
+      "weights_sha256": "dd924a11b4c220f385b51ffa522daea7c9f3d850e31b162bb5661df483c6d3ee",
+      "config": {
+        "architectures": [
+          "Qwen2ForCausalLM"
+        ],
+        "attention_dropout": 0.0,
+        "bos_token_id": 151643,
+        "eos_token_id": 151645,
+        "hidden_act": "silu",
+        "hidden_size": 1536,
+        "initializer_range": 0.02,
+        "intermediate_size": 8960,
+        "max_position_embeddings": 32768,
+        "max_window_layers": 21,
+        "model_type": "qwen2",
+        "num_attention_heads": 12,
+        "num_hidden_layers": 28,
+        "num_key_value_heads": 2,
+        "rms_norm_eps": 1e-06,
+        "rope_theta": 1000000.0,
+        "sliding_window": 32768,
+        "tie_word_embeddings": true,
+        "torch_dtype": "bfloat16",
+        "transformers_version": "4.43.1",
+        "use_cache": true,
+        "use_sliding_window": false,
+        "vocab_size": 151936
+      },
+      "arms": {
+        "contract_min": {
+          "correct": 19,
+          "total": 24,
+          "accuracy": 0.791667,
+          "strict_contract": 9,
+          "median_latency_ms": 146.296,
+          "output_tokens": 374,
+          "rows": [
+            {
+              "id": "arith-01",
+              "expected": "C",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "The answer to the question \"What is 7 + 8?\" is:\n\nB. 14\n\nThis corresponds to option B in your list of choices.",
+              "latency_ms": 4570.331,
+              "output_tokens": 34
+            },
+            {
+              "id": "arith-02",
+              "expected": "C",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "The answer to \"What is 9 multiplied by 6?\" is:\n\nC. 54\n\nSo, the correct choice is C.",
+              "latency_ms": 948.771,
+              "output_tokens": 30
+            },
+            {
+              "id": "arith-03",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. 9",
+              "latency_ms": 160.213,
+              "output_tokens": 5
+            },
+            {
+              "id": "arith-04",
+              "expected": "C",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "The answer to the question \"What is 17 - 9?\" is:\n\nB. 8\n\nSo the correct capital letter to return is:\nC",
+              "latency_ms": 1030.331,
+              "output_tokens": 33
+            },
+            {
+              "id": "arith-05",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": true,
+              "text": "C",
+              "latency_ms": 68.264,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-06",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. 12",
+              "latency_ms": 193.446,
+              "output_tokens": 6
+            },
+            {
+              "id": "logic-01",
+              "expected": "A",
+              "predicted": "A",
+              "correct": true,
+              "strict_contract": false,
+              "text": "A. Yes",
+              "latency_ms": 129.639,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-02",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 67.479,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-03",
+              "expected": "B",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "The sequence given is an arithmetic progression where each term increases by 2 from the previous term. Therefore, the next number in the sequence would be:\n\n2 + 2 = 4\n4 + 2 = 6\n6 + 2 = 8\n8 + 2 = 10\n\nSo",
+              "latency_ms": 2007.573,
+              "output_tokens": 64
+            },
+            {
+              "id": "logic-04",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": true,
+              "text": "C",
+              "latency_ms": 67.167,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-05",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. Pat",
+              "latency_ms": 128.43,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-06",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 68.147,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-01",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. 3",
+              "latency_ms": 160.197,
+              "output_tokens": 5
+            },
+            {
+              "id": "code-02",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B.",
+              "latency_ms": 98.96,
+              "output_tokens": 3
+            },
+            {
+              "id": "code-03",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. false",
+              "latency_ms": 132.394,
+              "output_tokens": 4
+            },
+            {
+              "id": "code-04",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 68.297,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-05",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "The answer is B. 1.\n\nExplanation:\nIn most programming languages, when you perform integer division (using the `%` operator), it returns the remainder of the division. For example, `5 % 2` would return `1`, because 5 divided by 2 leaves a remainder of 1.",
+              "latency_ms": 1995.399,
+              "output_tokens": 64
+            },
+            {
+              "id": "code-06",
+              "expected": "B",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "The correct answer is:\n\nA. \"true\"\n\nIn JSON, strings representing boolean values can be either `\"true\"` or `\"false\"`. The other options (true, 1, and yes) are not valid JSON representations of booleans.",
+              "latency_ms": 1546.57,
+              "output_tokens": 50
+            },
+            {
+              "id": "state-01",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. 6",
+              "latency_ms": 160.394,
+              "output_tokens": 5
+            },
+            {
+              "id": "state-02",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 66.537,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-03",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 66.811,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-04",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. 3",
+              "latency_ms": 162.175,
+              "output_tokens": 5
+            },
+            {
+              "id": "state-05",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "The answer is B. 7.\n\nExplanation:\nIf the initial balance was 10 and you withdraw 3, you subtract 3 from 10 to get the new balance of 7.",
+              "latency_ms": 1299.526,
+              "output_tokens": 42
+            },
+            {
+              "id": "state-06",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 67.022,
+              "output_tokens": 2
+            }
+          ]
+        },
+        "contract_jsonless": {
+          "correct": 19,
+          "total": 24,
+          "accuracy": 0.791667,
+          "strict_contract": 0,
+          "median_latency_ms": 159.067,
+          "output_tokens": 115,
+          "rows": [
+            {
+              "id": "arith-01",
+              "expected": "C",
+              "predicted": "B",
+              "correct": false,
+              "strict_contract": false,
+              "text": "B. 14",
+              "latency_ms": 192.19,
+              "output_tokens": 6
+            },
+            {
+              "id": "arith-02",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. 54",
+              "latency_ms": 191.639,
+              "output_tokens": 6
+            },
+            {
+              "id": "arith-03",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. 9",
+              "latency_ms": 158.889,
+              "output_tokens": 5
+            },
+            {
+              "id": "arith-04",
+              "expected": "C",
+              "predicted": "B",
+              "correct": false,
+              "strict_contract": false,
+              "text": "B. 7",
+              "latency_ms": 159.831,
+              "output_tokens": 5
+            },
+            {
+              "id": "arith-05",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. 25",
+              "latency_ms": 194.352,
+              "output_tokens": 6
+            },
+            {
+              "id": "arith-06",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. 12",
+              "latency_ms": 192.064,
+              "output_tokens": 6
+            },
+            {
+              "id": "logic-01",
+              "expected": "A",
+              "predicted": "A",
+              "correct": true,
+              "strict_contract": false,
+              "text": "A. Yes",
+              "latency_ms": 129.393,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-02",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. Tuesday",
+              "latency_ms": 128.842,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-03",
+              "expected": "B",
+              "predicted": "D",
+              "correct": false,
+              "strict_contract": false,
+              "text": "D. 12",
+              "latency_ms": 193.103,
+              "output_tokens": 6
+            },
+            {
+              "id": "logic-04",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. carrot",
+              "latency_ms": 129.487,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-05",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. Pat",
+              "latency_ms": 128.964,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-06",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. on",
+              "latency_ms": 128.912,
+              "output_tokens": 4
+            },
+            {
+              "id": "code-01",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. 3",
+              "latency_ms": 159.245,
+              "output_tokens": 5
+            },
+            {
+              "id": "code-02",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. ==",
+              "latency_ms": 129.642,
+              "output_tokens": 4
+            },
+            {
+              "id": "code-03",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. false",
+              "latency_ms": 128.724,
+              "output_tokens": 4
+            },
+            {
+              "id": "code-04",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. queue",
+              "latency_ms": 129.083,
+              "output_tokens": 4
+            },
+            {
+              "id": "code-05",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. 1",
+              "latency_ms": 160.48,
+              "output_tokens": 5
+            },
+            {
+              "id": "code-06",
+              "expected": "B",
+              "predicted": "A",
+              "correct": false,
+              "strict_contract": false,
+              "text": "A. \"true\"",
+              "latency_ms": 192.283,
+              "output_tokens": 6
+            },
+            {
+              "id": "state-01",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. 6",
+              "latency_ms": 160.807,
+              "output_tokens": 5
+            },
+            {
+              "id": "state-02",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. No",
+              "latency_ms": 129.476,
+              "output_tokens": 4
+            },
+            {
+              "id": "state-03",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. unlocked",
+              "latency_ms": 129.803,
+              "output_tokens": 4
+            },
+            {
+              "id": "state-04",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. 3",
+              "latency_ms": 159.953,
+              "output_tokens": 5
+            },
+            {
+              "id": "state-05",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. 7",
+              "latency_ms": 159.647,
+              "output_tokens": 5
+            },
+            {
+              "id": "state-06",
+              "expected": "B",
+              "predicted": "A",
+              "correct": false,
+              "strict_contract": false,
+              "text": "A. false",
+              "latency_ms": 129.071,
+              "output_tokens": 4
+            }
+          ]
+        },
+        "contract_role": {
+          "correct": 17,
+          "total": 24,
+          "accuracy": 0.708333,
+          "strict_contract": 22,
+          "median_latency_ms": 67.304,
+          "output_tokens": 55,
+          "rows": [
+            {
+              "id": "arith-01",
+              "expected": "C",
+              "predicted": "B",
+              "correct": false,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 67.09,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-02",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": true,
+              "text": "C.",
+              "latency_ms": 97.856,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-03",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": true,
+              "text": "C.",
+              "latency_ms": 98.041,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-04",
+              "expected": "C",
+              "predicted": "A",
+              "correct": false,
+              "strict_contract": false,
+              "text": "A. 6",
+              "latency_ms": 159.642,
+              "output_tokens": 5
+            },
+            {
+              "id": "arith-05",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": true,
+              "text": "C",
+              "latency_ms": 67.315,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-06",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": true,
+              "text": "C",
+              "latency_ms": 67.294,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-01",
+              "expected": "A",
+              "predicted": "A",
+              "correct": true,
+              "strict_contract": false,
+              "text": "A. Yes",
+              "latency_ms": 129.552,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-02",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 67.21,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-03",
+              "expected": "B",
+              "predicted": "A",
+              "correct": false,
+              "strict_contract": true,
+              "text": "A",
+              "latency_ms": 67.642,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-04",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": true,
+              "text": "C",
+              "latency_ms": 67.404,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-05",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": true,
+              "text": "C",
+              "latency_ms": 67.253,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-06",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 66.971,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-01",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 67.172,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-02",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 66.598,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-03",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 66.484,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-04",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 67.02,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-05",
+              "expected": "B",
+              "predicted": "A",
+              "correct": false,
+              "strict_contract": true,
+              "text": "A",
+              "latency_ms": 66.648,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-06",
+              "expected": "B",
+              "predicted": "A",
+              "correct": false,
+              "strict_contract": true,
+              "text": "A",
+              "latency_ms": 67.995,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-01",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": true,
+              "text": "C",
+              "latency_ms": 67.644,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-02",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 66.904,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-03",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 66.56,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-04",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": true,
+              "text": "C",
+              "latency_ms": 67.728,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-05",
+              "expected": "B",
+              "predicted": "C",
+              "correct": false,
+              "strict_contract": true,
+              "text": "C",
+              "latency_ms": 68.925,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-06",
+              "expected": "B",
+              "predicted": "A",
+              "correct": false,
+              "strict_contract": true,
+              "text": "A",
+              "latency_ms": 67.919,
+              "output_tokens": 2
+            }
+          ]
+        },
+        "scaffold_check": {
+          "correct": 19,
+          "total": 24,
+          "accuracy": 0.791667,
+          "strict_contract": 20,
+          "median_latency_ms": 67.78,
+          "output_tokens": 60,
+          "rows": [
+            {
+              "id": "arith-01",
+              "expected": "C",
+              "predicted": "B",
+              "correct": false,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 68.625,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-02",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. 54",
+              "latency_ms": 194.053,
+              "output_tokens": 6
+            },
+            {
+              "id": "arith-03",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. 9",
+              "latency_ms": 162.273,
+              "output_tokens": 5
+            },
+            {
+              "id": "arith-04",
+              "expected": "C",
+              "predicted": "D",
+              "correct": false,
+              "strict_contract": false,
+              "text": "D. 9",
+              "latency_ms": 161.148,
+              "output_tokens": 5
+            },
+            {
+              "id": "arith-05",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": true,
+              "text": "C",
+              "latency_ms": 67.751,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-06",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": true,
+              "text": "C",
+              "latency_ms": 67.567,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-01",
+              "expected": "A",
+              "predicted": "A",
+              "correct": true,
+              "strict_contract": false,
+              "text": "A. Yes",
+              "latency_ms": 131.493,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-02",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 68.222,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-03",
+              "expected": "B",
+              "predicted": "D",
+              "correct": false,
+              "strict_contract": true,
+              "text": "D",
+              "latency_ms": 68.795,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-04",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": true,
+              "text": "C",
+              "latency_ms": 67.725,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-05",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": true,
+              "text": "C",
+              "latency_ms": 67.605,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-06",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 68.202,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-01",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 67.846,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-02",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 67.431,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-03",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 67.09,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-04",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 67.269,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-05",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 67.584,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-06",
+              "expected": "B",
+              "predicted": "A",
+              "correct": false,
+              "strict_contract": true,
+              "text": "A",
+              "latency_ms": 68.092,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-01",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": true,
+              "text": "C",
+              "latency_ms": 68.022,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-02",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 67.252,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-03",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 67.564,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-04",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": true,
+              "text": "C",
+              "latency_ms": 67.64,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-05",
+              "expected": "B",
+              "predicted": "C",
+              "correct": false,
+              "strict_contract": true,
+              "text": "C",
+              "latency_ms": 67.808,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-06",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 67.591,
+              "output_tokens": 2
+            }
+          ]
+        },
+        "scaffold_eliminate": {
+          "correct": 9,
+          "total": 24,
+          "accuracy": 0.375,
+          "strict_contract": 0,
+          "median_latency_ms": 1542.365,
+          "output_tokens": 968,
+          "rows": [
+            {
+              "id": "arith-01",
+              "expected": "C",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "The correct answer is:\n\nB. 14",
+              "latency_ms": 345.17,
+              "output_tokens": 11
+            },
+            {
+              "id": "arith-02",
+              "expected": "C",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "To solve this problem, we need to multiply 9 by 6.\n\n\\[ 9 \\times 6 = 54 \\]\n\nSo, the correct answer is:\n\nC. 54",
+              "latency_ms": 1275.138,
+              "output_tokens": 41
+            },
+            {
+              "id": "arith-03",
+              "expected": "C",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "To solve this problem, we need to divide 81 by 9.\n\n\\[ 81 \\div 9 = 9 \\]\n\nSo, the correct answer is:\n\nC. 9",
+              "latency_ms": 1272.545,
+              "output_tokens": 41
+            },
+            {
+              "id": "arith-04",
+              "expected": "C",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "To solve this problem:\n\n1) We need to subtract 9 from 17.\n\n2) Let's do the subtraction:\n   17 - 9 = 8\n\n3) Looking at our choices:\n   A. 6\n   B. 7\n   C. 8\n   D",
+              "latency_ms": 1990.866,
+              "output_tokens": 64
+            },
+            {
+              "id": "arith-05",
+              "expected": "C",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "The correct answer is:\n\nC. 25\n\nExplanation:\n- Squaring a number means multiplying it by itself.\n- \\( 5 \\times 5 = 25 \\)\n\nSo, 5 squared equals 25.",
+              "latency_ms": 1529.479,
+              "output_tokens": 49
+            },
+            {
+              "id": "arith-06",
+              "expected": "C",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "To solve this problem, let's break it down step by step:\n\n1. The box has 3 rows.\n2. Each row contains 4 balls.\n\nNow, we can calculate the total number of balls:\n\\[ \\text{Total number of balls} = \\text{Number of rows} \\times \\text",
+              "latency_ms": 1997.182,
+              "output_tokens": 64
+            },
+            {
+              "id": "logic-01",
+              "expected": "A",
+              "predicted": "A",
+              "correct": true,
+              "strict_contract": false,
+              "text": "A. Yes",
+              "latency_ms": 131.128,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-02",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. Tuesday",
+              "latency_ms": 131.639,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-03",
+              "expected": "B",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "The sequence given is an arithmetic progression where each term increases by 2 from the previous one. The first term (a) is 2, and the common difference (d) is also 2.\n\nTo find the next term in the sequence:\n- First term (a) = 2\n- Common difference (",
+              "latency_ms": 2006.873,
+              "output_tokens": 64
+            },
+            {
+              "id": "logic-04",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "The item that does not belong is:\n\nC. carrot\n\nExplanation:\n- Apples, bananas, and oranges are all fruits.\n- Carrots are vegetables.\n\nTherefore, the correct answer is C. carrot.",
+              "latency_ms": 1338.119,
+              "output_tokens": 43
+            },
+            {
+              "id": "logic-05",
+              "expected": "C",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "To determine who is the shortest among Sam, Lee, and Pat, let's analyze the given information step by step:\n\n1. Sam is taller than Lee (S > L).\n2. Lee is taller than Pat (L > P).\n\nFrom these two statements:\n- Since S > L and L > P, it",
+              "latency_ms": 1991.143,
+              "output_tokens": 64
+            },
+            {
+              "id": "logic-06",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. on",
+              "latency_ms": 129.431,
+              "output_tokens": 4
+            },
+            {
+              "id": "code-01",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. 3",
+              "latency_ms": 159.9,
+              "output_tokens": 5
+            },
+            {
+              "id": "code-02",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. ==",
+              "latency_ms": 128.107,
+              "output_tokens": 4
+            },
+            {
+              "id": "code-03",
+              "expected": "B",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "To determine what `boolean NOT true` evaluates to:\n\n1. **Understand the operation**: The expression `NOT true` is a logical negation of the value `true`.\n2. **Logical negation**:\n   - `true` means \"something exists\" or \"it's not false\".\n   - Therefore",
+              "latency_ms": 1997.738,
+              "output_tokens": 64
+            },
+            {
+              "id": "code-04",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. queue",
+              "latency_ms": 130.221,
+              "output_tokens": 4
+            },
+            {
+              "id": "code-05",
+              "expected": "B",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "To solve this problem:\n\n1. We need to calculate 5% of 2.\n2. The formula for percentage is (percentage / 100) * total.\n3. Plugging in the values:\n   (5 / 100) * 2 = 0.1 * 2",
+              "latency_ms": 1990.55,
+              "output_tokens": 64
+            },
+            {
+              "id": "code-06",
+              "expected": "B",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "The correct answer is:\n\nA. \"true\"\n\nExplanation:\n- Option A (\"true\") is a string that represents the boolean value `true`.\n- Option B (true) is a literal boolean value in JavaScript/TypeScript, which is equivalent to `\"true\"`.\n- Option C (1) is an integer representing",
+              "latency_ms": 1987.449,
+              "output_tokens": 64
+            },
+            {
+              "id": "state-01",
+              "expected": "C",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "To solve this problem:\n\n1. The initial value of the counter is 4.\n2. It is incremented twice.\n\nIncrementing once would increase it from 4 to 5.\nIncrementing again would increase it from 5 to 6.\n\nTherefore, after being incremented twice, the counter's value will be ",
+              "latency_ms": 1991.022,
+              "output_tokens": 64
+            },
+            {
+              "id": "state-02",
+              "expected": "B",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "To determine whether a file remains after creation and deletion:\n\n1. When a file is created, it exists in the system's directory structure.\n2. After deletion, the file should no longer be accessible unless it was moved to another location.\n\nGiven these points:\n- If the file is deleted but not moved elsewhere, it",
+              "latency_ms": 1993.89,
+              "output_tokens": 64
+            },
+            {
+              "id": "state-03",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. unlocked",
+              "latency_ms": 129.469,
+              "output_tokens": 4
+            },
+            {
+              "id": "state-04",
+              "expected": "C",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "To solve this problem:\n\n1. Start with the initial list: [1, 2]\n2. Append 3 to the end of the list: [1, 2, 3]\n3. The last item in the final list is 3\n\nTherefore, the correct answer is:\nC. 3",
+              "latency_ms": 1995.46,
+              "output_tokens": 64
+            },
+            {
+              "id": "state-05",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "To solve this problem:\n\n1. Start with the initial balance of 10.\n2. Withdraw 3 from the balance.\n\nCalculation:\n10 - 3 = 7\n\nTherefore, the correct answer is B. 7.",
+              "latency_ms": 1555.251,
+              "output_tokens": 50
+            },
+            {
+              "id": "state-06",
+              "expected": "B",
+              "predicted": "A",
+              "correct": false,
+              "strict_contract": false,
+              "text": "The correct answer is:\n\nA. false\n\nExplanation:\n- Initially, the flag is set to \"false\".\n- It is then toggled once, which means it changes from \"false\" to \"true\".\n- After toggling, the new value of the flag is \"true\".\n\nTherefore, the final answer is A",
+              "latency_ms": 1996.431,
+              "output_tokens": 64
+            }
+          ]
+        },
+        "scaffold_twopass": {
+          "correct": 13,
+          "total": 24,
+          "accuracy": 0.541667,
+          "strict_contract": 7,
+          "median_latency_ms": 129.755,
+          "output_tokens": 302,
+          "rows": [
+            {
+              "id": "arith-01",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. 15",
+              "latency_ms": 190.926,
+              "output_tokens": 6
+            },
+            {
+              "id": "arith-02",
+              "expected": "C",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "To solve the problem of multiplying 9 by 6:\n\n1. First pass:\n   - Multiply 9 by 6 directly to get the product.\n\n2. Second pass:\n   - Check if the result matches any of the given options (A, B, C, or D).\n\n3. Final step:\n  ",
+              "latency_ms": 1989.783,
+              "output_tokens": 64
+            },
+            {
+              "id": "arith-03",
+              "expected": "C",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "9",
+              "latency_ms": 67.075,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-04",
+              "expected": "C",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "To solve the problem step-by-step:\n\n1. First pass:\n   Calculate 17 - 9 directly.\n   17 - 9 = 8\n\n2. Second pass:\n   Check if 8 matches any of the given options (A, B, C, or D).\n   The correct answer",
+              "latency_ms": 1999.216,
+              "output_tokens": 64
+            },
+            {
+              "id": "arith-05",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. 25",
+              "latency_ms": 192.684,
+              "output_tokens": 6
+            },
+            {
+              "id": "arith-06",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. 12",
+              "latency_ms": 191.459,
+              "output_tokens": 6
+            },
+            {
+              "id": "logic-01",
+              "expected": "A",
+              "predicted": "A",
+              "correct": true,
+              "strict_contract": false,
+              "text": "A. Yes",
+              "latency_ms": 129.568,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-02",
+              "expected": "B",
+              "predicted": "C",
+              "correct": false,
+              "strict_contract": false,
+              "text": "C. Wednesday",
+              "latency_ms": 129.3,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-03",
+              "expected": "B",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "The sequence is increasing by 2 each time (2, 4, 6, 8). Therefore, the next number would be:\n\nA. 9",
+              "latency_ms": 1065.122,
+              "output_tokens": 34
+            },
+            {
+              "id": "logic-04",
+              "expected": "C",
+              "predicted": "D",
+              "correct": false,
+              "strict_contract": false,
+              "text": "D. Orange",
+              "latency_ms": 129.626,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-05",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. Pat",
+              "latency_ms": 128.994,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-06",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 68.137,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-01",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. 3",
+              "latency_ms": 161.614,
+              "output_tokens": 5
+            },
+            {
+              "id": "code-02",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B.",
+              "latency_ms": 99.027,
+              "output_tokens": 3
+            },
+            {
+              "id": "code-03",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. false",
+              "latency_ms": 129.884,
+              "output_tokens": 4
+            },
+            {
+              "id": "code-04",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": false,
+              "text": "B. queue",
+              "latency_ms": 130.069,
+              "output_tokens": 4
+            },
+            {
+              "id": "code-05",
+              "expected": "B",
+              "predicted": null,
+              "correct": false,
+              "strict_contract": false,
+              "text": "To solve this problem, we need to understand what 5% of 2 means in mathematical terms.\n\nFirst pass:\n- In mathematics, when you divide 5 by 2, you get 2.5 because \\( \\frac{5}{2} = 2.5 \\).\n\nSecond pass:\n- Now",
+              "latency_ms": 2004.367,
+              "output_tokens": 64
+            },
+            {
+              "id": "code-06",
+              "expected": "B",
+              "predicted": "D",
+              "correct": false,
+              "strict_contract": true,
+              "text": "D.",
+              "latency_ms": 98.335,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-01",
+              "expected": "C",
+              "predicted": "C",
+              "correct": true,
+              "strict_contract": false,
+              "text": "C. 6",
+              "latency_ms": 159.77,
+              "output_tokens": 5
+            },
+            {
+              "id": "state-02",
+              "expected": "B",
+              "predicted": "A",
+              "correct": false,
+              "strict_contract": true,
+              "text": "A",
+              "latency_ms": 67.125,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-03",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 66.946,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-04",
+              "expected": "C",
+              "predicted": "D",
+              "correct": false,
+              "strict_contract": true,
+              "text": "D",
+              "latency_ms": 67.119,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-05",
+              "expected": "B",
+              "predicted": "C",
+              "correct": false,
+              "strict_contract": false,
+              "text": "C. 10",
+              "latency_ms": 191.736,
+              "output_tokens": 6
+            },
+            {
+              "id": "state-06",
+              "expected": "B",
+              "predicted": "B",
+              "correct": true,
+              "strict_contract": true,
+              "text": "B",
+              "latency_ms": 67.542,
+              "output_tokens": 2
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "finished_utc": "2026-08-15T20:38:39Z"
+}
