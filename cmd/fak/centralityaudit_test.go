@@ -38,3 +38,24 @@ func TestCentralityAuditJSONSchema(t *testing.T) {
 		t.Fatalf("json:\n%s", got)
 	}
 }
+
+func TestCentralityAuditSelectedMigrationPreview(t *testing.T) {
+	issues := filepath.Join(t.TempDir(), "issues.json")
+	selections := filepath.Join(t.TempDir(), "selections.json")
+	if err := os.WriteFile(issues, []byte(`[{"number":7,"title":"legacy","body":"original body"}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	selection := `[{"number":7,"centrality":"Stewardship (release obligation)","evidence":"release policy link","p1":"preserved - bounded","p2":"advanced - prevents rework","p3":"N/A - no adaptation","p4":"advanced - gates release"}]`
+	if err := os.WriteFile(selections, []byte(selection), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := runCentralityAudit([]string{"--input", issues, "--selections", selections}, &out, &bytes.Buffer{}, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"schema": "fak-issue-centrality-migration/1"`, `"mode": "preview"`, `"original_body": "original body"`, `"new_body": "original body\n\n## Problem frame`} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("preview missing %q:\n%s", want, out.String())
+		}
+	}
+}

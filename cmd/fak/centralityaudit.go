@@ -28,6 +28,7 @@ func runCentralityAudit(args []string, stdout, stderr io.Writer, now func() time
 	repo := fs.String("repo", "", "GitHub OWNER/REPO (default: current repository)")
 	limit := fs.Int("limit", 5000, "maximum open issues to collect")
 	jsonOut := fs.Bool("json", false, "emit the stable JSON report")
+	selectionsPath := fs.String("selections", "", "preview exact body patches for explicitly selected issue classifications")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -60,6 +61,23 @@ func runCentralityAudit(args []string, stdout, stderr io.Writer, now func() time
 	issues, err := issuecentrality.Decode(data)
 	if err != nil {
 		return err
+	}
+	if *selectionsPath != "" {
+		selectionData, readErr := os.ReadFile(*selectionsPath)
+		if readErr != nil {
+			return fmt.Errorf("read selections: %w", readErr)
+		}
+		var selections []issuecentrality.Selection
+		if decodeErr := json.Unmarshal(selectionData, &selections); decodeErr != nil {
+			return fmt.Errorf("decode selections: %w", decodeErr)
+		}
+		plan, planErr := issuecentrality.PreviewMigration(issues, selections)
+		if planErr != nil {
+			return planErr
+		}
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(plan)
 	}
 	report := issuecentrality.Audit(issues, scope, provenance, now(), nil)
 	if *jsonOut {

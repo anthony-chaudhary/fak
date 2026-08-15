@@ -51,9 +51,10 @@ This decision does **not** yet prove which individual legacy issues should close
 ```bash
 fak centrality-audit --repo anthony-chaudhary/fak
 fak centrality-audit --repo anthony-chaudhary/fak --json
+fak centrality-audit --input open-issues.json --selections selected-migrations.json > migration-preview.json
 ```
 
-The command reports explicit Core, Enabling, Stewardship, Peripheral, unknown, and complete P1-P4 counts. It does not score or reorder issues. [#6543](https://github.com/anthony-chaudhary/fak/issues/6543) owns canonical intake parsing; [#6544](https://github.com/anthony-chaudhary/fak/issues/6544) owns selection-surface propagation.
+The command reports explicit Core, Enabling, Stewardship, Peripheral, unknown, and complete P1-P4 counts. Each issue is typed `valid`, `invalid`, or `unclassified` with canonical reason and repair tokens. It does not score or reorder issues. `--selections` remains no-write: it accepts only explicitly numbered, evidence-backed classifications and emits every original and replacement body. It refuses blank evidence, duplicates, issues outside the audited input, invalid frames, and issues that already declare a frame; there is no blanket rewrite or metadata inference. Applying a reviewed patch and independently reading it back from GitHub remain separate explicit operator actions. [#6543](https://github.com/anthony-chaudhary/fak/issues/6543) owns canonical intake parsing; [#6544](https://github.com/anthony-chaudhary/fak/issues/6544) owns selection-surface propagation.
 
 ## Next bounded wave
 
