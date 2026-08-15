@@ -89,11 +89,12 @@ func guardCodexLoopGateConfig(command []string, threshold, codexHome string, sin
 		return codexLoopGateConfig{}, false
 	}
 	return codexLoopGateConfig{
-		Threshold:  threshold,
-		CodexHome:  codexHome,
-		SinceHours: sinceHours,
-		Limit:      limit,
-		Quiet:      quiet,
+		Threshold:     threshold,
+		CodexHome:     codexHome,
+		SinceHours:    sinceHours,
+		Limit:         limit,
+		Quiet:         quiet,
+		BypassCommand: "fak m --codex-loop-gate off -- " + strings.Join(command, " "),
 	}, true
 }
 

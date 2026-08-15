@@ -345,8 +345,9 @@ var codexProgressAckTools = map[string]bool{
 // codexContentFreeSuccessRE matches the constant envelope an exec/shell host tool emits
 // for a command that SUCCEEDED and printed nothing, as the outcome digest normalizes it
 // (whitespace collapsed to single spaces). It is anchored at both ends and pinned to exit
-// code 0: any byte of real output body, and any non-zero exit, fails the match.
-var codexContentFreeSuccessRE = regexp.MustCompile(`^Exit code: 0(?: Wall time: [0-9.]+ seconds?)? Output:$`)
+// code 0. The wrapper's empty JSON acknowledgement (`{}`) is also content-free;
+// any other output body, and any non-zero exit, fails the match.
+var codexContentFreeSuccessRE = regexp.MustCompile(`^(?:Exit code: 0|Script completed)(?: Wall time: [0-9.]+ seconds?)? Output:(?: \{\})?$`)
 
 // codexOutcomeIsContentFreeSuccess reports whether a repeated outcome is a digest
 // COLLISION on a content-free success envelope rather than a repetition. A command that
@@ -370,6 +371,9 @@ func codexOutcomeIsContentFreeSuccess(o codexRepeatedOutcome) bool {
 // does any other non-progress tool.
 func codexOutcomeIsForwardProgress(o codexRepeatedOutcome) bool {
 	if codexOutcomeIsContentFreeSuccess(o) {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(o.Tool), "wait") && strings.HasPrefix(strings.TrimSpace(o.OutputExcerpt), "Script running with cell ID ") {
 		return true
 	}
 	if !codexProgressAckTools[strings.ToLower(strings.TrimSpace(o.Tool))] {
@@ -419,7 +423,7 @@ func applyCodexLoopForwardProgressNote(d *codexLoopDiagnosis) {
 	}
 	if len(silent) > 0 {
 		why = append(why, strings.Join(silent, ", ")+
-			" succeeded silently (exit code 0, empty output) across fully distinct arguments, so the shared digest is an empty-output collision")
+			" returned the same successful wrapper output across distinct arguments without consecutive retries, so the shared digest is not a stuck operation")
 	}
 	// The progress-tool token stays authoritative when both classes are present: it is
 	// the pre-existing, more specific reason for the same "not a no-progress loop" answer.

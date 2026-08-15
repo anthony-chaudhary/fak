@@ -110,6 +110,9 @@ func TestGuardCodexLoopGateConfigCodexOnly(t *testing.T) {
 	if cfg.Threshold != "loop" || cfg.CodexHome != "C:/tmp/codex" || cfg.SinceHours != 12 || cfg.Limit != 7 || !cfg.Quiet {
 		t.Fatalf("wrong loop gate config: %+v", cfg)
 	}
+	if got := cfg.BypassCommand; got != "fak m --codex-loop-gate off -- codex exec" {
+		t.Fatalf("bypass command=%q", got)
+	}
 	for _, command := range [][]string{
 		nil,
 		{"claude"},

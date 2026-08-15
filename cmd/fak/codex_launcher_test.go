@@ -250,6 +250,7 @@ func TestRunCodexLoopGateRefusesBeforeSpawn(t *testing.T) {
 		"update_plan",
 		"Plan updated",
 		"loop-session verdict=LOOP",
+		"operator override: rerun as `fak codex --loop-gate off`",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("loop-gate stderr missing %q:\n%s", want, got)
@@ -535,7 +536,8 @@ func TestRunCodexLoopGateRefusesCurrentDirectThread(t *testing.T) {
 		"current-thread gate REFUSE fail-on=unguarded verdict=OK reason=codex_session_bypassed_fak_guard",
 		"session        : " + threadID + " provider=openai",
 		"next action    : launch future Codex sessions through `fak codex`",
-		"pass --loop-gate off to launch anyway after an operator decision",
+		"operator override: rerun as `fak codex --loop-gate off`",
+		"the flag belongs after the fak verb",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("current-thread gate stderr missing %q:\n%s", want, got)

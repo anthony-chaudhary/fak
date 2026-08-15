@@ -46,12 +46,13 @@ type codexLaunchOptions struct {
 }
 
 type codexLoopGateConfig struct {
-	Threshold  string
-	CodexHome  string
-	SinceHours float64
-	Limit      int
-	WorkingDir string
-	Quiet      bool
+	Threshold     string
+	CodexHome     string
+	SinceHours    float64
+	Limit         int
+	WorkingDir    string
+	Quiet         bool
+	BypassCommand string
 }
 
 var codexLaunchRun = execCodexLaunchChild
@@ -148,12 +149,13 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 		if rc := runCodexLoopGate(stderr, codexLoopGateConfig{
-			Threshold:  *loopGate,
-			CodexHome:  *codexHome,
-			SinceHours: *loopGateSinceHours,
-			Limit:      *loopGateLimit,
-			WorkingDir: workingDir,
-			Quiet:      *quiet,
+			Threshold:     *loopGate,
+			CodexHome:     *codexHome,
+			SinceHours:    *loopGateSinceHours,
+			Limit:         *loopGateLimit,
+			WorkingDir:    workingDir,
+			Quiet:         *quiet,
+			BypassCommand: "fak codex --loop-gate off",
 		}); rc != 0 {
 			return rc
 		}
@@ -278,6 +280,14 @@ func execCodexLaunchChild(stdout, stderr io.Writer, argv, env []string) int {
 	return 0
 }
 
+func printCodexOperatorOverride(stderr io.Writer, cfg codexLoopGateConfig) {
+	command := strings.TrimSpace(cfg.BypassCommand)
+	if command == "" {
+		command = "fak codex --loop-gate off"
+	}
+	fmt.Fprintf(stderr, "fak codex: operator override: rerun as `%s` (the flag belongs after the fak verb).\n", command)
+}
+
 func runCodexLoopGate(stderr io.Writer, cfg codexLoopGateConfig) int {
 	threshold := strings.ToLower(strings.TrimSpace(cfg.Threshold))
 	if threshold == "" || threshold == "off" || threshold == "none" || threshold == "false" || threshold == "0" {
@@ -296,7 +306,7 @@ func runCodexLoopGate(stderr io.Writer, cfg codexLoopGateConfig) int {
 			fmt.Fprintf(stderr, "fak codex: current-thread gate REFUSE fail-on=unguarded verdict=%s reason=%s\n",
 				d.Verdict, codexLoopDiagnosisGateReason(d, "unguarded"))
 			fmt.Fprint(stderr, renderCodexLoopDiagnosis(d))
-			fmt.Fprintln(stderr, "fak codex: pass --loop-gate off to launch anyway after an operator decision.")
+			printCodexOperatorOverride(stderr, cfg)
 			return 1
 		}
 		if !cfg.Quiet {
@@ -314,7 +324,7 @@ func runCodexLoopGate(stderr io.Writer, cfg codexLoopGateConfig) int {
 		fmt.Fprintf(stderr, "fak codex: loop gate REFUSE fail-on=%s verdict=%s reason=%s\n",
 			codexLoopFailOnName(threshold), rep.Verdict, rep.Reason)
 		fmt.Fprint(stderr, renderCodexLoopRecentReport(rep))
-		fmt.Fprintln(stderr, "fak codex: pass --loop-gate off to launch anyway after an operator decision.")
+		printCodexOperatorOverride(stderr, cfg)
 		return 1
 	}
 	if remediationCount > 0 {

@@ -87,6 +87,23 @@ func codexSilentSuccessFixture(t *testing.T, home string, n int) string {
 	return path
 }
 
+func TestDiagnoseCodexLoopClassifiesDistinctSuccessfulWrapperOutputsAsOK(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "codex-home")
+	path := codexSilentSuccessFixture(t, home, 6)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b = bytes.ReplaceAll(b, []byte(`"output":"Exit code: 0\nWall time: 0.0 seconds\nOutput:"`), []byte(`"output":"Script completed\nWall time: 0.0 seconds\nOutput: {}"`))
+	d, err := diagnoseCodexLoop(bytes.NewReader(b), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Verdict != "OK" || d.Reason != "repeated_content_free_success_no_loop" {
+		t.Fatalf("verdict=%s reason=%s, want OK/repeated_content_free_success_no_loop", d.Verdict, d.Reason)
+	}
+}
+
 func TestSessionsCodexLoopTreatsDistinctSilentSuccessesAsProgress(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "codex-home")
 	path := codexSilentSuccessFixture(t, home, 5)
@@ -107,7 +124,7 @@ func TestSessionsCodexLoopTreatsDistinctSilentSuccessesAsProgress(t *testing.T) 
 	if d.Reason != "repeated_content_free_success_no_loop" {
 		t.Fatalf("reason = %q, want repeated_content_free_success_no_loop", d.Reason)
 	}
-	if !strings.Contains(d.NextAction, "succeeded silently") {
+	if !strings.Contains(d.NextAction, "not a stuck operation") {
 		t.Fatalf("next action must name WHY no fuse is needed, got %q", d.NextAction)
 	}
 	// The traffic still has to be visible: this is an exemption from the verdict, not
