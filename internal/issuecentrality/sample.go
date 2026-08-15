@@ -3,6 +3,7 @@ package issuecentrality
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
@@ -26,6 +27,7 @@ type PortfolioIssue struct {
 	Body      string     `json:"body"`
 	Labels    []Label    `json:"labels"`
 	Milestone *Milestone `json:"milestone"`
+	UpdatedAt string     `json:"updatedAt"`
 }
 
 type Label struct {
@@ -99,7 +101,17 @@ func BuildSample(issues []PortfolioIssue, opt SampleOptions) Sample {
 	sort.Strings(families)
 	for _, family := range families {
 		rows := milestoneless[family]
-		sort.SliceStable(rows, func(i, j int) bool { return rows[i].Number < rows[j].Number })
+		sort.SliceStable(rows, func(i, j int) bool {
+			left, leftOK := parseUpdatedAt(rows[i].UpdatedAt)
+			right, rightOK := parseUpdatedAt(rows[j].UpdatedAt)
+			if leftOK != rightOK {
+				return leftOK
+			}
+			if leftOK && !left.Equal(right) {
+				return left.After(right)
+			}
+			return rows[i].Number < rows[j].Number
+		})
 		picked := 0
 		for _, issue := range rows {
 			if _, alreadySelected := selected[issue.Number]; alreadySelected {
@@ -176,4 +188,9 @@ func contains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func parseUpdatedAt(value string) (time.Time, bool) {
+	parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(value))
+	return parsed, err == nil
 }

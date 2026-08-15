@@ -58,3 +58,44 @@ func TestBuildSampleCarriesCanonicalRetainAndReframeDecisions(t *testing.T) {
 		t.Fatalf("invalid row = %+v", got.Rows[1])
 	}
 }
+
+func TestBuildSampleChoosesMostRecentlyUpdatedFamilyRow(t *testing.T) {
+	issues := []PortfolioIssue{
+		{Number: 9, Title: "older", UpdatedAt: "2026-08-01T00:00:00Z", Labels: []Label{{Name: "observability"}}},
+		{Number: 7, Title: "newer high id", UpdatedAt: "2026-08-10T00:00:00Z", Labels: []Label{{Name: "observability"}}},
+		{Number: 5, Title: "newer tie low id", UpdatedAt: "2026-08-10T00:00:00Z", Labels: []Label{{Name: "observability"}}},
+		{Number: 1, Title: "missing timestamp", Labels: []Label{{Name: "observability"}}},
+	}
+	got := BuildSample(issues, SampleOptions{PerFamily: 1})
+	if len(got.Rows) != 1 || got.Rows[0].Number != 5 {
+		t.Fatalf("active stratum = %+v, want newest timestamp then lowest issue number", got.Rows)
+	}
+	for i, j := 0, len(issues)-1; i < j; i, j = i+1, j-1 {
+		issues[i], issues[j] = issues[j], issues[i]
+	}
+	again := BuildSample(issues, SampleOptions{PerFamily: 1})
+	if !reflect.DeepEqual(got.Rows, again.Rows) {
+		t.Fatalf("input order changed sample:\nfirst=%+v\nsecond=%+v", got.Rows, again.Rows)
+	}
+}
+
+func TestBuildSampleMandatorySetsIgnoreActivityOrdering(t *testing.T) {
+	got := BuildSample([]PortfolioIssue{
+		{Number: 10, UpdatedAt: "2020-01-01T00:00:00Z", Labels: []Label{{Name: "priority/P0"}, {Name: "security"}}},
+		{Number: 11, UpdatedAt: "2020-01-01T00:00:00Z", Labels: []Label{{Name: "gen/now"}, {Name: "security"}}},
+		{Number: 12, UpdatedAt: "2026-08-15T00:00:00Z", Labels: []Label{{Name: "security"}}},
+	}, SampleOptions{})
+	if len(got.Rows) != 3 || got.P0Total != 1 || got.GenNowTotal != 1 {
+		t.Fatalf("activity displaced mandatory rows: %+v", got)
+	}
+}
+
+func TestBuildSampleMissingTimestampsFallBackToIssueNumber(t *testing.T) {
+	got := BuildSample([]PortfolioIssue{
+		{Number: 8, Labels: []Label{{Name: "security"}}},
+		{Number: 3, UpdatedAt: "not-a-time", Labels: []Label{{Name: "security"}}},
+	}, SampleOptions{})
+	if len(got.Rows) != 1 || got.Rows[0].Number != 3 {
+		t.Fatalf("missing timestamp fallback = %+v", got.Rows)
+	}
+}

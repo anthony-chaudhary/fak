@@ -53,7 +53,7 @@ func runCentralityAudit(args []string, stdout, stderr io.Writer, now func() time
 	} else {
 		fields := "number,title,body"
 		if *sample {
-			fields = "number,title,body,labels,milestone"
+			fields = "number,title,body,labels,milestone,updatedAt"
 		}
 		argv := []string{"issue", "list", "--state", "open", "--limit", fmt.Sprint(*limit), "--json", fields}
 		if *repo != "" {
