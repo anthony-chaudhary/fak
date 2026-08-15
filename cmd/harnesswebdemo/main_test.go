@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -107,5 +108,26 @@ func TestSelfcheckDrivesRenderRunApprovalFailureAndReconnect(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("receipt missing %q: %s", want, out.String())
 		}
+	}
+}
+
+func TestPersistentStoreReopensRunAndExclusiveCursor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sessions.json")
+	first, err := newPersistentStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID := first.create("persist me")
+	if got := len(first.after(runID, 0)); got != 8 {
+		t.Fatalf("initial events=%d", got)
+	}
+
+	reopened, err := newPersistentStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := reopened.after(runID, 6)
+	if len(got) != 2 || got[0].Sequence != 7 || got[1].Sequence != 8 {
+		t.Fatalf("reopened exclusive cursor=%v", got)
 	}
 }

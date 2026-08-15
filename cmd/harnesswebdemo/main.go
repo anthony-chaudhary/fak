@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,12 +41,65 @@ type runState struct {
 }
 
 type store struct {
-	mu   sync.RWMutex
-	runs map[string]*runState
-	next uint64
+	mu      sync.RWMutex
+	runs    map[string]*runState
+	next    uint64
+	persist string
 }
 
 func newStore() *store { return &store{runs: make(map[string]*runState)} }
+
+func newPersistentStore(path string) (*store, error) {
+	s := &store{runs: make(map[string]*runState), persist: path}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return s, nil
+		}
+		return nil, err
+	}
+	var disk struct {
+		Runs map[string][]harnesskit.Envelope `json:"runs"`
+	}
+	if err := json.Unmarshal(body, &disk); err != nil {
+		return nil, fmt.Errorf("decode session store: %w", err)
+	}
+	for id, events := range disk.Runs {
+		s.runs[id] = &runState{events: events}
+		if strings.HasPrefix(id, "local-") {
+			var n uint64
+			_, _ = fmt.Sscanf(id, "local-%d", &n)
+			if n > s.next {
+				s.next = n
+			}
+		}
+	}
+	return s, nil
+}
+
+func (s *store) saveLocked() error {
+	if s.persist == "" {
+		return nil
+	}
+	disk := struct {
+		Runs map[string][]harnesskit.Envelope `json:"runs"`
+	}{Runs: make(map[string][]harnesskit.Envelope, len(s.runs))}
+	for id, state := range s.runs {
+		disk.Runs[id] = state.events
+	}
+	body, err := json.MarshalIndent(disk, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(s.persist), 0o755); err != nil {
+		return err
+	}
+	tmp := s.persist + ".tmp"
+	if err := os.WriteFile(tmp, body, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.persist)
+}
 
 func (s *store) create(message string) string {
 	s.mu.Lock()
@@ -78,6 +132,7 @@ func (s *store) create(message string) string {
 		)
 	}
 	s.runs[runID] = state
+	_ = s.saveLocked()
 	return runID
 }
 
@@ -123,7 +178,7 @@ func (s *store) resolve(runID, approvalID, decision string) error {
 		event(runID, seq, harnesskit.EventMessageCompleted, harnesskit.MessagePayload{MessageID: fmt.Sprintf("message-%d", seq), Role: "assistant", Text: text}),
 		event(runID, seq+1, harnesskit.EventRunCompleted, harnesskit.RunPayload{Status: "completed"}),
 	)
-	return nil
+	return s.saveLocked()
 }
 
 func handler(s *store) http.Handler {
@@ -257,6 +312,7 @@ func run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 	fs.SetOutput(stderr)
 	addr := fs.String("addr", "127.0.0.1:8787", "loopback listen address")
 	check := fs.Bool("selfcheck", false, "run captured render and protocol witness")
+	statePath := fs.String("state", "", "session state file (default: user config directory)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -277,7 +333,20 @@ func run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	server := &http.Server{Handler: handler(newStore()), ReadHeaderTimeout: 5 * time.Second}
+	if *statePath == "" {
+		configDir, configErr := os.UserConfigDir()
+		if configErr != nil {
+			fmt.Fprintln(stderr, configErr)
+			return 1
+		}
+		*statePath = filepath.Join(configDir, "fak", "harnesswebdemo", "sessions.json")
+	}
+	s, err := newPersistentStore(*statePath)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	server := &http.Server{Handler: handler(s), ReadHeaderTimeout: 5 * time.Second}
 	fmt.Fprintf(stdout, "fak native harness UI: http://%s\n", listener.Addr())
 	go func() { <-ctx.Done(); _ = server.Shutdown(context.Background()) }()
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
