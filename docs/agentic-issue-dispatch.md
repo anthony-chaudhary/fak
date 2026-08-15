@@ -87,6 +87,31 @@ row reports `missing_sections` for these five body sections and `missing_fields`
 stricter issue-contract fields. A row with missing required sections is triage debt, not
 a worker launch candidate.
 
+
+New shift-left briefs also carry one **problem frame** in the existing contract review;
+there is no parallel priority system:
+
+```markdown
+- Centrality: Core | Enabling (<named Core outcome>) | Stewardship (<obligation>) | Peripheral
+- P1: advanced | preserved | N/A - <concrete reason>
+- P2: advanced | preserved | N/A - <concrete reason>
+- P3: advanced | preserved | N/A - <concrete reason>
+- P4: advanced | preserved | N/A - <concrete reason>
+```
+
+Each P1-P4 answer needs a short explanation; a bare label or bare `N/A` is ceremonial
+and leaves the issue triage-only with a field-specific `problem_frame_repair` token.
+Human output shows `centrality=<class>(<target>)`; JSON exposes the canonical
+`problem_frame` object, including checks, reasons, and repairs. This preserves the shared
+end-to-end goal while decoupling work by default: centrality explains connection to the
+common outcomes, and the four checks prevent a locally convenient leaf from regressing
+managed context, net-true value, bounded adaptation, or integrated operations.
+
+**Migration boundary:** contracts using the new `Scope / tree`, `Witness / proof`, or
+`Placement` vocabulary are gated now. Older issue bodies remain readable as
+`centrality=unclassified` with `problem_frame.enforced=false` until deliberately migrated;
+they are not silently reinterpreted or bulk-blocked.
+
 These five sections are the *structure* axis of ticket scope. The full scope
 contract — structure, size (the S0–S4 ladder), atomicity, write-scope, cohort
 placement, and work-class, each with the verb that measures it and the fix when

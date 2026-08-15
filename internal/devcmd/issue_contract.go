@@ -70,6 +70,7 @@ type issueContractResult struct {
 	TemplateRepairPlans []issuepolicy.TemplateRepairPlan `json:"template_repair_plans,omitempty"`
 	Reviews             []issuepolicy.Review             `json:"reviews"`
 	ReadinessSchema     string                           `json:"readiness_schema"`
+	ProblemFrameSchema  string                           `json:"problem_frame_schema"`
 }
 
 type issueContractCounts struct {
@@ -206,11 +207,12 @@ func runIssueContract(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	result := issueContractResult{
-		Schema:          "fak.issue-contract-result.v1",
-		Mode:            mode,
-		File:            path,
-		ReadinessSchema: issuepolicy.TaskBriefSchema,
-		OK:              true,
+		Schema:             "fak.issue-contract-result.v1",
+		Mode:               mode,
+		File:               path,
+		ReadinessSchema:    issuepolicy.TaskBriefSchema,
+		ProblemFrameSchema: issuepolicy.ProblemFrameSchema,
+		OK:                 true,
 	}
 	opts := issuepolicy.Options{
 		Live:              *live,
@@ -1110,6 +1112,12 @@ func renderIssueContract(r issueContractResult) string {
 			line += fmt.Sprintf(" scale=%s(%s)",
 				string(review.Scale.Effective), issueContractBucketValue(review.Scale.Source, "?"))
 		}
+		if review.ProblemFrame.Enforced || review.ProblemFrame.Centrality != issuepolicy.CentralityUnclassified {
+			line += " centrality=" + issueContractBucketValue(review.ProblemFrame.Centrality, issuepolicy.CentralityUnclassified)
+			if review.ProblemFrame.CentralityTarget != "" {
+				line += fmt.Sprintf("(%s)", review.ProblemFrame.CentralityTarget)
+			}
+		}
 		if review.OperatingEnvelope.Status != "" && review.OperatingEnvelope.Status != issuepolicy.EnvelopeUndeclared {
 			line += fmt.Sprintf(" envelope=%s target=%d witnessed=%d gaps=%d",
 				review.OperatingEnvelope.Status, len(review.OperatingEnvelope.Target),
@@ -1132,6 +1140,12 @@ func renderIssueContract(r issueContractResult) string {
 		lines = append(lines, line)
 		for _, reason := range review.Reasons {
 			lines = append(lines, "    refuses: "+reason)
+		}
+		for _, reason := range review.ProblemFrame.Reasons {
+			lines = append(lines, "    problem_frame: "+reason)
+		}
+		for _, repair := range review.ProblemFrame.RepairActions {
+			lines = append(lines, "    problem_frame_repair: "+repair)
 		}
 		for _, missing := range review.MissingFields {
 			lines = append(lines, "    missing: "+missing)

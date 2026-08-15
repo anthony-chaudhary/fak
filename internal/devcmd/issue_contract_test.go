@@ -101,7 +101,7 @@ func TestIssueContractReviewsDispatchableCandidate(t *testing.T) {
 }
 
 func TestIssueContractJSONIncludesShiftLeftReadinessSchema(t *testing.T) {
-	body := "## Outcome\n\ntyped readiness\n\n## Scope / tree\n\ninternal/issuepolicy/**\n\n## Dependencies\n\nnone\n\n## Acceptance\n\nJSON fields are typed\n\n## Witness / proof\n\nfocused test\n\n## Placement\n\ngen/now, P1, issuecontract lane\n"
+	body := "## Value\n\n- For: maintainers reviewing issue contracts\n- Problem: frame decisions can disappear before dispatch\n- Today: reviewers reconstruct them manually\n- Better because: typed intake catches omissions early\n- Centrality: Enabling (reliable dispatch contracts)\n- P1: preserved - no runtime context is duplicated\n- P2: advanced - review rework is removed\n- P3: preserved - qualitative decisions remain revisable\n- P4: advanced - the real contract path exposes the frame\n\n## Outcome\n\ntyped readiness\n\n## Scope / tree\n\ninternal/issuepolicy/**\n\n## Dependencies\n\nnone\n\n## Acceptance\n\nJSON fields are typed\n\n## Witness / proof\n\nfocused test\n\n## Placement\n\ngen/now, P1, issuecontract lane\n"
 	payload, _ := json.Marshal([]issuepolicy.IssueDraft{{Number: 6421, Title: "validate briefs", Body: body}})
 	path := filepath.Join(t.TempDir(), "issues.json")
 	if err := os.WriteFile(path, payload, 0o600); err != nil {
@@ -117,7 +117,7 @@ func TestIssueContractJSONIncludesShiftLeftReadinessSchema(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.ReadinessSchema != issuepolicy.TaskBriefSchema || !got.Reviews[0].BriefReadiness.Ready || !got.Reviews[0].BriefReadiness.Enforced {
+	if got.ReadinessSchema != issuepolicy.TaskBriefSchema || got.ProblemFrameSchema != issuepolicy.ProblemFrameSchema || !got.Reviews[0].BriefReadiness.Ready || !got.Reviews[0].BriefReadiness.Enforced || !got.Reviews[0].ProblemFrame.Ready {
 		t.Fatalf("result=%+v", got)
 	}
 }
@@ -994,6 +994,24 @@ func TestRenderIssueContractClosureGate(t *testing.T) {
 	}, issuepolicy.Options{})
 	got := renderIssueContract(issueContractResult{Schema: "test", Reviews: []issuepolicy.Review{review}})
 	for _, want := range []string{"closure=refused", "claim=production", "production_credit=false", "closure_refuses: ISSUE_CLOSURE_WITNESS_MISMATCH", "closure_repair:"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("render missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderIssueContractProblemFrame(t *testing.T) {
+	frame := issuepolicy.AssessProblemFrame(issuepolicy.IssueDraft{Body: "## Value\n- Centrality: Enabling\n- P1: advanced\n"})
+	got := renderIssueContract(issueContractResult{Schema: "test", Reviews: []issuepolicy.Review{{
+		Key: "issuepolicy/problem-frame", Verdict: "needs_problem_frame", Dispatchability: issuepolicy.TriageOnly,
+		ProblemFrame: frame,
+	}}})
+	for _, want := range []string{
+		"centrality=enabling",
+		"problem_frame: problem_centrality_target_missing",
+		"problem_frame: problem_check_p1_ceremonial",
+		"problem_frame_repair: centrality: name the Core outcome",
+	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("render missing %q:\n%s", want, got)
 		}

@@ -37,6 +37,7 @@ const (
 	Refused      = "refused"
 
 	ReasonScopeIncomplete        = "ISSUE_SCOPE_INCOMPLETE"
+	ReasonProblemFrameIncomplete = "ISSUE_PROBLEM_FRAME_INCOMPLETE"
 	ReasonUnrouted               = "ISSUE_UNROUTED"
 	ReasonNotBornRouted          = "ISSUE_NOT_BORN_ROUTED"
 	ReasonPrivateBoundary        = "ISSUE_PRIVATE_BOUNDARY"
@@ -256,6 +257,7 @@ type Review struct {
 	Dispatchability   string                   `json:"dispatchability"`
 	Reasons           []string                 `json:"reasons,omitempty"`
 	BriefReadiness    BriefReadiness           `json:"brief_readiness"`
+	ProblemFrame      ProblemFrame             `json:"problem_frame"`
 	MissingFields     []string                 `json:"missing_fields,omitempty"`
 	MissingSections   []string                 `json:"missing_sections,omitempty"`
 	IssueNumber       int                      `json:"issue_number,omitempty"`
@@ -460,6 +462,16 @@ func ReviewIssueDraft(d IssueDraft, opt Options) Review {
 	candidate := CandidateFromIssueDraft(d)
 	review := ReviewCandidate(candidate, opt)
 	review.BriefReadiness = assessIssueBrief(d, candidate)
+	review.ProblemFrame = AssessProblemFrame(d)
+	if review.ProblemFrame.Enforced && !review.ProblemFrame.Ready {
+		review.OK = false
+		review.MissingFields = appendUnique(review.MissingFields, review.ProblemFrame.Reasons...)
+		addReviewReason(&review, ReasonProblemFrameIncomplete)
+		if review.Dispatchability == Dispatchable {
+			review.Verdict = "needs_problem_frame"
+			review.Dispatchability = TriageOnly
+		}
+	}
 	if review.BriefReadiness.Enforced && !review.BriefReadiness.Ready {
 		review.OK = false
 		if review.Dispatchability == Dispatchable {
