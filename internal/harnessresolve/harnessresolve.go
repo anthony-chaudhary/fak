@@ -495,3 +495,24 @@ func appendProvider(in []Component, component Component) []Component {
 	}
 	return append(in, component)
 }
+
+// VerifyLock checks that a lock has the current schema and that its ID matches
+// the canonical contents. Callers must verify before treating an unchanged ID
+// as an admission decision.
+func VerifyLock(lock Lock) error {
+	if lock.Schema != LockSchema {
+		return fmt.Errorf("lock schema must be %q", LockSchema)
+	}
+	if lock.ID == "" {
+		return fmt.Errorf("lock id is required")
+	}
+	want := lock.ID
+	got, err := lockID(lock)
+	if err != nil {
+		return err
+	}
+	if got != want {
+		return fmt.Errorf("lock digest mismatch: got %s want %s", want, got)
+	}
+	return nil
+}

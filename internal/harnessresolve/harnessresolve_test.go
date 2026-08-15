@@ -126,3 +126,19 @@ func validManifest() Manifest {
 func component(id, version string, provides []string, requires []Requirement) Component {
 	return Component{ID: id, Version: version, Digest: "sha256:" + id, Source: "registry/" + id, Provides: provides, Requires: requires, Evidence: stackresolve.Evidence{Authority: "test", Source: id, Freshness: "2026-08-15"}}
 }
+
+func TestVerifyLockRejectsForgedIdentity(t *testing.T) {
+	lock := Lock{Schema: LockSchema, ID: "sha256:forged"}
+	if err := VerifyLock(lock); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+		t.Fatalf("VerifyLock error = %v", err)
+	}
+	lock.ID = ""
+	id, err := lockID(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock.ID = id
+	if err := VerifyLock(lock); err != nil {
+		t.Fatalf("valid lock refused: %v", err)
+	}
+}
