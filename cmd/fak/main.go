@@ -61,522 +61,561 @@ func main() {
 		recordUsage(verb, argv, 0, start)
 		return
 	}
-	switch os.Args[1] {
+	if dispatchCoreVerbA(os.Args[1], os.Args[2:]) || dispatchCoreVerbB(os.Args[1], os.Args[2:]) ||
+		dispatchExtendedVerbA(os.Args[1], os.Args[2:]) || dispatchExtendedVerbB(os.Args[1], os.Args[2:]) {
+		recordUsage(verb, argv, 0, start)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "fak: unknown verb %q\n", os.Args[1])
+	if s := suggestVerbSpelling(os.Args[1]); s != "" {
+		fmt.Fprintf(os.Stderr, "  did you mean 'fak %s'?\n", s)
+	}
+	fmt.Fprintln(os.Stderr, "  'fak help' shows the overview; 'fak help --all' lists every verb.")
+	recordUsage(verb, argv, 2, start)
+	os.Exit(2)
+}
+
+func dispatchCoreVerbA(name string, args []string) bool {
+	switch name {
 	case "agent":
-		cmdAgent(os.Args[2:])
+		cmdAgent(args)
 	case "harness":
-		cmdHarness(os.Args[2:])
+		cmdHarness(args)
 	case "armbench":
-		cmdArmbench(os.Args[2:])
+		cmdArmbench(args)
 	case "api-host":
-		cmdAPIHost(os.Args[2:])
+		cmdAPIHost(args)
 	case "question-ledger":
-		cmdQuestionLedger(os.Args[2:])
+		cmdQuestionLedger(args)
 	case "disambiguation":
-		cmdDisambiguation(os.Args[2:])
+		cmdDisambiguation(args)
 	case "trunk-build-probe":
-		cmdTrunkBuildProbe(os.Args[2:])
+		cmdTrunkBuildProbe(args)
 	case "godsplit-plan":
-		cmdGodsplitPlan(os.Args[2:])
+		cmdGodsplitPlan(args)
 	case "glm52-prefill-sweep":
-		cmdGLM52PrefillSweep(os.Args[2:])
+		cmdGLM52PrefillSweep(args)
 	case "recall":
-		cmdRecall(os.Args[2:])
+		cmdRecall(args)
 	case "recover":
-		cmdRecover(os.Args[2:])
+		cmdRecover(args)
 	case "concept":
-		os.Exit(runConceptCLI(os.Stdout, os.Stderr, os.Args[2:]))
+		os.Exit(runConceptCLI(os.Stdout, os.Stderr, args))
 	case "config":
-		cmdConfig(os.Args[2:])
+		cmdConfig(args)
 	case "rename-concept":
-		cmdRenameConcept(os.Args[2:])
+		cmdRenameConcept(args)
 	case "session":
-		cmdSession(os.Args[2:])
+		cmdSession(args)
 	case "session-audit":
-		cmdSessionAudit(os.Args[2:])
+		cmdSessionAudit(args)
 	case "scratch-janitor":
-		os.Exit(runScratchJanitor(os.Stdout, os.Stderr, os.Args[2:]))
+		os.Exit(runScratchJanitor(os.Stdout, os.Stderr, args))
 	case "codex-resume":
-		cmdCodexResume(os.Args[2:])
+		cmdCodexResume(args)
 	case "sessionjournal":
-		cmdSessionJournal(os.Args[2:])
+		cmdSessionJournal(args)
 	case "tier-calibrate":
-		cmdTierCalibrate(os.Args[2:])
+		cmdTierCalibrate(args)
 	case "resume":
-		cmdResume(os.Args[2:])
+		cmdResume(args)
 	case "dispatch":
-		cmdDispatch(os.Args[2:])
+		cmdDispatch(args)
 	case "dispatch-conservation":
-		cmdDispatchConservation(os.Args[2:])
+		cmdDispatchConservation(args)
 	case "dispatch-aging":
-		cmdDispatchAging(os.Args[2:])
+		cmdDispatchAging(args)
 	case "knownbad":
-		cmdKnownBad(os.Args[2:])
+		cmdKnownBad(args)
 	case "process-guard":
-		cmdProcessGuard(os.Args[2:])
+		cmdProcessGuard(args)
 	case "windowgate":
-		cmdWindowgate(os.Args[2:])
+		cmdWindowgate(args)
 	case "conpty":
-		cmdConPTY(os.Args[2:])
+		cmdConPTY(args)
 	case "ps":
-		cmdPS(os.Args[2:])
+		cmdPS(args)
 	case "top":
-		cmdTop(os.Args[2:])
+		cmdTop(args)
 	case "signal":
-		cmdSignal(os.Args[2:])
+		cmdSignal(args)
 	case "task":
-		cmdTask(os.Args[2:])
+		cmdTask(args)
 	case "tasks":
-		cmdTasks(os.Args[2:])
+		cmdTasks(args)
 	case "toolproc":
-		cmdToolproc(os.Args[2:])
+		cmdToolproc(args)
 	case "stallscan":
-		cmdStallscan(os.Args[2:])
+		cmdStallscan(args)
 	case "terminal-relief":
-		cmdTerminalRelief(os.Args[2:])
+		cmdTerminalRelief(args)
 	case "schedule-held":
-		cmdScheduleHeld(os.Args[2:])
+		cmdScheduleHeld(args)
 	case "learning-observation":
-		cmdLearningObservation(os.Args[2:])
+		cmdLearningObservation(args)
 	case "host-crash":
-		cmdHostCrash(os.Args[2:])
+		cmdHostCrash(args)
 	case "host-relaunch-broker":
-		os.Exit(runHostRelaunchBroker(os.Stdout, os.Stderr, os.Args[2:]))
+		os.Exit(runHostRelaunchBroker(os.Stdout, os.Stderr, args))
 	case "schedscan":
-		cmdSchedScan(os.Args[2:])
+		cmdSchedScan(args)
 	case "growthgate":
-		cmdGrowthgate(os.Args[2:])
+		cmdGrowthgate(args)
 	case "egresslist":
-		cmdEgresslist(os.Args[2:])
+		cmdEgresslist(args)
 	case "test":
-		cmdTest(os.Args[2:])
+		cmdTest(args)
 	case "done":
-		cmdDone(os.Args[2:])
+		cmdDone(args)
 	case "profile":
-		cmdProfile(os.Args[2:])
+		cmdProfile(args)
 	case "multisubmit":
-		cmdMultiSubmit(os.Args[2:])
+		cmdMultiSubmit(args)
 	case "c":
-		cmdTUI(append([]string{"agent"}, os.Args[2:]...))
+		cmdTUI(append([]string{"agent"}, args...))
 	case "console":
-		cmdTUI(os.Args[2:])
+		cmdTUI(args)
 	case "chat":
-		cmdChat(os.Args[2:])
+		cmdChat(args)
 	case "chatrelay":
-		cmdChatRelay(os.Args[2:])
+		cmdChatRelay(args)
 	case "relay":
-		cmdRelay(os.Args[2:])
+		cmdRelay(args)
 	case "claude-mac-fak", "mac":
 		// `fak mac` is the crisp, memorable handle; `fak claude-mac-fak` is the long
 		// form kept working byte-for-byte. Both spellings route to the one handler.
-		cmdClaudeMacFak(os.Args[2:])
+		cmdClaudeMacFak(args)
 	case "macbench":
-		cmdMacBench(os.Args[2:])
+		cmdMacBench(args)
 	case "macfit":
-		cmdMacFit(os.Args[2:])
+		cmdMacFit(args)
 	case "capabilities":
-		os.Exit(runCapabilities(os.Stdout, os.Stderr, os.Args[2:]))
+		os.Exit(runCapabilities(os.Stdout, os.Stderr, args))
 	case "codex":
-		cmdCodex(os.Args[2:])
+		cmdCodex(args)
 	case "codex-mcp-health":
-		cmdCodexMCPHealth(os.Args[2:])
+		cmdCodexMCPHealth(args)
 	case "loop":
-		cmdLoop(os.Args[2:])
+		cmdLoop(args)
 	case "bgloop":
-		cmdBgloop(os.Args[2:])
+		cmdBgloop(args)
+	default:
+		return false
+	}
+	return true
+}
+
+func dispatchCoreVerbB(name string, args []string) bool {
+	switch name {
 	case "loop-score":
-		cmdLoopScore(os.Args[2:])
+		cmdLoopScore(args)
 	case "waiting":
-		cmdWaiting(os.Args[2:])
+		cmdWaiting(args)
 	case "cron":
-		cmdCron(os.Args[2:])
+		cmdCron(args)
 	case "logvault":
-		cmdLogvault(os.Args[2:])
+		cmdLogvault(args)
 	case "guard-audit":
-		cmdGuardAudit(os.Args[2:])
+		cmdGuardAudit(args)
 	case "snapshot":
-		cmdSnapshot(os.Args[2:])
+		cmdSnapshot(args)
 	case "traj":
-		cmdTraj(os.Args[2:])
+		cmdTraj(args)
 	case "quantwatch":
-		cmdQuantwatch(os.Args[2:])
+		cmdQuantwatch(args)
 	case "workpattern":
-		if err := cmdWorkpattern(os.Args[2:]); err != nil {
+		if err := cmdWorkpattern(args); err != nil {
 			fmt.Fprintln(os.Stderr, "fak workpattern:", err)
 			os.Exit(2)
 		}
 	case "trajctl":
-		cmdTrajctl(os.Args[2:])
+		cmdTrajctl(args)
 	case "shadowgit":
-		cmdShadowGit(os.Args[2:])
+		cmdShadowGit(args)
 	case "signals":
-		cmdSignals(os.Args[2:])
+		cmdSignals(args)
 	case "trajquery":
-		cmdTrajQuery(os.Args[2:])
+		cmdTrajQuery(args)
 	case "dup":
-		cmdDup(os.Args[2:])
+		cmdDup(args)
 	case "dream":
-		cmdDream(os.Args[2:])
+		cmdDream(args)
 	case "memory":
-		cmdMemory(os.Args[2:])
+		cmdMemory(args)
 	case "debug":
-		cmdDebug(os.Args[2:])
+		cmdDebug(args)
 	case "policy":
-		cmdPolicy(os.Args[2:])
+		cmdPolicy(args)
 	case "enroll":
 		// Pin (or show, or revoke) this box's org trust anchor — the opt-in door to
 		// the org-policy plane, #5323. See cmd/fak/enroll.go.
-		cmdEnroll(os.Args[2:])
+		cmdEnroll(args)
 	case "org":
 		// Read the org-policy plane: posture, staleness, and which channel owns each
 		// capability knob — the legibility half of centralized control, #5322. See
 		// cmd/fak/org.go.
-		cmdOrg(os.Args[2:])
+		cmdOrg(args)
 	case "egress":
-		cmdEgress(os.Args[2:])
+		cmdEgress(args)
 	case "eve":
 		// The Eve integration bridge (#2600): mechanical security preflight over
 		// eve's MCP/OpenAPI connections (#2602). See cmd/fak/eve.go.
-		cmdEve(os.Args[2:])
+		cmdEve(args)
 	case "doomloop":
 		// The two-axis doom-loop guard: classifies live workers on effort vs
 		// verified progress and wires the reversible-first correction. See
 		// cmd/fak/doomloop.go and internal/doomloop.
-		cmdDoomloop(os.Args[2:])
+		cmdDoomloop(args)
 	case "lint":
-		cmdLint(os.Args[2:])
+		cmdLint(args)
 	case "codelint":
-		cmdCodelint(os.Args[2:])
+		cmdCodelint(args)
 	case "breath":
-		cmdBreath(os.Args[2:])
+		cmdBreath(args)
 	case "answer-shape":
-		cmdAnswerShape(os.Args[2:])
+		cmdAnswerShape(args)
 	case "negate":
 		// The negation operator (#4461/#4472, negframe L2): `fak negate detect|resolve|reframe`
 		// exposes detect (Classify), resolve (positive-complement over the L2 registry), and
 		// reframe (emit-time Reframe) as one callable primitive over internal/negframe.
-		cmdNegate(os.Args[2:])
+		cmdNegate(args)
 	case "claim-check":
-		cmdClaimCheck(os.Args[2:])
+		cmdClaimCheck(args)
 	case "headless-lint":
-		cmdHeadlessLint(os.Args[2:])
+		cmdHeadlessLint(args)
 	case "hwgate-lint":
-		cmdHwGateLint(os.Args[2:])
+		cmdHwGateLint(args)
 	case "check-tool-failure":
-		cmdCheckToolFailure(os.Args[2:])
+		cmdCheckToolFailure(args)
 	case "doctor":
-		cmdDoctor(os.Args[2:])
+		cmdDoctor(args)
 	case "init":
 		// Emit a minimal, valid fak.toml deployment manifest (#3421).
-		cmdInit(os.Args[2:])
+		cmdInit(args)
 	case "workflow":
-		cmdWorkflow(os.Args[2:])
+		cmdWorkflow(args)
 	case "slack":
-		cmdSlack(os.Args[2:])
+		cmdSlack(args)
 	case "chatops":
 		// The inbound read-only Slack control door (chatops.go). docs/cli-reference.md has
 		// documented `fak chatops` since it landed, but the verb was never routed here, so
 		// every invocation fell through to the unknown-verb path.
-		cmdChatOps(os.Args[2:])
+		cmdChatOps(args)
 	case "release":
-		cmdRelease(os.Args[2:])
+		cmdRelease(args)
 	case "release-lock":
-		cmdReleaseLock(os.Args[2:])
+		cmdReleaseLock(args)
 	case "release-staleness":
-		cmdReleaseStaleness(os.Args[2:])
+		cmdReleaseStaleness(args)
 	case "watchdog":
-		cmdWatchdog(os.Args[2:])
+		cmdWatchdog(args)
 	case "service":
-		cmdService(os.Args[2:])
+		cmdService(args)
 	case "micro":
 		// The native in-process Go microagent runtime front door (see cmdMicro).
-		cmdMicro(os.Args[2:])
+		cmdMicro(args)
 	case "microbench":
 		// Per-agent RSS + CPU density witness for the in-process microagent host
 		// vs the guarded-CLI baseline (#2008; mock engine, no spend).
-		cmdMicroBench(os.Args[2:])
+		cmdMicroBench(args)
 	case "token-profile":
-		cmdTokenProfile(os.Args[2:])
+		cmdTokenProfile(args)
 	case "serve":
-		cmdServe(os.Args[2:])
+		cmdServe(args)
 	case "serve-wiring":
-		cmdServeWiring(os.Args[2:])
+		cmdServeWiring(args)
 	case "manage", "m":
-		cmdManage(os.Args[2:])
+		cmdManage(args)
 	case "guard":
-		cmdGuard(os.Args[2:])
+		cmdGuard(args)
 	case "goal-park":
-		cmdGoalPark(os.Args[2:])
+		cmdGoalPark(args)
 	case "info":
 		// The live fak-info overlay: poll a fak guard/serve gateway's /debug/vars and print
 		// one compact line per tick (cache economy + floor safety + liveness). This is the 20%
 		// pane `fak guard --split` opens; also runnable by hand in a second pane.
-		cmdInfo(os.Args[2:])
+		cmdInfo(args)
 	case "demo":
 		// The zero-flag 60-second proof: fak's offline scenario through the REAL kernel,
 		// one live verdict per call class (see cmdDemo). No agent, no key.
-		cmdDemo(os.Args[2:])
+		cmdDemo(args)
 	case "guard-precompact":
 		// Hidden: Claude Code PreCompact hook actuator installed by `fak guard`.
-		cmdGuardPreCompact(os.Args[2:])
+		cmdGuardPreCompact(args)
 	case "guard-stophook":
 		// Hidden: Claude Code Stop hook actuator installed by `fak guard` (see
 		// cmdGuardStopHook: blocks an unchosen end_turn past a fully-refused turn).
-		cmdGuardStopHook(os.Args[2:])
+		cmdGuardStopHook(args)
 	case "guard-goal-question":
 		// Hidden: active-goal AskUserQuestion PreToolUse boundary.
-		cmdGuardGoalQuestionHook(os.Args[2:])
+		cmdGuardGoalQuestionHook(args)
 	case "guard-commit-gate":
 		// Hidden: Claude Code PreToolUse boundary for git commit stamp/path binding.
-		cmdGuardCommitGate(os.Args[2:])
+		cmdGuardCommitGate(args)
 	case "guard-sessionstart":
 		// Hidden: Claude Code SessionStart hook actuator installed by `fak guard` (#3092).
-		cmdGuardSessionStart(os.Args[2:])
+		cmdGuardSessionStart(args)
 	case "guard-stops":
 		// Operator-facing: fold the typed Stop-hook decision ledger into a tally (clean
 		// stops, bounded stand-downs, and the fail-open stops that are otherwise invisible).
-		cmdGuardStops(os.Args[2:])
+		cmdGuardStops(args)
 	case "guard-stops-slack":
 		// Durable update-in-place scoreboard feeder for the Stop decision ledger.
-		cmdGuardStopsSlack(os.Args[2:])
+		cmdGuardStopsSlack(args)
 	case "trunk-red":
 		// Operator-facing: fold the pre-existing trunk-red witness ledger into the distinct
 		// shared breaks the build gates admitted over (a peer's red, not yours) — worst (most
 		// clones stuck) first, so a break the whole fleet inherits gets fixed at its source.
-		cmdTrunkRed(os.Args[2:])
+		cmdTrunkRed(args)
 	case guard.TrampolineVerb:
 		// Hidden internal seam: the Landlock hook-floor re-exec trampoline, Linux (see
 		// guard.LandlockTrampoline).
-		if err := guard.LandlockTrampoline(os.Args[2:]); err != nil {
+		if err := guard.LandlockTrampoline(args); err != nil {
 			fmt.Fprintf(os.Stderr, "fak: %v\n", err)
 			os.Exit(127)
 		}
+	default:
+		return false
+	}
+	return true
+}
+
+func dispatchExtendedVerbA(name string, args []string) bool {
+	switch name {
 	case "audit":
-		cmdAudit(os.Args[2:])
+		cmdAudit(args)
 	case "usage":
-		cmdUsage(os.Args[2:])
+		cmdUsage(args)
 	case "headroom":
-		cmdHeadroom(os.Args[2:])
+		cmdHeadroom(args)
 	case "vcache":
-		cmdVCache(os.Args[2:])
+		cmdVCache(args)
 	case "hook":
 		cmdHook()
 	case "hooks":
-		cmdHooks(os.Args[2:])
+		cmdHooks(args)
 	case "hygiene":
-		cmdHygiene(os.Args[2:])
+		cmdHygiene(args)
 	case "idempotency":
-		cmdIdempotency(os.Args[2:])
+		cmdIdempotency(args)
 	case "public-scrub":
-		cmdPublicScrub(os.Args[2:])
+		cmdPublicScrub(args)
 	case "rungstats":
-		cmdRungStats(os.Args[2:])
+		cmdRungStats(args)
 	case "swebench":
-		cmdSwebench(os.Args[2:])
+		cmdSwebench(args)
 	case "webbench":
-		cmdWebbench(os.Args[2:])
+		cmdWebbench(args)
 	case "ailuminate":
-		cmdAILuminate(os.Args[2:])
+		cmdAILuminate(args)
 	case "model":
-		cmdModel(os.Args[2:])
+		cmdModel(args)
 	case "new-model":
-		cmdNewModel(os.Args[2:])
+		cmdNewModel(args)
 	case "architecture":
-		cmdArchitecture(os.Args[2:])
+		cmdArchitecture(args)
 	case "new-leaf":
-		cmdNewLeaf(os.Args[2:])
+		cmdNewLeaf(args)
 	case "pull":
 		// Top-level alias for `fak model pull`: the Ollama-style run-by-name download.
-		cmdModelPull(os.Args[2:])
+		cmdModelPull(args)
 	case "ls":
 		// Top-level alias for `fak model ls`: list known model aliases + cache status.
-		cmdModelLs(os.Args[2:])
+		cmdModelLs(args)
 	case "route":
-		cmdRoute(os.Args[2:])
+		cmdRoute(args)
 	case "execution-route":
-		cmdExecutionRoute(os.Args[2:])
+		cmdExecutionRoute(args)
 	case "llmd-smoke", "llm-d-smoke":
-		cmdLLMDSmoke(os.Args[2:])
+		cmdLLMDSmoke(args)
 	case "routebench":
-		cmdRoutebench(os.Args[2:])
+		cmdRoutebench(args)
 	case "deepseekbench":
-		cmdDeepSeekBench(os.Args[2:])
+		cmdDeepSeekBench(args)
 	case "assume":
-		cmdAssume(os.Args[2:])
+		cmdAssume(args)
 	case "accounts":
-		cmdAccounts(os.Args[2:])
+		cmdAccounts(args)
 	case "fleet-accounts":
-		cmdFleetAccounts(os.Args[2:])
+		cmdFleetAccounts(args)
 	case "fleet":
-		cmdFleet(os.Args[2:])
+		cmdFleet(args)
 	case "garden":
-		cmdGarden(os.Args[2:])
+		cmdGarden(args)
 	case "stale-work":
-		cmdStaleWork(os.Args[2:])
+		cmdStaleWork(args)
 	case "cadence":
-		cmdCadence(os.Args[2:])
+		cmdCadence(args)
 	case "operator":
-		cmdOperatorHeaviness(os.Args[2:])
+		cmdOperatorHeaviness(args)
 	case "milestone":
-		cmdMilestone(os.Args[2:])
+		cmdMilestone(args)
 	case "milestone-scorecard":
-		cmdMilestoneScorecard(os.Args[2:])
+		cmdMilestoneScorecard(args)
 	case "project":
 		// The ProjectsV2 board control-pane fold — makes the board an operator-visible
 		// dimension (report/verdict/Slack-ready) instead of a write-only sync target.
-		cmdProject(os.Args[2:])
+		cmdProject(args)
 	case "mlp-score":
 		// The witnessed grade of the "first lovable cut" for the all-in-one agent
 		// runtime epic (#3256, milestone #17): per-criterion PASS/not-yet (#3284).
-		cmdMLPScore(os.Args[2:])
+		cmdMLPScore(args)
 	case "program":
-		cmdProgram(os.Args[2:])
+		cmdProgram(args)
 	case "rollup":
-		cmdRollup(os.Args[2:])
+		cmdRollup(args)
 	case "spend":
-		cmdSpend(os.Args[2:])
+		cmdSpend(args)
 	case "budget":
-		cmdBudget(os.Args[2:])
+		cmdBudget(args)
 	case "sidecar":
-		cmdSidecar(os.Args[2:])
+		cmdSidecar(args)
 	case "nightrun":
-		cmdNightrun(os.Args[2:])
+		cmdNightrun(args)
 	case "sessions":
-		cmdSessions(os.Args[2:])
+		cmdSessions(args)
 	case "loop-index-scorecard":
-		cmdLoopIndexScorecard(os.Args[2:])
+		cmdLoopIndexScorecard(args)
 	case "loop-map":
-		cmdLoopMap(os.Args[2:])
+		cmdLoopMap(args)
 	case "superloop":
-		cmdSuperloop(os.Args[2:])
+		cmdSuperloop(args)
 	case "fused":
-		cmdFused(os.Args[2:])
+		cmdFused(args)
 	case "experiments":
-		cmdExperiments(os.Args[2:])
+		cmdExperiments(args)
 	case "coverage-matrix":
-		cmdCoverageMatrix(os.Args[2:])
+		cmdCoverageMatrix(args)
 	case "conformance":
-		cmdConformance(os.Args[2:])
+		cmdConformance(args)
 	case "support-maturity-scorecard":
-		cmdSupportMaturityScorecard(os.Args[2:])
+		cmdSupportMaturityScorecard(args)
 	case "support":
-		cmdSupport(os.Args[2:])
+		cmdSupport(args)
 	case "dojo":
-		cmdDojo(os.Args[2:])
+		cmdDojo(args)
 	case "dojo-rsi":
-		cmdDojoRSI(os.Args[2:])
+		cmdDojoRSI(args)
 	case "guard-verdict-rsi":
-		cmdGuardVerdictRSI(os.Args[2:])
+		cmdGuardVerdictRSI(args)
 	case "guard-rsi-scorecard":
-		cmdGuardRSIScorecard(os.Args[2:])
+		cmdGuardRSIScorecard(args)
 	case "opt":
-		cmdOpt(os.Args[2:])
+		cmdOpt(args)
 	case "dogfood-score":
-		cmdDogfoodScore(os.Args[2:])
+		cmdDogfoodScore(args)
 	case "concept-usage-score":
-		cmdConceptUsageScore(os.Args[2:])
+		cmdConceptUsageScore(args)
 	case "propagation-scorecard":
-		cmdPropagationScorecard(os.Args[2:])
+		cmdPropagationScorecard(args)
+	default:
+		return false
+	}
+	return true
+}
+
+func dispatchExtendedVerbB(name string, args []string) bool {
+	switch name {
 	case "propagation-debt-dispatch":
-		cmdPropagationDebtDispatch(os.Args[2:])
+		cmdPropagationDebtDispatch(args)
 	case "unwired-scorecard":
-		cmdUnwiredScorecard(os.Args[2:])
+		cmdUnwiredScorecard(args)
 	case "unwired-debt-dispatch":
-		cmdUnwiredDebtDispatch(os.Args[2:])
+		cmdUnwiredDebtDispatch(args)
 	case "qa-process-debt-dispatch":
-		cmdQAProcessDebtDispatch(os.Args[2:])
+		cmdQAProcessDebtDispatch(args)
 	case "mode-debt-dispatch":
 		// The permission-regime fan-out (#4416, epic #4397): consume the sibling
 		// mode-debt scorecard and file one deduped issue per HARD un-lifted dial,
 		// routed to the permission-regime backlog (#2389 / #2405).
-		cmdModeDebtDispatch(os.Args[2:])
+		cmdModeDebtDispatch(args)
 	case "checkpoint-scorecard":
-		cmdCheckpointScorecard(os.Args[2:])
+		cmdCheckpointScorecard(args)
 	case "checkpoint-debt-dispatch":
-		cmdCheckpointDebtDispatch(os.Args[2:])
+		cmdCheckpointDebtDispatch(args)
 	case "antipattern-scorecard":
 		// The unifying work-loss card (docs/notes/AGENTIC-DEV-ANTIPATTERNS-2026-07-02.md
 		// spine): folds REDUNDANT_REWORK + UNWIRED_PKG + ORPHAN_FUNC into one antipattern_debt.
-		cmdAntipatternScorecard(os.Args[2:])
+		cmdAntipatternScorecard(args)
 	case "maturity":
-		cmdMaturity(os.Args[2:])
+		cmdMaturity(args)
 	case "balance":
 		// The night-balance readout (#3128): resume recovery-vs-stranding and
 		// gardening-vs-throughput folded side by side; exit non-zero on an
 		// underwater recovery budget so a night gate reading $? sees it.
-		cmdBalance(os.Args[2:])
+		cmdBalance(args)
 	case "token-defaults-scorecard":
-		cmdTokenDefaultsScorecard(os.Args[2:])
+		cmdTokenDefaultsScorecard(args)
 	case "skill-effectiveness-scorecard":
-		cmdSkillEffectivenessScorecard(os.Args[2:])
+		cmdSkillEffectivenessScorecard(args)
 	case "mcp-filter-proof":
-		os.Exit(runMCPFilterProof(os.Stdout, os.Stderr, os.Args[2:]))
+		os.Exit(runMCPFilterProof(os.Stdout, os.Stderr, args))
 	case "footprint":
 		// The always-sent MCP tool-schema floor scorecard (epic #3229, #3230):
 		// price fak's registered tools/list floor offline via internal/mcpfootprint.
-		os.Exit(runMCPFootprint(os.Stdout, os.Stderr, os.Args[2:]))
+		os.Exit(runMCPFootprint(os.Stdout, os.Stderr, args))
 	case "skill":
 		// The queried skill loader operator surface (epic #1103, C7 / #1110):
 		// `fak skill query|residency|swap` over .claude/skills (+ MCP resolver).
-		cmdSkill(os.Args[2:])
+		cmdSkill(args)
 	case "conflation-scorecard":
-		cmdConflationScorecard(os.Args[2:])
+		cmdConflationScorecard(args)
 	case "test-quality":
-		cmdTestQuality(os.Args[2:])
+		cmdTestQuality(args)
 	case "quality":
 		// The missing-middle quality ladder spine (epic #4509): `fak quality run|explain`
 		// runs one versioned case through a reference path and an engine path, applies a
 		// deterministic comparator + a rubric scorer, and emits a machine-readable result
 		// with a replayable failure bundle localized to the first divergence.
-		cmdQuality(os.Args[2:])
+		cmdQuality(args)
 	case "score":
 		// Parent verb grouping the meta-scorecards / RSI loops (#1505): `fak score <name>` routes
 		// to the same handler each legacy top-level *-scorecard/*-score/*-rsi verb ran (see
 		// score.go). Behavior-preserving; the legacy verbs stay wired below as thin aliases.
-		cmdScore(os.Args[2:])
+		cmdScore(args)
 	case "scorecard":
-		cmdScorecardPane(os.Args[2:])
+		cmdScorecardPane(args)
 	case "repo-hygiene-scorecard":
-		cmdRepoHygieneScorecard(os.Args[2:])
+		cmdRepoHygieneScorecard(args)
 	case "ui-quality-scorecard":
-		cmdUIQualityScore(os.Args[2:])
+		cmdUIQualityScore(args)
 	case "scoreboard":
-		cmdScoreboard(os.Args[2:])
+		cmdScoreboard(args)
 	case "steering":
-		cmdSteering(os.Args[2:])
+		cmdSteering(args)
 	case "steer":
-		cmdSteer(os.Args[2:])
+		cmdSteer(args)
 	case "blockers":
-		cmdBlockers(os.Args[2:])
+		cmdBlockers(args)
 	case "product":
-		cmdProduct(os.Args[2:])
+		cmdProduct(args)
 	case "product-scorecard":
-		os.Exit(runProductScorecard(os.Stdout, os.Stderr, os.Args[2:]))
+		os.Exit(runProductScorecard(os.Stdout, os.Stderr, args))
 	case "grafana":
-		cmdGrafana(os.Args[2:])
+		cmdGrafana(args)
 	case "cachevalue":
-		cmdCachevalue(os.Args[2:])
+		cmdCachevalue(args)
 	case "cachesweep":
-		os.Exit(runCachesweep(os.Stdout, os.Stderr, os.Args[2:]))
+		os.Exit(runCachesweep(os.Stdout, os.Stderr, args))
 	case "savings":
-		cmdSavings(os.Args[2:])
+		cmdSavings(args)
 	case "marketing":
-		cmdMarketing(os.Args[2:])
+		cmdMarketing(args)
 	case "news":
-		cmdNews(os.Args[2:])
+		cmdNews(args)
 	case "nodeusage":
-		cmdNodeUsage(os.Args[2:])
+		cmdNodeUsage(args)
 	case "callavoid":
-		cmdCallavoid(os.Args[2:])
+		cmdCallavoid(args)
 	case "savings-vector":
-		cmdSavingsVector(os.Args[2:])
+		cmdSavingsVector(args)
 	case "horizon-recovery":
-		cmdHorizonRecovery(os.Args[2:])
+		cmdHorizonRecovery(args)
 	case "dogfood-issues":
-		cmdDogfoodIssues(os.Args[2:])
+		cmdDogfoodIssues(args)
 	case "study-monitor":
 		// Durable source registry for recurring study/scout passes.
-		os.Exit(runStudyMonitor(os.Stdout, os.Stderr, os.Args[2:]))
+		os.Exit(runStudyMonitor(os.Stdout, os.Stderr, args))
 	case "idea-scout":
 		// The research-to-issue feeder as a verb (cmd/fak/ideascout.go over
 		// internal/ideascout). It shipped with a full Go port of tools/idea_scout.py, a
@@ -587,61 +626,55 @@ func main() {
 		// (#5546). The `cmdIdeaScout` wrapper it was authored with was later swept as dead
 		// code (#1419): the caller it was missing was THIS arm, not the wrapper.
 		// Dry-run is the default; --live is what files real issues (see ideaScoutUsage).
-		os.Exit(runIdeaScout(os.Stdout, os.Stderr, os.Args[2:]))
+		os.Exit(runIdeaScout(os.Stdout, os.Stderr, args))
 	case "complain":
-		cmdComplain(os.Args[2:])
+		cmdComplain(args)
 	case "learning-debt-dispatch":
-		cmdLearningDebtDispatch(os.Args[2:])
+		cmdLearningDebtDispatch(args)
 	case "harness-debt-dispatch":
 		// The harness-strength fan-out (#4414, epic #4396, under self-ablation #607 /
 		// open ablation registry #2828): consume the sibling model-strength
 		// classifier's --json verdict and file one deduped deletion issue per HARD
 		// scaffold graded REDUNDANT or HOBBLING (LOAD_BEARING files nothing).
-		cmdHarnessDebtDispatch(os.Args[2:])
+		cmdHarnessDebtDispatch(args)
 	case "stopfailure":
-		cmdStopFailure(os.Args[2:])
+		cmdStopFailure(args)
 	case "cluster":
-		cmdCluster(os.Args[2:])
+		cmdCluster(args)
 	case "leaseref":
-		cmdLeaseref(os.Args[2:])
+		cmdLeaseref(args)
 	case "intent":
-		cmdIntent(os.Args[2:])
+		cmdIntent(args)
 	case "memgate":
-		cmdMemgate(os.Args[2:])
+		cmdMemgate(args)
 	case "memory-read":
-		cmdMemoryRead(os.Args[2:])
+		cmdMemoryRead(args)
 	case "memory-stability-governor":
-		cmdMemoryStabilityGovernor(os.Args[2:])
+		cmdMemoryStabilityGovernor(args)
 	case "node":
-		cmdNode(os.Args[2:])
+		cmdNode(args)
 	case "node-compare":
-		cmdNodeCompare(os.Args[2:])
+		cmdNodeCompare(args)
 	case "qwen36-node-reports":
-		cmdQwen36NodeReports(os.Args[2:])
+		cmdQwen36NodeReports(args)
 	case "qwen36-parity-witness-gate":
-		cmdQwen36ParityWitnessGate(os.Args[2:])
+		cmdQwen36ParityWitnessGate(args)
 	case "lab":
-		cmdLab(os.Args[2:])
+		cmdLab(args)
 	case "fleet-trend":
-		cmdFleetTrend(os.Args[2:])
+		cmdFleetTrend(args)
 	case "popularization-tickets":
-		cmdPopularizationTickets(os.Args[2:])
+		cmdPopularizationTickets(args)
 	case "dormancy":
-		cmdDormancy(os.Args[2:])
+		cmdDormancy(args)
 	case "version", "-v", "--version":
 		cmdVersion(os.Stdout)
 	case "-h", "--help", "help":
-		cmdHelp(os.Args[2:])
+		cmdHelp(args)
 	default:
-		fmt.Fprintf(os.Stderr, "fak: unknown verb %q\n", os.Args[1])
-		if s := suggestVerbSpelling(os.Args[1]); s != "" {
-			fmt.Fprintf(os.Stderr, "  did you mean 'fak %s'?\n", s)
-		}
-		fmt.Fprintln(os.Stderr, "  'fak help' shows the overview; 'fak help --all' lists every verb.")
-		recordUsage(verb, argv, 2, start)
-		os.Exit(2)
+		return false
 	}
-	recordUsage(verb, argv, 0, start)
+	return true
 }
 
 func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *string) bool {
