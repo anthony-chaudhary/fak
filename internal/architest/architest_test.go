@@ -91,6 +91,7 @@ var tier = map[string]int{
 	"harnessinit":          1, // external product scaffold renderer; stdlib-only and outside kernel hot paths (#6788).
 	"harnessdiscover":      1, // provenance-bearing scoped declaration discovery before contextual selection (#6898).
 	"harnessclassify":      1, // deterministic explicit-first domain/task classification before contextual selection (#6900).
+	"harnesscompose":       1, // typed inert asset overlap semantics before dependency solving and launch (#6904).
 	"harnessselect":        1, // context-layer selection and explain trace; stdlib-only before product composition.
 	"stackresolve":         1, // stdlib-only generic dependency search and receipts; domain facts enter through Provider (#6891).
 	"supportgraph":         1, // stdlib-only exact-tuple support evidence and freshness query before model/hardware composition (#6895).
@@ -552,6 +553,7 @@ var tier = map[string]int{
 	"lightgapscore":         1, // deterministic stdlib-only scorecard parser and renderer; off the hot path.
 	"lightgapport":          1,
 	"kvquantmeta":           1,
+	"quantmeta":             1, // stdlib-only neutral quantization descriptor, parser, and typed adjudication contract (#6222).
 	"quantdetect":           1,
 	"fp4runtime":            1, // stdlib-only FP4/microscaling runtime, GPU-architecture, and accumulator compatibility contract; no model kernel.
 	"fp4meta":               1, // stdlib-only neutral FP4 artifact, recipe, scale, runtime, and hardware metadata contract; no model kernel.
