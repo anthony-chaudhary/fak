@@ -110,6 +110,7 @@ var tier = map[string]int{
 	"resumemetrics":        1,                // in-process expvar metrics for the resume/heal watchdog (#3803): expvar counters + strings only; imports nothing internal, off the hot path.
 	"resumebackoff":        2,                // pure resume signature backoff and cross-session park fold (#3584); stdlib only.
 	"commitlifecycle":      2,                // pure commit-to-ship lifecycle fold (#5989); stdlib-only, no git/filesystem/process I/O, off the hot path.
+	"wiplease":             1,                // pure live-WIP projection into lease geometry; stdlib-only ownership metadata, off the hot path.
 	"wipref":               1,                // append-only working-tree checkpoint ref store under refs/fak/wip/ read by fak wip (sibling of leaseref's refs/fak/locks); stdlib-only, imports nothing internal, off the hot path.
 	"wipattr":              1,                // pure dirty-hunk-to-checkpoint attribution fold (#3874); stdlib-only, imports nothing internal, off the hot path.
 	"wiprecon":             1,                // pure crashed-checkpoint reconciliation decision fold (#3875); stdlib-only, imports nothing internal, off the hot path.
@@ -339,6 +340,7 @@ var tier = map[string]int{
 	"milestonedoc":        4, // the freshness-checked milestone status doc (#1441): renders the maturity CLIMB (covmatrix grid -> M0-M7 ladder via milestonereport.InterpretMaturity) into a committed docs/milestones/STATUS.md block with the --write-doc/--check-doc seam (twin of supportmaturityscore's matrix block). Forced to tier 3 by its milestonereport(3) import; also imports covmatrix(1)+supportmaturity(2), off the hot path.
 	"dispatchorder":       1, // pure dispatch-ordering helper; stdlib-only, imports nothing internal, off the hot path.
 	"dispatchauto":        1, // pure dispatch wave auto-sizing fold: live ceilings + node roster + context budget -> target/refill/placement; stdlib-only, off the hot path.
+	"amoprofpub":          1, // pure analysis-report publication tree construction; stdlib-only, off the hot path.
 	"categorybaseline":    1, // explicit category-layer completion registry + pure hold decision; stdlib-only, off the hot path.
 	"dispatchcache":       2, // pure stdlib-only TTL/content-hash cache for routed dispatch payloads.
 	"dispatchtick":        2, // pure issue-resolution dispatch tick contract: backend argv, guard wrap, wave/account sidecars + the tier-aware account chooser (#3042); imports modelroute(1) for the WorkTier vocabulary, else stdlib-only, off the hot path.
@@ -418,6 +420,7 @@ var tier = map[string]int{
 	"skipledger":          2, // pure skip/select ledger fold (#1776): turns one dispatchorder.Result into per-candidate rows (issue, lane, reason, safety/capacity category, timestamp) for later rate-loss audit; imports only dispatchorder (tier 1), off the hot path.
 	"attemptbudget":       2, // pure per-issue attempt-budget fold (#1777): counts an issue's recorded failed attempts against a budget and holds it for triage once crossed, naming the last failure class; stdlib-only, off the hot path.
 	"timeoutphase":        1, // pure timeout-phase classifier (#1793): folds one timed-out attempt's observed lifecycle-stage markers into a closed phase (before_startup/during_edit/during_tests/during_commit/during_push/unknown) for the timeout ledger; stdlib-only, off the hot path.
+	"vllmquant":           1, // pure vLLM quantization capability-contract adjudication; stdlib-only, off the hot path.
 	"vllmcompile":         1, // pure tuned-baseline gate for served-engine benchmarks (#1731): records torch.compile/CUDA-graph/warmup state as a `vllm_compile` block and classifies tuned/cold-start/diagnostic; stdlib-only, off the hot path.
 	"harnessprofile":      1,
 	"managedinventory":    1, // public-safe managed-agent object registry + catalog validator/renderer; stdlib-only, imports nothing internal, off the hot path.
