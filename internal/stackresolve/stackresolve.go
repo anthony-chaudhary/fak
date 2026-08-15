@@ -178,87 +178,185 @@ func Resolve(ctx context.Context, workload string, roots []string, providers ...
 		byCapability[capability] = sortedUnique(byCapability[capability])
 	}
 
-	selected := map[string]bool{}
-	paths := map[string][]string{}
-	queue := append([]string(nil), receipt.Roots...)
-	for _, root := range receipt.Roots {
-		paths[root] = []string{root}
+	initial := resolveState{
+		receipt:  receipt,
+		selected: map[string]bool{},
+		paths:    map[string][]string{},
 	}
-	for len(queue) > 0 {
-		id := queue[0]
-		queue = queue[1:]
-		if selected[id] {
-			continue
-		}
-		component, ok := byID[id]
-		if !ok {
-			return refused(receipt, "MISSING_ROOT", id, paths[id], Evidence{}, availableRemedies(id, byCapability)), nil
-		}
-		selected[id] = true
-		for _, relation := range component.Relations {
-			switch relation.Kind {
-			case Requires:
-				chosen, substitute := choose(relation, byCapability)
-				if chosen == "" {
-					chain := append(append([]string(nil), paths[id]...), relation.Target)
-					return refused(receipt, "UNSATISFIED_REQUIREMENT", relation.Target, chain, relation.Evidence, availableRemedies(relation.Target, byCapability)), nil
-				}
-				receipt.Decisions = append(receipt.Decisions, Decision{From: id, Relation: Requires, Wanted: relation.Target, Chosen: chosen, Substitute: substitute, Evidence: relation.Evidence})
-				if _, seen := paths[chosen]; !seen {
-					paths[chosen] = append(append([]string(nil), paths[id]...), chosen)
-				}
-				queue = append(queue, chosen)
-			case Optional:
-				chosen, substitute := choose(relation, byCapability)
-				if chosen == "" {
-					receipt.Warnings = append(receipt.Warnings, Warning{Code: "OPTIONAL_UNAVAILABLE", From: id, Wanted: relation.Target, Message: "optional component is unavailable", Evidence: relation.Evidence})
-					continue
-				}
-				// Availability is recorded, but optional components enter the closure only when requested as roots.
-				receipt.Decisions = append(receipt.Decisions, Decision{From: id, Relation: Optional, Wanted: relation.Target, Chosen: chosen, Substitute: substitute, Evidence: relation.Evidence})
-			case Recommends:
-				chosen, substitute := choose(relation, byCapability)
-				if chosen == "" {
-					receipt.Warnings = append(receipt.Warnings, Warning{Code: "RECOMMENDATION_UNMET", From: id, Wanted: relation.Target, Message: "recommendation is not a launch requirement", Evidence: relation.Evidence})
-					continue
-				}
-				// Recommendations inform operators without expanding the mandatory closure.
-				receipt.Decisions = append(receipt.Decisions, Decision{From: id, Relation: Recommends, Wanted: relation.Target, Chosen: chosen, Substitute: substitute, Evidence: relation.Evidence})
-			case Conflicts:
-				// Evaluated after closure so relation order cannot change the result.
-			default:
-				return Receipt{}, fmt.Errorf("component %s: unsupported relation %q", id, relation.Kind)
-			}
-		}
+	for _, root := range receipt.Roots {
+		initial.paths[root] = []string{root}
+	}
+	result, _ := resolveQueue(initial, append([]string(nil), receipt.Roots...), byID, byCapability)
+	return finish(result, byID), nil
+}
+
+type resolveState struct {
+	receipt  Receipt
+	selected map[string]bool
+	paths    map[string][]string
+}
+
+// resolveQueue searches only dependency choices reachable from the requested roots.
+// Candidate order is stable, so the first satisfiable receipt is reproducible without
+// eagerly enumerating the unrelated cross-product of the whole catalog.
+func resolveQueue(state resolveState, queue []string, byID map[string]Component, byCapability map[string][]string) (resolveState, bool) {
+	if len(queue) == 0 {
+		return checkConflicts(state, byID, byCapability)
+	}
+	id := queue[0]
+	queue = append([]string(nil), queue[1:]...)
+	if state.selected[id] {
+		return resolveQueue(state, queue, byID, byCapability)
+	}
+	component, ok := byID[id]
+	if !ok {
+		state.receipt = refused(state.receipt, "MISSING_ROOT", id, state.paths[id], Evidence{}, availableRemedies(id, byCapability))
+		return state, false
+	}
+	state = cloneState(state)
+	state.selected[id] = true
+	return resolveRelations(state, component, 0, queue, byID, byCapability)
+}
+
+func resolveRelations(state resolveState, component Component, index int, queue []string, byID map[string]Component, byCapability map[string][]string) (resolveState, bool) {
+	if index == len(component.Relations) {
 		sort.Strings(queue)
+		return resolveQueue(state, queue, byID, byCapability)
+	}
+	relation := component.Relations[index]
+	next := func(candidate string, substitute bool) (resolveState, bool) {
+		branch := cloneState(state)
+		branch.receipt.Decisions = append(branch.receipt.Decisions, Decision{From: component.ID, Relation: relation.Kind, Wanted: relation.Target, Chosen: candidate, Substitute: substitute, Evidence: relation.Evidence})
+		if _, seen := branch.paths[candidate]; !seen {
+			branch.paths[candidate] = append(append([]string(nil), branch.paths[component.ID]...), candidate)
+		}
+		return resolveRelations(branch, component, index+1, append(append([]string(nil), queue...), candidate), byID, byCapability)
 	}
 
-	selectedIDs := make([]string, 0, len(selected))
-	for id := range selected {
-		selectedIDs = append(selectedIDs, id)
+	switch relation.Kind {
+	case Requires:
+		candidates := relationCandidates(relation, byCapability)
+		if len(candidates) == 0 {
+			state.receipt = refused(state.receipt, "UNSATISFIED_REQUIREMENT", relation.Target, append(append([]string(nil), state.paths[component.ID]...), relation.Target), relation.Evidence, availableRemedies(relation.Target, byCapability))
+			return state, false
+		}
+		var firstFailure resolveState
+		for i, candidate := range candidates {
+			result, ok := next(candidate.id, candidate.substitute)
+			if ok {
+				return result, true
+			}
+			if i == 0 {
+				firstFailure = result
+			}
+		}
+		return firstFailure, false
+	case Optional:
+		candidates := relationCandidates(relation, byCapability)
+		if len(candidates) == 0 {
+			state = cloneState(state)
+			state.receipt.Warnings = append(state.receipt.Warnings, Warning{Code: "OPTIONAL_UNAVAILABLE", From: component.ID, Wanted: relation.Target, Message: "optional component is unavailable", Evidence: relation.Evidence})
+			return resolveRelations(state, component, index+1, queue, byID, byCapability)
+		}
+		// Availability is recorded, but optional components enter the closure only when requested as roots.
+		state = cloneState(state)
+		state.receipt.Decisions = append(state.receipt.Decisions, Decision{From: component.ID, Relation: Optional, Wanted: relation.Target, Chosen: candidates[0].id, Substitute: candidates[0].substitute, Evidence: relation.Evidence})
+		return resolveRelations(state, component, index+1, queue, byID, byCapability)
+	case Recommends:
+		candidates := relationCandidates(relation, byCapability)
+		state = cloneState(state)
+		if len(candidates) == 0 {
+			state.receipt.Warnings = append(state.receipt.Warnings, Warning{Code: "RECOMMENDATION_UNMET", From: component.ID, Wanted: relation.Target, Message: "recommendation is not a launch requirement", Evidence: relation.Evidence})
+		} else {
+			// Recommendations inform operators without expanding the mandatory closure.
+			state.receipt.Decisions = append(state.receipt.Decisions, Decision{From: component.ID, Relation: Recommends, Wanted: relation.Target, Chosen: candidates[0].id, Substitute: candidates[0].substitute, Evidence: relation.Evidence})
+		}
+		return resolveRelations(state, component, index+1, queue, byID, byCapability)
+	case Conflicts:
+		return resolveRelations(state, component, index+1, queue, byID, byCapability)
+	default:
+		state.receipt = Receipt{}
+		state.receipt.Conflict = &Conflict{Code: "INVALID_RELATION", Wanted: string(relation.Kind)}
+		return state, false
 	}
-	sort.Strings(selectedIDs)
-	for _, id := range selectedIDs {
-		component := byID[id]
-		for _, relation := range component.Relations {
+}
+
+type candidate struct {
+	id         string
+	substitute bool
+}
+
+func relationCandidates(relation Relation, byCapability map[string][]string) []candidate {
+	var out []candidate
+	seen := map[string]bool{}
+	add := func(capability string, substitute bool) {
+		for _, id := range byCapability[capability] {
+			if !seen[id] {
+				seen[id] = true
+				out = append(out, candidate{id: id, substitute: substitute})
+			}
+		}
+	}
+	add(relation.Target, false)
+	for _, substitute := range relation.Substitutes {
+		add(substitute, true)
+	}
+	return out
+}
+
+func checkConflicts(state resolveState, byID map[string]Component, byCapability map[string][]string) (resolveState, bool) {
+	ids := sortedSelectedIDs(state.selected)
+	for _, id := range ids {
+		for _, relation := range byID[id].Relations {
 			if relation.Kind != Conflicts {
 				continue
 			}
-			other := firstSelected(byCapability[relation.Target], selected)
+			other := firstSelected(byCapability[relation.Target], state.selected)
 			if other == "" {
 				continue
 			}
-			chain := append(append([]string(nil), paths[id]...), "conflicts:"+other)
-			return refused(receipt, "COMPONENT_CONFLICT", relation.Target, chain, relation.Evidence, []string{"remove " + id, "remove " + other}), nil
+			state.receipt = refused(state.receipt, "COMPONENT_CONFLICT", relation.Target, append(append([]string(nil), state.paths[id]...), "conflicts:"+other), relation.Evidence, []string{"remove " + id, "remove " + other})
+			return state, false
 		}
 	}
+	return state, true
+}
 
-	for _, id := range selectedIDs {
-		receipt.Selected = append(receipt.Selected, byID[id])
+func finish(state resolveState, byID map[string]Component) Receipt {
+	if state.receipt.Status == "allow" {
+		for _, id := range sortedSelectedIDs(state.selected) {
+			state.receipt.Selected = append(state.receipt.Selected, byID[id])
+		}
 	}
-	sortDecisions(receipt.Decisions)
-	sortWarnings(receipt.Warnings)
-	return receipt, nil
+	sortDecisions(state.receipt.Decisions)
+	sortWarnings(state.receipt.Warnings)
+	return state.receipt
+}
+
+func cloneState(in resolveState) resolveState {
+	out := in
+	out.receipt.Roots = append([]string(nil), in.receipt.Roots...)
+	out.receipt.Selected = append([]Component(nil), in.receipt.Selected...)
+	out.receipt.Decisions = append([]Decision(nil), in.receipt.Decisions...)
+	out.receipt.Warnings = append([]Warning(nil), in.receipt.Warnings...)
+	out.selected = make(map[string]bool, len(in.selected))
+	for id, value := range in.selected {
+		out.selected[id] = value
+	}
+	out.paths = make(map[string][]string, len(in.paths))
+	for id, path := range in.paths {
+		out.paths[id] = append([]string(nil), path...)
+	}
+	return out
+}
+
+func sortedSelectedIDs(selected map[string]bool) []string {
+	ids := make([]string, 0, len(selected))
+	for id := range selected {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func validateComponent(c Component, provider string) error {
@@ -274,18 +372,6 @@ func validateComponent(c Component, provider string) error {
 		}
 	}
 	return nil
-}
-
-func choose(r Relation, providers map[string][]string) (string, bool) {
-	if ids := providers[r.Target]; len(ids) > 0 {
-		return ids[0], false
-	}
-	for _, substitute := range r.Substitutes {
-		if ids := providers[substitute]; len(ids) > 0 {
-			return ids[0], true
-		}
-	}
-	return "", false
 }
 
 func firstSelected(ids []string, selected map[string]bool) string {
