@@ -1,0 +1,367 @@
+{
+  "schema": "fak-stack-selfcheck/1",
+  "allow": {
+    "schema": "fak-stack-receipt/1",
+    "status": "allow",
+    "workload": "coding-change@r1",
+    "roots": [
+      "harness:ponytail@r8",
+      "infra:l4-cuda12@r3"
+    ],
+    "selected": [
+      {
+        "id": "backend:awq@1.4.2",
+        "kind": "serving-backend",
+        "version": "1.4.2",
+        "provides": [
+          "quant.awq.w4a16"
+        ],
+        "relations": [
+          {
+            "kind": "requires",
+            "target": "kernel.awq.fast",
+            "substitutes": [
+              "kernel.awq.portable"
+            ],
+            "evidence": {
+              "authority": "backend",
+              "source": "awq-backend@1.4.2"
+            }
+          }
+        ],
+        "evidence": {
+          "authority": "backend",
+          "source": "awq-backend@1.4.2"
+        }
+      },
+      {
+        "id": "harness:ponytail@r8",
+        "kind": "harness",
+        "version": "r8",
+        "provides": [
+          "workload.coding"
+        ],
+        "relations": [
+          {
+            "kind": "optional",
+            "target": "tool.browser",
+            "evidence": {
+              "authority": "ponytail",
+              "source": "harness-manifest@r8"
+            }
+          },
+          {
+            "kind": "recommends",
+            "target": "infra.gpu.sm90",
+            "evidence": {
+              "authority": "benchmark",
+              "source": "coding-latency-2026-08-15",
+              "tier": "observed",
+              "freshness": "2026-09-15"
+            }
+          },
+          {
+            "kind": "requires",
+            "target": "model.coder",
+            "evidence": {
+              "authority": "ponytail",
+              "source": "harness-manifest@r8"
+            }
+          },
+          {
+            "kind": "requires",
+            "target": "policy.repo-reviewed",
+            "evidence": {
+              "authority": "operator",
+              "source": "coding-change@r1"
+            }
+          },
+          {
+            "kind": "requires",
+            "target": "tool.repo-write",
+            "evidence": {
+              "authority": "ponytail",
+              "source": "harness-manifest@r8"
+            }
+          }
+        ],
+        "evidence": {
+          "authority": "harness-kit",
+          "source": "ponytail@r8",
+          "tier": "conformant"
+        }
+      },
+      {
+        "id": "infra:l4-cuda12@r3",
+        "kind": "infrastructure-baseline",
+        "version": "r3",
+        "provides": [
+          "device.cuda.sm80",
+          "infra.gpu.sm80"
+        ],
+        "evidence": {
+          "authority": "fleet-probe",
+          "source": "l4-cuda12@r3",
+          "tier": "observed",
+          "freshness": "2026-08-16"
+        }
+      },
+      {
+        "id": "kernel:awq-portable@0.9",
+        "kind": "kernel-path",
+        "version": "0.9",
+        "provides": [
+          "kernel.awq.portable"
+        ],
+        "relations": [
+          {
+            "kind": "requires",
+            "target": "runtime.cuda12",
+            "evidence": {
+              "authority": "kernel",
+              "source": "awq-portable@0.9"
+            }
+          }
+        ],
+        "evidence": {
+          "authority": "kernel",
+          "source": "awq-portable@0.9",
+          "tier": "device-decode",
+          "freshness": "2026-09-15"
+        }
+      },
+      {
+        "id": "model:coder-awq@sha256:111",
+        "kind": "model-artifact",
+        "version": "sha256:111",
+        "provides": [
+          "model.coder"
+        ],
+        "relations": [
+          {
+            "kind": "requires",
+            "target": "quant.awq.w4a16",
+            "evidence": {
+              "authority": "quantmeta",
+              "source": "artifact:sha256:111",
+              "tier": "metadata"
+            }
+          }
+        ],
+        "evidence": {
+          "authority": "model-registry",
+          "source": "artifact:sha256:111"
+        }
+      },
+      {
+        "id": "policy:repo-reviewed@r3",
+        "kind": "policy",
+        "version": "r3",
+        "provides": [
+          "policy.repo-reviewed"
+        ],
+        "evidence": {
+          "authority": "policy",
+          "source": "repo-reviewed@r3",
+          "tier": "structure"
+        }
+      },
+      {
+        "id": "runtime:cuda@12.8",
+        "kind": "runtime",
+        "version": "12.8",
+        "provides": [
+          "runtime.cuda12"
+        ],
+        "relations": [
+          {
+            "kind": "requires",
+            "target": "device.cuda.sm80",
+            "evidence": {
+              "authority": "runtime-probe",
+              "source": "cuda@12.8"
+            }
+          }
+        ],
+        "evidence": {
+          "authority": "runtime-probe",
+          "source": "cuda@12.8",
+          "tier": "observed"
+        }
+      },
+      {
+        "id": "tool:repo@r4",
+        "kind": "tool-provider",
+        "version": "r4",
+        "provides": [
+          "tool.repo-write"
+        ],
+        "evidence": {
+          "authority": "tool-registry",
+          "source": "repo-tool@r4",
+          "tier": "contract-tested"
+        }
+      }
+    ],
+    "decisions": [
+      {
+        "from": "backend:awq@1.4.2",
+        "relation": "requires",
+        "wanted": "kernel.awq.fast",
+        "chosen": "kernel:awq-portable@0.9",
+        "substitute": true,
+        "evidence": {
+          "authority": "backend",
+          "source": "awq-backend@1.4.2"
+        }
+      },
+      {
+        "from": "harness:ponytail@r8",
+        "relation": "requires",
+        "wanted": "model.coder",
+        "chosen": "model:coder-awq@sha256:111",
+        "evidence": {
+          "authority": "ponytail",
+          "source": "harness-manifest@r8"
+        }
+      },
+      {
+        "from": "harness:ponytail@r8",
+        "relation": "requires",
+        "wanted": "policy.repo-reviewed",
+        "chosen": "policy:repo-reviewed@r3",
+        "evidence": {
+          "authority": "operator",
+          "source": "coding-change@r1"
+        }
+      },
+      {
+        "from": "harness:ponytail@r8",
+        "relation": "requires",
+        "wanted": "tool.repo-write",
+        "chosen": "tool:repo@r4",
+        "evidence": {
+          "authority": "ponytail",
+          "source": "harness-manifest@r8"
+        }
+      },
+      {
+        "from": "kernel:awq-portable@0.9",
+        "relation": "requires",
+        "wanted": "runtime.cuda12",
+        "chosen": "runtime:cuda@12.8",
+        "evidence": {
+          "authority": "kernel",
+          "source": "awq-portable@0.9"
+        }
+      },
+      {
+        "from": "model:coder-awq@sha256:111",
+        "relation": "requires",
+        "wanted": "quant.awq.w4a16",
+        "chosen": "backend:awq@1.4.2",
+        "evidence": {
+          "authority": "quantmeta",
+          "source": "artifact:sha256:111",
+          "tier": "metadata"
+        }
+      },
+      {
+        "from": "runtime:cuda@12.8",
+        "relation": "requires",
+        "wanted": "device.cuda.sm80",
+        "chosen": "infra:l4-cuda12@r3",
+        "evidence": {
+          "authority": "runtime-probe",
+          "source": "cuda@12.8"
+        }
+      }
+    ],
+    "warnings": [
+      {
+        "code": "RECOMMENDATION_UNMET",
+        "from": "harness:ponytail@r8",
+        "wanted": "infra.gpu.sm90",
+        "message": "recommendation is not a launch requirement",
+        "evidence": {
+          "authority": "benchmark",
+          "source": "coding-latency-2026-08-15",
+          "tier": "observed",
+          "freshness": "2026-09-15"
+        }
+      },
+      {
+        "code": "OPTIONAL_UNAVAILABLE",
+        "from": "harness:ponytail@r8",
+        "wanted": "tool.browser",
+        "message": "optional component is unavailable",
+        "evidence": {
+          "authority": "ponytail",
+          "source": "harness-manifest@r8"
+        }
+      }
+    ]
+  },
+  "refuse": {
+    "schema": "fak-stack-receipt/1",
+    "status": "refuse",
+    "workload": "coding-change@r1",
+    "roots": [
+      "harness:ponytail@r8",
+      "infra:t4-cuda12@r2"
+    ],
+    "decisions": [
+      {
+        "from": "backend:awq@1.4.2",
+        "relation": "requires",
+        "wanted": "kernel.awq.fast",
+        "chosen": "kernel:awq-fast@0.9",
+        "evidence": {
+          "authority": "backend",
+          "source": "awq-backend@1.4.2"
+        }
+      },
+      {
+        "from": "harness:ponytail@r8",
+        "relation": "requires",
+        "wanted": "model.coder",
+        "chosen": "model:coder-awq@sha256:111",
+        "evidence": {
+          "authority": "ponytail",
+          "source": "harness-manifest@r8"
+        }
+      },
+      {
+        "from": "model:coder-awq@sha256:111",
+        "relation": "requires",
+        "wanted": "quant.awq.w4a16",
+        "chosen": "backend:awq@1.4.2",
+        "evidence": {
+          "authority": "quantmeta",
+          "source": "artifact:sha256:111",
+          "tier": "metadata"
+        }
+      }
+    ],
+    "conflict": {
+      "code": "UNSATISFIED_REQUIREMENT",
+      "wanted": "device.cuda.sm80",
+      "chain": [
+        "harness:ponytail@r8",
+        "model:coder-awq@sha256:111",
+        "backend:awq@1.4.2",
+        "kernel:awq-fast@0.9",
+        "device.cuda.sm80"
+      ],
+      "remediation": [
+        "add a provider for device.cuda.sm80",
+        "collect or refresh evidence for device.cuda.sm80"
+      ],
+      "evidence": {
+        "authority": "kernel",
+        "source": "awq-fast@0.9",
+        "tier": "device-decode"
+      }
+    }
+  }
+}

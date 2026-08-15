@@ -264,6 +264,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Learning observation lineage](docs/learning-observation.md) — content-addressed source/candidate/witness/verdict records and closed-enum edges; separate from witness-gated admission.
 
 ## Notes & research (`docs/notes/`)
+- [Native harness stack-resolution spine witness](docs/notes/NATIVE-HARNESS-STACK-RESOLUTION-SPINE-2026-08-15.md) -- auto-indexed dated note.
 - [Harness-creation current-interest inventory — 2026-08-15](docs/notes/HARNESS-CREATION-CURRENT-INTEREST-2026-08-15.md) -- auto-indexed dated note.
 
 - [Harness creator ten-minute spine witness — 2026-08-15](docs/notes/HARNESS-CREATOR-SPINE-WITNESS-2026-08-15.md) -- auto-indexed dated note.
@@ -748,4 +749,3 @@ front page.
 ## Research notes — 2026-08-13
 
 - [`docs/notes/NATIVE-HARNESS-CORE-READINESS-2026-08-13.md`](docs/notes/NATIVE-HARNESS-CORE-READINESS-2026-08-13.md) — core-readiness update on the fak-owned agent loop, superseding the two stale June notes. Streaming and the durable turn checkpoint (the June "Crush is ahead" gaps) both **shipped**, along with structured progress SSE, the mid-flight verb mailbox, terminal-tool loop wake, and per-call account routing. The gap the June map missed: **the owned loop has no work surface** — `internal/agent/loop.go:401` wires it to the travel-demo `ToolCatalog()` over `kernel.New("localtools")`, and `internal/gateway/native_serve.go:216` seeds it with `lastUserText(req.Messages)` alone, so the served request's `tools[]` and conversation history are dropped. `fak serve --native` therefore cannot serve a real client conversation and `fak chat` cannot edit a file; #1380's DoD run has been unwitnessed since June for exactly that reason. Maps the twelve (all OPEN) children of the harness-native program #2387, the six rungs of today's resource-governance epic #6552 — whose seat-pooling design has the demo fixture as its subject until the tool surface generalizes — and argues the Claude Code import worth making is the **tool contract and its cross-call invariants** (read-before-edit, exact-match uniqueness, truncation ceilings) as kernel contracts, plus canonicalization-before-matching (#2407), *not* its permission regexes, which fak's adjudicator (`cli_grammar`/`shell_dialect`/`rce_pipe`/`argcanon`) already beats.
-

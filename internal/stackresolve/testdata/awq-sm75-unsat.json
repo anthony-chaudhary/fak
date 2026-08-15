@@ -1,0 +1,35 @@
+{
+  "schema": "fak-stack-manifest/1",
+  "workload": "coding-change@r1",
+  "roots": ["harness:ponytail@r8", "infra:t4-cuda12@r2"],
+  "components": [
+    {
+      "id": "harness:ponytail@r8", "kind": "harness", "version": "r8",
+      "relations": [{"kind": "requires", "target": "model.coder", "evidence": {"authority": "ponytail", "source": "harness-manifest@r8"}}],
+      "evidence": {"authority": "harness-kit", "source": "ponytail@r8"}
+    },
+    {
+      "id": "model:coder-awq@sha256:111", "kind": "model-artifact", "version": "sha256:111",
+      "provides": ["model.coder"],
+      "relations": [{"kind": "requires", "target": "quant.awq.w4a16", "evidence": {"authority": "quantmeta", "source": "artifact:sha256:111", "tier": "metadata"}}],
+      "evidence": {"authority": "model-registry", "source": "artifact:sha256:111"}
+    },
+    {
+      "id": "backend:awq@1.4.2", "kind": "serving-backend", "version": "1.4.2",
+      "provides": ["quant.awq.w4a16"],
+      "relations": [{"kind": "requires", "target": "kernel.awq.fast", "evidence": {"authority": "backend", "source": "awq-backend@1.4.2"}}],
+      "evidence": {"authority": "backend", "source": "awq-backend@1.4.2"}
+    },
+    {
+      "id": "kernel:awq-fast@0.9", "kind": "kernel-path", "version": "0.9",
+      "provides": ["kernel.awq.fast"],
+      "relations": [{"kind": "requires", "target": "device.cuda.sm80", "evidence": {"authority": "kernel", "source": "awq-fast@0.9", "tier": "device-decode"}}],
+      "evidence": {"authority": "kernel", "source": "awq-fast@0.9"}
+    },
+    {
+      "id": "infra:t4-cuda12@r2", "kind": "infrastructure-baseline", "version": "r2",
+      "provides": ["device.cuda.sm75"],
+      "evidence": {"authority": "fleet-probe", "source": "t4-cuda12@r2", "tier": "observed", "freshness": "2026-08-16"}
+    }
+  ]
+}

@@ -5855,6 +5855,11 @@
           "category": "incidental",
           "reason": "Tuple carrier only transports the existing preflight result across a timeout boundary.",
           "token": "dispatchWavePreflightResult"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local reverse index from provided capability to candidate component IDs; it is resolver implementation data, not a new policy-capability concept.",
+          "token": "byCapability"
         }
       ],
       "exclude": [
@@ -5913,6 +5918,7 @@
         "adjudicationPrompt",
         "adjudicators",
         "bundled_capability",
+        "byCapability",
         "capabilities",
         "capability_denied",
         "capability_digest",
@@ -7675,6 +7681,11 @@
           "category": "incidental",
           "reason": "Local aggregate variable counts route observations; it is not a decision policy or distinct domain concept.",
           "token": "routeDecisions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Deterministic receipt-ordering helper over already-resolved decisions; not a new decision concept.",
+          "token": "sortDecisions"
         }
       ],
       "id": "decision",
@@ -7722,6 +7733,7 @@
         "scheduleOutcome",
         "selectorDecision",
         "selectorOracle",
+        "sortDecisions",
         "total_decision_overhead_ms"
       ],
       "min_files": 3,
