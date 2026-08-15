@@ -519,9 +519,9 @@ func TestHostProbeShellReuseIsOnTheTickConfigSurface(t *testing.T) {
 // handed. Dropping either line reds here instead of quietly costing the fleet a
 // console per probe again.
 func TestDispatchTickWiresTheHostProbeSpine(t *testing.T) {
-	src, err := os.ReadFile("dispatch_tick.go")
+	src, err := os.ReadFile("dispatch_tick_evaluate.go")
 	if err != nil {
-		t.Fatalf("read the tick: %v", err)
+		t.Fatalf("read the tick evaluator: %v", err)
 	}
 	for _, want := range []string{
 		"dispatchArmHostProbeShellReuse(opts.HostProbeShellReuse)",
