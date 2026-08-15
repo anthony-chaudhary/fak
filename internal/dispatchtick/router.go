@@ -215,6 +215,10 @@ type IssueRoute struct {
 	// dependency soft-hold (holdOpenPrereqForRoute) reads this to keep a leaf out of the pick
 	// while a prerequisite it names is still an open candidate this tick.
 	BlockedBy []string `json:"blocked_by,omitempty"`
+	// Category/Layer are explicit category-baseline coordinates from matching issue-body
+	// sections. They are scheduling data only; absent metadata keeps legacy work unchanged.
+	Category string `json:"category,omitempty"`
+	Layer    string `json:"layer,omitempty"`
 	// Body is the issue's full markdown body, carried through the route so the picker can
 	// build a worker prompt from the already-fetched row instead of a second `gh issue
 	// view` on the hot dispatch path (#4167). omitempty keeps a body-less issue's route
@@ -1244,6 +1248,8 @@ func route(issue Issue, lane, confidence, signal string, conflict bool, paths []
 		UnroutedReason: unroutedReason,
 		Generation:     generationField(issue),
 		BlockedBy:      CandidateBlockedBy(issue.Body),
+		Category:       issueBriefField(issue, "category"),
+		Layer:          issueBriefField(issue, "layer", "capability layer"),
 		Body:           issue.Body,
 		Labels:         labelNames(issue),
 	}

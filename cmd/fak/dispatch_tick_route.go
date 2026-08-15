@@ -629,6 +629,9 @@ func dispatchRouteIssuesNative(root string, stderr io.Writer) (dispatchtick.Rout
 	// SkippedHumanBlocked (still open), so a dependent of it remains correctly held. Reads the
 	// ledger fresh each tick (never the routed cache), so a resume takes effect next tick.
 	payload = holdSteerPausedForRoute(root, payload)
+	// A witnessed completed category layer redirects ordinary polish to its declared next
+	// layer while preserving regressions and undeclared legacy work (#6862).
+	payload = holdCompletedCategoryBaselines(root, payload)
 	// Compare the pre-hold graph with the prior durable hold set before removing current
 	// dependents. This turns prerequisite closure into a one-pass pickup signal (#6856).
 	payload = reconcilePrereqRelease(root, payload)
