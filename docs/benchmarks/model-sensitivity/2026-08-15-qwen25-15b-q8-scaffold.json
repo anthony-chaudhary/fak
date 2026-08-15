@@ -1,0 +1,1345 @@
+{
+  "schema": "fak-model-scaffold-ablation-cell/1",
+  "started_utc": "2026-08-15T18:18:02Z",
+  "finished_utc": "2026-08-15T18:25:42Z",
+  "host": {
+    "platform": "Linux-6.6.137+-x86_64-Intel-R-_Xeon-R-_CPU_@_2.20GHz-with-glibc2.37"
+  },
+  "endpoint": "http://127.0.0.1:8083",
+  "model": "qwen2.5-1.5b-cpu",
+  "artifact": null,
+  "protocol": {
+    "scoring": "greedy generation; first explicit answer-letter phrase",
+    "temperature": 0.0,
+    "max_tokens": 24,
+    "tasks": 24,
+    "arms": [
+      "direct",
+      "contract",
+      "scaffold"
+    ],
+    "task_definitions": [
+      {
+        "id": "arith-01",
+        "q": "What is 7 + 8?",
+        "choices": [
+          "13",
+          "14",
+          "15",
+          "16"
+        ],
+        "answer": "C"
+      },
+      {
+        "id": "arith-02",
+        "q": "What is 9 multiplied by 6?",
+        "choices": [
+          "45",
+          "48",
+          "54",
+          "56"
+        ],
+        "answer": "C"
+      },
+      {
+        "id": "arith-03",
+        "q": "What is 81 divided by 9?",
+        "choices": [
+          "7",
+          "8",
+          "9",
+          "10"
+        ],
+        "answer": "C"
+      },
+      {
+        "id": "arith-04",
+        "q": "What is 17 - 9?",
+        "choices": [
+          "6",
+          "7",
+          "8",
+          "9"
+        ],
+        "answer": "C"
+      },
+      {
+        "id": "arith-05",
+        "q": "What is 5 squared?",
+        "choices": [
+          "10",
+          "20",
+          "25",
+          "30"
+        ],
+        "answer": "C"
+      },
+      {
+        "id": "arith-06",
+        "q": "A box has 3 rows of 4 balls. How many balls?",
+        "choices": [
+          "7",
+          "10",
+          "12",
+          "14"
+        ],
+        "answer": "C"
+      },
+      {
+        "id": "logic-01",
+        "q": "All robins are birds. All birds have wings. Do robins have wings?",
+        "choices": [
+          "Yes",
+          "No",
+          "Sometimes",
+          "Unknown"
+        ],
+        "answer": "A"
+      },
+      {
+        "id": "logic-02",
+        "q": "If today is Monday, what day is tomorrow?",
+        "choices": [
+          "Sunday",
+          "Tuesday",
+          "Wednesday",
+          "Friday"
+        ],
+        "answer": "B"
+      },
+      {
+        "id": "logic-03",
+        "q": "Which number comes next: 2, 4, 6, 8?",
+        "choices": [
+          "9",
+          "10",
+          "11",
+          "12"
+        ],
+        "answer": "B"
+      },
+      {
+        "id": "logic-04",
+        "q": "Which item does not belong: apple, banana, carrot, orange?",
+        "choices": [
+          "apple",
+          "banana",
+          "carrot",
+          "orange"
+        ],
+        "answer": "C"
+      },
+      {
+        "id": "logic-05",
+        "q": "Sam is taller than Lee. Lee is taller than Pat. Who is shortest?",
+        "choices": [
+          "Sam",
+          "Lee",
+          "Pat",
+          "Cannot know"
+        ],
+        "answer": "C"
+      },
+      {
+        "id": "logic-06",
+        "q": "A light is off. One working switch is flipped once. What is its new state?",
+        "choices": [
+          "off",
+          "on",
+          "broken",
+          "unknown"
+        ],
+        "answer": "B"
+      },
+      {
+        "id": "code-01",
+        "q": "In Python, what is len([10, 20, 30])?",
+        "choices": [
+          "2",
+          "3",
+          "30",
+          "60"
+        ],
+        "answer": "B"
+      },
+      {
+        "id": "code-02",
+        "q": "Which operator tests equality in Go?",
+        "choices": [
+          "=",
+          "==",
+          ":=",
+          "!="
+        ],
+        "answer": "B"
+      },
+      {
+        "id": "code-03",
+        "q": "What does boolean false evaluate to?",
+        "choices": [
+          "true",
+          "false",
+          "zero",
+          "error"
+        ],
+        "answer": "B"
+      },
+      {
+        "id": "code-04",
+        "q": "Which data structure uses FIFO order?",
+        "choices": [
+          "stack",
+          "queue",
+          "tree",
+          "set"
+        ],
+        "answer": "B"
+      },
+      {
+        "id": "code-05",
+        "q": "What is 5 % 2 in most programming languages?",
+        "choices": [
+          "0",
+          "1",
+          "2",
+          "2.5"
+        ],
+        "answer": "B"
+      },
+      {
+        "id": "code-06",
+        "q": "Which JSON value is a boolean?",
+        "choices": [
+          "\"true\"",
+          "true",
+          "1",
+          "yes"
+        ],
+        "answer": "B"
+      },
+      {
+        "id": "state-01",
+        "q": "A counter starts at 4 and is incremented twice. Its value is?",
+        "choices": [
+          "4",
+          "5",
+          "6",
+          "8"
+        ],
+        "answer": "C"
+      },
+      {
+        "id": "state-02",
+        "q": "A file is created and then deleted. Does it remain present?",
+        "choices": [
+          "Yes",
+          "No",
+          "Twice",
+          "Unknown"
+        ],
+        "answer": "B"
+      },
+      {
+        "id": "state-03",
+        "q": "A door starts locked and is unlocked once. It is now?",
+        "choices": [
+          "locked",
+          "unlocked",
+          "open",
+          "missing"
+        ],
+        "answer": "B"
+      },
+      {
+        "id": "state-04",
+        "q": "A list [1,2] has 3 appended. What is the last item?",
+        "choices": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "answer": "C"
+      },
+      {
+        "id": "state-05",
+        "q": "Balance is 10, then 3 is withdrawn. New balance?",
+        "choices": [
+          "3",
+          "7",
+          "10",
+          "13"
+        ],
+        "answer": "B"
+      },
+      {
+        "id": "state-06",
+        "q": "Flag starts false and is toggled once. New value?",
+        "choices": [
+          "false",
+          "true",
+          "null",
+          "error"
+        ],
+        "answer": "B"
+      }
+    ],
+    "arm_prompts": {
+      "direct": "{question}\n{lettered_options}\nAnswer:",
+      "contract": "Choose the correct option. Return exactly one capital letter: A, B, C, or D.\nQuestion: {question}\n{lettered_options}\nAnswer:",
+      "scaffold": "Solve the question carefully, check the result against the options, then return exactly one capital letter: A, B, C, or D. Do not output reasoning.\nQuestion: {question}\n{lettered_options}\nAnswer:"
+    }
+  },
+  "arms": {
+    "direct": {
+      "correct": 13,
+      "total": 24,
+      "accuracy": 0.541667,
+      "strict_contract": 3,
+      "median_latency_ms": 6560.908,
+      "usage_totals": {
+        "prompt_tokens": 990,
+        "completion_tokens": 241,
+        "total_tokens": 1231
+      },
+      "rows": [
+        {
+          "id": "arith-01",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": false,
+          "text": "C. 15",
+          "latency_ms": 7461.104,
+          "usage": {
+            "prompt_tokens": 42,
+            "completion_tokens": 5,
+            "total_tokens": 47
+          }
+        },
+        {
+          "id": "arith-02",
+          "expected": "C",
+          "predicted": null,
+          "correct": false,
+          "strict_contract": false,
+          "text": "To find the product of 9 multiplied by 6, you can use the multiplication table or perform the calculation directly.\n\n",
+          "latency_ms": 12199.688,
+          "usage": {
+            "prompt_tokens": 43,
+            "completion_tokens": 24,
+            "total_tokens": 67
+          }
+        },
+        {
+          "id": "arith-03",
+          "expected": "C",
+          "predicted": null,
+          "correct": false,
+          "strict_contract": false,
+          "text": "To determine the correct answer, we need to perform the division of 81 by 9.\n\nLet's break it",
+          "latency_ms": 5915.692,
+          "usage": {
+            "prompt_tokens": 41,
+            "completion_tokens": 24,
+            "total_tokens": 65
+          }
+        },
+        {
+          "id": "arith-04",
+          "expected": "C",
+          "predicted": null,
+          "correct": false,
+          "strict_contract": false,
+          "text": "To solve the problem of 17 - 9, we can follow these steps:\n\n1. Start with the number",
+          "latency_ms": 12114.009,
+          "usage": {
+            "prompt_tokens": 39,
+            "completion_tokens": 24,
+            "total_tokens": 63
+          }
+        },
+        {
+          "id": "arith-05",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": false,
+          "text": "C. 25",
+          "latency_ms": 1160.755,
+          "usage": {
+            "prompt_tokens": 40,
+            "completion_tokens": 5,
+            "total_tokens": 45
+          }
+        },
+        {
+          "id": "arith-06",
+          "expected": "C",
+          "predicted": null,
+          "correct": false,
+          "strict_contract": false,
+          "text": "To determine the total number of balls in the box, we need to calculate the total number of balls in all the rows",
+          "latency_ms": 2947.83,
+          "usage": {
+            "prompt_tokens": 48,
+            "completion_tokens": 24,
+            "total_tokens": 72
+          }
+        },
+        {
+          "id": "logic-01",
+          "expected": "A",
+          "predicted": "A",
+          "correct": true,
+          "strict_contract": false,
+          "text": "A. Yes",
+          "latency_ms": 10435.335,
+          "usage": {
+            "prompt_tokens": 43,
+            "completion_tokens": 3,
+            "total_tokens": 46
+          }
+        },
+        {
+          "id": "logic-02",
+          "expected": "B",
+          "predicted": null,
+          "correct": false,
+          "strict_contract": false,
+          "text": "To determine what day it will be tomorrow if today is Monday, we need to count forward one day from Monday.\n\n1",
+          "latency_ms": 2694.493,
+          "usage": {
+            "prompt_tokens": 36,
+            "completion_tokens": 24,
+            "total_tokens": 60
+          }
+        },
+        {
+          "id": "logic-03",
+          "expected": "B",
+          "predicted": null,
+          "correct": false,
+          "strict_contract": false,
+          "text": "The next number in the sequence 2, 4, 6, 8 is 10.",
+          "latency_ms": 9061.262,
+          "usage": {
+            "prompt_tokens": 50,
+            "completion_tokens": 22,
+            "total_tokens": 72
+          }
+        },
+        {
+          "id": "logic-04",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": true,
+          "text": "C",
+          "latency_ms": 812.893,
+          "usage": {
+            "prompt_tokens": 40,
+            "completion_tokens": 1,
+            "total_tokens": 41
+          }
+        },
+        {
+          "id": "logic-05",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": false,
+          "text": "C. Pat",
+          "latency_ms": 10402.026,
+          "usage": {
+            "prompt_tokens": 43,
+            "completion_tokens": 3,
+            "total_tokens": 46
+          }
+        },
+        {
+          "id": "logic-06",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": false,
+          "text": "B. on",
+          "latency_ms": 1049.103,
+          "usage": {
+            "prompt_tokens": 44,
+            "completion_tokens": 3,
+            "total_tokens": 47
+          }
+        },
+        {
+          "id": "code-01",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": false,
+          "text": "B. 3",
+          "latency_ms": 10648.631,
+          "usage": {
+            "prompt_tokens": 51,
+            "completion_tokens": 4,
+            "total_tokens": 55
+          }
+        },
+        {
+          "id": "code-02",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B.",
+          "latency_ms": 3851.652,
+          "usage": {
+            "prompt_tokens": 29,
+            "completion_tokens": 2,
+            "total_tokens": 31
+          }
+        },
+        {
+          "id": "code-03",
+          "expected": "B",
+          "predicted": "C",
+          "correct": false,
+          "strict_contract": false,
+          "text": "C. zero",
+          "latency_ms": 4005.276,
+          "usage": {
+            "prompt_tokens": 33,
+            "completion_tokens": 3,
+            "total_tokens": 36
+          }
+        },
+        {
+          "id": "code-04",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": false,
+          "text": "B. queue",
+          "latency_ms": 4009.814,
+          "usage": {
+            "prompt_tokens": 33,
+            "completion_tokens": 3,
+            "total_tokens": 36
+          }
+        },
+        {
+          "id": "code-05",
+          "expected": "B",
+          "predicted": null,
+          "correct": false,
+          "strict_contract": false,
+          "text": "To determine the value of 5%2 in most programming languages, let's break it down step by step:\n\n1",
+          "latency_ms": 2839.972,
+          "usage": {
+            "prompt_tokens": 44,
+            "completion_tokens": 24,
+            "total_tokens": 68
+          }
+        },
+        {
+          "id": "code-06",
+          "expected": "B",
+          "predicted": "A",
+          "correct": false,
+          "strict_contract": false,
+          "text": "A. \"true\"",
+          "latency_ms": 10421.743,
+          "usage": {
+            "prompt_tokens": 35,
+            "completion_tokens": 5,
+            "total_tokens": 40
+          }
+        },
+        {
+          "id": "state-01",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": true,
+          "text": "C",
+          "latency_ms": 4055.796,
+          "usage": {
+            "prompt_tokens": 45,
+            "completion_tokens": 1,
+            "total_tokens": 46
+          }
+        },
+        {
+          "id": "state-02",
+          "expected": "B",
+          "predicted": "D",
+          "correct": false,
+          "strict_contract": false,
+          "text": "D. Unknown",
+          "latency_ms": 10335.413,
+          "usage": {
+            "prompt_tokens": 39,
+            "completion_tokens": 3,
+            "total_tokens": 42
+          }
+        },
+        {
+          "id": "state-03",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": false,
+          "text": "B. unlocked",
+          "latency_ms": 10336.14,
+          "usage": {
+            "prompt_tokens": 39,
+            "completion_tokens": 3,
+            "total_tokens": 42
+          }
+        },
+        {
+          "id": "state-04",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": false,
+          "text": "C. 3",
+          "latency_ms": 1233.433,
+          "usage": {
+            "prompt_tokens": 48,
+            "completion_tokens": 4,
+            "total_tokens": 52
+          }
+        },
+        {
+          "id": "state-05",
+          "expected": "B",
+          "predicted": null,
+          "correct": false,
+          "strict_contract": false,
+          "text": "To determine the new balance after withdrawing 3 from an initial balance of 10, we can follow these steps:\n\n",
+          "latency_ms": 12348.658,
+          "usage": {
+            "prompt_tokens": 47,
+            "completion_tokens": 24,
+            "total_tokens": 71
+          }
+        },
+        {
+          "id": "state-06",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": false,
+          "text": "B. true",
+          "latency_ms": 7206.125,
+          "usage": {
+            "prompt_tokens": 38,
+            "completion_tokens": 3,
+            "total_tokens": 41
+          }
+        }
+      ]
+    },
+    "contract": {
+      "correct": 20,
+      "total": 24,
+      "accuracy": 0.833333,
+      "strict_contract": 24,
+      "median_latency_ms": 5965.448,
+      "usage_totals": {
+        "prompt_tokens": 1518,
+        "completion_tokens": 24,
+        "total_tokens": 1542
+      },
+      "rows": [
+        {
+          "id": "arith-01",
+          "expected": "C",
+          "predicted": "B",
+          "correct": false,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 1233.754,
+          "usage": {
+            "prompt_tokens": 64,
+            "completion_tokens": 1,
+            "total_tokens": 65
+          }
+        },
+        {
+          "id": "arith-02",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": true,
+          "text": "C",
+          "latency_ms": 4431.529,
+          "usage": {
+            "prompt_tokens": 65,
+            "completion_tokens": 1,
+            "total_tokens": 66
+          }
+        },
+        {
+          "id": "arith-03",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": true,
+          "text": "C",
+          "latency_ms": 10618.755,
+          "usage": {
+            "prompt_tokens": 63,
+            "completion_tokens": 1,
+            "total_tokens": 64
+          }
+        },
+        {
+          "id": "arith-04",
+          "expected": "C",
+          "predicted": "D",
+          "correct": false,
+          "strict_contract": true,
+          "text": "D",
+          "latency_ms": 4329.232,
+          "usage": {
+            "prompt_tokens": 61,
+            "completion_tokens": 1,
+            "total_tokens": 62
+          }
+        },
+        {
+          "id": "arith-05",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": true,
+          "text": "C",
+          "latency_ms": 7452.445,
+          "usage": {
+            "prompt_tokens": 62,
+            "completion_tokens": 1,
+            "total_tokens": 63
+          }
+        },
+        {
+          "id": "arith-06",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": true,
+          "text": "C",
+          "latency_ms": 7587.285,
+          "usage": {
+            "prompt_tokens": 70,
+            "completion_tokens": 1,
+            "total_tokens": 71
+          }
+        },
+        {
+          "id": "logic-01",
+          "expected": "A",
+          "predicted": "A",
+          "correct": true,
+          "strict_contract": true,
+          "text": "A",
+          "latency_ms": 4396.945,
+          "usage": {
+            "prompt_tokens": 65,
+            "completion_tokens": 1,
+            "total_tokens": 66
+          }
+        },
+        {
+          "id": "logic-02",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 7389.08,
+          "usage": {
+            "prompt_tokens": 58,
+            "completion_tokens": 1,
+            "total_tokens": 59
+          }
+        },
+        {
+          "id": "logic-03",
+          "expected": "B",
+          "predicted": "D",
+          "correct": false,
+          "strict_contract": true,
+          "text": "D",
+          "latency_ms": 1370.893,
+          "usage": {
+            "prompt_tokens": 72,
+            "completion_tokens": 1,
+            "total_tokens": 73
+          }
+        },
+        {
+          "id": "logic-04",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": true,
+          "text": "C",
+          "latency_ms": 7449.728,
+          "usage": {
+            "prompt_tokens": 62,
+            "completion_tokens": 1,
+            "total_tokens": 63
+          }
+        },
+        {
+          "id": "logic-05",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": true,
+          "text": "C",
+          "latency_ms": 4397.459,
+          "usage": {
+            "prompt_tokens": 65,
+            "completion_tokens": 1,
+            "total_tokens": 66
+          }
+        },
+        {
+          "id": "logic-06",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 7522.41,
+          "usage": {
+            "prompt_tokens": 66,
+            "completion_tokens": 1,
+            "total_tokens": 67
+          }
+        },
+        {
+          "id": "code-01",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 4541.816,
+          "usage": {
+            "prompt_tokens": 73,
+            "completion_tokens": 1,
+            "total_tokens": 74
+          }
+        },
+        {
+          "id": "code-02",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 10385.942,
+          "usage": {
+            "prompt_tokens": 51,
+            "completion_tokens": 1,
+            "total_tokens": 52
+          }
+        },
+        {
+          "id": "code-03",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 10446.264,
+          "usage": {
+            "prompt_tokens": 55,
+            "completion_tokens": 1,
+            "total_tokens": 56
+          }
+        },
+        {
+          "id": "code-04",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 10443.56,
+          "usage": {
+            "prompt_tokens": 55,
+            "completion_tokens": 1,
+            "total_tokens": 56
+          }
+        },
+        {
+          "id": "code-05",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 7531.618,
+          "usage": {
+            "prompt_tokens": 66,
+            "completion_tokens": 1,
+            "total_tokens": 67
+          }
+        },
+        {
+          "id": "code-06",
+          "expected": "B",
+          "predicted": "A",
+          "correct": false,
+          "strict_contract": true,
+          "text": "A",
+          "latency_ms": 4274.71,
+          "usage": {
+            "prompt_tokens": 57,
+            "completion_tokens": 1,
+            "total_tokens": 58
+          }
+        },
+        {
+          "id": "state-01",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": true,
+          "text": "C",
+          "latency_ms": 10650.92,
+          "usage": {
+            "prompt_tokens": 67,
+            "completion_tokens": 1,
+            "total_tokens": 68
+          }
+        },
+        {
+          "id": "state-02",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 4320.782,
+          "usage": {
+            "prompt_tokens": 61,
+            "completion_tokens": 1,
+            "total_tokens": 62
+          }
+        },
+        {
+          "id": "state-03",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 4321.336,
+          "usage": {
+            "prompt_tokens": 61,
+            "completion_tokens": 1,
+            "total_tokens": 62
+          }
+        },
+        {
+          "id": "state-04",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": true,
+          "text": "C",
+          "latency_ms": 7589.091,
+          "usage": {
+            "prompt_tokens": 70,
+            "completion_tokens": 1,
+            "total_tokens": 71
+          }
+        },
+        {
+          "id": "state-05",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 4469.082,
+          "usage": {
+            "prompt_tokens": 69,
+            "completion_tokens": 1,
+            "total_tokens": 70
+          }
+        },
+        {
+          "id": "state-06",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 1158.516,
+          "usage": {
+            "prompt_tokens": 60,
+            "completion_tokens": 1,
+            "total_tokens": 61
+          }
+        }
+      ]
+    },
+    "scaffold": {
+      "correct": 16,
+      "total": 24,
+      "accuracy": 0.666667,
+      "strict_contract": 23,
+      "median_latency_ms": 6190.898,
+      "usage_totals": {
+        "prompt_tokens": 1854,
+        "completion_tokens": 24,
+        "total_tokens": 1878
+      },
+      "rows": [
+        {
+          "id": "arith-01",
+          "expected": "C",
+          "predicted": "B",
+          "correct": false,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 7726.969,
+          "usage": {
+            "prompt_tokens": 78,
+            "completion_tokens": 1,
+            "total_tokens": 79
+          }
+        },
+        {
+          "id": "arith-02",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": true,
+          "text": "C",
+          "latency_ms": 10858.446,
+          "usage": {
+            "prompt_tokens": 79,
+            "completion_tokens": 1,
+            "total_tokens": 80
+          }
+        },
+        {
+          "id": "arith-03",
+          "expected": "C",
+          "predicted": "D",
+          "correct": false,
+          "strict_contract": true,
+          "text": "D",
+          "latency_ms": 4612.836,
+          "usage": {
+            "prompt_tokens": 77,
+            "completion_tokens": 1,
+            "total_tokens": 78
+          }
+        },
+        {
+          "id": "arith-04",
+          "expected": "C",
+          "predicted": null,
+          "correct": false,
+          "strict_contract": false,
+          "text": "8",
+          "latency_ms": 10788.608,
+          "usage": {
+            "prompt_tokens": 75,
+            "completion_tokens": 1,
+            "total_tokens": 76
+          }
+        },
+        {
+          "id": "arith-05",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": true,
+          "text": "C",
+          "latency_ms": 1441.894,
+          "usage": {
+            "prompt_tokens": 76,
+            "completion_tokens": 1,
+            "total_tokens": 77
+          }
+        },
+        {
+          "id": "arith-06",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": true,
+          "text": "C",
+          "latency_ms": 1582.704,
+          "usage": {
+            "prompt_tokens": 84,
+            "completion_tokens": 1,
+            "total_tokens": 85
+          }
+        },
+        {
+          "id": "logic-01",
+          "expected": "A",
+          "predicted": "A",
+          "correct": true,
+          "strict_contract": true,
+          "text": "A",
+          "latency_ms": 10864.393,
+          "usage": {
+            "prompt_tokens": 79,
+            "completion_tokens": 1,
+            "total_tokens": 80
+          }
+        },
+        {
+          "id": "logic-02",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 1368.8,
+          "usage": {
+            "prompt_tokens": 72,
+            "completion_tokens": 1,
+            "total_tokens": 73
+          }
+        },
+        {
+          "id": "logic-03",
+          "expected": "B",
+          "predicted": "D",
+          "correct": false,
+          "strict_contract": true,
+          "text": "D",
+          "latency_ms": 7873.407,
+          "usage": {
+            "prompt_tokens": 86,
+            "completion_tokens": 1,
+            "total_tokens": 87
+          }
+        },
+        {
+          "id": "logic-04",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": true,
+          "text": "C",
+          "latency_ms": 1445.119,
+          "usage": {
+            "prompt_tokens": 76,
+            "completion_tokens": 1,
+            "total_tokens": 77
+          }
+        },
+        {
+          "id": "logic-05",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": true,
+          "text": "C",
+          "latency_ms": 10855.628,
+          "usage": {
+            "prompt_tokens": 79,
+            "completion_tokens": 1,
+            "total_tokens": 80
+          }
+        },
+        {
+          "id": "logic-06",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 1508.55,
+          "usage": {
+            "prompt_tokens": 80,
+            "completion_tokens": 1,
+            "total_tokens": 81
+          }
+        },
+        {
+          "id": "code-01",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 10996.43,
+          "usage": {
+            "prompt_tokens": 87,
+            "completion_tokens": 1,
+            "total_tokens": 88
+          }
+        },
+        {
+          "id": "code-02",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 4402.178,
+          "usage": {
+            "prompt_tokens": 65,
+            "completion_tokens": 1,
+            "total_tokens": 66
+          }
+        },
+        {
+          "id": "code-03",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 4459.956,
+          "usage": {
+            "prompt_tokens": 69,
+            "completion_tokens": 1,
+            "total_tokens": 70
+          }
+        },
+        {
+          "id": "code-04",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 4462.571,
+          "usage": {
+            "prompt_tokens": 69,
+            "completion_tokens": 1,
+            "total_tokens": 70
+          }
+        },
+        {
+          "id": "code-05",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 1519.127,
+          "usage": {
+            "prompt_tokens": 80,
+            "completion_tokens": 1,
+            "total_tokens": 81
+          }
+        },
+        {
+          "id": "code-06",
+          "expected": "B",
+          "predicted": "A",
+          "correct": false,
+          "strict_contract": true,
+          "text": "A",
+          "latency_ms": 10728.802,
+          "usage": {
+            "prompt_tokens": 71,
+            "completion_tokens": 1,
+            "total_tokens": 72
+          }
+        },
+        {
+          "id": "state-01",
+          "expected": "C",
+          "predicted": "D",
+          "correct": false,
+          "strict_contract": true,
+          "text": "D",
+          "latency_ms": 4694.39,
+          "usage": {
+            "prompt_tokens": 81,
+            "completion_tokens": 1,
+            "total_tokens": 82
+          }
+        },
+        {
+          "id": "state-02",
+          "expected": "B",
+          "predicted": "D",
+          "correct": false,
+          "strict_contract": true,
+          "text": "D",
+          "latency_ms": 10792.681,
+          "usage": {
+            "prompt_tokens": 75,
+            "completion_tokens": 1,
+            "total_tokens": 76
+          }
+        },
+        {
+          "id": "state-03",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 10790.536,
+          "usage": {
+            "prompt_tokens": 75,
+            "completion_tokens": 1,
+            "total_tokens": 76
+          }
+        },
+        {
+          "id": "state-04",
+          "expected": "C",
+          "predicted": "C",
+          "correct": true,
+          "strict_contract": true,
+          "text": "C",
+          "latency_ms": 1578.915,
+          "usage": {
+            "prompt_tokens": 84,
+            "completion_tokens": 1,
+            "total_tokens": 85
+          }
+        },
+        {
+          "id": "state-05",
+          "expected": "B",
+          "predicted": "D",
+          "correct": false,
+          "strict_contract": true,
+          "text": "D",
+          "latency_ms": 10943.216,
+          "usage": {
+            "prompt_tokens": 83,
+            "completion_tokens": 1,
+            "total_tokens": 84
+          }
+        },
+        {
+          "id": "state-06",
+          "expected": "B",
+          "predicted": "B",
+          "correct": true,
+          "strict_contract": true,
+          "text": "B",
+          "latency_ms": 7687.406,
+          "usage": {
+            "prompt_tokens": 74,
+            "completion_tokens": 1,
+            "total_tokens": 75
+          }
+        }
+      ]
+    }
+  }
+}
