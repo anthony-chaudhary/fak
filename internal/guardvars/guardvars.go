@@ -74,6 +74,8 @@ type CacheAttributionVars struct {
 	FakCompactionCacheReadTokens uint64 `json:"fak_compaction_cache_read_tokens,omitempty"`
 	FakKVPrefixReusedTokens      uint64 `json:"fak_kv_prefix_reused_tokens"`
 	FakVDSOAvoidedCalls          uint64 `json:"fak_vdso_avoided_calls"` // avoided engine calls, NOT a token-equiv
+	FakResponseMemoCalls         uint64 `json:"fak_response_memo_calls"`
+	FakInlineServedCalls         uint64 `json:"fak_inline_served_calls"`
 	// FakDeferCold* surface the cold-tool-DEFER shed (#3647/#3232, the --defer-cold-tools lever) —
 	// a THIRD shed mechanism distinct from the compaction shed above. FakDeferColdTurns/Count witness
 	// how many turns fak deferred the cold tool tail and how many custom defs it marked defer_loading;

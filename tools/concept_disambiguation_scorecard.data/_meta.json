@@ -2115,6 +2115,11 @@
           "category": "incidental",
           "reason": "Issue #6841 work-source DTO, renderer, reconciliation helper, or stable enum label within the existing work-done query; not a new guard or context subsystem concept.",
           "token": "guardInfoUnknownWorkSource"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6841 reconciliation assertion over the existing work-done query; not a new guard gate.",
+          "token": "guardInfoWorkDoneReconciles"
         }
       ],
       "exclude": [
@@ -2274,6 +2279,7 @@
         "guardInfoWorkDoneFromVars",
         "guardInfoWorkDoneMetric",
         "guardInfoWorkDoneMetrics",
+        "guardInfoWorkDoneReconciles",
         "guardInfoWorkDoneRows",
         "guardInfoWorkDoneSchema",
         "guardInfoWorkDoneSource",

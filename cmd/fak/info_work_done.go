@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	guardInfoWorkDoneSourceSchema         = "fak.info.work-source/1"
 	guardInfoWorkDoneSchema               = "fak.info.work-done/1"
 	guardInfoWorkDoneBaselineID           = "direct-provider/v1"
 	guardInfoWorkDoneBaselineEffectiveUTC = "2026-08-14"
@@ -52,11 +53,17 @@ type guardInfoWorkDoneMetric struct {
 }
 
 type guardInfoWorkDoneSource struct {
-	ID               string  `json:"id"`
-	Label            string  `json:"label"`
-	InputTokenEquiv  float64 `json:"input_token_equiv"`
-	Evidence         string  `json:"evidence"`
-	ExclusivityGroup string  `json:"exclusivity_group"`
+	Schema              string  `json:"schema"`
+	ID                  string  `json:"id"`
+	Owner               string  `json:"owner"`
+	Disposition         string  `json:"disposition"`
+	Label               string  `json:"label"`
+	Events              uint64  `json:"events"`
+	EventCountAvailable bool    `json:"event_count_available"`
+	InputTokenEquiv     float64 `json:"input_token_equiv"`
+	ModelCallsAvoided   uint64  `json:"model_calls_avoided"`
+	Evidence            string  `json:"evidence"`
+	ExclusivityGroup    string  `json:"exclusivity_group"`
 }
 
 func guardInfoWorkDoneFromVars(v guardInfoVars) guardInfoWorkDone {
@@ -91,20 +98,76 @@ func guardInfoWorkDoneFromVars(v guardInfoVars) guardInfoWorkDone {
 		}
 	}
 	if a := v.CacheAttribution; a != nil {
-		if a.ProviderTokenEquiv > 0 {
-			w.Sources = append(w.Sources, guardInfoWorkDoneSource{
-				ID: "provider_cache", Label: "provider cache", InputTokenEquiv: a.ProviderTokenEquiv,
-				Evidence: "observed", ExclusivityGroup: "cache_token_equiv_owner",
-			})
-		}
-		if a.FakTokenEquiv > 0 {
-			w.Sources = append(w.Sources, guardInfoWorkDoneSource{
-				ID: "fak_reuse", Label: "fak reuse", InputTokenEquiv: a.FakTokenEquiv,
-				Evidence: "witnessed", ExclusivityGroup: "cache_token_equiv_owner",
-			})
-		}
+		w.Sources = guardInfoWorkDoneSources(*a)
+	} else {
+		w.Sources = []guardInfoWorkDoneSource{guardInfoUnknownWorkSource()}
 	}
 	return w
+}
+
+func guardInfoWorkDoneSources(a guardInfoCacheAttribution) []guardInfoWorkDoneSource {
+	const tokenGroup = "input_token_equiv_owner/v1"
+	const callGroup = "avoided_model_call_path/v1"
+	var out []guardInfoWorkDoneSource
+	add := func(source guardInfoWorkDoneSource) {
+		source.Schema = guardInfoWorkDoneSourceSchema
+		out = append(out, source)
+	}
+	if a.ProviderPromptCacheReadTokenEquiv > 0 || a.ProviderTokenEquiv > 0 {
+		add(guardInfoWorkDoneSource{ID: "provider_cache", Owner: "provider", Disposition: "loaded", Label: "provider prefix cache",
+			InputTokenEquiv: a.ProviderTokenEquiv, Evidence: "observed", ExclusivityGroup: tokenGroup})
+	}
+	if a.FakCompactionShedTokens > 0 {
+		add(guardInfoWorkDoneSource{ID: "context_reduction", Owner: "fak", Disposition: "reduced", Label: "context compaction",
+			InputTokenEquiv: float64(a.FakCompactionShedTokens), Evidence: "witnessed", ExclusivityGroup: tokenGroup})
+	}
+	if a.FakKVPrefixReusedTokens > 0 {
+		add(guardInfoWorkDoneSource{ID: "fak_prefix_reuse", Owner: "fak", Disposition: "loaded", Label: "fak prefix reuse",
+			InputTokenEquiv: float64(a.FakKVPrefixReusedTokens), Evidence: "witnessed", ExclusivityGroup: tokenGroup})
+	}
+	classifiedFakTokens := float64(a.FakCompactionShedTokens + a.FakKVPrefixReusedTokens)
+	if a.FakTokenEquiv > classifiedFakTokens {
+		add(guardInfoWorkDoneSource{ID: "unknown", Owner: "fak", Disposition: "unknown", Label: "unclassified context reduction",
+			InputTokenEquiv: a.FakTokenEquiv - classifiedFakTokens, Evidence: "unavailable", ExclusivityGroup: tokenGroup})
+	}
+	if a.FakResponseMemoCalls > 0 {
+		add(guardInfoWorkDoneSource{ID: "fak_response_reuse", Owner: "fak", Disposition: "served", Label: "response memo",
+			Events: a.FakResponseMemoCalls, EventCountAvailable: true, ModelCallsAvoided: a.FakResponseMemoCalls, Evidence: "witnessed", ExclusivityGroup: callGroup})
+	}
+	if a.FakInlineServedCalls > 0 {
+		add(guardInfoWorkDoneSource{ID: "inline_tool_local", Owner: "fak", Disposition: "served", Label: "inline/tool local",
+			Events: a.FakInlineServedCalls, EventCountAvailable: true, ModelCallsAvoided: a.FakInlineServedCalls, Evidence: "witnessed", ExclusivityGroup: callGroup})
+	}
+	knownCalls := a.FakResponseMemoCalls + a.FakInlineServedCalls
+	if a.FakVDSOAvoidedCalls > knownCalls {
+		unknown := a.FakVDSOAvoidedCalls - knownCalls
+		add(guardInfoWorkDoneSource{ID: "unknown", Owner: "unknown", Disposition: "unknown", Label: "unclassified local reuse",
+			Events: unknown, EventCountAvailable: true, ModelCallsAvoided: unknown, Evidence: "unavailable", ExclusivityGroup: callGroup})
+	}
+	if len(out) == 0 {
+		return []guardInfoWorkDoneSource{{Schema: guardInfoWorkDoneSourceSchema, ID: "cold_direct", Owner: "provider", Disposition: "loaded", Label: "cold/direct path", Evidence: "observed", ExclusivityGroup: "none"}}
+	}
+	return out
+}
+
+func guardInfoUnknownWorkSource() guardInfoWorkDoneSource {
+	return guardInfoWorkDoneSource{Schema: guardInfoWorkDoneSourceSchema, ID: "unknown", Owner: "unknown", Disposition: "unknown", Label: "source unavailable", Evidence: "unavailable", ExclusivityGroup: "none"}
+}
+
+func guardInfoWorkDoneReconciles(w guardInfoWorkDone) bool {
+	var tokens float64
+	var calls uint64
+	for _, source := range w.Sources {
+		tokens += source.InputTokenEquiv
+		calls += source.ModelCallsAvoided
+	}
+	if w.Metrics.InputTokensAvoided.Available && tokens != w.Metrics.InputTokensAvoided.Value {
+		return false
+	}
+	if w.Metrics.ModelCallsAvoided.Available && float64(calls) != w.Metrics.ModelCallsAvoided.Value {
+		return false
+	}
+	return true
 }
 
 func guardInfoDirectProviderBaseline() guardInfoWorkDoneBaseline {
@@ -171,9 +234,49 @@ func guardInfoSignedShortCount(v float64) string {
 }
 
 func guardInfoWorkDoneSourceText(w guardInfoWorkDone) string {
-	var parts []string
+	var providerTokens, fakTokens float64
+	var calls uint64
 	for _, source := range w.Sources {
-		parts = append(parts, fmt.Sprintf("%s ~%s tok", source.Label, guardInfoShortCount(int(source.InputTokenEquiv))))
+		if source.Owner == "provider" {
+			providerTokens += source.InputTokenEquiv
+		}
+		if source.Owner == "fak" {
+			fakTokens += source.InputTokenEquiv
+		}
+		calls += source.ModelCallsAvoided
+	}
+	var parts []string
+	if providerTokens > 0 {
+		parts = append(parts, fmt.Sprintf("provider ~%s tok", guardInfoShortCount(int(providerTokens))))
+	}
+	if fakTokens > 0 {
+		parts = append(parts, fmt.Sprintf("fak ~%s tok", guardInfoShortCount(int(fakTokens))))
+	}
+	if calls > 0 {
+		parts = append(parts, fmt.Sprintf("fak %s calls", guardInfoShortCount(int(calls))))
+	}
+	if len(parts) == 0 && len(w.Sources) > 0 {
+		return w.Sources[0].Label
 	}
 	return strings.Join(parts, " + ")
+}
+
+func guardInfoWorkDoneSourceRows(w guardInfoWorkDone) []string {
+	rows := []string{" sources (exclusive within each group; do not add across units):"}
+	for _, source := range w.Sources {
+		effect := "no measured saving"
+		if source.InputTokenEquiv != 0 {
+			effect = fmt.Sprintf("~%s input tok", guardInfoShortCount(int(source.InputTokenEquiv)))
+		}
+		if source.ModelCallsAvoided > 0 {
+			effect = fmt.Sprintf("%s model calls", guardInfoShortCount(int(source.ModelCallsAvoided)))
+		}
+		count := "events unavailable"
+		if source.EventCountAvailable {
+			count = "events " + guardInfoShortCount(int(source.Events))
+		}
+		rows = append(rows, fmt.Sprintf("  %-8s from %-21s · %s · %s · %s/%s · group %s",
+			source.Disposition, source.Label, count, effect, source.Owner, source.Evidence, source.ExclusivityGroup))
+	}
+	return rows
 }

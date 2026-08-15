@@ -942,6 +942,13 @@ type debugCacheAttributionVars = guardvars.CacheAttributionVars
 // nonzero token slice OR an avoided call, so a cold session stays quiet rather than emitting
 // an all-zero object. When the fak slice is anchor-starved (#1407) the block still renders
 // the provider slice with fak reading ~0, honestly.
+func positiveInt64(v int64) uint64 {
+	if v <= 0 {
+		return 0
+	}
+	return uint64(v)
+}
+
 func cacheAttributionVars(sum AdjudicationSummary, vdsoHits int64, servedInline uint64) *debugCacheAttributionVars {
 	ms := sum.MechanismSavings()
 	if vdsoHits > 0 {
@@ -976,6 +983,8 @@ func cacheAttributionVars(sum AdjudicationSummary, vdsoHits int64, servedInline 
 		FakCompactionCacheReadTokens:              ms.FakCompactionCacheReadTokens,
 		FakKVPrefixReusedTokens:                   ms.FakKVPrefixReusedTokens,
 		FakVDSOAvoidedCalls:                       ms.FakVDSOAvoidedCalls,
+		FakResponseMemoCalls:                      positiveInt64(vdsoHits),
+		FakInlineServedCalls:                      servedInline,
 		FakDeferColdTurns:                         sum.DeferColdTurns,
 		FakDeferColdCount:                         sum.DeferColdCount,
 		FakDeferColdToolNames:                     sum.DeferColdToolNames,

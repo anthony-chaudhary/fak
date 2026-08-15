@@ -51,6 +51,9 @@ func TestCacheAttributionVarsMatchesMechanismSplit(t *testing.T) {
 	if got.FakVDSOAvoidedCalls != uint64(vdsoHits)+servedInline {
 		t.Errorf("vdso avoided calls = %d, want %d (VDSOHits + inline-served)", got.FakVDSOAvoidedCalls, uint64(vdsoHits)+servedInline)
 	}
+	if got.FakResponseMemoCalls != uint64(vdsoHits) || got.FakInlineServedCalls != servedInline {
+		t.Fatalf("producer provenance memo=%d inline=%d, want memo=%d inline=%d", got.FakResponseMemoCalls, got.FakInlineServedCalls, vdsoHits, servedInline)
+	}
 }
 
 // The cold-tool-DEFER shed (#3647) must ride the /debug/vars block as its OWN fields, never folded

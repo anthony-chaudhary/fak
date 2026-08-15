@@ -12,7 +12,7 @@ func workDoneFixture() guardInfoVars {
 	var v guardInfoVars
 	if err := json.Unmarshal([]byte(`{
 		"vcache":{"saved_token_equiv":184000},
-		"cache_attribution":{"total_token_equiv":184000,"provider_token_equiv":112000,"fak_token_equiv":72000,"fak_vdso_avoided_calls":27}
+		"cache_attribution":{"total_token_equiv":184000,"provider_token_equiv":112000,"fak_token_equiv":72000,"fak_compaction_shed_tokens":72000,"fak_vdso_avoided_calls":27,"fak_response_memo_calls":19,"fak_inline_served_calls":8}
 	}`), &v); err != nil {
 		panic(err)
 	}
@@ -27,7 +27,7 @@ func TestGuardInfoWorkDoneCapturedRender(t *testing.T) {
 	for _, want := range []string{
 		"vs direct provider path r1 · observed session",
 		"+184k input tok avoided · 27 model calls avoided · 38s wait avoided",
-		"provider cache ~112k tok + fak reuse ~72k tok · Cache tab for ablation",
+		"provider ~112k tok + fak ~72k tok + fak 27 calls · Cache tab for ablation",
 	} {
 		if !strings.Contains(roomy, want) {
 			t.Fatalf("captured roomy render missing %q:\n%s", want, roomy)
@@ -91,8 +91,11 @@ func TestGuardInfoWorkDoneJSONUsesTheRenderedAccountingObject(t *testing.T) {
 	if got := doc.WorkDone.Metrics.WaitSecondsAvoided.Value; got != 38 {
 		t.Fatalf("JSON wait = %v, want 38", got)
 	}
-	if len(doc.WorkDone.Sources) != 2 || doc.WorkDone.Sources[0].ExclusivityGroup != "cache_token_equiv_owner" {
+	if len(doc.WorkDone.Sources) != 4 || doc.WorkDone.Sources[0].Schema != guardInfoWorkDoneSourceSchema {
 		t.Fatalf("JSON source attribution = %#v", doc.WorkDone.Sources)
+	}
+	if !guardInfoWorkDoneReconciles(doc.WorkDone) {
+		t.Fatalf("source effects do not reconcile to totals: %#v", doc.WorkDone)
 	}
 }
 
@@ -143,6 +146,88 @@ func TestRenderInfoCacheViewExplainsBaseline(t *testing.T) {
 	for _, want := range []string{"vs direct provider path r1", "fak    current session", "fak-local response reuse", "config sha256:"} {
 		if !strings.Contains(rows, want) {
 			t.Fatalf("Cache detail missing %q:\n%s", want, rows)
+		}
+	}
+}
+
+func TestGuardInfoWorkDoneSourcesAreProducerGroundedAndExclusive(t *testing.T) {
+	w := guardInfoWorkDoneFromVars(workDoneFixture())
+	want := map[string]guardInfoWorkDoneSource{}
+	for _, source := range w.Sources {
+		want[source.ID] = source
+	}
+	if got := want["provider_cache"]; got.Owner != "provider" || got.InputTokenEquiv != 112000 || got.ExclusivityGroup != "input_token_equiv_owner/v1" {
+		t.Fatalf("provider source = %#v", got)
+	}
+	if got := want["context_reduction"]; got.Owner != "fak" || got.InputTokenEquiv != 72000 {
+		t.Fatalf("context source = %#v", got)
+	}
+	if got := want["fak_response_reuse"]; got.Events != 19 || got.ModelCallsAvoided != 19 || got.Disposition != "served" {
+		t.Fatalf("response memo source = %#v", got)
+	}
+	if got := want["inline_tool_local"]; got.Events != 8 || got.ModelCallsAvoided != 8 || got.Disposition != "served" {
+		t.Fatalf("inline source = %#v", got)
+	}
+	if !guardInfoWorkDoneReconciles(w) {
+		t.Fatalf("mixed-source fixture did not reconcile: %#v", w)
+	}
+}
+
+func TestGuardInfoWorkDoneSourcesExposeUnknownAndColdPaths(t *testing.T) {
+	var partial guardInfoVars
+	if err := json.Unmarshal([]byte(`{"cache_attribution":{"fak_token_equiv":5,"fak_vdso_avoided_calls":3}}`), &partial); err != nil {
+		t.Fatal(err)
+	}
+	partial.VCache = workDoneFixture().VCache
+	partial.VCache.SavedTokenEquiv = 5
+	w := guardInfoWorkDoneFromVars(partial)
+	if len(w.Sources) != 2 || w.Sources[0].ID != "unknown" || w.Sources[1].ID != "unknown" || !guardInfoWorkDoneReconciles(w) {
+		t.Fatalf("partial provenance = %#v", w.Sources)
+	}
+
+	var cold guardInfoVars
+	if err := json.Unmarshal([]byte(`{"cache_attribution":{}}`), &cold); err != nil {
+		t.Fatal(err)
+	}
+	cw := guardInfoWorkDoneFromVars(cold)
+	if len(cw.Sources) != 1 || cw.Sources[0].ID != "cold_direct" {
+		t.Fatalf("cold source = %#v", cw.Sources)
+	}
+	unknown := guardInfoWorkDoneFromVars(guardInfoVars{})
+	if len(unknown.Sources) != 1 || unknown.Sources[0].ID != "unknown" {
+		t.Fatalf("absent source = %#v", unknown.Sources)
+	}
+}
+
+func TestRenderInfoCacheViewShowsSourceProvenanceHierarchy(t *testing.T) {
+	v := workDoneFixture()
+	rows := strings.Join(renderInfoCacheView(newGuardInfoPanelCtx(v, newGuardInfoTrend(4), 180)), "\n")
+	for _, want := range []string{
+		"sources (exclusive within each group; do not add across units)",
+		"loaded   from provider prefix cache",
+		"reduced  from context compaction",
+		"served   from response memo",
+		"served   from inline/tool local",
+		"provider/observed", "fak/witnessed",
+	} {
+		if !strings.Contains(rows, want) {
+			t.Fatalf("source render missing %q:\n%s", want, rows)
+		}
+	}
+}
+
+func TestGuardInfoWorkDoneSourceHierarchyNarrowCapture(t *testing.T) {
+	v := workDoneFixture()
+	rows := guardInfoWorkDoneSourceRows(guardInfoWorkDoneFromVars(v))
+	captured := joinPaneRowsTUI(rows, 72, 0)
+	for _, line := range strings.Split(captured, "\n") {
+		if dispWidthTUI(line) > 72 {
+			t.Fatalf("narrow source row wraps (%d cells): %q", dispWidthTUI(line), line)
+		}
+	}
+	for _, want := range []string{"provider prefix cache", "context compaction", "response memo", "inline/tool local"} {
+		if !strings.Contains(captured, want) {
+			t.Fatalf("narrow capture lost %q:\n%s", want, captured)
 		}
 	}
 }

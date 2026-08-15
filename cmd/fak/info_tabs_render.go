@@ -269,6 +269,7 @@ func renderInfoCacheView(ctx guardInfoPanelCtx) []string {
 	w := guardInfoWorkDoneFromVars(v)
 	rows := []string{cacheRow, fmt.Sprintf(" saved  %s tokens so far · vs %s r%d", signedTokens(guardInfoSaved(v)), w.Baseline.Label, w.Baseline.Revision)}
 	rows = append(rows, guardInfoWorkDoneBaselineDetailRows(w)...)
+	rows = append(rows, guardInfoWorkDoneSourceRows(w)...)
 	rows = append(rows, renderInfoCacheAblationRows(ctx)...)
 	rows = append(rows, guardInfoTrendsPanelRows(ctx, guardPanelFull)...)
 	return rows
