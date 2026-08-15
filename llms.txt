@@ -12,6 +12,8 @@ net-true efficiency, `P3` fast adaptation, `P4` integrated operations), and the 
 connects new work to operator value. Do not turn this direction into a shipped claim; use
 [`CLAIMS.md`](CLAIMS.md) for shipped/simulated/stub status.
 
+- [Project orientation](docs/project-orientation.md): current decision record for the agent-kernel center, capability-family classifications, investment boundary, and repeatable portfolio audit
+
 ## Audience guides
 
 - [Less context, less code](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/less-context-less-code.md): where fak fits beside concise-output and YAGNI/minimal-code guidance.

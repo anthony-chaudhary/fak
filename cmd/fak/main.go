@@ -515,6 +515,10 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 }
 
 func dispatchExtendedVerbB(name string, args []string) bool {
+	if name == "centrality-audit" {
+		cmdCentralityAudit(args)
+		return true
+	}
 	switch name {
 	case "propagation-debt-dispatch":
 		cmdPropagationDebtDispatch(args)

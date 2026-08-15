@@ -12,6 +12,8 @@ to every change—managed context, net-true efficiency, bounded adaptation, and 
 operations—and a separate centrality signal for deciding which work is closest to those
 connected user problems.
 
+For the current investment boundary and capability classification, read [Project orientation: the agent-kernel center](docs/project-orientation.md).
+
 ## See one verdict in one command — no key, model, or GPU
 
 If you are evaluating fak for the first time, the shortest proof that it manages a

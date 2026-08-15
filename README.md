@@ -8,6 +8,8 @@
 
 fak is an all-in-one agent boundary: one Go binary for model routing, context reuse, tool policy, journaling, and recovery. Put Claude Code, Codex, OpenCode, or a harness you write yourself on one side; keep its UI, login, cloud or local model, and tools on the other. The same native modules can also compose fleets of small, bounded agents in one process.
 
+The current project boundary and capability classification are recorded in [Project orientation: the agent-kernel center](docs/project-orientation.md). It distinguishes Core kernel outcomes from Enabling substrates, Stewardship obligations, and Peripheral expansion without turning centrality into a priority score.
+
 > **Start here:** install fak, then run `fak guard -- claude` to wrap the agent you already use with one drop-in command. It forwards your existing subscription credential—no separate API key—and places fak's managed-context decisions plus default-deny policy floor in front of every turn. The deterministic no-key proof remains below.
 
 [![Watch the 40-second fak value walk: save tokens and turns first, then see pre-execution policy](visuals/fak-homepage-hero.gif)](visuals/fak-homepage-hero.mp4)
@@ -122,5 +124,3 @@ After trying `guard`, `fak launch install --provider all --default claude` can i
 - **Contribute:** [contributing guide](CONTRIBUTING.md) · [security policy](SECURITY.md) · [documentation map](docs/index.md) · [front-page overflow](docs/README-legacy.md)
 
 Apache-2.0. Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md); participation is governed by the [Code of Conduct](.github/CODE_OF_CONDUCT.md).
-
-
