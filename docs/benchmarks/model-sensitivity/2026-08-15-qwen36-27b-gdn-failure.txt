@@ -1,0 +1,60 @@
+Qwen3.6-27B-Q4_K_M direct arith-01 None C 14278
+Qwen3.6-27B-Q4_K_M direct arith-02 None C 13917
+Qwen3.6-27B-Q4_K_M direct arith-03 None C 14021
+Qwen3.6-27B-Q4_K_M direct arith-04 None C 13788
+Qwen3.6-27B-Q4_K_M direct arith-05 None C 13841
+Qwen3.6-27B-Q4_K_M direct arith-06 None C 14862
+Qwen3.6-27B-Q4_K_M direct logic-01 None A 14366
+Qwen3.6-27B-Q4_K_M direct logic-02 None B 13475
+Qwen3.6-27B-Q4_K_M direct logic-03 None B 14929
+Qwen3.6-27B-Q4_K_M direct logic-04 None C 13861
+Qwen3.6-27B-Q4_K_M direct logic-05 None C 14185
+Qwen3.6-27B-Q4_K_M direct logic-06 None B 14321
+Qwen3.6-27B-Q4_K_M direct code-01 None B 15305
+Qwen3.6-27B-Q4_K_M direct code-02 None B 13334
+Qwen3.6-27B-Q4_K_M direct code-03 None B 13350
+Qwen3.6-27B-Q4_K_M direct code-04 None B 13316
+Qwen3.6-27B-Q4_K_M direct code-05 None B 14292
+Qwen3.6-27B-Q4_K_M direct code-06 None B 13455
+Qwen3.6-27B-Q4_K_M direct state-01 None C 14411
+Qwen3.6-27B-Q4_K_M direct state-02 None B 13759
+Qwen3.6-27B-Q4_K_M direct state-03 None B 13901
+Qwen3.6-27B-Q4_K_M direct state-04 None C 15036
+Qwen3.6-27B-Q4_K_M direct state-05 None B 14806
+Qwen3.6-27B-Q4_K_M direct state-06 None B 13911
+Qwen3.6-27B-Q4_K_M contract arith-01 A C 14140
+Qwen3.6-27B-Q4_K_M contract arith-02 C C 14255
+Qwen3.6-27B-Q4_K_M contract arith-03 B C 13986
+Qwen3.6-27B-Q4_K_M contract arith-04 B C 13846
+Qwen3.6-27B-Q4_K_M contract arith-05 C C 14054
+Qwen3.6-27B-Q4_K_M contract arith-06 C C 15030
+Qwen3.6-27B-Q4_K_M contract logic-01 A A 14382
+Qwen3.6-27B-Q4_K_M contract logic-02 B B 13507
+Qwen3.6-27B-Q4_K_M contract logic-03 C B 15146
+Qwen3.6-27B-Q4_K_M contract logic-04 C C 13921
+Traceback (most recent call last):
+  File "/tmp/fak-endpoint-model-ablate-6692.py", line 57, in main
+    try: response=json.loads(urllib.request.urlopen(req,timeout=300).read())
+  File "/usr/lib/python3.10/urllib/request.py", line 216, in urlopen
+    return opener.open(url, data, timeout)
+  File "/usr/lib/python3.10/urllib/request.py", line 525, in open
+    response = meth(req, response)
+  File "/usr/lib/python3.10/urllib/request.py", line 634, in http_response
+    response = self.parent.error(
+  File "/usr/lib/python3.10/urllib/request.py", line 563, in error
+    return self._call_chain(*args)
+  File "/usr/lib/python3.10/urllib/request.py", line 496, in _call_chain
+    result = func(*args)
+  File "/usr/lib/python3.10/urllib/request.py", line 643, in http_error_default
+    raise HTTPError(req.full_url, code, msg, hdrs, fp)
+urllib.error.HTTPError: HTTP Error 500: Internal Server Error
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/tmp/fak-endpoint-model-ablate-6692.py", line 66, in <module>
+    main()
+  File "/tmp/fak-endpoint-model-ablate-6692.py", line 58, in main
+    except urllib.error.HTTPError as e: raise RuntimeError(f"HTTP {e.code}: {e.read().decode()}")
+RuntimeError: HTTP 500: {"error":{"code":"handler_panic","message":"internal error: recovered handler panic: model: backend \"cuda\" forward \"qwen35-gdn\" via \"cuda/qwen35-gdn-ssm-decode-v1\" failed closed at layer 0 (Qwen35GDNDecode): compute: cuda Qwen3.5 GDN kernel failed closed at preflight (code 10002); no CPU fallback; session closed, no CPU retry","param":null,"type":"server_error"}}
+
