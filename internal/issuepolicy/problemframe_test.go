@@ -39,6 +39,23 @@ func TestAssessProblemFrameAcceptsCentralityClassesAndChecks(t *testing.T) {
 	}
 }
 
+func TestAssessProblemFrameAcceptsDocumentedDescriptiveCheckLabels(t *testing.T) {
+	body := "## Value\n- Centrality: Enabling (managed context)\n" +
+		"- P1 Context: preserved - does not duplicate runtime context\n" +
+		"- P2 Net value: advanced - removes intake rework\n" +
+		"- P3 Adaptation: N/A - no adaptive behavior in this docs-only leaf\n" +
+		"- P4 Operations: preserved - existing operator path remains intact\n"
+	frame := AssessProblemFrame(IssueDraft{Body: body})
+	if !frame.Ready {
+		t.Fatalf("documented descriptive labels refused: %+v", frame)
+	}
+	for _, id := range []string{"p1", "p2", "p3", "p4"} {
+		if !frame.Checks[id].Valid {
+			t.Fatalf("%s = %+v", id, frame.Checks[id])
+		}
+	}
+}
+
 func TestAssessProblemFrameRejectsMissingMalformedAndCeremonialFields(t *testing.T) {
 	body := "## Value\n- Centrality: Enabling\n" +
 		"- P1: advanced\n" +

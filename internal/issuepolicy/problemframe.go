@@ -76,7 +76,7 @@ func AssessProblemFrame(d IssueDraft) ProblemFrame {
 	}
 
 	for _, id := range []string{"p1", "p2", "p3", "p4"} {
-		raw := labeledLineValue(d.Body, id)
+		raw := labeledLineValuePrefix(d.Body, id)
 		check := parseProblemCheck(id, raw)
 		out.Checks[id] = check
 		if out.Enforced && !check.Valid {
@@ -161,6 +161,22 @@ func labeledLineValue(body, label string) string {
 		line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "-*"))
 		key, value, ok := strings.Cut(line, ":")
 		if ok && strings.EqualFold(strings.TrimSpace(key), label) {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func labeledLineValuePrefix(body, label string) string {
+	label = strings.ToLower(strings.TrimSpace(label))
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "-*"))
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(strings.ToLower(strings.TrimSpace(key)))
+		if len(fields) > 0 && fields[0] == label {
 			return strings.TrimSpace(value)
 		}
 	}
