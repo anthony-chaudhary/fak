@@ -266,9 +266,9 @@ func TestIssuePromptExtractsAgentIssueBrief(t *testing.T) {
 		"Verified handoff proposed this next leaf.",
 		"## Batch policy",
 		"At most two follow-up issues per handoff; update existing marker.",
-		"## In scope",
+		"## Core through-line",
 		"Render a compact worker brief.",
-		"## Out of scope",
+		"## Gold-plating boundary",
 		"Do not change route picking.",
 		"## Done condition",
 		"Prompt includes the parsed brief.",
@@ -286,6 +286,8 @@ func TestIssuePromptExtractsAgentIssueBrief(t *testing.T) {
 		"- Confusion risks: Do not turn this leaf into the parent epic.",
 		"- Coordination: Serialize with issuecontract parser edits.",
 		"- Batch policy: At most two follow-up issues per handoff; update existing marker.",
+		"- Core through-line: Render a compact worker brief.",
+		"- Gold-plating boundary: Do not change route picking.",
 		"- Acceptance gate: go test ./internal/dispatchtick",
 	} {
 		if !strings.Contains(p, want) {

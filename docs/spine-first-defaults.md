@@ -51,7 +51,9 @@ The issue contract renders these decisions as `## Core through-line` and
 `## Gold-plating boundary` (legacy `In scope` / `Out of scope` headings remain readable). The
 `Done condition` must close the through-line; the `Witness` must observe its final outcome. This
 keeps "core" from becoming a synonym for everything the author wants and makes scope creep
-visible before dispatch.
+visible before dispatch. `fak-dev issue create` enforces this by default and canonicalizes legacy
+headings to the decision names; `--raw-body` is the explicit escape hatch for a deliberate
+non-contract administrative issue.
 
 Why: a spine is a witness; a plan is a claim. The repo refuses unproven claims
 (`not yet` discipline) — the spine is what converts "we will" into "it does".

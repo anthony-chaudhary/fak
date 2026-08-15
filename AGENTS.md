@@ -275,6 +275,8 @@ binary/tooling is unavailable, and say so in the handoff.
 
 Filing a GitHub issue from an agent session works the same way: prefer
 `fak-dev issue create --title T (--body B | --body-file F)` over raw `gh issue create` —
+the default body must decide `## Core through-line` and `## Gold-plating boundary` before
+creation (`--raw-body` is only for a deliberate non-contract administrative issue) —
 it shells to `gh` directly from the trusted binary, the same way `fak commit`/`fak
 sweep` do for git, so it does not trip the reversibility/ESCALATE preview-confirm
 gate on every call. Use raw `gh issue create` only as a fallback when the binary is
