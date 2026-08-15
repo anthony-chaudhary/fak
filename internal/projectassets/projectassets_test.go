@@ -208,3 +208,23 @@ func baseManifest() string {
  "harnesses":{"claude":{"skills":"native","memories":"native","goal_prompts":"native"},"codex":{"skills":"generated-adapter","memories":"AGENTS.md","goal_prompts":"native"},"fak-native":{"skills":"native-loader","memories":"AGENTS.md","goal_prompts":"native-loader"}}
 }`
 }
+
+func TestSyncPreservesDeliberateNativeCodexAdapter(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, ManifestPath, baseManifest())
+	write(t, root, ".claude/skills/fleet-wave/SKILL.md", "---\nname: fleet-wave\ndescription: canonical\n---\nClaude workflow.\n")
+	write(t, root, ".claude/memory/base.md", "memory\n")
+	write(t, root, ".claude/goal-prompts/base.md", "prompt\n")
+	native := "---\nname: fleet-wave\ndescription: Codex-native wave\n---\nUse fak dispatch wave --backend=codex.\n"
+	write(t, root, ".agents/skills/fleet-wave/SKILL.md", native)
+	if receipt, err := Build(root, true); err != nil || !receipt.ZeroUnexplainedGaps {
+		t.Fatalf("sync failed: receipt=%+v err=%v", receipt, err)
+	}
+	body, err := os.ReadFile(filepath.Join(root, ".agents", "skills", "fleet-wave", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != native {
+		t.Fatalf("native adapter was overwritten:\n%s", body)
+	}
+}

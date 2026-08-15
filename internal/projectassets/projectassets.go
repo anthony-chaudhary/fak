@@ -142,6 +142,12 @@ func skillName(root, p string) (string, error) {
 	}
 	return strings.TrimSpace(string(m[1])), nil
 }
+
+// isGeneratedAdapter distinguishes disposable discovery pointers from deliberate native adapters.
+// Sync may refresh only the former; overwriting the latter would erase harness-specific behavior.
+func isGeneratedAdapter(body []byte) bool {
+	return strings.Contains(string(body), "generated-by: fak project-assets sync")
+}
 func adapter(name, rel string) string {
 	return fmt.Sprintf("---\nname: %s\ndescription: Generated Codex adapter for the canonical fak project skill %s.\nmetadata:\n  generated-by: fak project-assets sync\n  canonical: %s\n---\n\n# Canonical project skill adapter\n\nLoad and follow [`%s`](%s). This generated discovery adapter contains no maintained workflow body.\n\n## Portability contract\n\n- The linked canonical `SKILL.md` is the single semantic workflow body for Claude, Codex, and fak-native loaders.\n- This adapter changes discovery only; it must not fork, summarize, or translate the workflow.\n- Harness-native invocation, permissions, hooks, model routing, and worker launch remain typed adapters outside the semantic body.\n", name, name, rel, rel, rel)
 }
@@ -201,6 +207,9 @@ func Build(root string, write bool) (Receipt, error) {
 			if e = os.MkdirAll(filepath.Dir(abs), 0755); e != nil {
 				return r, e
 			}
+			if existing, readErr := os.ReadFile(abs); readErr == nil && !isGeneratedAdapter(existing) {
+				continue
+			}
 			rel, _ := filepath.Rel(filepath.Dir(abs), filepath.Join(root, filepath.FromSlash(p)))
 			e = os.WriteFile(abs, []byte(adapter(n, filepath.ToSlash(rel))), 0644)
 			if e != nil {
@@ -221,7 +230,7 @@ func Build(root string, write bool) (Receipt, error) {
 		rel, _ := filepath.Rel(filepath.Dir(abs), filepath.Join(root, filepath.FromSlash(source)))
 		b, e := os.ReadFile(abs)
 		n, _ := skillName(root, source)
-		if e != nil || string(b) != adapter(n, filepath.ToSlash(rel)) {
+		if e != nil || (isGeneratedAdapter(b) && string(b) != adapter(n, filepath.ToSlash(rel))) {
 			stale = append(stale, target)
 		}
 	}
