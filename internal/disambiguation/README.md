@@ -90,7 +90,7 @@ labels. Agents discover the authoritative public contracts in these existing pla
 
 Generation calls `LoadPublicManifests` and `NewAdmittedIndex`, rejecting an entry
 before output when either target is absent. This reads only public repository
-paths—never private repositories, host configuration, or a second generated
+pathsâ€”never private repositories, host configuration, or a second generated
 registry. Run `fak disambiguation ownership --self-test --json`; its report proves
 one accepted fixture and separate rejected leaf/lane fixtures through the public
 CLI seam.
