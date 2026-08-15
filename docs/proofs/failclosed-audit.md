@@ -144,6 +144,7 @@ cross-checked against the live registry in code.
 | UNTIERED_LEAF | warn | fail-open | advisory by design (#3614); staged twin of TIER_DECLARED |
 | GOFMT | warn | fail-open | advisory; commit-boundary twin of make ci gofmt-check |
 | DUPLICATION | warn | fail-open | advisory; in-process twin of fak dup guard --staged |
+| COMMENT_QUALITY | warn | fail-open | advisory; changed-lines-only comments should explain durable why |
 
 <!-- failclosed-ledger:end -->
 
@@ -214,6 +215,7 @@ above.
 | BLOCKED_BY_OPEN_PREREQ | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | BROADCAST_MALFORMED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | CACHE_PREFIX_RESIDENT | refusal | floor-declared | `Floor:` cite in the dos.toml block |
+| DEPTH_NOT_CARRIED | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
 | CHECKER_TAMPERED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | COLLISION_RISK | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | COMPACTION_THRASH | refusal | floor-declared | `Floor:` cite in the dos.toml block |
