@@ -300,6 +300,8 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	once := fs.Bool("once", false, "print one snapshot line and exit (no watch loop)")
 	watch := fs.Bool("watch", false, "refresh continuously even when stdout is not a terminal")
 	asJSON := fs.Bool("json", false, "emit one /debug/vars snapshot (the rendered subset) as JSON and exit")
+	workDoneJSON := fs.Bool("work-done-json", false, "emit only the stable fak.info.work-done-query/1 accounting contract and exit")
+	workDoneWindow := fs.Duration("work-done-window", 0, "with --work-done-json, sample a bounded interval and emit deltas; 0 emits the session-total snapshot")
 	style := fs.String("style", envOrDefault("FAK_INFO_STYLE", "visual"), "watch-loop rendering on a TTY: visual (default — task-manager gauges + trend sparklines in stacked sub-panes) or line (a single compact status line); off a TTY both append one line per tick")
 	maxIdle := fs.Duration("max-idle", 0, "issue #2340: in watch mode, self-exit (with a closing line) after the gateway has been unreachable for about this long WITHOUT ever answering — a self-terminating backstop so an auto-spawned pane (e.g. from `fak guard --split`) whose gateway never comes up cannot poll a dead URL forever and leak a terminal pane. 0 (default) polls indefinitely, the manual-run behavior. Ignored with --once/--json. Rounds up to a whole --interval tick.")
 	prefixTranscript := fs.String("prefix-transcript", "", "issue #1602: score the managed-context prefix-stability of a recorded Claude Code / GLM transcript (JSONL) turn-by-turn, offline, and exit — no gateway needed")
@@ -314,6 +316,10 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	startup := fs.Bool("startup", false, "print the guarded session's FULL startup report (the banner + hook/MCP/auth notes) and exit. This is the on-demand door to the detail an attended `fak guard -- claude` launch keeps compact: the guard records the full text on its gateway at boot, and this reads it back any time during the session (startup_report on /debug/vars). Relaunching with `fak guard --banner=full` streams it at boot instead.")
 	color := fs.String("color", "auto", "colorize the info overlay on a TTY: auto (TTY && NO_COLOR unset), always (force on unless NO_COLOR), or never")
 	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if *workDoneWindow < 0 || (*workDoneWindow > 0 && !*workDoneJSON) || (*workDoneJSON && *asJSON) {
+		fmt.Fprintln(stderr, "fak info: --work-done-window requires --work-done-json; --json and --work-done-json are mutually exclusive")
 		return 2
 	}
 	if *receiptFile != "" {
@@ -414,6 +420,9 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 
+	if *workDoneJSON {
+		return runInfoWorkDoneQuery(stdout, stderr, c, *workDoneWindow)
+	}
 	if *asJSON {
 		v, ok := fetchGuardInfoVars(c, stderr)
 		if !ok {

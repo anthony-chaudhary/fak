@@ -4,7 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math"
+	"sort"
 	"strings"
+	"time"
 )
 
 const (
@@ -44,12 +47,14 @@ type guardInfoWorkDoneMetrics struct {
 }
 
 type guardInfoWorkDoneMetric struct {
-	Available  bool    `json:"available"`
-	Value      float64 `json:"value,omitempty"`
-	Unit       string  `json:"unit"`
-	Evidence   string  `json:"evidence"`
-	BaselineID string  `json:"baseline_id"`
-	Basis      string  `json:"basis,omitempty"`
+	Available         bool    `json:"available"`
+	Value             float64 `json:"value,omitempty"`
+	IntegerValue      *uint64 `json:"integer_value,omitempty"`
+	UnavailableReason string  `json:"unavailable_reason,omitempty"`
+	Unit              string  `json:"unit"`
+	Evidence          string  `json:"evidence"`
+	BaselineID        string  `json:"baseline_id"`
+	Basis             string  `json:"basis,omitempty"`
 }
 
 type guardInfoWorkDoneSource struct {
@@ -72,20 +77,20 @@ func guardInfoWorkDoneFromVars(v guardInfoVars) guardInfoWorkDone {
 		Window:   "observed_session",
 		Baseline: guardInfoDirectProviderBaseline(),
 		Metrics: guardInfoWorkDoneMetrics{
-			InputTokensAvoided: guardInfoWorkDoneMetric{Unit: "input_tokens", Evidence: "unavailable", BaselineID: guardInfoWorkDoneBaselineID},
-			ModelCallsAvoided:  guardInfoWorkDoneMetric{Unit: "model_calls", Evidence: "unavailable", BaselineID: guardInfoWorkDoneBaselineID},
-			WaitSecondsAvoided: guardInfoWorkDoneMetric{Unit: "seconds", Evidence: "unavailable", BaselineID: guardInfoWorkDoneBaselineID},
+			InputTokensAvoided: guardInfoWorkDoneMetric{Unit: "input_tokens", Evidence: "unavailable", BaselineID: guardInfoWorkDoneBaselineID, UnavailableReason: "provider_cache_usage_not_reported"},
+			ModelCallsAvoided:  guardInfoWorkDoneMetric{Unit: "model_calls", Evidence: "unavailable", BaselineID: guardInfoWorkDoneBaselineID, UnavailableReason: "local_avoidance_counters_not_reported"},
+			WaitSecondsAvoided: guardInfoWorkDoneMetric{Unit: "seconds", Evidence: "unavailable", BaselineID: guardInfoWorkDoneBaselineID, UnavailableReason: "observed_turn_latency_not_reported"},
 		},
 	}
 	if v.VCache != nil {
 		w.Metrics.InputTokensAvoided = guardInfoWorkDoneMetric{
-			Available: true, Value: guardInfoSaved(v), Unit: "input_tokens", Evidence: "observed",
+			Available: true, Value: guardInfoSaved(v), IntegerValue: integerMetricValue(guardInfoSaved(v)), Unit: "input_tokens", Evidence: "observed",
 			BaselineID: guardInfoWorkDoneBaselineID, Basis: "provider-reported cache usage; token-equivalent delta against the declared baseline arm",
 		}
 	}
 	if v.CacheAttribution != nil || v.Adjudication != nil {
 		w.Metrics.ModelCallsAvoided = guardInfoWorkDoneMetric{
-			Available: true, Value: float64(guardInfoTurnsSaved(v)), Unit: "model_calls", Evidence: "witnessed",
+			Available: true, Value: float64(guardInfoTurnsSaved(v)), IntegerValue: ptrUint64(guardInfoTurnsSaved(v)), Unit: "model_calls", Evidence: "witnessed",
 			BaselineID: guardInfoWorkDoneBaselineID, Basis: "fak-local engine calls skipped",
 		}
 	}
@@ -102,6 +107,122 @@ func guardInfoWorkDoneFromVars(v guardInfoVars) guardInfoWorkDone {
 	} else {
 		w.Sources = []guardInfoWorkDoneSource{guardInfoUnknownWorkSource()}
 	}
+	return w
+}
+
+func integerMetricValue(v float64) *uint64 {
+	if v < 0 || math.IsNaN(v) || math.IsInf(v, 0) || math.Trunc(v) != v || v > math.MaxUint64 {
+		return nil
+	}
+	return ptrUint64(uint64(v))
+}
+
+func ptrUint64(v uint64) *uint64 { return &v }
+
+const guardInfoWorkDoneQuerySchema = "fak.info.work-done-query/1"
+
+type guardInfoWorkDoneQuery struct {
+	Schema      string              `json:"schema"`
+	GeneratedAt string              `json:"generated_at"`
+	Window      guardInfoWorkWindow `json:"window"`
+	WorkDone    guardInfoWorkDone   `json:"work_done"`
+}
+
+type guardInfoWorkWindow struct {
+	Kind          string `json:"kind"`
+	StartUTC      string `json:"start_utc,omitempty"`
+	EndUTC        string `json:"end_utc"`
+	DurationNanos int64  `json:"duration_nanos"`
+	Reset         bool   `json:"reset"`
+	ResetReason   string `json:"reset_reason,omitempty"`
+}
+
+func guardInfoSessionWorkDoneQuery(v guardInfoVars, at time.Time) guardInfoWorkDoneQuery {
+	return guardInfoWorkDoneQuery{
+		Schema: guardInfoWorkDoneQuerySchema, GeneratedAt: at.UTC().Format(time.RFC3339Nano),
+		Window:   guardInfoWorkWindow{Kind: "session_total", EndUTC: at.UTC().Format(time.RFC3339Nano)},
+		WorkDone: guardInfoWorkDoneFromVars(v),
+	}
+}
+
+func guardInfoBoundedWorkDoneQuery(before, after guardInfoVars, start, end time.Time) guardInfoWorkDoneQuery {
+	a, b := guardInfoWorkDoneFromVars(before), guardInfoWorkDoneFromVars(after)
+	q := guardInfoWorkDoneQuery{
+		Schema: guardInfoWorkDoneQuerySchema, GeneratedAt: end.UTC().Format(time.RFC3339Nano),
+		Window:   guardInfoWorkWindow{Kind: "bounded", StartUTC: start.UTC().Format(time.RFC3339Nano), EndUTC: end.UTC().Format(time.RFC3339Nano), DurationNanos: end.Sub(start).Nanoseconds()},
+		WorkDone: b,
+	}
+	q.WorkDone.Window = "bounded"
+	if !guardInfoWorkDoneBaselineCompatible(a.Baseline, b.Baseline) {
+		q.Window.Reset, q.Window.ResetReason = true, "baseline_changed"
+		q.WorkDone = guardInfoUnavailableWindowWorkDone(b, "baseline_changed_during_window")
+		return q
+	}
+	if workDoneCountersRegressed(a, b) {
+		q.Window.Reset, q.Window.ResetReason = true, "session_counters_reset"
+		q.WorkDone = guardInfoUnavailableWindowWorkDone(b, "session_counters_reset_during_window")
+		return q
+	}
+	q.WorkDone.Metrics.InputTokensAvoided = subtractWorkMetric(a.Metrics.InputTokensAvoided, b.Metrics.InputTokensAvoided)
+	q.WorkDone.Metrics.ModelCallsAvoided = subtractWorkMetric(a.Metrics.ModelCallsAvoided, b.Metrics.ModelCallsAvoided)
+	q.WorkDone.Metrics.WaitSecondsAvoided = subtractWorkMetric(a.Metrics.WaitSecondsAvoided, b.Metrics.WaitSecondsAvoided)
+	q.WorkDone.Sources = subtractWorkSources(a.Sources, b.Sources)
+	return q
+}
+
+func workDoneCountersRegressed(a, b guardInfoWorkDone) bool {
+	for _, pair := range [][2]guardInfoWorkDoneMetric{{a.Metrics.InputTokensAvoided, b.Metrics.InputTokensAvoided}, {a.Metrics.ModelCallsAvoided, b.Metrics.ModelCallsAvoided}, {a.Metrics.WaitSecondsAvoided, b.Metrics.WaitSecondsAvoided}} {
+		if pair[0].Available && pair[1].Available && pair[1].Value < pair[0].Value {
+			return true
+		}
+	}
+	return false
+}
+
+func subtractWorkMetric(a, b guardInfoWorkDoneMetric) guardInfoWorkDoneMetric {
+	if !a.Available || !b.Available {
+		b.Available, b.Value, b.IntegerValue, b.Evidence = false, 0, nil, "unavailable"
+		b.UnavailableReason = "window_endpoint_unavailable"
+		return b
+	}
+	b.Value -= a.Value
+	if b.Unit == "model_calls" {
+		b.IntegerValue = ptrUint64(uint64(b.Value))
+	}
+	return b
+}
+
+func subtractWorkSources(a, b []guardInfoWorkDoneSource) []guardInfoWorkDoneSource {
+	before := map[string]guardInfoWorkDoneSource{}
+	for _, source := range a {
+		before[source.ID] = source
+	}
+	out := make([]guardInfoWorkDoneSource, 0, len(b))
+	for _, source := range b {
+		prior := before[source.ID]
+		source.InputTokenEquiv -= prior.InputTokenEquiv
+		if source.ModelCallsAvoided < prior.ModelCallsAvoided || (source.EventCountAvailable && prior.EventCountAvailable && source.Events < prior.Events) {
+			continue
+		}
+		source.ModelCallsAvoided -= prior.ModelCallsAvoided
+		if source.EventCountAvailable && prior.EventCountAvailable {
+			source.Events -= prior.Events
+		} else {
+			source.EventCountAvailable, source.Events = false, 0
+		}
+		if source.InputTokenEquiv != 0 || source.ModelCallsAvoided != 0 || source.Events != 0 {
+			out = append(out, source)
+		}
+	}
+	return out
+}
+
+func guardInfoUnavailableWindowWorkDone(w guardInfoWorkDone, reason string) guardInfoWorkDone {
+	metrics := []*guardInfoWorkDoneMetric{&w.Metrics.InputTokensAvoided, &w.Metrics.ModelCallsAvoided, &w.Metrics.WaitSecondsAvoided}
+	for _, metric := range metrics {
+		metric.Available, metric.Value, metric.IntegerValue, metric.Evidence, metric.UnavailableReason = false, 0, nil, "unavailable", reason
+	}
+	w.Sources = nil
 	return w
 }
 
@@ -147,6 +268,8 @@ func guardInfoWorkDoneSources(a guardInfoCacheAttribution) []guardInfoWorkDoneSo
 	if len(out) == 0 {
 		return []guardInfoWorkDoneSource{{Schema: guardInfoWorkDoneSourceSchema, ID: "cold_direct", Owner: "provider", Disposition: "loaded", Label: "cold/direct path", Evidence: "observed", ExclusivityGroup: "none"}}
 	}
+	rank := map[string]int{"provider_cache": 0, "context_reduction": 1, "fak_prefix_reuse": 2, "fak_response_reuse": 3, "inline_tool_local": 4, "cold_direct": 5, "unknown": 6}
+	sort.SliceStable(out, func(i, j int) bool { return rank[out[i].ID] < rank[out[j].ID] })
 	return out
 }
 

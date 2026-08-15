@@ -692,6 +692,11 @@
           "category": "incidental",
           "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
           "token": "cache_token_equiv_owner"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
+          "token": "provider_cache_usage_not_reported"
         }
       ],
       "id": "cache",
@@ -864,6 +869,7 @@
         "prefixcachequeries",
         "promptcachehittokens",
         "promptcachemisstokens",
+        "provider_cache_usage_not_reported",
         "pycache",
         "registerCacheLevers",
         "replaceMicroCacheWitness",
@@ -2120,6 +2126,36 @@
           "category": "incidental",
           "reason": "Issue #6841 reconciliation assertion over the existing work-done query; not a new guard gate.",
           "token": "guardInfoWorkDoneReconciles"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
+          "token": "guardInfoWorkDoneQuerySchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
+          "token": "guardInfoWorkDoneQuery"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
+          "token": "guardInfoWorkWindow"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
+          "token": "guardInfoSessionWorkDoneQuery"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
+          "token": "guardInfoBoundedWorkDoneQuery"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
+          "token": "guardInfoUnavailableWindowWorkDone"
         }
       ],
       "exclude": [
@@ -2266,8 +2302,11 @@
         "guardHandoffBlockCounterRel",
         "guardHeadlessChildWindowMode",
         "guardInfo",
+        "guardInfoBoundedWorkDoneQuery",
         "guardInfoDirectProviderBaseline",
+        "guardInfoSessionWorkDoneQuery",
         "guardInfoSignedShortCount",
+        "guardInfoUnavailableWindowWorkDone",
         "guardInfoUnknownWorkSource",
         "guardInfoWorkDone",
         "guardInfoWorkDoneBaseline",
@@ -2279,6 +2318,8 @@
         "guardInfoWorkDoneFromVars",
         "guardInfoWorkDoneMetric",
         "guardInfoWorkDoneMetrics",
+        "guardInfoWorkDoneQuery",
+        "guardInfoWorkDoneQuerySchema",
         "guardInfoWorkDoneReconciles",
         "guardInfoWorkDoneRows",
         "guardInfoWorkDoneSchema",
@@ -2287,6 +2328,7 @@
         "guardInfoWorkDoneSourceSchema",
         "guardInfoWorkDoneSourceText",
         "guardInfoWorkDoneSources",
+        "guardInfoWorkWindow",
         "guardKeychainAPIKey",
         "guardKeychainAccessToken",
         "guardKeychainCred",
@@ -3627,6 +3669,26 @@
           "category": "incidental",
           "reason": "typed import exclusion reason, not a runtime session concept",
           "token": "session_or_transcript_residue"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
+          "token": "guardInfoSessionWorkDoneQuery"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
+          "token": "session_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
+          "token": "session_counters_reset"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
+          "token": "session_counters_reset_during_window"
         }
       ],
       "id": "session-runtime",
@@ -3746,6 +3808,7 @@
         "filterToolSchedulerTrials",
         "gemma4_session_test",
         "gen_session_effectiveness_svg",
+        "guardInfoSessionWorkDoneQuery",
         "guardSessionStart",
         "guardSessionStartDriverEntrypointBases",
         "guardSessionStartDriverEntrypointDirs",
@@ -3845,9 +3908,12 @@
         "sessionRegistryRecoveryStage",
         "sessionRoots",
         "session_compaction_thrash",
+        "session_counters_reset",
+        "session_counters_reset_during_window",
         "session_lifecycle",
         "session_or_transcript_residue",
         "session_registry_recovery",
+        "session_total",
         "sessionids",
         "sessionmine",
         "sessionregistry",
