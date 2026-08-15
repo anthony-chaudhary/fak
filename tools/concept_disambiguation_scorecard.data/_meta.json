@@ -6360,6 +6360,11 @@
           "category": "incidental",
           "reason": "Cancellable variant of the existing radix prefix lookup API; Context is a standard request-cancellation parameter, not a new managed-context concept.",
           "token": "LookupSnapshotTieredContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "A classifier-local hash binding one remembered choice to an exact path/task, not a managed-context subsystem.",
+          "token": "ContextKey"
         }
       ],
       "id": "context-ctx",
@@ -6367,6 +6372,7 @@
         "AffinityFromContext",
         "COMPACTION_THRASH",
         "CompactionContract",
+        "ContextKey",
         "ContextLimit",
         "ContextShedding",
         "ContextTokensSaved",
@@ -7704,6 +7710,11 @@
           "category": "incidental",
           "reason": "Deterministic receipt-ordering helper over already-resolved decisions; not a new decision concept.",
           "token": "sortDecisions"
+        },
+        {
+          "category": "incidental",
+          "reason": "A classifier-local machine-readable ambiguity result, not the kernel decision/adjudication concept.",
+          "token": "DecisionRequest"
         }
       ],
       "id": "decision",
@@ -7716,6 +7727,7 @@
         "DecisionDelegate",
         "DecisionMS",
         "DecisionRefuse",
+        "DecisionRequest",
         "DecisionSamples",
         "EvaluateHeldSchedule",
         "GenerationContentionDecisionContract",

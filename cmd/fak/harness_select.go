@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/harnessclassify"
 	"github.com/anthony-chaudhary/fak/internal/harnessdiscover"
 	"github.com/anthony-chaudhary/fak/internal/harnessselect"
 )
@@ -19,6 +20,10 @@ func runHarnessSelect(stdout, stderr io.Writer, argv []string) int {
 	discoverPath := fs.String("discover", "", "scoped harness discovery registry")
 	path := fs.String("path", "", "current project or task path")
 	principal := fs.String("principal", "", "authenticated engineer identity for discovered team/person sources")
+	task := fs.String("task", "", "plain-language task to classify when no --tag is supplied")
+	taskDomain := fs.String("task-domain", "", "explicit task domain")
+	projectDomain := fs.String("project-domain", "", "explicit project domain")
+	choiceFile := fs.String("choice-file", "", "scoped remembered domain choice")
 	var tags harnessTagFlag
 	fs.Var(&tags, "tag", "context tag (repeatable or comma-separated)")
 	if err := fs.Parse(argv); err != nil {
@@ -48,7 +53,28 @@ func runHarnessSelect(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 	}
-	result, err := harnessselect.Resolve(manifest, harnessselect.Context{Path: *path, Tags: tags.values()})
+	resolvedTags := tags.values()
+	if len(resolvedTags) == 0 && (*task != "" || *taskDomain != "" || *projectDomain != "" || *choiceFile != "") {
+		choice, err := readHarnessChoice(*choiceFile)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak harness select: %v\n", err)
+			return 1
+		}
+		classified, err := harnessclassify.Classify(harnessclassify.Input{Path: *path, Task: *task, TaskDomain: *taskDomain, ProjectDomain: *projectDomain, Choice: choice})
+		if err != nil {
+			fmt.Fprintf(stderr, "fak harness select: %v\n", err)
+			return 1
+		}
+		if classified.NeedsDecision {
+			if err := json.NewEncoder(stdout).Encode(classified); err != nil {
+				fmt.Fprintf(stderr, "fak harness select: %v\n", err)
+				return 1
+			}
+			return 3
+		}
+		resolvedTags = []string{classified.Domain}
+	}
+	result, err := harnessselect.Resolve(manifest, harnessselect.Context{Path: *path, Tags: resolvedTags})
 	if err != nil {
 		fmt.Fprintf(stderr, "fak harness select: %v\n", err)
 		return 1

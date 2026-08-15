@@ -1,0 +1,15 @@
+[
+  {"path":"matter.docx","task":"draft deposition brief","want":"legal"},
+  {"path":"evidence.pdf","task":"review contract brief citations","want":"legal"},
+  {"path":"brief.docx","task":"prepare deposition matter","want":"legal"},
+  {"path":"main.go","task":"implement compile bug","want":"coding"},
+  {"path":"worker.py","task":"refactor test implementation","want":"coding"},
+  {"path":"client.ts","task":"implement compile test","want":"coding"},
+  {"path":"runbook.md","task":"deploy production incident runbook","want":"integrated"},
+  {"path":"ops.txt","task":"customer production incident","want":"integrated"},
+  {"path":"deploy.yaml","task":"deploy customer runbook","want":"integrated"},
+  {"path":"brief.go","task":"implement contract brief","decision":true},
+  {"path":"notes.txt","task":"review","decision":true},
+  {"path":"incident.go","task":"implement production incident","decision":true}
+]
+
