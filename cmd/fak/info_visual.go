@@ -35,13 +35,15 @@ var guardInfoSparkRunes = []rune("▁▂▃▄▅▆▇█")
 // Each series is capped to guardInfoTrendCap; push appends one tick and trims the oldest. It is
 // the only state the overlay carries across ticks — the gateway stays the single source of truth.
 type guardInfoTrend struct {
-	cap        int
-	saved      []float64 // net saved-token-equiv (the headline economic signal; can be negative)
-	hit        []float64 // cache hit rate, 0..1
-	turns      []float64 // cumulative replies (model turns) — its slope is the work rate
-	inflight   []float64 // requests in flight right now
-	heap       []float64 // gateway heap-alloc bytes — the resources panel's live memory trend
-	savedCalls []float64 // cumulative engine calls fak avoided (turns saved) — its slope is the saving rate
+	cap             int
+	baseline        guardInfoWorkDoneBaseline
+	baselineChanges uint64
+	saved           []float64 // net saved-token-equiv (the headline economic signal; can be negative)
+	hit             []float64 // cache hit rate, 0..1
+	turns           []float64 // cumulative replies (model turns) — its slope is the work rate
+	inflight        []float64 // requests in flight right now
+	heap            []float64 // gateway heap-alloc bytes — the resources panel's live memory trend
+	savedCalls      []float64 // cumulative engine calls fak avoided (turns saved) — its slope is the saving rate
 }
 
 // newGuardInfoTrend returns an empty trend ring with the given per-series cap (clamped to >=1).
@@ -56,6 +58,14 @@ func newGuardInfoTrend(capN int) *guardInfoTrend {
 // A nil VCache (no provider cache activity yet) contributes a zero saving and zero hit, so the
 // sparkline shows the pre-cache flat baseline rather than a gap.
 func (t *guardInfoTrend) push(v guardInfoVars) {
+	baseline := guardInfoWorkDoneFromVars(v).Baseline
+	if t.baseline.ID == "" {
+		t.baseline = baseline
+	} else if !guardInfoWorkDoneBaselineCompatible(t.baseline, baseline) {
+		t.baseline = baseline
+		t.baselineChanges++
+		t.saved, t.hit, t.turns, t.inflight, t.heap, t.savedCalls = nil, nil, nil, nil, nil, nil
+	}
 	saved, hit := 0.0, 0.0
 	if v.VCache != nil {
 		saved = v.VCache.SavedTokenEquiv

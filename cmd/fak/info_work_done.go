@@ -1,13 +1,17 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 )
 
 const (
-	guardInfoWorkDoneSchema     = "fak.info.work-done/1"
-	guardInfoWorkDoneBaselineID = "direct-provider/v1"
+	guardInfoWorkDoneSchema               = "fak.info.work-done/1"
+	guardInfoWorkDoneBaselineID           = "direct-provider/v1"
+	guardInfoWorkDoneBaselineEffectiveUTC = "2026-08-14"
+	guardInfoWorkDoneComparisonScope      = "same observed session; fak-local reuse disabled on the baseline arm"
 )
 
 // guardInfoWorkDone is the shared accounting object behind the default TUI and `fak info
@@ -22,8 +26,14 @@ type guardInfoWorkDone struct {
 }
 
 type guardInfoWorkDoneBaseline struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
+	ID                  string `json:"id"`
+	Label               string `json:"label"`
+	Revision            int    `json:"revision"`
+	EffectiveUTC        string `json:"effective_utc"`
+	ConfigurationSHA256 string `json:"configuration_sha256"`
+	ComparisonScope     string `json:"comparison_scope"`
+	CandidateArm        string `json:"candidate_arm"`
+	BaselineArm         string `json:"baseline_arm"`
 }
 
 type guardInfoWorkDoneMetrics struct {
@@ -33,11 +43,12 @@ type guardInfoWorkDoneMetrics struct {
 }
 
 type guardInfoWorkDoneMetric struct {
-	Available bool    `json:"available"`
-	Value     float64 `json:"value,omitempty"`
-	Unit      string  `json:"unit"`
-	Evidence  string  `json:"evidence"`
-	Basis     string  `json:"basis,omitempty"`
+	Available  bool    `json:"available"`
+	Value      float64 `json:"value,omitempty"`
+	Unit       string  `json:"unit"`
+	Evidence   string  `json:"evidence"`
+	BaselineID string  `json:"baseline_id"`
+	Basis      string  `json:"basis,omitempty"`
 }
 
 type guardInfoWorkDoneSource struct {
@@ -52,30 +63,30 @@ func guardInfoWorkDoneFromVars(v guardInfoVars) guardInfoWorkDone {
 	w := guardInfoWorkDone{
 		Schema:   guardInfoWorkDoneSchema,
 		Window:   "observed_session",
-		Baseline: guardInfoWorkDoneBaseline{ID: guardInfoWorkDoneBaselineID, Label: "direct provider path"},
+		Baseline: guardInfoDirectProviderBaseline(),
 		Metrics: guardInfoWorkDoneMetrics{
-			InputTokensAvoided: guardInfoWorkDoneMetric{Unit: "input_tokens", Evidence: "unavailable"},
-			ModelCallsAvoided:  guardInfoWorkDoneMetric{Unit: "model_calls", Evidence: "unavailable"},
-			WaitSecondsAvoided: guardInfoWorkDoneMetric{Unit: "seconds", Evidence: "unavailable"},
+			InputTokensAvoided: guardInfoWorkDoneMetric{Unit: "input_tokens", Evidence: "unavailable", BaselineID: guardInfoWorkDoneBaselineID},
+			ModelCallsAvoided:  guardInfoWorkDoneMetric{Unit: "model_calls", Evidence: "unavailable", BaselineID: guardInfoWorkDoneBaselineID},
+			WaitSecondsAvoided: guardInfoWorkDoneMetric{Unit: "seconds", Evidence: "unavailable", BaselineID: guardInfoWorkDoneBaselineID},
 		},
 	}
 	if v.VCache != nil {
 		w.Metrics.InputTokensAvoided = guardInfoWorkDoneMetric{
-			Available: true, Value: guardInfoSaved(v), Unit: "input_tokens", Evidence: "estimated",
-			Basis: "provider-reported cache usage and configured token prices",
+			Available: true, Value: guardInfoSaved(v), Unit: "input_tokens", Evidence: "observed",
+			BaselineID: guardInfoWorkDoneBaselineID, Basis: "provider-reported cache usage; token-equivalent delta against the declared baseline arm",
 		}
 	}
 	if v.CacheAttribution != nil || v.Adjudication != nil {
 		w.Metrics.ModelCallsAvoided = guardInfoWorkDoneMetric{
 			Available: true, Value: float64(guardInfoTurnsSaved(v)), Unit: "model_calls", Evidence: "witnessed",
-			Basis: "fak-local engine calls skipped",
+			BaselineID: guardInfoWorkDoneBaselineID, Basis: "fak-local engine calls skipped",
 		}
 	}
 	if w.Metrics.ModelCallsAvoided.Available && v.Adjudication != nil {
 		if seconds, ok := timeSavedSeconds(w.Metrics.ModelCallsAvoided.Value, *v.Adjudication); ok {
 			w.Metrics.WaitSecondsAvoided = guardInfoWorkDoneMetric{
-				Available: true, Value: seconds, Unit: "seconds", Evidence: "modeled_from_observed_session_mean",
-				Basis: "avoided calls multiplied by observed mean end-to-end turn latency",
+				Available: true, Value: seconds, Unit: "seconds", Evidence: "modeled",
+				BaselineID: guardInfoWorkDoneBaselineID, Basis: "avoided calls multiplied by observed current-session mean end-to-end turn latency",
 			}
 		}
 	}
@@ -96,6 +107,34 @@ func guardInfoWorkDoneFromVars(v guardInfoVars) guardInfoWorkDone {
 	return w
 }
 
+func guardInfoDirectProviderBaseline() guardInfoWorkDoneBaseline {
+	b := guardInfoWorkDoneBaseline{
+		ID: guardInfoWorkDoneBaselineID, Label: "direct provider path", Revision: 1,
+		EffectiveUTC: guardInfoWorkDoneBaselineEffectiveUTC, ComparisonScope: guardInfoWorkDoneComparisonScope,
+		CandidateArm: "current session: provider cache and fak-local reuse enabled as configured",
+		BaselineArm:  "same provider/session workload: fak-local response reuse and inline serving disabled",
+	}
+	canonical := strings.Join([]string{b.ID, b.EffectiveUTC, b.ComparisonScope, b.CandidateArm, b.BaselineArm}, "\x00")
+	sum := sha256.Sum256([]byte(canonical))
+	b.ConfigurationSHA256 = "sha256:" + hex.EncodeToString(sum[:])
+	return b
+}
+
+func guardInfoWorkDoneBaselineCompatible(a, b guardInfoWorkDoneBaseline) bool {
+	return a.ID != "" && a.ID == b.ID && a.ConfigurationSHA256 != "" && a.ConfigurationSHA256 == b.ConfigurationSHA256
+}
+
+func guardInfoWorkDoneBaselineDetailRows(w guardInfoWorkDone) []string {
+	b := w.Baseline
+	return []string{
+		fmt.Sprintf(" base   %s · r%d · effective %s", b.ID, b.Revision, b.EffectiveUTC),
+		" scope  " + b.ComparisonScope,
+		" fak    " + b.CandidateArm,
+		" alt    " + b.BaselineArm,
+		" config " + b.ConfigurationSHA256,
+	}
+}
+
 func ptrGuardInfoWorkDone(v guardInfoWorkDone) *guardInfoWorkDone { return &v }
 
 func guardInfoWorkDoneRows(ctx guardInfoPanelCtx, level guardInfoPanelLevel) []string {
@@ -113,7 +152,7 @@ func guardInfoWorkDoneRows(ctx guardInfoPanelCtx, level guardInfoPanelLevel) []s
 		return []string{fmt.Sprintf(" work  %s avoided · %s avoided", tokens, calls)}
 	}
 	rows := []string{
-		" work  vs " + w.Baseline.Label + " · observed session",
+		fmt.Sprintf(" work  vs %s r%d · observed session", w.Baseline.Label, w.Baseline.Revision),
 		fmt.Sprintf("       %s avoided · %s avoided · %s avoided", tokens, calls, seconds),
 	}
 	if source := guardInfoWorkDoneSourceText(w); source != "" {
