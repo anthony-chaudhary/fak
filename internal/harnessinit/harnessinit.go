@@ -159,9 +159,10 @@ import (
 
 func main() {
  selfcheck := flag.Bool("selfcheck", false, "run one deterministic offline turn")
+ productLock := flag.String("product-lock", "", "verified fak product lock")
  flag.Parse()
  if !*selfcheck { fmt.Fprintln(os.Stderr, "use --selfcheck"); os.Exit(2) }
- if err := runtime.Selfcheck(context.Background(), os.Stdout); err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+ if err := runtime.Selfcheck(context.Background(), os.Stdout, *productLock); err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
 }
 `, generatedMarker, ContractVersion, version, module), true},
 		{"generated/runtime.go", fmt.Sprintf(`// %s
@@ -170,24 +171,67 @@ package generated
 
 import (
  "context"
+ "crypto/sha256"
+ "encoding/hex"
  "encoding/json"
  "fmt"
  "io"
+ "os"
+ "sort"
+ "strings"
 
  "github.com/anthony-chaudhary/fak/pkg/harnesskit"
  "%s/product"
 )
 
 type event struct { Type string `+"`json:\"type\"`"+`; Turn string `+"`json:\"turn\"`"+`; Detail string `+"`json:\"detail,omitempty\"`"+` }
+type lockedComponent struct { ID string `+"`json:\"id\"`"+`; Version string `+"`json:\"version\"`"+`; Digest string `+"`json:\"digest\"`"+`; Source string `+"`json:\"source\"`"+`; Reason string `+"`json:\"reason,omitempty\"`"+`; Provider string `+"`json:\"provider,omitempty\"`"+`; Provides []string `+"`json:\"provides,omitempty\"`"+` }
+type lockedAsset struct { Kind string `+"`json:\"kind\"`"+`; ID string `+"`json:\"id\"`"+`; Value string `+"`json:\"value,omitempty\"`"+`; Ref string `+"`json:\"ref,omitempty\"`"+`; Boundary string `+"`json:\"boundary,omitempty\"`"+`; Grants []string `+"`json:\"grants,omitempty\"`"+`; Denies []string `+"`json:\"denies,omitempty\"`"+`; Source string `+"`json:\"source\"`"+`; Locked bool `+"`json:\"locked,omitempty\"`"+`; Mandatory bool `+"`json:\"mandatory,omitempty\"`"+` }
+type productLock struct { Schema string `+"`json:\"schema\"`"+`; ID string `+"`json:\"id\"`"+`; Environment json.RawMessage `+"`json:\"environment\"`"+`; Budget json.RawMessage `+"`json:\"budget\"`"+`; Components []lockedComponent `+"`json:\"components\"`"+`; Assets []lockedAsset `+"`json:\"assets\"`"+`; AssetTrace json.RawMessage `+"`json:\"asset_trace\"`"+`; Decisions json.RawMessage `+"`json:\"decisions\"`"+` }
+type launchReceipt struct { Schema string `+"`json:\"schema\"`"+`; LockID string `+"`json:\"lock_id\"`"+`; ProductID string `+"`json:\"product_id\"`"+`; Profile string `+"`json:\"profile\"`"+`; Layers []string `+"`json:\"layers\"`"+`; Assets []string `+"`json:\"assets\"`"+`; Components []string `+"`json:\"components\"`"+` }
 
-func Selfcheck(ctx context.Context, out io.Writer) error {
+func loadLock(path string) (productLock, error) {
+ raw, err := os.ReadFile(path); if err != nil { return productLock{}, err }
+ var lock productLock; dec := json.NewDecoder(strings.NewReader(string(raw))); dec.DisallowUnknownFields(); if err := dec.Decode(&lock); err != nil { return productLock{}, err }
+ if lock.Schema != "fak.harness-product-lock/v1alpha1" || lock.ID == "" || len(lock.Components) == 0 { return productLock{}, fmt.Errorf("invalid product lock") }
+ want := lock.ID; lock.ID = ""; canonical, err := json.Marshal(lock); if err != nil { return productLock{}, err }; sum := sha256.Sum256(canonical); got := "sha256:" + hex.EncodeToString(sum[:]); if got != want { return productLock{}, fmt.Errorf("product lock digest mismatch") }; lock.ID = want
+ for _, component := range lock.Components { if component.ID == "" || component.Version == "" || component.Source == "" || !strings.HasPrefix(component.Digest, "sha256:") { return productLock{}, fmt.Errorf("invalid locked component") } }
+ for _, asset := range lock.Assets { if asset.Kind == "" || asset.ID == "" || asset.Source == "" || (asset.Kind == "secret" && asset.Ref == "") { return productLock{}, fmt.Errorf("invalid locked asset") } }
+ return lock, nil
+}
+func (lock productLock) project(productID string) (harnesskit.Profile, launchReceipt, string) {
+ seen := map[string]bool{}; layers := []string{}; assets := []string{}; instructions := []string{}
+ for _, asset := range lock.Assets { if !seen[asset.Source] { seen[asset.Source] = true; layers = append(layers, asset.Source) }; assets = append(assets, asset.Kind+"/"+asset.ID+"@"+asset.Source); if asset.Kind == "instruction" && asset.Value != "" { instructions = append(instructions, asset.Value) } }
+ profileID := "locked"; for _, layer := range layers { if layer == "legal" || layer == "coding" || layer == "integrated" { profileID = layer; break } }; capabilities := make([]harnesskit.Capability, 0, len(layers)); for _, layer := range layers { capabilities = append(capabilities, harnesskit.Capability("layer:"+layer)) }
+ components := []string{}; for _, component := range lock.Components { components = append(components, component.ID+"@"+component.Version+"#"+component.Digest) }; sort.Strings(assets); sort.Strings(components); sort.Strings(instructions)
+ return harnesskit.Profile{ID: profileID, Capabilities: capabilities}, launchReceipt{Schema:"fak.harness-launch-receipt/v1alpha1", LockID:lock.ID, ProductID:productID, Profile:profileID, Layers:layers, Assets:assets, Components:components}, strings.Join(instructions,"\n")
+}
+
+
+func Selfcheck(ctx context.Context, out io.Writer, lockPath string) error {
  select { case <-ctx.Done(): return ctx.Err(); default: }
- p, err := harnesskit.New(product.ID, product.Version).WithProfile(harnesskit.Profile{ID: product.Profile}).Build()
+ profile := harnesskit.Profile{ID: product.Profile}
+ var lock productLock
+ var receipt launchReceipt
+ instructions := ""
+ if lockPath != "" {
+  var err error
+  lock, err = loadLock(lockPath)
+  if err != nil { return err }
+  profile, receipt, instructions = lock.project(product.ID)
+ }
+ p, err := harnesskit.New(product.ID, product.Version).WithProfile(profile).Build()
  if err != nil { return err }
  if p.Spec().ID != product.ID { return fmt.Errorf("product identity mismatch") }
  emit := func(kind, detail string) error { return json.NewEncoder(out).Encode(event{Type: kind, Turn: "offline-1", Detail: detail}) }
+ if lockPath != "" {
+  rawReceipt, err := json.Marshal(receipt); if err != nil { return err }
+  if err := emit("harness.locked", string(rawReceipt)); err != nil { return err }
+ }
  if err := emit("turn.started", "offline deterministic model"); err != nil { return err }
- if err := emit("model.response", product.OfflineReply("prove the external harness works")); err != nil { return err }
+ reply := product.OfflineReply("prove the external harness works")
+ if instructions != "" { reply = profile.ID + " | " + instructions + " | " + reply }
+ if err := emit("model.response", reply); err != nil { return err }
  if err := emit("tool.requested", "record_selfcheck"); err != nil { return err }
  if err := emit("tool.completed", "record_selfcheck:ok"); err != nil { return err }
  return emit("turn.completed", "ok")
@@ -210,7 +254,8 @@ func OfflineReply(prompt string) string { return "offline reply: " + prompt }
 Generated by **%s** against public contract **%s** and pinned module **github.com/anthony-chaudhary/fak@%s**.
 
 - Build: `+"`go build -o product-bin ./cmd/product`"+`
-- Run the real offline turn: `+"`go run ./cmd/product --selfcheck`"+`
+- Run the stock offline turn: `+"`go run ./cmd/product --selfcheck`"+`
+- Run a verified contextual product: `+"`go run ./cmd/product --selfcheck --product-lock product.lock.json`"+`
 - Upgrade generated files: `+"`fak harness init --dir . --module %s --fak-version %s`"+`
 - Ownership: `+"`product/config.go`"+` is user-owned and is never overwritten. Files marked `+"`Code generated`"+` plus `+"`harness.lock.json`"+` are generator-owned.
 `, generatorID, ContractVersion, version, module, version), false},
