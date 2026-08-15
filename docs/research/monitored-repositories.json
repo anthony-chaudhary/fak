@@ -1,0 +1,62 @@
+{
+  "schema": "fak-monitored-repositories/1",
+  "updated_at": "2026-08-14",
+  "methodology": "Harness-related repositories absent by exact owner/name from tracked fak docs were ranked by direct seam relevance, current development activity, adoption signal, and license clarity. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
+  "repositories": [
+    {
+      "repository": "ruvnet/ruflo",
+      "url": "https://github.com/ruvnet/ruflo",
+      "status": "candidate",
+      "priority": 1,
+      "why": "Direct meta-harness overlap: multi-agent swarms, Codex and Claude integration, memory, skills, MCP, hooks, and a declared harness surface; 47 commits in the seven-day discovery window make it the hottest close seam.",
+      "last_checked": "2026-08-14",
+      "checked_revision": "4dcff483482cee316f47552a961bcbaadc89f378",
+      "stars_at_check": 67866,
+      "last_push_at_check": "2026-08-14T21:36:20Z"
+    },
+    {
+      "repository": "Untrivial-ai/agent-orchestrator",
+      "url": "https://github.com/Untrivial-ai/agent-orchestrator",
+      "status": "candidate",
+      "priority": 2,
+      "why": "Closest fleet-control analogue: plans work, spawns coding agents, isolates them in worktrees, and handles CI, reviews, and merge conflicts; at least 100 commits in the seven-day discovery window.",
+      "last_checked": "2026-08-14",
+      "checked_revision": "ee2c58a577317d4480a2b2ee5ff77f25e5307af9",
+      "stars_at_check": 9518,
+      "last_push_at_check": "2026-08-14T21:55:27Z"
+    },
+    {
+      "repository": "langchain-ai/open-swe",
+      "url": "https://github.com/langchain-ai/open-swe",
+      "status": "candidate",
+      "priority": 3,
+      "why": "Active asynchronous coding-agent harness with sandbox, task lifecycle, desktop, evaluation, and session surfaces; 80 commits in the seven-day discovery window expose useful operating-loop seams.",
+      "last_checked": "2026-08-14",
+      "checked_revision": "a6c360047186cc5b8afe3a74012a12bfc94ae7c7",
+      "stars_at_check": 10553,
+      "last_push_at_check": "2026-08-14T22:56:23Z"
+    },
+    {
+      "repository": "EveryInc/compound-engineering-plugin",
+      "url": "https://github.com/EveryInc/compound-engineering-plugin",
+      "status": "candidate",
+      "priority": 4,
+      "why": "Cross-harness plugin for Codex, Claude Code, Cursor, and peers with plan-review-work-compound loops and portable agent assets; 20 commits in the seven-day discovery window.",
+      "last_checked": "2026-08-14",
+      "checked_revision": "345e2bea42cabea2f32d25a68fd1739e8e92cd03",
+      "stars_at_check": 24259,
+      "last_push_at_check": "2026-08-14T22:46:18Z"
+    },
+    {
+      "repository": "obra/superpowers",
+      "url": "https://github.com/obra/superpowers",
+      "status": "candidate",
+      "priority": 5,
+      "why": "Largest adoption signal among previously untracked harness-adjacent sources and a portable skills, hooks, planning, testing, and subagent-development methodology spanning Codex and other agents.",
+      "last_checked": "2026-08-14",
+      "checked_revision": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+      "stars_at_check": 272168,
+      "last_push_at_check": "2026-08-13T00:36:31Z"
+    }
+  ]
+}

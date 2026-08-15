@@ -39,6 +39,15 @@ repeatedly and safely. If you were handed **one specific repo**, skip straight t
 `/field-borrow`. Reach for `scout-loop` when the job is *"keep finding new leads
 and converting them"* — the loop, not a single pass.
 
+## Durable monitored-source queue
+
+Start each pass from [`docs/research/monitored-repositories.json`](../../../docs/research/monitored-repositories.json), rendered with:
+
+```powershell
+fak study-monitor --due-days 14
+```
+
+Prefer the highest-priority due `candidate` or `watch` row before opening a fresh outward search. Exact `owner/name` is the deduplication key. When outward discovery finds a stronger untracked lead, register its checked revision and `last_checked` before deep study; after study, update the same row and link its `study_note`. This makes “most recently checked” queryable rather than recoverable only from filenames or session memory.
 ## The pass — one lead, end to end
 
 ### 1 — CRAWL: capture the first-class scout plan

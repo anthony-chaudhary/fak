@@ -116,6 +116,18 @@ acquisition, then run the same pass:
 The output shape flexes too: a single borrow → one leaf; a coherent track → an epic +
 child leaves; a whole subsystem worth adopting → an epic. Pick the shape the work demands.
 
+## Durable source registry — check before cloning, update when done
+
+Use [`docs/research/monitored-repositories.json`](../../../docs/research/monitored-repositories.json) as the exact `owner/name` source ledger. Before Phase 1:
+
+```powershell
+fak study-monitor --due-days 14
+```
+
+- If the source already has a row, treat `checked_revision` and `study_note` as deduplication evidence, not as proof that the current revision has been studied.
+- If it has no row, add it as `candidate` with the discovery check's date, pinned revision, push timestamp, adoption signal, and plain-language relevance.
+- At the end of a completed pass, update `last_checked`, `checked_revision`, `stars_at_check`, and `last_push_at_check`; set `status` to `studied` and `study_note` to the durable note path when a note ships, or `watch` when no candidate survives.
+- Land the registry update with the study note. A prose-only “we looked at it” is not durable registration.
 ## The pass
 
 ### 1 — Acquire into scratch, and PIN the source (never the tree)
