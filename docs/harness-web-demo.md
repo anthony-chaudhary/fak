@@ -1,6 +1,6 @@
 # Local native harness web UI
 
-`harnesswebdemo` is a separately built browser product over fak's public `pkg/harnesskit` contract. It serves embedded assets on loopback, submits deterministic offline turns, renders semantic message start/delta/completion, tools, artifacts, approvals, and typed failures, and reconnects from an exclusive sequence cursor. It does not import `internal/`, parse terminal output, or expose a remote listener.
+`harnesswebdemo` is a separately built browser product over fak's public `pkg/harnesskit` contract. It serves embedded assets on loopback, submits deterministic offline turns, renders semantic messages, tools, artifacts, approvals, and typed failures, and reconnects from an exclusive sequence cursor. It does not import `internal/`, parse terminal output, or expose a remote listener.
 
 ```text
 go run ./cmd/harnesswebdemo -selfcheck

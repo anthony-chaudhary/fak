@@ -38,7 +38,7 @@ func TestNormalRunEventsAreOrderedAndResumeExcludesCursor(t *testing.T) {
 	s := newStore()
 	runID := s.create("prove it")
 	events := s.after(runID, 0)
-	if len(events) != 8 {
+	if len(events) != 6 {
 		t.Fatalf("events=%d", len(events))
 	}
 	for i, event := range events {
@@ -50,14 +50,14 @@ func TestNormalRunEventsAreOrderedAndResumeExcludesCursor(t *testing.T) {
 		}
 	}
 	var message harnesskit.MessagePayload
-	if err := json.Unmarshal(events[3].Payload, &message); err != nil {
+	if err := json.Unmarshal(events[1].Payload, &message); err != nil {
 		t.Fatal(err)
 	}
 	if message.Text != "offline reply: prove it" {
 		t.Fatalf("message=%q", message.Text)
 	}
-	resumed := s.after(runID, 6)
-	if len(resumed) != 2 || resumed[0].Sequence != 7 || resumed[0].Type != harnesskit.EventArtifactPublished {
+	resumed := s.after(runID, 4)
+	if len(resumed) != 2 || resumed[0].Sequence != 5 || resumed[0].Type != harnesskit.EventArtifactPublished {
 		t.Fatalf("resumed=%v", resumed)
 	}
 }
@@ -103,7 +103,7 @@ func TestSelfcheckDrivesRenderRunApprovalFailureAndReconnect(t *testing.T) {
 	if err := selfcheck(&out); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"HARNESS_WEB_SELFCHECK ok", "protocol=fak.harness.run/v1", "normal=8", "resumed=2", "approval=4", "failure=3", "skins=2", "html_sha256="} {
+	for _, want := range []string{"HARNESS_WEB_SELFCHECK ok", "protocol=fak.harness.run/v1", "normal=6", "resumed=2", "approval=4", "failure=3", "skins=2", "html_sha256="} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("receipt missing %q: %s", want, out.String())
 		}
