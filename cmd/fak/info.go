@@ -303,6 +303,7 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	watch := fs.Bool("watch", false, "refresh continuously even when stdout is not a terminal")
 	asJSON := fs.Bool("json", false, "emit one /debug/vars snapshot (the rendered subset) as JSON and exit")
 	workDoneJSON := fs.Bool("work-done-json", false, "emit only the stable fak.info.work-done-query/1 accounting contract and exit")
+	workCoverage := fs.Bool("work-coverage", false, "report the declared WORK DONE accounting coverage registry and exit")
 	workDoneWindow := fs.Duration("work-done-window", 0, "with --work-done-json, sample a bounded interval and emit deltas; 0 emits the session-total snapshot")
 	workDoneHistory := fs.String("work-done-history", "", "privacy-safe JSONL history file used to compare and retain work-done query records")
 	workloadKey := fs.String("workload-key", "", "stable workload key for history comparison; persisted only as a SHA-256 identity")
@@ -326,6 +327,9 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	if *workDoneWindow < 0 || (*workDoneWindow > 0 && !*workDoneJSON) || (*workDoneJSON && *asJSON) || (*workDoneHistory != "" && *workloadKey == "") {
 		fmt.Fprintln(stderr, "fak info: --work-done-window requires --work-done-json; --json and --work-done-json are mutually exclusive; --work-done-history requires --workload-key")
 		return 2
+	}
+	if *workCoverage {
+		return runInfoWorkCoverage(stdout, stderr, *asJSON)
 	}
 	if *receiptFile != "" {
 		data, err := os.ReadFile(*receiptFile)
