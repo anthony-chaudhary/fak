@@ -1,42 +1,42 @@
 ---
-title: "Spine-first + fan-out — the two defaults for new work"
+title: "Spine-first + fan-out â€” the two defaults for new work"
 description: "The two defaults that fire for every new feature, leaf, verb, demo, or process change in fak unless explicitly waived: spine-first, then fan-out."
 ---
 
 # Spine-first + fan-out: the two defaults for any new unit of work
 
 These are defaults, not ceremonies: they fire for **every** new feature, leaf,
-verb, demo, or process change unless explicitly waived — the same way "default:
+verb, demo, or process change unless explicitly waived â€” the same way "default:
 ship" and "proof by default" fire in [`AGENTS.md`](../AGENTS.md).
 
-## Default 1 — the minimal working end-to-end spine ships first
+## Default 1 â€” the minimal working end-to-end spine ships first
 
 In the **same session** the work starts, ship the smallest runnable path that
-exercises the **real seam** end to end — as minimal and as *working* as possible:
+exercises the **real seam** end to end â€” as minimal and as *working* as possible:
 
-- **User-facing surface** → meet the LCD demo bar
+- **User-facing surface** â†’ meet the LCD demo bar
   ([`docs/run-the-demos.md`](run-the-demos.md)): one command, deterministic, no
   key, no network, no GPU, with a `-selfcheck` invariant.
-- **Library leaf / verb** → a test that drives the real object **plus** one
+- **Library leaf / verb** â†’ a test that drives the real object **plus** one
   captured live run of the verb (a `--json`/`--dry-run` invocation is fine).
-- **Process / doctrine change** → the machinery that makes it a default (a
+- **Process / doctrine change** â†’ the machinery that makes it a default (a
   gate, a skill, a verb), not a paragraph asking agents to remember it.
 
 **If a working spine is not achievable this session with high confidence, the
-spine itself becomes the first issue** — filed `gen/now`, milestoned at
+spine itself becomes the first issue** â€” filed `gen/now`, milestoned at
 creation, with the missing witness named. The spine is never silently deferred:
 either it exists as a witness, or it exists as a tracked issue. `fak issue
-fanout` enforces this mechanically — it **refuses to plan** without a
+fanout` enforces this mechanically â€” it **refuses to plan** without a
 `--spine` witness.
 
 ### Shift the finish line left at issue creation
 
 Every armed issue must make two judgments before implementation begins:
 
-- **Core through-line** � the shortest causal path from the proposed change, through the real
+- **Core through-line** — the shortest causal path from the proposed change, through the real
   seam, to one observable user/operator outcome and its witness. If removing a step still
   produces the stated outcome and witness, that step is not core.
-- **Gold-plating boundary** � name tempting work that improves completeness, elegance, breadth,
+- **Gold-plating boundary** — name tempting work that improves completeness, elegance, breadth,
   or hypothetical future reuse but is not needed for that causal path. This is a routing
   decision, not a dismissal: file independently valuable items as follow-ons instead of silently
   expanding the current issue.
@@ -56,7 +56,7 @@ headings to the decision names; `--raw-body` is the explicit escape hatch for a 
 non-contract administrative issue.
 
 Why: a spine is a witness; a plan is a claim. The repo refuses unproven claims
-(`not yet` discipline) — the spine is what converts "we will" into "it does".
+(`not yet` discipline) â€” the spine is what converts "we will" into "it does".
 It is also the cheapest moment to discover the design is wrong.
 
 ### The order of operations: applied implementation, then exhaustive proof
@@ -85,10 +85,10 @@ that path, it belongs in the spine. Exceptions are explicit: a prerequisite
 investigation may lead only when the unknown makes an applied spine impossible,
 but it must end in a checkable spine issue rather than an open-ended comparison.
 
-## Default 2 — the follow-on backlog is filed at creation time (3..50+)
+## Default 2 â€” the follow-on backlog is filed at creation time (3..50+)
 
 The moment a spine ships, fan out its hardening backlog **while context is
-hot** — not "later", which on a shared trunk means never:
+hot** â€” not "later", which on a shared trunk means never:
 
 ```bash
 fak issue fanout --title "my feature" --leaf myleaf \
@@ -96,12 +96,12 @@ fak issue fanout --title "my feature" --leaf myleaf \
 ```
 
 The planner ([`internal/issuefanout`](../internal/issuefanout/issuefanout.go))
-expands a fixed 15-template taxonomy — **qa** (edge sweep, failure paths,
+expands a fixed 15-template taxonomy â€” **qa** (edge sweep, failure paths,
 determinism/race), **dogfood** (self-run on the repo's own work, usage ledger),
 **product** (CLI reference, LCD demo, error-message UX), **observability**
 (outcome counters, scorecard fold), **integration** (advisory guard gate,
 dos.toml wiring, super-loop hookup), **docs** (doctrine + doc-map linkage), and
-**release** (CLAIMS.md tag + note) — into candidates that each carry the *full*
+**release** (CLAIMS.md tag + note) â€” into candidates that each carry the *full*
 [`issuecontract`](../internal/issuecontract/contract.go) scope contract
 (working spine, done condition, witness, acceptance gate, closure binding,
 route, step budget). Every candidate is **dispatchable the moment it is
@@ -109,8 +109,8 @@ filed**, proven by `go test ./internal/issuefanout`.
 
 - **3 is the floor, not the target** (`issuefanout.MinFanout`); the full
   taxonomy is 15, and a large feature composes several fan-outs (one per leaf).
-- File with `gh` — **milestone + labels at creation** (the issue-hygiene
-  default) — or wave-plan first: `fak issue fanout ... --json > plan.json &&
+- File with `gh` â€” **milestone + labels at creation** (the issue-hygiene
+  default) â€” or wave-plan first: `fak issue fanout ... --json > plan.json &&
   fak issue cohort --from-plan plan.json` gives concurrency-safe, leased waves.
 - Dedupe before filing: the candidates carry `fanout-<leaf>-*` marker keys, so
   a rerun is detectable against existing issues.
@@ -123,14 +123,14 @@ filed**, proven by `go test ./internal/issuefanout`.
 | Spine-first as an *issue* property (`issuecontract.WorkingSpine` required + spine-priority scoring) | shipped (pre-existing) |
 | Wave planning over the fan-out (`fak issue cohort --from-plan`) | shipped (pre-existing) |
 | `/spine-fanout` skill (agent front door) | **shipped** (`.claude/skills/spine-fanout/`) |
-| Advisory pre-commit nudge (PRIOR_ART pattern, `internal/hooks`) when a new leaf ships spine-less | planned — #2521 |
-| `dos.toml` lane for `issuefanout` + advisory reason token | **shipped** — #2522 |
-| Super-loop / dispatch hookup (fan-out fires automatically at spine-ship) | **shipped** — #2523 |
-| `fak new-leaf` scaffold prompting the spine + fan-out | planned — #2530 |
-| Adoption scorecard (spines shipped vs fan-outs filed) | **shipped** — #2532 |
+| Advisory pre-commit nudge (PRIOR_ART pattern, `internal/hooks`) when a new leaf ships spine-less | planned â€” #2521 |
+| `dos.toml` lane for `issuefanout` + advisory reason token | **shipped** â€” #2522 |
+| Super-loop / dispatch hookup (fan-out fires automatically at spine-ship) | **shipped** â€” #2523 |
+| `fak new-leaf` scaffold prompting the spine + fan-out | planned â€” #2530 |
+| Adoption scorecard (spines shipped vs fan-outs filed) | **shipped** â€” #2532 |
 
 This doctrine was dogfooded on itself: the planner above **is** the minimal
 working spine of the concept, its own fan-out was generated by the verb, and
 the "planned" rows above were filed from that output as **epic #2510**'s
-children (#2511–#2532). Each planned row is dispatchable by its issue number;
+children (#2511â€“#2532). Each planned row is dispatchable by its issue number;
 pick one up with `fak issue contract --issue <n>`.
