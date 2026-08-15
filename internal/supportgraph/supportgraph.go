@@ -42,14 +42,17 @@ type Tuple struct {
 	Hardware     string `json:"hardware"`
 }
 type Evidence struct {
-	ID        string    `json:"id"`
-	State     State     `json:"state"`
-	Tier      Tier      `json:"tier"`
-	Authority string    `json:"authority"`
-	Source    string    `json:"source"`
-	Expires   time.Time `json:"expires,omitempty"`
-	Fallback  string    `json:"fallback,omitempty"`
-	Penalty   string    `json:"penalty,omitempty"`
+	ID             string    `json:"id"`
+	State          State     `json:"state"`
+	Tier           Tier      `json:"tier"`
+	Authority      string    `json:"authority"`
+	Source         string    `json:"source"`
+	Expires        time.Time `json:"expires,omitempty"`
+	Fallback       string    `json:"fallback,omitempty"`
+	Penalty        string    `json:"penalty,omitempty"`
+	ArtifactDigest string    `json:"artifact_digest,omitempty"`
+	Environment    string    `json:"environment,omitempty"`
+	Reproduce      string    `json:"reproduce,omitempty"`
 }
 type Edge struct {
 	Tuple       Tuple      `json:"tuple"`

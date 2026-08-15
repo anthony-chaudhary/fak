@@ -4754,6 +4754,36 @@
           "category": "incidental",
           "reason": "CLI argument slice, not proof evidence",
           "token": "witnessArgs"
+        },
+        {
+          "category": "incidental",
+          "reason": "Command identifier for support witness ingestion; not a new witness-proof concept.",
+          "token": "supportwitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Return structure for ingestion mechanics; not a proof class.",
+          "token": "IngestResult"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for parsing or testing the already-defined support witness contract; not a new proof concept.",
+          "token": "witnessRaw"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for parsing or testing the already-defined support witness contract; not a new proof concept.",
+          "token": "ParseWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for parsing or testing the already-defined support witness contract; not a new proof concept.",
+          "token": "ValidateWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Field carrying the support witness record identifier through ingestion output; not a new proof concept.",
+          "token": "WitnessID"
         }
       ],
       "id": "witness-proof",
@@ -4770,10 +4800,12 @@
         "HonestyClaimUnwitnessed",
         "HonestyDoneNotWitnessed",
         "HonestyWrongWitness",
+        "IngestResult",
         "MotifCatalogReproduceFixWitness",
         "NewTreeWitness",
         "POPULATION_LIFT_UNWITNESSED",
         "PROFILE_REQUIRES_WITNESS",
+        "ParseWitness",
         "ProviderWitness",
         "QualityWitness",
         "REVOCABLE",
@@ -4785,6 +4817,7 @@
         "StageAttest",
         "StageWitnessRequest",
         "TurnOutcomesFromWitness",
+        "ValidateWitness",
         "VerdictSetupNotWitnessed",
         "VerdictUnwitnessed",
         "VerifySessionMoveDestinationReceipt",
@@ -4793,6 +4826,7 @@
         "WithCoreLockWitness",
         "WitnessEvidenceOptions",
         "WitnessEvidenceStats",
+        "WitnessID",
         "WitnessMove",
         "WitnessRoute",
         "WitnessSHA256",
@@ -4872,6 +4906,7 @@
         "runSessionCheckpointWitness",
         "sessionOpenRestartWitness",
         "setup_not_witnessed",
+        "supportwitness",
         "taskQuality",
         "taskSufficient",
         "trajctlWitnessedPhases",
@@ -4883,6 +4918,7 @@
         "witnessDigest",
         "witnessGitRunner",
         "witnessOutcomeID",
+        "witnessRaw",
         "witnessScriptedFold",
         "witnessSet",
         "witnessStrandedArchiveSuffix",
@@ -7257,6 +7293,21 @@
           "category": "incidental",
           "reason": "Witness command name for supportgraph, not a new support-maturity concept.",
           "token": "supportgraphdemo"
+        },
+        {
+          "category": "incidental",
+          "reason": "Command identifier for support witness ingestion; not a support maturity rung.",
+          "token": "supportwitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Payload hashing helper; not a support maturity concept.",
+          "token": "WitnessDigest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Return structure for ingestion mechanics; not a maturity concept.",
+          "token": "IngestResult"
         }
       ],
       "id": "support-maturity",
@@ -7284,6 +7335,7 @@
         "FormatUnsupported",
         "GuideCoverage",
         "INVALID_EVIDENCE",
+        "IngestResult",
         "KVQUANT_SUPPORTED",
         "KVQUANT_UNKNOWN_SCHEME",
         "KVQUANT_UNSUPPORTED_TRANSITION",
@@ -7350,6 +7402,7 @@
         "VerdictParityOK",
         "VerdictSetupParityClean",
         "VerdictSetupParityFlagged",
+        "WitnessDigest",
         "achievedMaturity",
         "calendar_coverage",
         "cmdLaunchParityCheck",
@@ -7414,6 +7467,7 @@
         "supportmaturitydebt",
         "supportmaturityscore",
         "supports",
+        "supportwitness",
         "targetcoverage",
         "topncoverage",
         "unsupported",

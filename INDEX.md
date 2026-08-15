@@ -264,6 +264,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Learning observation lineage](docs/learning-observation.md) — content-addressed source/candidate/witness/verdict records and closed-enum edges; separate from witness-gated admission.
 
 ## Notes & research (`docs/notes/`)
+- **[Support witness ingestion and GPU dispatch packet](docs/notes/SUPPORT-WITNESS-INGESTION-AND-GPU-DISPATCH-2026-08-15.md)** — Hashed evidence ingestion, baseline invalidation, sanctioned GCP preflight, and private-node command packet (#6896).
 - **[Integrated stack preflight spine](docs/notes/INTEGRATED-STACK-PREFLIGHT-SPINE-2026-08-15.md)** — Composition, workload fitness, and exact support evidence joined into required/recommended launch receipts (#6897).
 - **[Hardware and quantization support-graph spine](docs/notes/HARDWARE-QUANT-SUPPORT-GRAPH-SPINE-2026-08-15.md)** — Exact artifact/backend/kernel/runtime/hardware tuples with provenance, proof tiers, freshness, baselines, and fallback (#6895).
 - **[Workload fitness contract spine](docs/notes/WORKLOAD-FITNESS-CONTRACT-SPINE-2026-08-15.md)** — Coding-versus-legal fixture separating hard requirements, authority, evidence floors, preferences, costs, and unknowns (#6893).
