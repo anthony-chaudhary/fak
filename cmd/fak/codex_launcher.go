@@ -65,13 +65,18 @@ func cmdCodex(argv []string) {
 		cmdCodexMCP(argv[1:])
 		return
 	}
-	os.Exit(runCodex(os.Stdout, os.Stderr, argv))
+	args, code, stop := runCodexFreshnessAdmission(argv)
+	if stop {
+		os.Exit(code)
+	}
+	os.Exit(runCodex(os.Stdout, os.Stderr, args))
 }
 
 func runCodex(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("codex", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dryRun := fs.Bool("dry-run", false, "print the guarded Codex command and exit without launching")
+	_ = fs.String("freshness-gate", "on", "require a current checkout launcher before admission (on|off; off is an explicit recovery override)")
 	skipPermissions := fs.Bool("skip-permissions", true, "pass Codex's --dangerously-bypass-approvals-and-sandbox so fak's capability floor is the permission system")
 	splitMode := fs.String("split", "auto", "open the 20% fak-info pane when possible: auto|on|off")
 	splitWhere := fs.String("split-where", "bottom", "with --split: place the 20% fak-info pane as a bottom strip or right column")
