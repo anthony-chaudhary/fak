@@ -264,6 +264,11 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Learning observation lineage](docs/learning-observation.md) — content-addressed source/candidate/witness/verdict records and closed-enum edges; separate from witness-gated admission.
 
 ## Notes & research (`docs/notes/`)
+- [Concept study: C2C / Rosetta](docs/notes/CONCEPT-STUDY-C2C-2026-08-08.md) — pinned cache-to-cache research study, acquisition caveat, and clean-room borrow ledger
+- [Concept study: hermes-webui](docs/notes/CONCEPT-STUDY-HERMES-WEBUI-2026-08-11.md) — pinned UI-boundary study for a separately buildable fak client
+- [Governed-agent quickstart witness](docs/notes/GOVERNED-AGENT-QUICKSTART-WITNESS-2026-08-06.md) — dated runnable governed-agent proof and acceptance record
+- [No-progress verdict vocabulary split](docs/notes/NO-PROGRESS-VERDICT-VOCABULARY-SPLIT-2026-08-03.md) — separates terminal blockage from recoverable no-progress states
+- [Breadcrumbing search-agent research triage](docs/notes/RESEARCH-breadcrumbing-search-agents-triage-2026-08-08.md) — research triage for breadcrumbed retrieval and search-agent control
 - [First-class harness stack resolution witness — 2026-08-15](docs/notes/HARNESS-STACK-RESOLVE-CLI-2026-08-15.md) -- auto-indexed dated note.
 - **[Support witness ingestion and GPU dispatch packet](docs/notes/SUPPORT-WITNESS-INGESTION-AND-GPU-DISPATCH-2026-08-15.md)** — Hashed evidence ingestion, baseline invalidation, sanctioned GCP preflight, and private-node command packet (#6896).
 - **[Integrated stack preflight spine](docs/notes/INTEGRATED-STACK-PREFLIGHT-SPINE-2026-08-15.md)** — Composition, workload fitness, and exact support evidence joined into required/recommended launch receipts (#6897).
