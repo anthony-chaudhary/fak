@@ -114,8 +114,10 @@ they are not silently reinterpreted or bulk-blocked.
 
 
 `fak-dev issue cohort` carries that same canonical object into its portfolio rows and
-dispatch-wave members. Human output labels the fold `centrality (non-scoring)` and keeps
-priority, readiness, dependencies, and expected effort beside it. Input order and wave
+dispatch-wave members. Both JSON surfaces include the complete `problem_frame`, including
+the P1-P4 evidence; human portfolio and wave rows summarize each check beside centrality
+and its target or obligation. Human output labels the fold `centrality (non-scoring)` and
+keeps priority, readiness, dependencies, and expected effort beside it. Input order and wave
 assignment do not sort by centrality. In particular, an urgent Stewardship obligation may
 outrank ready Core work; Enabling rows retain their named Core target; Peripheral and
 legacy `unclassified` rows remain visible. Directory, title, labels, and parent epic never

@@ -200,7 +200,12 @@ func TestBuildStepBudgetCountsUnknownAsOne(t *testing.T) {
 func TestPortfolioCarriesCentralityWithoutReorderingOrScoring(t *testing.T) {
 	core := fullCandidate("core")
 	core.Priority = "P1"
-	core.ProblemFrame = issuepolicy.ProblemFrame{Schema: issuepolicy.ProblemFrameSchema, Ready: true, Enforced: true, Centrality: issuepolicy.CentralityCore, Checks: map[string]issuepolicy.ProblemCheck{}}
+	core.ProblemFrame = issuepolicy.ProblemFrame{Schema: issuepolicy.ProblemFrameSchema, Ready: true, Enforced: true, Centrality: issuepolicy.CentralityCore, Checks: map[string]issuepolicy.ProblemCheck{
+		"p1": {ID: "p1", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "shared context stays reusable", Valid: true},
+		"p2": {ID: "p2", Status: issuepolicy.ProblemCheckPreserved, Evidence: "no new operating cost", Valid: true},
+		"p3": {ID: "p3", Status: issuepolicy.ProblemCheckNA, Evidence: "fixed fixture has no adaptation", Valid: true},
+		"p4": {ID: "p4", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "dispatch carries the frame", Valid: true},
+	}}
 
 	stewardship := fullCandidate("stewardship")
 	stewardship.Priority = "urgent"
@@ -241,6 +246,19 @@ func TestPortfolioCarriesCentralityWithoutReorderingOrScoring(t *testing.T) {
 	}
 	if plan.Portfolio[4].Centrality != issuepolicy.CentralityUnclassified {
 		t.Fatalf("legacy row hidden or inferred: %+v", plan.Portfolio[4])
+	}
+	if got := plan.Portfolio[0].ProblemFrame.Checks["p1"].Evidence; got != "shared context stays reusable" {
+		t.Fatalf("portfolio lost canonical P1 evidence: %q", got)
+	}
+	rendered := Render(plan)
+	for _, want := range []string{
+		"portfolio: core centrality=core checks=p1:advanced[shared context stays reusable]",
+		"- core  centrality=core checks=p1:advanced[shared context stays reusable]",
+		"centrality=stewardship(release signing obligation)",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("render missing %q:\n%s", want, rendered)
+		}
 	}
 }
 

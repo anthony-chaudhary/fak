@@ -131,6 +131,7 @@ type PortfolioRow struct {
 	ExpectedSteps     int                         `json:"expected_steps,omitempty"`
 	Centrality        string                      `json:"centrality"`
 	CentralityTarget  string                      `json:"centrality_target,omitempty"`
+	ProblemFrame      issuepolicy.ProblemFrame    `json:"problem_frame"`
 	ProblemFrameReady bool                        `json:"problem_frame_ready"`
 	SelectionNote     string                      `json:"selection_note"`
 }
@@ -364,8 +365,8 @@ func appendPortfolioRow(plan *Plan, c issuepolicy.Candidate, review issuepolicy.
 		RiskBoundaryNotes: append([]string(nil), c.BoundaryNotes...), Reversibility: strings.TrimSpace(c.Reversibility),
 		ExpectedSteps: review.ExpectedSteps,
 		Centrality:    centrality, CentralityTarget: review.ProblemFrame.CentralityTarget,
-		ProblemFrameReady: review.ProblemFrame.Ready,
-		SelectionNote:     selectionNote(centrality, priority, review.Dispatchability),
+		ProblemFrame: review.ProblemFrame, ProblemFrameReady: review.ProblemFrame.Ready,
+		SelectionNote: selectionNote(centrality, priority, review.Dispatchability),
 	}
 	plan.Portfolio = append(plan.Portfolio, row)
 	switch centrality {

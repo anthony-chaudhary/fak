@@ -3,6 +3,8 @@ package issuecohort
 import (
 	"fmt"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 // Render produces the human-readable summary of a cohort Plan.
@@ -27,8 +29,8 @@ func Render(p Plan) string {
 		if row.CentralityTarget != "" {
 			target = "(" + row.CentralityTarget + ")"
 		}
-		fmt.Fprintf(&b, "    portfolio: %s centrality=%s%s priority=%s spine_priority=%d readiness=%s dependencies=%d steps=%d risk_notes=%d reversibility=%s note=%s\n",
-			row.Key, row.Centrality, target, emptyValue(row.Priority), row.SpinePriority.Total, row.Dispatchability,
+		fmt.Fprintf(&b, "    portfolio: %s centrality=%s%s checks=%s priority=%s spine_priority=%d readiness=%s dependencies=%d steps=%d risk_notes=%d reversibility=%s note=%s\n",
+			row.Key, row.Centrality, target, problemChecksSummary(row.ProblemFrame), emptyValue(row.Priority), row.SpinePriority.Total, row.Dispatchability,
 			len(row.Dependencies), row.ExpectedSteps, len(row.RiskBoundaryNotes), emptyValue(row.Reversibility), row.SelectionNote)
 	}
 
@@ -38,7 +40,11 @@ func Render(p Plan) string {
 			fmt.Fprintf(&b, "    lease: dos arbitrate%s%s\n", leaseTreeArg(w.LeaseRegion), leaseLaneArg(w.LeaseLanes))
 		}
 		for _, m := range w.Members {
-			fmt.Fprintf(&b, "    - %s%s%s\n", m.Key, laneSuffix(m.Lane), pathSuffix(m.Paths))
+			frame := ""
+			if m.ProblemFrame.Enforced || m.ProblemFrame.Centrality != "" {
+				frame = "  " + problemCentralitySummary(m.ProblemFrame) + " checks=" + problemChecksSummary(m.ProblemFrame)
+			}
+			fmt.Fprintf(&b, "    - %s%s%s%s\n", m.Key, frame, laneSuffix(m.Lane), pathSuffix(m.Paths))
 		}
 	}
 	if len(p.Subdivide) > 0 {
@@ -96,4 +102,32 @@ func emptyValue(value string) string {
 		return "(undeclared)"
 	}
 	return value
+}
+
+func problemCentralitySummary(frame issuepolicy.ProblemFrame) string {
+	centrality := frame.Centrality
+	if centrality == "" {
+		centrality = issuepolicy.CentralityUnclassified
+	}
+	if frame.CentralityTarget == "" {
+		return "centrality=" + centrality
+	}
+	return "centrality=" + centrality + "(" + frame.CentralityTarget + ")"
+}
+
+func problemChecksSummary(frame issuepolicy.ProblemFrame) string {
+	parts := make([]string, 0, 4)
+	for _, id := range []string{"p1", "p2", "p3", "p4"} {
+		check, ok := frame.Checks[id]
+		if !ok || check.Status == "" {
+			parts = append(parts, id+":undeclared")
+			continue
+		}
+		part := id + ":" + check.Status
+		if check.Evidence != "" {
+			part += "[" + check.Evidence + "]"
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, ",")
 }
