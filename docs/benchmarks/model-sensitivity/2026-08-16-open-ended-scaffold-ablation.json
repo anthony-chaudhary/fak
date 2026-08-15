@@ -1,0 +1,5025 @@
+{
+  "schema": "fak-open-ended-scaffold-ablation/2",
+  "started_utc": "2026-08-15T22:44:30Z",
+  "host": {
+    "platform": "Linux-6.8.0-1063-gcp-x86_64-with-glibc2.35",
+    "torch": "2.13.0+cu130",
+    "transformers": "5.15.0",
+    "cuda": "13.0",
+    "gpu": "NVIDIA L4"
+  },
+  "protocol": {
+    "tasks": [
+      {
+        "id": "arith-01",
+        "q": "What is 7 + 8?",
+        "answers": [
+          "15"
+        ]
+      },
+      {
+        "id": "arith-02",
+        "q": "What is 9 multiplied by 6?",
+        "answers": [
+          "54"
+        ]
+      },
+      {
+        "id": "arith-03",
+        "q": "What is 81 divided by 9?",
+        "answers": [
+          "9"
+        ]
+      },
+      {
+        "id": "arith-04",
+        "q": "What is 17 - 9?",
+        "answers": [
+          "8"
+        ]
+      },
+      {
+        "id": "arith-05",
+        "q": "What is 5 squared?",
+        "answers": [
+          "25"
+        ]
+      },
+      {
+        "id": "arith-06",
+        "q": "A box has 3 rows of 4 balls. How many balls are there?",
+        "answers": [
+          "12"
+        ]
+      },
+      {
+        "id": "logic-01",
+        "q": "If today is Monday, what day is tomorrow?",
+        "answers": [
+          "Tuesday"
+        ]
+      },
+      {
+        "id": "logic-02",
+        "q": "What number comes next in 2, 4, 6, 8?",
+        "answers": [
+          "10"
+        ]
+      },
+      {
+        "id": "logic-03",
+        "q": "Sam is taller than Lee. Lee is taller than Pat. Who is shortest?",
+        "answers": [
+          "Pat"
+        ]
+      },
+      {
+        "id": "logic-04",
+        "q": "A working light is off. Its switch is flipped once. What is the light's new state?",
+        "answers": [
+          "on"
+        ]
+      },
+      {
+        "id": "code-01",
+        "q": "In Python, what integer does len([10, 20, 30]) return?",
+        "answers": [
+          "3"
+        ]
+      },
+      {
+        "id": "code-02",
+        "q": "What operator tests equality in Go?",
+        "answers": [
+          "=="
+        ]
+      },
+      {
+        "id": "code-03",
+        "q": "What data structure processes items in FIFO order?",
+        "answers": [
+          "queue",
+          "a queue"
+        ]
+      },
+      {
+        "id": "code-04",
+        "q": "What integer is 5 % 2 in Go?",
+        "answers": [
+          "1"
+        ]
+      },
+      {
+        "id": "code-05",
+        "q": "Write the JSON boolean value meaning true.",
+        "answers": [
+          "true"
+        ]
+      },
+      {
+        "id": "state-01",
+        "q": "A counter starts at 4 and is incremented twice. What is its final integer value?",
+        "answers": [
+          "6"
+        ]
+      },
+      {
+        "id": "state-02",
+        "q": "A file is created and then deleted. Is it still present? Answer yes or no.",
+        "answers": [
+          "no"
+        ]
+      },
+      {
+        "id": "state-03",
+        "q": "A door starts locked and is unlocked once. What is its new lock state?",
+        "answers": [
+          "unlocked"
+        ]
+      },
+      {
+        "id": "state-04",
+        "q": "The integer 3 is appended to [1, 2]. What is the final integer item?",
+        "answers": [
+          "3"
+        ]
+      },
+      {
+        "id": "state-05",
+        "q": "A balance starts at 10 and then 3 is withdrawn. What is the new integer balance?",
+        "answers": [
+          "7"
+        ]
+      },
+      {
+        "id": "state-06",
+        "q": "A boolean flag starts false and is toggled once. What is its new boolean value?",
+        "answers": [
+          "true"
+        ]
+      },
+      {
+        "id": "fact-01",
+        "q": "What is the capital city of France?",
+        "answers": [
+          "Paris"
+        ]
+      },
+      {
+        "id": "fact-02",
+        "q": "At standard pressure, at what integer Celsius temperature does water freeze?",
+        "answers": [
+          "0",
+          "0 celsius",
+          "0 degrees celsius",
+          "0\u00b0c",
+          "zero",
+          "zero celsius",
+          "zero degrees celsius"
+        ]
+      },
+      {
+        "id": "fact-03",
+        "q": "Which planet is commonly called the Red Planet?",
+        "answers": [
+          "Mars"
+        ]
+      }
+    ],
+    "prompts": {
+      "contract": "Answer the question with only the answer and no explanation.\nQuestion: {q}\nAnswer:",
+      "scaffold": "Solve the question carefully and check the result. Respond with only the answer and no explanation.\nQuestion: {q}\nAnswer:"
+    },
+    "caps": [
+      8,
+      64
+    ],
+    "decode": {
+      "do_sample": false,
+      "temperature": 0.0
+    },
+    "scoring": "primary bounded semantic answer scoring; exact/strict is normalized full-output equality. Numeric tasks use the final standalone integer; text tasks require a boundary-delimited accepted answer; Go equality requires ==."
+  },
+  "models": [
+    {
+      "path": "/home/USER/models/qwen25-3b-instruct",
+      "weights_sha256": "8229c6ddee3ba5c33ce55182898c0a5c6cadf98086cea8c71b3f1f01f346fcae",
+      "weight_files": [
+        "model-00001-of-00002.safetensors",
+        "model-00002-of-00002.safetensors"
+      ],
+      "config": {
+        "architectures": [
+          "Qwen2ForCausalLM"
+        ],
+        "attention_dropout": 0.0,
+        "bos_token_id": 151643,
+        "eos_token_id": 151645,
+        "hidden_act": "silu",
+        "hidden_size": 2048,
+        "initializer_range": 0.02,
+        "intermediate_size": 11008,
+        "max_position_embeddings": 32768,
+        "max_window_layers": 70,
+        "model_type": "qwen2",
+        "num_attention_heads": 16,
+        "num_hidden_layers": 36,
+        "num_key_value_heads": 2,
+        "rms_norm_eps": 1e-06,
+        "rope_theta": 1000000.0,
+        "sliding_window": 32768,
+        "tie_word_embeddings": true,
+        "torch_dtype": "bfloat16",
+        "transformers_version": "4.43.1",
+        "use_cache": true,
+        "use_sliding_window": false,
+        "vocab_size": 151936
+      },
+      "thinking_control": "not applicable (model has no native thinking mode)",
+      "arms": {
+        "contract_8": {
+          "correct": 21,
+          "total": 24,
+          "strict": 21,
+          "output_tokens": 56,
+          "median_latency_ms": 86.201,
+          "rows": [
+            {
+              "id": "arith-01",
+              "answers": [
+                "15"
+              ],
+              "candidate": "15",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "15",
+              "latency_ms": 2365.603,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-02",
+              "answers": [
+                "54"
+              ],
+              "candidate": "54",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "54",
+              "latency_ms": 127.118,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-03",
+              "answers": [
+                "9"
+              ],
+              "candidate": "9",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "9",
+              "latency_ms": 85.423,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-04",
+              "answers": [
+                "8"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "8",
+              "latency_ms": 84.673,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-05",
+              "answers": [
+                "25"
+              ],
+              "candidate": "25",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "25",
+              "latency_ms": 125.136,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-06",
+              "answers": [
+                "12"
+              ],
+              "candidate": "12",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "12",
+              "latency_ms": 126.671,
+              "output_tokens": 3
+            },
+            {
+              "id": "logic-01",
+              "answers": [
+                "Tuesday"
+              ],
+              "candidate": "Tuesday",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Tuesday",
+              "latency_ms": 85.448,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-02",
+              "answers": [
+                "10"
+              ],
+              "candidate": "10",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "10",
+              "latency_ms": 125.574,
+              "output_tokens": 3
+            },
+            {
+              "id": "logic-03",
+              "answers": [
+                "Pat"
+              ],
+              "candidate": "Pat",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Pat",
+              "latency_ms": 85.847,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-04",
+              "answers": [
+                "on"
+              ],
+              "candidate": "on",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "on",
+              "latency_ms": 87.533,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-01",
+              "answers": [
+                "3"
+              ],
+              "candidate": "10",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "10",
+              "latency_ms": 128.908,
+              "output_tokens": 3
+            },
+            {
+              "id": "code-02",
+              "answers": [
+                "=="
+              ],
+              "candidate": "==",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "==",
+              "latency_ms": 86.523,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-03",
+              "answers": [
+                "queue",
+                "a queue"
+              ],
+              "candidate": "Queue",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Queue",
+              "latency_ms": 84.484,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-04",
+              "answers": [
+                "1"
+              ],
+              "candidate": "1",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "1",
+              "latency_ms": 84.931,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-05",
+              "answers": [
+                "true"
+              ],
+              "candidate": "true",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "true",
+              "latency_ms": 84.547,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-01",
+              "answers": [
+                "6"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "8",
+              "latency_ms": 84.643,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-02",
+              "answers": [
+                "no"
+              ],
+              "candidate": "No",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "No",
+              "latency_ms": 83.766,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-03",
+              "answers": [
+                "unlocked"
+              ],
+              "candidate": "unlocked",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "unlocked",
+              "latency_ms": 123.179,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-04",
+              "answers": [
+                "3"
+              ],
+              "candidate": "4",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "4",
+              "latency_ms": 86.09,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-05",
+              "answers": [
+                "7"
+              ],
+              "candidate": "7",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "7",
+              "latency_ms": 86.311,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-06",
+              "answers": [
+                "true"
+              ],
+              "candidate": "True",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "True",
+              "latency_ms": 85.553,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-01",
+              "answers": [
+                "Paris"
+              ],
+              "candidate": "Paris",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Paris",
+              "latency_ms": 85.501,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-02",
+              "answers": [
+                "0",
+                "0 celsius",
+                "0 degrees celsius",
+                "0\u00b0c",
+                "zero",
+                "zero celsius",
+                "zero degrees celsius"
+              ],
+              "candidate": "0",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "0",
+              "latency_ms": 86.786,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-03",
+              "answers": [
+                "Mars"
+              ],
+              "candidate": "Mars",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Mars",
+              "latency_ms": 126.123,
+              "output_tokens": 3
+            }
+          ]
+        },
+        "contract_64": {
+          "correct": 21,
+          "total": 24,
+          "strict": 21,
+          "output_tokens": 56,
+          "median_latency_ms": 85.764,
+          "rows": [
+            {
+              "id": "arith-01",
+              "answers": [
+                "15"
+              ],
+              "candidate": "15",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "15",
+              "latency_ms": 124.996,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-02",
+              "answers": [
+                "54"
+              ],
+              "candidate": "54",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "54",
+              "latency_ms": 125.152,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-03",
+              "answers": [
+                "9"
+              ],
+              "candidate": "9",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "9",
+              "latency_ms": 85.308,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-04",
+              "answers": [
+                "8"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "8",
+              "latency_ms": 85.384,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-05",
+              "answers": [
+                "25"
+              ],
+              "candidate": "25",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "25",
+              "latency_ms": 125.245,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-06",
+              "answers": [
+                "12"
+              ],
+              "candidate": "12",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "12",
+              "latency_ms": 126.374,
+              "output_tokens": 3
+            },
+            {
+              "id": "logic-01",
+              "answers": [
+                "Tuesday"
+              ],
+              "candidate": "Tuesday",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Tuesday",
+              "latency_ms": 86.101,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-02",
+              "answers": [
+                "10"
+              ],
+              "candidate": "10",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "10",
+              "latency_ms": 126.418,
+              "output_tokens": 3
+            },
+            {
+              "id": "logic-03",
+              "answers": [
+                "Pat"
+              ],
+              "candidate": "Pat",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Pat",
+              "latency_ms": 86.544,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-04",
+              "answers": [
+                "on"
+              ],
+              "candidate": "on",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "on",
+              "latency_ms": 85.298,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-01",
+              "answers": [
+                "3"
+              ],
+              "candidate": "10",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "10",
+              "latency_ms": 124.898,
+              "output_tokens": 3
+            },
+            {
+              "id": "code-02",
+              "answers": [
+                "=="
+              ],
+              "candidate": "==",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "==",
+              "latency_ms": 85.079,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-03",
+              "answers": [
+                "queue",
+                "a queue"
+              ],
+              "candidate": "Queue",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Queue",
+              "latency_ms": 85.083,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-04",
+              "answers": [
+                "1"
+              ],
+              "candidate": "1",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "1",
+              "latency_ms": 85.44,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-05",
+              "answers": [
+                "true"
+              ],
+              "candidate": "true",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "true",
+              "latency_ms": 85.742,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-01",
+              "answers": [
+                "6"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "8",
+              "latency_ms": 85.258,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-02",
+              "answers": [
+                "no"
+              ],
+              "candidate": "No",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "No",
+              "latency_ms": 85.75,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-03",
+              "answers": [
+                "unlocked"
+              ],
+              "candidate": "unlocked",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "unlocked",
+              "latency_ms": 126.188,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-04",
+              "answers": [
+                "3"
+              ],
+              "candidate": "4",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "4",
+              "latency_ms": 86.072,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-05",
+              "answers": [
+                "7"
+              ],
+              "candidate": "7",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "7",
+              "latency_ms": 85.778,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-06",
+              "answers": [
+                "true"
+              ],
+              "candidate": "True",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "True",
+              "latency_ms": 85.045,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-01",
+              "answers": [
+                "Paris"
+              ],
+              "candidate": "Paris",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Paris",
+              "latency_ms": 85.738,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-02",
+              "answers": [
+                "0",
+                "0 celsius",
+                "0 degrees celsius",
+                "0\u00b0c",
+                "zero",
+                "zero celsius",
+                "zero degrees celsius"
+              ],
+              "candidate": "0",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "0",
+              "latency_ms": 85.698,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-03",
+              "answers": [
+                "Mars"
+              ],
+              "candidate": "Mars",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Mars",
+              "latency_ms": 125.041,
+              "output_tokens": 3
+            }
+          ]
+        },
+        "scaffold_8": {
+          "correct": 21,
+          "total": 24,
+          "strict": 21,
+          "output_tokens": 55,
+          "median_latency_ms": 85.627,
+          "rows": [
+            {
+              "id": "arith-01",
+              "answers": [
+                "15"
+              ],
+              "candidate": "15",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "15",
+              "latency_ms": 124.731,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-02",
+              "answers": [
+                "54"
+              ],
+              "candidate": "54",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "54",
+              "latency_ms": 124.945,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-03",
+              "answers": [
+                "9"
+              ],
+              "candidate": "9",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "9",
+              "latency_ms": 84.78,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-04",
+              "answers": [
+                "8"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "8",
+              "latency_ms": 84.728,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-05",
+              "answers": [
+                "25"
+              ],
+              "candidate": "25",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "25",
+              "latency_ms": 126.122,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-06",
+              "answers": [
+                "12"
+              ],
+              "candidate": "12",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "12",
+              "latency_ms": 125.698,
+              "output_tokens": 3
+            },
+            {
+              "id": "logic-01",
+              "answers": [
+                "Tuesday"
+              ],
+              "candidate": "Tuesday",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Tuesday",
+              "latency_ms": 85.216,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-02",
+              "answers": [
+                "10"
+              ],
+              "candidate": "10",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "10",
+              "latency_ms": 124.782,
+              "output_tokens": 3
+            },
+            {
+              "id": "logic-03",
+              "answers": [
+                "Pat"
+              ],
+              "candidate": "Pat",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Pat",
+              "latency_ms": 85.464,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-04",
+              "answers": [
+                "on"
+              ],
+              "candidate": "On",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "On",
+              "latency_ms": 85.273,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-01",
+              "answers": [
+                "3"
+              ],
+              "candidate": "5",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "5",
+              "latency_ms": 85.734,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-02",
+              "answers": [
+                "=="
+              ],
+              "candidate": "==",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "==",
+              "latency_ms": 86.042,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-03",
+              "answers": [
+                "queue",
+                "a queue"
+              ],
+              "candidate": "Queue",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Queue",
+              "latency_ms": 85.471,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-04",
+              "answers": [
+                "1"
+              ],
+              "candidate": "1",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "1",
+              "latency_ms": 85.959,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-05",
+              "answers": [
+                "true"
+              ],
+              "candidate": "true",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "true",
+              "latency_ms": 86.486,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-01",
+              "answers": [
+                "6"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "8",
+              "latency_ms": 86.308,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-02",
+              "answers": [
+                "no"
+              ],
+              "candidate": "No",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "No",
+              "latency_ms": 85.508,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-03",
+              "answers": [
+                "unlocked"
+              ],
+              "candidate": "Unlocked",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Unlocked",
+              "latency_ms": 125.195,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-04",
+              "answers": [
+                "3"
+              ],
+              "candidate": "4",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "4",
+              "latency_ms": 85.339,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-05",
+              "answers": [
+                "7"
+              ],
+              "candidate": "7",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "7",
+              "latency_ms": 85.52,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-06",
+              "answers": [
+                "true"
+              ],
+              "candidate": "True",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "True",
+              "latency_ms": 85.257,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-01",
+              "answers": [
+                "Paris"
+              ],
+              "candidate": "Paris",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Paris",
+              "latency_ms": 85.198,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-02",
+              "answers": [
+                "0",
+                "0 celsius",
+                "0 degrees celsius",
+                "0\u00b0c",
+                "zero",
+                "zero celsius",
+                "zero degrees celsius"
+              ],
+              "candidate": "0",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "0",
+              "latency_ms": 85.114,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-03",
+              "answers": [
+                "Mars"
+              ],
+              "candidate": "Mars",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Mars",
+              "latency_ms": 124.63,
+              "output_tokens": 3
+            }
+          ]
+        },
+        "scaffold_64": {
+          "correct": 21,
+          "total": 24,
+          "strict": 21,
+          "output_tokens": 55,
+          "median_latency_ms": 85.612,
+          "rows": [
+            {
+              "id": "arith-01",
+              "answers": [
+                "15"
+              ],
+              "candidate": "15",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "15",
+              "latency_ms": 125.025,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-02",
+              "answers": [
+                "54"
+              ],
+              "candidate": "54",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "54",
+              "latency_ms": 125.924,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-03",
+              "answers": [
+                "9"
+              ],
+              "candidate": "9",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "9",
+              "latency_ms": 85.693,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-04",
+              "answers": [
+                "8"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "8",
+              "latency_ms": 85.367,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-05",
+              "answers": [
+                "25"
+              ],
+              "candidate": "25",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "25",
+              "latency_ms": 125.038,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-06",
+              "answers": [
+                "12"
+              ],
+              "candidate": "12",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "12",
+              "latency_ms": 124.611,
+              "output_tokens": 3
+            },
+            {
+              "id": "logic-01",
+              "answers": [
+                "Tuesday"
+              ],
+              "candidate": "Tuesday",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Tuesday",
+              "latency_ms": 84.954,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-02",
+              "answers": [
+                "10"
+              ],
+              "candidate": "10",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "10",
+              "latency_ms": 124.439,
+              "output_tokens": 3
+            },
+            {
+              "id": "logic-03",
+              "answers": [
+                "Pat"
+              ],
+              "candidate": "Pat",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Pat",
+              "latency_ms": 85.336,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-04",
+              "answers": [
+                "on"
+              ],
+              "candidate": "On",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "On",
+              "latency_ms": 85.789,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-01",
+              "answers": [
+                "3"
+              ],
+              "candidate": "5",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "5",
+              "latency_ms": 86.3,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-02",
+              "answers": [
+                "=="
+              ],
+              "candidate": "==",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "==",
+              "latency_ms": 86.024,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-03",
+              "answers": [
+                "queue",
+                "a queue"
+              ],
+              "candidate": "Queue",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Queue",
+              "latency_ms": 85.541,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-04",
+              "answers": [
+                "1"
+              ],
+              "candidate": "1",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "1",
+              "latency_ms": 85.137,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-05",
+              "answers": [
+                "true"
+              ],
+              "candidate": "true",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "true",
+              "latency_ms": 85.117,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-01",
+              "answers": [
+                "6"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "8",
+              "latency_ms": 85.281,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-02",
+              "answers": [
+                "no"
+              ],
+              "candidate": "No",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "No",
+              "latency_ms": 85.005,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-03",
+              "answers": [
+                "unlocked"
+              ],
+              "candidate": "Unlocked",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Unlocked",
+              "latency_ms": 125.077,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-04",
+              "answers": [
+                "3"
+              ],
+              "candidate": "4",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "4",
+              "latency_ms": 85.105,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-05",
+              "answers": [
+                "7"
+              ],
+              "candidate": "7",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "7",
+              "latency_ms": 85.683,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-06",
+              "answers": [
+                "true"
+              ],
+              "candidate": "True",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "True",
+              "latency_ms": 85.389,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-01",
+              "answers": [
+                "Paris"
+              ],
+              "candidate": "Paris",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Paris",
+              "latency_ms": 84.82,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-02",
+              "answers": [
+                "0",
+                "0 celsius",
+                "0 degrees celsius",
+                "0\u00b0c",
+                "zero",
+                "zero celsius",
+                "zero degrees celsius"
+              ],
+              "candidate": "0",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "0",
+              "latency_ms": 85.228,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-03",
+              "answers": [
+                "Mars"
+              ],
+              "candidate": "Mars",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Mars",
+              "latency_ms": 124.358,
+              "output_tokens": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "path": "/home/USER/models/smollm3-3b",
+      "weights_sha256": "a23fcc3bd5d5908c861e9f985327ddd3277edbe5c659cd2b0ff2017a1e372dcd",
+      "weight_files": [
+        "model-00001-of-00002.safetensors",
+        "model-00002-of-00002.safetensors"
+      ],
+      "config": {
+        "architectures": [
+          "SmolLM3ForCausalLM"
+        ],
+        "attention_bias": false,
+        "attention_dropout": 0.0,
+        "bos_token_id": 128000,
+        "eos_token_id": 128012,
+        "hidden_act": "silu",
+        "hidden_size": 2048,
+        "initializer_range": 0.02,
+        "intermediate_size": 11008,
+        "layer_types": [
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention",
+          "full_attention"
+        ],
+        "max_position_embeddings": 65536,
+        "max_window_layers": 28,
+        "mlp_bias": false,
+        "model_type": "smollm3",
+        "no_rope_layer_interval": 4,
+        "no_rope_layers": [
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          0
+        ],
+        "num_attention_heads": 16,
+        "num_hidden_layers": 36,
+        "num_key_value_heads": 4,
+        "pad_token_id": 128004,
+        "pretraining_tp": 2,
+        "rms_norm_eps": 1e-06,
+        "rope_scaling": null,
+        "rope_theta": 5000000.0,
+        "sliding_window": null,
+        "tie_word_embeddings": true,
+        "torch_dtype": "bfloat16",
+        "transformers_version": "4.54.0.dev0",
+        "use_cache": false,
+        "use_sliding_window": false,
+        "vocab_size": 128256
+      },
+      "thinking_control": "/no_think plus enable_thinking=False",
+      "arms": {
+        "contract_8": {
+          "correct": 23,
+          "total": 24,
+          "strict": 17,
+          "output_tokens": 73,
+          "median_latency_ms": 84.13,
+          "rows": [
+            {
+              "id": "arith-01",
+              "answers": [
+                "15"
+              ],
+              "candidate": "15",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "15",
+              "latency_ms": 98.861,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-02",
+              "answers": [
+                "54"
+              ],
+              "candidate": "54",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "54",
+              "latency_ms": 97.036,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-03",
+              "answers": [
+                "9"
+              ],
+              "candidate": "9",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "9",
+              "latency_ms": 84.569,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-04",
+              "answers": [
+                "8"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "8",
+              "latency_ms": 84.234,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-05",
+              "answers": [
+                "25"
+              ],
+              "candidate": "25",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "25",
+              "latency_ms": 84.025,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-06",
+              "answers": [
+                "12"
+              ],
+              "candidate": "12",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "12",
+              "latency_ms": 83.419,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-01",
+              "answers": [
+                "Tuesday"
+              ],
+              "candidate": "Tuesday",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Tuesday",
+              "latency_ms": 83.726,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-02",
+              "answers": [
+                "10"
+              ],
+              "candidate": "10",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "10",
+              "latency_ms": 82.711,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-03",
+              "answers": [
+                "Pat"
+              ],
+              "candidate": "Pat is the shortest.",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "Pat is the shortest.",
+              "latency_ms": 237.856,
+              "output_tokens": 6
+            },
+            {
+              "id": "logic-04",
+              "answers": [
+                "on"
+              ],
+              "candidate": "The light is now on.",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "The light is now on.",
+              "latency_ms": 277.913,
+              "output_tokens": 7
+            },
+            {
+              "id": "code-01",
+              "answers": [
+                "3"
+              ],
+              "candidate": "Answer: 3",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "Answer: 3",
+              "latency_ms": 200.556,
+              "output_tokens": 5
+            },
+            {
+              "id": "code-02",
+              "answers": [
+                "=="
+              ],
+              "candidate": "Answer: `==`",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "Answer: `==`",
+              "latency_ms": 238.781,
+              "output_tokens": 6
+            },
+            {
+              "id": "code-03",
+              "answers": [
+                "queue",
+                "a queue"
+              ],
+              "candidate": "Queue",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Queue",
+              "latency_ms": 83.369,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-04",
+              "answers": [
+                "1"
+              ],
+              "candidate": "1",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "1",
+              "latency_ms": 83.323,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-05",
+              "answers": [
+                "true"
+              ],
+              "candidate": "{\"boolean\": true}",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "{\"boolean\": true}",
+              "latency_ms": 237.724,
+              "output_tokens": 6
+            },
+            {
+              "id": "state-01",
+              "answers": [
+                "6"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "8",
+              "latency_ms": 83.15,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-02",
+              "answers": [
+                "no"
+              ],
+              "candidate": "No",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "No",
+              "latency_ms": 83.157,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-03",
+              "answers": [
+                "unlocked"
+              ],
+              "candidate": "Unlocked",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Unlocked",
+              "latency_ms": 123.095,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-04",
+              "answers": [
+                "3"
+              ],
+              "candidate": "Answer: 3",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "Answer: 3",
+              "latency_ms": 199.148,
+              "output_tokens": 5
+            },
+            {
+              "id": "state-05",
+              "answers": [
+                "7"
+              ],
+              "candidate": "7",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "7",
+              "latency_ms": 83.193,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-06",
+              "answers": [
+                "true"
+              ],
+              "candidate": "True",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "True",
+              "latency_ms": 83.015,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-01",
+              "answers": [
+                "Paris"
+              ],
+              "candidate": "Paris",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Paris",
+              "latency_ms": 83.366,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-02",
+              "answers": [
+                "0",
+                "0 celsius",
+                "0 degrees celsius",
+                "0\u00b0c",
+                "zero",
+                "zero celsius",
+                "zero degrees celsius"
+              ],
+              "candidate": "0",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "0",
+              "latency_ms": 83.564,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-03",
+              "answers": [
+                "Mars"
+              ],
+              "candidate": "Mars",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Mars",
+              "latency_ms": 122.082,
+              "output_tokens": 3
+            }
+          ]
+        },
+        "contract_64": {
+          "correct": 23,
+          "total": 24,
+          "strict": 17,
+          "output_tokens": 73,
+          "median_latency_ms": 83.791,
+          "rows": [
+            {
+              "id": "arith-01",
+              "answers": [
+                "15"
+              ],
+              "candidate": "15",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "15",
+              "latency_ms": 83.703,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-02",
+              "answers": [
+                "54"
+              ],
+              "candidate": "54",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "54",
+              "latency_ms": 83.88,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-03",
+              "answers": [
+                "9"
+              ],
+              "candidate": "9",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "9",
+              "latency_ms": 83.44,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-04",
+              "answers": [
+                "8"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "8",
+              "latency_ms": 84.025,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-05",
+              "answers": [
+                "25"
+              ],
+              "candidate": "25",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "25",
+              "latency_ms": 83.441,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-06",
+              "answers": [
+                "12"
+              ],
+              "candidate": "12",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "12",
+              "latency_ms": 82.626,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-01",
+              "answers": [
+                "Tuesday"
+              ],
+              "candidate": "Tuesday",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Tuesday",
+              "latency_ms": 83.162,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-02",
+              "answers": [
+                "10"
+              ],
+              "candidate": "10",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "10",
+              "latency_ms": 82.874,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-03",
+              "answers": [
+                "Pat"
+              ],
+              "candidate": "Pat is the shortest.",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "Pat is the shortest.",
+              "latency_ms": 237.755,
+              "output_tokens": 6
+            },
+            {
+              "id": "logic-04",
+              "answers": [
+                "on"
+              ],
+              "candidate": "The light is now on.",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "The light is now on.",
+              "latency_ms": 275.807,
+              "output_tokens": 7
+            },
+            {
+              "id": "code-01",
+              "answers": [
+                "3"
+              ],
+              "candidate": "Answer: 3",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "Answer: 3",
+              "latency_ms": 199.808,
+              "output_tokens": 5
+            },
+            {
+              "id": "code-02",
+              "answers": [
+                "=="
+              ],
+              "candidate": "Answer: `==`",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "Answer: `==`",
+              "latency_ms": 239.112,
+              "output_tokens": 6
+            },
+            {
+              "id": "code-03",
+              "answers": [
+                "queue",
+                "a queue"
+              ],
+              "candidate": "Queue",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Queue",
+              "latency_ms": 83.43,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-04",
+              "answers": [
+                "1"
+              ],
+              "candidate": "1",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "1",
+              "latency_ms": 82.818,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-05",
+              "answers": [
+                "true"
+              ],
+              "candidate": "{\"boolean\": true}",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "{\"boolean\": true}",
+              "latency_ms": 237.35,
+              "output_tokens": 6
+            },
+            {
+              "id": "state-01",
+              "answers": [
+                "6"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "8",
+              "latency_ms": 84.371,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-02",
+              "answers": [
+                "no"
+              ],
+              "candidate": "No",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "No",
+              "latency_ms": 84.078,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-03",
+              "answers": [
+                "unlocked"
+              ],
+              "candidate": "Unlocked",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Unlocked",
+              "latency_ms": 123.143,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-04",
+              "answers": [
+                "3"
+              ],
+              "candidate": "Answer: 3",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "Answer: 3",
+              "latency_ms": 199.501,
+              "output_tokens": 5
+            },
+            {
+              "id": "state-05",
+              "answers": [
+                "7"
+              ],
+              "candidate": "7",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "7",
+              "latency_ms": 83.246,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-06",
+              "answers": [
+                "true"
+              ],
+              "candidate": "True",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "True",
+              "latency_ms": 82.771,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-01",
+              "answers": [
+                "Paris"
+              ],
+              "candidate": "Paris",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Paris",
+              "latency_ms": 83.191,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-02",
+              "answers": [
+                "0",
+                "0 celsius",
+                "0 degrees celsius",
+                "0\u00b0c",
+                "zero",
+                "zero celsius",
+                "zero degrees celsius"
+              ],
+              "candidate": "0",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "0",
+              "latency_ms": 83.146,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-03",
+              "answers": [
+                "Mars"
+              ],
+              "candidate": "Mars",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Mars",
+              "latency_ms": 121.807,
+              "output_tokens": 3
+            }
+          ]
+        },
+        "scaffold_8": {
+          "correct": 22,
+          "total": 24,
+          "strict": 18,
+          "output_tokens": 71,
+          "median_latency_ms": 83.802,
+          "rows": [
+            {
+              "id": "arith-01",
+              "answers": [
+                "15"
+              ],
+              "candidate": "15",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "15",
+              "latency_ms": 82.865,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-02",
+              "answers": [
+                "54"
+              ],
+              "candidate": "54",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "54",
+              "latency_ms": 83.207,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-03",
+              "answers": [
+                "9"
+              ],
+              "candidate": "9",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "9",
+              "latency_ms": 83.133,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-04",
+              "answers": [
+                "8"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "8",
+              "latency_ms": 83.918,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-05",
+              "answers": [
+                "25"
+              ],
+              "candidate": "25",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "25",
+              "latency_ms": 84.083,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-06",
+              "answers": [
+                "12"
+              ],
+              "candidate": "12",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "12",
+              "latency_ms": 83.7,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-01",
+              "answers": [
+                "Tuesday"
+              ],
+              "candidate": "Tuesday",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Tuesday",
+              "latency_ms": 83.903,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-02",
+              "answers": [
+                "10"
+              ],
+              "candidate": "10",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "10",
+              "latency_ms": 84.341,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-03",
+              "answers": [
+                "Pat"
+              ],
+              "candidate": "Pat is the shortest.",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "Pat is the shortest.",
+              "latency_ms": 238.731,
+              "output_tokens": 6
+            },
+            {
+              "id": "logic-04",
+              "answers": [
+                "on"
+              ],
+              "candidate": "The light's new state is on.",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "The light's new state is on.",
+              "latency_ms": 314.784,
+              "output_tokens": 8
+            },
+            {
+              "id": "code-01",
+              "answers": [
+                "3"
+              ],
+              "candidate": "3",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "3",
+              "latency_ms": 83.982,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-02",
+              "answers": [
+                "=="
+              ],
+              "candidate": "Answer: `==`",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "Answer: `==`",
+              "latency_ms": 237.332,
+              "output_tokens": 6
+            },
+            {
+              "id": "code-03",
+              "answers": [
+                "queue",
+                "a queue"
+              ],
+              "candidate": "Queue",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Queue",
+              "latency_ms": 83.091,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-04",
+              "answers": [
+                "1"
+              ],
+              "candidate": "1",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "1",
+              "latency_ms": 83.509,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-05",
+              "answers": [
+                "true"
+              ],
+              "candidate": "{\"boolean\": true}",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "{\"boolean\": true}",
+              "latency_ms": 237.017,
+              "output_tokens": 6
+            },
+            {
+              "id": "state-01",
+              "answers": [
+                "6"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "8",
+              "latency_ms": 83.549,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-02",
+              "answers": [
+                "no"
+              ],
+              "candidate": "No",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "No",
+              "latency_ms": 83.531,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-03",
+              "answers": [
+                "unlocked"
+              ],
+              "candidate": "Unlocked",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Unlocked",
+              "latency_ms": 122.586,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-04",
+              "answers": [
+                "3"
+              ],
+              "candidate": "Answer: 32",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "Answer: 32",
+              "latency_ms": 198.271,
+              "output_tokens": 5
+            },
+            {
+              "id": "state-05",
+              "answers": [
+                "7"
+              ],
+              "candidate": "7",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "7",
+              "latency_ms": 82.812,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-06",
+              "answers": [
+                "true"
+              ],
+              "candidate": "True",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "True",
+              "latency_ms": 82.857,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-01",
+              "answers": [
+                "Paris"
+              ],
+              "candidate": "Paris",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Paris",
+              "latency_ms": 83.279,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-02",
+              "answers": [
+                "0",
+                "0 celsius",
+                "0 degrees celsius",
+                "0\u00b0c",
+                "zero",
+                "zero celsius",
+                "zero degrees celsius"
+              ],
+              "candidate": "0",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "0",
+              "latency_ms": 83.592,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-03",
+              "answers": [
+                "Mars"
+              ],
+              "candidate": "Mars",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Mars",
+              "latency_ms": 121.553,
+              "output_tokens": 3
+            }
+          ]
+        },
+        "scaffold_64": {
+          "correct": 22,
+          "total": 24,
+          "strict": 18,
+          "output_tokens": 72,
+          "median_latency_ms": 83.444,
+          "rows": [
+            {
+              "id": "arith-01",
+              "answers": [
+                "15"
+              ],
+              "candidate": "15",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "15",
+              "latency_ms": 82.877,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-02",
+              "answers": [
+                "54"
+              ],
+              "candidate": "54",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "54",
+              "latency_ms": 82.874,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-03",
+              "answers": [
+                "9"
+              ],
+              "candidate": "9",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "9",
+              "latency_ms": 83.012,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-04",
+              "answers": [
+                "8"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "8",
+              "latency_ms": 83.116,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-05",
+              "answers": [
+                "25"
+              ],
+              "candidate": "25",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "25",
+              "latency_ms": 83.838,
+              "output_tokens": 2
+            },
+            {
+              "id": "arith-06",
+              "answers": [
+                "12"
+              ],
+              "candidate": "12",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "12",
+              "latency_ms": 83.149,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-01",
+              "answers": [
+                "Tuesday"
+              ],
+              "candidate": "Tuesday",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Tuesday",
+              "latency_ms": 82.858,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-02",
+              "answers": [
+                "10"
+              ],
+              "candidate": "10",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "10",
+              "latency_ms": 83.652,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-03",
+              "answers": [
+                "Pat"
+              ],
+              "candidate": "Pat is the shortest.",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "Pat is the shortest.",
+              "latency_ms": 239.236,
+              "output_tokens": 6
+            },
+            {
+              "id": "logic-04",
+              "answers": [
+                "on"
+              ],
+              "candidate": "The light's new state is on.",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "The light's new state is on.",
+              "latency_ms": 354.45,
+              "output_tokens": 9
+            },
+            {
+              "id": "code-01",
+              "answers": [
+                "3"
+              ],
+              "candidate": "3",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "3",
+              "latency_ms": 84.614,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-02",
+              "answers": [
+                "=="
+              ],
+              "candidate": "Answer: `==`",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "Answer: `==`",
+              "latency_ms": 238.153,
+              "output_tokens": 6
+            },
+            {
+              "id": "code-03",
+              "answers": [
+                "queue",
+                "a queue"
+              ],
+              "candidate": "Queue",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Queue",
+              "latency_ms": 82.843,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-04",
+              "answers": [
+                "1"
+              ],
+              "candidate": "1",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "1",
+              "latency_ms": 84.214,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-05",
+              "answers": [
+                "true"
+              ],
+              "candidate": "{\"boolean\": true}",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": false,
+              "text": "{\"boolean\": true}",
+              "latency_ms": 236.973,
+              "output_tokens": 6
+            },
+            {
+              "id": "state-01",
+              "answers": [
+                "6"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "8",
+              "latency_ms": 83.235,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-02",
+              "answers": [
+                "no"
+              ],
+              "candidate": "No",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "No",
+              "latency_ms": 83.741,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-03",
+              "answers": [
+                "unlocked"
+              ],
+              "candidate": "Unlocked",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Unlocked",
+              "latency_ms": 122.753,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-04",
+              "answers": [
+                "3"
+              ],
+              "candidate": "Answer: 32",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "Answer: 32",
+              "latency_ms": 196.161,
+              "output_tokens": 5
+            },
+            {
+              "id": "state-05",
+              "answers": [
+                "7"
+              ],
+              "candidate": "7",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "7",
+              "latency_ms": 81.723,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-06",
+              "answers": [
+                "true"
+              ],
+              "candidate": "True",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "True",
+              "latency_ms": 81.919,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-01",
+              "answers": [
+                "Paris"
+              ],
+              "candidate": "Paris",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Paris",
+              "latency_ms": 82.668,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-02",
+              "answers": [
+                "0",
+                "0 celsius",
+                "0 degrees celsius",
+                "0\u00b0c",
+                "zero",
+                "zero celsius",
+                "zero degrees celsius"
+              ],
+              "candidate": "0",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "0",
+              "latency_ms": 81.848,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-03",
+              "answers": [
+                "Mars"
+              ],
+              "candidate": "Mars",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Mars",
+              "latency_ms": 119.755,
+              "output_tokens": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "path": "/home/USER/models/Phi-3.5-mini-instruct",
+      "weights_sha256": "12be042c8285552d8b4617959a43f66e259bbb84ff27b7469ffe89b6cb27deda",
+      "weight_files": [
+        "model-00001-of-00002.safetensors",
+        "model-00002-of-00002.safetensors"
+      ],
+      "config": {
+        "_name_or_path": "Phi-3.5-mini-instruct",
+        "architectures": [
+          "Phi3ForCausalLM"
+        ],
+        "attention_dropout": 0.0,
+        "auto_map": {
+          "AutoConfig": "configuration_phi3.Phi3Config",
+          "AutoModelForCausalLM": "modeling_phi3.Phi3ForCausalLM"
+        },
+        "bos_token_id": 1,
+        "embd_pdrop": 0.0,
+        "eos_token_id": 32000,
+        "hidden_act": "silu",
+        "hidden_size": 3072,
+        "initializer_range": 0.02,
+        "intermediate_size": 8192,
+        "max_position_embeddings": 131072,
+        "model_type": "phi3",
+        "num_attention_heads": 32,
+        "num_hidden_layers": 32,
+        "num_key_value_heads": 32,
+        "original_max_position_embeddings": 4096,
+        "pad_token_id": 32000,
+        "resid_pdrop": 0.0,
+        "rms_norm_eps": 1e-05,
+        "rope_scaling": {
+          "long_factor": [
+            1.0800000429153442,
+            1.1100000143051147,
+            1.1399999856948853,
+            1.340000033378601,
+            1.5899999141693115,
+            1.600000023841858,
+            1.6200000047683716,
+            2.620000123977661,
+            3.2300000190734863,
+            3.2300000190734863,
+            4.789999961853027,
+            7.400000095367432,
+            7.700000286102295,
+            9.09000015258789,
+            12.199999809265137,
+            17.670000076293945,
+            24.46000099182129,
+            28.57000160217285,
+            30.420001983642578,
+            30.840002059936523,
+            32.590003967285156,
+            32.93000411987305,
+            42.320003509521484,
+            44.96000289916992,
+            50.340003967285156,
+            50.45000457763672,
+            57.55000305175781,
+            57.93000411987305,
+            58.21000289916992,
+            60.1400032043457,
+            62.61000442504883,
+            62.62000274658203,
+            62.71000289916992,
+            63.1400032043457,
+            63.1400032043457,
+            63.77000427246094,
+            63.93000411987305,
+            63.96000289916992,
+            63.970001220703125,
+            64.02999877929688,
+            64.06999969482422,
+            64.08000183105469,
+            64.12000274658203,
+            64.41000366210938,
+            64.4800033569336,
+            64.51000213623047,
+            64.52999877929688,
+            64.83999633789062
+          ],
+          "short_factor": [
+            1.0,
+            1.0199999809265137,
+            1.0299999713897705,
+            1.0299999713897705,
+            1.0499999523162842,
+            1.0499999523162842,
+            1.0499999523162842,
+            1.0499999523162842,
+            1.0499999523162842,
+            1.0699999332427979,
+            1.0999999046325684,
+            1.1099998950958252,
+            1.1599998474121094,
+            1.1599998474121094,
+            1.1699998378753662,
+            1.2899998426437378,
+            1.339999794960022,
+            1.679999828338623,
+            1.7899998426437378,
+            1.8199998140335083,
+            1.8499997854232788,
+            1.8799997568130493,
+            1.9099997282028198,
+            1.9399996995925903,
+            1.9899996519088745,
+            2.0199997425079346,
+            2.0199997425079346,
+            2.0199997425079346,
+            2.0199997425079346,
+            2.0199997425079346,
+            2.0199997425079346,
+            2.0299997329711914,
+            2.0299997329711914,
+            2.0299997329711914,
+            2.0299997329711914,
+            2.0299997329711914,
+            2.0299997329711914,
+            2.0299997329711914,
+            2.0299997329711914,
+            2.0299997329711914,
+            2.0799996852874756,
+            2.0899996757507324,
+            2.189999580383301,
+            2.2199995517730713,
+            2.5899994373321533,
+            2.729999542236328,
+            2.749999523162842,
+            2.8399994373321533
+          ],
+          "type": "longrope"
+        },
+        "rope_theta": 10000.0,
+        "sliding_window": 262144,
+        "tie_word_embeddings": false,
+        "torch_dtype": "bfloat16",
+        "transformers_version": "4.43.3",
+        "use_cache": true,
+        "attention_bias": false,
+        "vocab_size": 32064
+      },
+      "thinking_control": "not applicable (model has no native thinking mode)",
+      "arms": {
+        "contract_8": {
+          "correct": 23,
+          "total": 24,
+          "strict": 23,
+          "output_tokens": 72,
+          "median_latency_ms": 124.677,
+          "rows": [
+            {
+              "id": "arith-01",
+              "answers": [
+                "15"
+              ],
+              "candidate": "15",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "15",
+              "latency_ms": 193.628,
+              "output_tokens": 4
+            },
+            {
+              "id": "arith-02",
+              "answers": [
+                "54"
+              ],
+              "candidate": "54",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "54",
+              "latency_ms": 160.313,
+              "output_tokens": 4
+            },
+            {
+              "id": "arith-03",
+              "answers": [
+                "9"
+              ],
+              "candidate": "9",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "9",
+              "latency_ms": 124.865,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-04",
+              "answers": [
+                "8"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "8",
+              "latency_ms": 125.507,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-05",
+              "answers": [
+                "25"
+              ],
+              "candidate": "25",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "25",
+              "latency_ms": 160.421,
+              "output_tokens": 4
+            },
+            {
+              "id": "arith-06",
+              "answers": [
+                "12"
+              ],
+              "candidate": "12",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "12",
+              "latency_ms": 160.851,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-01",
+              "answers": [
+                "Tuesday"
+              ],
+              "candidate": "Tuesday",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Tuesday",
+              "latency_ms": 159.939,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-02",
+              "answers": [
+                "10"
+              ],
+              "candidate": "10",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "10",
+              "latency_ms": 159.261,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-03",
+              "answers": [
+                "Pat"
+              ],
+              "candidate": "Pat",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Pat",
+              "latency_ms": 89.352,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-04",
+              "answers": [
+                "on"
+              ],
+              "candidate": "Off",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "Off",
+              "latency_ms": 89.017,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-01",
+              "answers": [
+                "3"
+              ],
+              "candidate": "3",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "3",
+              "latency_ms": 125.046,
+              "output_tokens": 3
+            },
+            {
+              "id": "code-02",
+              "answers": [
+                "=="
+              ],
+              "candidate": "==",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "==",
+              "latency_ms": 89.551,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-03",
+              "answers": [
+                "queue",
+                "a queue"
+              ],
+              "candidate": "Queue",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Queue",
+              "latency_ms": 125.75,
+              "output_tokens": 3
+            },
+            {
+              "id": "code-04",
+              "answers": [
+                "1"
+              ],
+              "candidate": "1",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "1",
+              "latency_ms": 124.378,
+              "output_tokens": 3
+            },
+            {
+              "id": "code-05",
+              "answers": [
+                "true"
+              ],
+              "candidate": "true",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "true",
+              "latency_ms": 88.668,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-01",
+              "answers": [
+                "6"
+              ],
+              "candidate": "6",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "6",
+              "latency_ms": 123.975,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-02",
+              "answers": [
+                "no"
+              ],
+              "candidate": "no",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "no",
+              "latency_ms": 89.145,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-03",
+              "answers": [
+                "unlocked"
+              ],
+              "candidate": "Unlocked",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Unlocked",
+              "latency_ms": 124.07,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-04",
+              "answers": [
+                "3"
+              ],
+              "candidate": "3",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "3",
+              "latency_ms": 125.236,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-05",
+              "answers": [
+                "7"
+              ],
+              "candidate": "7",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "7",
+              "latency_ms": 124.488,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-06",
+              "answers": [
+                "true"
+              ],
+              "candidate": "True",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "True",
+              "latency_ms": 89.326,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-01",
+              "answers": [
+                "Paris"
+              ],
+              "candidate": "Paris",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Paris",
+              "latency_ms": 89.857,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-02",
+              "answers": [
+                "0",
+                "0 celsius",
+                "0 degrees celsius",
+                "0\u00b0c",
+                "zero",
+                "zero celsius",
+                "zero degrees celsius"
+              ],
+              "candidate": "0\u00b0C",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "0\u00b0C",
+              "latency_ms": 197.001,
+              "output_tokens": 5
+            },
+            {
+              "id": "fact-03",
+              "answers": [
+                "Mars"
+              ],
+              "candidate": "Mars",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Mars",
+              "latency_ms": 88.475,
+              "output_tokens": 2
+            }
+          ]
+        },
+        "contract_64": {
+          "correct": 23,
+          "total": 24,
+          "strict": 23,
+          "output_tokens": 72,
+          "median_latency_ms": 124.367,
+          "rows": [
+            {
+              "id": "arith-01",
+              "answers": [
+                "15"
+              ],
+              "candidate": "15",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "15",
+              "latency_ms": 160.044,
+              "output_tokens": 4
+            },
+            {
+              "id": "arith-02",
+              "answers": [
+                "54"
+              ],
+              "candidate": "54",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "54",
+              "latency_ms": 160.148,
+              "output_tokens": 4
+            },
+            {
+              "id": "arith-03",
+              "answers": [
+                "9"
+              ],
+              "candidate": "9",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "9",
+              "latency_ms": 125.195,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-04",
+              "answers": [
+                "8"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "8",
+              "latency_ms": 124.642,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-05",
+              "answers": [
+                "25"
+              ],
+              "candidate": "25",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "25",
+              "latency_ms": 159.755,
+              "output_tokens": 4
+            },
+            {
+              "id": "arith-06",
+              "answers": [
+                "12"
+              ],
+              "candidate": "12",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "12",
+              "latency_ms": 160.668,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-01",
+              "answers": [
+                "Tuesday"
+              ],
+              "candidate": "Tuesday",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Tuesday",
+              "latency_ms": 158.636,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-02",
+              "answers": [
+                "10"
+              ],
+              "candidate": "10",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "10",
+              "latency_ms": 295.379,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-03",
+              "answers": [
+                "Pat"
+              ],
+              "candidate": "Pat",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Pat",
+              "latency_ms": 89.24,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-04",
+              "answers": [
+                "on"
+              ],
+              "candidate": "Off",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": false,
+              "semantic_correct": false,
+              "correct": false,
+              "strict": false,
+              "text": "Off",
+              "latency_ms": 89.761,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-01",
+              "answers": [
+                "3"
+              ],
+              "candidate": "3",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "3",
+              "latency_ms": 124.258,
+              "output_tokens": 3
+            },
+            {
+              "id": "code-02",
+              "answers": [
+                "=="
+              ],
+              "candidate": "==",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "==",
+              "latency_ms": 89.179,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-03",
+              "answers": [
+                "queue",
+                "a queue"
+              ],
+              "candidate": "Queue",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Queue",
+              "latency_ms": 124.475,
+              "output_tokens": 3
+            },
+            {
+              "id": "code-04",
+              "answers": [
+                "1"
+              ],
+              "candidate": "1",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "1",
+              "latency_ms": 124.604,
+              "output_tokens": 3
+            },
+            {
+              "id": "code-05",
+              "answers": [
+                "true"
+              ],
+              "candidate": "true",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "true",
+              "latency_ms": 89.064,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-01",
+              "answers": [
+                "6"
+              ],
+              "candidate": "6",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "6",
+              "latency_ms": 123.287,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-02",
+              "answers": [
+                "no"
+              ],
+              "candidate": "no",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "no",
+              "latency_ms": 89.283,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-03",
+              "answers": [
+                "unlocked"
+              ],
+              "candidate": "Unlocked",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Unlocked",
+              "latency_ms": 124.007,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-04",
+              "answers": [
+                "3"
+              ],
+              "candidate": "3",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "3",
+              "latency_ms": 124.821,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-05",
+              "answers": [
+                "7"
+              ],
+              "candidate": "7",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "7",
+              "latency_ms": 124.232,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-06",
+              "answers": [
+                "true"
+              ],
+              "candidate": "True",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "True",
+              "latency_ms": 89.125,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-01",
+              "answers": [
+                "Paris"
+              ],
+              "candidate": "Paris",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Paris",
+              "latency_ms": 89.247,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-02",
+              "answers": [
+                "0",
+                "0 celsius",
+                "0 degrees celsius",
+                "0\u00b0c",
+                "zero",
+                "zero celsius",
+                "zero degrees celsius"
+              ],
+              "candidate": "0\u00b0C",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "0\u00b0C",
+              "latency_ms": 195.194,
+              "output_tokens": 5
+            },
+            {
+              "id": "fact-03",
+              "answers": [
+                "Mars"
+              ],
+              "candidate": "Mars",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Mars",
+              "latency_ms": 88.566,
+              "output_tokens": 2
+            }
+          ]
+        },
+        "scaffold_8": {
+          "correct": 24,
+          "total": 24,
+          "strict": 24,
+          "output_tokens": 72,
+          "median_latency_ms": 125.016,
+          "rows": [
+            {
+              "id": "arith-01",
+              "answers": [
+                "15"
+              ],
+              "candidate": "15",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "15",
+              "latency_ms": 158.593,
+              "output_tokens": 4
+            },
+            {
+              "id": "arith-02",
+              "answers": [
+                "54"
+              ],
+              "candidate": "54",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "54",
+              "latency_ms": 159.49,
+              "output_tokens": 4
+            },
+            {
+              "id": "arith-03",
+              "answers": [
+                "9"
+              ],
+              "candidate": "9",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "9",
+              "latency_ms": 125.308,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-04",
+              "answers": [
+                "8"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "8",
+              "latency_ms": 125.718,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-05",
+              "answers": [
+                "25"
+              ],
+              "candidate": "25",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "25",
+              "latency_ms": 160.203,
+              "output_tokens": 4
+            },
+            {
+              "id": "arith-06",
+              "answers": [
+                "12"
+              ],
+              "candidate": "12",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "12",
+              "latency_ms": 161.76,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-01",
+              "answers": [
+                "Tuesday"
+              ],
+              "candidate": "Tuesday",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Tuesday",
+              "latency_ms": 158.977,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-02",
+              "answers": [
+                "10"
+              ],
+              "candidate": "10",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "10",
+              "latency_ms": 159.866,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-03",
+              "answers": [
+                "Pat"
+              ],
+              "candidate": "Pat",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Pat",
+              "latency_ms": 89.912,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-04",
+              "answers": [
+                "on"
+              ],
+              "candidate": "On",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "On",
+              "latency_ms": 89.96,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-01",
+              "answers": [
+                "3"
+              ],
+              "candidate": "3",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "3",
+              "latency_ms": 124.115,
+              "output_tokens": 3
+            },
+            {
+              "id": "code-02",
+              "answers": [
+                "=="
+              ],
+              "candidate": "==",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "==",
+              "latency_ms": 89.524,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-03",
+              "answers": [
+                "queue",
+                "a queue"
+              ],
+              "candidate": "Queue",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Queue",
+              "latency_ms": 124.613,
+              "output_tokens": 3
+            },
+            {
+              "id": "code-04",
+              "answers": [
+                "1"
+              ],
+              "candidate": "1",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "1",
+              "latency_ms": 124.724,
+              "output_tokens": 3
+            },
+            {
+              "id": "code-05",
+              "answers": [
+                "true"
+              ],
+              "candidate": "true",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "true",
+              "latency_ms": 89.907,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-01",
+              "answers": [
+                "6"
+              ],
+              "candidate": "6",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "6",
+              "latency_ms": 126.113,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-02",
+              "answers": [
+                "no"
+              ],
+              "candidate": "no",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "no",
+              "latency_ms": 90.176,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-03",
+              "answers": [
+                "unlocked"
+              ],
+              "candidate": "Unlocked",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Unlocked",
+              "latency_ms": 124.015,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-04",
+              "answers": [
+                "3"
+              ],
+              "candidate": "3",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "3",
+              "latency_ms": 125.406,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-05",
+              "answers": [
+                "7"
+              ],
+              "candidate": "7",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "7",
+              "latency_ms": 126.175,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-06",
+              "answers": [
+                "true"
+              ],
+              "candidate": "True",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "True",
+              "latency_ms": 89.915,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-01",
+              "answers": [
+                "Paris"
+              ],
+              "candidate": "Paris",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Paris",
+              "latency_ms": 89.359,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-02",
+              "answers": [
+                "0",
+                "0 celsius",
+                "0 degrees celsius",
+                "0\u00b0c",
+                "zero",
+                "zero celsius",
+                "zero degrees celsius"
+              ],
+              "candidate": "0\u00b0C",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "0\u00b0C",
+              "latency_ms": 195.211,
+              "output_tokens": 5
+            },
+            {
+              "id": "fact-03",
+              "answers": [
+                "Mars"
+              ],
+              "candidate": "Mars",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Mars",
+              "latency_ms": 89.077,
+              "output_tokens": 2
+            }
+          ]
+        },
+        "scaffold_64": {
+          "correct": 24,
+          "total": 24,
+          "strict": 24,
+          "output_tokens": 72,
+          "median_latency_ms": 124.709,
+          "rows": [
+            {
+              "id": "arith-01",
+              "answers": [
+                "15"
+              ],
+              "candidate": "15",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "15",
+              "latency_ms": 158.573,
+              "output_tokens": 4
+            },
+            {
+              "id": "arith-02",
+              "answers": [
+                "54"
+              ],
+              "candidate": "54",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "54",
+              "latency_ms": 159.199,
+              "output_tokens": 4
+            },
+            {
+              "id": "arith-03",
+              "answers": [
+                "9"
+              ],
+              "candidate": "9",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "9",
+              "latency_ms": 124.434,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-04",
+              "answers": [
+                "8"
+              ],
+              "candidate": "8",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "8",
+              "latency_ms": 124.616,
+              "output_tokens": 3
+            },
+            {
+              "id": "arith-05",
+              "answers": [
+                "25"
+              ],
+              "candidate": "25",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "25",
+              "latency_ms": 159.421,
+              "output_tokens": 4
+            },
+            {
+              "id": "arith-06",
+              "answers": [
+                "12"
+              ],
+              "candidate": "12",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "12",
+              "latency_ms": 160.417,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-01",
+              "answers": [
+                "Tuesday"
+              ],
+              "candidate": "Tuesday",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Tuesday",
+              "latency_ms": 159.4,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-02",
+              "answers": [
+                "10"
+              ],
+              "candidate": "10",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "10",
+              "latency_ms": 160.58,
+              "output_tokens": 4
+            },
+            {
+              "id": "logic-03",
+              "answers": [
+                "Pat"
+              ],
+              "candidate": "Pat",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Pat",
+              "latency_ms": 89.857,
+              "output_tokens": 2
+            },
+            {
+              "id": "logic-04",
+              "answers": [
+                "on"
+              ],
+              "candidate": "On",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "On",
+              "latency_ms": 89.408,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-01",
+              "answers": [
+                "3"
+              ],
+              "candidate": "3",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "3",
+              "latency_ms": 124.047,
+              "output_tokens": 3
+            },
+            {
+              "id": "code-02",
+              "answers": [
+                "=="
+              ],
+              "candidate": "==",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "==",
+              "latency_ms": 89.409,
+              "output_tokens": 2
+            },
+            {
+              "id": "code-03",
+              "answers": [
+                "queue",
+                "a queue"
+              ],
+              "candidate": "Queue",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Queue",
+              "latency_ms": 124.874,
+              "output_tokens": 3
+            },
+            {
+              "id": "code-04",
+              "answers": [
+                "1"
+              ],
+              "candidate": "1",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "1",
+              "latency_ms": 124.884,
+              "output_tokens": 3
+            },
+            {
+              "id": "code-05",
+              "answers": [
+                "true"
+              ],
+              "candidate": "true",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "true",
+              "latency_ms": 89.396,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-01",
+              "answers": [
+                "6"
+              ],
+              "candidate": "6",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "6",
+              "latency_ms": 124.801,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-02",
+              "answers": [
+                "no"
+              ],
+              "candidate": "no",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "no",
+              "latency_ms": 89.553,
+              "output_tokens": 2
+            },
+            {
+              "id": "state-03",
+              "answers": [
+                "unlocked"
+              ],
+              "candidate": "Unlocked",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Unlocked",
+              "latency_ms": 124.198,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-04",
+              "answers": [
+                "3"
+              ],
+              "candidate": "3",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "3",
+              "latency_ms": 126.09,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-05",
+              "answers": [
+                "7"
+              ],
+              "candidate": "7",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "7",
+              "latency_ms": 126.575,
+              "output_tokens": 3
+            },
+            {
+              "id": "state-06",
+              "answers": [
+                "true"
+              ],
+              "candidate": "True",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "True",
+              "latency_ms": 90.192,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-01",
+              "answers": [
+                "Paris"
+              ],
+              "candidate": "Paris",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Paris",
+              "latency_ms": 89.574,
+              "output_tokens": 2
+            },
+            {
+              "id": "fact-02",
+              "answers": [
+                "0",
+                "0 celsius",
+                "0 degrees celsius",
+                "0\u00b0c",
+                "zero",
+                "zero celsius",
+                "zero degrees celsius"
+              ],
+              "candidate": "0\u00b0C",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "0\u00b0C",
+              "latency_ms": 195.424,
+              "output_tokens": 5
+            },
+            {
+              "id": "fact-03",
+              "answers": [
+                "Mars"
+              ],
+              "candidate": "Mars",
+              "score_method": "complete_output_exact_and_bounded_semantic",
+              "exact_correct": true,
+              "semantic_correct": true,
+              "correct": true,
+              "strict": true,
+              "text": "Mars",
+              "latency_ms": 89.062,
+              "output_tokens": 2
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "finished_utc": "2026-08-15T22:46:19Z"
+}
