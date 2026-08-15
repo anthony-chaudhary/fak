@@ -215,7 +215,7 @@ above.
 | BLOCKED_BY_OPEN_PREREQ | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | BROADCAST_MALFORMED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | CACHE_PREFIX_RESIDENT | refusal | floor-declared | `Floor:` cite in the dos.toml block |
-| DEPTH_NOT_CARRIED | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| DEPTH_NOT_CARRIED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | CHECKER_TAMPERED | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | COLLISION_RISK | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | COMPACTION_THRASH | refusal | floor-declared | `Floor:` cite in the dos.toml block |
