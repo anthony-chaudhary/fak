@@ -70,6 +70,8 @@ func runIssueCohort(stdout, stderr io.Writer, argv []string) int {
 		}
 		candidates = make([]issuepolicy.Candidate, 0, len(issues))
 		for _, d := range issues {
+			// CandidateFromIssueDraft is the sole prose boundary; downstream cohort
+			// and dispatch surfaces consume its canonical ProblemFrame.
 			candidates = append(candidates, issuepolicy.CandidateFromIssueDraft(d))
 		}
 	} else {

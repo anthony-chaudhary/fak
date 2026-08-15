@@ -20,6 +20,17 @@ func Render(p Plan) string {
 		fmt.Fprintf(&b, "  duplicate keys: %d extra occurrence(s) across %d key(s) (rerun should update, not create)\n",
 			p.DuplicateKeys, len(p.Duplicates))
 	}
+	fmt.Fprintf(&b, "  centrality (non-scoring): core=%d enabling=%d stewardship=%d peripheral=%d unclassified=%d\n",
+		p.Centrality.Core, p.Centrality.Enabling, p.Centrality.Stewardship, p.Centrality.Peripheral, p.Centrality.Unclassified)
+	for _, row := range p.Portfolio {
+		target := ""
+		if row.CentralityTarget != "" {
+			target = "(" + row.CentralityTarget + ")"
+		}
+		fmt.Fprintf(&b, "    portfolio: %s centrality=%s%s priority=%s spine_priority=%d readiness=%s dependencies=%d steps=%d risk_notes=%d reversibility=%s note=%s\n",
+			row.Key, row.Centrality, target, emptyValue(row.Priority), row.SpinePriority.Total, row.Dispatchability,
+			len(row.Dependencies), row.ExpectedSteps, len(row.RiskBoundaryNotes), emptyValue(row.Reversibility), row.SelectionNote)
+	}
 
 	for _, w := range p.Waves {
 		fmt.Fprintf(&b, "  wave %d: %d leaf/leaves, step_budget=%d\n", w.Index, w.Size, w.StepBudget)
@@ -78,4 +89,11 @@ func leaseLaneArg(lanes []string) string {
 		return ""
 	}
 	return " --lane " + strings.Join(lanes, ",")
+}
+
+func emptyValue(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "(undeclared)"
+	}
+	return value
 }

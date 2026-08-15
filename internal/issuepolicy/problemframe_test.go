@@ -83,6 +83,21 @@ func TestAssessProblemFrameMigrationBoundary(t *testing.T) {
 	}
 }
 
+func TestReviewCandidateCarriesAndGatesCanonicalProblemFrame(t *testing.T) {
+	candidate := Candidate{
+		Schema: Schema, Key: "problem-frame/direct", Title: "direct candidate", ParentRef: "#1",
+		CurrentState: "gap", WhyNow: "now", WorkingSpine: "path", InScope: "one leaf", OutOfScope: "rest",
+		DoneCondition: "done", Witness: "test", AcceptanceGate: "test", ClosureBinding: "commit cites #1",
+		Paths: []string{"internal/issuepolicy/**"},
+		ProblemFrame: ProblemFrame{Schema: ProblemFrameSchema, Enforced: true, Ready: false, Centrality: CentralityEnabling,
+			Reasons: []string{"problem_centrality_target_missing"}, Checks: map[string]ProblemCheck{}},
+	}
+	review := ReviewCandidate(candidate, Options{})
+	if review.OK || review.Verdict != "needs_problem_frame" || !containsString(review.Reasons, ReasonProblemFrameIncomplete) {
+		t.Fatalf("direct candidate escaped frame gate: %+v", review)
+	}
+}
+
 func TestReviewIssueDraftGatesMalformedProblemFrame(t *testing.T) {
 	body := "## Value\n- Centrality: Core\n- P1: advanced - context is reused\n- P2: preserved - no efficiency regression\n- P3: preserved - adaptation remains bounded\n- P4: advanced\n"
 	review := ReviewIssueDraft(IssueDraft{Number: 7, Title: "issuepolicy: gate problem frame", Body: body}, Options{})

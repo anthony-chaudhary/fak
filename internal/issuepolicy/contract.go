@@ -152,6 +152,7 @@ type Candidate struct {
 	Labels                 []string        `json:"labels,omitempty"`
 	Priority               string          `json:"priority,omitempty"`
 	BoundaryNotes          []string        `json:"boundary_notes,omitempty"`
+	Reversibility          string          `json:"reversibility,omitempty"`
 	Private                bool            `json:"private,omitempty"`
 	ClosureBinding         string          `json:"closure_binding,omitempty"`
 	ClosureClaim           string          `json:"closure_claim,omitempty"`
@@ -168,8 +169,9 @@ type Candidate struct {
 	// (the issue's own stated assumption). A namespaced label always wins over
 	// these when both are present. Values may be a bare tier ("T1") or the full
 	// tag ("tier/T1-required"); modelTier parses the T<N> token out of either.
-	RequiredModelTier string `json:"required_model_tier,omitempty"`
-	OptimalModelTier  string `json:"optimal_model_tier,omitempty"`
+	ProblemFrame      ProblemFrame `json:"problem_frame,omitempty"`
+	RequiredModelTier string       `json:"required_model_tier,omitempty"`
+	OptimalModelTier  string       `json:"optimal_model_tier,omitempty"`
 }
 
 // Options carries context the issue body alone cannot prove, such as whether a
@@ -303,6 +305,10 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 		missing = append(missing, noiseMissing...)
 	}
 	reasons := reasonSet{}
+	if c.ProblemFrame.Enforced && !c.ProblemFrame.Ready {
+		reasons.add(ReasonProblemFrameIncomplete)
+		missing = appendUnique(missing, c.ProblemFrame.Reasons...)
+	}
 	if len(scopeMissing) > 0 {
 		reasons.add(ReasonScopeIncomplete)
 	}
@@ -413,6 +419,7 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 	generationFit := generationFit(c)
 	out := Review{
 		Schema:            ReviewSchema,
+		ProblemFrame:      c.ProblemFrame,
 		IssueNumber:       c.IssueNumber,
 		Key:               c.Key,
 		Lane:              c.Lane,
@@ -448,6 +455,9 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 	case private || reasons.has(ReasonLiveUnarmored) || reasons.has(ReasonNoiseIncomplete) || reasons.has(ReasonAgentIncomplete):
 		out.Verdict = "refused"
 		out.Dispatchability = Refused
+	case reasons.has(ReasonProblemFrameIncomplete):
+		out.Verdict = "needs_problem_frame"
+		out.Dispatchability = TriageOnly
 	default:
 		out.Verdict = "needs_scope"
 		out.Dispatchability = TriageOnly
@@ -463,15 +473,6 @@ func ReviewIssueDraft(d IssueDraft, opt Options) Review {
 	review := ReviewCandidate(candidate, opt)
 	review.BriefReadiness = assessIssueBrief(d, candidate)
 	review.ProblemFrame = AssessProblemFrame(d)
-	if review.ProblemFrame.Enforced && !review.ProblemFrame.Ready {
-		review.OK = false
-		review.MissingFields = appendUnique(review.MissingFields, review.ProblemFrame.Reasons...)
-		addReviewReason(&review, ReasonProblemFrameIncomplete)
-		if review.Dispatchability == Dispatchable {
-			review.Verdict = "needs_problem_frame"
-			review.Dispatchability = TriageOnly
-		}
-	}
 	if review.BriefReadiness.Enforced && !review.BriefReadiness.Ready {
 		review.OK = false
 		if review.Dispatchability == Dispatchable {
@@ -772,6 +773,7 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		Dependencies:           ParseIssueDependencies(section("Dependencies", "Dependency markers")),
 		Labels:                 issueDraftLabels(d.Labels),
 		BoundaryNotes:          issueDraftNotes(section("Boundary notes", "Risk / boundary notes")),
+		Reversibility:          agentSectionValue(section("Reversibility", "Rollback")),
 		ClosureBinding:         section("Closure binding"),
 		ClosureClaim:           section("Closure claim", "Ship claim"),
 		ClosureWitnessStandard: section("Closure witness standard", "Witnessed completion standard"),
@@ -782,6 +784,7 @@ func CandidateFromIssueDraft(d IssueDraft) Candidate {
 		RequiredScaleStages:    section("Required scale stages", "Required evidence stages"),
 		WorkEstimate:           section("Work estimate"),
 		ScopeContribution:      section("Overall completion contribution", "Scope contribution"),
+		ProblemFrame:           AssessProblemFrame(d),
 		// Body fallback for the tier tags — used only when the namespaced
 		// tier/T?-required|optimal GitHub labels are absent (see modelTier).
 		RequiredModelTier: issueHeaderField(d.Body, "Required model tier"),
@@ -944,12 +947,16 @@ func normalize(c Candidate) Candidate {
 	c.ClosureBinding = strings.TrimSpace(c.ClosureBinding)
 	c.ClosureClaim = strings.TrimSpace(c.ClosureClaim)
 	c.ClosureWitnessStandard = strings.TrimSpace(c.ClosureWitnessStandard)
+	if c.ProblemFrame.Schema == "" {
+		c.ProblemFrame = ProblemFrame{Schema: ProblemFrameSchema, Ready: true, Centrality: CentralityUnclassified, Checks: map[string]ProblemCheck{}}
+	}
 	c.RequiredModelTier = strings.TrimSpace(c.RequiredModelTier)
 	c.OptimalModelTier = strings.TrimSpace(c.OptimalModelTier)
 	c.Paths = compact(c.Paths)
 	c.Dependencies = normalizeDependencies(c.Dependencies)
 	c.Labels = compact(c.Labels)
 	c.BoundaryNotes = compact(c.BoundaryNotes)
+	c.Reversibility = strings.TrimSpace(c.Reversibility)
 	return c
 }
 

@@ -112,6 +112,16 @@ managed context, net-true value, bounded adaptation, or integrated operations.
 `centrality=unclassified` with `problem_frame.enforced=false` until deliberately migrated;
 they are not silently reinterpreted or bulk-blocked.
 
+
+`fak-dev issue cohort` carries that same canonical object into its portfolio rows and
+dispatch-wave members. Human output labels the fold `centrality (non-scoring)` and keeps
+priority, readiness, dependencies, and expected effort beside it. Input order and wave
+assignment do not sort by centrality. In particular, an urgent Stewardship obligation may
+outrank ready Core work; Enabling rows retain their named Core target; Peripheral and
+legacy `unclassified` rows remain visible. Directory, title, labels, and parent epic never
+synthesize a class�the only source is `CandidateFromIssueDraft` / `ProblemFrame` from the
+issue-contract seam.
+
 These five sections are the *structure* axis of ticket scope. The full scope
 contract — structure, size (the S0–S4 ladder), atomicity, write-scope, cohort
 placement, and work-class, each with the verb that measures it and the fix when

@@ -62,11 +62,12 @@ type WaveMember struct {
 	// it is the review's own identity field, and it is what lets a downstream
 	// reader bind a landed commit's `#N` back to the wave the work was decided in
 	// (internal/steerpr's wave grouping, #5040) without inventing a second key.
-	IssueNumber   int      `json:"issue_number,omitempty"`
-	Title         string   `json:"title,omitempty"`
-	Lane          string   `json:"lane,omitempty"`
-	Paths         []string `json:"paths,omitempty"`
-	ExpectedSteps int      `json:"expected_steps,omitempty"`
+	IssueNumber   int                      `json:"issue_number,omitempty"`
+	Title         string                   `json:"title,omitempty"`
+	Lane          string                   `json:"lane,omitempty"`
+	Paths         []string                 `json:"paths,omitempty"`
+	ExpectedSteps int                      `json:"expected_steps,omitempty"`
+	ProblemFrame  issuepolicy.ProblemFrame `json:"problem_frame"`
 }
 
 // Wave is one set of leaves whose expected trees are mutually disjoint, so all
@@ -116,6 +117,32 @@ type DuplicateGroup struct {
 	Count int    `json:"count"`
 }
 
+// PortfolioRow keeps centrality visible without folding it into a priority score.
+type PortfolioRow struct {
+	IssueNumber       int                         `json:"issue_number,omitempty"`
+	Key               string                      `json:"key"`
+	Title             string                      `json:"title,omitempty"`
+	Dispatchability   string                      `json:"dispatchability"`
+	Priority          string                      `json:"priority,omitempty"`
+	SpinePriority     issuepolicy.SpinePriority   `json:"spine_priority"`
+	Dependencies      []issuepolicy.DependencyRef `json:"dependencies,omitempty"`
+	RiskBoundaryNotes []string                    `json:"risk_boundary_notes,omitempty"`
+	Reversibility     string                      `json:"reversibility,omitempty"`
+	ExpectedSteps     int                         `json:"expected_steps,omitempty"`
+	Centrality        string                      `json:"centrality"`
+	CentralityTarget  string                      `json:"centrality_target,omitempty"`
+	ProblemFrameReady bool                        `json:"problem_frame_ready"`
+	SelectionNote     string                      `json:"selection_note"`
+}
+
+type CentralityCounts struct {
+	Core         int `json:"core"`
+	Enabling     int `json:"enabling"`
+	Stewardship  int `json:"stewardship"`
+	Peripheral   int `json:"peripheral"`
+	Unclassified int `json:"unclassified"`
+}
+
 // Plan is the machine-readable cohort fold.
 type Plan struct {
 	Schema          string           `json:"schema"`
@@ -133,6 +160,8 @@ type Plan struct {
 	Subdivide       []SubdivideRow   `json:"subdivide,omitempty"`
 	Triage          []TriageRow      `json:"triage,omitempty"`
 	Duplicates      []DuplicateGroup `json:"duplicates,omitempty"`
+	Portfolio       []PortfolioRow   `json:"portfolio"`
+	Centrality      CentralityCounts `json:"centrality"`
 }
 
 // leaf is the internal projection of a dispatchable candidate used for wave
@@ -165,6 +194,7 @@ func Build(candidates []issuepolicy.Candidate, opt Options) Plan {
 			seen[key] = true
 		}
 		review := issuepolicy.ReviewCandidate(c, opt.Options)
+		appendPortfolioRow(&plan, c, review)
 		switch {
 		case review.OK && review.Dispatchability == issuepolicy.Dispatchable:
 			plan.Dispatchable++
@@ -176,6 +206,7 @@ func Build(candidates []issuepolicy.Candidate, opt Options) Plan {
 					Lane:          review.Lane,
 					Paths:         append([]string(nil), review.Paths...),
 					ExpectedSteps: review.ExpectedSteps,
+					ProblemFrame:  review.ProblemFrame,
 				},
 				normPaths: normalizePaths(review.Paths),
 			})
@@ -318,6 +349,65 @@ func sortedKeys(set map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func appendPortfolioRow(plan *Plan, c issuepolicy.Candidate, review issuepolicy.Review) {
+	centrality := review.ProblemFrame.Centrality
+	if centrality == "" {
+		centrality = issuepolicy.CentralityUnclassified
+	}
+	priority := candidatePriority(c)
+	row := PortfolioRow{
+		IssueNumber: review.IssueNumber, Key: strmatch.FirstTrimmed(review.Key, c.Key), Title: strings.TrimSpace(c.Title),
+		Dispatchability: review.Dispatchability, Priority: priority, SpinePriority: review.SpinePriority,
+		Dependencies:      append([]issuepolicy.DependencyRef(nil), review.Dependencies...),
+		RiskBoundaryNotes: append([]string(nil), c.BoundaryNotes...), Reversibility: strings.TrimSpace(c.Reversibility),
+		ExpectedSteps: review.ExpectedSteps,
+		Centrality:    centrality, CentralityTarget: review.ProblemFrame.CentralityTarget,
+		ProblemFrameReady: review.ProblemFrame.Ready,
+		SelectionNote:     selectionNote(centrality, priority, review.Dispatchability),
+	}
+	plan.Portfolio = append(plan.Portfolio, row)
+	switch centrality {
+	case issuepolicy.CentralityCore:
+		plan.Centrality.Core++
+	case issuepolicy.CentralityEnabling:
+		plan.Centrality.Enabling++
+	case issuepolicy.CentralityStewardship:
+		plan.Centrality.Stewardship++
+	case issuepolicy.CentralityPeripheral:
+		plan.Centrality.Peripheral++
+	default:
+		plan.Centrality.Unclassified++
+	}
+}
+
+func candidatePriority(c issuepolicy.Candidate) string {
+	if priority := strings.TrimSpace(c.Priority); priority != "" {
+		return priority
+	}
+	for _, label := range c.Labels {
+		lower := strings.ToLower(strings.TrimSpace(label))
+		if lower == "urgent" || lower == "critical" || strings.HasPrefix(lower, "priority/") || strings.HasPrefix(lower, "priority:") {
+			return strings.TrimSpace(label)
+		}
+	}
+	return ""
+}
+
+func selectionNote(centrality, priority, dispatchability string) string {
+	if centrality == issuepolicy.CentralityStewardship && isUrgentPriority(priority) {
+		return "urgent stewardship obligation may outrank ready Core work; centrality is non-scoring"
+	}
+	if dispatchability != issuepolicy.Dispatchable {
+		return "repair readiness before selection; centrality remains visible and non-scoring"
+	}
+	return "centrality is non-scoring; order still considers urgency, dependencies, effort, and reversibility"
+}
+
+func isUrgentPriority(priority string) bool {
+	p := strings.ToLower(strings.TrimSpace(priority))
+	return p == "urgent" || p == "critical" || p == "p0" || p == "priority/p0" || p == "priority:critical" || p == "priority:urgent"
 }
 
 func collidesWithAny(lf leaf, bucket []leaf) bool {

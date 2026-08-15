@@ -197,13 +197,71 @@ func TestBuildStepBudgetCountsUnknownAsOne(t *testing.T) {
 	}
 }
 
+func TestPortfolioCarriesCentralityWithoutReorderingOrScoring(t *testing.T) {
+	core := fullCandidate("core")
+	core.Priority = "P1"
+	core.ProblemFrame = issuepolicy.ProblemFrame{Schema: issuepolicy.ProblemFrameSchema, Ready: true, Enforced: true, Centrality: issuepolicy.CentralityCore, Checks: map[string]issuepolicy.ProblemCheck{}}
+
+	stewardship := fullCandidate("stewardship")
+	stewardship.Priority = "urgent"
+	stewardship.Reversibility = "rollback the release manifest"
+	stewardship.BoundaryNotes = []string{"signing deadline is hard"}
+	stewardship.Dependencies = []issuepolicy.DependencyRef{{Relation: "blocked-by", Issue: 7, Blocking: true}}
+	stewardship.ProblemFrame = issuepolicy.ProblemFrame{Schema: issuepolicy.ProblemFrameSchema, Ready: true, Enforced: true, Centrality: issuepolicy.CentralityStewardship, CentralityTarget: "release signing obligation", Checks: map[string]issuepolicy.ProblemCheck{}}
+
+	enabling := fullCandidate("enabling")
+	enabling.ProblemFrame = issuepolicy.ProblemFrame{Schema: issuepolicy.ProblemFrameSchema, Ready: true, Enforced: true, Centrality: issuepolicy.CentralityEnabling, CentralityTarget: "managed-context outcome", Checks: map[string]issuepolicy.ProblemCheck{}}
+
+	peripheral := fullCandidate("peripheral")
+	peripheral.ProblemFrame = issuepolicy.ProblemFrame{Schema: issuepolicy.ProblemFrameSchema, Ready: true, Enforced: true, Centrality: issuepolicy.CentralityPeripheral, Checks: map[string]issuepolicy.ProblemCheck{}}
+
+	legacy := fullCandidate("legacy")
+	plan := Build([]issuepolicy.Candidate{core, stewardship, enabling, peripheral, legacy}, Options{})
+	if len(plan.Portfolio) != 5 {
+		t.Fatalf("portfolio rows = %d, want 5", len(plan.Portfolio))
+	}
+	wantOrder := []string{"core", "stewardship", "enabling", "peripheral", "legacy"}
+	for i, want := range wantOrder {
+		if plan.Portfolio[i].Key != want {
+			t.Fatalf("portfolio reordered at %d: got %q want %q", i, plan.Portfolio[i].Key, want)
+		}
+	}
+	if got := plan.Centrality; got.Core != 1 || got.Enabling != 1 || got.Stewardship != 1 || got.Peripheral != 1 || got.Unclassified != 1 {
+		t.Fatalf("centrality counts = %+v", got)
+	}
+	steward := plan.Portfolio[1]
+	if steward.Priority != "urgent" || len(steward.Dependencies) != 1 || len(steward.RiskBoundaryNotes) != 1 || steward.Reversibility != "rollback the release manifest" {
+		t.Fatalf("independent selection axes lost: %+v", steward)
+	}
+	if steward.CentralityTarget != "release signing obligation" || !strings.Contains(steward.SelectionNote, "may outrank ready Core") {
+		t.Fatalf("stewardship row = %+v", steward)
+	}
+	if plan.Portfolio[2].CentralityTarget != "managed-context outcome" {
+		t.Fatalf("enabling linkage lost: %+v", plan.Portfolio[2])
+	}
+	if plan.Portfolio[4].Centrality != issuepolicy.CentralityUnclassified {
+		t.Fatalf("legacy row hidden or inferred: %+v", plan.Portfolio[4])
+	}
+}
+
+func TestPortfolioDoesNotInferCentralityFromMetadata(t *testing.T) {
+	candidate := fullCandidate("internal/core")
+	candidate.Title = "Core epic implementation"
+	candidate.ParentRef = "Core outcome #99"
+	candidate.Labels = []string{"core", "priority/P0"}
+	plan := Build([]issuepolicy.Candidate{candidate}, Options{})
+	if got := plan.Portfolio[0].Centrality; got != issuepolicy.CentralityUnclassified {
+		t.Fatalf("metadata inferred centrality %q, want unclassified", got)
+	}
+}
+
 func TestRenderSmoke(t *testing.T) {
 	a := fullCandidate("alpha")
 	b := fullCandidate("big")
 	b.ExpectedSteps = 20
 	plan := Build([]issuepolicy.Candidate{a, b}, Options{})
 	out := Render(plan)
-	for _, want := range []string{"issue-cohort:", "concurrency:", "wave 0:", "split-first"} {
+	for _, want := range []string{"issue-cohort:", "concurrency:", "centrality (non-scoring):", "portfolio: alpha centrality=unclassified", "wave 0:", "split-first"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("render missing %q in:\n%s", want, out)
 		}

@@ -162,6 +162,47 @@ func TestRunIssueCohortFromIssues(t *testing.T) {
 	}
 }
 
+func TestRunIssueCohortFromIssuesCarriesCanonicalProblemFrame(t *testing.T) {
+	body := "## Value\n- Centrality: Enabling (managed-context outcome)\n- P1: advanced - shared context is reused\n- P2: advanced - intake rework is removed\n- P3: preserved - classification remains revisable\n- P4: advanced - dispatch sees the frame\n"
+	issues := []issuepolicy.IssueDraft{{Number: 44, Title: "enabling leaf", Body: body}}
+	b, err := json.Marshal(issues)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "issues.json")
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runIssueCohort(&stdout, &stderr, []string{"--from-issues", path, "--json", "--strict-project-work=false"}); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	var plan issuecohort.Plan
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Portfolio) != 1 || plan.Portfolio[0].Centrality != issuepolicy.CentralityEnabling || plan.Portfolio[0].CentralityTarget != "managed-context outcome" {
+		t.Fatalf("canonical frame lost: %+v", plan.Portfolio)
+	}
+}
+
+func TestRunIssueCohortDispatchWaveCarriesCanonicalProblemFrame(t *testing.T) {
+	candidate := cohortTestCandidate("enabling", []string{"internal/enabling/**"})
+	candidate.ProblemFrame = issuepolicy.ProblemFrame{Schema: issuepolicy.ProblemFrameSchema, Ready: true, Enforced: true, Centrality: issuepolicy.CentralityEnabling, CentralityTarget: "managed-context outcome", Checks: map[string]issuepolicy.ProblemCheck{}}
+	path := writeCohortPlan(t, []issuepolicy.Candidate{candidate})
+	var stdout, stderr bytes.Buffer
+	if code := runIssueCohort(&stdout, &stderr, []string{"--from-plan", path, "--json", "--strict-project-work=false"}); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	var plan issuecohort.Plan
+	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Waves) != 1 || plan.Waves[0].Members[0].ProblemFrame.Centrality != issuepolicy.CentralityEnabling {
+		t.Fatalf("dispatch wave lost frame: %+v", plan.Waves)
+	}
+}
+
 func TestRunIssueCohortRoutedViaRunIssue(t *testing.T) {
 	path := writeCohortPlan(t, []issuepolicy.Candidate{
 		cohortTestCandidate("a", []string{"internal/foo/**"}),
