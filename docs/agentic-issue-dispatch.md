@@ -22,8 +22,8 @@ status terms.
 ## 0. Plan the cohort at creation time
 
 The steps below deconflict a wave *at launch time* with `dos arbitrate`. When you
-are **creating** the batch — an agent emitting anywhere from 1 to 1000 issues in a
-single run — plan the whole cohort *before* any issue is synced, so the collision
+are **creating** the batch â€” an agent emitting anywhere from 1 to 1000 issues in a
+single run â€” plan the whole cohort *before* any issue is synced, so the collision
 structure is visible while it is still cheap to fix:
 
 ```bash
@@ -38,11 +38,11 @@ into:
   the *same disjoint-tree rule* `dos arbitrate` applies at launch (first-fit graph
   colouring over lane + path overlap). Every wave is safe to dispatch at once, and
   the number of waves is the number of sequential rounds the batch needs. This is
-  the creation-time dual of section 3's same-wave arbitration — the collision that
+  the creation-time dual of section 3's same-wave arbitration â€” the collision that
   would otherwise be caught (and deferred) at launch is instead surfaced before the
   issues exist.
 - **split-first**: rows declared (or detected) as an epic / non-leaf, or with an
-  expected-step budget over the dispatch cap, each with a child-issue budget — so
+  expected-step budget over the dispatch cap, each with a child-issue budget â€” so
   "the batch is 1000 issues" cannot hide "40 of them are really epics".
 - **triage**: rows not yet scoped/routed/witnessed enough to dispatch.
 - **duplicates**: marker keys that appear more than once, so a rerun that would
@@ -121,13 +121,13 @@ keeps priority, readiness, dependencies, and expected effort beside it. Input or
 assignment do not sort by centrality. In particular, an urgent Stewardship obligation may
 outrank ready Core work; Enabling rows retain their named Core target; Peripheral and
 legacy `unclassified` rows remain visible. Directory, title, labels, and parent epic never
-synthesize a class�the only source is `CandidateFromIssueDraft` / `ProblemFrame` from the
+synthesize a class—the only source is `CandidateFromIssueDraft` / `ProblemFrame` from the
 issue-contract seam.
 
 These five sections are the *structure* axis of ticket scope. The full scope
-contract — structure, size (the S0–S4 ladder), atomicity, write-scope, cohort
+contract â€” structure, size (the S0â€“S4 ladder), atomicity, write-scope, cohort
 placement, and work-class, each with the verb that measures it and the fix when
-it fails — is [The scope of a GitHub ticket](ticket-scope.md); the repeatable
+it fails â€” is [The scope of a GitHub ticket](ticket-scope.md); the repeatable
 per-ticket pass is the [`/ticket-scope`](../.claude/skills/ticket-scope/SKILL.md)
 skill.
 
@@ -230,45 +230,45 @@ workers from mutating the same tree.
 
 ### A GO is an admission-view answer, not an acquirability promise (#5056)
 
-`dos arbitrate` decides **admission** — "may a worker with this tree be admitted,
+`dos arbitrate` decides **admission** â€” "may a worker with this tree be admitted,
 given this view of the live-lease set." It takes no lock and journals nothing; the
 grant itself happens only at `dos lease-lane acquire`, whose read-arbitrate-append
-runs under the lane-lease mutex. So an `acquire` verdict (the `GO — you may take
-lane …` interpretation) is *not* a promise that the lease verb will grant the lane,
+runs under the lane-lease mutex. So an `acquire` verdict (the `GO â€” you may take
+lane â€¦` interpretation) is *not* a promise that the lease verb will grant the lane,
 and a GO followed by an `acquire` refusal is not a bug. Three reasons, all by
 design:
 
 - **The kernel deliberately keeps two lease views.** The lock-held `acquire` read
   uses the structural fold (`live_leases(expire_dead=False)`): every un-RELEASEd
   booking stays visible, because a lease's *effect* (the booked tree) outlives the
-  short-lived process that journaled it — the recorded pid of every **healthy**
+  short-lived process that journaled it â€” the recorded pid of every **healthy**
   lease is dead within moments of acquisition, so a dead pid never means a free
   lane. The dead-eliding admission/contention view (`expire_dead=True`, the
   phantom-orphan self-heal used by the pre-admission sensor) exists for a
   different consumer. Forcing all readers to agree is a known regression: eliding
-  a still-held region at acquire time double-books it — the exact TOCTOU the lease
+  a still-held region at acquire time double-books it â€” the exact TOCTOU the lease
   exists to prevent.
 - **The two `arbitrate` surfaces do not agree, and the MCP one fails OPEN.** The
-  `dos arbitrate` **CLI** reads the live lane-journal WAL by default — same set
-  `acquire` folds — so it agrees with the authority; `--leases '[]'` opts out into
+  `dos arbitrate` **CLI** reads the live lane-journal WAL by default â€” same set
+  `acquire` folds â€” so it agrees with the authority; `--leases '[]'` opts out into
   an empty world. The **MCP tool** `dos_arbitrate` reads nothing: with
   `live_leases` omitted it arbitrates against *nothing live*, so every lane reads
   free (`dos_mcp/server.py`, `live_leases=list(live_leases or [])`). Observed live:
-  MCP `dos_arbitrate` returned `"cluster lane 'tools' free — admitted."` with
-  `GO — … disjoint from every live lease, so concurrent work is safe` for a lane
+  MCP `dos_arbitrate` returned `"cluster lane 'tools' free â€” admitted."` with
+  `GO â€” â€¦ disjoint from every live lease, so concurrent work is safe` for a lane
   `dos lease-lane acquire` refused the same second as `"already held by a live
-  loop"` — [dos-kernel#246](https://github.com/anthony-chaudhary/dos-kernel/issues/246),
+  loop"` â€” [dos-kernel#246](https://github.com/anthony-chaudhary/dos-kernel/issues/246),
   which proposes defaulting to the WAL and failing *closed* when it is unreadable.
   Until then, use the CLI form or feed the real live set explicitly (`dos lease-lane
   live`, `fak leaseref live`). A FREE from a checker that cannot see the store is
-  not evidence of a free lane. (The tool is still non-persisting — it journals
-  nothing — but "no I/O" was never accurate: it already reads the workspace's
+  not evidence of a free lane. (The tool is still non-persisting â€” it journals
+  nothing â€” but "no I/O" was never accurate: it already reads the workspace's
   `dos.toml`.)
-- **Even a correct GO can be stale by acquire time** — arbitrate holds no lock, so
+- **Even a correct GO can be stale by acquire time** â€” arbitrate holds no lock, so
   a peer can take the lane between the two calls.
 
 Route on the *lease* verb's verdict, not arbitrate's: GO means "admissible per the
-admission view — proceed to `dos lease-lane acquire`", and a subsequent acquire
+admission view â€” proceed to `dos lease-lane acquire`", and a subsequent acquire
 refusal is authoritative (wait, or pick a disjoint lane/tree). Never edit a tree on
 the strength of a GO alone.
 
