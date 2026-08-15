@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -101,6 +103,13 @@ func (s *store) saveLocked() error {
 	return os.Rename(tmp, s.persist)
 }
 
+func (s *store) nextRunID(prefix string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.next++
+	return fmt.Sprintf("%s-%d", prefix, s.next)
+}
+
 func (s *store) create(message string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -157,6 +166,118 @@ func (s *store) after(runID string, after uint64) []harnesskit.Envelope {
 	return out
 }
 
+func (s *store) replace(runID string, events []harnesskit.Envelope) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.runs[runID] = &runState{events: append([]harnesskit.Envelope(nil), events...)}
+	return s.saveLocked()
+}
+
+type liveAdapter struct {
+	baseURL string
+	client  *http.Client
+}
+
+func (a *liveAdapter) run(ctx context.Context, runID, message string) ([]harnesskit.Envelope, error) {
+	requestBody, _ := json.Marshal(map[string]any{
+		"model": "fak-native", "max_tokens": 512, "stream": true,
+		"messages": []map[string]string{{"role": "user", "content": message}},
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(a.baseURL, "/")+"/v1/messages", bytes.NewReader(requestBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Trace-Id", runID)
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("fak returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+
+	events := []harnesskit.Envelope{
+		event(runID, 1, harnesskit.EventRunStarted, harnesskit.RunPayload{Status: "running"}),
+		event(runID, 2, harnesskit.EventMessageStarted, harnesskit.MessagePayload{MessageID: "assistant", Role: "assistant"}),
+	}
+	seq := uint64(2)
+	var text strings.Builder
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 4096), 1<<20)
+	var eventName string
+	var data strings.Builder
+	emit := func() error {
+		if data.Len() == 0 {
+			eventName = ""
+			return nil
+		}
+		var obj map[string]any
+		if err := json.Unmarshal([]byte(data.String()), &obj); err != nil {
+			return fmt.Errorf("decode fak SSE: %w", err)
+		}
+		kind := eventName
+		if kind == "" {
+			kind, _ = obj["type"].(string)
+		}
+		switch kind {
+		case "content_block_delta":
+			delta, _ := obj["delta"].(map[string]any)
+			chunk, _ := delta["text"].(string)
+			if chunk != "" {
+				text.WriteString(chunk)
+				seq++
+				events = append(events, event(runID, seq, harnesskit.EventMessageDelta, harnesskit.MessagePayload{MessageID: "assistant", Text: chunk}))
+			}
+		case "tool_started":
+			seq++
+			events = append(events, event(runID, seq, harnesskit.EventToolStarted, harnesskit.ToolPayload{CallID: stringField(obj, "call_id"), Name: stringField(obj, "tool"), Status: "running"}))
+		case "result_admitted":
+			seq++
+			events = append(events, event(runID, seq, harnesskit.EventToolCompleted, harnesskit.ToolPayload{CallID: stringField(obj, "call_id"), Name: stringField(obj, "tool"), Status: "completed", Summary: "result admitted by fak"}))
+		case "call_adjudicated":
+			if strings.EqualFold(stringField(obj, "verdict"), "DENY") {
+				seq++
+				events = append(events, event(runID, seq, harnesskit.EventError, harnesskit.ErrorPayload{Code: stringField(obj, "reason"), Message: "fak denied " + stringField(obj, "tool"), Retryable: false}))
+			}
+		}
+		eventName = ""
+		data.Reset()
+		return nil
+	}
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case line == "":
+			if err := emit(); err != nil {
+				return nil, err
+			}
+		case strings.HasPrefix(line, "event:"):
+			eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		case strings.HasPrefix(line, "data:"):
+			if data.Len() > 0 {
+				data.WriteByte('\n')
+			}
+			data.WriteString(strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if err := emit(); err != nil {
+		return nil, err
+	}
+	seq++
+	events = append(events, event(runID, seq, harnesskit.EventMessageCompleted, harnesskit.MessagePayload{MessageID: "assistant", Role: "assistant", Text: text.String()}))
+	seq++
+	events = append(events, event(runID, seq, harnesskit.EventRunCompleted, harnesskit.RunPayload{Status: "completed"}))
+	return events, nil
+}
+
+func stringField(m map[string]any, key string) string { value, _ := m[key].(string); return value }
+
 func (s *store) resolve(runID, approvalID, decision string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -181,7 +302,9 @@ func (s *store) resolve(runID, approvalID, decision string) error {
 	return s.saveLocked()
 }
 
-func handler(s *store) http.Handler {
+func handler(s *store) http.Handler { return handlerWithLive(s, nil) }
+
+func handlerWithLive(s *store, live *liveAdapter) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -196,7 +319,21 @@ func handler(s *store) http.Handler {
 			http.Error(w, "message is required", http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, map[string]string{"run_id": s.create(strings.TrimSpace(input.Message))})
+		message := strings.TrimSpace(input.Message)
+		if live != nil && !strings.HasPrefix(strings.ToLower(message), "approval:") && !strings.HasPrefix(strings.ToLower(message), "failure:") {
+			runID := s.nextRunID("live")
+			events, err := live.run(r.Context(), runID, message)
+			if err != nil {
+				events = []harnesskit.Envelope{event(runID, 1, harnesskit.EventRunStarted, harnesskit.RunPayload{Status: "running"}), event(runID, 2, harnesskit.EventError, harnesskit.ErrorPayload{Code: "LIVE_FAK_ERROR", Message: err.Error(), Retryable: true}), event(runID, 3, harnesskit.EventRunCompleted, harnesskit.RunPayload{Status: "failed", Reason: "live fak error"})}
+			}
+			if err := s.replace(runID, events); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, map[string]string{"run_id": runID})
+			return
+		}
+		writeJSON(w, map[string]string{"run_id": s.create(message)})
 	})
 	mux.HandleFunc("GET /api/events", func(w http.ResponseWriter, r *http.Request) {
 		after, err := strconv.ParseUint(r.URL.Query().Get("after"), 10, 64)
@@ -313,6 +450,7 @@ func run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 	addr := fs.String("addr", "127.0.0.1:8787", "loopback listen address")
 	check := fs.Bool("selfcheck", false, "run captured render and protocol witness")
 	statePath := fs.String("state", "", "session state file (default: user config directory)")
+	fakURL := fs.String("fak-url", "", "stock fak base URL; non-example prompts run live when set")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -346,7 +484,11 @@ func run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	server := &http.Server{Handler: handler(s), ReadHeaderTimeout: 5 * time.Second}
+	var live *liveAdapter
+	if strings.TrimSpace(*fakURL) != "" {
+		live = &liveAdapter{baseURL: *fakURL, client: &http.Client{Timeout: 10 * time.Minute}}
+	}
+	server := &http.Server{Handler: handlerWithLive(s, live), ReadHeaderTimeout: 5 * time.Second}
 	fmt.Fprintf(stdout, "fak native harness UI: http://%s\n", listener.Addr())
 	go func() { <-ctx.Done(); _ = server.Shutdown(context.Background()) }()
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {

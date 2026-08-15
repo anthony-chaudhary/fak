@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -129,5 +133,64 @@ func TestPersistentStoreReopensRunAndExclusiveCursor(t *testing.T) {
 	got := reopened.after(runID, 6)
 	if len(got) != 2 || got[0].Sequence != 7 || got[1].Sequence != 8 {
 		t.Fatalf("reopened exclusive cursor=%v", got)
+	}
+}
+
+func TestLiveAdapterProjectsNativeSSEWithoutProviderTypes(t *testing.T) {
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Trace-Id"); got != "live-1" {
+			t.Errorf("trace=%q", got)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		frames := []struct{ name, data string }{
+			{"message_start", `{"type":"message_start"}`},
+			{"turn_started", `{"type":"turn_started","seq":1,"turn":1}`},
+			{"tool_started", `{"type":"tool_started","seq":2,"call_id":"read-1","tool":"Read"}`},
+			{"result_admitted", `{"type":"result_admitted","seq":3,"call_id":"read-1","tool":"Read"}`},
+			{"content_block_delta", `{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}`},
+		}
+		for _, f := range frames {
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", f.name, f.data)
+		}
+	}))
+	defer gateway.Close()
+	adapter := &liveAdapter{baseURL: gateway.URL, client: gateway.Client()}
+	events, err := adapter.run(context.Background(), "live-1", "inspect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []harnesskit.EventType
+	for _, e := range events {
+		kinds = append(kinds, e.Type)
+		if err := e.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []harnesskit.EventType{harnesskit.EventRunStarted, harnesskit.EventMessageStarted, harnesskit.EventToolStarted, harnesskit.EventToolCompleted, harnesskit.EventMessageDelta, harnesskit.EventMessageCompleted, harnesskit.EventRunCompleted}
+	if !reflect.DeepEqual(kinds, want) {
+		t.Fatalf("kinds=%v want=%v", kinds, want)
+	}
+}
+
+func TestLiveAdapterFailureBecomesTypedRunFailure(t *testing.T) {
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "provider down", http.StatusBadGateway) }))
+	defer gateway.Close()
+	s := newStore()
+	ts := httptest.NewServer(handlerWithLive(s, &liveAdapter{baseURL: gateway.URL, client: gateway.Client()}))
+	defer ts.Close()
+	runID, err := postRun(ts.Client(), ts.URL, "inspect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := s.after(runID, 0)
+	if len(events) != 3 || events[1].Type != harnesskit.EventError || events[2].Type != harnesskit.EventRunCompleted {
+		t.Fatalf("events=%v", events)
+	}
+	var failure harnesskit.ErrorPayload
+	if err := events[1].DecodePayload(&failure); err != nil {
+		t.Fatal(err)
+	}
+	if failure.Code != "LIVE_FAK_ERROR" || !failure.Retryable {
+		t.Fatalf("failure=%+v", failure)
 	}
 }
