@@ -199,6 +199,15 @@ func runIssueCreateWith(stdout, stderr io.Writer, argv []string, runner issueCre
 			fmt.Fprintf(stderr, "fak-dev issue create: %v\n", err)
 			return 2
 		}
+		frame := issuepolicy.AssessProblemFrame(issuepolicy.IssueDraft{Title: strings.TrimSpace(*title), Body: resolvedBody})
+		if !frame.Enforced {
+			fmt.Fprintln(stderr, "fak-dev issue create: problem frame is incomplete: problem_frame_unclassified; repair: declare Centrality and P1-P4 with concrete evidence")
+			return 2
+		}
+		if !frame.Ready {
+			fmt.Fprintf(stderr, "fak-dev issue create: problem frame is incomplete: %s; repair: %s\n", strings.Join(frame.Reasons, ","), strings.Join(frame.RepairActions, "; "))
+			return 2
+		}
 		resolvedBody, err = issuepolicy.AppendProjectWorkDefaults(resolvedBody, issuepolicy.ProjectWorkAuthoring{
 			EstimatePoints: *estimatePoints, ParentBaseline: *parentBaselinePoints,
 			ContributionPoints: *contributionPoints, CompletionStandard: *completionStandard,
