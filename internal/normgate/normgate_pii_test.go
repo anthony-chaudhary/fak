@@ -101,3 +101,66 @@ func TestNoPIIDefers(t *testing.T) {
 		t.Errorf("clean result: want Defer, got %v/%s", v.Kind, abi.ReasonName(v.Reason))
 	}
 }
+
+func TestPublicEmailContextAdmitsEmailUnchanged(t *testing.T) {
+	t.Setenv("FAK_SECRET_POSTURE", "warn")
+	body := "contacts: hiring@example.com and jobs@example.org"
+	r := result(body)
+	call := &abi.ToolCall{Meta: map[string]string{"fak.pii.public_classes": "email"}}
+	v := normgate.New().Admit(context.Background(), call, r)
+	if v.Kind != abi.VerdictAllow {
+		t.Fatalf("public email context: want Allow, got %v/%v", v.Kind, v.Reason)
+	}
+	if got := string(resolve(t, context.Background(), r.Payload)); got != body {
+		t.Fatalf("public email was rewritten into garbage: got %q want %q", got, body)
+	}
+}
+
+func TestPublicEmailContextStillMasksProtectedPII(t *testing.T) {
+	t.Setenv("FAK_SECRET_POSTURE", "warn")
+	body := "contact hiring@example.com; SSN 123-45-6789"
+	r := result(body)
+	call := &abi.ToolCall{Meta: map[string]string{"fak.pii.public_classes": "email"}}
+	v := normgate.New().Admit(context.Background(), call, r)
+	if v.Kind != abi.VerdictTransform || v.Reason != abi.ReasonPIIRedacted {
+		t.Fatalf("mixed classes: want Transform/PII_REDACTED, got %v/%v", v.Kind, v.Reason)
+	}
+	got := string(resolve(t, context.Background(), r.Payload))
+	if !strings.Contains(got, "hiring@example.com") || strings.Contains(got, "123-45-6789") {
+		t.Fatalf("class-scoped result wrong: %q", got)
+	}
+}
+
+func TestPublicEmailContextCannotHideObfuscatedProtectedPII(t *testing.T) {
+	t.Setenv("FAK_SECRET_POSTURE", "warn")
+	// A raw email is public, but a second email exists only in a decoded view. Because
+	// it has no exact raw span, the exemption cannot prove a safe edit and must seal.
+	r := result("contact hiring@example.com; encoded dXNlckBleGFtcGxlLmNvbQ==")
+	call := &abi.ToolCall{Meta: map[string]string{"fak.pii.public_classes": "email"}}
+	v := normgate.New().Admit(context.Background(), call, r)
+	if v.Kind != abi.VerdictQuarantine || v.Reason != abi.ReasonPIIExfil {
+		t.Fatalf("mixed obfuscated class: want Quarantine/PII_EXFIL, got %v/%v", v.Kind, v.Reason)
+	}
+}
+
+func TestResultCannotSelfDeclarePublicPII(t *testing.T) {
+	t.Setenv("FAK_SECRET_POSTURE", "warn")
+	r := result("contact hiring@example.com")
+	r.Meta = map[string]string{"fak.pii.public_classes": "email"}
+	v := normgate.New().Admit(context.Background(), &abi.ToolCall{}, r)
+	if v.Kind != abi.VerdictTransform || v.Reason != abi.ReasonPIIRedacted {
+		t.Fatalf("result-authored exemption must be ignored, got %v/%v", v.Kind, v.Reason)
+	}
+}
+
+func TestUnknownPublicPIIClassFailsClosed(t *testing.T) {
+	t.Setenv("FAK_SECRET_POSTURE", "warn")
+	for _, declaration := range []string{"all", "emails", "email,all", ",email"} {
+		r := result("contact hiring@example.com")
+		call := &abi.ToolCall{Meta: map[string]string{"fak.pii.public_classes": declaration}}
+		v := normgate.New().Admit(context.Background(), call, r)
+		if v.Kind != abi.VerdictTransform || v.Reason != abi.ReasonPIIRedacted {
+			t.Errorf("declaration %q: want default redaction, got %v/%v", declaration, v.Kind, v.Reason)
+		}
+	}
+}

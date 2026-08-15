@@ -347,26 +347,54 @@ func secretPostureSeals() bool {
 // credential and the PII rung — consistent with the #5378 ask ("same opt-in fail-closed
 // seal ... consistent with the secret path"). A separate PII-specific posture is a clean
 // follow-on if an operator ever needs to seal one class but not the other.
-func (g *Gate) admitPII(ctx context.Context, c *abi.ToolCall, r *abi.Result, body []byte) abi.Verdict {
-	if secretPostureSeals() {
-		return g.quarantineOut(ctx, r, abi.ReasonPIIExfil, body)
+const publicPIIClassesMeta = "fak.pii.public_classes"
+
+// publicPIIClasses reads a caller-authored, class-scoped context contract. Result data
+// cannot grant itself an exemption. Unknown/malformed classes invalidate the declaration.
+func publicPIIClasses(c *abi.ToolCall) (map[string]bool, bool) {
+	if c == nil || c.Meta == nil {
+		return nil, true
 	}
-	if !canon.RawPIIComplete(body) {
-		return g.quarantineOut(ctx, r, abi.ReasonPIIExfil, body)
+	raw := strings.TrimSpace(c.Meta[publicPIIClassesMeta])
+	if raw == "" {
+		return nil, true
 	}
-	return g.redactPIIOut(ctx, r, body)
+	classes := make(map[string]bool)
+	for _, item := range strings.Split(raw, ",") {
+		class := strings.TrimSpace(item)
+		if class == "" || !canon.KnownPIIClass(class) {
+			return nil, false
+		}
+		classes[class] = true
+	}
+	return classes, true
 }
 
-// redactPIIOut masks the PII span(s) in body IN PLACE and admits the redacted result as a
-// Transform — the rest of the output stays in context. The PII twin of redactOut: it pages
-// nothing out and mints no held handle, because the redacted body carries no live PII
-// (canon.RedactPII is verified to re-screen clean). The verdict is a Transform carrying
-// ReasonPIIRedacted so the banner reads as a WARN, not the loud PII_EXFIL seal.
+func (g *Gate) admitPII(ctx context.Context, c *abi.ToolCall, r *abi.Result, body []byte) abi.Verdict {
+	exempt, valid := publicPIIClasses(c)
+	if valid && len(exempt) > 0 {
+		// Prove the exemption is complete rather than trusting the raw class list:
+		// temporarily mask declared-public spans and run the full canonical scanner
+		// (including decoded/reversed/normalized views) on what remains.
+		probe, removed := canon.RedactPIIClasses(body, exempt)
+		if removed > 0 && !canon.Scan(probe).PII {
+			return abi.Verdict{Kind: abi.VerdictAllow}
+		}
+	}
+	if secretPostureSeals() || !canon.RawPIIComplete(body) {
+		return g.quarantineOut(ctx, r, abi.ReasonPIIExfil, body)
+	}
+	return g.redactPIIOutExcept(ctx, r, body, exempt)
+}
+
+// redactPIIOut masks the PII span(s) in body IN PLACE and admits the redacted result.
 func (g *Gate) redactPIIOut(ctx context.Context, r *abi.Result, body []byte) abi.Verdict {
-	red, masked := canon.RedactPII(body)
+	return g.redactPIIOutExcept(ctx, r, body, nil)
+}
+
+func (g *Gate) redactPIIOutExcept(ctx context.Context, r *abi.Result, body []byte, exempt map[string]bool) abi.Verdict {
+	red, masked := canon.RedactPIIExcept(body, exempt)
 	if masked == 0 {
-		// Detector said PII but the redactor masked nothing (a detection/redaction skew) —
-		// take the safe direction and seal rather than admit the unredacted body.
 		return g.quarantineOut(ctx, r, abi.ReasonPIIExfil, body)
 	}
 	atomic.AddInt64(&g.transform, 1)

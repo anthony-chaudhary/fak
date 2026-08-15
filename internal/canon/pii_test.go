@@ -93,3 +93,33 @@ func TestRawPIIComplete(t *testing.T) {
 		t.Errorf("RedactPII must not claim to mask an obfuscation-only needle, masked=%d", masked)
 	}
 }
+
+func TestContextualPIIClassExemptionPreservesOnlyDeclaredClass(t *testing.T) {
+	body := []byte("contact hiring@example.com, SSN 123-45-6789")
+	exempt := map[string]bool{PIIClassEmail: true}
+	if classes := PIIClasses(body); !classes[PIIClassEmail] || !classes[PIIClassNationalID] {
+		t.Fatalf("want email and national-id classes, got %v", classes)
+	}
+	red, masked := RedactPIIExcept(body, exempt)
+	if masked != 1 {
+		t.Fatalf("want one protected span masked, got %d: %q", masked, red)
+	}
+	got := string(red)
+	if !strings.Contains(got, "hiring@example.com") {
+		t.Fatalf("declared-public email was changed: %q", got)
+	}
+	if strings.Contains(got, "123-45-6789") || !strings.Contains(got, "[redacted:pii:11B]") {
+		t.Fatalf("protected national id was not masked: %q", got)
+	}
+}
+
+func TestPIIClassNamesAreClosed(t *testing.T) {
+	for _, class := range []string{PIIClassEmail, PIIClassPhone, PIIClassNationalID, PIIClassPaymentCard, PIIClassIBAN} {
+		if !KnownPIIClass(class) {
+			t.Errorf("known class %q rejected", class)
+		}
+	}
+	if KnownPIIClass("all") || KnownPIIClass("emails") {
+		t.Error("unknown or blanket class must fail closed")
+	}
+}
