@@ -4,6 +4,7 @@ package categorybaseline
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,7 +13,10 @@ import (
 
 const Schema = "fak-category-baselines/1"
 
-const DefaultPath = ".fak/category-baselines.json"
+const (
+	DefaultPath = "config/category-baselines.json"
+	LegacyPath  = ".fak/category-baselines.json"
+)
 
 type Registry struct {
 	Schema     string     `json:"schema"`
@@ -39,6 +43,9 @@ type Decision struct {
 func Load(root string) Registry {
 	path := filepath.Join(root, filepath.FromSlash(DefaultPath))
 	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		b, err = os.ReadFile(filepath.Join(root, filepath.FromSlash(LegacyPath)))
+	}
 	if err != nil {
 		return Registry{Schema: Schema}
 	}

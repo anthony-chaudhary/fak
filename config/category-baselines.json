@@ -1,0 +1,15 @@
+{
+  "schema": "fak-category-baselines/1",
+  "categories": [
+    {
+      "name": "agent-work-profile",
+      "layers": [
+        "default-medium",
+        "provider-effectiveness"
+      ],
+      "completed_layer": "default-medium",
+      "next_layer": "provider-effectiveness",
+      "witness": "go test ./internal/agent -run ^TestRunReportCapturesDefaultWorkProfileWitness$ -count=1"
+    }
+  ]
+}

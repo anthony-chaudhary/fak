@@ -6,12 +6,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/categorybaseline"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
 
 func TestHoldCompletedCategoryBaselineRedirectsPolish(t *testing.T) {
 	root := t.TempDir()
-	path := filepath.Join(root, ".fak", "category-baselines.json")
+	path := filepath.Join(root, filepath.FromSlash(categorybaseline.DefaultPath))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
