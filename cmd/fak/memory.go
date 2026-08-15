@@ -36,6 +36,8 @@ func cmdMemory(args []string) {
 		cmdMemoryExplainPromotion(args[1:])
 	case "run":
 		cmdMemoryRun(args[1:])
+	case "import-claude":
+		os.Exit(runMemoryImportClaude(os.Stdout, os.Stderr, args[1:]))
 	case "recall":
 		os.Exit(runMemoryRecall(os.Stdout, os.Stderr, args[1:]))
 	case "index":
@@ -68,6 +70,7 @@ func memoryUsage() {
       execute the query against a backend (the in-memory demo corpus, or a recall
       core image with --dir). Mutations are PROPOSED unless --apply is given.
 
+  fak memory import-claude --source DIR [--destination DIR --apply --consent-scope S --producer P --capture-time RFC3339]
   fak memory recall --intent STR [--store DIR] [--k N] [--budget BYTES] [--json]
       the loop-turn orientation block (#2346 R1): run a recall query over
       the markdown memory store (MEMORY.md + fact files; default: the committed

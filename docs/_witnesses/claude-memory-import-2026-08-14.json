@@ -1,0 +1,28 @@
+{
+  "schema": "fak-claude-memory-import-witness/1",
+  "captured_at": "2026-08-15T00:33:56.4324083Z",
+  "source": {
+    "files": 417,
+    "bytes": 1684407,
+    "hash": "e1706178716a6a1ddb6e304b4e67894b08d0f5af7c290e5aee6e3c9de9d5352f"
+  },
+  "counts": {
+    "importable": 278,
+    "private": 91,
+    "session-specific": 13,
+    "stale": 34,
+    "unsupported": 1
+  },
+  "reasons": {
+    "dated_run_state": 1,
+    "durable_project_knowledge": 278,
+    "private_material": 91,
+    "session_or_transcript_residue": 12,
+    "source_index": 1,
+    "stale_concrete_claim": 34
+  },
+  "accounted_files": 417,
+  "unexplained_files": 0,
+  "applied_cells": 0,
+  "privacy": "aggregate-only; source paths and bodies omitted"
+}

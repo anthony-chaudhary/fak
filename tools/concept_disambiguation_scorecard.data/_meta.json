@@ -2095,6 +2095,26 @@
           "category": "incidental",
           "reason": "Issue #6840 baseline descriptor implementation or DTO field for the existing work-done query; not a new guard gate or planning subsystem concept.",
           "token": "guardInfoDirectProviderBaseline"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6841 work-source DTO, renderer, reconciliation helper, or stable enum label within the existing work-done query; not a new guard or context subsystem concept.",
+          "token": "guardInfoWorkDoneSourceRows"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6841 work-source DTO, renderer, reconciliation helper, or stable enum label within the existing work-done query; not a new guard or context subsystem concept.",
+          "token": "guardInfoWorkDoneSourceSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6841 work-source DTO, renderer, reconciliation helper, or stable enum label within the existing work-done query; not a new guard or context subsystem concept.",
+          "token": "guardInfoWorkDoneSources"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6841 work-source DTO, renderer, reconciliation helper, or stable enum label within the existing work-done query; not a new guard or context subsystem concept.",
+          "token": "guardInfoUnknownWorkSource"
         }
       ],
       "exclude": [
@@ -2243,6 +2263,7 @@
         "guardInfo",
         "guardInfoDirectProviderBaseline",
         "guardInfoSignedShortCount",
+        "guardInfoUnknownWorkSource",
         "guardInfoWorkDone",
         "guardInfoWorkDoneBaseline",
         "guardInfoWorkDoneBaselineCompatible",
@@ -2256,7 +2277,10 @@
         "guardInfoWorkDoneRows",
         "guardInfoWorkDoneSchema",
         "guardInfoWorkDoneSource",
+        "guardInfoWorkDoneSourceRows",
+        "guardInfoWorkDoneSourceSchema",
         "guardInfoWorkDoneSourceText",
+        "guardInfoWorkDoneSources",
         "guardKeychainAPIKey",
         "guardKeychainAccessToken",
         "guardKeychainCred",
@@ -3587,6 +3611,16 @@
           "category": "incidental",
           "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
           "token": "modeled_from_observed_session_mean"
+        },
+        {
+          "category": "incidental",
+          "reason": "local importer classifier regex, not a session runtime abstraction",
+          "token": "sessionMemoryPattern"
+        },
+        {
+          "category": "incidental",
+          "reason": "typed import exclusion reason, not a runtime session concept",
+          "token": "session_or_transcript_residue"
         }
       ],
       "id": "session-runtime",
@@ -3791,6 +3825,7 @@
         "sessionCorpusCapabilities",
         "sessionDiscoverySchema",
         "sessionLocked",
+        "sessionMemoryPattern",
         "sessionMoveDestination",
         "sessionMoveDestinationFlags",
         "sessionMoveSchema",
@@ -3805,6 +3840,7 @@
         "sessionRoots",
         "session_compaction_thrash",
         "session_lifecycle",
+        "session_or_transcript_residue",
         "session_registry_recovery",
         "sessionids",
         "sessionmine",
@@ -5974,6 +6010,11 @@
           "category": "incidental",
           "reason": "benchmark receipt formatter helper, not a managed-context concept",
           "token": "cellContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6841 work-source DTO, renderer, reconciliation helper, or stable enum label within the existing work-done query; not a new guard or context subsystem concept.",
+          "token": "context_reduction"
         }
       ],
       "id": "context-ctx",
@@ -6009,6 +6050,7 @@
         "compactions",
         "context",
         "context_cancelled",
+        "context_reduction",
         "context_shedding_only",
         "contexts",
         "ctx",
@@ -6767,6 +6809,11 @@
           "category": "incidental",
           "reason": "Typed FP4 interoperability refusal code, not a support maturity stage.",
           "token": "unsupported_scale"
+        },
+        {
+          "category": "incidental",
+          "reason": "typed import exclusion reason, not a capability maturity state",
+          "token": "unsupported_extension"
         }
       ],
       "id": "support-maturity",
@@ -6918,6 +6965,7 @@
         "topncoverage",
         "unsupported",
         "unsupported_encoding",
+        "unsupported_extension",
         "unsupported_runtime_fusion",
         "unsupported_scale"
       ],
@@ -7143,16 +7191,17 @@
           "category": "incidental",
           "reason": "benchmark aggregate timing field, not a product decision",
           "token": "TotalDecisionOverhead"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal per-file receipt record, not an adjudication domain concept",
+          "token": "importDecision"
         }
       ],
       "id": "decision",
       "ignore": [
         "AddedDecisionOverheadMS",
-        "appendsteerdecisions",
         "DECISION_INVALID",
-        "decision_ms_per_request",
-        "decision_records",
-        "decision_surface",
         "DecisionAbstain",
         "DecisionBenchmark",
         "DecisionBoundary",
@@ -7160,29 +7209,34 @@
         "DecisionMS",
         "DecisionRefuse",
         "DecisionSamples",
-        "decisionStderr",
-        "deterministicSelectorDecision",
         "EvaluateHeldSchedule",
-        "fixtureSelectStage",
         "GenerationContentionDecisionContract",
-        "gooddecisionratio",
-        "guardGoalQuestionDecision",
-        "kinddecisionsabout",
         "LaunchDecision",
         "MeasureHeldDecisionOverhead",
-        "naturalDecision",
         "OBSERVER_DECISION_IGNORED",
-        "partialretrydecision",
         "PlanStepDecision",
+        "ReuseDecision",
+        "SessionClientDecisionRequest",
+        "TotalDecisionOverhead",
+        "appendsteerdecisions",
+        "decisionStderr",
+        "decision_ms_per_request",
+        "decision_records",
+        "decision_surface",
+        "deterministicSelectorDecision",
+        "fixtureSelectStage",
+        "gooddecisionratio",
+        "guardGoalQuestionDecision",
+        "importDecision",
+        "kinddecisionsabout",
+        "naturalDecision",
+        "partialretrydecision",
         "pluginDecisionFromVerdict",
         "predictHeld",
-        "ReuseDecision",
         "scheduleOutcome",
         "selectorDecision",
         "selectorOracle",
-        "SessionClientDecisionRequest",
-        "total_decision_overhead_ms",
-        "TotalDecisionOverhead"
+        "total_decision_overhead_ms"
       ],
       "min_files": 3,
       "name": "Decision family",

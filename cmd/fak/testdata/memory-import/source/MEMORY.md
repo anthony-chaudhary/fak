@@ -1,0 +1,2 @@
+- [Durable cache rule](durable.md) - stable project guidance.
+- [Stale shipped claim](stale.md) - references a missing artifact.
