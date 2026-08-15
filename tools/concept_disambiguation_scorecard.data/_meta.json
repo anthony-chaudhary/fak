@@ -697,6 +697,11 @@
           "category": "incidental",
           "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
           "token": "provider_cache_usage_not_reported"
+        },
+        {
+          "category": "incidental",
+          "reason": "local estimate of suffix cache creation attributed to one compaction fire",
+          "token": "inducedCacheCreation"
         }
       ],
       "id": "cache",
@@ -836,6 +841,7 @@
         "formatTurnCacheSummary",
         "formatTurnDebugStatsWithBudgetAndCache",
         "identityCacheLever",
+        "inducedCacheCreation",
         "inferCacheCreationTokensHeadOnly",
         "inferCacheCreationTokensMessagePrefix",
         "infercachecreationtokens",

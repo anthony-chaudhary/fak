@@ -171,9 +171,10 @@ type CompactOutcome struct {
 	// grows. That is the signal that distinguishes a BENIGN idle (a genuinely short session)
 	// from the anchored-near-the-end dormancy on real Claude Code traffic (#1407), which the
 	// bare under_budget reason cannot tell apart. Zero/false on every other outcome.
-	ProtectedPrefixTokens int
-	SuffixTokens          int
-	AnchorStarved         bool
+	ProtectedPrefixTokens      int
+	SuffixTokens               int
+	InducedCacheCreationTokens int `json:"induced_cache_creation_tokens,omitempty"`
+	AnchorStarved              bool
 	// Restore handle for a tombstoned originating task. On a FIRED compaction that drops the
 	// session's first user turn (the automatic tombstone path — see originatingTaskExcerptAndBytes),
 	// RestoreID is the content-address (sha256 hex, the ctxplan.Digest scheme) embedded in the stub,
@@ -596,9 +597,14 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 	if !good {
 		return raw, refusal
 	}
+	inducedCacheCreation := 0
+	if opts.Anchor == CompactAnchorHead && !opts.ColdCache {
+		inducedCacheCreation = invalidatedSuffixSpanTokens(elems, keepStart)
+	}
 	return out, CompactOutcome{
 		Reason: CompactReasonNone, Dropped: dropped, ShedTokens: shedTokens,
-		RestoreID: restoreID, RestoreExcerpt: tombstone, RestoreBytes: taskBytes,
+		InducedCacheCreationTokens: inducedCacheCreation,
+		RestoreID:                  restoreID, RestoreExcerpt: tombstone, RestoreBytes: taskBytes,
 		PositiveResidue: positiveResidue.Text, ResidueRestoreID: positiveResidue.RestoreID,
 		ResidueRestoreBytes: positiveResidue.RestoreBytes, ResidueBytesDropped: positiveResidue.DroppedBytes,
 		PositiveAssertionsKept: positiveResidue.AssertionsKept,
@@ -702,6 +708,17 @@ func compactionSolvencyOverride(opts CompactOptions) bool {
 // whose byte prefix the drop shifts so the provider must cold-write it again. Bytes beyond the last
 // breakpoint were never cached, so they are not counted as invalidated. Same ~4-chars/token currency
 // as the budget and the provider input_tokens. dropStart is pfxEnd+1 (0 in head mode).
+func invalidatedSuffixSpanTokens(elems []json.RawMessage, keepStart int) int {
+	if keepStart < 0 {
+		keepStart = 0
+	}
+	invalidated := 0
+	for i := keepStart; i < len(elems); i++ {
+		invalidated += estimateElementTokens(elems[i])
+	}
+	return invalidated
+}
+
 func headBurstEconomics(elems []json.RawMessage, dropStart, keepStart int) (droppedCachedTokens, invalidatedSuffixTokens int) {
 	if dropStart < 0 {
 		dropStart = 0

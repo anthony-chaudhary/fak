@@ -59,6 +59,7 @@ type CompactReceipt struct {
 	// provider read it actually unlocked without joining a second ledger.
 	ObservedCacheReadTokens     uint64 `json:"observed_cache_read_tokens,omitempty"`
 	ObservedCacheCreationTokens uint64 `json:"observed_cache_creation_tokens,omitempty"`
+	InducedCacheCreationTokens  int    `json:"induced_cache_creation_tokens,omitempty"`
 	// JoinKey is the event-join coordinate (#2788) a fire shares with the provider usage record
 	// for the turn it affected — the (turn sequence, monotonic ts) pair that makes the receipt's
 	// WITNESSED shed correlatable 1:1 with the SAME turn's OBSERVED provider cache_read /
@@ -77,10 +78,11 @@ type CompactReceipt struct {
 // exists per fire — the "each fire produces exactly one receipt" half of the acceptance.
 func NewCompactReceipt(out CompactOutcome) CompactReceipt {
 	return CompactReceipt{
-		Fired:        out.Reason == CompactReasonNone,
-		Reason:       out.Reason,
-		ShedTokens:   nonNegInt(out.ShedTokens),
-		DroppedTurns: nonNegInt(out.Dropped),
+		Fired:                      out.Reason == CompactReasonNone,
+		Reason:                     out.Reason,
+		ShedTokens:                 nonNegInt(out.ShedTokens),
+		DroppedTurns:               nonNegInt(out.Dropped),
+		InducedCacheCreationTokens: nonNegInt(out.InducedCacheCreationTokens),
 		// A fired outcome discharged the prefix-mismatch proof by construction (see the field doc);
 		// a bail carries no splice at all. Either way the receipt records a clean prefix.
 		PrefixMismatch: 0,
@@ -126,4 +128,57 @@ func nonNegInt(n int) int {
 		return 0
 	}
 	return n
+}
+
+func SumReceiptInducedCreation(receipts []CompactReceipt) int {
+	total := 0
+	for _, r := range receipts {
+		if r.Fired && r.InducedCacheCreationTokens > 0 {
+			total += r.InducedCacheCreationTokens
+		}
+	}
+	return total
+}
+
+type InducedCreationReconciliation struct {
+	Fires                  int
+	ReconciledFires        int
+	InducedTokens          uint64
+	ObservedCreationTokens uint64
+	DebitTokens            uint64
+	WithinObserved         bool
+	AttributedFraction     float64
+}
+
+func (r InducedCreationReconciliation) Reconciled() bool {
+	return r.Fires > 0 && r.ReconciledFires == r.Fires && r.WithinObserved
+}
+func ReconcileInducedCreation(receipts []CompactReceipt) InducedCreationReconciliation {
+	var out InducedCreationReconciliation
+	for _, r := range receipts {
+		if !r.Fired {
+			continue
+		}
+		out.Fires++
+		if r.ObservedCacheCreationTokens == 0 {
+			continue
+		}
+		out.ReconciledFires++
+		if r.InducedCacheCreationTokens > 0 {
+			out.InducedTokens += uint64(r.InducedCacheCreationTokens)
+		}
+		out.ObservedCreationTokens += r.ObservedCacheCreationTokens
+	}
+	if out.ReconciledFires == 0 {
+		return out
+	}
+	out.WithinObserved = out.InducedTokens <= out.ObservedCreationTokens
+	out.DebitTokens = out.InducedTokens
+	if out.DebitTokens > out.ObservedCreationTokens {
+		out.DebitTokens = out.ObservedCreationTokens
+	}
+	if out.ObservedCreationTokens > 0 {
+		out.AttributedFraction = float64(out.DebitTokens) / float64(out.ObservedCreationTokens)
+	}
+	return out
 }
