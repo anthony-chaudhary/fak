@@ -120,7 +120,9 @@ func (s *specState) resolve(ctx context.Context, authoritative *abi.ToolCall, m 
 	if s == nil || s.pending == nil {
 		return
 	}
+	beforeRollbacks := s.pending.Sink().Rollbacks()
 	outcome, _ := s.pending.Resume(ctx, authoritative)
+	m.SpecRollbacks += int(s.pending.Sink().Rollbacks() - beforeRollbacks)
 	switch outcome {
 	case abi.OutcomeCommitted:
 		m.SpecCommitted++

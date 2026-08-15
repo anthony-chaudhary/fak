@@ -181,4 +181,7 @@ func TestRunArmSpeculationSquashesOnMiss(t *testing.T) {
 	if m.SpecCommitted != 0 {
 		t.Fatalf("a mismatch must not commit; got committed=%d", m.SpecCommitted)
 	}
+	if m.SpecRollbacks != 1 {
+		t.Fatalf("squash must be backed by one BufferSink rollback; got %d", m.SpecRollbacks)
+	}
 }

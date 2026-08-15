@@ -63,6 +63,7 @@ type ArmMetrics struct {
 	SpecIssued    int `json:"spec_issued,omitempty"`
 	SpecCommitted int `json:"spec_committed,omitempty"`
 	SpecSquashed  int `json:"spec_squashed,omitempty"`
+	SpecRollbacks int `json:"spec_rollbacks,omitempty"`
 	// SpecServed is how many speculative effect-free reads were served from the
 	// prediction WITHOUT engine dispatch (#1319, the before-consumption serve) — it does
 	// NOT bump EngineCalls. WritesBarred is how many write-shaped calls the

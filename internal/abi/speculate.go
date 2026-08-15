@@ -434,6 +434,7 @@ type BufferSink struct {
 	mu        sync.Mutex
 	provis    map[uint64][]Ref // epoch -> provisional (not-yet-committed) effects
 	committed []Ref            // promoted effects, in promote order (durable)
+	rollbacks uint64
 }
 
 // NewBufferSink builds an empty provisional-effect sink.
@@ -473,7 +474,15 @@ func (b *BufferSink) Rollback(_ context.Context, _ TxnID, epoch uint64) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.provis, epoch)
+	b.rollbacks++
 	return nil
+}
+
+// Rollbacks reports how many provisional epochs this sink discarded.
+func (b *BufferSink) Rollbacks() uint64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.rollbacks
 }
 
 // Committed returns the durable effects in promote order (a copy; the caller may
