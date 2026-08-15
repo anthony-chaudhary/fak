@@ -11,8 +11,16 @@ import (
 	"strings"
 )
 
-const codexContinuationHookCommand = "fak sessions codex-loop-hook 2>/dev/null || true"
-const codexContinuationHookCommandWindows = "fak sessions codex-loop-hook 2>nul || exit /b 0"
+const (
+	codexRawRecoveryEnv     = "FAK_CODEX_RAW_RECOVERY"
+	codexRawRecoveryValue   = "break-glass"
+	codexRawRecoveryWarning = "fak codex guard: BREAK-GLASS raw Codex recovery active; fak capability floor and guard audit are not running"
+
+	// Recovery is evaluated by the shell before invoking fak, so it remains usable
+	// when fak is missing, stale, or broken. The exact value avoids accidental bypass.
+	codexContinuationHookCommand        = "if [ \"${" + codexRawRecoveryEnv + ":-}\" = \"" + codexRawRecoveryValue + "\" ]; then echo '" + codexRawRecoveryWarning + "' >&2; else fak sessions codex-loop-hook 2>/dev/null || true; fi"
+	codexContinuationHookCommandWindows = "if /i \"%" + codexRawRecoveryEnv + "%\"==\"" + codexRawRecoveryValue + "\" (echo " + codexRawRecoveryWarning + " 1>&2) else (fak sessions codex-loop-hook 2>nul || exit /b 0)"
+)
 
 func sessionsCodexHookInstall(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("sessions codex-hook-install", flag.ContinueOnError)

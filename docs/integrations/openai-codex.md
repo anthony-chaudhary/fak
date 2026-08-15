@@ -208,6 +208,41 @@ What Codex gets from this path:
 Use this path when you are running Codex itself. It preserves Codex's current model wire and
 adds fak as an explicit, inspectable tool boundary.
 
+### Break-glass recovery when `fak` itself is broken
+
+The normal response to a raw-session continuation block is to exit and restart with
+`fak codex`. If that front door cannot launch, use the explicit **raw recovery token** for
+one repair session. The project hook checks this token in the shell *before invoking `fak`*,
+so recovery does not depend on a working `fak` binary:
+
+```powershell
+# PowerShell: launch raw Codex, then clear the process-scoped token after exiting.
+$env:FAK_CODEX_RAW_RECOVERY = 'break-glass'
+codex
+Remove-Item Env:FAK_CODEX_RAW_RECOVERY
+```
+
+```bash
+# POSIX shell: scope the token to this one raw Codex process.
+FAK_CODEX_RAW_RECOVERY=break-glass codex
+```
+
+This is deliberately not a quiet convenience bypass. The exact value `break-glass` is
+required, and every prompt prints `BREAK-GLASS raw Codex recovery active`; while it is set,
+the fak capability floor and guard audit are **not running**. Use the session only to diagnose
+or repair the guarded launcher, exit it, clear the variable, and prove normal service:
+
+```powershell
+Remove-Item Env:FAK_CODEX_RAW_RECOVERY -ErrorAction SilentlyContinue
+fak codex --dry-run
+fak codex
+```
+
+Do not persist the variable in a shell profile, user environment, worker manifest, or CI
+secret. If `fak` is absent or too old to run the hook, no token is needed: the compatibility
+path already fails open. The token is for the narrower case where the current hook is
+successfully blocking raw Codex but guarded launch is unavailable.
+
 ### Long-context reset budgets
 
 There are two different questions:
