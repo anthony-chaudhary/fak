@@ -77,10 +77,11 @@ type StaleRestore struct {
 // rewritten read, for the gateway to stash) are then meaningful. Any other Reason means the body was
 // returned unchanged (identity) and the counts are 0 / Restores nil.
 type StaleElideOutcome struct {
-	Reason    string
-	Elided    int
-	ShedBytes int
-	Restores  []StaleRestore
+	Reason     string
+	Elided     int
+	ShedBytes  int
+	ShedTokens int
+	Restores   []StaleRestore
 }
 
 // ElideStaleReads is the byte-only wrapper: it returns the rewritten body and discards the restore
@@ -153,7 +154,32 @@ func ElideStaleReadsWithOutcome(raw []byte) ([]byte, StaleElideOutcome) {
 	case spliceVerdictMalformedResult:
 		return raw, StaleElideOutcome{Reason: StaleReasonMalformedResult}
 	}
-	return out, StaleElideOutcome{Reason: StaleReasonNone, Elided: len(edits), ShedBytes: shed, Restores: restores}
+	shedTokens := staleElideTokenDelta(elems, out)
+	return out, StaleElideOutcome{
+		Reason: StaleReasonNone, Elided: len(edits), ShedBytes: shed,
+		ShedTokens: shedTokens, Restores: restores,
+	}
+}
+
+// staleElideTokenDelta uses the same image-aware house estimator as compaction. Provider tokenizers
+// are not available on this local rewrite seam, so this receipt is explicitly token-equivalent; it
+// is nevertheless computed from the exact before/after wire elements rather than from display text.
+func staleElideTokenDelta(before []json.RawMessage, rawAfter []byte) int {
+	var body struct {
+		Messages []json.RawMessage `json:"messages"`
+	}
+	if json.Unmarshal(rawAfter, &body) != nil || len(body.Messages) != len(before) {
+		return 0
+	}
+	beforeTokens, afterTokens := 0, 0
+	for i := range before {
+		beforeTokens += estimateElementTokens(before[i])
+		afterTokens += estimateElementTokens(body.Messages[i])
+	}
+	if beforeTokens <= afterTokens {
+		return 0
+	}
+	return beforeTokens - afterTokens
 }
 
 // staleEditToolNames is the closed set of tool names whose tool_use supersedes an earlier Read of the

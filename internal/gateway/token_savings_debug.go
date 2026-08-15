@@ -57,10 +57,10 @@ func (s *Server) tokenSavingsVars(sum AdjudicationSummary) debugTokenSavingsVars
 		deferLever.State, deferLever.Reason = "ready", "not_observed"
 	}
 
-	staleTurns, staleReads, staleBytes, staleBails := s.metrics.staleElideSnapshot()
+	staleTurns, staleReads, staleBytes, staleTokens, staleBails := s.metrics.staleElideSnapshot()
 	stale := debugTokenSavingLever{
 		Configured: s.elideStaleReads, Fired: staleTurns, Units: staleReads,
-		SavedBytes: staleBytes, BailReasons: staleBails,
+		SavedBytes: staleBytes, SavedTokens: staleTokens, BailReasons: staleBails,
 		Rollback: "--elide-stale-reads=false",
 	}
 	switch {

@@ -1024,7 +1024,7 @@ func (c *latencyCounter) observe(seconds float64) {
 
 // observeStaleElide records one eligible stale-read elision attempt using only
 // bounded reason enums and aggregate counts. No path, content, or trace is kept.
-func (m *gatewayMetrics) observeStaleElide(reason string, elided, shedBytes int) {
+func (m *gatewayMetrics) observeStaleElide(reason string, elided, shedBytes, shedTokens int) {
 	if m == nil {
 		return
 	}
@@ -1034,6 +1034,7 @@ func (m *gatewayMetrics) observeStaleElide(reason string, elided, shedBytes int)
 		m.staleElideTurns++
 		m.staleElideReads += uint64(elided)
 		m.staleElideBytes += uint64(shedBytes)
+		m.staleElideTokens += uint64(max(shedTokens, 0))
 		return
 	}
 	if reason == "" {
@@ -1045,9 +1046,9 @@ func (m *gatewayMetrics) observeStaleElide(reason string, elided, shedBytes int)
 	m.staleElideBails[reason]++
 }
 
-func (m *gatewayMetrics) staleElideSnapshot() (turns, reads, bytes uint64, bails map[string]uint64) {
+func (m *gatewayMetrics) staleElideSnapshot() (turns, reads, bytes, tokens uint64, bails map[string]uint64) {
 	if m == nil {
-		return 0, 0, 0, nil
+		return 0, 0, 0, 0, nil
 	}
 	m.staleElideMu.Lock()
 	defer m.staleElideMu.Unlock()
@@ -1055,5 +1056,5 @@ func (m *gatewayMetrics) staleElideSnapshot() (turns, reads, bytes uint64, bails
 	for reason, count := range m.staleElideBails {
 		bails[reason] = count
 	}
-	return m.staleElideTurns, m.staleElideReads, m.staleElideBytes, bails
+	return m.staleElideTurns, m.staleElideReads, m.staleElideBytes, m.staleElideTokens, bails
 }

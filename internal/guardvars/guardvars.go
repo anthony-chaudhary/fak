@@ -57,6 +57,18 @@ type SessionVars struct {
 // fak-authored savings. Every token-equiv value is the same input-token currency as the vcache
 // block; FakVDSOAvoidedCalls is a separate avoided-call counter (skipped engine calls, not
 // prompt tokens).
+// TokenSavingsVars is the privacy-safe aggregate receipt block emitted by /debug/vars.
+type TokenSavingsVars struct {
+	StaleReadElide TokenSavingLever `json:"stale_read_elide"`
+}
+
+type TokenSavingLever struct {
+	Fired       uint64 `json:"fired"`
+	Units       uint64 `json:"units"`
+	SavedBytes  uint64 `json:"saved_bytes,omitempty"`
+	SavedTokens uint64 `json:"saved_tokens,omitempty"`
+}
+
 type CacheAttributionVars struct {
 	ProviderTokenEquiv float64 `json:"provider_token_equiv"` // net: read rebate minus write premium
 	FakTokenEquiv      float64 `json:"fak_token_equiv"`      // compaction shed + in-kernel KV-prefix reuse

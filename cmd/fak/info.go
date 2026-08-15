@@ -104,6 +104,7 @@ type guardInfoVars struct {
 		Status          string  `json:"status"`
 	} `json:"vcache"`
 	CacheAttribution *guardInfoCacheAttribution `json:"cache_attribution"`
+	TokenSavings     guardvars.TokenSavingsVars `json:"token_savings"`
 	// ManagedCache is #2190's managed-cache 1h TTL-upgrade posture: whether the lever is
 	// on for this session and, when on, whether it is paying (upgrades) or inert (every
 	// head refused). Rendered from /debug/vars only, mirroring debugManagedCacheVars

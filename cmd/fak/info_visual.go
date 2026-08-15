@@ -302,10 +302,11 @@ func guardInfoUpstreamKindLabel(kind string) string {
 // guardInfoSaved / guardInfoHitPct / guardInfoHitFrac / guardInfoMult / guardInfoSavingWord pull
 // the cache fields with a nil-VCache (no provider cache activity yet) reading as the honest zero.
 func guardInfoSaved(v guardInfoVars) float64 {
+	saved := float64(v.TokenSavings.StaleReadElide.SavedTokens)
 	if v.VCache != nil {
-		return v.VCache.SavedTokenEquiv
+		saved += v.VCache.SavedTokenEquiv
 	}
-	return 0
+	return saved
 }
 
 func guardInfoHitFrac(v guardInfoVars) float64 {

@@ -26,6 +26,25 @@ func TestTokenSavingsDebugDefaultReceipt(t *testing.T) {
 	}
 }
 
+func TestTokenSavingsDebugStaleElisionPublishesTokenReceipt(t *testing.T) {
+	s := newDeferServer(t, false)
+	s.elideStaleReads = true
+	s.metrics.observeStaleElide(agent.StaleReasonNone, 2, 4096, 1024)
+	got := s.debugVars(time.Now()).TokenSavings.StaleReadElide
+	if got.State != "active" || got.Fired != 1 || got.Units != 2 || got.SavedBytes != 4096 || got.SavedTokens != 1024 {
+		t.Fatalf("stale receipt=%+v", got)
+	}
+	b, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"trace_id", "tool_args", "content", "path"} {
+		if containsJSONKey(b, forbidden) {
+			t.Fatalf("privacy leak key %q in %s", forbidden, b)
+		}
+	}
+}
+
 func TestTokenSavingsDebugBailoutsAndPrivacy(t *testing.T) {
 	t.Setenv("FAK_ABLATE_MCP_TOOL_FILTER", "1")
 	t.Setenv("FAK_ABLATE_DEFER_TOOLS", "1")
@@ -33,7 +52,7 @@ func TestTokenSavingsDebugBailoutsAndPrivacy(t *testing.T) {
 	s.deferColdTools = true
 	s.elideStaleReads = true
 	s.compactHistoryBudget = 2048
-	s.metrics.observeStaleElide("no_stale_reads", 0, 0)
+	s.metrics.observeStaleElide("no_stale_reads", 0, 0, 0)
 	s.metrics.observeCompaction(agent.CompactOutcome{Reason: agent.CompactReasonUnderBudget}, false)
 	got := s.debugVars(time.Now()).TokenSavings
 	if got.NativeMCPFilter.Reason != "ablation" || got.ColdToolDefer.Reason != "ablation" {

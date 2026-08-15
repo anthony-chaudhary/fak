@@ -115,6 +115,9 @@ func TestReadLifecycleElidesStaleKeepsFreshAndPrefix(t *testing.T) {
 	if outcome.ShedBytes <= 0 {
 		t.Fatalf("expected positive ShedBytes, got %d", outcome.ShedBytes)
 	}
+	if outcome.ShedTokens <= 0 {
+		t.Fatalf("expected positive ShedTokens, got %d", outcome.ShedTokens)
+	}
 	// (a) The stale read body is gone and the restore marker (naming the file) is present.
 	if bytes.Contains(out, []byte(bigX)) {
 		t.Error("stale read of x.go was NOT elided (pre-edit body still present)")

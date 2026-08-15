@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
@@ -205,7 +206,7 @@ func TestRenderInfoCacheViewShowsSourceProvenanceHierarchy(t *testing.T) {
 	for _, want := range []string{
 		"sources (exclusive within each group; do not add across units)",
 		"loaded   from provider prefix cache",
-		"reduced  from context compaction",
+		"reduced  from context reduction",
 		"served   from response memo",
 		"served   from inline/tool local",
 		"provider/observed", "fak/witnessed",
@@ -225,9 +226,47 @@ func TestGuardInfoWorkDoneSourceHierarchyNarrowCapture(t *testing.T) {
 			t.Fatalf("narrow source row wraps (%d cells): %q", dispWidthTUI(line), line)
 		}
 	}
-	for _, want := range []string{"provider prefix cache", "context compaction", "response memo", "inline/tool local"} {
+	for _, want := range []string{"provider prefix cache", "context reduction", "response memo", "inline/tool local"} {
 		if !strings.Contains(captured, want) {
 			t.Fatalf("narrow capture lost %q:\n%s", want, captured)
 		}
+	}
+}
+
+func TestGuardInfoWorkDoneReconcilesStaleElisionWithoutCompactionOverlap(t *testing.T) {
+	v := workDoneFixture()
+	v.TokenSavings.StaleReadElide.Fired = 1
+	v.TokenSavings.StaleReadElide.Units = 2
+	v.TokenSavings.StaleReadElide.SavedBytes = 2400
+	v.TokenSavings.StaleReadElide.SavedTokens = 600
+
+	w := guardInfoWorkDoneFromVars(v)
+	var context guardInfoWorkDoneSource
+	for _, source := range w.Sources {
+		if source.ID == "context_reduction" {
+			context = source
+		}
+	}
+	wantContext := float64(v.CacheAttribution.FakCompactionShedTokens + 600)
+	if context.InputTokenEquiv != wantContext {
+		t.Fatalf("context reduction=%v, want compaction+elision=%v", context.InputTokenEquiv, wantContext)
+	}
+	var reconciled float64
+	for _, source := range w.Sources {
+		reconciled += source.InputTokenEquiv
+	}
+	if reconciled != w.Metrics.InputTokensAvoided.Value {
+		t.Fatalf("sources=%v do not reconcile to total=%v", reconciled, w.Metrics.InputTokensAvoided.Value)
+	}
+	rendered := strings.Join(guardInfoWorkDoneSourceRows(w), "\n")
+	if !strings.Contains(rendered, "context reduction") || !strings.Contains(rendered, "~72.6k input") {
+		t.Fatalf("captured render lost elision receipt:\n%s", rendered)
+	}
+	encoded, err := json.Marshal(guardInfoSessionWorkDoneQuery(v, time.Unix(0, 0)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"id":"context_reduction"`) || !strings.Contains(string(encoded), `"input_token_equiv":72600`) {
+		t.Fatalf("query lost elision receipt: %s", encoded)
 	}
 }
