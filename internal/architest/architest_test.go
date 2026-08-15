@@ -76,7 +76,7 @@ var tier = map[string]int{
 	"macbench":             1, // Mac gateway benchmark probes for nightrun: stdlib HTTP client + JSON artifact fold, off the hot path.
 	"benchruns":            1, // pure benchmark-run catalog reader/renderer over experiments/benchmark artifacts; stdlib-only, off the hot path.
 	"benchckpt":            1, // per-cell write-ahead checkpoint/resume ledger the compute-bench executors write through (#2382); stdlib-only, off the hot path.
-	"devcheckpoint":        1, // append-only developer milestone checkpoint records; imports flock(1)+stdlib, off the hot path.
+	"devcheckpoint":        2, // append-only developer milestone checkpoint records; imports flock(1)+stdlib, off the hot path.
 	"benchlineagegate":     2, // pure benchmark-emitter lineage hygiene gate; stdlib-only source scanner, off the hot path.
 	"conceptbench":         2, // dos-refereed conceptbench grader (#2732): maps a concept + transcript + fixture to a referee-sourced verdict; imports taskmgr(1)+hooks(1), off the hot path.
 	"cachevalueledger":     2, // durable, append-only cache-value observation ledger for fak sessions; JSONL persistence over cacheobs stats.
@@ -559,11 +559,11 @@ var tier = map[string]int{
 	"residualquant":         1, // stdlib-only RRQ metadata/research adjudication; no model kernel.
 	"rotationmeta":          1, // stdlib-only rotation-transform metadata and runtime capability adjudication; no model kernel.
 	"quantwatch":            1, // stdlib-only public metadata ingestion and deterministic ranking; no model or runtime kernel.
-	"quantbench":            1, // stdlib-only benchmark evidence contract and adjudication; no runtime kernel.
+	"quantbench":            2, // stdlib-only benchmark evidence contract and adjudication; no runtime kernel.
 	"kvint2eval":            1, // stdlib-only INT2 KV rotation evidence contract; CUDA producer is fixture-only.
 	"codexresume":           2,
 	"disambiguation":        1, // stdlib-only terminology schema, validation, and self-test; no policy or model kernel.
-	"sessionregistry":       1, // stdlib-only durable child-lineage record and read-back; no runtime kernel.
+	"sessionregistry":       2, // stdlib-only durable child-lineage record and read-back; no runtime kernel.
 	"grafanacontract":       1, // stdlib-only contract checks for shipped Grafana dashboard JSON.
 	"processforest":         1, // stdlib-only durable logical process-forest identity, ancestry, adoption, and deterministic snapshots.
 	"lifecycleadapter":      1, // stdlib-only process-forest adapter capability negotiation and bounded invocation contract.
@@ -572,7 +572,7 @@ var tier = map[string]int{
 	"gardenbudget":          1, // #6493 whole-tick budget/checkpoint primitive: stdlib-only durable cursor plus pure suffix executor/remaining-budget arithmetic; imports nothing internal and stays off the hot path.
 	"armbench":              2, // #6676 off-path multi-arm benchmark integrator; imports the tier-2 windowgate to keep managed child processes invisible on Windows.
 	"codetools":             2, // Kernel-mediated workspace coding engines: canonical confinement, policy rung, bounded Read/Grep/Glob; imports ABI/refutil/vDSO but not core runtime.
-	"portabilitylab":        1, // Hermetic release acceptance harness over the tier-1 portability leaf; stdlib plus portability only, off the hot path.
+	"portabilitylab":        2, // Hermetic release acceptance harness over the tier-1 portability leaf; stdlib plus portability only, off the hot path.
 	"scratchjanitor":        1, // stdlib-only age and resume-reference guarded harness scratch cleanup; off the runtime hot path.
 	"managedocs":            1,
 	"humanctl":              1,
