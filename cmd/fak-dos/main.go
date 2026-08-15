@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/dosdecision"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -97,6 +99,8 @@ func runRemove(stdout, stderr io.Writer, args []string) int {
 func runList(stdout, stderr io.Writer, args []string) int {
 	fs, wsArg := commonFlags("fak-dos decisions list", stderr)
 	native := fs.Bool("native", true, "include `dos decisions --all --json` rows")
+	all := fs.Bool("all", false, "also emit rows superseded by a released lease (resolved history)")
+	summary := fs.Bool("summary", false, "emit {cleared, active, superseded} instead of the bare row array")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -104,19 +108,11 @@ func runList(stdout, stderr io.Writer, args []string) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
-	rows := []any{}
+	rows := []dosdecision.Row{}
 	if *native {
-		cmd := windowgate.Command("dos", "decisions", "--workspace", ws, "--all", "--json")
-		b, err := cmd.Output()
+		nativeRows, err := nativeDecisions(ws, stderr)
 		if err != nil {
-			if ee, ok := err.(*exec.ExitError); ok {
-				fmt.Fprint(stderr, string(ee.Stderr))
-			}
-			return fail(stderr, fmt.Errorf("native dos decisions read: %w", err))
-		}
-		var nativeRows []any
-		if err := json.Unmarshal(b, &nativeRows); err != nil {
-			return fail(stderr, fmt.Errorf("native dos decisions JSON: %w", err))
+			return fail(stderr, err)
 		}
 		rows = append(rows, nativeRows...)
 	}
@@ -125,9 +121,98 @@ func runList(stdout, stderr io.Writer, args []string) int {
 		return fail(stderr, err)
 	}
 	for _, r := range host {
-		rows = append(rows, r)
+		row, err := hostRow(r)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		rows = append(rows, row)
 	}
-	return writeJSON(stdout, stderr, rows)
+	// A refusal is over when its blocking lease is gone, so the active queue is the
+	// revalidated one — an operator asked to resolve a collision must be looking at
+	// a collision that still exists (#6494).
+	live := dosdecision.LiveSet{}
+	if dosdecision.NeedsLiveSet(rows) {
+		live = liveLanes(ws)
+	}
+	res := dosdecision.Revalidate(rows, live)
+	if *summary {
+		return writeJSON(stdout, stderr, map[string]any{
+			"cleared": res.Cleared, "active": res.Active, "superseded": res.Superseded,
+		})
+	}
+	out := res.Active
+	if *all {
+		out = append(append([]dosdecision.Row{}, res.Active...), res.Superseded...)
+	}
+	return writeJSON(stdout, stderr, out)
+}
+
+// hostRow projects a host-authored row into the shape the revalidator reads. Host
+// rows are never lease-dependent (`HOST_QUEUE_ITEM`), so they pass through, but
+// projecting them keeps one row type on the output path.
+func hostRow(r Row) (dosdecision.Row, error) {
+	b, err := json.Marshal(r)
+	if err != nil {
+		return nil, err
+	}
+	var out dosdecision.Row
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// nativeDecisions and liveLanes are the two kernel reads this command performs.
+// They are indirected so the fold between them is testable without a `dos` on PATH.
+var (
+	nativeDecisions = readNativeDecisions
+	liveLanes       = readLiveLanes
+)
+
+// readNativeDecisions reads `dos decisions --all --json`. `--all` here is the
+// KERNEL's meaning (include ORACLE/JUDGE-resolvable rows, not only HUMAN ones) —
+// this adapter's own `--all` is about resolved history and is applied after the
+// revalidation fold.
+func readNativeDecisions(ws string, stderr io.Writer) ([]dosdecision.Row, error) {
+	cmd := windowgate.Command("dos", "decisions", "--workspace", ws, "--all", "--json")
+	b, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			fmt.Fprint(stderr, string(ee.Stderr))
+		}
+		return nil, fmt.Errorf("native dos decisions read: %w", err)
+	}
+	var rows []dosdecision.Row
+	if err := json.Unmarshal(b, &rows); err != nil {
+		return nil, fmt.Errorf("native dos decisions JSON: %w", err)
+	}
+	return rows, nil
+}
+
+// readLiveLanes reads `dos lease-lane live` — the authoritative WAL live set — from
+// the workspace. It reports Known=false on any read or parse fault: an unreadable
+// kernel must never be mistaken for an idle one, or the queue would empty itself
+// whenever `dos` is missing. The workspace is passed as the working directory, not
+// as a path argument, because an explicit path makes `dos lease-lane live`
+// re-resolve to a different `.dos/` (the same rule `tools/dos_fleet_lease.py` obeys).
+func readLiveLanes(ws string) dosdecision.LiveSet {
+	cmd := windowgate.Command("dos", "lease-lane", "live")
+	cmd.Dir = ws
+	b, err := cmd.Output()
+	if err != nil {
+		return dosdecision.LiveSet{}
+	}
+	var raw []map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(b), &raw); err != nil {
+		return dosdecision.LiveSet{}
+	}
+	lanes := make([]string, 0, len(raw))
+	for _, r := range raw {
+		if lane, _ := r["lane"].(string); lane != "" {
+			lanes = append(lanes, lane)
+		}
+	}
+	return dosdecision.LiveSet{Lanes: lanes, Known: true}
 }
 
 func writeJSON(w, stderr io.Writer, v any) int {

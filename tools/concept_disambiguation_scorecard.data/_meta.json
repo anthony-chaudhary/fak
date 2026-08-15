@@ -2271,6 +2271,11 @@
           "category": "incidental",
           "reason": "Private memory-co-travel parser for the shared rollout vocabulary; it does not define a new guard gate or policy boundary.",
           "token": "parseGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Example reason token parsed from historical decision evidence; it is data carried by a row, not a guard gate definition.",
+          "token": "SOAK_GATE"
         }
       ],
       "exclude": [
@@ -2337,6 +2342,7 @@
         "ReportedGates",
         "RoleGate",
         "RunPonytailGates",
+        "SOAK_GATE",
         "SafetyGate",
         "SessionAffinityGateway",
         "TestGuardSelfTightenOverlayPathIsAgentWritable",
@@ -7732,6 +7738,21 @@
           "category": "incidental",
           "reason": "Injectable command-reader function used to test the fak-dos adapter; it does not define a new decision kind or policy.",
           "token": "nativeDecisions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Adapter I/O helper that reads native DOS decision rows; it does not create a decision concept.",
+          "token": "readNativeDecisions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Adapter I/O helper for authoritative lease-state revalidation; it does not define a decision kind or policy.",
+          "token": "liveLanes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Adapter I/O helper for authoritative lease-state revalidation; it does not define a decision kind or policy.",
+          "token": "readLiveLanes"
         }
       ],
       "id": "decision",
@@ -7770,12 +7791,15 @@
         "guardGoalQuestionDecision",
         "importDecision",
         "kinddecisionsabout",
+        "liveLanes",
         "nativeDecisions",
         "naturalDecision",
         "observed_decisions",
         "partialretrydecision",
         "pluginDecisionFromVerdict",
         "predictHeld",
+        "readLiveLanes",
+        "readNativeDecisions",
         "routeDecisions",
         "routing_defer_decision",
         "scheduleOutcome",
