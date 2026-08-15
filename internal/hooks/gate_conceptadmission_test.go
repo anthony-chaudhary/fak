@@ -478,3 +478,95 @@ func TestConceptAdmissionCommittedRangeRepeatsCandidateDiff(t *testing.T) {
 		t.Fatalf("range gate got=%+v err=%v", got, err)
 	}
 }
+
+func TestConceptAdmissionBatchesIndexRowReads(t *testing.T) {
+	meta := `{"families":[{"id":"cache","roots":["cache"],"ignore":[]}]}`
+	rows := `{"rows":[{"family":"cache","grounding":"CacheBurst"}]}`
+	calls := map[string]int{}
+	d := diffOf(t.TempDir(), map[string][]string{"internal/demo/demo.go": {"const CacheBurst = 1"}})
+	d.ctx = context.Background()
+	d.Treeish = ":"
+	d.IndexPaths = []string{
+		"tools/concept_disambiguation_scorecard.data/rows-cache.json",
+		"tools/concept_disambiguation_scorecard.data/rows-other.json",
+	}
+	d.run = func(_ context.Context, _ string, args ...string) (string, int, error) {
+		verb := strings.Join(args, " ")
+		calls[verb]++
+		switch args[0] {
+		case "show":
+			if args[1] == ":tools/concept_disambiguation_scorecard.data/_meta.json" {
+				return meta, 0, nil
+			}
+		case "grep":
+			return "tools/concept_disambiguation_scorecard.data/rows-cache.json\x00" + rows + "\n", 0, nil
+		}
+		return "", 1, nil
+	}
+
+	got, err := gateConceptAdmission(d)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+	if calls["grep --cached -z -I -e ^ -- tools/concept_disambiguation_scorecard.data/rows-*.json"] != 1 {
+		t.Fatalf("batch grep calls = %v, want exactly one", calls)
+	}
+	for call := range calls {
+		if strings.HasPrefix(call, "show :tools/concept_disambiguation_scorecard.data/rows-") {
+			t.Fatalf("row shard used per-file git show despite successful batch: %q", call)
+		}
+	}
+}
+
+func TestRegisteredConceptAdmissionBatchesThroughLandsTreeView(t *testing.T) {
+	meta := `{"families":[{"id":"cache","roots":["cache"],"ignore":[]}]}`
+	rows := `{"rows":[{"family":"cache","grounding":"CacheBurst"}]}`
+	calls := map[string]int{}
+	d := diffOf(t.TempDir(), map[string][]string{"internal/demo/demo.go": {"const CacheBurst = 1"}})
+	d.ctx = context.Background()
+	d.Treeish = ":"
+	d.IndexPaths = []string{"tools/concept_disambiguation_scorecard.data/_meta.json", "tools/concept_disambiguation_scorecard.data/rows-cache.json"}
+	d.run = func(_ context.Context, _ string, args ...string) (string, int, error) {
+		call := strings.Join(args, " ")
+		calls[call]++
+		switch {
+		case args[0] == "rev-parse":
+			return "0123456789012345678901234567890123456789\n", 0, nil
+		case args[0] == "ls-files" && len(args) > 1 && args[1] == "--stage":
+			return "100644 0123456789012345678901234567890123456789 0\ttools/concept_disambiguation_scorecard.data/_meta.json\n", 0, nil
+		case args[0] == "show" && strings.Contains(args[1], "_meta.json"):
+			return meta, 0, nil
+		case args[0] == "grep":
+			return "tools/concept_disambiguation_scorecard.data/rows-cache.json\x00" + rows + "\n", 0, nil
+		}
+		return "", 1, nil
+	}
+	var concept Gate
+	for _, g := range PreCommitGates() {
+		if g.Name == "CONCEPT_ADMISSION" {
+			concept = g
+			break
+		}
+	}
+	got, err := concept.Check(d)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+	if calls["grep --cached -z -I -e ^ -- tools/concept_disambiguation_scorecard.data/rows-*.json"] != 1 {
+		t.Fatalf("registered LANDS_TREE gate did not use one index batch: %v", calls)
+	}
+}
+
+func TestStagedFilesMatchingReconstructsMultilineFiles(t *testing.T) {
+	d := &StagedDiff{Root: t.TempDir(), Treeish: ":", ctx: context.Background()}
+	d.run = func(_ context.Context, _ string, args ...string) (string, int, error) {
+		return "a.json\x00{\n" + "a.json\x00  \"rows\": []\n" + "a.json\x00}\n" + "b.json\x00{}", 0, nil
+	}
+	got, ok := d.stagedFilesMatching("*.json")
+	if !ok {
+		t.Fatal("batch read unexpectedly fell back")
+	}
+	if string(got["a.json"]) != "{\n  \"rows\": []\n}\n" || string(got["b.json"]) != "{}" {
+		t.Fatalf("reconstructed files = %#v", got)
+	}
+}

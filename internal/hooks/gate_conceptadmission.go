@@ -210,8 +210,9 @@ func gateConceptAdmission(d *StagedDiff) ([]Finding, error) {
 		return nil, nil
 	} // semantic gate owns malformed data
 	positioned := map[string]bool{}
-	// Read every row through the index-aware accessor, including a newly staged
-	// row file that does not exist in HEAD or a peer-dirty workspace.
+	// Read the row corpus from the exact staged index in one process. On Windows, one
+	// `git show` per shard made this gate spend 13 seconds on a docs-only commit. The
+	// fallback preserves hand-built/range fixtures and the prior fail-open behavior.
 	paths := append([]string{}, d.IndexPaths...)
 	if len(paths) == 0 {
 		matches, _ := filepath.Glob(filepath.Join(d.Root, "tools", "concept_disambiguation_scorecard.data", "rows-*.json"))
@@ -220,11 +221,15 @@ func gateConceptAdmission(d *StagedDiff) ([]Finding, error) {
 			paths = append(paths, filepath.ToSlash(rel))
 		}
 	}
+	batched, batchOK := d.stagedFilesMatching("tools/concept_disambiguation_scorecard.data/rows-*.json")
 	for _, rel := range paths {
 		if !strings.HasPrefix(rel, "tools/concept_disambiguation_scorecard.data/rows-") || !strings.HasSuffix(rel, ".json") {
 			continue
 		}
-		b, exists := d.FileBytes(rel)
+		b, exists := batched[rel]
+		if !batchOK {
+			b, exists = d.FileBytes(rel)
+		}
 		if !exists {
 			continue
 		}

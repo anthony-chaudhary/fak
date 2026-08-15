@@ -437,6 +437,35 @@ func (d *StagedDiff) FileBytes(rel string) ([]byte, bool) {
 	return e.data, e.exists
 }
 
+// stagedFilesMatching reads text files matching one pathspec from the exact staged index in
+// one git process. `git grep -z` prefixes every output line with path+NUL; matching `^` keeps
+// blank lines too. Callers fall back to FileBytes unless ok is true.
+func (d *StagedDiff) stagedFilesMatching(pathspec string) (map[string][]byte, bool) {
+	if d.run == nil || d.Treeish != ":" {
+		return nil, false
+	}
+	out, code, err := d.run(d.ctx, d.Root, "grep", "--cached", "-z", "-I", "-e", "^", "--", pathspec)
+	if err != nil || (code != 0 && code != 1) {
+		return nil, false
+	}
+	files := map[string][]byte{}
+	if code == 1 {
+		return files, true
+	}
+	for _, line := range strings.SplitAfter(out, "\n") {
+		if line == "" {
+			continue
+		}
+		i := strings.IndexByte(line, 0)
+		if i <= 0 {
+			return nil, false
+		}
+		rel := filepath.ToSlash(line[:i])
+		files[rel] = append(files[rel], line[i+1:]...)
+	}
+	return files, true
+}
+
 // cachedFile / storeFile are the ONLY fileCache accessors, so every read a gate makes is
 // serialized against an abandoned gate still running against the same StagedDiff (see cacheMu).
 //
