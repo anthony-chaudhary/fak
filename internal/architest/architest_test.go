@@ -89,6 +89,7 @@ var tier = map[string]int{
 	"callavoid":            1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
 	"harnessres":           1, // cross-platform, stdlib-only process resource sampler for the fak guard harness (CPU/mem/IO); imports nothing internal, off the hot path (#2045, epic #2044).
 	"harnessinit":          1, // external product scaffold renderer; stdlib-only and outside kernel hot paths (#6788).
+	"harnessdiscover":      1, // provenance-bearing scoped declaration discovery before contextual selection (#6898).
 	"harnessselect":        1, // context-layer selection and explain trace; stdlib-only before product composition.
 	"amdgpu":               2, // AMD GPU fact probe and perf-counter JSON fold for Windows harness diagnostics; imports windowgate(1), off the hot path.
 	"accounts":             2, "accountobs": 1, "guardaudit": 2, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 2, "cacheobs": 1, "cachevalue": 2, "canon": 1, "compute": 2, "deletioncert": 1, "demoui": 2, "ggufload": 2, "gpulease": 2, "fleetreap": 2, "hfhub": 2, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 2, "model": 2, "orphanscan": 1, "pathlint": 1, "pathutil": 1, "privatepath": 2, "provenance": 1, "swebench": 2, "urllint": 1, "webbench": 2,

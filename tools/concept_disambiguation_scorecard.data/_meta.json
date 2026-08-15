@@ -8450,6 +8450,11 @@
           "category": "incidental",
           "reason": "Timeout wrapper preserves the existing execution-plan concept and only bounds its wait.",
           "token": "auditDispatchWaveExecutionPlanBounded"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local deterministic candidate-list helper for one relation; resolver search plumbing, not a new plan concept.",
+          "token": "relationCandidates"
         }
       ],
       "exclude": [
@@ -8541,6 +8546,7 @@
         "planting",
         "plants",
         "register_bench_plan_doc",
+        "relationCandidates",
         "runAblatePlan",
         "runContinuitySyncPlan",
         "seedCandidate",
