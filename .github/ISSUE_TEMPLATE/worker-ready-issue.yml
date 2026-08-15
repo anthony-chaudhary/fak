@@ -41,6 +41,22 @@ body:
 
         Generation is a horizon, not priority, branch strategy, or runtime feature gate. See `docs/generation.md`.
   - type: textarea
+    id: problem_frame
+    attributes:
+      label: Problem frame
+      description: >-
+        Classify this as Core, Enabling (name the Core outcome), Stewardship
+        (name the obligation), or Peripheral. For each P1-P4 row, write
+        advanced, preserved, or N/A plus a concrete reason; short answers are fine.
+      placeholder: |-
+        Centrality: Enabling (named Core outcome)
+        P1 Context: preserved - reason
+        P2 Net value: advanced - reason
+        P3 Adaptation: N/A - concrete reason
+        P4 Operations: preserved - reason
+    validations:
+      required: true
+  - type: textarea
     id: current-state
     attributes:
       label: Current state

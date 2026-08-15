@@ -3,6 +3,7 @@ package architest
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -426,14 +427,29 @@ func hasTopLevelKey(doc, key string) bool {
 	return false
 }
 
+func formIDs(body string) []string {
+	var ids []string
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "id: ") {
+			ids = append(ids, strings.TrimSpace(strings.TrimPrefix(line, "id: ")))
+		}
+	}
+	return ids
+}
+
 func TestHumanIssueTemplatesPromptForCanonicalProblemFrame(t *testing.T) {
 	root := filepath.Dir(internalDir(t))
-	for _, name := range []string{"feature-request.yml", "bug-report.yml"} {
+	workerReadyIDs := []string{"parent-context", "generation", "problem_frame", "current-state", "why-next", "working-spine", "priority-context", "work-unit", "expected-steps", "assumptions", "confusion-risks", "coordination-notes", "trigger", "batch-policy", "in-scope", "out-of-scope", "done-condition", "witness", "acceptance-gate", "lane", "path-hints", "hot-tree-owning-lanes", "hot-tree-contention-check", "hot-tree-partition", "hot-tree-commit-recipe", "boundary-notes", "closure-binding", "final-checks"}
+	for _, name := range []string{"feature-request.yml", "bug-report.yml", "worker-ready-issue.yml"} {
 		data, err := os.ReadFile(filepath.Join(root, ".github", "ISSUE_TEMPLATE", name))
 		if err != nil {
 			t.Fatal(err)
 		}
 		body := string(data)
+		if got := strings.Count(body, "id: problem_frame"); got != 1 {
+			t.Errorf("%s problem-frame prompt count = %d, want exactly 1", name, got)
+		}
 		for _, want := range []string{
 			"id: problem_frame",
 			"Centrality: Enabling (named Core outcome)",
@@ -446,6 +462,9 @@ func TestHumanIssueTemplatesPromptForCanonicalProblemFrame(t *testing.T) {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s missing canonical problem-frame prompt %q", name, want)
 			}
+		}
+		if name == "worker-ready-issue.yml" && !reflect.DeepEqual(formIDs(body), workerReadyIDs) {
+			t.Errorf("worker-ready field inventory changed:\ngot  %v\nwant %v", formIDs(body), workerReadyIDs)
 		}
 		if !strings.Contains(body, "Enabling") || !strings.Contains(body, "name the Core outcome") || !strings.Contains(body, "Stewardship") || !strings.Contains(body, "name the obligation") {
 			t.Errorf("%s does not explain targeted centrality classes", name)
