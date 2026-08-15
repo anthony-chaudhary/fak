@@ -322,6 +322,10 @@ func evaluateDispatchTick(opts dispatchTickOptions, stderr io.Writer) (map[strin
 	}
 
 	tPrompt := time.Now()
+	return completeDispatchTickEvaluation(root, runsDir, opts, stderr, pick, pickRes, account, target, witnessRecords, payload, finish, timings, spawnStart, tPrompt)
+
+}
+func completeDispatchTickEvaluation(root, runsDir string, opts dispatchTickOptions, stderr io.Writer, pick dispatchLanePick, pickRes dispatchTickPick, account dispatchtick.Account, target int, witnessRecords []dispatchtick.WitnessRecord, payload map[string]any, finish func(map[string]any) map[string]any, timings map[string]int64, spawnStart, tPrompt time.Time) (map[string]any, error) {
 	// #4167: hand dispatchPrompt the router-fetched row for the selected target so it
 	// reuses the already-fetched body instead of a second `gh issue view`. A cache miss
 	// (unrouted --target-issue) yields the zero value, and dispatchPrompt falls back.
