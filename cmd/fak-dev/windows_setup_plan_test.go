@@ -84,7 +84,7 @@ func TestDefaultPlanRefusesBroadNonRepositoryPath(t *testing.T) {
 func TestPowerShellIsIdempotentAndReadBackDriven(t *testing.T) {
 	p := SetupSpec{Paths: []string{`C:\src\fak`}, Processes: []string{"go.exe"}, Group: "239.1.2.3", Port: 9876}
 	script := PowerShell(p, `C:\tmp\result.json`, true)
-	for _, want := range []string{"Add-MpPreference", "Set-NetFirewallProfile", "-DefaultInboundAction Allow", "-DefaultOutboundAction Allow", "-NotifyOnListen False", "-AllowInboundRules True", "-AllowLocalFirewallRules True", "Get-NetFirewallRule", "Remove-NetFirewallRule", "New-NetFirewallRule", "Get-MpPreference", "Get-NetFirewallProfile", "239.1.2.3", "9876", "ConvertTo-Json"} {
+	for _, want := range []string{"Add-MpPreference", "Set-NetFirewallProfile", "-DefaultInboundAction Block", "-DefaultOutboundAction Allow", "-NotifyOnListen False", "-AllowInboundRules True", "-AllowLocalFirewallRules True", "Get-NetFirewallRule", "Remove-NetFirewallRule", "New-NetFirewallRule", "Get-MpPreference", "Get-NetFirewallProfile", "239.1.2.3", "9876", "ConvertTo-Json"} {
 		if !strings.Contains(script, want) {
 			t.Errorf("script omits %q", want)
 		}
