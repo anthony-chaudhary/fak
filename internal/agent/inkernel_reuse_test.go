@@ -861,3 +861,18 @@ func TestInKernelSnapshotCheckpointCreatesStableSiblingBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestInKernelBackendWithoutPrefixReuseSkipsCheckpointAdmission(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_RADIX", "on")
+	cfg := tinyCfg()
+	be := &countingBackend{Backend: compute.Default(), deviceMemory: true}
+	p := NewInKernelPlanner(model.NewSynthetic(cfg), nil, "no-device-prefix-reuse", false, be, false)
+	p.quant = false
+	if p.tree != nil {
+		t.Fatal("generic device model must leave unsupported prefix reuse disabled")
+	}
+	ids := synthIDs(cfg.VocabSize, inKernelSnapshotCheckpointTokens+8, 6917)
+	if _, _, _, _, _, _, err := p.generateReusedContext(context.Background(), ids, 1, 0, 0, 0, map[int]bool{}, nil); err != nil {
+		t.Fatalf("device decode without prefix reuse: %v", err)
+	}
+}

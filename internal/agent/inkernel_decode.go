@@ -173,7 +173,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		tp := time.Now()
 		prefillAt := matched
 		checkpoint := inKernelSnapshotCheckpoint(prefillAt, len(ids))
-		if p.backend != nil && checkpoint > prefillAt {
+		if reuse && p.backend != nil && checkpoint > prefillAt {
 			logits = s.Prefill(ids[prefillAt:checkpoint])
 			var checkpointSnapshot *model.PrefixSnapshot
 			checkpointSnapshot, err = s.PrefixSnapshot()
