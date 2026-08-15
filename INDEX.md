@@ -265,6 +265,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Harness creator ten-minute spine witness — 2026-08-15](docs/notes/HARNESS-CREATOR-SPINE-WITNESS-2026-08-15.md) -- auto-indexed dated note.
 - [Custom tool registration, model visibility, and deterministic skill programs](docs/notes/CUSTOM-TOOL-REGISTRATION-SKILL-PROGRAMS-2026-08-14.md) -- separates installed, allowed, exposed, and selected tools; defines explicit versioned skill-to-program compilation.
 - [Worktree ledger ownership](docs/notes/WORKTREE-LEDGER-OWNERSHIP-2026-08-13.md) -- auto-indexed dated note.
 - [Caveman study: shape-specific context transforms with measured fallback](docs/notes/CONCEPT-STUDY-CAVEMAN-2026-08-13.md) -- pinned source study with on-axis fak witnesses and filed borrows #6668-#6670.
