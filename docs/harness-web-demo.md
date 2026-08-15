@@ -19,4 +19,3 @@ The page includes three offline operating scenarios:
 This is a practical local product-development surface, not yet a complete coding-harness replacement: a live model/tool adapter, durable sessions across process restart, authenticated non-loopback deployment, full screen-reader/browser automation, and the independent second implementation remain follow-ons under #6790.
 
 Captured normal, approval, and failure renders are indexed in [the operating-envelope witness](_witnesses/harness-web-demo/README.md).
-
