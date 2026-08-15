@@ -120,15 +120,29 @@ type Verdict struct {
 // Allowed reports whether the verdict permits the call (Kind == "ALLOW").
 func (v Verdict) Allowed() bool { return v.Kind == "ALLOW" }
 
+// Preference narrows one syscall's witness, wait, transform, disclosure, and
+// resume behavior. Kernel and organization requirements remain monotone when
+// the server resolves these per-call preferences.
+type Preference struct {
+	RequireWitness     bool   `json:"require_witness"`
+	WitnessRoute       string `json:"witness_route,omitempty"`
+	WaitMode           string `json:"wait_mode,omitempty"`
+	TransformMode      string `json:"transform_mode,omitempty"`
+	Disclosure         string `json:"disclosure,omitempty"`
+	Timeout            string `json:"timeout,omitempty"`
+	ResumeNotification string `json:"resume_notification,omitempty"`
+}
+
 // SyscallRequest is the body of Adjudicate and Syscall. Arguments is either a JSON
 // object or a JSON-encoded string (the OpenAI function.arguments convention).
 type SyscallRequest struct {
-	Tool      string          `json:"tool"`
-	Arguments json.RawMessage `json:"arguments,omitempty"`
-	ReadOnly  bool            `json:"read_only,omitempty"`
-	Witness   string          `json:"witness,omitempty"`
-	TraceID   string          `json:"trace_id,omitempty"`
-	Principal string          `json:"principal,omitempty"`
+	Tool        string          `json:"tool"`
+	Arguments   json.RawMessage `json:"arguments,omitempty"`
+	ReadOnly    bool            `json:"read_only,omitempty"`
+	Witness     string          `json:"witness,omitempty"`
+	TraceID     string          `json:"trace_id,omitempty"`
+	Principal   string          `json:"principal,omitempty"`
+	Preferences Preference      `json:"preferences,omitempty"`
 }
 
 // AdmitRequest is the body of Admit: a CLIENT-produced tool Result to run through
