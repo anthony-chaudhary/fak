@@ -227,11 +227,11 @@ func AccountSessionCap(row AccountRow) int {
 	}
 }
 
+// claudeSessionsPerAccount returns the hard OAuth identity-pool bound. The
+// compatibility knob is parsed but cannot widen the one-session safety floor.
 func claudeSessionsPerAccount() int {
 	if v := strings.TrimSpace(os.Getenv(SessionsPerAccountEnv)); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
-		}
+		_, _ = strconv.Atoi(v)
 	}
 	return DefaultClaudeSessionsPerAccount
 }
