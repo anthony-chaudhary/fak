@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -27,14 +28,14 @@ func main() {
 	case "freshness":
 		fs := flag.NewFlagSet("pagescheck freshness", flag.ExitOnError)
 		root := fs.String("root", ".", "repository root")
-		maximumDays := fs.Int("maximum-age-days", 21, "maximum committed age for time-sensitive assets")
-		var paths stringList
-		fs.Var(&paths, "path", "tracked marketing path to audit (repeatable)")
+		targetsPath := fs.String("targets", ".github/pages-freshness-targets.json", "freshness target manifest")
 		_ = fs.Parse(os.Args[2:])
-		if len(paths) == 0 {
-			paths = append(paths, "docs/marketing", "docs/launch")
+		targets, loadErr := pagespublish.LoadFreshnessTargets(filepath.Join(*root, filepath.FromSlash(*targetsPath)))
+		if loadErr != nil {
+			fmt.Fprintln(os.Stderr, "pagescheck:", loadErr)
+			os.Exit(1)
 		}
-		freshness, auditErr := pagespublish.AuditFreshness(*root, paths, time.Duration(*maximumDays)*24*time.Hour, time.Now())
+		freshness, auditErr := pagespublish.AuditFreshness(*root, targets, time.Now())
 		if writeErr := pagespublish.WriteFreshnessJSON(freshness); writeErr != nil {
 			fmt.Fprintln(os.Stderr, writeErr)
 			os.Exit(1)

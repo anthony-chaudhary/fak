@@ -13,69 +13,127 @@ import (
 	"time"
 )
 
-// FreshnessEntry records the last committed change to a published marketing asset.
+const FreshnessTargetsSchema = "fak-pages-freshness-targets/1"
+
+type FreshnessTarget struct {
+	Path            string `json:"path"`
+	Class           string `json:"class"`
+	ReviewAfterDays int    `json:"review_after_days,omitempty"`
+	Check           string `json:"check"`
+}
+
+type FreshnessTargets struct {
+	Schema  string            `json:"schema"`
+	Roots   []string          `json:"roots"`
+	Targets []FreshnessTarget `json:"targets"`
+}
+
+// FreshnessEntry records the committed age and review contract for one overdue asset.
 type FreshnessEntry struct {
-	Path       string    `json:"path"`
-	LastChange time.Time `json:"last_change"`
-	AgeDays    int       `json:"age_days"`
+	Path            string    `json:"path"`
+	LastChange      time.Time `json:"last_change"`
+	AgeDays         int       `json:"age_days"`
+	ReviewAfterDays int       `json:"review_after_days"`
+	Check           string    `json:"check"`
 }
 
-// FreshnessReport is the deletion queue for time-sensitive Pages content.
+// FreshnessReport is the review queue for explicitly time-sensitive Pages content.
 type FreshnessReport struct {
-	Schema         string           `json:"schema"`
-	MaximumAgeDays int              `json:"maximum_age_days"`
-	Checked        int              `json:"checked"`
-	Stale          []FreshnessEntry `json:"stale"`
+	Schema  string           `json:"schema"`
+	Checked int              `json:"checked"`
+	Durable int              `json:"durable"`
+	Due     []FreshnessEntry `json:"due"`
 }
 
-// AuditFreshness finds tracked files whose latest commit predates the maximum age.
-// Git history, rather than filesystem mtimes, keeps the result reproducible in CI.
-func AuditFreshness(root string, paths []string, maximumAge time.Duration, now time.Time) (FreshnessReport, error) {
-	report := FreshnessReport{Schema: "fak-pages-freshness/1", MaximumAgeDays: int(maximumAge / (24 * time.Hour)), Stale: []FreshnessEntry{}}
-	if maximumAge <= 0 {
-		return report, fmt.Errorf("maximum age must be positive")
+func LoadFreshnessTargets(path string) (FreshnessTargets, error) {
+	var targets FreshnessTargets
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return targets, err
 	}
-	if len(paths) == 0 {
-		return report, fmt.Errorf("at least one path is required")
+	if err := json.Unmarshal(b, &targets); err != nil {
+		return targets, fmt.Errorf("decode freshness targets: %w", err)
 	}
-	filesOut, err := gitOutput(root, append([]string{"ls-files", "--"}, paths...)...)
+	return targets, nil
+}
+
+// AuditFreshness checks only declared review targets. Durable assets are inventoried but
+// never expire merely because their content remains stable.
+func AuditFreshness(root string, targets FreshnessTargets, now time.Time) (FreshnessReport, error) {
+	report := FreshnessReport{Schema: "fak-pages-freshness/2", Due: []FreshnessEntry{}}
+	if targets.Schema != FreshnessTargetsSchema {
+		return report, fmt.Errorf("freshness targets schema %q, want %q", targets.Schema, FreshnessTargetsSchema)
+	}
+	trackedOut, err := gitOutput(root, append([]string{"ls-files", "--"}, targets.Roots...)...)
 	if err != nil {
 		return report, err
 	}
-	files := strings.Fields(strings.ReplaceAll(filesOut, "\\", "/"))
-	sort.Strings(files)
-	cutoff := now.UTC().Add(-maximumAge)
-	for _, path := range files {
-		if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(path))); statErr != nil {
-			if os.IsNotExist(statErr) {
-				continue
-			}
-			return report, fmt.Errorf("%s: %w", path, statErr)
+	tracked := map[string]bool{}
+	for _, path := range strings.Fields(strings.ReplaceAll(trackedOut, "\\", "/")) {
+		tracked[path] = true
+	}
+	declared := map[string]bool{}
+	for _, target := range targets.Targets {
+		target.Path = filepath.ToSlash(strings.TrimSpace(target.Path))
+		if target.Path == "" || declared[target.Path] {
+			return report, fmt.Errorf("freshness target path is empty or duplicated: %q", target.Path)
 		}
-		stamp, err := gitOutput(root, "log", "-1", "--format=%ct", "--", path)
+		declared[target.Path] = true
+		if !tracked[target.Path] {
+			return report, fmt.Errorf("freshness target is not tracked under a configured root: %s", target.Path)
+		}
+		if strings.TrimSpace(target.Check) == "" {
+			return report, fmt.Errorf("%s: freshness target needs a concrete check", target.Path)
+		}
+		switch target.Class {
+		case "durable":
+			if target.ReviewAfterDays != 0 {
+				return report, fmt.Errorf("%s: durable target must not set review_after_days", target.Path)
+			}
+			report.Durable++
+			continue
+		case "review":
+			if target.ReviewAfterDays <= 0 {
+				return report, fmt.Errorf("%s: review target needs positive review_after_days", target.Path)
+			}
+		default:
+			return report, fmt.Errorf("%s: class must be durable or review", target.Path)
+		}
+		stamp, err := gitOutput(root, "log", "-1", "--format=%ct", "--", target.Path)
 		if err != nil {
 			return report, err
 		}
 		stamp = strings.TrimSpace(stamp)
 		if stamp == "" {
-			return report, fmt.Errorf("%s: no git history (checkout must use fetch-depth: 0)", path)
+			return report, fmt.Errorf("%s: no git history (checkout must use fetch-depth: 0)", target.Path)
 		}
 		seconds, err := strconv.ParseInt(stamp, 10, 64)
 		if err != nil {
-			return report, fmt.Errorf("%s: invalid git timestamp %q", path, stamp)
+			return report, fmt.Errorf("%s: invalid git timestamp %q", target.Path, stamp)
 		}
 		changed := time.Unix(seconds, 0).UTC()
 		report.Checked++
-		if changed.Before(cutoff) {
-			report.Stale = append(report.Stale, FreshnessEntry{Path: filepath.ToSlash(path), LastChange: changed, AgeDays: int(now.UTC().Sub(changed) / (24 * time.Hour))})
+		if changed.Before(now.UTC().Add(-time.Duration(target.ReviewAfterDays) * 24 * time.Hour)) {
+			report.Due = append(report.Due, FreshnessEntry{Path: target.Path, LastChange: changed, AgeDays: int(now.UTC().Sub(changed) / (24 * time.Hour)), ReviewAfterDays: target.ReviewAfterDays, Check: target.Check})
 		}
 	}
-	if len(report.Stale) > 0 {
-		names := make([]string, len(report.Stale))
-		for i, entry := range report.Stale {
+	var missing []string
+	for path := range tracked {
+		if !declared[path] {
+			missing = append(missing, path)
+		}
+	}
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		return report, fmt.Errorf("tracked freshness roots contain unclassified assets: %s", strings.Join(missing, ", "))
+	}
+	sort.Slice(report.Due, func(i, j int) bool { return report.Due[i].Path < report.Due[j].Path })
+	if len(report.Due) > 0 {
+		names := make([]string, len(report.Due))
+		for i, entry := range report.Due {
 			names[i] = entry.Path
 		}
-		return report, fmt.Errorf("%d published marketing assets exceed %d days; delete or substantively refresh: %s", len(report.Stale), report.MaximumAgeDays, strings.Join(names, ", "))
+		return report, fmt.Errorf("%d published assets need freshness review; verify the declared check, then update, archive, or retain with a new witnessed review commit: %s", len(report.Due), strings.Join(names, ", "))
 	}
 	return report, nil
 }
@@ -92,7 +150,6 @@ func gitOutput(root string, args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
-// WriteFreshnessJSON emits the report even when stale entries make the audit fail.
 func WriteFreshnessJSON(report FreshnessReport) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")

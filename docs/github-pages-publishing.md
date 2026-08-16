@@ -9,7 +9,7 @@ rebuilt from an empty output directory.
 
 `.github/workflows/pages.yml` coalesces source churn on a 15-minute schedule, and also runs immediately when the publishing implementation changes. A per-doc push trigger is intentionally avoided: this shared trunk can land docs many times per minute, and GitHub Actions keeps only one pending run per concurrency group, so newer pushes otherwise starve every build before it starts:
 
-1. `pagescheck freshness` checks committed history for `docs/marketing/` and `docs/launch/`; any tracked asset older than 21 days must be deleted or substantively refreshed. The checkout is full-depth so age is reproducible.
+1. `pagescheck freshness` loads `.github/pages-freshness-targets.json`. Every asset under `docs/marketing/` and `docs/launch/` must be classified either `durable` (no age expiry) or `review` with a page-specific review interval and concrete up-to-date check. An overdue review asks the maintainer to verify that check and then update, archive, or retain the page with a witnessed review commit; age alone never orders deletion. The checkout is full-depth so review age is reproducible.
 2. `pagescheck source` rejects non-UTF-8 source before Jekyll can fail opaquely.
 3. `pagescheck seo` scores the complete published source corpus and refuses regression below the checked-in score/debt/orphan baseline with a narrow cross-platform path-resolution allowance (84.5 / 535 / 90; post-cleanup local witness is 84.8 / 535 / 90, with narrow hosted path-resolution variance); its full JSON witness is published at `/_proofs/seo-report.json`.
 4. GitHub's supported Jekyll builder creates a fresh `_site` from `docs/`.
@@ -29,8 +29,8 @@ committed and no long-lived `gh-pages` branch accumulates obsolete files.
 The source check is dependency-free and uses the repository's Go toolchain:
 
 ```bash
-go run ./cmd/pagescheck freshness --root . --maximum-age-days 21 \
-  --path docs/marketing --path docs/launch
+go run ./cmd/pagescheck freshness --root . \
+  --targets .github/pages-freshness-targets.json
 go run ./cmd/pagescheck source --root docs
 ```
 
@@ -49,6 +49,6 @@ Actions** as the build source; legacy `main:/docs` builds bypass this contract.
 
 ## CI/CD contract impact
 
-- **Changed:** the Pages build now requires full git history and rejects marketing/launch assets older than 21 days before rendering.
-- **Consumers migrated:** `pages.yml` passes the two published marketing paths to `pagescheck freshness`; the deploy job still consumes the clean `_site` artifact unchanged.
-- **Cutover / rollback:** the next scheduled build enforces the age ceiling; rollback removes the freshness step and returns checkout to shallow history without changing the deployed artifact schema.
+- **Changed:** the Pages build now uses an explicit target manifest instead of applying one age ceiling to every marketing/launch asset.
+- **Consumers migrated:** `pages.yml` passes `.github/pages-freshness-targets.json` to `pagescheck freshness`; the deploy job still consumes the clean `_site` artifact unchanged.
+- **Cutover / rollback:** the next scheduled build enforces complete classification and page-specific review targets; rollback restores the prior path flags without changing the deployed artifact schema.

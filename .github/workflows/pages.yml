@@ -39,9 +39,7 @@ jobs:
         run: >-
           go run ./cmd/pagescheck freshness
           --root .
-          --maximum-age-days 21
-          --path docs/marketing
-          --path docs/launch
+          --targets .github/pages-freshness-targets.json
       - name: Reject source that Pages cannot render
         run: go run ./cmd/pagescheck source --root docs
       - name: Hold the published corpus SEO floor

@@ -1,0 +1,79 @@
+{
+  "schema": "fak-pages-freshness-targets/1",
+  "roots": [
+    "docs/marketing",
+    "docs/launch"
+  ],
+  "targets": [
+    {
+      "path": "docs/marketing/README.md",
+      "class": "durable",
+      "check": "Hub structure and generator commands remain canonical."
+    },
+    {
+      "path": "docs/marketing/config-answers.json",
+      "class": "review",
+      "review_after_days": 21,
+      "check": "Generated configuration answers still match the current CLI and config schema."
+    },
+    {
+      "path": "docs/launch/directory-submissions.md",
+      "class": "review",
+      "review_after_days": 21,
+      "check": "Directory availability, submission status, and copy remain current."
+    },
+    {
+      "path": "docs/launch/landscape-research.md",
+      "class": "review",
+      "review_after_days": 21,
+      "check": "Named alternatives, links, and positioning claims remain current."
+    },
+    {
+      "path": "docs/launch/lobsters-and-blog.md",
+      "class": "review",
+      "review_after_days": 21,
+      "check": "Channel rules, links, and launch copy remain current."
+    },
+    {
+      "path": "docs/launch/positioning-brief.md",
+      "class": "review",
+      "review_after_days": 90,
+      "check": "Durable positioning still matches shipped capabilities and witnessed claims."
+    },
+    {
+      "path": "docs/launch/reddit-localllama.md",
+      "class": "review",
+      "review_after_days": 21,
+      "check": "Community rules, links, and launch copy remain current."
+    },
+    {
+      "path": "docs/launch/reddit-other-subs.md",
+      "class": "review",
+      "review_after_days": 21,
+      "check": "Community list, rules, links, and launch copy remain current."
+    },
+    {
+      "path": "docs/launch/show-hn.md",
+      "class": "review",
+      "review_after_days": 21,
+      "check": "Launch copy and every factual claim remain current."
+    },
+    {
+      "path": "docs/launch/untrusted-program-talk.md",
+      "class": "durable",
+      "check": "Technical talk remains a durable explanatory asset; normal link and claim gates apply."
+    },
+    {
+      "path": "docs/launch/x-thread.md",
+      "class": "review",
+      "review_after_days": 21,
+      "check": "Platform format, links, and launch copy remain current."
+    },
+    {
+      "path": "docs/launch/youtube-demo-script.md",
+      "class": "review",
+      "review_after_days": 21,
+      "check": "Commands, timing, links, and demonstrated behavior remain current."
+    }
+  ]
+}
