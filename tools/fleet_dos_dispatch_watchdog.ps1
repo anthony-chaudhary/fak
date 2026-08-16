@@ -21,19 +21,38 @@ careful NOT to match: the job supervisor (python.exe run_supervise_loop.py), a
 Designed to be run on a 5-minute schedule (see register_dos_dispatch_watchdog.ps1).
 Safe to run by hand any time. Never starts a second supervisor if one is alive.
 
-Exit codes: 0 = supervisor already alive (no-op) | 10 = respawned it.
+The desired population is NOT a parameter of this loop (#6502): it is read from the
+one declared SSOT (fleet_target.ps1) at tick time, so an operator's target-0
+quarantine survives every scheduled tick and every reboot. This task used to carry
+`-Target 8` in its Scheduled Task arguments, a snapshot Task Scheduler would have
+replayed against that quarantine forever.
+
+Exit codes: 0 = supervisor already alive, or quarantined (no-op) | 3 = the tick's
+requested population was refused by the SSOT | 10 = respawned it.
 #>
 [CmdletBinding()]
 param(
   # Resolve the repo root from this script's own location (tools/ lives at the
   # repo root) so the watchdog works from any clone, not just C:\work\fleet.
-  [string]$FleetDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
-  [int]$Target      = 4,
+  # Resolved in the BODY, not here: under [CmdletBinding()] Windows PowerShell
+  # evaluates param defaults before $PSScriptRoot is populated, so this expression
+  # in the default position died at parameter binding on every `powershell.exe
+  # -File` run -- which is exactly how the Scheduled Task invokes it.
+  [string]$FleetDir = '',
+  # -1 means "this tick carried no population", which is the intended steady
+  # state. A number passed by hand is ADVISORY: it must agree with the SSOT or the
+  # tick is refused, and it never raises the population on its own.
+  [int]$Target      = -1,
   [int]$Interval    = 120,
   [string]$LogDir   = ''
 )
 
 $ErrorActionPreference = 'Stop'
+# The param defaults above are deliberately empty because $PSScriptRoot is not yet
+# populated at parameter-binding time; resolve here, where it is. The $MyInvocation
+# fallback covers the dot-sourced case, matching register_dos_dispatch_watchdog.ps1.
+$scriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+if (-not $FleetDir) { $FleetDir = (Resolve-Path (Join-Path $scriptRoot '..')).Path }
 $stateRoot = if ($env:FLEET_STATE_DIR) {
   $env:FLEET_STATE_DIR
 } elseif ($env:LOCALAPPDATA) {
@@ -48,6 +67,21 @@ function Note($m) {
   $line = "{0}  {1}" -f (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'), $m
   Add-Content -Path $log -Value $line
   Write-Output $line
+}
+
+# #6502: resolve the desired population from the declared SSOT before anything
+# else. Assert-FleetTargetAdmits returns the SSOT's number whatever this tick
+# asked for, so even a stale scheduled argument cannot raise the population.
+. (Join-Path $scriptRoot 'fleet_target.ps1')
+try {
+  $Target = Assert-FleetTargetAdmits -Requested $Target
+} catch {
+  Note ("REFUSED {0}" -f $_.Exception.Message)
+  exit 3
+}
+if ($Target -le 0) {
+  Note ("QUARANTINE target=0 per {0} -- not respawning the dispatch supervisor" -f (Get-FleetTargetPath))
+  exit 0
 }
 
 # A fleet dispatch supervisor is alive iff a dos.exe process is running

@@ -19,15 +19,23 @@ install, so without this gate merely installing the task would spawn the supervi
 Designed to be run on a 5-minute schedule (see register-* below). Safe to run
 by hand any time. Never starts a second supervisor if one is alive.
 
-Exit codes: 0 = alive / disabled / job repo absent (no-op) | 10 = respawned it.
+The desired population is NOT this loop's to choose (#6502): it comes from the one
+declared SSOT (fleet_target.ps1), read at tick time, so an operator's target-0
+quarantine survives every scheduled tick and every reboot. This task used to carry
+`-Target 4` in its Scheduled Task arguments while a sibling watchdog carried
+`-Target 8` and the operator held target 0 -- three answers to one question.
+
+Exit codes: 0 = alive / disabled / quarantined / job repo absent (no-op) | 3 = the
+tick's requested population was refused by the SSOT | 10 = respawned it.
 #>
 [CmdletBinding()]
 param(
   [string]$JobDir = 'C:\work\job',
-  # Seed from FAK_SUPERVISOR_TARGET when -Target is not passed, mirroring the .py port
-  # (fleet_supervisor_watchdog.py:39) so the laptop_dispatch_config.ps1 env knob governs
-  # the population on Windows too.
-  [int]$Target    = $(if ($env:FAK_SUPERVISOR_TARGET) { [int]$env:FAK_SUPERVISOR_TARGET } else { 4 }),
+  # -1 means "this tick carried no population", which is the intended steady state.
+  # FAK_SUPERVISOR_TARGET (laptop_dispatch_config.ps1) is still honored as a
+  # REQUEST, but it is advisory: it goes through the same SSOT admission as a
+  # hand-passed -Target and can never raise the population on its own.
+  [int]$Target    = $(if ($env:FAK_SUPERVISOR_TARGET) { [int]$env:FAK_SUPERVISOR_TARGET } else { -1 }),
   [string]$LogDir = ''
 )
 
@@ -46,6 +54,21 @@ function Note($m) {
   $line = "{0}  {1}" -f (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'), $m
   Add-Content -Path $log -Value $line
   Write-Output $line
+}
+
+# #6502: the declared SSOT owns the population, not this task's arguments and not
+# the env knob. Assert-FleetTargetAdmits returns the SSOT's number whatever was
+# requested, so even a stale scheduled -Target cannot repopulate a quarantine.
+. (Join-Path $PSScriptRoot 'fleet_target.ps1')
+try {
+  $Target = Assert-FleetTargetAdmits -Requested $Target
+} catch {
+  Note ("REFUSED {0}" -f $_.Exception.Message)
+  exit 3
+}
+if ($Target -le 0) {
+  Note ("QUARANTINE target=0 per {0} -- not respawning the supervisor" -f (Get-FleetTargetPath))
+  exit 0
 }
 
 # A supervisor is alive iff a run_supervise_loop.py process exists.
