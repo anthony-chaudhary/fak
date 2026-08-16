@@ -19,6 +19,15 @@ task principal to S4U (needs elevation): tools\migrate_fleet_tasks_to_s4u.ps1.
 
 Exit: 0 GREEN, 2 AMBER, 3 RED (so a /loop or CI gate can branch on it).
 
+THE EXIT CODE IS THE GATE -- PROPAGATE IT (#6509). A wrapper that runs this audit,
+appends the output to a log, and then `exit 0` makes Task Scheduler record
+LastTaskResult=0 over 47 RED findings: telemetry with no gate, where a red finding
+never alters health and the same warning is appended forever. The typed statuses,
+the finding-recurrence fold (age / occurrences / resolution / actionable owner), and
+the "a RED audit cannot yield scheduler result 0" proof live in
+internal/watchdoghealth (auditgate.go); a wrapper's only job is to hand this script's
+$LASTEXITCODE straight back to the scheduler.
+
   .\watchdog_watchdog_audit.ps1            # human-readable audit + verdict
   .\watchdog_watchdog_audit.ps1 -Json      # machine verdict (one JSON object)
 #>
@@ -114,7 +123,11 @@ $selfTask = Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.
 $out.n3_auditor_scheduled = [bool]$selfTask
 $out.n3_auditor_logontype = if ($selfTask) { "$(@($selfTask)[0].Principal.LogonType)" } else { $null }
 if (-not $selfTask) { Bump 'amber' "n3 GAP: this audit is not itself scheduled/looped -- it only runs when a human remembers. A dead auditor over a dead watchdog is a silent double-fault." }
-elseif ($out.n3_auditor_logontype -eq 'Interactive') { Bump 'amber' "n3: the auditor's own task is LogonType=Interactive -- it will die the SAME way it is meant to detect. Make it S4U (or keep it as an orthogonal /loop, not a scheduled task)." }
+# RED, not amber (#6509): an auditor sharing the failure mode it detects is not a latent
+# risk, it is a DISABLED GATE -- once refused it goes silent, and silence then reads as
+# health. Independence from the checked failure mode is a precondition for trusting any
+# verdict this script emits, so it fails the audit outright.
+elseif ($out.n3_auditor_logontype -match '^Interactive') { Bump 'red' "n3: the auditor's own task is LogonType=Interactive -- it will be refused (0x800710E0) the SAME way the tasks it audits were, so its silence cannot be read as health. Make it S4U (or keep it as an orthogonal /loop, not a scheduled task)." }
 
 $out.verdict = $verdict.ToUpper()
 $out.reasons = @($reasons)
