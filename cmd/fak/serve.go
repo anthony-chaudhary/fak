@@ -369,6 +369,7 @@ func cmdServe(argv []string) {
 	rt.resolveCompute(sf)
 	defer rt.closeEPGroup()
 	rt.loadModel(sf)
+	rt.configureEPDecode()
 	rt.resolveSessionPlane(sf)
 	rt.resolveObservers(sf)
 	rt.buildGateway(sf)

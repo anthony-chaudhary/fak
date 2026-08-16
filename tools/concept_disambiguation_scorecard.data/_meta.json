@@ -3948,6 +3948,11 @@
           "category": "incidental",
           "reason": "Implementation symbol for #2174 scheduled-task launcher audit, not a separate session-runtime concept.",
           "token": "schedSessionUnknown"
+        },
+        {
+          "category": "incidental",
+          "reason": "Session constructor adapter for #4835 follower decode, not a distinct session-runtime concept.",
+          "token": "epFollowerSessionFactory"
         }
       ],
       "id": "session-runtime",
@@ -4059,6 +4064,7 @@
         "dispatchsessionsaudittest",
         "endpointSessionState",
         "enqueueGuardSessionThreadNotice",
+        "epFollowerSessionFactory",
         "episodes",
         "exact-filter",
         "fak_fleet_goal_sessions",

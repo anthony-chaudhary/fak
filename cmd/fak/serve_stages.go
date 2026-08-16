@@ -50,6 +50,8 @@ type serveRuntime struct {
 	inKernelQ4K   bool
 	loadProfile   *gateway.ModelLoadProfile
 	epGroup       *fakmodel.DistComm
+	epRole        epDecodeRole
+	epCoord       *fakmodel.EPDecodeCoordinator
 	inKernelTok   *tokenizer.Tokenizer
 
 	apiKey              string
