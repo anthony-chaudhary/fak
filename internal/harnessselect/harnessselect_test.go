@@ -37,6 +37,21 @@ func TestResolveOverlappingHarnessLayers(t *testing.T) {
 	}
 }
 
+func TestResolveNormalizesForeignPathSeparators(t *testing.T) {
+	m := Manifest{Schema: Schema, Layers: []Layer{{
+		ID:    "project",
+		Scope: "project",
+		When:  Match{PathPrefixes: []string{`C:/matters/7`}},
+	}}}
+	got, err := Resolve(m, Context{Path: `C:\matters\7\briefs`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"project"}; !reflect.DeepEqual(got.Layers, want) {
+		t.Fatalf("layers = %#v, want %#v", got.Layers, want)
+	}
+}
+
 func TestResolveIsPermutationInvariant(t *testing.T) {
 	base := Manifest{Schema: Schema, Layers: []Layer{
 		{ID: "team", Scope: "team", Capabilities: []string{"review"}},

@@ -204,7 +204,10 @@ func selectionReason(layer Layer) string {
 }
 
 func cleanPath(s string) string {
-	s = filepath.ToSlash(strings.TrimSpace(s))
+	// Manifests and launch contexts can cross OS boundaries. Normalize both
+	// separator spellings before filepath.Clean applies host-native semantics.
+	s = strings.ReplaceAll(strings.TrimSpace(s), `\`, "/")
+	s = filepath.ToSlash(filepath.Clean(filepath.FromSlash(s)))
 	if s == "." {
 		return ""
 	}
