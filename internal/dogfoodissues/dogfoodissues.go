@@ -548,6 +548,7 @@ func IssueBodyWithOptions(item ActionItem, opt BuildOptions) string {
 	issueSection(&b, "Batch policy", c.BatchPolicy)
 	issueSection(&b, "Core through-line", item.InScope)
 	issueSection(&b, "Gold-plating boundary", item.OutOfScope)
+	issueProblemFrame(&b, c.ProblemFrame)
 	issueSection(&b, "Done condition", item.DoneCondition)
 	issueSection(&b, "Witness", item.Witness)
 	issueSection(&b, "Acceptance gate", item.AcceptanceGate)
@@ -672,6 +673,17 @@ func firstPositive(values ...int) int {
 		}
 	}
 	return 0
+}
+
+func issueProblemFrame(b *strings.Builder, frame issuepolicy.ProblemFrame) {
+	fmt.Fprintln(b, "## Problem frame")
+	fmt.Fprintln(b)
+	fmt.Fprintf(b, "- Centrality: %s (%s)\n", frame.Centrality, frame.CentralityTarget)
+	for _, id := range []string{"p1", "p2", "p3", "p4"} {
+		check := frame.Checks[id]
+		fmt.Fprintf(b, "- %s: %s - %s\n", strings.ToUpper(id), check.Status, check.Evidence)
+	}
+	fmt.Fprintln(b)
 }
 
 func issueSection(b *strings.Builder, title, body string) {

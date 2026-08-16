@@ -734,3 +734,12 @@ func TestActionCandidateCarriesCanonicalProblemFrameIndependentOfMetadata(t *tes
 		t.Fatalf("review lost frame: %+v", review.ProblemFrame)
 	}
 }
+
+func TestIssueBodyRoundTripsCanonicalProblemFrame(t *testing.T) {
+	item := ActionItem{Key: "dogfood/action", Title: "action", SourceProbe: "score", Finding: "debt", InScope: "one fix", OutOfScope: "other work", DoneCondition: "debt drops", Witness: "score rerun", AcceptanceGate: "go test", WorkingSpine: "fix one measured row", Lane: "dogfoodissues", Paths: []string{"internal/dogfoodissues"}}
+	body := IssueBody(item)
+	review := issuepolicy.ReviewIssueDraft(issuepolicy.IssueDraft{Title: item.Title, Body: body}, issuepolicy.Options{})
+	if !review.ProblemFrame.Ready || review.ProblemFrame.Centrality != issuepolicy.CentralityEnabling || len(review.ProblemFrame.Checks) != 4 {
+		t.Fatalf("body round trip lost frame: %+v\n%s", review.ProblemFrame, body)
+	}
+}
