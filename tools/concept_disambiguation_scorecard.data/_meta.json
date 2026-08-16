@@ -3869,6 +3869,11 @@
           "category": "incidental",
           "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
           "token": "session_counters_reset_during_window"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed ownership-report reason code, not a session lifecycle state or runtime control",
+          "token": "ReasonSessionLive"
         }
       ],
       "id": "session-runtime",
@@ -3894,6 +3899,7 @@
         "ObservedSessions",
         "PublishSessionDiscovery",
         "ReapMalformedSessionRefs",
+        "ReasonSessionLive",
         "RecordSessionTerminalOutput",
         "RegisteredObserved",
         "ResolveSessionEffect",
@@ -8242,6 +8248,11 @@
           "category": "incidental",
           "reason": "Local Markdown formatting helper for the harness gallery; it introduces no reusable render/materialize contract.",
           "token": "renderREADME"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private text formatter for the wip owner command, not a reusable render abstraction",
+          "token": "wipOwnerRender"
         }
       ],
       "id": "render-materialize",
@@ -8312,6 +8323,7 @@
         "tuioverviewsavingsrender",
         "unmaterialized",
         "wipBlockedRender",
+        "wipOwnerRender",
         "wipReclaimRender"
       ],
       "min_files": 2,

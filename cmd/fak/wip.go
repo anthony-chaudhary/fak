@@ -66,6 +66,8 @@ func runWip(stdout, stderr io.Writer, argv []string) int {
 		return runWipReap(stdout, stderr, argv[1:])
 	case "attribute", "attr":
 		return runWipAttribute(stdout, stderr, argv[1:])
+	case "owner", "own":
+		return runWipOwner(stdout, stderr, argv[1:])
 	case "blocked":
 		return runWipBlocked(stdout, stderr, argv[1:])
 	case "reconcile":
@@ -183,6 +185,18 @@ func wipUsage(w io.Writer) {
       Attribute every dirty working-tree hunk to the session that checkpointed it
       (OWNED), to several (SHARED), or to none (ORPHAN — unattributed, at-risk WIP).
       With --orphans, print only the ORPHAN hunks (exit 3 if any exist).
+
+  fak wip owner [-C <repo>] [--ttl <dur>] [--json] [--unclaimed] [<path>...]
+      Answer "whose is this?" for a CREATED path — the case attribute structurally
+      cannot see, because a file absent from HEAD produces no 'git diff HEAD' hunk.
+      Evidence is the checkpoint capture itself (read-tree HEAD + add -A records every
+      untracked path as an ADDITION), so each created path grades CLAIMED_LIVE (one
+      fresh claimant), AMBIGUOUS (several — tree-wide capture cannot name an author, so
+      none is chosen), CLAIMED_EXPIRED (named owner, check-in overdue — NEVER a reap
+      licence), or UNCLAIMED (no fresh checkpoint records it: at risk from any broad
+      add/clean). Defaults to every untracked path; --unclaimed prints only the at-risk
+      set and exits 3 if any exist. Read-only. The --ttl claim window is also the cost
+      bound: only checkpoints inside it (or held by a live session) are read.
 
   fak wip blocked [-C <repo>] [--ledger <path>] [--stale-days N] [--landable] [--json]
       Rank the dirty working tree by the dispatch admissions each path has REFUSED
