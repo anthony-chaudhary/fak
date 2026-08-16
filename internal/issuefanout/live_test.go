@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 func liveTestPlan(t *testing.T) Plan {
@@ -151,5 +153,19 @@ func TestListExistingArgsBoundsTheScan(t *testing.T) {
 	want := fmt.Sprintf("issue list --state all --limit %d --json number,body --repo o/r", DefaultDedupeCap)
 	if got != want {
 		t.Fatalf("ListExistingArgs = %q, want %q", got, want)
+	}
+}
+
+func TestLiveBodyRoundTripsCanonicalProblemFrame(t *testing.T) {
+	plan, err := Build(Input{Title: "frame spine", Leaf: "framespine", SpineRef: "abc", Max: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range plan.Candidates {
+		body := LiveBody(candidate)
+		review := issuepolicy.ReviewIssueDraft(issuepolicy.IssueDraft{Title: candidate.Title, Body: body}, issuepolicy.Options{})
+		if !review.ProblemFrame.Ready || review.ProblemFrame.Centrality != candidate.ProblemFrame.Centrality || review.ProblemFrame.CentralityTarget != candidate.ProblemFrame.CentralityTarget || len(review.ProblemFrame.Checks) != 4 {
+			t.Fatalf("%s body lost frame: %+v\n%s", candidate.Key, review.ProblemFrame, body)
+		}
 	}
 }

@@ -137,6 +137,18 @@ func LiveBody(c issuepolicy.Candidate) string {
 	section("Working spine", c.WorkingSpine)
 	section("Core through-line", c.InScope)
 	section("Gold-plating boundary", c.OutOfScope)
+	if c.ProblemFrame.Enforced {
+		centrality := c.ProblemFrame.Centrality
+		if c.ProblemFrame.CentralityTarget != "" {
+			centrality += " (" + c.ProblemFrame.CentralityTarget + ")"
+		}
+		lines := []string{"- Centrality: " + centrality}
+		for _, id := range []string{"p1", "p2", "p3", "p4"} {
+			check := c.ProblemFrame.Checks[id]
+			lines = append(lines, "- "+strings.ToUpper(id)+": "+check.Status+" - "+check.Evidence)
+		}
+		section("Problem frame", strings.Join(lines, "\n"))
+	}
 	section("Root point", c.RootPoint)
 	section("Origin signal", c.OriginSignal)
 	section("Prevents recurrence", c.PreventsRecurrence)
