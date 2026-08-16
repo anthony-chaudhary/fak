@@ -357,7 +357,7 @@ Fleet-spine discovery path with one elevated setup:
 
 ```powershell
 go run ./cmd/fak-dev windows-setup              # inspect; makes no changes
-go run ./cmd/fak-dev windows-setup --apply      # one UAC prompt; default-allow all profiles, suppress listen prompts, install + verify
+go run ./cmd/fak-dev windows-setup --apply      # one UAC prompt; default-deny inbound, allow outbound, suppress listen prompts, install + verify
 ```
 
 The command idempotently adds Microsoft Defender exclusions for the repository, Go build
