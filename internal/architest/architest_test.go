@@ -604,7 +604,7 @@ var tier = map[string]int{
 	"workaccount":           1, // stdlib-only WORK DONE mechanism coverage registry and validator; off the runtime hot path.
 	"orientation":           2, // versioned temporal product-orientation snapshot; imports issue-free stdlib only, off the runtime hot path.
 	"harnessweb":            2, // loopback browser runtime over public harnesskit plus persisted semantic sessions; off kernel hot path (#6980).
-	"committedbuildwitness": 1, // stdlib-only exact-HEAD build receipt shared by off-path repository gates and dispatch preflight (#6871).
+	"committedbuildwitness": 2, // exact-HEAD build receipt; imports windowgate(2) for hidden git probes, off the hot path (#6871).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
