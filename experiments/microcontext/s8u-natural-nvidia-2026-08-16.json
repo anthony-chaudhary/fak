@@ -1,0 +1,1181 @@
+{
+  "Schema": "fak-microcontext-natural-traffic-judgments/1",
+  "CreatedAt": "2026-08-16T09:20:53Z",
+  "CorpusSHA256": "c62ea95020119723fd94f53056941932ca3aab449de3db76aace8c2d3b820d8c",
+  "Adjudicator": "nvidia-llama-3.1-8b",
+  "Model": "meta/llama-3.1-8b-instruct",
+  "BatchSize": 10,
+  "PromptTokens": 43067,
+  "OutputTokens": 7128,
+  "WallMS": 109399.628,
+  "Records": [
+    {
+      "id": "gh-6350",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about tightening the baseline after retirement commits, which requires searching the repository for the relevant commits and understanding the commit state."
+    },
+    {
+      "id": "gh-6318",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about implementing a policy capability adjudication and reason terms, which requires searching the repository for relevant information."
+    },
+    {
+      "id": "gh-6206",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about requiring reuse classification for every new dev command, which requires searching the repository for relevant information and reading documentation."
+    },
+    {
+      "id": "gh-6056",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about making whole-path coordination the central fak mantra, which requires searching the repository for relevant information and reading documentation."
+    },
+    {
+      "id": "gh-6103",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about adding a dedicated architest gate that consumes the existing typed report diagnostic, which requires searching the repository for relevant commits and understanding the commit state."
+    },
+    {
+      "id": "gh-6233",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about refreshing GPTQ interoperability beyond archived loaders, which requires searching the repository for relevant commits and understanding the commit state."
+    },
+    {
+      "id": "gh-6184",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about benchmarking trigram code search against indexed search systems, which requires searching the repository for relevant information."
+    },
+    {
+      "id": "gh-6047",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about projecting cache and context state into coordinated plans, which requires searching the repository for relevant information."
+    },
+    {
+      "id": "gh-6070",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about adding intent-level customization guide over excellent defaults, which requires searching the repository for relevant commits and understanding the commit state."
+    },
+    {
+      "id": "gh-6137",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about running telemetry alternative arms, which requires searching the repository for relevant information."
+    },
+    {
+      "id": "gh-6247",
+      "labels": [
+        "commit_state",
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks to evaluate FOCUS FP4 against tuned public baselines, which requires searching the repository for relevant information, reading documentation, and examining the commit state."
+    },
+    {
+      "id": "gh-6267",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks to retire superseded Python commit-message checker, which requires searching the repository and examining the commit state."
+    },
+    {
+      "id": "gh-6052",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks to recover partial cross-layer failures without leaked work, which requires searching the repository."
+    },
+    {
+      "id": "gh-6263",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks to retire superseded Python implementation and tests, which requires searching the repository and examining the commit state."
+    },
+    {
+      "id": "gh-6197",
+      "labels": [
+        "commit_state",
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks to name the aging in-flight set so finish-before-start has a target, which requires searching the repository, examining the issue state, and examining the commit state."
+    },
+    {
+      "id": "gh-6251",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks to model non-uniform and learned quantization codebooks, which requires searching the repository and examining the commit state."
+    },
+    {
+      "id": "gh-6290",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks to ship the Go generator and byte-deterministic ordering, which requires searching the repository and examining the commit state."
+    },
+    {
+      "id": "gh-6222",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks to define a neutral quantization capability descriptor, which requires searching the repository and examining the commit state."
+    },
+    {
+      "id": "gh-6373",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks to expose directed dependency cycles, which requires searching the repository."
+    },
+    {
+      "id": "gh-6214",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks to gate direct fan-out growth, which requires searching the repository."
+    },
+    {
+      "id": "gh-6365",
+      "labels": [
+        "commit_state",
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about binding reviewed workflow concepts to bounded steering actions, which requires searching the repository for related code and documentation, as well as understanding the current state of the commit."
+    },
+    {
+      "id": "gh-6361",
+      "labels": [
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about exposing dependency dominator seams, which requires searching the repository for related code and understanding the current state of the issue."
+    },
+    {
+      "id": "gh-6353",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about benchmarking test routing against host and CI alternatives, which requires searching the repository for related code and understanding the current state of the commit."
+    },
+    {
+      "id": "gh-6023",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about making legacy fak dev a thin migration handoff to fak-dev, which requires searching the repository for related code and understanding the current state of the commit."
+    },
+    {
+      "id": "gh-6304",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about adding regenerate-and-diff CI enforcement, which requires searching the repository for related code and understanding the current state of the commit."
+    },
+    {
+      "id": "gh-6022",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about migrating dev-only dispatch and enforcing a runtime dependency ratchet, which requires searching the repository for related code."
+    },
+    {
+      "id": "gh-6155",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about benchmarking cache reuse divergence detection against monitoring alternatives, which requires searching the repository for related code."
+    },
+    {
+      "id": "gh-6355",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about adversarial + edge-case sweep for Native micro-agent shared-cache swarm proof, which requires searching the repository for related code and understanding the current state of the commit."
+    },
+    {
+      "id": "gh-6319",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about index benchmark baseline witness and claim terms, which requires searching the repository for related code."
+    },
+    {
+      "id": "gh-6362",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about the sweep writing FAK_\u003cFEATURE\u003e=1|0 but 8 registered arms speak a different value dialect, which requires searching the repository for related code."
+    },
+    {
+      "id": "gh-6081",
+      "labels": [
+        "commit_state",
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about fixing a specific issue in the CUDA toolkit, and the context mentions the source issue, updated at, and SHA256 hash, which suggests that the answer can be found in the repository search, issue state, and commit state."
+    },
+    {
+      "id": "gh-6143",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about running a specific benchmark, and the context mentions the parent production-scope benchmark coverage epic, which suggests that the answer can be found in the repository search."
+    },
+    {
+      "id": "gh-6305",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about implementing a specific work unit, and the context mentions the parent epic and sequence hint, which suggests that the answer can be found in the repository search."
+    },
+    {
+      "id": "gh-6080",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about exposing reverse dependents and fan-in hotspots, and the context mentions the parent epic and spine, which suggests that the answer can be found in the repository search."
+    },
+    {
+      "id": "gh-6293",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about modeling explicit contrasts and forbidden conflations, and the context mentions the parent epic and sequence hint, which suggests that the answer can be found in the repository search."
+    },
+    {
+      "id": "gh-6323",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about adding change-impact output for index diffs, and the context mentions the parent epic and sequence hint, which suggests that the answer can be found in the repository search."
+    },
+    {
+      "id": "gh-6160",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about bounding straggler tails with cancellation and partial folds, and the context mentions the parent epic and strengthened baseline, which suggests that the answer can be found in the repository search."
+    },
+    {
+      "id": "gh-6213",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about shipping the end-to-end report CLI and proof fixture, and the context mentions the catalog and miners, which suggests that the answer can be found in the repository search."
+    },
+    {
+      "id": "gh-6236",
+      "labels": [
+        "commit_state",
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about supporting bitsandbytes 8-bit and 4-bit load contracts, and the context mentions the parent epic and working spine, which suggests that the answer can be found in the repository search, issue state, and commit state."
+    },
+    {
+      "id": "gh-6215",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about fixing the CONFIG_NOT_ENV ratchet, and the context mentions the parent epic and adjacent issues, which suggests that the answer can be found in the repository search and commit state."
+    },
+    {
+      "id": "gh-6175",
+      "labels": [
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about an idea-scout candidate and the context mentions a paper on arXiv, which suggests that the question requires reading documentation to understand the topic."
+    },
+    {
+      "id": "gh-6227",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about exposing quantization capability constraints in policy, which requires searching the repository for related code and understanding the current state of the codebase."
+    },
+    {
+      "id": "gh-6021",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about shipping a minimal independent fak-dev binary spine, which requires searching the repository for related code and understanding the current state of the codebase."
+    },
+    {
+      "id": "gh-6044",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about implementing durable REQUIRE_WITNESS held-call spine, which requires searching the repository for related code and reading documentation to understand the topic."
+    },
+    {
+      "id": "gh-6060",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about showing guard fleet posture in the default TUI, which requires searching the repository for related code and understanding the current state of the codebase."
+    },
+    {
+      "id": "gh-6193",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about gate dependency reach and depth growth, which requires searching the repository for related code and understanding the current state of the codebase."
+    },
+    {
+      "id": "gh-6058",
+      "labels": [
+        "commit_state",
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about proving net value over tuned layer-local policies, which requires searching the repository for related code, understanding the current state of the codebase, and reading documentation to understand the topic."
+    },
+    {
+      "id": "gh-6237",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about integrating torchao quantization capability discovery, which requires searching the repository for related code and understanding the current state of the codebase."
+    },
+    {
+      "id": "gh-6194",
+      "labels": [
+        "commit_state",
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about making WIP a governed quantity, which requires searching the repository for related code, understanding the current state of the codebase, and analyzing issue state to understand the impact of WIP."
+    },
+    {
+      "id": "gh-6162",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about benchmarking dedicated cache warming against provider and engine alternatives, which requires searching the repository for related code and understanding the current state of the codebase."
+    },
+    {
+      "id": "gh-6190",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about implementing a feature for archreport, which involves gate pairwise lateral vertex-cut loss. The context mentions searching for related issues and commits, which suggests that the question requires searching the repository for relevant information."
+    },
+    {
+      "id": "gh-6248",
+      "labels": [
+        "commit_state",
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about evaluating heterogeneity-aware microscaling, which involves researching and reading documentation. The context mentions searching for related issues and commits, which suggests that the question requires searching the repository for relevant information and checking the commit state."
+    },
+    {
+      "id": "gh-6342",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about wiring provider stream callbacks into generation control, which involves searching for related issues and commits. The context mentions searching for related issues and commits, which suggests that the question requires searching the repository for relevant information and checking the commit state."
+    },
+    {
+      "id": "gh-6277",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about implementing a feature for disambiguation, which involves model explicit contrasts and forbidden conflations. The context mentions searching for related issues, which suggests that the question requires searching the repository for relevant information."
+    },
+    {
+      "id": "gh-6209",
+      "labels": [
+        "commit_state",
+        "docs_read",
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about synthesizing a cited coding-workload vocabulary, which involves researching and reading documentation. The context mentions searching for related issues and commits, which suggests that the question requires searching the repository for relevant information, checking the issue state, and checking the commit state."
+    },
+    {
+      "id": "gh-6182",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about benchmarking Go AST queries against structural search tools, which involves searching for related issues. The context mentions searching for related issues, which suggests that the question requires searching the repository for relevant information."
+    },
+    {
+      "id": "gh-6327",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about adding a scale and latency witness for repository-sized index, which involves searching for related issues. The context mentions searching for related issues, which suggests that the question requires searching the repository for relevant information."
+    },
+    {
+      "id": "gh-6031",
+      "labels": [
+        "commit_state",
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about implementing a feature for microcontextdemo, which involves reading-only tool enrichment fan-out with quotas and cancellation. The context mentions searching for related issues and commits, which suggests that the question requires searching the repository for relevant information, checking the commit state, and reading documentation."
+    },
+    {
+      "id": "gh-6146",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about running cache simulator alternative arms, which involves searching for related issues. The context mentions searching for related issues, which suggests that the question requires searching the repository for relevant information."
+    },
+    {
+      "id": "gh-6195",
+      "labels": [
+        "commit_state",
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about auditing live scheduler quality disagreements, which involves searching for related issues and commits. The context mentions searching for related issues and commits, which suggests that the question requires searching the repository for relevant information, checking the issue state, and checking the commit state."
+    },
+    {
+      "id": "gh-6028",
+      "labels": [
+        "commit_state",
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks to classify portable dev patterns versus fak-specific tooling, which requires reading documentation and searching the repository for relevant information. The commit state is also relevant as it involves changes to the codebase."
+    },
+    {
+      "id": "gh-6229",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question involves emitting quantization route and residency telemetry, which requires searching the repository for relevant information and checking the commit state."
+    },
+    {
+      "id": "gh-6117",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question involves adding a gate for increased tier-gap drift, which requires searching the repository for relevant information and checking the commit state."
+    },
+    {
+      "id": "gh-6121",
+      "labels": [
+        "docs_read",
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question involves removing duplicated labels from S8f answer facts, which requires searching the repository for relevant information, checking the issue state, and reading documentation."
+    },
+    {
+      "id": "gh-6279",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question involves assigning owner leaf and lane to every entry, which requires searching the repository for relevant information."
+    },
+    {
+      "id": "gh-6243",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question involves adding BitNet runtime capability and delegation spine, which requires searching the repository for relevant information and checking the commit state."
+    },
+    {
+      "id": "gh-6179",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question involves exposing lateral minimum-cut partitions, which requires searching the repository for relevant information."
+    },
+    {
+      "id": "gh-6074",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question involves adding a determinism test and a -race run, which requires searching the repository for relevant information and checking the commit state."
+    },
+    {
+      "id": "gh-6271",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question involves retiring superseded Python AMD GPU facts implementation, which requires searching the repository for relevant information and checking the commit state."
+    },
+    {
+      "id": "gh-6027",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question involves fixing a corrupt cooldown store, which requires searching the repository for relevant information and checking the commit state."
+    },
+    {
+      "id": "gh-6084",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about fixing a bug in the archreport feature, which involves searching the repository for related commits and understanding the commit state."
+    },
+    {
+      "id": "gh-6250",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about reproducing a specific result from a research paper, which involves searching the repository for related documents and reading them."
+    },
+    {
+      "id": "gh-6296",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about disambiguating freshness verdicts, which involves searching the repository for related issues."
+    },
+    {
+      "id": "gh-6313",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about indexing module leaf lane and commit-stamp vocabulary, which involves searching the repository for related commits and understanding the commit state."
+    },
+    {
+      "id": "gh-6119",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about reconciling native cache pricing with cloud calculators, which involves searching the repository for related issues."
+    },
+    {
+      "id": "gh-6315",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about indexing cache prefix radix KV and provider reuse terms, which involves searching the repository for related issues."
+    },
+    {
+      "id": "gh-6343",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about persisting generation epochs and steering points, which involves searching the repository for related issues."
+    },
+    {
+      "id": "gh-6111",
+      "labels": [
+        "commit_state",
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about publishing net-true large-input decision boundary, which involves searching the repository for related commits, reading documents, and understanding the commit state."
+    },
+    {
+      "id": "gh-6287",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about adding a committed-tip freshness verifier, which involves searching the repository for related commits and understanding the commit state."
+    },
+    {
+      "id": "gh-6289",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about defining the machine-readable entry schema and version contract, which involves searching the repository for related issues."
+    },
+    {
+      "id": "gh-6218",
+      "labels": [
+        "commit_state",
+        "docs_read",
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about the exposure state of claims in CLAIMS.md, which requires searching the repository, understanding the current state of the issue, checking the commit history, and reading documentation."
+    },
+    {
+      "id": "gh-6205",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about benchmarking Go call graph against type-aware and code-intelligence alternatives, which requires searching the repository."
+    },
+    {
+      "id": "gh-6174",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about retaining cut witnesses across connectivity drift, which requires searching the repository."
+    },
+    {
+      "id": "gh-6344",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about measuring steering resolution, latency, and speculative waste, which requires searching the repository."
+    },
+    {
+      "id": "gh-6359",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about measuring Native micro-agent shared-cache swarm proof adoption, which requires searching the repository and checking the commit history."
+    },
+    {
+      "id": "gh-6192",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about exposing transitive dependency reach, which requires searching the repository."
+    },
+    {
+      "id": "gh-6045",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about defining typed tool-call plugin stages and user preference layering, which requires searching the repository and reading documentation."
+    },
+    {
+      "id": "gh-6141",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about gating deeper transitive blast paths, which requires searching the repository."
+    },
+    {
+      "id": "gh-6275",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about adding query-by-canonical-term with structured JSON, which requires searching the repository."
+    },
+    {
+      "id": "gh-6126",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question asks about fixing CUDA acceptance, which requires searching the repository."
+    },
+    {
+      "id": "gh-6294",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about implementing a feature to attach scope qualifiers to overloaded terms, which requires searching the repository for relevant information."
+    },
+    {
+      "id": "gh-6150",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about implementing a feature to diff lateral component coupling, which requires searching the repository for relevant information."
+    },
+    {
+      "id": "gh-6158",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about implementing a feature to gate lateral articulation-point impact, which requires searching the repository for relevant information."
+    },
+    {
+      "id": "gh-6139",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about running scheduler alternative arms, which requires searching the repository for relevant information and reading documentation."
+    },
+    {
+      "id": "gh-6102",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about running equivalent OPA and Cedar policy arms, which requires searching the repository for relevant information and reading documentation."
+    },
+    {
+      "id": "gh-6064",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about comparing native compression with cached full history and LLMLingua-2, which requires searching the repository for relevant information."
+    },
+    {
+      "id": "gh-6124",
+      "labels": [
+        "docs_read",
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about adding adjudicated semantic-residual corpus, which requires searching the repository for relevant information, checking the issue state, and reading documentation."
+    },
+    {
+      "id": "gh-6176",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about triaging a candidate idea, which requires searching the repository for relevant information and checking the commit state."
+    },
+    {
+      "id": "gh-6311",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about indexing reason codes and verdict vocabulary, which requires searching the repository for relevant information."
+    },
+    {
+      "id": "gh-6062",
+      "labels": [
+        "commit_state",
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is about measuring how work flows, not just how much is open, which requires searching the repository for relevant information, checking the issue state, and checking the commit state."
+    },
+    {
+      "id": "gh-6154",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is asking about a feature addition, and the context mentions searching for information in the repository."
+    },
+    {
+      "id": "gh-6133",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is asking about running a benchmark, and the context mentions searching for information in the repository."
+    },
+    {
+      "id": "gh-6123",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is asking about a feature addition, and the context mentions searching for information in the repository."
+    },
+    {
+      "id": "gh-6232",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is asking about a feature addition, and the context mentions searching for information in the repository and checking the commit state."
+    },
+    {
+      "id": "gh-6368",
+      "labels": [
+        "docs_read",
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is asking about tracking workflow concept drift, and the context mentions searching for information in the repository, checking the issue state, and reading documentation."
+    },
+    {
+      "id": "gh-6180",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is asking about benchmarking net-true claim grading, and the context mentions searching for information in the repository."
+    },
+    {
+      "id": "gh-6310",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is asking about indexing exported package capability terminology, and the context mentions searching for information in the repository."
+    },
+    {
+      "id": "gh-6364",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is asking about benchmarking issue close batching, and the context mentions searching for information in the repository."
+    },
+    {
+      "id": "gh-6164",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is asking about benchmarking provider cache economics fold, and the context mentions searching for information in the repository."
+    },
+    {
+      "id": "gh-6172",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question is asking about exposing lateral minimum-cut witnesses, and the context mentions searching for information in the repository."
+    },
+    {
+      "id": "gh-6356",
+      "labels": [
+        "commit_state",
+        "docs_read",
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question requires information from the repository, documentation, issue state, and commit state, as indicated by the readback labels."
+    },
+    {
+      "id": "gh-6208",
+      "labels": [
+        "commit_state",
+        "docs_read",
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question requires information from the repository, issue state, commit state, and documentation, as indicated by the readback labels."
+    },
+    {
+      "id": "gh-6187",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question requires information from the repository, as indicated by the readback labels."
+    },
+    {
+      "id": "gh-6036",
+      "labels": [
+        "commit_state",
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question requires information from the repository, commit state, and documentation, as indicated by the readback labels."
+    },
+    {
+      "id": "gh-6231",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question requires information from the repository and commit state, as indicated by the readback labels."
+    },
+    {
+      "id": "gh-6107",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question requires information from the repository and documentation, as indicated by the readback labels."
+    },
+    {
+      "id": "gh-6204",
+      "labels": [
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question requires information from the repository and issue state, as indicated by the readback labels."
+    },
+    {
+      "id": "gh-6168",
+      "labels": [
+        "commit_state",
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question requires information from the repository, commit state, and documentation, as indicated by the readback labels."
+    },
+    {
+      "id": "gh-6016",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question requires information from the repository, as indicated by the readback labels."
+    },
+    {
+      "id": "gh-6050",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0,
+      "rationale": "The question requires information from the repository, as indicated by the readback labels."
+    }
+  ]
+}

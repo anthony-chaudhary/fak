@@ -455,6 +455,14 @@ type demoOptions struct {
 	verifyNaturalFold             string
 	naturalSurfaceOut             string
 	verifyNaturalSurfacePath      string
+	naturalTrafficCorpus          string
+	naturalTrafficJudgeOut        string
+	naturalTrafficAdjudicator     string
+	naturalTrafficFoldA           string
+	naturalTrafficFoldB           string
+	naturalTrafficFoldOut         string
+	naturalTrafficReportOut       string
+	verifyNaturalTrafficPath      string
 	filterToolSchedulerTrials     int
 	routingVOISeed                int64
 	semanticCorpus                string
@@ -664,6 +672,14 @@ func registerDemoFlagsB(o *demoOptions) {
 	flag.StringVar(&o.verifyNaturalFold, "verify-natural-multitool-fold", "", "natural fold to verify")
 	flag.StringVar(&o.naturalSurfaceOut, "natural-multitool-surface-output", "", "write natural decision surface")
 	flag.StringVar(&o.verifyNaturalSurfacePath, "verify-natural-multitool-surface", "", "verify natural decision surface")
+	flag.StringVar(&o.naturalTrafficCorpus, "natural-traffic-corpus", "", "100+ record multi-label natural traffic corpus")
+	flag.StringVar(&o.naturalTrafficJudgeOut, "natural-traffic-judgment-output", "", "write multi-label natural traffic judgments")
+	flag.StringVar(&o.naturalTrafficAdjudicator, "natural-traffic-adjudicator", "", "natural traffic adjudicator identity")
+	flag.StringVar(&o.naturalTrafficFoldA, "natural-traffic-fold-a", "", "first multi-label judgment bundle")
+	flag.StringVar(&o.naturalTrafficFoldB, "natural-traffic-fold-b", "", "second multi-label judgment bundle")
+	flag.StringVar(&o.naturalTrafficFoldOut, "natural-traffic-fold-output", "", "write frozen multi-label fold")
+	flag.StringVar(&o.naturalTrafficReportOut, "natural-traffic-report-output", "", "run real seams and write held-out policy report")
+	flag.StringVar(&o.verifyNaturalTrafficPath, "verify-natural-traffic", "", "verify multi-label fold or report")
 	flag.StringVar(&o.verifyLiveFilterToolPath, "verify-live-filter-tool", "", "verify live filter/tool scheduler matrix")
 	flag.Int64Var(&o.routingVOISeed, "routing-voi-seed", 6105, "deterministic routing experiment seed")
 	flag.IntVar(&o.routingVOITrials, "routing-voi-trials", 24, "routing experiment repetitions")
@@ -887,6 +903,38 @@ func runDemoCommands1(o demoOptions) bool {
 }
 
 func runDemoCommands2A(o demoOptions) bool {
+	if o.naturalTrafficJudgeOut != "" {
+		if err := runNaturalTrafficJudge(context.Background(), o.naturalTrafficCorpus, o.naturalTrafficJudgeOut, o.semanticEndpoint, o.semanticAPIKey, o.semanticModel, o.naturalTrafficAdjudicator); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS natural traffic judgments %s\n", o.naturalTrafficJudgeOut)
+		return true
+	}
+	if o.naturalTrafficFoldOut != "" {
+		if err := foldNaturalTraffic(o.naturalTrafficCorpus, o.naturalTrafficFoldA, o.naturalTrafficFoldB, o.naturalTrafficFoldOut); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS natural traffic fold %s\n", o.naturalTrafficFoldOut)
+		return true
+	}
+	if o.naturalTrafficReportOut != "" {
+		if err := runNaturalTrafficReport(context.Background(), o.naturalTrafficCorpus, o.naturalTrafficFoldA, o.naturalTrafficReportOut); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS natural traffic report %s\n", o.naturalTrafficReportOut)
+		return true
+	}
+	if o.verifyNaturalTrafficPath != "" {
+		if err := verifyNaturalTraffic(o.naturalTrafficCorpus, o.verifyNaturalTrafficPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("PASS natural traffic verified %s\n", o.verifyNaturalTrafficPath)
+		return true
+	}
 	if o.naturalJudgeOut != "" {
 		endpoint, apiKey := o.semanticEndpoint, o.semanticAPIKey
 		if endpoint == "" {

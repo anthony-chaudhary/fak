@@ -1,0 +1,6025 @@
+{
+  "Schema": "fak-microcontext-natural-traffic-report/1",
+  "CreatedAt": "2026-08-16T09:31:19Z",
+  "CorpusSHA256": "c62ea95020119723fd94f53056941932ca3aab449de3db76aace8c2d3b820d8c",
+  "FoldSHA256": "08fbda786cb61478527b20e22996bb0c2443ffb232db098a23ebe71dffb875e2",
+  "Provenance": "observed local git/gh seams; break-even rows modeled from observed test work",
+  "Records": 120,
+  "Tune": 93,
+  "Test": 27,
+  "Receipts": [
+    {
+      "ID": "gh-6350",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "cead1bf56b refactor(pythongate): tighten retirement baseline (#6350) (fak pythongate)",
+      "WallMS": 79.649,
+      "WorkMS": 79.649,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6350",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 64.383,
+      "WorkMS": 64.383,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6350",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6350,\"state\":\"CLOSED\",\"title\":\"refactor(pythongate): tighten baseline after resume/plan/node retirements\"}",
+      "WallMS": 580.207,
+      "WorkMS": 580.207,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6350",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 237.096,
+      "WorkMS": 237.096,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6318",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 175.47,
+      "WorkMS": 175.47,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6318",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 67.499,
+      "WorkMS": 67.499,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6318",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6318,\"state\":\"OPEN\",\"title\":\"feat(disambiguation): index policy capability adjudication and reason terms\"}",
+      "WallMS": 722.634,
+      "WorkMS": 722.634,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6318",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 209.696,
+      "WorkMS": 209.696,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6206",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "106775b01b build(devindex): enforce reuse class on new commands (#6206) (fak devindex)",
+      "WallMS": 86.947,
+      "WorkMS": 86.947,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6206",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 67.912,
+      "WorkMS": 67.912,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6206",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6206,\"state\":\"CLOSED\",\"title\":\"build(devindex): require reuse classification for every new dev command\"}",
+      "WallMS": 594.954,
+      "WorkMS": 594.954,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6206",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 199.628,
+      "WorkMS": 199.628,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6056",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 204.892,
+      "WorkMS": 204.892,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6056",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 267.028,
+      "WorkMS": 267.028,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6056",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6056,\"state\":\"OPEN\",\"title\":\"docs(coordination): make whole-path coordination the central fak mantra\"}",
+      "WallMS": 470.177,
+      "WorkMS": 470.177,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6056",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:17966:      \"title\": \"docs(coordination): make whole-path coordination the central fak mantra\",",
+      "WallMS": 360.497,
+      "WorkMS": 360.497,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6103",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "3ffc90a9ab test(architest): gate typed stale tier declarations (#6103) (fak archreport)",
+      "WallMS": 87.882,
+      "WorkMS": 87.882,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6103",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 62.855,
+      "WorkMS": 62.855,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6103",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6103,\"state\":\"CLOSED\",\"title\":\"test(architest): gate typed stale tier declarations\"}",
+      "WallMS": 501.083,
+      "WorkMS": 501.083,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6103",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:18825:      \"title\": \"test(architest): gate typed stale tier declarations\",",
+      "WallMS": 220.74,
+      "WorkMS": 220.74,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6233",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 277.132,
+      "WorkMS": 277.132,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6233",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 428.399,
+      "WorkMS": 428.399,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6233",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6233,\"state\":\"OPEN\",\"title\":\"feat(model): refresh GPTQ interoperability beyond archived loaders\"}",
+      "WallMS": 722.791,
+      "WorkMS": 722.791,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6233",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 215.27,
+      "WorkMS": 215.27,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6184",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "150f376faf feat(trigram): add indexed search alternatives comparison #6184 (fak trigram)",
+      "WallMS": 73.012,
+      "WorkMS": 73.012,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6184",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/benchmarks/INDEXED-CODE-SEARCH-ALTERNATIVES-2026-08-10.md:3:Status: **INCOMPLETE**. Issue [#6184](https://github.com/anthony-chaudhary/fak/issues/6184) tracks real search-system runs and independent resource/cost witnesses.\ndocs/benchm",
+      "WallMS": 81.326,
+      "WorkMS": 81.326,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6184",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6184,\"state\":\"OPEN\",\"title\":\"Benchmark trigram code search against indexed search systems\"}",
+      "WallMS": 575.329,
+      "WorkMS": 575.329,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6184",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 209.263,
+      "WorkMS": 209.263,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6047",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 188.436,
+      "WorkMS": 188.436,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6047",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 67.776,
+      "WorkMS": 67.776,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6047",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6047,\"state\":\"OPEN\",\"title\":\"feat(coordination): project cache and context state into coordinated plans\"}",
+      "WallMS": 677.008,
+      "WorkMS": 677.008,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6047",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:17768:      \"title\": \"feat(coordination): project cache and context state into coordinated plans\",",
+      "WallMS": 435.263,
+      "WorkMS": 435.263,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6070",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "8311ee5ada test(arch): declare configguide composer tier (#6070) (fak architest)",
+      "WallMS": 82.313,
+      "WorkMS": 82.313,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6070",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 104.362,
+      "WorkMS": 104.362,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6070",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6070,\"state\":\"CLOSED\",\"title\":\"feat(config): add intent-level customization guide over excellent defaults\"}",
+      "WallMS": 608.674,
+      "WorkMS": 608.674,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6070",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:18226:      \"title\": \"feat(config): add intent-level customization guide over excellent defaults\",",
+      "WallMS": 197.024,
+      "WorkMS": 197.024,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6137",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "e99e102e24 feat(launchlatency): add telemetry alternatives comparison #6137 (fak launchlatency)",
+      "WallMS": 83.221,
+      "WorkMS": 83.221,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6137",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/benchmarks/LAUNCH-LATENCY-ALTERNATIVES-2026-08-10.md:5:**INCOMPLETE.** The local packet executes fak's summary and a raw-event/no-summary baseline only. Prometheus, OpenTelemetry, and Datadog have zero measurements until real ingestion",
+      "WallMS": 70.945,
+      "WorkMS": 70.945,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6137",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6137,\"state\":\"OPEN\",\"title\":\"bench(launchlatency): run telemetry alternative arms\"}",
+      "WallMS": 535.361,
+      "WorkMS": 535.361,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6137",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 240.658,
+      "WorkMS": 240.658,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6247",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 598.475,
+      "WorkMS": 598.475,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6247",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 74.401,
+      "WorkMS": 74.401,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6247",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6247,\"state\":\"OPEN\",\"title\":\"research(model): evaluate FOCUS FP4 against tuned public baselines\"}",
+      "WallMS": 826.797,
+      "WorkMS": 826.797,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6247",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 211.965,
+      "WorkMS": 211.965,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6267",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 530.971,
+      "WorkMS": 530.971,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6267",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 91.76,
+      "WorkMS": 91.76,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6267",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6267,\"state\":\"OPEN\",\"title\":\"refactor(commitstamp): retire superseded Python commit-message checker\"}",
+      "WallMS": 683.657,
+      "WorkMS": 683.657,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6267",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 217.439,
+      "WorkMS": 217.439,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6052",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 199.321,
+      "WorkMS": 199.321,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6052",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 61.284,
+      "WorkMS": 61.284,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6052",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6052,\"state\":\"OPEN\",\"title\":\"feat(coordination): recover partial cross-layer failures without leaked work\"}",
+      "WallMS": 730.25,
+      "WorkMS": 730.25,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6052",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:17878:      \"title\": \"feat(coordination): recover partial cross-layer failures without leaked work\",",
+      "WallMS": 224.356,
+      "WorkMS": 224.356,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6263",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "03c36ba446 refactor(fleetcompare): retire superseded Python pair (fak fleetcompare)",
+      "WallMS": 79.167,
+      "WorkMS": 79.167,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6263",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 70.036,
+      "WorkMS": 70.036,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6263",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6263,\"state\":\"CLOSED\",\"title\":\"refactor(fleetcompare): retire superseded Python implementation and tests\"}",
+      "WallMS": 660.765,
+      "WorkMS": 660.765,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6263",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 221.267,
+      "WorkMS": 221.267,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6197",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "4f57a077b2 feat(flowmetrics): add an aging in-flight readout bound to the aging_wip KPI (fak flowmetrics)",
+      "WallMS": 99.079,
+      "WorkMS": 99.079,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6197",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 68.331,
+      "WorkMS": 68.331,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6197",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6197,\"state\":\"CLOSED\",\"title\":\"feat(flowmetrics): name the aging in-flight set so finish-before-start has a target\"}",
+      "WallMS": 948.203,
+      "WorkMS": 948.203,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6197",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 231.108,
+      "WorkMS": 231.108,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6251",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "6cfed8b16d feat(codebookmeta): implement quantization codebook metadata (#6251) (fak codebookmeta)",
+      "WallMS": 80.725,
+      "WorkMS": 80.725,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6251",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/research/quantization/codebookmeta.md:3:Issue: [#6251](https://github.com/anthony-chaudhary/fak/issues/6251) · parent [#6221](https://github.com/anthony-chaudhary/fak/issues/6221)",
+      "WallMS": 75.249,
+      "WorkMS": 75.249,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6251",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6251,\"state\":\"CLOSED\",\"title\":\"feat(model): model non-uniform and learned quantization codebooks\"}",
+      "WallMS": 1536.724,
+      "WorkMS": 1536.724,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6251",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 240.017,
+      "WorkMS": 240.017,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6290",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 180.683,
+      "WorkMS": 180.683,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6290",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 80.497,
+      "WorkMS": 80.497,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6290",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6290,\"state\":\"CLOSED\",\"title\":\"feat(disambiguation): ship the Go generator and byte-deterministic ordering\"}",
+      "WallMS": 1391.563,
+      "WorkMS": 1391.563,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6290",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 214.822,
+      "WorkMS": 214.822,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6222",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "e084ac79c1 feat(quantmeta): add neutral quantization descriptors (#6222) (fak quantmeta)",
+      "WallMS": 55.905,
+      "WorkMS": 55.905,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6222",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 452.922,
+      "WorkMS": 452.922,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6222",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6222,\"state\":\"CLOSED\",\"title\":\"feat(model): define a neutral quantization capability descriptor\"}",
+      "WallMS": 1938.329,
+      "WorkMS": 1938.329,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6222",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 205.448,
+      "WorkMS": 205.448,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6373",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "1564d39eb2 feat(archreport): expose directed dependency cycles (#6373) (fak archreport)",
+      "WallMS": 68.676,
+      "WorkMS": 68.676,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6373",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/witnesses/task-queue-current.txt:4:#6373 state=done priority=unknown generation=unknown lane=unknown title=\"feat(archreport): expose directed dependency cycles\" outcome=\"unknown\" requires=none witness=\"`go test ./internal/archreport ./",
+      "WallMS": 66.227,
+      "WorkMS": 66.227,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6373",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6373,\"state\":\"CLOSED\",\"title\":\"feat(archreport): expose directed dependency cycles\"}",
+      "WallMS": 991.911,
+      "WorkMS": 991.911,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6373",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "docs/witnesses/task-queue-current.txt:4:#6373 state=done priority=unknown generation=unknown lane=unknown title=\"feat(archreport): expose directed dependency cycles\" outcome=\"unknown\" requires=none witness=\"`go test ./internal/archreport ./",
+      "WallMS": 201.117,
+      "WorkMS": 201.117,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6214",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "8a7734a4d9 feat(archreport): add direct fan-out growth gate (#6214) (fak archreport)",
+      "WallMS": 75.304,
+      "WorkMS": 75.304,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6214",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 77.84,
+      "WorkMS": 77.84,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6214",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6214,\"state\":\"CLOSED\",\"title\":\"feat(archreport): gate direct fan-out growth\"}",
+      "WallMS": 679.547,
+      "WorkMS": 679.547,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6214",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 193.601,
+      "WorkMS": 193.601,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6365",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 169.499,
+      "WorkMS": 169.499,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6365",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 69.436,
+      "WorkMS": 69.436,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6365",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6365,\"state\":\"OPEN\",\"title\":\"Bind reviewed workflow concepts to bounded steering actions\"}",
+      "WallMS": 691.035,
+      "WorkMS": 691.035,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6365",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 195.809,
+      "WorkMS": 195.809,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6361",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "f6658624f3 feat(archreport): add dependency dominator seams (#6361) (fak archreport)",
+      "WallMS": 69.884,
+      "WorkMS": 69.884,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6361",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 67.284,
+      "WorkMS": 67.284,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6361",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6361,\"state\":\"CLOSED\",\"title\":\"feat(archreport): expose dependency dominator seams\"}",
+      "WallMS": 673.568,
+      "WorkMS": 673.568,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6361",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 199.112,
+      "WorkMS": 199.112,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6353",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "5fc380e2bf feat(testroute): add alternatives comparison #6353 (fak testroute)",
+      "WallMS": 69.967,
+      "WorkMS": 69.967,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6353",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/benchmarks/NATIVE-IMPLEMENTATION-COMPARISONS.md:61:| Host test-execution route selection | `internal/testroute` | native; GOOS-only; fak + GitHub Actions; Go; WSL; GitHub Actions; Bazel | [local contract](TEST-EXECUTION-ROUTING-ALTERNA",
+      "WallMS": 67.113,
+      "WorkMS": 67.113,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6353",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6353,\"state\":\"CLOSED\",\"title\":\"Benchmark test routing against host and CI alternatives\"}",
+      "WallMS": 647.206,
+      "WorkMS": 647.206,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6353",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 213.413,
+      "WorkMS": 213.413,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6023",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 168.372,
+      "WorkMS": 168.372,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6023",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 76.677,
+      "WorkMS": 76.677,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6023",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6023,\"state\":\"OPEN\",\"title\":\"feat(cmd): make legacy fak dev a thin migration handoff to fak-dev\"}",
+      "WallMS": 593.861,
+      "WorkMS": 593.861,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6023",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:17316:      \"title\": \"feat(cmd): make legacy fak dev a thin migration handoff to fak-dev\",",
+      "WallMS": 235.274,
+      "WorkMS": 235.274,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6304",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 168.493,
+      "WorkMS": 168.493,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6304",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 64.611,
+      "WorkMS": 64.611,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6304",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6304,\"state\":\"CLOSED\",\"title\":\"feat(disambiguation): add regenerate-and-diff CI enforcement\"}",
+      "WallMS": 589.497,
+      "WorkMS": 589.497,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6304",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 215.093,
+      "WorkMS": 215.093,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6022",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "37fced93bf refactor(devcmd): move workflow audit to fak-dev (#6022) (fak devcmd)",
+      "WallMS": 70.192,
+      "WorkMS": 70.192,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6022",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/context-budget/mcp-tool-floor.md:35:Re-pinned for #6011: #6022 retired the repository index MCP tools, taking the registry",
+      "WallMS": 70.38,
+      "WorkMS": 70.38,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6022",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6022,\"state\":\"OPEN\",\"title\":\"refactor(cmd): migrate dev-only dispatch and enforce a runtime dependency ratchet\"}",
+      "WallMS": 616.34,
+      "WorkMS": 616.34,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6022",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:17297:      \"title\": \"refactor(cmd): migrate dev-only dispatch and enforce a runtime dependency ratchet\",",
+      "WallMS": 206.045,
+      "WorkMS": 206.045,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6155",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "115e50d29b feat(cachewitness): add divergence alternatives comparison #6155 (fak cachewitness)",
+      "WallMS": 71.604,
+      "WorkMS": 71.604,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6155",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/benchmarks/CACHE-REUSE-DIVERGENCE-ALTERNATIVES-2026-08-10.md:5:**INCOMPLETE.** The local packet executes fak's cross-provenance reuse-divergence fold and a raw-counter/no-detector baseline. Prometheus, OpenTelemetry, Prometheus rules, ",
+      "WallMS": 62.977,
+      "WorkMS": 62.977,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6155",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6155,\"state\":\"OPEN\",\"title\":\"Benchmark cache reuse divergence detection against monitoring alternatives\"}",
+      "WallMS": 686.636,
+      "WorkMS": 686.636,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6155",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 199.311,
+      "WorkMS": 199.311,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6355",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 167.698,
+      "WorkMS": 167.698,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6355",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 67.111,
+      "WorkMS": 67.111,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6355",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6355,\"state\":\"CLOSED\",\"title\":\"qa: adversarial + edge-case sweep for Native micro-agent shared-cache swarm proof\"}",
+      "WallMS": 574.347,
+      "WorkMS": 574.347,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6355",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 207.742,
+      "WorkMS": 207.742,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6319",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 173.125,
+      "WorkMS": 173.125,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6319",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 64.077,
+      "WorkMS": 64.077,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6319",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6319,\"state\":\"OPEN\",\"title\":\"feat(disambiguation): index benchmark baseline witness and claim terms\"}",
+      "WallMS": 799.234,
+      "WorkMS": 799.234,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6319",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 203.088,
+      "WorkMS": 203.088,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6362",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "0484bb91ac fix(ablate): fix registered arm value dialects (#6362) (fak ablate)",
+      "WallMS": 73.418,
+      "WorkMS": 73.418,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6362",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 61.545,
+      "WorkMS": 61.545,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6362",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6362,\"state\":\"CLOSED\",\"title\":\"fix(ablate): the sweep writes FAK_\u003cFEATURE\u003e=1|0 but 8 registered arms speak a different value dialect, so both arms measure the same configuration\"}",
+      "WallMS": 621.165,
+      "WorkMS": 621.165,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6362",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 204.878,
+      "WorkMS": 204.878,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6081",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "6fc671b234 fix(cuda): add standard toolkit fallback in clean sessions (#6081) (fak compute)",
+      "WallMS": 82.12,
+      "WorkMS": 82.12,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6081",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 65.932,
+      "WorkMS": 65.932,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6081",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6081,\"state\":\"CLOSED\",\"title\":\"fix(cuda): discover standard toolkit in clean DGX sessions\"}",
+      "WallMS": 572.849,
+      "WorkMS": 572.849,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6081",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:18443:      \"title\": \"fix(cuda): discover standard toolkit in clean DGX sessions\",",
+      "WallMS": 526.761,
+      "WorkMS": 526.761,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6143",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 198.343,
+      "WorkMS": 198.343,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6143",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/benchmarks/LANE-TREE-ADMISSION-ALTERNATIVES-2026-08-10.md:5:**INCOMPLETE.** The local packet executes fak's in-process admission and a geometry-only baseline. DOS arbitration, GitHub Actions, Kubernetes Lease coordination, and etcd hav",
+      "WallMS": 88.048,
+      "WorkMS": 88.048,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6143",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6143,\"state\":\"CLOSED\",\"title\":\"bench(laneadmit): run quota and scheduler alternative arms\"}",
+      "WallMS": 641.127,
+      "WorkMS": 641.127,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6143",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 209.755,
+      "WorkMS": 209.755,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6305",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 220.857,
+      "WorkMS": 220.857,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6305",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 69.74,
+      "WorkMS": 69.74,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6305",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6305,\"state\":\"OPEN\",\"title\":\"feat(disambiguation): reject private paths credentials and host identities\"}",
+      "WallMS": 671.009,
+      "WorkMS": 671.009,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6305",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 218.832,
+      "WorkMS": 218.832,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6080",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "24eba4c385 feat(archreport): expose reverse architecture edges (#6080) (fak archreport)",
+      "WallMS": 86.215,
+      "WorkMS": 86.215,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6080",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/whats-new.md:182:- **[`24eba4c3`](https://github.com/anthony-chaudhary/fak/commit/24eba4c3)** 2026-08-09 — feat(archreport): expose reverse architecture edges — subsystem `archreport`, scope `shipped`, issue [#6080](https://github.",
+      "WallMS": 92.24,
+      "WorkMS": 92.24,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6080",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6080,\"state\":\"CLOSED\",\"title\":\"feat(archreport): expose reverse dependents and fan-in hotspots\"}",
+      "WallMS": 705.494,
+      "WorkMS": 705.494,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6080",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:18426:      \"title\": \"feat(archreport): expose reverse dependents and fan-in hotspots\",",
+      "WallMS": 218.155,
+      "WorkMS": 218.155,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6293",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 194.717,
+      "WorkMS": 194.717,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6293",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 68.837,
+      "WorkMS": 68.837,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6293",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6293,\"state\":\"CLOSED\",\"title\":\"feat(disambiguation): model explicit contrasts and forbidden conflations\"}",
+      "WallMS": 2733.786,
+      "WorkMS": 2733.786,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6293",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 216.445,
+      "WorkMS": 216.445,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6323",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 167.452,
+      "WorkMS": 167.452,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6323",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 64.234,
+      "WorkMS": 64.234,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6323",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6323,\"state\":\"OPEN\",\"title\":\"feat(disambiguation): add change-impact output for index diffs\"}",
+      "WallMS": 771.841,
+      "WorkMS": 771.841,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6323",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 221.556,
+      "WorkMS": 221.556,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6160",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "9b3cca7362 feat(microcontextdemo): add cancellation and partial fold matrix #6160 (fak microcontextdemo)",
+      "WallMS": 73.504,
+      "WorkMS": 73.504,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6160",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/research/README.md:33:- [Micro-context S8l live cancellation and partial-fold policies](micro-context-s8l-tail-policies.md) — wait-all/deadline/early-stop/hedge receipts, typed partial folds, live latency-quality tradeoffs, and cance",
+      "WallMS": 66.147,
+      "WorkMS": 66.147,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6160",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6160,\"state\":\"CLOSED\",\"title\":\"experiment(microcontextdemo): bound straggler tails with cancellation and partial folds\"}",
+      "WallMS": 671.107,
+      "WorkMS": 671.107,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6160",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 562.16,
+      "WorkMS": 562.16,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6213",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 519.799,
+      "WorkMS": 519.799,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6213",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 68.81,
+      "WorkMS": 68.81,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6213",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6213,\"state\":\"CLOSED\",\"title\":\"feat(workpatterns): ship the end-to-end report CLI and proof fixture\"}",
+      "WallMS": 548.554,
+      "WorkMS": 548.554,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6213",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 206.382,
+      "WorkMS": 206.382,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6236",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 170.908,
+      "WorkMS": 170.908,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6236",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 61.029,
+      "WorkMS": 61.029,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6236",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6236,\"state\":\"OPEN\",\"title\":\"feat(model): support bitsandbytes 8-bit and 4-bit load contracts\"}",
+      "WallMS": 652.819,
+      "WorkMS": 652.819,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6236",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 206.994,
+      "WorkMS": 206.994,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6215",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "42f7b445f6 fix(envconfiglint): add a liveness witness and record 16 unadmitted env reads (#6215) (fak envconfiglint)",
+      "WallMS": 97.653,
+      "WorkMS": 97.653,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6215",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 62.646,
+      "WorkMS": 62.646,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6215",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6215,\"state\":\"CLOSED\",\"title\":\"fix(envconfiglint): the CONFIG_NOT_ENV ratchet is red at HEAD again — 12 unadmitted env reads, so #2863 gates nothing\"}",
+      "WallMS": 610.871,
+      "WorkMS": 610.871,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6215",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 194.781,
+      "WorkMS": 194.781,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6175",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 216.283,
+      "WorkMS": 216.283,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6175",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 152.317,
+      "WorkMS": 152.317,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6175",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6175,\"state\":\"OPEN\",\"title\":\"idea-scout: StepJack: Benchmarking Computer-Use Agent Safety Against Multi-Step Indirect Prompt Injection\"}",
+      "WallMS": 473.683,
+      "WorkMS": 473.683,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6175",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 196.666,
+      "WorkMS": 196.666,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6227",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "bd770f26e0 feat(quantpolicy): enforce quantization capability policy (fak quantpolicy)",
+      "WallMS": 66.921,
+      "WorkMS": 66.921,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6227",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 76.351,
+      "WorkMS": 76.351,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6227",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6227,\"state\":\"CLOSED\",\"title\":\"feat(policy): expose quantization capability constraints in policy\"}",
+      "WallMS": 501.616,
+      "WorkMS": 501.616,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6227",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 198.003,
+      "WorkMS": 198.003,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6021",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "3adb37d86f test(architest): declare fak-dev command tier (#6021) (fak architest)",
+      "WallMS": 83.032,
+      "WorkMS": 83.032,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6021",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/dev-pattern-boundary.md:106:Neither replaces the extraction and packaging work tracked by #6021–#6026.",
+      "WallMS": 61.986,
+      "WorkMS": 61.986,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6021",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6021,\"state\":\"CLOSED\",\"title\":\"build(cmd): ship a minimal independent fak-dev binary spine\"}",
+      "WallMS": 938.341,
+      "WorkMS": 938.341,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6021",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:17278:      \"title\": \"build(cmd): ship a minimal independent fak-dev binary spine\",",
+      "WallMS": 196.961,
+      "WorkMS": 196.961,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6044",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "5a88f2c2d3 docs(gateway): add reconciliation loops to witness continuations #6044 (fak docs)",
+      "WallMS": 71.887,
+      "WorkMS": 71.887,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6044",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 102.922,
+      "WorkMS": 102.922,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6044",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6044,\"state\":\"OPEN\",\"title\":\"Implement durable REQUIRE_WITNESS held-call spine\"}",
+      "WallMS": 516.584,
+      "WorkMS": 516.584,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6044",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:17710:      \"title\": \"Implement durable REQUIRE_WITNESS held-call spine\",",
+      "WallMS": 195.102,
+      "WorkMS": 195.102,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6060",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "9c1c132eab feat(info): show guard fleet in default TUI (#6060) (fak cmd)",
+      "WallMS": 81.784,
+      "WorkMS": 81.784,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6060",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/fleet-ui-generation-plan.md:37:machine-posture rendering from #6060. The missing spine is not “build a dashboard”; it is joining\ndocs/whats-new.md:165:- **[`9c1c132e`](https://github.com/anthony-chaudhary/fak/commit/9c1c132e)** 202",
+      "WallMS": 64.995,
+      "WorkMS": 64.995,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6060",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6060,\"state\":\"CLOSED\",\"title\":\"feat(info): show guard fleet posture in the default TUI\"}",
+      "WallMS": 570.167,
+      "WorkMS": 570.167,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6060",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:18054:      \"title\": \"feat(info): show guard fleet posture in the default TUI\",",
+      "WallMS": 201.014,
+      "WorkMS": 201.014,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6193",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "e5fc01af20 feat(archreport): add dependency growth gates (#6193) (fak archreport)",
+      "WallMS": 75.392,
+      "WorkMS": 75.392,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6193",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 88.292,
+      "WorkMS": 88.292,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6193",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6193,\"state\":\"CLOSED\",\"title\":\"feat(archreport): gate dependency reach and depth growth\"}",
+      "WallMS": 529.227,
+      "WorkMS": 529.227,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6193",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 200.81,
+      "WorkMS": 200.81,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6058",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 181.981,
+      "WorkMS": 181.981,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6058",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 65.298,
+      "WorkMS": 65.298,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6058",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6058,\"state\":\"OPEN\",\"title\":\"bench(coordination): prove net value over tuned layer-local policies\"}",
+      "WallMS": 552.845,
+      "WorkMS": 552.845,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6058",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:18010:      \"title\": \"bench(coordination): prove net value over tuned layer-local policies\",",
+      "WallMS": 211.196,
+      "WorkMS": 211.196,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6237",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 507.344,
+      "WorkMS": 507.344,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6237",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 63.084,
+      "WorkMS": 63.084,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6237",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6237,\"state\":\"OPEN\",\"title\":\"feat(model): integrate torchao quantization capability discovery\"}",
+      "WallMS": 534.364,
+      "WorkMS": 534.364,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6237",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 218.896,
+      "WorkMS": 218.896,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6194",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "0effd4f05c feat(flowmetrics): add flow metrics folded from signals the repo already emits (#6194) (fak flowmetrics)",
+      "WallMS": 457.668,
+      "WorkMS": 457.668,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6194",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 63.683,
+      "WorkMS": 63.683,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6194",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6194,\"state\":\"OPEN\",\"title\":\"epic(flowmetrics): make WIP a governed quantity — 8 measured flow defects, 8 bounded leaves\"}",
+      "WallMS": 2558.668,
+      "WorkMS": 2558.668,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6194",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 210.611,
+      "WorkMS": 210.611,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6162",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "200f2301b0 feat(vcachewarm): add warming alternatives comparison #6162 (fak vcachewarm)",
+      "WallMS": 111.883,
+      "WorkMS": 111.883,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6162",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/benchmarks/DEDICATED-CACHE-WARMING-ALTERNATIVES-2026-08-10.md:5:**INCOMPLETE.** The local packet executes fak's dedicated-warm planner/readback accounting and a demand-only baseline. Anthropic, Gemini, OpenAI, LMCache, Mooncake, vLLM, ",
+      "WallMS": 66.722,
+      "WorkMS": 66.722,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6162",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6162,\"state\":\"OPEN\",\"title\":\"Benchmark dedicated cache warming against provider and engine alternatives\"}",
+      "WallMS": 539.082,
+      "WorkMS": 539.082,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6162",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 243,
+      "WorkMS": 243,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6190",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "24efdb25f2 feat(archreport): add pairwise vertex-cut loss gate (#6190) (fak archreport)",
+      "WallMS": 83.307,
+      "WorkMS": 83.307,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6190",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 74.438,
+      "WorkMS": 74.438,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6190",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6190,\"state\":\"CLOSED\",\"title\":\"feat(archreport): gate pairwise lateral vertex-cut loss\"}",
+      "WallMS": 762.79,
+      "WorkMS": 762.79,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6190",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 201.591,
+      "WorkMS": 201.591,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6248",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "c7c2bd33b9 feat(microscaleeval): implement microscaling adjudication (#6248) (fak microscaleeval)",
+      "WallMS": 70.707,
+      "WorkMS": 70.707,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6248",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/research/quantization/heterogeneous-microscaling.md:3:Issue: [#6248](https://github.com/anthony-chaudhary/fak/issues/6248), child of #6221.",
+      "WallMS": 65.131,
+      "WorkMS": 65.131,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6248",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6248,\"state\":\"CLOSED\",\"title\":\"research(model): evaluate heterogeneity-aware microscaling\"}",
+      "WallMS": 660.792,
+      "WorkMS": 660.792,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6248",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 193.348,
+      "WorkMS": 193.348,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6342",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "0ccfcd9ffe feat(streamcapture): add a real-provider stream recorder with hermetic replay captures (#6342) (fak streamcapture)",
+      "WallMS": 95.534,
+      "WorkMS": 95.534,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6342",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 62.094,
+      "WorkMS": 62.094,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6342",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6342,\"state\":\"CLOSED\",\"title\":\"feat(gateway): wire provider stream callbacks into generation control\"}",
+      "WallMS": 581.742,
+      "WorkMS": 581.742,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6342",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 200.61,
+      "WorkMS": 200.61,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6277",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "bf917939ae feat(disambiguation): add explicit contrast validation #6277 (fak disambiguation)",
+      "WallMS": 79.715,
+      "WorkMS": 79.715,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6277",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 64.312,
+      "WorkMS": 64.312,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6277",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6277,\"state\":\"CLOSED\",\"title\":\"feat(disambiguation): model explicit contrasts and forbidden conflations\"}",
+      "WallMS": 535.364,
+      "WorkMS": 535.364,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6277",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 199.774,
+      "WorkMS": 199.774,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6209",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 168.411,
+      "WorkMS": 168.411,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6209",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/research/coding-workload-vocabulary.md:11:[#6209](https://github.com/anthony-chaudhary/fak/issues/6209), parent",
+      "WallMS": 73.172,
+      "WorkMS": 73.172,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6209",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6209,\"state\":\"CLOSED\",\"title\":\"research(workpatterns): synthesize a cited coding-workload vocabulary\"}",
+      "WallMS": 536.652,
+      "WorkMS": 536.652,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6209",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 198.884,
+      "WorkMS": 198.884,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6182",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "f6a5f09d98 feat(astquery): add structural search alternatives comparison #6182 (fak astquery)",
+      "WallMS": 89.944,
+      "WorkMS": 89.944,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6182",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/benchmarks/GO-AST-QUERY-ALTERNATIVES-2026-08-10.md:3:Status: **INCOMPLETE**. Issue [#6182](https://github.com/anthony-chaudhary/fak/issues/6182) tracks real structural-search tool runs and independent resource/cost witnesses.\ndocs/benc",
+      "WallMS": 68.796,
+      "WorkMS": 68.796,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6182",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6182,\"state\":\"OPEN\",\"title\":\"Benchmark Go AST queries against structural search tools\"}",
+      "WallMS": 578.823,
+      "WorkMS": 578.823,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6182",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 220.254,
+      "WorkMS": 220.254,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6327",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 166.674,
+      "WorkMS": 166.674,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6327",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 62.842,
+      "WorkMS": 62.842,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6327",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6327,\"state\":\"OPEN\",\"title\":\"test(disambiguation): add scale and latency witness for repository-sized index\"}",
+      "WallMS": 638.156,
+      "WorkMS": 638.156,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6327",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 211.059,
+      "WorkMS": 211.059,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6031",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "907b3e11e2 feat(microcontextdemo): add bounded read enrichment #6031 (fak microcontextdemo)",
+      "WallMS": 81.225,
+      "WorkMS": 81.225,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6031",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/research/micro-context-fabrics.md:83:| S8b | **Observed fixture:** bounded read-only tool enrichment (#6031) | [request/receipt/restart witness](micro-context-s8b-tool-enrichment.md) |\r\ndocs/research/micro-context-large-input-operators",
+      "WallMS": 66.614,
+      "WorkMS": 66.614,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6031",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6031,\"state\":\"CLOSED\",\"title\":\"feat(microcontextdemo): read-only tool enrichment fan-out with quotas and cancellation\"}",
+      "WallMS": 567.055,
+      "WorkMS": 567.055,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6031",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:17466:      \"title\": \"feat(microcontextdemo): read-only tool enrichment fan-out with quotas and cancellation\",",
+      "WallMS": 200.991,
+      "WorkMS": 200.991,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6146",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "b707578cd4 feat(cachesweep): add simulator alternatives comparison #6146 (fak cachesweep)",
+      "WallMS": 78.198,
+      "WorkMS": 78.198,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6146",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/benchmarks/NATIVE-IMPLEMENTATION-COMPARISONS.md:67:| Prefix-cache budget/reuse sweep + ROI knee | `internal/cachesweep` | native; no cache; libCacheSim; Caffeine; Redis/Valkey | [local contract](PREFIX-CACHE-SWEEP-ALTERNATIVES-2026-08-",
+      "WallMS": 63.657,
+      "WorkMS": 63.657,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6146",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6146,\"state\":\"OPEN\",\"title\":\"bench(cachesweep): run cache simulator alternative arms\"}",
+      "WallMS": 582.79,
+      "WorkMS": 582.79,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6146",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 206.97,
+      "WorkMS": 206.97,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6195",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "dfb9a2b573 feat(microcontextdemo): add live scheduler disagreement audit #6195 (fak microcontextdemo)",
+      "WallMS": 80.302,
+      "WorkMS": 80.302,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6195",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 71.098,
+      "WorkMS": 71.098,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6195",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6195,\"state\":\"CLOSED\",\"title\":\"research(microcontextdemo): audit live scheduler quality disagreements\"}",
+      "WallMS": 610.596,
+      "WorkMS": 610.596,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6195",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 217.388,
+      "WorkMS": 217.388,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6028",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "6e0ffdfc89 docs(arch): add reusable dev pattern classes (#6028) (fak devindex)",
+      "WallMS": 85.34,
+      "WorkMS": 85.34,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6028",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/dev-pattern-boundary.md:3:Status: **accepted for the `fak` / `fak-dev` split** (#6019, #6028).",
+      "WallMS": 119.361,
+      "WorkMS": 119.361,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6028",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6028,\"state\":\"CLOSED\",\"title\":\"docs(arch): classify portable dev patterns versus fak-specific tooling\"}",
+      "WallMS": 1521.579,
+      "WorkMS": 1521.579,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6028",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:17410:      \"title\": \"docs(arch): classify portable dev patterns versus fak-specific tooling\",",
+      "WallMS": 257.446,
+      "WorkMS": 257.446,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6229",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "06bd6c3003 docs(claims): reclassify quantobs fixture commit (#6229) (fak docs)",
+      "WallMS": 41.951,
+      "WorkMS": 41.951,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6229",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 89.588,
+      "WorkMS": 89.588,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6229",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6229,\"state\":\"CLOSED\",\"title\":\"feat(observability): emit quantization route and residency telemetry\"}",
+      "WallMS": 629.956,
+      "WorkMS": 629.956,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6229",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 200.814,
+      "WorkMS": 200.814,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6117",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "fb633ebcf9 feat(archreport): add increased tier-gap gate (#6117) (fak archreport)",
+      "WallMS": 88.238,
+      "WorkMS": 88.238,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6117",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 82.181,
+      "WorkMS": 82.181,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6117",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6117,\"state\":\"CLOSED\",\"title\":\"feat(archreport): gate increased tier-gap drift\"}",
+      "WallMS": 667.999,
+      "WorkMS": 667.999,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6117",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 198.253,
+      "WorkMS": 198.253,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6121",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "5148dcf7ab fix(microcontextdemo): dedupe corpus labels #6121 (fak microcontextdemo)",
+      "WallMS": 112.979,
+      "WorkMS": 112.979,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6121",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 69.486,
+      "WorkMS": 69.486,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6121",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6121,\"state\":\"CLOSED\",\"title\":\"fix(microcontextdemo): remove duplicated labels from S8f answer facts\"}",
+      "WallMS": 622.27,
+      "WorkMS": 622.27,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6121",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 196.304,
+      "WorkMS": 196.304,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6279",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "9847a43e7f feat(disambiguation): implement public ownership admission (#6279) (fak disambiguation)",
+      "WallMS": 72.433,
+      "WorkMS": 72.433,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6279",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 64.118,
+      "WorkMS": 64.118,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6279",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6279,\"state\":\"CLOSED\",\"title\":\"feat(disambiguation): assign owner leaf and lane to every entry\"}",
+      "WallMS": 644.023,
+      "WorkMS": 644.023,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6279",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 199.082,
+      "WorkMS": 199.082,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6243",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "2338733a37 feat(engine): add the BitNet runtime delegation contract and its fake-runtime witness (#6243) (fak bitnetruntime)",
+      "WallMS": 63.072,
+      "WorkMS": 63.072,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6243",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 65.54,
+      "WorkMS": 65.54,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6243",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6243,\"state\":\"CLOSED\",\"title\":\"feat(engine): add BitNet runtime capability and delegation spine\"}",
+      "WallMS": 615.332,
+      "WorkMS": 615.332,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6243",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 193.194,
+      "WorkMS": 193.194,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6179",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "91d0317eb5 feat(archreport): add lateral minimum-cut partitions (#6179) (fak archreport)",
+      "WallMS": 91.672,
+      "WorkMS": 91.672,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6179",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 65.3,
+      "WorkMS": 65.3,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6179",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6179,\"state\":\"CLOSED\",\"title\":\"feat(archreport): expose lateral minimum-cut partitions\"}",
+      "WallMS": 598.167,
+      "WorkMS": 598.167,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6179",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 196.888,
+      "WorkMS": 196.888,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6074",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "7a746b82c4 test(archreport): prove concurrent report determinism (#6074) (fak archreport)",
+      "WallMS": 76.999,
+      "WorkMS": 76.999,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6074",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 60.427,
+      "WorkMS": 60.427,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6074",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6074,\"state\":\"CLOSED\",\"title\":\"qa: determinism + race witness for Architecture graph report\"}",
+      "WallMS": 573.363,
+      "WorkMS": 573.363,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6074",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:18304:      \"title\": \"qa: determinism + race witness for Architecture graph report\",",
+      "WallMS": 195.369,
+      "WorkMS": 195.369,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6271",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "df8c1a131a refactor(devcmd): retire Python AMD GPU facts (#6271) (fak devcmd)",
+      "WallMS": 158.412,
+      "WorkMS": 158.412,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6271",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 73.746,
+      "WorkMS": 73.746,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6271",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6271,\"state\":\"CLOSED\",\"title\":\"refactor(amdgpu): retire superseded Python AMD GPU facts implementation\"}",
+      "WallMS": 751.425,
+      "WorkMS": 751.425,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6271",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 549.473,
+      "WorkMS": 549.473,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6027",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "5ed2be4acb fix(accounts): warn when a corrupt cooldown store turns the gate off (fak accounts)",
+      "WallMS": 65.392,
+      "WorkMS": 65.392,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6027",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 69.736,
+      "WorkMS": 69.736,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6027",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6027,\"state\":\"CLOSED\",\"title\":\"fix(accounts): a corrupt cooldown store silently disables the whole cooldown gate\"}",
+      "WallMS": 632.894,
+      "WorkMS": 632.894,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6027",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:17392:      \"title\": \"fix(accounts): a corrupt cooldown store silently disables the whole cooldown gate\",",
+      "WallMS": 194.912,
+      "WorkMS": 194.912,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6084",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "45334707d1 fix(archreport): preserve reports across stale rows (#6084) (fak archreport)",
+      "WallMS": 74.704,
+      "WorkMS": 74.704,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6084",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/notes/ARCHITECTURE-REPORT-DOGFOOD-2026-08-09.md:34:- #6084 — `archreport-dogfood-defect: stale-declaration-global-outage`: represent stale",
+      "WallMS": 62.189,
+      "WorkMS": 62.189,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6084",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6084,\"state\":\"CLOSED\",\"title\":\"fix(archreport): keep reports usable with stale tier declarations\"}",
+      "WallMS": 568.704,
+      "WorkMS": 568.704,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6084",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:18492:      \"title\": \"fix(archreport): keep reports usable with stale tier declarations\",\nexperiments/microcontext/s8i-semantic-packet-2026-08-10.json:9:      \"Title\": \"fix(a",
+      "WallMS": 198.594,
+      "WorkMS": 198.594,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6250",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "021ca485ff feat(lightroteval): implement bounded LightRot evaluation (#6250) (fak lightroteval)",
+      "WallMS": 67.802,
+      "WorkMS": 67.802,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6250",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/research/quantization/lightrot.md:4:Issue: #6250, child of #6221.",
+      "WallMS": 61.921,
+      "WorkMS": 61.921,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6250",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6250,\"state\":\"CLOSED\",\"title\":\"research(model): reproduce LightRot low-bit results\"}",
+      "WallMS": 615.008,
+      "WorkMS": 615.008,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6250",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 199.167,
+      "WorkMS": 199.167,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6296",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 185.729,
+      "WorkMS": 185.729,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6296",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 65.558,
+      "WorkMS": 65.558,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6296",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6296,\"state\":\"CLOSED\",\"title\":\"fix(disambiguation): represent fresh stale unknown and invalid separately\"}",
+      "WallMS": 673.211,
+      "WorkMS": 673.211,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6296",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 196.397,
+      "WorkMS": 196.397,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6313",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 519.751,
+      "WorkMS": 519.751,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6313",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 568.887,
+      "WorkMS": 568.887,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6313",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6313,\"state\":\"OPEN\",\"title\":\"feat(disambiguation): index module leaf lane and commit-stamp vocabulary\"}",
+      "WallMS": 625.697,
+      "WorkMS": 625.697,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6313",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 236.996,
+      "WorkMS": 236.996,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6119",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "bf3a9c2d06 feat(cacheprice): add cloud alternatives comparison #6119 (fak cacheprice)",
+      "WallMS": 88.563,
+      "WorkMS": 88.563,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6119",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/benchmarks/CACHE-COST-ACCOUNTING-ALTERNATIVES-2026-08-09.md:3:Issue: [#6119](https://github.com/anthony-chaudhary/fak/issues/6119)",
+      "WallMS": 109.191,
+      "WorkMS": 109.191,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6119",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6119,\"state\":\"CLOSED\",\"title\":\"bench(cacheprice): reconcile native cache pricing with cloud calculators\"}",
+      "WallMS": 660.263,
+      "WorkMS": 660.263,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6119",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 208.205,
+      "WorkMS": 208.205,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6315",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 171.481,
+      "WorkMS": 171.481,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6315",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 66.761,
+      "WorkMS": 66.761,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6315",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6315,\"state\":\"OPEN\",\"title\":\"feat(disambiguation): index cache prefix radix KV and provider reuse terms\"}",
+      "WallMS": 873.922,
+      "WorkMS": 873.922,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6315",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 206.198,
+      "WorkMS": 206.198,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6343",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 166.331,
+      "WorkMS": 166.331,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6343",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 63.593,
+      "WorkMS": 63.593,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6343",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6343,\"state\":\"OPEN\",\"title\":\"feat(sessionjournal): persist generation epochs and steering points\"}",
+      "WallMS": 545.213,
+      "WorkMS": 545.213,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6343",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 200.959,
+      "WorkMS": 200.959,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6111",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 179.469,
+      "WorkMS": 179.469,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6111",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/research/micro-context-s8f-corpus-grader.md:136:without inspecting the 680 held-out answers. #6110 then runs live endpoints; #6111 computes the\ndocs/research/micro-context-s8j-live-semantic-matrix.md:101:6. At least one candidate must ",
+      "WallMS": 69.658,
+      "WorkMS": 69.658,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6111",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6111,\"state\":\"OPEN\",\"title\":\"research(microcontextdemo): publish net-true large-input decision boundary\"}",
+      "WallMS": 581.202,
+      "WorkMS": 581.202,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6111",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:18964:      \"title\": \"research(microcontextdemo): publish net-true large-input decision boundary\",",
+      "WallMS": 201.082,
+      "WorkMS": 201.082,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6287",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 169.014,
+      "WorkMS": 169.014,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6287",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 66.619,
+      "WorkMS": 66.619,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6287",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6287,\"state\":\"OPEN\",\"title\":\"feat(disambiguation): add a committed-tip freshness verifier\"}",
+      "WallMS": 4345.517,
+      "WorkMS": 4345.517,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6287",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 297.855,
+      "WorkMS": 297.855,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6289",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 182.222,
+      "WorkMS": 182.222,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6289",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 83.244,
+      "WorkMS": 83.244,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6289",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6289,\"state\":\"CLOSED\",\"title\":\"feat(disambiguation): define the machine-readable entry schema and version contract\"}",
+      "WallMS": 669.03,
+      "WorkMS": 669.03,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6289",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 211.97,
+      "WorkMS": 211.97,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6218",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "e6ca15ead7 feat(claimcheck): add a machine-readable exposure state to CLAIMS.md (fak claimcheck)",
+      "WallMS": 65.213,
+      "WorkMS": 65.213,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6218",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 108.649,
+      "WorkMS": 108.649,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6218",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6218,\"state\":\"CLOSED\",\"title\":\"feat(claimcheck): CLAIMS.md has no exposure state — 16 [SHIPPED] claims are default-off and the lint cannot tell\"}",
+      "WallMS": 522.397,
+      "WorkMS": 522.397,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6218",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 211.477,
+      "WorkMS": 211.477,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6205",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "6b5ea6ca5c fix(dispatch): refuse close-resolved on incomplete evidence (fak dispatch)",
+      "WallMS": 86.605,
+      "WorkMS": 86.605,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6205",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md:3:Status: **INCOMPLETE**. Issue [#6205](https://github.com/anthony-chaudhary/fak/issues/6205) tracks real type-aware and code-intelligence tool runs with independent resource and cost",
+      "WallMS": 67.641,
+      "WorkMS": 67.641,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6205",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6205,\"state\":\"OPEN\",\"title\":\"Benchmark Go call graph against type-aware and code-intelligence alternatives\"}",
+      "WallMS": 527.3,
+      "WorkMS": 527.3,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6205",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 540.322,
+      "WorkMS": 540.322,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6174",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "d8c8b2b18f feat(archreport): add cut witnesses to connectivity drift (#6174) (fak archreport)",
+      "WallMS": 71.471,
+      "WorkMS": 71.471,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6174",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 66.915,
+      "WorkMS": 66.915,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6174",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6174,\"state\":\"CLOSED\",\"title\":\"feat(archreport): retain cut witnesses across connectivity drift\"}",
+      "WallMS": 564.975,
+      "WorkMS": 564.975,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6174",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 192.572,
+      "WorkMS": 192.572,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6344",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 160.496,
+      "WorkMS": 160.496,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6344",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 60.422,
+      "WorkMS": 60.422,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6344",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6344,\"state\":\"OPEN\",\"title\":\"feat(generationobs): measure steering resolution, latency, and speculative waste\"}",
+      "WallMS": 608.359,
+      "WorkMS": 608.359,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6344",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 439.126,
+      "WorkMS": 439.126,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6359",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 228.039,
+      "WorkMS": 228.039,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6359",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 68.974,
+      "WorkMS": 68.974,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6359",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6359,\"state\":\"CLOSED\",\"title\":\"dogfood: usage ledger so Native micro-agent shared-cache swarm proof adoption is measured, not claimed\"}",
+      "WallMS": 550.401,
+      "WorkMS": 550.401,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6359",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 197.446,
+      "WorkMS": 197.446,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6192",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "df7644a920 feat(archreport): add transitive dependency reach (#6192) (fak archreport)",
+      "WallMS": 432.713,
+      "WorkMS": 432.713,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6192",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 102.716,
+      "WorkMS": 102.716,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6192",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6192,\"state\":\"CLOSED\",\"title\":\"feat(archreport): expose transitive dependency reach\"}",
+      "WallMS": 438.154,
+      "WorkMS": 438.154,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6192",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 209.714,
+      "WorkMS": 209.714,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6045",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "f3b2ff4b16 feat(toolplugin): add monotone plugin and preference host (#6045) (fak toolplugin)",
+      "WallMS": 92.094,
+      "WorkMS": 92.094,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6045",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 63.409,
+      "WorkMS": 63.409,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6045",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6045,\"state\":\"CLOSED\",\"title\":\"Define typed tool-call plugin stages and user preference layering\"}",
+      "WallMS": 626.028,
+      "WorkMS": 626.028,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6045",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:17728:      \"title\": \"Define typed tool-call plugin stages and user preference layering\",",
+      "WallMS": 567.664,
+      "WorkMS": 567.664,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6141",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "9d5da99d7e feat(archreport): add blast-path depth gate (#6141) (fak archreport)",
+      "WallMS": 76.198,
+      "WorkMS": 76.198,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6141",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 66.215,
+      "WorkMS": 66.215,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6141",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6141,\"state\":\"CLOSED\",\"title\":\"feat(archreport): gate deeper transitive blast paths\"}",
+      "WallMS": 511.37,
+      "WorkMS": 511.37,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6141",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 201.683,
+      "WorkMS": 201.683,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6275",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "6b028c01d9 feat(disambiguation): add canonical-term query #6275 (fak disambiguation)",
+      "WallMS": 69.9,
+      "WorkMS": 69.9,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6275",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 63.311,
+      "WorkMS": 63.311,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6275",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6275,\"state\":\"CLOSED\",\"title\":\"feat(disambiguation): add query-by-canonical-term with structured JSON\"}",
+      "WallMS": 477.626,
+      "WorkMS": 477.626,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6275",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 190.498,
+      "WorkMS": 190.498,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6126",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "5180917a76 fix(compute): prevent stale CUDA upload cache hits (#6126) (fak compute)",
+      "WallMS": 407.414,
+      "WorkMS": 407.414,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6126",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 133.563,
+      "WorkMS": 133.563,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6126",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6126,\"state\":\"CLOSED\",\"title\":\"fix(cuda): Qwen3.5 GDN stage 3 invalid launch reds sm_80 acceptance\"}",
+      "WallMS": 614.371,
+      "WorkMS": 614.371,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6126",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 251.03,
+      "WorkMS": 251.03,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6294",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 210.048,
+      "WorkMS": 210.048,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6294",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 90.621,
+      "WorkMS": 90.621,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6294",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6294,\"state\":\"CLOSED\",\"title\":\"feat(disambiguation): attach scope qualifiers to overloaded terms\"}",
+      "WallMS": 492.717,
+      "WorkMS": 492.717,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6294",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 222.163,
+      "WorkMS": 222.163,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6150",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "44210dc401 feat(archreport): add lateral coupling deltas (#6150) (fak archreport)",
+      "WallMS": 80.271,
+      "WorkMS": 80.271,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6150",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 69.749,
+      "WorkMS": 69.749,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6150",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6150,\"state\":\"CLOSED\",\"title\":\"feat(archreport): diff lateral component coupling\"}",
+      "WallMS": 638.501,
+      "WorkMS": 638.501,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6150",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 218.353,
+      "WorkMS": 218.353,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6158",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "07ba9b59ae feat(archreport): add articulation-point impact gate (#6158) (fak archreport)",
+      "WallMS": 72.122,
+      "WorkMS": 72.122,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6158",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 67.676,
+      "WorkMS": 67.676,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6158",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6158,\"state\":\"CLOSED\",\"title\":\"feat(archreport): gate lateral articulation-point impact\"}",
+      "WallMS": 482.401,
+      "WorkMS": 482.401,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6158",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 190.909,
+      "WorkMS": 190.909,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6139",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "7544380719 feat(computeadmit): add scheduler alternatives comparison #6139 (fak computeadmit)",
+      "WallMS": 79.202,
+      "WorkMS": 79.202,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6139",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/benchmarks/COMPUTE-REGION-ADMISSION-ALTERNATIVES-2026-08-10.md:5:**INCOMPLETE.** This packet executes fak's region admission and an unbounded/no-admission baseline. Kubernetes, Slurm, Ray, and AWS Batch have zero measurements until rea",
+      "WallMS": 100.506,
+      "WorkMS": 100.506,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6139",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6139,\"state\":\"OPEN\",\"title\":\"bench(computeadmit): run scheduler alternative arms\"}",
+      "WallMS": 496.816,
+      "WorkMS": 496.816,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6139",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 195.555,
+      "WorkMS": 195.555,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6102",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "6b5ea6ca5c fix(dispatch): refuse close-resolved on incomplete evidence (fak dispatch)",
+      "WallMS": 71.697,
+      "WorkMS": 71.697,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6102",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 71.363,
+      "WorkMS": 71.363,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6102",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6102,\"state\":\"OPEN\",\"title\":\"bench(adjudicator): run equivalent OPA and Cedar policy arms\"}",
+      "WallMS": 456.698,
+      "WorkMS": 456.698,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6102",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:18810:      \"title\": \"bench(adjudicator): run equivalent OPA and Cedar policy arms\",",
+      "WallMS": 961.564,
+      "WorkMS": 961.564,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6064",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "b4efa46308 feat(headroom): add same-corpus compressor comparison #6064 (fak headroom)",
+      "WallMS": 80.934,
+      "WorkMS": 80.934,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6064",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/benchmarks/CONTEXT-COMPRESSION-COMPARISON-RUNNER.md:3:`fak headroom compare` is the shared-corpus local spine for #6064:\ndocs/benchmarks/CONTEXT-COMPRESSION-LIVE-2026-08-09.md:5:Issue: #3204 (adapter spine); broader end-to-end comparis",
+      "WallMS": 67.535,
+      "WorkMS": 67.535,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6064",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6064,\"state\":\"OPEN\",\"title\":\"bench(headroom): compare native compression with cached full history and LLMLingua-2\"}",
+      "WallMS": 547.872,
+      "WorkMS": 547.872,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6064",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:18116:      \"title\": \"bench(headroom): compare native compression with cached full history and LLMLingua-2\",",
+      "WallMS": 203.967,
+      "WorkMS": 203.967,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6124",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "6eb23023b2 feat(microcontextdemo): add adjudicated semantic residual corpus #6124 (fak microcontextdemo)",
+      "WallMS": 78.214,
+      "WorkMS": 78.214,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6124",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/research/README.md:30:- [Micro-context S8i independently adjudicated semantic residual](micro-context-s8i-semantic-residual.md) — blinded tune/test packet, two-model live adjudication, exact-agreement/abstention fold, and blind seman",
+      "WallMS": 104.156,
+      "WorkMS": 104.156,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6124",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6124,\"state\":\"CLOSED\",\"title\":\"experiment(microcontextdemo): add adjudicated semantic-residual corpus\"}",
+      "WallMS": 663.065,
+      "WorkMS": 663.065,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6124",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 228.572,
+      "WorkMS": 228.572,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6176",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 170.516,
+      "WorkMS": 170.516,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6176",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 62.035,
+      "WorkMS": 62.035,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6176",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6176,\"state\":\"OPEN\",\"title\":\"idea-scout: NiyamAI - An Intent-Bound AI Agent with Cryptographically Verifiable Guardrails using Zero-Knowle…\"}",
+      "WallMS": 534.785,
+      "WorkMS": 534.785,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6176",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 229.858,
+      "WorkMS": 229.858,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6311",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 182.661,
+      "WorkMS": 182.661,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6311",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 69.376,
+      "WorkMS": 69.376,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6311",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6311,\"state\":\"OPEN\",\"title\":\"feat(disambiguation): index reason codes and verdict vocabulary\"}",
+      "WallMS": 438.317,
+      "WorkMS": 438.317,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6311",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 195.217,
+      "WorkMS": 195.217,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6062",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "bff91ae318 feat(scorecard): add pure delivery-flow fold (#6062) (fak scorecard)",
+      "WallMS": 82.3,
+      "WorkMS": 82.3,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6062",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 60.92,
+      "WorkMS": 60.92,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6062",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6062,\"state\":\"CLOSED\",\"title\":\"feat(scorecard): pure delivery-flow fold — measure how work flows, not just how much is open\"}",
+      "WallMS": 459.101,
+      "WorkMS": 459.101,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6062",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:18086:      \"title\": \"feat(scorecard): pure delivery-flow fold — measure how work flows, not just how much is open\",",
+      "WallMS": 191.851,
+      "WorkMS": 191.851,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6154",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "4bbdd63db5 feat(archreport): add lateral bridge impact gate (#6154) (fak archreport)",
+      "WallMS": 73.18,
+      "WorkMS": 73.18,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6154",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 95.813,
+      "WorkMS": 95.813,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6154",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6154,\"state\":\"CLOSED\",\"title\":\"feat(archreport): gate lateral bridge impact\"}",
+      "WallMS": 588.021,
+      "WorkMS": 588.021,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6154",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 223.309,
+      "WorkMS": 223.309,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6133",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "c0ebb1c379 feat(timeoutphase): add tracing alternatives comparison #6133 (fak timeoutphase)",
+      "WallMS": 92.515,
+      "WorkMS": 92.515,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6133",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/benchmarks/TIMEOUT-PHASE-ATTRIBUTION-ALTERNATIVES-2026-08-10.md:3:Issue: [#6133](https://github.com/anthony-chaudhary/fak/issues/6133)",
+      "WallMS": 69.487,
+      "WorkMS": 69.487,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6133",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6133,\"state\":\"OPEN\",\"title\":\"bench(timeoutphase): run OpenTelemetry, Datadog, and X-Ray tracing arms\"}",
+      "WallMS": 509.645,
+      "WorkMS": 509.645,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6133",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 208.49,
+      "WorkMS": 208.49,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6123",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "2953b8c925 feat(archreport): add deeper-violation gate (#6123) (fak archreport)",
+      "WallMS": 105.682,
+      "WorkMS": 105.682,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6123",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 71.785,
+      "WorkMS": 71.785,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6123",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6123,\"state\":\"CLOSED\",\"title\":\"feat(archreport): gate deeper upward violations\"}",
+      "WallMS": 1204.735,
+      "WorkMS": 1204.735,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6123",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 261.414,
+      "WorkMS": 261.414,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6232",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 230.236,
+      "WorkMS": 230.236,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6232",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 73.089,
+      "WorkMS": 73.089,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6232",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6232,\"state\":\"OPEN\",\"title\":\"feat(engine): delegate quantized models to llama.cpp with capability checks\"}",
+      "WallMS": 507.672,
+      "WorkMS": 507.672,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6232",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 253.513,
+      "WorkMS": 253.513,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6368",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 208.271,
+      "WorkMS": 208.271,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6368",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 73.632,
+      "WorkMS": 73.632,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6368",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6368,\"state\":\"OPEN\",\"title\":\"Track workflow concept drift and lineage across windows\"}",
+      "WallMS": 521.718,
+      "WorkMS": 521.718,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6368",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 211.162,
+      "WorkMS": 211.162,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6180",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "e993a8d379 feat(claimcheck): add grading alternatives comparison #6180 (fak claimcheck)",
+      "WallMS": 94.423,
+      "WorkMS": 94.423,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6180",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/benchmarks/NATIVE-IMPLEMENTATION-COMPARISONS.md:79:| Net-true, strawman, and not-yet claim grading | `internal/claimcheck` | native; witness-presence heuristic; `fak + Prometheus`; `fak + OpenTelemetry`; OPA/Rego; OpenAI Evals; LangSmi",
+      "WallMS": 66.156,
+      "WorkMS": 66.156,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6180",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6180,\"state\":\"OPEN\",\"title\":\"Benchmark net-true claim grading against evaluation systems\"}",
+      "WallMS": 462.478,
+      "WorkMS": 462.478,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6180",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 209.411,
+      "WorkMS": 209.411,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6310",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 196.738,
+      "WorkMS": 196.738,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6310",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 4013.169,
+      "WorkMS": 4013.169,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6310",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6310,\"state\":\"OPEN\",\"title\":\"feat(disambiguation): index exported package capability terminology\"}",
+      "WallMS": 700.513,
+      "WorkMS": 700.513,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6310",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 197.714,
+      "WorkMS": 197.714,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6364",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "da0af50a82 feat(closebatch): add alternatives comparison #6364 (fak closebatch)",
+      "WallMS": 72.998,
+      "WorkMS": 72.998,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6364",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/benchmarks/ISSUE-CLOSE-BATCH-ALTERNATIVES-2026-08-10.md:3:Status: **INCOMPLETE**. Issue [#6364](https://github.com/anthony-chaudhary/fak/issues/6364) tracks real hosted-system witnesses.\ndocs/benchmarks/NATIVE-IMPLEMENTATION-COMPARISON",
+      "WallMS": 65.023,
+      "WorkMS": 65.023,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6364",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6364,\"state\":\"OPEN\",\"title\":\"Benchmark issue close batching against hosted alternatives\"}",
+      "WallMS": 634.482,
+      "WorkMS": 634.482,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6364",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 205.049,
+      "WorkMS": 205.049,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6164",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "f11a434f23 feat(vcacheobserve): add economics alternatives comparison #6164 (fak vcacheobserve)",
+      "WallMS": 105.862,
+      "WorkMS": 105.862,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6164",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/benchmarks/NATIVE-IMPLEMENTATION-COMPARISONS.md:73:| Provider-cache economics and realized-value fold | `internal/vcacheobserve` | native; raw usage; `fak + Prometheus`; `fak + OpenTelemetry`; Anthropic; OpenAI; Datadog; LangSmith | [l",
+      "WallMS": 77.989,
+      "WorkMS": 77.989,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6164",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6164,\"state\":\"OPEN\",\"title\":\"Benchmark provider cache economics fold against observability alternatives\"}",
+      "WallMS": 555.085,
+      "WorkMS": 555.085,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6164",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 257.525,
+      "WorkMS": 257.525,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6172",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "89fd764d28 feat(archreport): expose lateral minimum-cut witnesses (#6172) (fak archreport)",
+      "WallMS": 92.011,
+      "WorkMS": 92.011,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6172",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 78.2,
+      "WorkMS": 78.2,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6172",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6172,\"state\":\"CLOSED\",\"title\":\"feat(archreport): expose lateral minimum-cut witnesses\"}",
+      "WallMS": 527.464,
+      "WorkMS": 527.464,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6172",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 504.376,
+      "WorkMS": 504.376,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6356",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 239.995,
+      "WorkMS": 239.995,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6356",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 104.931,
+      "WorkMS": 104.931,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6356",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6356,\"state\":\"CLOSED\",\"title\":\"qa: failure-path + refusal coverage for Native micro-agent shared-cache swarm proof\"}",
+      "WallMS": 673.355,
+      "WorkMS": 673.355,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6356",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 220.336,
+      "WorkMS": 220.336,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6208",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "889a2ac878 feat(workpattern): add named coding workload miners (#6208) (fak worktype)",
+      "WallMS": 73.07,
+      "WorkMS": 73.07,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6208",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/research/coding-workload-vocabulary.md:12:[#6208](https://github.com/anthony-chaudhary/fak/issues/6208); generation stream",
+      "WallMS": 64.649,
+      "WorkMS": 64.649,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6208",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6208,\"state\":\"CLOSED\",\"title\":\"epic(workpatterns): name and mine reusable agent coding workloads\"}",
+      "WallMS": 975.003,
+      "WorkMS": 975.003,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6208",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 217.721,
+      "WorkMS": 217.721,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6187",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "a7e3f04219 feat(codelint): add Go syntax alternatives comparison #6187 (fak codelint)",
+      "WallMS": 71.829,
+      "WorkMS": 71.829,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6187",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/benchmarks/GO-SYNTAX-VALIDATION-ALTERNATIVES-2026-08-10.md:3:Status: **INCOMPLETE**. Issue [#6187](https://github.com/anthony-chaudhary/fak/issues/6187) tracks real toolchain runs and independent resource/cost witnesses.\ndocs/benchmark",
+      "WallMS": 68.155,
+      "WorkMS": 68.155,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6187",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6187,\"state\":\"OPEN\",\"title\":\"Benchmark native Go syntax checks against lint toolchains\"}",
+      "WallMS": 585.598,
+      "WorkMS": 585.598,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6187",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 190.834,
+      "WorkMS": 190.834,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6036",
+      "Split": "test",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "4b8c5a230b feat(nativebench): add benchmark leaf dispositions #6036 (fak nativebench)",
+      "WallMS": 74.599,
+      "WorkMS": 74.599,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6036",
+      "Split": "test",
+      "Label": "docs_read",
+      "Status": "completed",
+      "Receipt": "docs/benchmarks/PREFIX-KV-REUSE-COMPARISON.md:3:Status: **INCOMPLETE**. Issue: #6036.\ndocs/whats-new.md:117:- **[`8d430ad1`](https://github.com/anthony-chaudhary/fak/commit/8d430ad1)** 2026-08-09 — feat(nativebench): expose comparison obl",
+      "WallMS": 63.424,
+      "WorkMS": 63.424,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6036",
+      "Split": "test",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6036,\"state\":\"CLOSED\",\"title\":\"bench(native): benchmark every native capability against tuned, next-best, and integrated alternatives\"}",
+      "WallMS": 471.853,
+      "WorkMS": 471.853,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6036",
+      "Split": "test",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:17555:      \"title\": \"bench(native): benchmark every native capability against tuned, next-best, and integrated alternatives\",",
+      "WallMS": 200.217,
+      "WorkMS": 200.217,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6231",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 170.027,
+      "WorkMS": 170.027,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6231",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 70.923,
+      "WorkMS": 70.923,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6231",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6231,\"state\":\"OPEN\",\"title\":\"feat(model): map GGUF quantization types and metadata\"}",
+      "WallMS": 502.661,
+      "WorkMS": 502.661,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6231",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 196.096,
+      "WorkMS": 196.096,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6107",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "6b5ea6ca5c fix(dispatch): refuse close-resolved on incomplete evidence (fak dispatch)",
+      "WallMS": 71.767,
+      "WorkMS": 71.767,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6107",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 60.977,
+      "WorkMS": 60.977,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6107",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6107,\"state\":\"OPEN\",\"title\":\"bench(ctxmmu): run Letta and first-class memory integration arms\"}",
+      "WallMS": 437.101,
+      "WorkMS": 437.101,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6107",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:18895:      \"title\": \"bench(ctxmmu): run Letta and first-class memory integration arms\",",
+      "WallMS": 222.482,
+      "WorkMS": 222.482,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6204",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "c64a901944 feat(archreport): add dependency-burden hotspots (#6204) (fak archreport)",
+      "WallMS": 73.691,
+      "WorkMS": 73.691,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6204",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 72.29,
+      "WorkMS": 72.29,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6204",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6204,\"state\":\"CLOSED\",\"title\":\"feat(archreport): rank dependency-burden hotspots\"}",
+      "WallMS": 484.423,
+      "WorkMS": 484.423,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6204",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 202.246,
+      "WorkMS": 202.246,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6168",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "b6da0da368 docs(research): document filter and tool micro-windows #6168 (fak docs)",
+      "WallMS": 74.016,
+      "WorkMS": 74.016,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6168",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 414.297,
+      "WorkMS": 414.297,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6168",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6168,\"state\":\"CLOSED\",\"title\":\"docs(research): separate selector filter and tool-result micro-windows\"}",
+      "WallMS": 442.161,
+      "WorkMS": 442.161,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6168",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 203.331,
+      "WorkMS": 203.331,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6016",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 158.775,
+      "WorkMS": 158.775,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6016",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 65.224,
+      "WorkMS": 65.224,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6016",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6016,\"state\":\"OPEN\",\"title\":\"idea-scout: The Bitter Lesson of Tool Calling\"}",
+      "WallMS": 601.778,
+      "WorkMS": 601.778,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6016",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:17177:      \"title\": \"idea-scout: The Bitter Lesson of Tool Calling\",\nexperiments/microcontext/s8i-semantic-packet-2026-08-10.json:97:      \"Title\": \"idea-scout: The Bitter L",
+      "WallMS": 241.087,
+      "WorkMS": 241.087,
+      "Authority": [
+        "repo_search"
+      ]
+    },
+    {
+      "ID": "gh-6050",
+      "Split": "tune",
+      "Label": "commit_state",
+      "Status": "completed",
+      "Receipt": "",
+      "WallMS": 213.16,
+      "WorkMS": 213.16,
+      "Authority": [
+        "commit_state"
+      ]
+    },
+    {
+      "ID": "gh-6050",
+      "Split": "tune",
+      "Label": "docs_read",
+      "Status": "no_match",
+      "Receipt": "",
+      "WallMS": 75.984,
+      "WorkMS": 75.984,
+      "Authority": [
+        "docs_read"
+      ]
+    },
+    {
+      "ID": "gh-6050",
+      "Split": "tune",
+      "Label": "issue_state",
+      "Status": "completed",
+      "Receipt": "{\"number\":6050,\"state\":\"OPEN\",\"title\":\"feat(coordination): couple serve admission and backpressure to the global plan\"}",
+      "WallMS": 547.14,
+      "WorkMS": 547.14,
+      "Authority": [
+        "issue_state"
+      ]
+    },
+    {
+      "ID": "gh-6050",
+      "Split": "tune",
+      "Label": "repo_search",
+      "Status": "completed",
+      "Receipt": "experiments/microcontext/s8f-github-issues-public-2026-08-09.json:17834:      \"title\": \"feat(coordination): couple serve admission and backpressure to the global plan\",",
+      "WallMS": 186.757,
+      "WorkMS": 186.757,
+      "Authority": [
+        "repo_search"
+      ]
+    }
+  ],
+  "Policies": [
+    {
+      "Policy": "deterministic",
+      "Split": "tune",
+      "Records": 93,
+      "Exact": 0.6774193548387096,
+      "MeanLabels": 1.6236559139784945,
+      "MeanWallMS": 404.8587311827958,
+      "MeanWorkMS": 404.8587311827958,
+      "MeanAuthority": 1.6236559139784945,
+      "ExactCILow": 0.5770106827427646,
+      "ExactCIHigh": 0.7637519647145263,
+      "Observed": true
+    },
+    {
+      "Policy": "tuned_fixed_cascade",
+      "Split": "tune",
+      "Records": 93,
+      "Exact": 0,
+      "MeanLabels": 4,
+      "MeanWallMS": 1242.3334193548394,
+      "MeanWorkMS": 1242.3334193548394,
+      "MeanAuthority": 4,
+      "ExactCILow": 0,
+      "ExactCIHigh": 0.0396689026203615,
+      "Observed": true
+    },
+    {
+      "Policy": "semantic_admission",
+      "Split": "tune",
+      "Records": 93,
+      "Exact": 0.6666666666666666,
+      "MeanLabels": 1.6559139784946237,
+      "MeanWallMS": 413.79733333333337,
+      "MeanWorkMS": 413.79733333333337,
+      "MeanAuthority": 1.6559139784946237,
+      "ExactCILow": 0.5659327976152322,
+      "ExactCIHigh": 0.7541775681779805,
+      "Observed": true
+    },
+    {
+      "Policy": "selective_parallelism",
+      "Split": "tune",
+      "Records": 93,
+      "Exact": 0.6666666666666666,
+      "MeanLabels": 1.6666666666666667,
+      "MeanWallMS": 415.9120215053764,
+      "MeanWorkMS": 415.9120215053764,
+      "MeanAuthority": 1.6666666666666667,
+      "ExactCILow": 0.5659327976152322,
+      "ExactCIHigh": 0.7541775681779805,
+      "Observed": true
+    },
+    {
+      "Policy": "deterministic",
+      "Split": "test",
+      "Records": 27,
+      "Exact": 0.5555555555555556,
+      "MeanLabels": 2,
+      "MeanWallMS": 440.7190370370372,
+      "MeanWorkMS": 440.7190370370372,
+      "MeanAuthority": 2,
+      "ExactCILow": 0.37312719479576884,
+      "ExactCIHigh": 0.7241440232992717,
+      "Observed": true
+    },
+    {
+      "Policy": "tuned_fixed_cascade",
+      "Split": "test",
+      "Records": 27,
+      "Exact": 0,
+      "MeanLabels": 4,
+      "MeanWallMS": 1111.4760740740735,
+      "MeanWorkMS": 1111.4760740740735,
+      "MeanAuthority": 4,
+      "ExactCILow": 6.938893903907228e-18,
+      "ExactCIHigh": 0.12455903714463581,
+      "Observed": true
+    },
+    {
+      "Policy": "semantic_admission",
+      "Split": "test",
+      "Records": 27,
+      "Exact": 0.5555555555555556,
+      "MeanLabels": 2,
+      "MeanWallMS": 440.7190370370372,
+      "MeanWorkMS": 440.7190370370372,
+      "MeanAuthority": 2,
+      "ExactCILow": 0.37312719479576884,
+      "ExactCIHigh": 0.7241440232992717,
+      "Observed": true
+    },
+    {
+      "Policy": "selective_parallelism",
+      "Split": "test",
+      "Records": 27,
+      "Exact": 0.5555555555555556,
+      "MeanLabels": 2,
+      "MeanWallMS": 440.7190370370372,
+      "MeanWorkMS": 440.7190370370372,
+      "MeanAuthority": 2,
+      "ExactCILow": 0.37312719479576884,
+      "ExactCIHigh": 0.7241440232992717,
+      "Observed": true
+    }
+  ],
+  "BreakEven": [
+    {
+      "SelectorCostMS": 5,
+      "SavedToolWorkMS": 670.7570370370363,
+      "ErrorCostMS": 0,
+      "CacheHitRate": 0,
+      "NetValueMS": 665.7570370370363,
+      "Wins": true
+    },
+    {
+      "SelectorCostMS": 5,
+      "SavedToolWorkMS": 670.7570370370363,
+      "ErrorCostMS": 25,
+      "CacheHitRate": 0,
+      "NetValueMS": 640.7570370370363,
+      "Wins": true
+    },
+    {
+      "SelectorCostMS": 5,
+      "SavedToolWorkMS": 670.7570370370363,
+      "ErrorCostMS": 100,
+      "CacheHitRate": 0,
+      "NetValueMS": 565.7570370370363,
+      "Wins": true
+    },
+    {
+      "SelectorCostMS": 5,
+      "SavedToolWorkMS": 335.37851851851815,
+      "ErrorCostMS": 0,
+      "CacheHitRate": 0.5,
+      "NetValueMS": 330.37851851851815,
+      "Wins": true
+    },
+    {
+      "SelectorCostMS": 5,
+      "SavedToolWorkMS": 335.37851851851815,
+      "ErrorCostMS": 25,
+      "CacheHitRate": 0.5,
+      "NetValueMS": 305.37851851851815,
+      "Wins": true
+    },
+    {
+      "SelectorCostMS": 5,
+      "SavedToolWorkMS": 335.37851851851815,
+      "ErrorCostMS": 100,
+      "CacheHitRate": 0.5,
+      "NetValueMS": 230.37851851851815,
+      "Wins": true
+    },
+    {
+      "SelectorCostMS": 5,
+      "SavedToolWorkMS": 67.07570370370361,
+      "ErrorCostMS": 0,
+      "CacheHitRate": 0.9,
+      "NetValueMS": 62.07570370370361,
+      "Wins": true
+    },
+    {
+      "SelectorCostMS": 5,
+      "SavedToolWorkMS": 67.07570370370361,
+      "ErrorCostMS": 25,
+      "CacheHitRate": 0.9,
+      "NetValueMS": 37.07570370370361,
+      "Wins": true
+    },
+    {
+      "SelectorCostMS": 5,
+      "SavedToolWorkMS": 67.07570370370361,
+      "ErrorCostMS": 100,
+      "CacheHitRate": 0.9,
+      "NetValueMS": -37.92429629629639,
+      "Wins": false
+    },
+    {
+      "SelectorCostMS": 911.6635666666666,
+      "SavedToolWorkMS": 670.7570370370363,
+      "ErrorCostMS": 0,
+      "CacheHitRate": 0,
+      "NetValueMS": -240.9065296296303,
+      "Wins": false
+    },
+    {
+      "SelectorCostMS": 911.6635666666666,
+      "SavedToolWorkMS": 670.7570370370363,
+      "ErrorCostMS": 25,
+      "CacheHitRate": 0,
+      "NetValueMS": -265.9065296296303,
+      "Wins": false
+    },
+    {
+      "SelectorCostMS": 911.6635666666666,
+      "SavedToolWorkMS": 670.7570370370363,
+      "ErrorCostMS": 100,
+      "CacheHitRate": 0,
+      "NetValueMS": -340.9065296296303,
+      "Wins": false
+    },
+    {
+      "SelectorCostMS": 911.6635666666666,
+      "SavedToolWorkMS": 335.37851851851815,
+      "ErrorCostMS": 0,
+      "CacheHitRate": 0.5,
+      "NetValueMS": -576.2850481481485,
+      "Wins": false
+    },
+    {
+      "SelectorCostMS": 911.6635666666666,
+      "SavedToolWorkMS": 335.37851851851815,
+      "ErrorCostMS": 25,
+      "CacheHitRate": 0.5,
+      "NetValueMS": -601.2850481481485,
+      "Wins": false
+    },
+    {
+      "SelectorCostMS": 911.6635666666666,
+      "SavedToolWorkMS": 335.37851851851815,
+      "ErrorCostMS": 100,
+      "CacheHitRate": 0.5,
+      "NetValueMS": -676.2850481481485,
+      "Wins": false
+    },
+    {
+      "SelectorCostMS": 911.6635666666666,
+      "SavedToolWorkMS": 67.07570370370361,
+      "ErrorCostMS": 0,
+      "CacheHitRate": 0.9,
+      "NetValueMS": -844.587862962963,
+      "Wins": false
+    },
+    {
+      "SelectorCostMS": 911.6635666666666,
+      "SavedToolWorkMS": 67.07570370370361,
+      "ErrorCostMS": 25,
+      "CacheHitRate": 0.9,
+      "NetValueMS": -869.587862962963,
+      "Wins": false
+    },
+    {
+      "SelectorCostMS": 911.6635666666666,
+      "SavedToolWorkMS": 67.07570370370361,
+      "ErrorCostMS": 100,
+      "CacheHitRate": 0.9,
+      "NetValueMS": -944.587862962963,
+      "Wins": false
+    }
+  ],
+  "FalsifyingRegime": "adaptive admission loses when selector plus error cost exceeds avoided tool work, especially at high cache hit rate"
+}

@@ -1,0 +1,3000 @@
+{
+  "Schema": "fak-microcontext-natural-traffic-fold/1",
+  "CreatedAt": "2026-08-16T09:31:18Z",
+  "CorpusSHA256": "c62ea95020119723fd94f53056941932ca3aab449de3db76aace8c2d3b820d8c",
+  "Policy": "construction/read-back and first independent model must agree per label; disagreements are frozen; second model is held out as the evaluated semantic policy",
+  "Adjudicators": [
+    "construction",
+    "openai-gpt-5.6-sol",
+    "nvidia-llama-3.1-8b"
+  ],
+  "Counts": {
+    "disputed": 92,
+    "label_commit_state": 19,
+    "label_docs_read": 16,
+    "label_issue_state": 6,
+    "label_repo_search": 118,
+    "test": 27,
+    "tune": 93
+  },
+  "JudgeWallMS": {
+    "nvidia-llama-3.1-8b": 109399.628,
+    "openai-gpt-5.6-sol": 513024.85
+  },
+  "Records": [
+    {
+      "id": "gh-6350",
+      "split": "test",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6318",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6206",
+      "split": "tune",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "docs_read",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "docs_read",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6056",
+      "split": "tune",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "docs_read",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "docs_read",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6103",
+      "split": "test",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6233",
+      "split": "test",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6184",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6047",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6070",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6137",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6247",
+      "split": "test",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6267",
+      "split": "tune",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6052",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6263",
+      "split": "tune",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6197",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "issue_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "issue_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6251",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6290",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6222",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6373",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6214",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6365",
+      "split": "test",
+      "labels": [
+        "commit_state",
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6361",
+      "split": "test",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "issue_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "issue_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6353",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6023",
+      "split": "test",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6304",
+      "split": "test",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6022",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6155",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6355",
+      "split": "tune",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6319",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6362",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6081",
+      "split": "test",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "issue_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "issue_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6143",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6305",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6080",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6293",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6323",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6160",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6213",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6236",
+      "split": "tune",
+      "labels": [
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "issue_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "issue_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6215",
+      "split": "tune",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6175",
+      "split": "tune",
+      "labels": [],
+      "clarify": false,
+      "disputed": [
+        "docs_read",
+        "issue_state",
+        "repo_search",
+        "clarify"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "docs_read"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state"
+        ]
+      }
+    },
+    {
+      "id": "gh-6227",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6021",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6044",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "docs_read",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "docs_read",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6060",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6193",
+      "split": "test",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6058",
+      "split": "test",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6237",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6194",
+      "split": "tune",
+      "labels": [
+        "commit_state",
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "commit_state",
+          "issue_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "issue_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6162",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6190",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6248",
+      "split": "tune",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6342",
+      "split": "test",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6277",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6209",
+      "split": "tune",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6182",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6327",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6031",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6146",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6195",
+      "split": "test",
+      "labels": [
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "issue_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "issue_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6028",
+      "split": "test",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6229",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6117",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6121",
+      "split": "tune",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6279",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6243",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6179",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6074",
+      "split": "tune",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6271",
+      "split": "test",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6027",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6084",
+      "split": "tune",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6250",
+      "split": "tune",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "docs_read",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6296",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6313",
+      "split": "tune",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6119",
+      "split": "test",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6315",
+      "split": "test",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6343",
+      "split": "test",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6111",
+      "split": "test",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6287",
+      "split": "tune",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6289",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6218",
+      "split": "tune",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6205",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6174",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6344",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6359",
+      "split": "test",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6192",
+      "split": "test",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6045",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "docs_read",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "docs_read",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6141",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6275",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6126",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6294",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6150",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6158",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6139",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "docs_read",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6102",
+      "split": "tune",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "docs_read",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "docs_read",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6064",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6124",
+      "split": "tune",
+      "labels": [
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6176",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "docs_read",
+        "issue_state",
+        "clarify"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6311",
+      "split": "test",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6062",
+      "split": "test",
+      "labels": [
+        "commit_state",
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "issue_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "issue_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6154",
+      "split": "test",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6133",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6123",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6232",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6368",
+      "split": "tune",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6180",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6310",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6364",
+      "split": "test",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6164",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6172",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6356",
+      "split": "tune",
+      "labels": [
+        "commit_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6208",
+      "split": "tune",
+      "labels": [
+        "issue_state",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "issue_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6187",
+      "split": "test",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6036",
+      "split": "test",
+      "labels": [
+        "commit_state",
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6231",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "commit_state",
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6107",
+      "split": "tune",
+      "labels": [
+        "docs_read",
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "docs_read",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "docs_read",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6204",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "issue_state",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "issue_state",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6168",
+      "split": "tune",
+      "labels": [
+        "commit_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "disputed": [
+        "issue_state",
+        "repo_search"
+      ],
+      "votes": {
+        "construction": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "commit_state",
+          "docs_read",
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "commit_state",
+          "docs_read",
+          "issue_state"
+        ]
+      }
+    },
+    {
+      "id": "gh-6016",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "docs_read",
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "docs_read",
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    },
+    {
+      "id": "gh-6050",
+      "split": "tune",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "disputed": [
+        "issue_state"
+      ],
+      "votes": {
+        "construction": [
+          "repo_search"
+        ],
+        "nvidia-llama-3.1-8b": [
+          "repo_search"
+        ],
+        "openai-gpt-5.6-sol": [
+          "issue_state",
+          "repo_search"
+        ]
+      }
+    }
+  ]
+}

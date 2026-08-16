@@ -1,0 +1,1238 @@
+{
+  "Schema": "fak-microcontext-natural-traffic-judgments/1",
+  "CreatedAt": "2026-08-10T23:50:48Z",
+  "CorpusSHA256": "c62ea95020119723fd94f53056941932ca3aab449de3db76aace8c2d3b820d8c",
+  "Adjudicator": "openai-gpt-5.6-sol",
+  "Model": "",
+  "BatchSize": 10,
+  "PromptTokens": 32059,
+  "OutputTokens": 22905,
+  "WallMS": 513024.85,
+  "Records": [
+    {
+      "id": "gh-6350",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "commit_state"
+      ],
+      "clarify": false,
+      "confidence": 0.98,
+      "rationale": "Inspect the live baseline and tracked Python files, verify referenced retirements and #6348 ownership, and validate the resulting signed commit."
+    },
+    {
+      "id": "gh-6318",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.94,
+      "rationale": "Locate the existing public seam and fixtures, check parent/dependency and dedupe state, and update agent-facing documentation."
+    },
+    {
+      "id": "gh-6206",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.97,
+      "rationale": "Inspect command ownership and validation code, then update architecture and command-creation guidance."
+    },
+    {
+      "id": "gh-6056",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Audit and revise repository orientation surfaces, CLI help, diagrams, glossary, links, and claims."
+    },
+    {
+      "id": "gh-6103",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.98,
+      "rationale": "Inspect archreport and architest implementations and tests, then document the committed-gate behavior."
+    },
+    {
+      "id": "gh-6233",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.93,
+      "rationale": "Inspect the parent contract and current repository seam, and consult current GPTQModel, Transformers, vLLM, and legacy AutoGPTQ conventions."
+    },
+    {
+      "id": "gh-6184",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.91,
+      "rationale": "Discover current fak integrations, preserve the required open issue state, and consult external systems' setup and measurement documentation."
+    },
+    {
+      "id": "gh-6047",
+      "labels": [
+        "repo_search",
+        "issue_state"
+      ],
+      "clarify": false,
+      "confidence": 0.95,
+      "rationale": "Inspect cache/context, planning, action, and tracing seams and verify the neutral-contract dependency and related issue state."
+    },
+    {
+      "id": "gh-6070",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.97,
+      "rationale": "Inspect the shipped typed configuration and CLI surfaces and update user-facing guidance for intent-level postures."
+    },
+    {
+      "id": "gh-6137",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.92,
+      "rationale": "Discover native and integrated telemetry arms, consult backend-specific metric semantics, and align the witness with the current parent benchmark scope."
+    },
+    {
+      "id": "gh-6247",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.98,
+      "rationale": "Needs current repo contracts and parent fixtures plus the pinned paper and public-baseline documentation."
+    },
+    {
+      "id": "gh-6267",
+      "labels": [
+        "repo_search",
+        "commit_state"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Requires comparing current Go/Python implementations and verifying the signed path-scoped deletion commit."
+    },
+    {
+      "id": "gh-6052",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.94,
+      "rationale": "The recovery state machine must be designed against current cross-layer code, persistence, and tests."
+    },
+    {
+      "id": "gh-6263",
+      "labels": [
+        "repo_search",
+        "commit_state"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Requires current Go/Python parity inspection and verification of the signed atomic deletion commit."
+    },
+    {
+      "id": "gh-6197",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.91,
+      "rationale": "Needs inspection of current flowmetrics reporting, CLI seams, tests, and emitted signals."
+    },
+    {
+      "id": "gh-6251",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.97,
+      "rationale": "Needs current interoperability contracts, parent fixtures, and authoritative format/codebook documentation."
+    },
+    {
+      "id": "gh-6290",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.9,
+      "rationale": "Needs the current fak seam, parent source declarations, and the declared public-source documentation."
+    },
+    {
+      "id": "gh-6222",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.95,
+      "rationale": "Needs current fragmented support, parent fixtures, and contemporary quantization format/runtime documentation."
+    },
+    {
+      "id": "gh-6373",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Implementation depends on the current architecture graph model, report formats, CLI, tests, and docs."
+    },
+    {
+      "id": "gh-6214",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Needs current ReportDiff, policy handling, rendering, ordering, and test conventions."
+    },
+    {
+      "id": "gh-6365",
+      "labels": [
+        "repo_search",
+        "commit_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.95,
+      "rationale": "Inspect the current concept/rule seams, the cited spine commit, and workflow-concept documentation."
+    },
+    {
+      "id": "gh-6361",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Current dependency graph/report implementations and tests are sufficient to implement and verify dominators."
+    },
+    {
+      "id": "gh-6353",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.87,
+      "rationale": "Locate the existing host probes and consult current documentation for each execution alternative and its pinned setup."
+    },
+    {
+      "id": "gh-6023",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.94,
+      "rationale": "Inspect command dispatch and subprocess behavior plus existing CLI metadata and migration documentation."
+    },
+    {
+      "id": "gh-6304",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.93,
+      "rationale": "CI wiring requires current repository inspection, parent/dependency status, and existing agent-facing CI documentation."
+    },
+    {
+      "id": "gh-6022",
+      "labels": [
+        "repo_search",
+        "issue_state"
+      ],
+      "clarify": false,
+      "confidence": 0.95,
+      "rationale": "Inspect current command/package reachability and retrieve the dev-only classification maintained by issue #6020."
+    },
+    {
+      "id": "gh-6155",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.91,
+      "rationale": "Inspect native benchmark infrastructure and consult current integration and external-monitoring documentation."
+    },
+    {
+      "id": "gh-6355",
+      "labels": [
+        "repo_search",
+        "commit_state"
+      ],
+      "clarify": false,
+      "confidence": 0.94,
+      "rationale": "Inspect the current microcachedemo surface and the cited working-spine commit before constructing adversarial tests."
+    },
+    {
+      "id": "gh-6319",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.92,
+      "rationale": "The work depends on current disambiguation code, parent/schema status, and existing public-seam documentation."
+    },
+    {
+      "id": "gh-6362",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.97,
+      "rationale": "Current ablation registration, environment encoding, production readers, and tests can establish and fix the dialect mismatch."
+    },
+    {
+      "id": "gh-6081",
+      "labels": [
+        "repo_search",
+        "commit_state"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Inspect all CUDA acceptance families/tests and verify the fix against the current tested commit."
+    },
+    {
+      "id": "gh-6143",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.93,
+      "rationale": "Current harness and parent workload plus authoritative scheduler/quota semantics are needed for equivalent benchmark arms."
+    },
+    {
+      "id": "gh-6305",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.9,
+      "rationale": "Inspect the disambiguation seam, confirm parent/spine and dedupe state, and update agent-facing documentation."
+    },
+    {
+      "id": "gh-6080",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.98,
+      "rationale": "The bounded requirements are complete; current graph/report implementation and tests are the necessary evidence."
+    },
+    {
+      "id": "gh-6293",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.9,
+      "rationale": "Inspect the schema seam, verify parent sequencing/dedupe state, and document the contrast model."
+    },
+    {
+      "id": "gh-6323",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.9,
+      "rationale": "Inspect index and CLI implementations, verify parent sequencing/dedupe state, and update discoverable documentation."
+    },
+    {
+      "id": "gh-6160",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.88,
+      "rationale": "The experiment needs the current harness, referenced baseline/matrix state, and endpoint cancellation and billing semantics."
+    },
+    {
+      "id": "gh-6213",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.97,
+      "rationale": "Inspect catalog/miner and CLI conventions, then add and verify the required CLI reference and example documentation."
+    },
+    {
+      "id": "gh-6236",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.94,
+      "rationale": "Use the current model seam and parent contract while consulting authoritative bitsandbytes load-contract semantics."
+    },
+    {
+      "id": "gh-6215",
+      "labels": [
+        "repo_search",
+        "commit_state"
+      ],
+      "clarify": false,
+      "confidence": 0.98,
+      "rationale": "The fix depends on current lint code/offenders and verification of committed HEAD, which the gate explicitly scans."
+    },
+    {
+      "id": "gh-6175",
+      "labels": [
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": true,
+      "confidence": 0.86,
+      "rationale": "Triage requires reading the paper and checking related/duplicate issues, but prioritization, scope, and acceptance criteria are explicitly undecided."
+    },
+    {
+      "id": "gh-6227",
+      "labels": [
+        "repo_search",
+        "issue_state"
+      ],
+      "clarify": false,
+      "confidence": 0.9,
+      "rationale": "Inspect the existing policy seam and retrieve the parent epic's fixtures and neutral contract."
+    },
+    {
+      "id": "gh-6021",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.94,
+      "rationale": "The work depends on the current Go command layout, dispatch seams, and existing command behavior."
+    },
+    {
+      "id": "gh-6044",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.95,
+      "rationale": "Inspect the current ABI verdict, gateway projection, stores, executor, continuation path, and tests."
+    },
+    {
+      "id": "gh-6060",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.95,
+      "rationale": "The rendering request requires locating the current fleet decoder, default TUI, Agents tab, and render tests."
+    },
+    {
+      "id": "gh-6193",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.92,
+      "rationale": "Inspect archreport diff and policy implementations plus the user-facing documentation that must be updated."
+    },
+    {
+      "id": "gh-6058",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "commit_state"
+      ],
+      "clarify": false,
+      "confidence": 0.85,
+      "rationale": "The evaluation needs current coordinator and baseline implementations, the parent gate, and revision-pinned committed configurations and results."
+    },
+    {
+      "id": "gh-6237",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.94,
+      "rationale": "Integration requires the repository contract, parent fixtures, and current versioned torchao recipe and capability documentation."
+    },
+    {
+      "id": "gh-6194",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "commit_state"
+      ],
+      "clarify": false,
+      "confidence": 0.94,
+      "rationale": "Flow metrics depend on current implementation plus live issue and commit histories used to calculate the governed KPIs."
+    },
+    {
+      "id": "gh-6162",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.92,
+      "rationale": "Inspect Plan/ReconcileWarm and benchmark infrastructure, then consult current provider and cache-engine API semantics for comparable arms."
+    },
+    {
+      "id": "gh-6190",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Requires inspecting and modifying the current archreport diff and gating implementation."
+    },
+    {
+      "id": "gh-6248",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.94,
+      "rationale": "Needs the current #6221 contract, repository integration seams, and authoritative paper/OCP/vendor specifications."
+    },
+    {
+      "id": "gh-6342",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Requires locating generationctl and current gateway/provider streaming adapters and tests."
+    },
+    {
+      "id": "gh-6277",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.97,
+      "rationale": "Requires implementing validation, public seams, and documentation in the current repository."
+    },
+    {
+      "id": "gh-6209",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.97,
+      "rationale": "Requires authoritative literature research plus integration of the report and machine-readable artifact into the repository."
+    },
+    {
+      "id": "gh-6182",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.95,
+      "rationale": "Needs current AST-query/integration inspection and authoritative setup and semantics for external structural-search arms."
+    },
+    {
+      "id": "gh-6327",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Requires inspecting the disambiguation seam and adding a reproducible repository-scale benchmark."
+    },
+    {
+      "id": "gh-6031",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Requires implementing the enrichment scheduler contract against current kernel and demo code."
+    },
+    {
+      "id": "gh-6146",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.95,
+      "rationale": "Needs inspection of cachesweep and existing integrations plus authoritative configuration for external simulator arms."
+    },
+    {
+      "id": "gh-6195",
+      "labels": [
+        "repo_search",
+        "issue_state"
+      ],
+      "clarify": false,
+      "confidence": 0.91,
+      "rationale": "Requires frozen repository artifacts and current evidence from the referenced experiment and parent issues."
+    },
+    {
+      "id": "gh-6028",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.95,
+      "rationale": "Requires inspecting the ownership inventory and updating its documented reuse contract."
+    },
+    {
+      "id": "gh-6229",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.9,
+      "rationale": "Implementation depends on current code, the parent epic’s public contract/fixtures, and documented telemetry semantics."
+    },
+    {
+      "id": "gh-6117",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Requires changing archreport verdict and CLI behavior plus its reference documentation."
+    },
+    {
+      "id": "gh-6121",
+      "labels": [
+        "repo_search",
+        "commit_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.93,
+      "rationale": "Needs code and artifact inspection, documentation/hash updates, and commit provenance for the origin witness."
+    },
+    {
+      "id": "gh-6279",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.92,
+      "rationale": "Requires checking manifests and generator code, then documenting the public seam."
+    },
+    {
+      "id": "gh-6243",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.89,
+      "rationale": "Depends on repository adapters, the parent interoperability contract, and current BitNet capability requirements."
+    },
+    {
+      "id": "gh-6179",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Requires modifying minimum-cut report structures/rendering and documenting partition semantics."
+    },
+    {
+      "id": "gh-6074",
+      "labels": [
+        "repo_search",
+        "commit_state"
+      ],
+      "clarify": false,
+      "confidence": 0.94,
+      "rationale": "Needs current test/code inspection and commit evidence for the required race and determinism witness."
+    },
+    {
+      "id": "gh-6271",
+      "labels": [
+        "repo_search",
+        "commit_state"
+      ],
+      "clarify": false,
+      "confidence": 0.97,
+      "rationale": "Requires comparing Go/Python implementations and verifying the signed path-scoped deletion commit."
+    },
+    {
+      "id": "gh-6027",
+      "labels": [
+        "repo_search",
+        "issue_state"
+      ],
+      "clarify": false,
+      "confidence": 0.91,
+      "rationale": "Requires inspecting cooldown call paths while preserving the fail-open policy established by the referenced issue."
+    },
+    {
+      "id": "gh-6084",
+      "labels": [
+        "repo_search",
+        "commit_state"
+      ],
+      "clarify": false,
+      "confidence": 0.93,
+      "rationale": "Inspect archreport behavior and reproduce the failure against the committed tip."
+    },
+    {
+      "id": "gh-6250",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.9,
+      "rationale": "Needs current repository support, the parent contract/fixtures, and the cited paper and public format documentation."
+    },
+    {
+      "id": "gh-6296",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.88,
+      "rationale": "Inspect the freshness seam and tests, plus its agent-facing reason-code documentation."
+    },
+    {
+      "id": "gh-6313",
+      "labels": [
+        "repo_search",
+        "commit_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.89,
+      "rationale": "Requires ownership-index code, real revision/stamp semantics, and discoverable vocabulary documentation."
+    },
+    {
+      "id": "gh-6119",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.95,
+      "rationale": "Reconcile the native fixture against current public cloud calculator SKU and billing documentation."
+    },
+    {
+      "id": "gh-6315",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Implement the cache index and verify contrasts using current public provider and cache-mechanism sources."
+    },
+    {
+      "id": "gh-6343",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.94,
+      "rationale": "The journal, replay invariants, and crash witness are repository implementation concerns."
+    },
+    {
+      "id": "gh-6111",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.87,
+      "rationale": "Needs repository benchmark artifacts, current parent acceptance criteria, and evidence for external tuned alternatives."
+    },
+    {
+      "id": "gh-6287",
+      "labels": [
+        "repo_search",
+        "commit_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.95,
+      "rationale": "The verifier depends on repository code, committed-tip versus overlay state, and agent-facing documentation."
+    },
+    {
+      "id": "gh-6289",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.92,
+      "rationale": "Inspect the public schema seam and ensure its version contract is documented where agents discover it."
+    },
+    {
+      "id": "gh-6218",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.94,
+      "rationale": "Inspect the current CLAIMS.md vocabulary and the repository lint that validates claim tags."
+    },
+    {
+      "id": "gh-6205",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Inspect the native graph implementation and fixture, plus current documentation for configuring and pinning each external comparison arm."
+    },
+    {
+      "id": "gh-6174",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.91,
+      "rationale": "Trace snapshot, drift, rendering, policy, and test code, and inspect the CLI reference that must be updated."
+    },
+    {
+      "id": "gh-6344",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.9,
+      "rationale": "Inspect the current generation-observation spine, adapter capability model, counters, reports, replay support, and provider ledger."
+    },
+    {
+      "id": "gh-6359",
+      "labels": [
+        "repo_search",
+        "commit_state"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Inspect current ledger patterns and the explicitly identified spine commit before wiring invocation accounting."
+    },
+    {
+      "id": "gh-6192",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.95,
+      "rationale": "Inspect architecture graph construction, leaf schemas, path canonicalization, renderers, and tests."
+    },
+    {
+      "id": "gh-6045",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.91,
+      "rationale": "Inspect the current verdict ABI, host interfaces, configuration layering, and authority enforcement before defining the plugin profile."
+    },
+    {
+      "id": "gh-6141",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.95,
+      "rationale": "Inspect report-diff path derivation, regression classification, CLI fail policies, ordering, and tests."
+    },
+    {
+      "id": "gh-6275",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.93,
+      "rationale": "Inspect the disambiguation seam, CLI JSON conventions, seeded data, selfchecks, and agent-facing documentation."
+    },
+    {
+      "id": "gh-6126",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.88,
+      "rationale": "Inspect the current CUDA GDN launch code, build acceptance path, error handling, and parity regression tests."
+    },
+    {
+      "id": "gh-6294",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Inspect the public seam and writer paths, verify parent/deduplication state, and locate agent-facing documentation."
+    },
+    {
+      "id": "gh-6150",
+      "labels": [
+        "repo_search",
+        "issue_state"
+      ],
+      "clarify": false,
+      "confidence": 0.94,
+      "rationale": "Inspect current ReportDiff and CLI policy code, plus the parent issue and related work state."
+    },
+    {
+      "id": "gh-6158",
+      "labels": [
+        "repo_search",
+        "issue_state"
+      ],
+      "clarify": false,
+      "confidence": 0.94,
+      "rationale": "Inspect articulation-point diff and gating code and verify the parent dependency state."
+    },
+    {
+      "id": "gh-6139",
+      "labels": [
+        "repo_search",
+        "issue_state"
+      ],
+      "clarify": false,
+      "confidence": 0.93,
+      "rationale": "Repository inspection is explicitly required to discover scheduler integrations; parent benchmark state must also be checked."
+    },
+    {
+      "id": "gh-6102",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.95,
+      "rationale": "Inspect adjudicator integrations and benchmark machinery, verify parent/integration issues, and read the named benchmark witness documentation."
+    },
+    {
+      "id": "gh-6064",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Inspect nativebench and Compressor seams, verify dependency #3204, and read existing benchmark and provenance documentation."
+    },
+    {
+      "id": "gh-6124",
+      "labels": [
+        "repo_search",
+        "issue_state"
+      ],
+      "clarify": false,
+      "confidence": 0.91,
+      "rationale": "Inspect the existing corpus, grader, and filtering implementation and verify the three related issue states."
+    },
+    {
+      "id": "gh-6176",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": true,
+      "confidence": 0.98,
+      "rationale": "Human triage is explicitly required; assess repository fit and duplicates and read the linked paper before choosing scope or disposition."
+    },
+    {
+      "id": "gh-6311",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Inventory current public constants and seams, verify parent/deduplication state, and locate agent-facing documentation."
+    },
+    {
+      "id": "gh-6062",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "commit_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.97,
+      "rationale": "The feature depends on current code and issue flow, live working-tree/commit evidence, and repository operating guidance such as AGENTS.md."
+    },
+    {
+      "id": "gh-6154",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.92,
+      "rationale": "Inspect current archreport diff, bridge evidence, policy, and tests."
+    },
+    {
+      "id": "gh-6133",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.9,
+      "rationale": "Needs benchmark harness inspection, current parent evidence, and tracing backend setup semantics."
+    },
+    {
+      "id": "gh-6123",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.95,
+      "rationale": "Inspect violation diff/policy implementation and update the documented CLI behavior."
+    },
+    {
+      "id": "gh-6232",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.94,
+      "rationale": "Requires current adapter code, the parent contract and fixtures, and llama.cpp interface documentation."
+    },
+    {
+      "id": "gh-6368",
+      "labels": [
+        "repo_search",
+        "commit_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.97,
+      "rationale": "Inspect current implementation and docs against the explicitly named spine commit."
+    },
+    {
+      "id": "gh-6180",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.91,
+      "rationale": "Needs the native grader and benchmark framework plus evaluator and policy-system semantics."
+    },
+    {
+      "id": "gh-6310",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.95,
+      "rationale": "Inspect disambiguation seams, verify parent sequencing/dependencies, and update discoverability docs."
+    },
+    {
+      "id": "gh-6364",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.83,
+      "rationale": "Find the native workload fixture and use hosted-system API and batching documentation."
+    },
+    {
+      "id": "gh-6164",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.91,
+      "rationale": "Inspect vcacheobserve and benchmark infrastructure, then validate observability-provider semantics."
+    },
+    {
+      "id": "gh-6172",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Inspect minimum-cut computation/rendering and document the witness semantics."
+    },
+    {
+      "id": "gh-6356",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "commit_state"
+      ],
+      "clarify": false,
+      "confidence": 0.97,
+      "rationale": "Inspect current error paths/tests, parent status, and the cited spine commit."
+    },
+    {
+      "id": "gh-6208",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.94,
+      "rationale": "Requires mining repository artifacts, current child/program state, and research or trajectory documentation."
+    },
+    {
+      "id": "gh-6187",
+      "labels": [
+        "repo_search",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.95,
+      "rationale": "Inspect the native benchmark implementation and current configuration/behavior of the compared toolchains."
+    },
+    {
+      "id": "gh-6036",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "commit_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.95,
+      "rationale": "Needs a current shipped-capability inventory, epic progress, provenance, and the cited benchmark standard."
+    },
+    {
+      "id": "gh-6231",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.94,
+      "rationale": "Inspect existing contracts and fixtures, the parent contract, and current GGUF specifications."
+    },
+    {
+      "id": "gh-6107",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.93,
+      "rationale": "Requires current adapters and harnesses, integration-arm status, and the target benchmark document/configuration."
+    },
+    {
+      "id": "gh-6204",
+      "labels": [
+        "repo_search"
+      ],
+      "clarify": false,
+      "confidence": 0.98,
+      "rationale": "The scoped implementation and tests can be resolved by inspecting the current architecture-report code."
+    },
+    {
+      "id": "gh-6168",
+      "labels": [
+        "issue_state",
+        "commit_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Read and update the research note, verify referenced issue evidence, and establish the required ancestry/version witness."
+    },
+    {
+      "id": "gh-6016",
+      "labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ],
+      "clarify": false,
+      "confidence": 0.92,
+      "rationale": "Human triage needs the paper, current repository relevance, and duplicate or related-issue state."
+    },
+    {
+      "id": "gh-6050",
+      "labels": [
+        "repo_search",
+        "issue_state"
+      ],
+      "clarify": false,
+      "confidence": 0.96,
+      "rationale": "Inspect current serving/planning seams and the parent coordination contract before implementing the adapter."
+    }
+  ]
+}

@@ -4952,6 +4952,11 @@
           "category": "incidental",
           "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
           "token": "splitDebtWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6372 research witness artifact naming inside cmd/microcontextdemo, not a distinct operator-facing concept",
+          "token": "natural-traffic"
         }
       ],
       "id": "witness-proof",
@@ -5053,6 +5058,7 @@
         "microCacheWitnessSchema",
         "motifDetectReproduceFixWitness",
         "named_witness",
+        "natural-traffic",
         "newGuardCompactionWitness",
         "nwitness",
         "observeProxyFillWitness",
@@ -6137,6 +6143,21 @@
           "category": "incidental",
           "reason": "Implementation symbol for #2174 scheduled-task launcher audit, not a separate policy-capability concept.",
           "token": "schedLauncherPosture"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6372 CLI field carrying an adjudicator identity, not a new policy capability",
+          "token": "naturalTrafficAdjudicator"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6372 serialized policy metric row, not a new policy capability",
+          "token": "naturalTrafficPolicyRow"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6372 local benchmark policy projection helper, not a runtime policy capability",
+          "token": "policyLabels"
         }
       ],
       "exclude": [
@@ -6234,12 +6255,15 @@
         "multi_capability",
         "naturalAdjudicator",
         "naturalPolicySummary",
+        "naturalTrafficAdjudicator",
+        "naturalTrafficPolicyRow",
         "normalizeDecodePolicyLabel",
         "numareplicapolicyunsupported",
         "orgPostureGloss",
         "phasePolicy",
         "policies",
         "policyErr",
+        "policyLabels",
         "policyLocked",
         "policyOf",
         "policy_admission",
@@ -8226,6 +8250,21 @@
           "category": "incidental",
           "reason": "A product-lock explanation formatter over stackresolve receipts, not a separate kernel decision concept.",
           "token": "decisionReason"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6372 serialized research judgment row, not a new decision mechanism",
+          "token": "naturalTrafficDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6372 research sensitivity row, not a new runtime decision mechanism",
+          "token": "naturalTrafficBreakEven"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6372 research report row, not a new runtime decision mechanism",
+          "token": "naturalTrafficPolicyRow"
         }
       ],
       "id": "decision",
@@ -8268,6 +8307,9 @@
         "liveLanes",
         "nativeDecisions",
         "naturalDecision",
+        "naturalTrafficBreakEven",
+        "naturalTrafficDecision",
+        "naturalTrafficPolicyRow",
         "observed_decisions",
         "partialretrydecision",
         "pluginDecisionFromVerdict",

@@ -1,0 +1,1543 @@
+{
+  "Schema": "fak-microcontext-natural-traffic/1",
+  "CreatedAt": "2026-08-10T23:50:17Z",
+  "Source": "public GitHub issues returned by gh issue list; title plus bounded body",
+  "Selection": "exclude blank/short/private-marked titles, SHA-256 rank eligible records, take first N; no class balancing",
+  "SplitRule": "first byte of source hash modulo 5 == 0 =\u003e test, otherwise tune",
+  "Requested": 120,
+  "Eligible": 120,
+  "Excluded": 0,
+  "readback_class_prior": {
+    "commit_state": 50,
+    "docs_read": 21,
+    "issue_state": 14,
+    "repo_search": 120
+  },
+  "Records": [
+    {
+      "id": "gh-6350",
+      "split": "test",
+      "source_issue": 6350,
+      "source_updated_at": "2026-08-10T20:30:29Z",
+      "source_sha256": "0042b10e255f62c9384b64e4ff4bb8a9d76b995093b70651e0a971248a3fb006",
+      "question": "refactor(pythongate): tighten baseline after resume/plan/node retirements",
+      "context": "Parent: #6220\n\n## Problem\nThree witnessed retirement commits removed six grandfathered Python files since the last ratchet freeze: resume relaunch (#6332), plan audit (#6270), and node compare (#6329). The baseline must shrink without admitting the two prohibited lightgap additions owned by #6348.\n\n## Done when\n- Set `internal/pythongate/baseline.go` to the intersection of the previous grandfathered set and current tracked `tools/*.py`.\n- Expected baseline count: 587.\n- `tools/lightgap_scorecard*.py` remain offenses and are NOT added.\n- Verify the only baseline removals are the six retired paths.\n- Commit signed `(fak pythongate)` with independent read-back.\n\n## Witness\nBaseline 587, tracked tools 589, exactly two pythongate offenses both owned by #6348.",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6318",
+      "split": "tune",
+      "source_issue": 6318,
+      "source_updated_at": "2026-08-10T23:36:04Z",
+      "source_sha256": "0243018003e29a2a74868455fefd8daa0d812a30b077ab19da7cd8d04a4d694e",
+      "question": "feat(disambiguation): index policy capability adjudication and reason terms",
+      "context": "Parent: #6272\n\n## Problem\nSeparate policy declarations, capability floor, adjudication decisions, structural preflight, and model-mediated checks.\n\n## Done condition\nThe `policy-source` work unit is implemented through the public fak seam, documented where agents discover it, and does not introduce a second writer or private-source dependency.\n\n## Acceptance gate\nFixture maps public policy terms to canonical records and catches incompatible reason reuse.\n\n## Likely files\n- internal/disambiguation\n\n## Dependencies\n- Parent epic #6272\n- Sequence hint: fan-out after schema/generator/query spine\n\n## Dedupe query\n`is:issue repo:anthony-chaudhary/fak in:title \"policy-source\"`\n\n## Work unit\nleaf\n\n## Expected steps\n3",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6206",
+      "split": "tune",
+      "source_issue": 6206,
+      "source_updated_at": "2026-08-10T19:40:22Z",
+      "source_sha256": "02ff146dbbe4936525102d3b036f6dff1c8fc4c09486387c8451343cb91ed10d",
+      "question": "build(devindex): require reuse classification for every new dev command",
+      "context": "## Problem\n\nThe dev-reuse axis added in #6028 currently defaults every unknown dev command to `fak-maintainer`. That makes the inventory total today but lets a newly added command bypass the portable-versus-fak-specific decision. The boundary therefore is documented, not default-enforced.\n\n## Scope\n\n- Replace the implicit maintainer fallback with an explicit exhaustive classification registry for all current dev-owned commands.\n- Make unknown/new dev commands fail ownership validation with an actionable instruction to choose portable-pattern, fak-maintainer, or lab-operations and add a rationale.\n- Keep runtime commands automatically not-applicable.\n- Add negative tests proving a synthetic new dev command cannot pass by default.\n- Update the architecture note and command-creation guidance so classification happens in the same change as dispatch/tier registration.\n\n## Definition of done\n\n- [ ] Every current dev command is explicitly present in exactly one reuse class.\n- [ ] A newly dispatched TierDev command absent from the registry fails the total ownership test.\n- [ ] Duplicate class registration fails validation.\n- [ ] Failure output names the command and valid classes.\n- [ ] Doc",
+      "readback_labels": [
+        "repo_search",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6056",
+      "split": "tune",
+      "source_issue": 6056,
+      "source_updated_at": "2026-08-09T21:21:36Z",
+      "source_sha256": "04508f6feacc1512719fc6322a6a979268c9a7a01b5cb8efe0c3e55e052e8390",
+      "question": "docs(coordination): make whole-path coordination the central fak mantra",
+      "context": "## Parent\n\nPart of #6042. The coordination thesis needs one canonical vocabulary and architecture map before parallel implementations drift.\n\n## Deliverable\n\nMake cross-layer coordination a central, bounded product mantra across the README, start-here path, architecture, docs index, glossary and relevant CLI help. Define coordination, orchestration, scheduling, routing and serving distinctly; map cache/context, compute/placement, harness/runtime, serve/engine and trust/operations to existing fak leaves.\n\n## Definition of done\n\n- [ ] Primary orientation surfaces lead with: fak coordinates the whole agent path, not isolated components.\n- [ ] One canonical architecture diagram shows observations flowing into a constrained plan and typed actions/effects returning through the four layers.\n- [ ] The glossary prevents “coordination” from becoming a synonym for worker orchestration or generic integration.\n- [ ] Existing claims remain honesty-tagged; docs make no performance claim before #6058.\n- [ ] Links point to existing layer epics (#5964, #5416, #1911, #5629, #2208) and #6042 as the fold, not as replacements.\n- [ ] Docs lint/link checks pass and a repository search confirms the can",
+      "readback_labels": [
+        "repo_search",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6103",
+      "split": "test",
+      "source_issue": 6103,
+      "source_updated_at": "2026-08-10T04:49:39Z",
+      "source_sha256": "058e89174c776db32570eae8b92b7a94064ad42aea0856877d9572f4db9c4b8c",
+      "question": "test(architest): gate typed stale tier declarations",
+      "context": "## Parent context\n\n#6099\n\n## Problem\n\n`archreport.Analyze` already preserves healthy architecture output and emits a typed `stale-tier-declaration` diagnostic when a tier declaration points at a deleted package, but the committed architecture gate does not consume that result. A stale row can therefore survive indefinitely while `TestNoUpwardImports` and the primitive gate silently skip it.\n\n## Spine\n\nAdd a dedicated architest gate that consumes the existing typed report diagnostic and fails with the report's recovery action. Export the diagnostic kind as a shared constant so the producer and gate cannot drift through duplicate string literals.\n\n## Done\n\n- The stale-tier diagnostic kind has one shared production definition.\n- A dedicated architest test consumes `archreport.Report.Diagnostics`; it does not re-walk declarations or package directories.\n- Synthetic coverage proves stale declarations fail the gate while unrelated diagnostics are ignored.\n- The live architecture tier table passes the new gate.\n- CLI reference documents that stale rows are diagnostics and committed-gate failures.\n\n## Witness\n\n`go test ./internal/archreport ./internal/architest -run 'Stale|TierDeclarations",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6233",
+      "split": "test",
+      "source_issue": 6233,
+      "source_updated_at": "2026-08-10T19:33:46Z",
+      "source_sha256": "05b15c318e8c932e0ad1a203c8483c3332fd23508f39fb6bc18533d45246b09b",
+      "question": "feat(model): refresh GPTQ interoperability beyond archived loaders",
+      "context": "\u003c!-- quant-interop-child: gptqinterop --\u003e\n\n## Current state\n\nThe quantization interoperability epic #6221 has no shipped gptqinterop leaf. Existing support is fragmented or implicit, so agents cannot cite a neutral capability contract for this seam.\n\n## Why now\n\nQuantization formats and runtimes are changing quickly; this seam is required now so support remains explicit rather than inferred.\n\n## Working spine\n\nStart from the public fixtures and neutral contract in #6221; deliver the smallest parser/adjudicator/adapter path that returns a typed result end to end.\n\n## Parent context\n\nChild of #6221. This leaf supports broad industry interoperability and must not select a universal quantization winner.\n\n## In scope\n\nSupport GPTQ metadata variants through active GPTQModel/Transformers/vLLM conventions and identify legacy AutoGPTQ safely.\n\n## Acceptance gate\n\nThe named witness passes, unknown or unsupported input has an explicit typed result, and fak validate --mine passes for exactly the owned paths.\n\n## Out of scope\n\nDo not implement unrelated model kernels, redistribute restricted weights, or claim quality/performance outside the witnessed envelope. Do not create a fak-only artifact ",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6184",
+      "split": "tune",
+      "source_issue": 6184,
+      "source_updated_at": "2026-08-10T21:22:05Z",
+      "source_sha256": "060f8944cbb0a98bd02add1113d55ebfeaec8d15f9c1a935fd9a3515b4bf51f8",
+      "question": "Benchmark trigram code search against indexed search systems",
+      "context": "## Problem\n`internal/trigram.Index` provides indexed literal and regex code search used by fak search surfaces, but has no same-corpus benchmark against tuned scanning or practical code-search systems.\n\n## Required arms\n- fak native trigram indexed literal search\n- optimized in-memory linear scan\n- ripgrep\n- git grep\n- Zoekt\n- livegrep\n- Sourcegraph Search\n\nNo equivalent first-class fak integration is currently present; add any discovered integration separately before completion.\n\n## Same workload\nEvery arm indexes/loads the same six files and executes identical literal queries spanning multiple matches, no matches, short-pattern fallback, Unicode, and ordered path/line output. Correctness requires exact files and line numbers. Complete witnesses separate build/load and query latency, and report precision/recall, CPU/RSS, index/storage/network bytes, setup/operator time, and total cost.\n\n## Acceptance\nNative and tuned scan baseline run locally; external systems stay explicit unavailable zero rows; benchmark the real index build plus query corpus; classify indexed literal search without claiming regex/similarity debt covered; dated packet/index row; issue remains open for independen",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6047",
+      "split": "tune",
+      "source_issue": 6047,
+      "source_updated_at": "2026-08-09T21:21:03Z",
+      "source_sha256": "07046898eebc2e04ad944daa94853d99caef255a2a1e007afe703923f3dc34da",
+      "question": "feat(coordination): project cache and context state into coordinated plans",
+      "context": "## Parent and dependency\n\nPart of #6042; depends on the neutral contract spine.\n\n## Deliverable\n\nAdd the cache/context adapter that reports reusable prefix/KV/object residency, reuse horizon, context pressure, compaction state, transfer cost and freshness, then applies only typed coordination actions (pin, prefetch, transfer, compact, evict, or no-op).\n\n## Definition of done\n\n- [ ] Adapter output contains stable IDs, byte/token sizes, location, age, estimated reuse horizon, transfer/rehydration cost and uncertainty.\n- [ ] A fixture proves a warm remote prefix can beat a cold local placement while a short reuse horizon can reverse that choice.\n- [ ] Observation is read-only and action application is idempotent with typed partial/failure outcomes.\n- [ ] Stale residency cannot be treated as current; generation/freshness checks are tested.\n- [ ] Existing cache policy remains the declared fallback when coordination is disabled.\n- [ ] Trace/decision records never leak cached prompt content or tenant-private keys.\n- [ ] Unit tests plus one captured adapter selfcheck prove observe → plan reference → apply.\n\n## Related\n\nCoordinate with cache-value #745/#2828 and object tier #2169; do no",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6070",
+      "split": "tune",
+      "source_issue": 6070,
+      "source_updated_at": "2026-08-09T23:00:59Z",
+      "source_sha256": "077e4ad6faa9c480f819e9bf4950e1f83269efa2324773c0e1c2e3730ff43e74",
+      "question": "feat(config): add intent-level customization guide over excellent defaults",
+      "context": "## Parent context\nFollow-on to shipped customization spine #6041 and part of epic #3256.\n\n## Current state\nThe reviewable file and truthful precedence now exist, but customization still requires knowing field names and editing TOML. fak has strong built-in defaults but no guided way to express a user's operational opinions such as local-only, team gateway, hardened ingress, or long-session budget posture without exposing a sprawling knob catalog.\n\n## Why now\nThe product goal is flexible across user opinions while retaining excellent out-of-box defaults. Named, inspectable postures can encode coherent deltas and keep individual knob discovery bounded.\n\n## Working spine\nA `fak config guide` command asks or accepts a small set of intent-level choices, renders the minimal fak.toml delta from defaults, and explains every changed value; presets are data over the same typed manifest, never a parallel config system.\n\n## In scope\n- Intent-level postures with the default first and no forced config creation.\n- Render only deltas from built-ins.\n- Explain why each delta exists and show the equivalent explicit flag.\n- Deterministic non-interactive JSON mode for agents and automation.\n- Round-tr",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6137",
+      "split": "tune",
+      "source_issue": 6137,
+      "source_updated_at": "2026-08-10T21:23:08Z",
+      "source_sha256": "07db5230cdc23e6c51bab12b0b0c39b7a00d14b6261aa18dae7d62ba0698f13c",
+      "question": "bench(launchlatency): run telemetry alternative arms",
+      "context": "## Parent context\n\nParent production-scope benchmark coverage epic: #6036.\n\n## Missing witness\n\nThe native `internal/launchlatency` dispatch-to-heartbeat histogram and p50/p95 capability has no complete same-workload alternatives run.\n\n## Done when\n\nRun one captured launch ledger through fak native, a tuned raw-event/no-summary baseline, Prometheus histograms, OpenTelemetry metrics, and Datadog distributions. If any equivalent first-class fak telemetry integrations exist, run each as a separate `fak + integration` arm.\n\nFor each available arm independently capture exact bucket/quantile quality against an oracle, processing and query latency, CPU/RSS/network/storage, dropped observations, and total cost. Mocks and instrumentation adapters are not backend witnesses.\n\n## Reproduction seed\n\nUse fixed dispatch/heartbeat timestamps spanning all bucket boundaries plus one negative clock-skew sample. Preserve the same bucket edges and percentile convention in every arm.\n\n## Work estimate\nEstimate: 3 points. Uncertainty: operator-supplied estimate; revise through the parent denominator when evidence changes.\n\n## Overall completion contribution\nContribution: 3/564 points.\n\n## Completion stan",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6247",
+      "split": "test",
+      "source_issue": 6247,
+      "source_updated_at": "2026-08-10T19:34:38Z",
+      "source_sha256": "0a1904e55e3ad0aee6a5c5b272e094c1eb7fc1c81c9e6b30178c11f0c07e2a4e",
+      "question": "research(model): evaluate FOCUS FP4 against tuned public baselines",
+      "context": "\u003c!-- quant-interop-child: focusfp4 --\u003e\n\n## Current state\n\nThe quantization interoperability epic #6221 has no shipped focusfp4 leaf. Existing support is fragmented or implicit, so agents cannot cite a neutral capability contract for this seam.\n\n## Why now\n\nQuantization formats and runtimes are changing quickly; this seam is required now so support remains explicit rather than inferred.\n\n## Working spine\n\nStart from the public fixtures and neutral contract in #6221; deliver the smallest parser/adjudicator/adapter path that returns a typed result end to end.\n\n## Parent context\n\nChild of #6221. This leaf supports broad industry interoperability and must not select a universal quantization winner.\n\n## In scope\n\nPin arXiv:2608.01847 and assess whether its coupled-relaxation/dual-granularity result merits an adapter or stays research-only.\n\n## Acceptance gate\n\nThe named witness passes, unknown or unsupported input has an explicit typed result, and fak validate --mine passes for exactly the owned paths.\n\n## Out of scope\n\nDo not implement unrelated model kernels, redistribute restricted weights, or claim quality/performance outside the witnessed envelope. Do not create a fak-only artifact ",
+      "readback_labels": [
+        "repo_search",
+        "commit_state",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6267",
+      "split": "tune",
+      "source_issue": 6267,
+      "source_updated_at": "2026-08-10T22:15:26Z",
+      "source_sha256": "0b0a1b63b630786205dbe5f1273fdcffc8774b129a21c156ffa8240beab2c4a4",
+      "question": "refactor(commitstamp): retire superseded Python commit-message checker",
+      "context": "Parent: #6220\n\n## Problem\n`internal/hooks/gate_commitmsg.go` and commit-stamp tests supersede `tools/check_commit_msg.py` and `tools/check_commit_msg_test.py`.\n\n## Done when\n- Compare contracts and add any missing focused Go parity test.\n- Delete both Python files atomically.\n- Run focused hooks tests and pythongate.\n- Do not edit the shared pythongate baseline in this leaf.\n\n## Witness\nSigned path-scoped `(fak hooks)` commit deleting the pair with Go parity tests green.",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6052",
+      "split": "tune",
+      "source_issue": 6052,
+      "source_updated_at": "2026-08-09T21:21:40Z",
+      "source_sha256": "0b7e32f3152a196c103b74f97409c8618e2299cf21875a102ca27b29c8cb1276",
+      "question": "feat(coordination): recover partial cross-layer failures without leaked work",
+      "context": "## Parent\n\nPart of #6042. Coordination creates cross-layer failure modes that no layer can recover from alone.\n\n## Deliverable\n\nDefine and implement a failure/recovery state machine spanning cache transfer, placement reservation, harness launch, serve admission and result witness. Specify compensating actions, ownership, deadlines, retry budgets and terminal outcomes.\n\n## Definition of done\n\n- [ ] Failure matrix covers each action failing before apply, during apply, after apply-before-ack and after downstream work starts.\n- [ ] Retry is idempotent and cannot duplicate workers, reservations, cache pins or model requests.\n- [ ] Partial success yields typed compensate, continue-degraded, replan, or abort decisions.\n- [ ] Process restart reconstructs in-flight state from durable records and independently reads effects back.\n- [ ] Cancellation races and budget exhaustion are deterministic and tested.\n- [ ] Chaos fixtures inject one failure per layer and prove no leaked lease/pin/request remains.\n- [ ] Operator-facing output names the failed layer, affected work, action taken and next safe step.",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6263",
+      "split": "tune",
+      "source_issue": 6263,
+      "source_updated_at": "2026-08-10T19:36:52Z",
+      "source_sha256": "0bcd181777a9ecbd62f4b0fc256022b2b0cf77c1660be371a6d69883afea6391",
+      "question": "refactor(fleetcompare): retire superseded Python implementation and tests",
+      "context": "Parent: #6220\n\n## Problem\n`internal/fleetcompare/` now contains the Go implementation and tests, while `tools/fleet_compare.py` and `tools/fleet_compare_test.py` remain as a duplicate Python surface.\n\n## Done when\n- Confirm the Go behavior covers the Python contract and add focused Go parity coverage for any missing edge.\n- Delete `tools/fleet_compare.py` and `tools/fleet_compare_test.py` in the same commit.\n- Prove focused Go tests and `go test ./internal/pythongate -run TestNoNewPythonTools` pass.\n- Do not loosen or regenerate the shared pythongate baseline; cohort reconciliation tightens it once.\n\n## Witness\nA signed, path-scoped `(fak fleetcompare)` commit whose diff deletes both Python files and whose focused Go tests pass.",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6197",
+      "split": "tune",
+      "source_issue": 6197,
+      "source_updated_at": "2026-08-10T17:48:31Z",
+      "source_sha256": "0c7ac9103c51c990f6f358d07e52f8d32cfc5a9d89c373622b57ac3775013bbf",
+      "question": "feat(flowmetrics): name the aging in-flight set so finish-before-start has a target",
+      "context": "## Parent context\n\nParent: #6194. That epic measures flow from the signals this repo already emits\nand decomposes the eight resulting defects into bounded leaves. This is the\n`aging_wip` leaf — the defect the report itself selects as `next_action`.\n\n## Current state\n\n`internal/flowmetrics` grades eight flow KPIs and, run against 6157 issues and\n10809 commits in this checkout, reports 86 issues that have at least one\nreferencing commit but no close after 7 days, the oldest 43 days old. The cap in\n`internal/flowmetrics/report.go` is 12. Nothing consumes that number: there is no\nreadout verb and no gate, so aging in-flight work accumulates silently while new\nwork keeps starting.\n\n## Why this is next\n\nAging in-flight work is the cheapest throughput available — it is already\nstarted, already has context, and already holds a lane. `Build` selects this\ndefect as `next_action` ahead of the other seven precisely because finishing it\nrequires no new intake. Every other flow KPI in the report improves as a side\neffect of draining it.\n\n## Working spine\n\n`fak` cannot yet tell an operator which started work is rotting. This adds the\none readout that makes the aging set nameable, which is the",
+      "readback_labels": [
+        "repo_search",
+        "issue_state",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6251",
+      "split": "tune",
+      "source_issue": 6251,
+      "source_updated_at": "2026-08-10T19:34:44Z",
+      "source_sha256": "0c851f90ce363484282014b1ed02ae01695e2c475086d26c54e5c52c9d8350cf",
+      "question": "feat(model): model non-uniform and learned quantization codebooks",
+      "context": "\u003c!-- quant-interop-child: codebookmeta --\u003e\n\n## Current state\n\nThe quantization interoperability epic #6221 has no shipped codebookmeta leaf. Existing support is fragmented or implicit, so agents cannot cite a neutral capability contract for this seam.\n\n## Why now\n\nQuantization formats and runtimes are changing quickly; this seam is required now so support remains explicit rather than inferred.\n\n## Working spine\n\nStart from the public fixtures and neutral contract in #6221; deliver the smallest parser/adjudicator/adapter path that returns a typed result end to end.\n\n## Parent context\n\nChild of #6221. This leaf supports broad industry interoperability and must not select a universal quantization winner.\n\n## In scope\n\nDescribe NF4, integer grids, learned/parametric codebooks, index packing and decode requirements.\n\n## Acceptance gate\n\nThe named witness passes, unknown or unsupported input has an explicit typed result, and fak validate --mine passes for exactly the owned paths.\n\n## Out of scope\n\nDo not implement unrelated model kernels, redistribute restricted weights, or claim quality/performance outside the witnessed envelope. Do not create a fak-only artifact format.\n\n## Done condit",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6290",
+      "split": "tune",
+      "source_issue": 6290,
+      "source_updated_at": "2026-08-10T19:28:41Z",
+      "source_sha256": "0cea77e859687ebdda9c647960c4375c54ab0fe5448d24168f3620e76a049934",
+      "question": "feat(disambiguation): ship the Go generator and byte-deterministic ordering",
+      "context": "Parent: #6272\n\n## Problem\nGenerate the index from declared public sources using stable ordering and byte-reproducible output.\n\n## Done condition\nThe `generator` work unit is implemented through the public fak seam, documented where agents discover it, and does not introduce a second writer or private-source dependency.\n\n## Acceptance gate\nTwo regenerations at the same committed tip have identical SHA-256 and regenerate-and-diff is clean.\n\n## Likely files\n- internal/disambiguation\n- cmd/fak\n\n## Dependencies\n- Parent epic #6272\n- Sequence hint: spine\n\n## Dedupe query\n`is:issue repo:anthony-chaudhary/fak in:title \"generator\"`\n\n## Work unit\nleaf\n\n## Expected steps\n3",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6222",
+      "split": "tune",
+      "source_issue": 6222,
+      "source_updated_at": "2026-08-10T21:07:05Z",
+      "source_sha256": "0db8f6521d7917ac8f4bec9de235a07462bed1e775651044901ca619bd09d67f",
+      "question": "feat(model): define a neutral quantization capability descriptor",
+      "context": "\u003c!-- quant-interop-child: quantmeta --\u003e\n\n## Current state\n\nThe quantization interoperability epic #6221 has no shipped quantmeta leaf. Existing support is fragmented or implicit, so agents cannot cite a neutral capability contract for this seam.\n\n## Why now\n\nQuantization formats and runtimes are changing quickly; this seam is required now so support remains explicit rather than inferred.\n\n## Working spine\n\nStart from the public fixtures and neutral contract in #6221; deliver the smallest parser/adjudicator/adapter path that returns a typed result end to end.\n\n## Parent context\n\nChild of #6221. This leaf supports broad industry interoperability and must not select a universal quantization winner.\n\n## In scope\n\nDefine typed descriptors for weight, activation, KV, scale, zero-point, grouping, codebook, sparsity and training provenance without ranking methods.\n\n## Acceptance gate\n\nThe named witness passes, unknown or unsupported input has an explicit typed result, and fak validate --mine passes for exactly the owned paths.\n\n## Out of scope\n\nDo not implement unrelated model kernels, redistribute restricted weights, or claim quality/performance outside the witnessed envelope. Do not crea",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6373",
+      "split": "tune",
+      "source_issue": 6373,
+      "source_updated_at": "2026-08-10T23:42:07Z",
+      "source_sha256": "0e53369844b40d23e1149bf662c7217b60d53bd9bf6b09f28e2f7a61c0713da7",
+      "question": "feat(archreport): expose directed dependency cycles",
+      "context": "## Parent context\n\n#6192\n\n## Problem\n\nDirected dependency reach and paths currently flatten cycles into per-leaf closures. Operators cannot see which packages form one mutually-dependent strongly connected component, so they cannot distinguish an ordinary long path from an architectural cycle that must be broken as a unit.\n\n## Spine\n\nCondense the directed dependency graph into deterministic strongly connected components and expose nontrivial dependency cycles.\n\n## Done\n- Whole reports carry sorted `dependency_cycles`; each row contains sorted members and deterministic internal directed edges.\n- Self-imports and multi-package SCCs are represented; acyclic singleton packages are omitted.\n- Each leaf carries its cycle membership or an empty value, with scoped/whole parity.\n- Component and edge ordering is deterministic across repeated and concurrent analysis.\n- `fak architecture --leaf` text renders cycle membership and whole text summarizes dependency cycles.\n- Chain, self-loop, two-node cycle, overlapping reach with separate SCCs, disconnected components, scoped parity, and determinism are covered.\n- CLI reference explains SCC semantics and distinguishes dependency cycles from undir",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6214",
+      "split": "tune",
+      "source_issue": 6214,
+      "source_updated_at": "2026-08-10T20:01:41Z",
+      "source_sha256": "0e5d5156a2b5ade4da0d480777db260e487a9a4136f353ee5060362096ff5d48",
+      "question": "feat(archreport): gate direct fan-out growth",
+      "context": "## Parent context\n\n#6204\n\n## Problem\n\nDirect fan-out is now visible in whole-graph hotspots but not in diffs. Introduced-edge policies answer which specific edge appeared and dependency-reach gates answer transitive footprint, but neither isolates growth in a stable leaf's immediate dependency surface. Operators cannot enforce a direct dependency budget without conflating edge direction classes or transitive changes.\n\n## Spine\n\nExpose direct fan-out drift and add an isolated growth policy.\n\n## Done\n\n- `ReportDiff` exposes deterministic `fan_out_changes` with leaf, before/after direct dependency count, and signed delta.\n- Positive fan-out delta produces `regression`; contractions remain clean absent another regression.\n- Changes order growth first, absolute delta descending, then leaf.\n- `--fail-on increased-fan-out` exits 3 only for positive direct fan-out drift and recommends consolidating or moving the shared seam downward.\n- The policy remains isolated from fan-in, dependency reach/depth, and edge-direction regressions.\n- Derived evidence does not change `Changes()` cardinality; JSON, text, policy isolation, ordering, determinism, and docs are covered.\n\n## Witness\n\n`go test ./in",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6365",
+      "split": "test",
+      "source_issue": 6365,
+      "source_updated_at": "2026-08-10T22:13:08Z",
+      "source_sha256": "0f030e3ff6e5e47f9d4797c2c9dbacb392a13280a1ea3334cad717f66e602a90",
+      "question": "Bind reviewed workflow concepts to bounded steering actions",
+      "context": "## Problem\nCommit `578169f544` ships stable, explainable workflow-concept IDs and source-session drill-down, but operators cannot yet bind a reviewed concept to a steering action. The spine intentionally avoids turning an unsupervised cluster into policy by itself.\n\n## Done when\n- A versioned steering rule can select a `fak traj concepts` concept ID and declare one bounded action (routing preference, policy override, prompt/tool hint, or observe-only).\n- Applying a rule requires explicit operator review and records rule revision, concept signature, action, author, and timestamp.\n- Stale selectors fail closed when the stored signature no longer matches the current concept.\n- A captured end-to-end test proves aggregate -\u003e concept -\u003e reviewed rule -\u003e affected decision -\u003e exact source call, including rollback to observe-only.\n\n## Spine witness\n`578169f544` (`internal/toolseq@r3`, `docs/workflow-concepts.md@r1`).",
+      "readback_labels": [
+        "repo_search",
+        "commit_state",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6361",
+      "split": "test",
+      "source_issue": 6361,
+      "source_updated_at": "2026-08-10T22:43:59Z",
+      "source_sha256": "0f9804d45d53b6d3e7f90dd7061b8d07a1a242ac07a73165f5e2abb8d2cbd412",
+      "question": "feat(archreport): expose dependency dominator seams",
+      "context": "## Parent context\n\n#6192\n\n## Problem\n\n`dependency_paths` retain one canonical shortest route, but a package on that route may be avoidable through a longer alternative. Operators cannot distinguish a merely chosen shortest-path intermediary from a mandatory seam traversed by every dependency path. That makes extraction advice weaker: the report can show a route without identifying which package actually dominates downstream dependencies.\n\n## Spine\n\nCompute deterministic directed dependency dominators for every source leaf and expose mandatory seams.\n\n## Done\n\n- Every leaf carries sorted `dependency_dominators` rows for reachable dependencies with at least one strict dominator between source and destination.\n- Each row carries dependency, canonical strict dominator chain ordered sourceward-to-destinationward, and the existing canonical shortest dependency path for context.\n- A dominator is included only when every directed path from source to dependency passes through it; source and destination are excluded.\n- Cycles terminate and use the standard iterative dominator fixed point over the source-reachable subgraph.\n- Scoped and whole reports retain identical selected-leaf evidence.\n-",
+      "readback_labels": [
+        "repo_search",
+        "issue_state"
+      ]
+    },
+    {
+      "id": "gh-6353",
+      "split": "tune",
+      "source_issue": 6353,
+      "source_updated_at": "2026-08-10T21:00:48Z",
+      "source_sha256": "137e76c5074a3df30ddee531d66eb915c0da162a1906830e56a664d9e8c21c89",
+      "question": "Benchmark test routing against host and CI alternatives",
+      "context": "Benchmark test execution route selection across fak native, GOOS-only baseline, fak + GitHub Actions, Go native, WSL, GitHub Actions, and Bazel constraints using the same four host probes. Independently witness route accuracy, latency/throughput, CPU/RSS/network, setup/operator time, and total cost; pin versions/configuration and commands.",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6023",
+      "split": "test",
+      "source_issue": 6023,
+      "source_updated_at": "2026-08-09T19:07:25Z",
+      "source_sha256": "141fd127875eabf0f8543f2e495d06f53a2f36160cc44615cb48dc05050f4a22",
+      "question": "feat(cmd): make legacy fak dev a thin migration handoff to fak-dev",
+      "context": "## Problem\n\nMaintainer scripts and docs currently use `fak dev \u003cverb\u003e`. Once dev implementations leave the runtime binary, compatibility must not silently re-link them or fail opaquely.\n\n## Scope\n\n- Define and implement the compatibility policy for `fak dev ...`.\n- Prefer a thin process handoff to a separately installed `fak-dev` when safe and portable; otherwise emit an actionable migration error.\n- Version and time-bound any compatibility window.\n- Prove argument, environment, stdio, signal, and exit-code behavior for the supported platforms.\n\n## Definition of done\n\n- [ ] `fak` contains no dev implementation packages; compatibility is process handoff or error text only.\n- [ ] With compatible `fak-dev` installed, `fak dev \u003cverb\u003e` preserves argv, cwd, stdio, and exit status in subprocess tests.\n- [ ] Missing or incompatible `fak-dev` produces a deterministic diagnostic with exact install/migration commands and no partial action.\n- [ ] Recursion/path-shadowing and version-skew cases are tested.\n- [ ] The deprecation/support window is documented in machine-readable CLI metadata and user docs.\n\n## Witness\n\nSubprocess fixtures with fake sibling executables covering success, missing bin",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6304",
+      "split": "test",
+      "source_issue": 6304,
+      "source_updated_at": "2026-08-10T19:27:56Z",
+      "source_sha256": "14db0507f2c165f2ded3565b197e3092477ce9e7d3abddb416f0f0872c7e07f3",
+      "question": "feat(disambiguation): add regenerate-and-diff CI enforcement",
+      "context": "Parent: #6272\n\n## Problem\nWire deterministic regeneration into CI without changing required-check names or leaving consumers unmigrated.\n\n## Done condition\nThe `ci-gate` work unit is implemented through the public fak seam, documented where agents discover it, and does not introduce a second writer or private-source dependency.\n\n## Acceptance gate\nCI-spec impact statement lists consumers; fak ci-preflight catches a stale generated fixture.\n\n## Likely files\n- .github\n- scripts\n- internal/disambiguation\n\n## Dependencies\n- Parent epic #6272\n- Sequence hint: fan-out after schema/generator/query spine\n\n## Dedupe query\n`is:issue repo:anthony-chaudhary/fak in:title \"ci-gate\"`\n\n## Work unit\nleaf\n\n## Expected steps\n3",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6022",
+      "split": "tune",
+      "source_issue": 6022,
+      "source_updated_at": "2026-08-10T14:58:03Z",
+      "source_sha256": "159d36616bfaa6991d239b0ecc7df70e9ae8f148dd4f965af2bfc946c3ca95ef",
+      "question": "refactor(cmd): migrate dev-only dispatch and enforce a runtime dependency ratchet",
+      "context": "## Problem\n\nA second binary is not meaningful while dev implementations remain reachable from `cmd/fak`. The classified dev command families and their package dependencies must move behind `fak-dev`, with a ratchet that prevents recurrence.\n\n## Scope\n\n- Migrate all commands classified dev-only by #6020 from runtime dispatch into `cmd/fak-dev` in directory-coherent families.\n- Extract command implementations from `package main` where necessary into owned internal leaves, preserving thin command shells.\n- Remove dev-only direct and transitive package reachability from `cmd/fak`.\n- Add an architecture ratchet over the runtime dependency graph and command inventory.\n\n## Definition of done\n\n- [ ] Every dev-owned command in the inventory dispatches from `fak-dev`; none dispatches an implementation from `fak`.\n- [ ] The graph witness reports zero paths from `cmd/fak` to packages classified dev-only.\n- [ ] The ratchet fails when a dev-only package is intentionally imported by runtime or a dev verb is registered on the runtime surface.\n- [ ] Representative command-family parity tests cover repository read, repository mutation in an isolated fixture, issue orchestration with a fake boundary,",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6155",
+      "split": "tune",
+      "source_issue": 6155,
+      "source_updated_at": "2026-08-10T21:22:46Z",
+      "source_sha256": "162ed7d508dfd481fc8016b75066dcf6d7acec8a31849a1d2acb0946ab4e14eb",
+      "question": "Benchmark cache reuse divergence detection against monitoring alternatives",
+      "context": "## Problem\n`internal/cachewitness` implements native parsing and reuse-divergence/self-check logic, but remains unclassified in the repository-wide native benchmark audit.\n\n## Deliverable\nDecompose the package into benchmarkable capabilities, starting with reuse-divergence detection. Compare fak native against raw metrics/no detector, every equivalent first-class fak observability integration, and strongest practical external monitoring alternatives under one injected-divergence trace.\n\n## Required comparison properties\n- native, tuned baseline, explicit first-class integration arms, and external arms\n- same correctness/quality oracle, alert latency, CPU/RSS/network/storage, token/byte use where applicable, and total cost\n- unavailable arms retain zero measurements\n- native microbenchmark, dated packet, index row, and `internal/nativebench` classification\n- keep this issue open until real external/integration witnesses are captured\n\n## Candidate arms\n- fak native reuse-divergence fold\n- raw counters/no detector\n- fak + Prometheus\n- fak + OpenTelemetry\n- Prometheus recording/alerting rules\n- Datadog anomaly monitor\n\n## Witness\nScoped `internal/cachewitness` tests and benchmark plus ",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6355",
+      "split": "tune",
+      "source_issue": 6355,
+      "source_updated_at": "2026-08-10T21:41:33Z",
+      "source_sha256": "1699b42670b3f77025f8fb1935266a7727308aab06325aafc8fd79dd2030012a",
+      "question": "qa: adversarial + edge-case sweep for Native micro-agent shared-cache swarm proof",
+      "context": "\u003c!-- fak-issuefanout-key: fanout-microcachedemo-qa-edge-sweep --\u003e\n\n## Generation stream\n\ngen/now\n\n## Parent context\n\n#6351\n\n## Current state\n\nThe working spine of Native micro-agent shared-cache swarm proof exists (e7b90f8944f0); this follow-on has not started.\n\n## Why this is next\n\nSpine-first default: the spine just shipped, so its follow-on backlog is filed at creation time while context is hot.\n\n## Working spine\n\nEvery documented input class of Native micro-agent shared-cache swarm proof keeps working under hostile and edge input; the test table is the map of what is proven.\n\n## In scope\n\nTable-driven tests over cmd/microcachedemo/ covering empty, oversized, malformed, and hostile inputs and every error path.\n\n## Out of scope\n\nNew features; refactors beyond what a failing test forces.\n\n## Done condition\n\nEdge/adversarial table tests land in cmd/microcachedemo/ and fail before / pass after any fix they force.\n\n## Witness\n\ngo test ./internal/microcachedemo -run 'Edge|Adversarial' -v output captured in the commit or issue.\n\n## Acceptance gate\n\nmake test-fast green including the new tests.\n\n## Work estimate\n\nEstimate: 3 points\n\n## Overall completion contribution\n\nContribution: 3/8 ",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6319",
+      "split": "tune",
+      "source_issue": 6319,
+      "source_updated_at": "2026-08-10T19:26:32Z",
+      "source_sha256": "16e24f9b45d45dfbf8cb66fc1457bb72d26b248126749fbd27c396ab3dfad52a",
+      "question": "feat(disambiguation): index benchmark baseline witness and claim terms",
+      "context": "Parent: #6272\n\n## Problem\nDistinguish naive/tuned/fak baselines, witness provenance, simulated evidence, and net-true claims.\n\n## Done condition\nThe `claims-source` work unit is implemented through the public fak seam, documented where agents discover it, and does not introduce a second writer or private-source dependency.\n\n## Acceptance gate\nFixture rejects a claim term whose baseline or provenance scope is missing.\n\n## Likely files\n- internal/disambiguation\n\n## Dependencies\n- Parent epic #6272\n- Sequence hint: fan-out after schema/generator/query spine\n\n## Dedupe query\n`is:issue repo:anthony-chaudhary/fak in:title \"claims-source\"`\n\n## Work unit\nleaf\n\n## Expected steps\n3",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6362",
+      "split": "tune",
+      "source_issue": 6362,
+      "source_updated_at": "2026-08-10T21:50:26Z",
+      "source_sha256": "189ca3b9d59477c9ba30c9b4e96bfdd8208a7af0db7fad96b73d0e32bd1397cb",
+      "question": "fix(ablate): the sweep writes FAK_\u003cFEATURE\u003e=1|0 but 8 registered arms speak a different value dialect, so both arms measure the same configuration",
+      "context": "## Current state\n\n`internal/ablate` re-execs one subprocess arm per feature and hands the child a boolean env value.\n`FeatureConfig.childEnv()` (`internal/ablate/ablate.go:170-188`) writes exactly `1` for the ON arm\nand `0` for the OFF arm:\n\n```go\nv := \"0\"\nif c.EnvFeatures[f] == \"on\" { v = \"1\" }\nout = append(out, concept.EnvVar+\"=\"+v)\n```\n\n**Several registered concepts do not read that dialect.** Their production readers use a different\nvalue vocabulary, so the sweep's two arms resolve to the *same* configuration and the reported delta\nis noise attributed to a feature.\n\nExecuted against HEAD (2026-08-10) via `go test -overlay`, so nothing landed in the shared tree:\n\n```\nOFF-arm child env: [FAK_COMPRESSOR=0 FAK_GITGATE=0 FAK_IFC=0 FAK_NORMGATE=0 FAK_INKERNEL_RADIX=0 FAK_WIRE_SCREEN=0]\nON -arm child env: [FAK_COMPRESSOR=1 FAK_NORMGATE=1 FAK_WIRE_SCREEN=1]\n\nreader dialect  != \"off\"      value \"0\" -\u003e enabled=true      \u003c-- OFF arm stays ON\nreader dialect  != \"off\"      value \"1\" -\u003e enabled=true\nreader dialect  registry[v]   value \"0\" -\u003e active=false\nreader dialect  registry[v]   value \"1\" -\u003e active=false      \u003c-- ON arm stays OFF\n```\n\n### Three reader dialects, none of them `1|0`\n\n**(a)",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6081",
+      "split": "test",
+      "source_issue": 6081,
+      "source_updated_at": "2026-08-09T23:00:53Z",
+      "source_sha256": "19c6e8e6bd1e146de955264fcccb19920a08953fa3ba482bcc635c9d0ac940d1",
+      "question": "fix(cuda): discover standard toolkit in clean DGX sessions",
+      "context": "## Problem\nThe seven native CUDA acceptance scripts only probe `$CUDA_HOME/bin/nvcc` and `command -v nvcc`. Fresh bridge shells on the lab DGX nodes intentionally have no HOME and omit `/usr/local/cuda/bin` from PATH, even though `/usr/local/cuda/bin/nvcc` and live A100 devices exist. The orchestrator therefore mislabels a toolkit-discovery failure as `SKIP: no reachable CUDA device`.\n\n## Done condition\n- Every native CUDA acceptance family probes the standard `/usr/local/cuda` toolkit when CUDA_HOME and PATH do not resolve nvcc.\n- The acceptance regression test covers HOME-less/PATH-less standard-toolkit resolution.\n- A clean bridge session on a lab DGX reaches the actual device test and reports PASS/FAIL, not the false no-device SKIP.\n\n## Witness\nCaptured `tools/cuda_acceptance.sh` or family output identifies the tested commit and accelerator class and shows the native witness executing through `/usr/local/cuda/bin/nvcc`.\n\n## Parent context\nParent: #5131\n\n## Work estimate\nEstimate: 2 points. Uncertainty: operator-supplied estimate; revise through the parent denominator when evidence changes.\n\n## Overall completion contribution\nContribution: 2/4 points.\n\n## Completion standard\npro",
+      "readback_labels": [
+        "repo_search",
+        "issue_state",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6143",
+      "split": "tune",
+      "source_issue": 6143,
+      "source_updated_at": "2026-08-10T11:58:59Z",
+      "source_sha256": "1a5d5b4dd04071b9d2824bfbd1c89a1f14d81349ec9a1e7b5563b1806056b0c4",
+      "question": "bench(laneadmit): run quota and scheduler alternative arms",
+      "context": "## Parent context\n\nParent production-scope benchmark coverage epic: #6036.\n\n## Missing witness\n\nThe native `internal/laneadmit` per-lane capacity and work-conservation policy has no complete same-workload alternatives run.\n\n## Done when\n\nRun the same active-lane roster, capacity vector, idle-lane state, and pending requests through separate arms for fak native, a tuned global-cap/no-lane-isolation baseline, Kubernetes ResourceQuota plus priority/fairness, Slurm partitions/QOS, HashiCorp Nomad quotas, and GitHub Actions concurrency groups where its envelope overlaps. Add each equivalent first-class fak integration separately if one is identified.\n\nFor each available arm independently capture admission correctness, isolation/fairness and stranded-capacity quality, decision/scheduling latency and throughput, CPU/RSS/control-plane use, utilization, and total cost. Mocks and configuration translations are not scheduler witnesses.\n\n## Reproduction seed\n\nUse two declared lanes with base capacity one, one lane idle, one lane saturated, and one borrowed-slot request; also include an undeclared lane and invalid capacity to prove fail-closed behavior.\n\n## Work estimate\nEstimate: 5 points. Unc",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6305",
+      "split": "tune",
+      "source_issue": 6305,
+      "source_updated_at": "2026-08-10T23:34:37Z",
+      "source_sha256": "1b37425d29e540d7eecefc75bb2c4a417c3f9b4287466d9ef635570cb6ee1806",
+      "question": "feat(disambiguation): reject private paths credentials and host identities",
+      "context": "Parent: #6272\n\n## Problem\nFail generation when entries contain absolute local paths, credentials, private repository names, private hostnames, or unsanitized operational text.\n\n## Done condition\nThe `public-safety` work unit is implemented through the public fak seam, documented where agents discover it, and does not introduce a second writer or private-source dependency.\n\n## Acceptance gate\nPublic-leak corpus rejects each sensitive class and accepts repository-relative public locators.\n\n## Likely files\n- internal/disambiguation\n\n## Dependencies\n- Parent epic #6272\n- Sequence hint: fan-out after schema/generator/query spine\n\n## Dedupe query\n`is:issue repo:anthony-chaudhary/fak in:title \"public-safety\"`\n\n## Work unit\nleaf\n\n## Expected steps\n3",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6080",
+      "split": "tune",
+      "source_issue": 6080,
+      "source_updated_at": "2026-08-09T21:59:09Z",
+      "source_sha256": "1b4e68619f46f1689ad4b16719db37ecd2b265811f5233999cf811a92d115ee8",
+      "question": "feat(archreport): expose reverse dependents and fan-in hotspots",
+      "context": "## Parent context\n\n#6068\n\n## Problem\n\n`fak architecture --leaf NAME` shows what a leaf imports, but not what imports that leaf. This makes impact analysis asymmetric: an operator cannot see the direct blast radius or identify high-fan-in architecture hotspots from the enforced graph.\n\n## Spine\n\nExtend `internal/archreport` to derive reverse edges from the same declared graph. Include deterministic direct `dependents` on each leaf and a top-level hotspot ranking by fan-in; expose both in the existing `fak-architecture/1` JSON and text leaf view without filesystem mutation or a second taxonomy.\n\n## Done\n\n- `fak architecture --leaf NAME --json` names sorted direct dependents.\n- Full reports include deterministic hotspot rows sorted by fan-in descending then leaf name.\n- A synthetic graph test proves reverse edges, tie ordering, and no transitive overclaim.\n- Existing dependency and violation semantics remain unchanged.\n\n## Witness\n\n`go test ./internal/archreport ./cmd/fak -run 'Architecture|Dependent|Hotspot' -count=1`\n\n## Work estimate\n\n3 points.\n\n## Completion standard\n\nProduction.\n\n## Overall completion contribution\nContribution: 3/3 points.\n\n## Target operating envelope\n- declared",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6293",
+      "split": "tune",
+      "source_issue": 6293,
+      "source_updated_at": "2026-08-10T19:28:33Z",
+      "source_sha256": "1b63506bdcfc209029d61c7c9379724300f547692e6004504d3e9cc9f4570bff",
+      "question": "feat(disambiguation): model explicit contrasts and forbidden conflations",
+      "context": "Parent: #6272\n\n## Problem\nRepresent the pairwise distinctions agents must preserve instead of relying on glossary prose alone.\n\n## Done condition\nThe `contrasts` work unit is implemented through the public fak seam, documented where agents discover it, and does not introduce a second writer or private-source dependency.\n\n## Acceptance gate\nValidation rejects self-contrasts, unknown targets, asymmetric required pairs, and empty contrast explanations.\n\n## Likely files\n- internal/disambiguation\n\n## Dependencies\n- Parent epic #6272\n- Sequence hint: spine\n\n## Dedupe query\n`is:issue repo:anthony-chaudhary/fak in:title \"contrasts\"`\n\n## Work unit\nleaf\n\n## Expected steps\n3",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6323",
+      "split": "tune",
+      "source_issue": 6323,
+      "source_updated_at": "2026-08-10T23:47:02Z",
+      "source_sha256": "1c213c528037ef074f6c362f82e05d7ef5427b647faa28f0d400f7492ab697eb",
+      "question": "feat(disambiguation): add change-impact output for index diffs",
+      "context": "Parent: #6272\n\n## Problem\nClassify index changes as additive, alias move, semantic change, contrast change, owner move, stale transition, or removal.\n\n## Done condition\nThe `diff` work unit is implemented through the public fak seam, documented where agents discover it, and does not introduce a second writer or private-source dependency.\n\n## Acceptance gate\nGolden diff fixture types every change and identifies downstream query compatibility impact.\n\n## Likely files\n- internal/disambiguation\n- cmd/fak\n\n## Dependencies\n- Parent epic #6272\n- Sequence hint: fan-out after schema/generator/query spine\n\n## Dedupe query\n`is:issue repo:anthony-chaudhary/fak in:title \"diff\"`\n\n## Work unit\nleaf\n\n## Expected steps\n3",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6160",
+      "split": "tune",
+      "source_issue": 6160,
+      "source_updated_at": "2026-08-10T14:57:53Z",
+      "source_sha256": "1c39cfd485cf1162cdd185ca8c7101294f5a65ff3b519565c82359b4b5301625",
+      "question": "experiment(microcontextdemo): bound straggler tails with cancellation and partial folds",
+      "context": "## Parent context\n\n#6033, strengthened baseline #6151, and S8k live matrix.\n\n## Finding\n\nA strengthened micro-context trial retained low median TTFT but one retried window pushed p95 and all-of-set wall time to roughly five minutes. Per-record decomposition bounds failure scope but does not by itself guarantee low tail latency when the fold waits for every record.\n\n## Scope\n\n- Add per-window deadlines, global task deadlines, and cancellation receipts.\n- Compare wait-all, quality-sufficiency early stop, straggler abstention, and bounded hedging policies.\n- Preserve partial typed facts and mark unopened/cancelled/timed-out windows distinctly.\n- Include cancelled-but-billed accounting where exposed.\n- Measure quality loss, p50/p95/all-of-set wall time, tokens, retries, and wasted work on the same frozen workload.\n\n## Done condition\n\nA live reproducible matrix identifies where cancellation/partial-fold policies improve tail without violating the quality floor, and records not-yet when no policy does.\n\n## Witness\n\nRaw endpoint traces, cancellation receipts, partial-fold artifacts, blind grades, sensitivity table, and rerun commands.\n\n## Lane\n\nmicrocontextdemo\n\n## Work unit\n\nleaf\n\n## Exp",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6213",
+      "split": "tune",
+      "source_issue": 6213,
+      "source_updated_at": "2026-08-10T21:45:50Z",
+      "source_sha256": "1d1b5a3ebd8e90a33d847d53fbe004764fd2a5fab10f964dde6e83b12216430e",
+      "question": "feat(workpatterns): ship the end-to-end report CLI and proof fixture",
+      "context": "## Problem\nCatalog and miners are not reusable until an operator or agent can invoke one stable command and receive a provenance-rich report over research/catalog, source, or trajectory inputs.\n\n## Scope\nShip a thin \fak command over the pattern catalog and miners with discover/list, source-scan, trajectory-scan, and combined report modes (names may follow repository CLI conventions). Include human and versioned JSON output, input provenance, abstentions, and a checked-in scrubbed proof fixture/example.\n\n## Definition of done\n- [ ] One first-class \fak verb lists catalog entries and scans source and trajectory inputs without network access.\n- [ ] --json has a versioned schema containing catalog version, detector versions, input provenance/digests, findings, counts, and abstentions/errors.\n- [ ] Human output is concise and names patterns, subpatterns, evidence locations/ranges, and uncertainty.\n- [ ] A checked-in scrubbed end-to-end fixture/report demonstrates both repository-source and trajectory-derived findings.\n- [ ] CLI tests cover help, bad arguments, missing files, JSON schema, deterministic output, privacy defaults, and no-match exit behavior.\n- [ ] CLI reference and research ",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6236",
+      "split": "tune",
+      "source_issue": 6236,
+      "source_updated_at": "2026-08-10T19:34:01Z",
+      "source_sha256": "2117b6b99a6261a847bb02f06a48f30d50fbdb8bd798591ba7dbfc499a7eed30",
+      "question": "feat(model): support bitsandbytes 8-bit and 4-bit load contracts",
+      "context": "\u003c!-- quant-interop-child: bnbinterop --\u003e\n\n## Current state\n\nThe quantization interoperability epic #6221 has no shipped bnbinterop leaf. Existing support is fragmented or implicit, so agents cannot cite a neutral capability contract for this seam.\n\n## Why now\n\nQuantization formats and runtimes are changing quickly; this seam is required now so support remains explicit rather than inferred.\n\n## Working spine\n\nStart from the public fixtures and neutral contract in #6221; deliver the smallest parser/adjudicator/adapter path that returns a typed result end to end.\n\n## Parent context\n\nChild of #6221. This leaf supports broad industry interoperability and must not select a universal quantization winner.\n\n## In scope\n\nRepresent LLM.int8 and NF4/FP4 load-time quantization including compute/storage dtype and double quantization.\n\n## Acceptance gate\n\nThe named witness passes, unknown or unsupported input has an explicit typed result, and fak validate --mine passes for exactly the owned paths.\n\n## Out of scope\n\nDo not implement unrelated model kernels, redistribute restricted weights, or claim quality/performance outside the witnessed envelope. Do not create a fak-only artifact format.\n\n## Do",
+      "readback_labels": [
+        "repo_search",
+        "issue_state",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6215",
+      "split": "tune",
+      "source_issue": 6215,
+      "source_updated_at": "2026-08-10T18:31:57Z",
+      "source_sha256": "22d95cebe730c3e668ed6912112ad6e83175b60320b1bf839c3709fe296cef32",
+      "question": "fix(envconfiglint): the CONFIG_NOT_ENV ratchet is red at HEAD again — 12 unadmitted env reads, so #2863 gates nothing",
+      "context": "## Parent context\n\nThe liveness half of #2863 (CONFIG_NOT_ENV, Track G / epic #2834). Adjacent to the destination\nissues #6091 (feature-gate registry) and #2862 / #2896 (config-surface budget) — but independent\nof all of them: this is the gate that is supposed to be holding the line *today* and is not.\n\n## Current state\n\n`TestNoNewNonSecretEnvReads` (`internal/envconfiglint/envconfiglint_test.go`) is **RED at HEAD**\nwith **12 offenders**. It runs under `make ci` (`Makefile:26` `ci: … test …` → `Makefile:94-95`\n`test: go run ./cmd/testenv -- go test ./...`).\n\nReproduce:\n\n```\ngo test ./internal/envconfiglint/ -run TestNoNewNonSecretEnvReads\n```\n\nThe scan reads **committed content at HEAD via `git grep`**, never the working tree\n(`internal/envconfiglint/doc.go:41-43`), so this is not a peer's uncommitted WIP in the shared\ncheckout — every offender below is committed, non-test source. Verified independently, e.g.\n`git grep -c '\"FAK_LINGUA_URL\"' HEAD -- '*.go'` → `HEAD:internal/headroom/lingua.go:1`.\n\n| file | env read |\n|---|---|\n| `cmd/fak/dispatch_tick_lease_beat.go` | `DISPATCH_HOST_ID` |\n| `cmd/fak/fleet_control.go` | `FAK_FLEET_BUS` |\n| `cmd/fak/guard_sessionstart.go` ",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6175",
+      "split": "tune",
+      "source_issue": 6175,
+      "source_updated_at": "2026-08-10T19:26:23Z",
+      "source_sha256": "2426a10196b61f2a483dba8de8c6ef3b2d378f4560c275f7f422266a51bda43b",
+      "question": "idea-scout: StepJack: Benchmarking Computer-Use Agent Safety Against Multi-Step Indirect Prompt Injection",
+      "context": "\u003e Auto-filed by the daily **idea-scout** (`tools/idea_scout.py`, 2026-08-10). A candidate RELATED idea found on arXiv; **needs human triage** — close as `wontfix`/`duplicate` if it is not worth pursuing.\n\n**Source:** https://arxiv.org/abs/2608.06477\n\n**Authors:** Zhuoxin Zhan, Akbar Rafiey, Avery Ma, Leila Pishdad, Layla El Asri\n**Submitted:** 2026-08-06\n\n**Why surfaced** (topic `prompt-injection-defense`, score 64): terms: prompt injection(title), indirect(title), agent(title); recent (3d); very fresh (≤30d)\n\n### Dispatchability\n- dispatchability: `triage_only`\n- reason: idea-scout candidates need human scope, lane, witness, and acceptance criteria before they become worker-ready leaves.\n\n**Summary**\n\nComputer-use agents (CUAs) face a growing threat from indirect prompt injection, where adversarial instructions are planted in the environment such as web pages. In this paper, we introduce multi-step indirect prompt injection, a new attack class against CUAs in which the adversarial goal is decomposed into multiple innocuous-looking sub-steps and distributed across a chain of pages referenced along the agent's navigation path. We develop a pipeline to automatically decompose an ",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6227",
+      "split": "tune",
+      "source_issue": 6227,
+      "source_updated_at": "2026-08-10T19:57:57Z",
+      "source_sha256": "246130bf8255132e5f9ccd3a841d6582a3176a7da052100c8f09494d7646a940",
+      "question": "feat(policy): expose quantization capability constraints in policy",
+      "context": "\u003c!-- quant-interop-child: quantpolicy --\u003e\n\n## Current state\n\nThe quantization interoperability epic #6221 has no shipped quantpolicy leaf. Existing support is fragmented or implicit, so agents cannot cite a neutral capability contract for this seam.\n\n## Why now\n\nQuantization formats and runtimes are changing quickly; this seam is required now so support remains explicit rather than inferred.\n\n## Working spine\n\nStart from the public fixtures and neutral contract in #6221; deliver the smallest parser/adjudicator/adapter path that returns a typed result end to end.\n\n## Parent context\n\nChild of #6221. This leaf supports broad industry interoperability and must not select a universal quantization winner.\n\n## In scope\n\nAdd policy predicates for minimum/maximum precision, approved formats, provenance requirements and conversion refusal.\n\n## Acceptance gate\n\nThe named witness passes, unknown or unsupported input has an explicit typed result, and fak validate --mine passes for exactly the owned paths.\n\n## Out of scope\n\nDo not implement unrelated model kernels, redistribute restricted weights, or claim quality/performance outside the witnessed envelope. Do not create a fak-only artifact form",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6021",
+      "split": "tune",
+      "source_issue": 6021,
+      "source_updated_at": "2026-08-09T20:35:27Z",
+      "source_sha256": "2461ea4719a6bdc16bd12010254dc8dd52c9216cea6bb4c72f9733d9fc4a861d",
+      "question": "build(cmd): ship a minimal independent fak-dev binary spine",
+      "context": "## Problem\n\nThere is no independently buildable development artifact. The first architectural spine must prove two executable entry points before attempting a bulk move of hundreds of verbs.\n\n## Scope\n\n- Add `cmd/fak-dev` as a real Go binary with its own help/version surface.\n- Extract the minimum non-`main` dispatch/bootstrap seam needed to host one representative read-only repository command in `fak-dev` without duplicating its implementation.\n- Keep `cmd/fak` runtime behavior unchanged during this spine, but ensure the new dev entry point does not import `cmd/fak`.\n- Add clean build and subprocess behavior witnesses for both binaries.\n\n## Definition of done\n\n- [ ] `go build ./cmd/fak` and `go build ./cmd/fak-dev` independently succeed from a clean tip and write only to explicit temporary outputs in verification.\n- [ ] `fak-dev help` identifies itself as repository-development tooling and lists the migrated spine command.\n- [ ] One representative read-only dev command executes through `fak-dev` with output/exit parity against its pre-split behavior.\n- [ ] No implementation is copied between command trees and neither `main` package imports the other.\n- [ ] The ownership inventory ",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6044",
+      "split": "tune",
+      "source_issue": 6044,
+      "source_updated_at": "2026-08-09T21:21:25Z",
+      "source_sha256": "24b322fd3cad6147164b1003d4e386217f5023491289b0c013f2f0f436d5503f",
+      "question": "Implement durable REQUIRE_WITNESS held-call spine",
+      "context": "## Problem\n\n`abi.VerdictRequireWitness` and the gateway wire projection exist, but today the verdict only routes outward with `disposition: ESCALATE`. The kernel does not yet persist the exact held call, publish a typed witness request, verify a bound attestation, revalidate policy, execute at most once, and resume the parked continuation.\n\n## Minimal working spine\n\nImplement one end-to-end fake `money_transfer` flow:\n\n1. proposal adjudicates to `REQUIRE_WITNESS` and returns a durable `held_id` without executing;\n2. a second principal reads the bounded witness request and submits an approval bound to `held_id`, canonical call digest, witness contract, identity, and expiry;\n3. the kernel verifies and revalidates the call, takes a compare-and-swap execution lease, and executes exactly once;\n4. duplicate/replayed attestations do not duplicate the effect;\n5. the parked session receives exactly one admitted result; cancellation/expiry makes late attestations inert.\n\n## Done condition / witness\n\nA test drives the real held-call store and executor through hold -\u003e attest -\u003e revalidate -\u003e execute -\u003e admit -\u003e resume, captures the state/event sequence, and proves no execution before attestati",
+      "readback_labels": [
+        "repo_search",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6060",
+      "split": "tune",
+      "source_issue": 6060,
+      "source_updated_at": "2026-08-09T20:32:06Z",
+      "source_sha256": "27b59eff6351f9d2863ce89fec1c7593d39dc270d82b45e3102be173911d90ff",
+      "question": "feat(info): show guard fleet posture in the default TUI",
+      "context": "## Parent context\nParent #2209 — the cross-agent, cross-surface rollup and shared-items plane.\n\n## Problem\nThe default `fak info` TUI for a `fak guard` gateway decodes the guard-published `/debug/vars.fleet` snapshot but does not render it. Operators must leave the default overview to learn fleet posture, and even the Agents tab omits the machine sample.\n\n## Done condition\n- The pinned default overview row shows fleet verdict, machine/session totals, seat health, and attention signals when the gateway publishes a fleet snapshot.\n- The Agents tab shows the aggregate plus the bounded per-machine sample, with attention rows first.\n- Gateways without a fleet block retain the existing rendering.\n- A captured-render test proves the default view contains the fleet posture.\n\n## Work estimate\nEstimate: 2 points. Uncertainty: operator-supplied estimate; revise through the parent denominator when evidence changes.\n\n## Overall completion contribution\nContribution: 2/2 points.\n\n## Completion standard\nproduction\n\n## Target operating envelope\nfleet-render-tests: \u003e= 3 tests\n\n## Witnessed operating envelope\nfleet-render-tests: \u003e= 3 tests",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6193",
+      "split": "test",
+      "source_issue": 6193,
+      "source_updated_at": "2026-08-10T18:02:55Z",
+      "source_sha256": "283215f5939191c22640124651aab0000f786db56ddbe3aae33bf12ee4cc4ecc",
+      "question": "feat(archreport): gate dependency reach and depth growth",
+      "context": "## Parent context\n\n#6192\n\n## Problem\n\nForward dependency reach and depth are snapshot-only. A leaf can acquire a large transitive dependency footprint or a deeper stack without changing its direct dependency count, and existing reverse blast-radius/path gates cannot detect that increase.\n\n## Spine\n\nDiff stable leaves by dependency reach and depth, then add isolated growth policies.\n\n## Done\n\n- `ReportDiff` exposes deterministic `dependency_reach_changes` and `dependency_depth_changes` with leaf, before/after values, and signed delta.\n- Positive reach or depth delta produces `regression`; contractions remain clean absent another regression.\n- Changes order positive growth first, absolute delta descending, then leaf.\n- `--fail-on increased-dependency-reach` and `--fail-on increased-dependency-depth` each isolate only their own positive drift.\n- Text names the changed metric and remediation distinguishes reducing footprint from shortening a dependency chain.\n- Derived views do not change `Changes()` cardinality; JSON, text, policy isolation, ordering, determinism, and docs are covered.\n\n## Witness\n\n`go test ./internal/archreport ./cmd/fak -run 'DependencyReachChange|DependencyDepthCha",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6058",
+      "split": "test",
+      "source_issue": 6058,
+      "source_updated_at": "2026-08-09T21:21:34Z",
+      "source_sha256": "285aaf7bf720476cec86e287781b4686dde5ca6ef1b5c66a049326338d5bd223",
+      "question": "bench(coordination): prove net value over tuned layer-local policies",
+      "context": "## Parent and gate\n\nPart of #6042. This is the claim gate: coordination is not a performance win until measured against the real alternative.\n\n## Deliverable\n\nRun a reproducible live A/B/C evaluation on sanctioned compute:\n\n- A: naive independent defaults (diagnostic only);\n- B: tuned layer-local cache + placement + harness + serve policies with no global coordinator (headline baseline);\n- C: the coordinated policy with the same models, workload, budget and hardware envelope.\n\nCover at least one long-horizon coding workload with repeated prefixes and harness fan-out, plus one pressure/failure scenario.\n\n## Definition of done\n\n- [ ] Pre-registered workload, hardware/module versions, policy configs, seeds and stopping rules are committed.\n- [ ] Report task success/quality first, then end-to-end latency, tokens, provider cost, GPU/CPU time, cache transfer/reuse, queue time, retries and coordination overhead.\n- [ ] B is independently tuned and documented; headline comparisons use C vs B, never C vs A.\n- [ ] Ablations remove one signal at a time (cache, compute, harness, serve) to identify where coordination adds or destroys value.\n- [ ] Failure run measures recovery time and leaked/dup",
+      "readback_labels": [
+        "repo_search",
+        "commit_state",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6237",
+      "split": "tune",
+      "source_issue": 6237,
+      "source_updated_at": "2026-08-10T19:34:05Z",
+      "source_sha256": "292cd0dc0a35e7fb730d498afc67e449748f96c7485c60711761d3794b5cfd21",
+      "question": "feat(model): integrate torchao quantization capability discovery",
+      "context": "\u003c!-- quant-interop-child: torchaoquant --\u003e\n\n## Current state\n\nThe quantization interoperability epic #6221 has no shipped torchaoquant leaf. Existing support is fragmented or implicit, so agents cannot cite a neutral capability contract for this seam.\n\n## Why now\n\nQuantization formats and runtimes are changing quickly; this seam is required now so support remains explicit rather than inferred.\n\n## Working spine\n\nStart from the public fixtures and neutral contract in #6221; deliver the smallest parser/adjudicator/adapter path that returns a typed result end to end.\n\n## Parent context\n\nChild of #6221. This leaf supports broad industry interoperability and must not select a universal quantization winner.\n\n## In scope\n\nMap torchao weight-only, dynamic activation and float8 recipes through versioned capability discovery.\n\n## Acceptance gate\n\nThe named witness passes, unknown or unsupported input has an explicit typed result, and fak validate --mine passes for exactly the owned paths.\n\n## Out of scope\n\nDo not implement unrelated model kernels, redistribute restricted weights, or claim quality/performance outside the witnessed envelope. Do not create a fak-only artifact format.\n\n## Done c",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6194",
+      "split": "tune",
+      "source_issue": 6194,
+      "source_updated_at": "2026-08-10T17:49:05Z",
+      "source_sha256": "2994c862f807fa24b8d340c35bb2a77ddeb659b223abec0d63df91c1e499d23e",
+      "question": "epic(flowmetrics): make WIP a governed quantity — 8 measured flow defects, 8 bounded leaves",
+      "context": "## Parent context\n\nParent: #5522. That audit established that the backlog does not describe reality —\n15 of 23 examined open tickets were already landed on trunk. This epic addresses\nthe same gap one level up: the repo emits every signal a flow measurement needs\nand reads none of them, so WIP is managed by feeling rather than by number.\n\n## Current state\n\n`internal/flowmetrics` now exists and grades eight flow KPIs from signals the repo\nalready emits. Run over this checkout — 6157 issues joined against 10809 commits,\nrev-pinned — it reports:\n\n| KPI | measured | threshold | verdict |\n|---|---|---|---|\n| flow_efficiency | median **3%** (30d), p90 71% | floor 30% | DEFECT |\n| queue_time | p50 queue **24.4h** vs p50 active **0.2h** | soft note only | soft |\n| unstarted_backlog | **1193 of 1347 open (89%)** have no referencing commit | ceiling 60% | DEFECT |\n| aging_wip | **86** started-but-unclosed past 7d, oldest **43d** | cap 12 | DEFECT |\n| atomicity | **79%** of closed issues landed as one commit in one lane | floor 50% | pass |\n| arrival_vs_service | **1.14** (7d, net +77) / 1.28 (60d, net +1347) | ceiling 1.10 | DEFECT |\n| witnessed_progress | **147 of 328 open aggregates (",
+      "readback_labels": [
+        "repo_search",
+        "issue_state",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6162",
+      "split": "tune",
+      "source_issue": 6162,
+      "source_updated_at": "2026-08-10T21:22:37Z",
+      "source_sha256": "2b2dee6c94ffa72a5e5046791cfefea3679b3652f478cbaa8201cfca3d9478e2",
+      "question": "Benchmark dedicated cache warming against provider and engine alternatives",
+      "context": "## Problem\n`internal/vcachewarm` implements fak-native dedicated prefix-cache warming decisions and warm accounting, but remains unclassified and lacks a common-workload comparison against no dedicated warming, provider-native caching, and first-class fak cache integrations.\n\n## Deliverable\nAdd a comparison contract for `Plan` plus `ReconcileWarm`. Execute fak native and a tuned demand-only/no-dedicated-warm baseline locally. Keep provider/cache-engine arms unavailable with zero measurements until their real APIs and stores run the same trace.\n\n## Required arms\n- fak native dedicated warm planner/accounting\n- demand-only fills/no dedicated warm\n- fak + Anthropic prompt caching\n- fak + Gemini explicit CachedContent\n- fak + OpenAI automatic prefix caching\n- fak + LMCache\n- fak + Mooncake\n- vLLM automatic prefix caching\n- SGLang HiCache\n\n## Same workload\nUse fixed prefix fingerprints, continuation fanout, provider capabilities, tool-choice constraints, cache-read readbacks, and cases for profitable warming, non-identical prefix, excessive fanout, explicit-cache path, and unavailable capability. Complete arms report decision quality, successful useful warms, false/wasted warms, latency",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6190",
+      "split": "tune",
+      "source_issue": 6190,
+      "source_updated_at": "2026-08-10T17:20:05Z",
+      "source_sha256": "2bc10c153ac22c5b08e8896165a50f871960d08ca93edcac38ab19df83b7ae51",
+      "question": "feat(archreport): gate pairwise lateral vertex-cut loss",
+      "context": "## Parent context\n\n#6188\n\n## Problem\n\nPairwise vertex cuts are snapshot-only. A non-adjacent package pair can lose an internally vertex-disjoint path while block membership and global `min_vertex_cut` remain unchanged because another pair already defines the block minimum. Existing resilient-pair and block vertex-connectivity gates miss that local package-path degradation.\n\n## Spine\n\nDiff stable non-adjacent package pairs by block identity and gate pairwise vertex-cut decreases.\n\n## Done\n\n- `ReportDiff` exposes deterministic `lateral_vertex_pair_cut_changes` for stable tier+membership block and pair identity.\n- Each change carries tier, sorted block members, pair identity, before/after cut, signed delta, and copied before/after separators.\n- Negative pair cut delta produces `regression`; improvements remain clean absent another regression.\n- Changes order decreases before increases, absolute delta descending, tier, block members, then pair.\n- `--fail-on decreased-lateral-vertex-pair-cuts` exits 3 only for negative drift and identifies the affected pair and separator transition.\n- Pair appearance/disappearance caused by adjacency changes is not misclassified as numeric drift.\n- Deri",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6248",
+      "split": "tune",
+      "source_issue": 6248,
+      "source_updated_at": "2026-08-10T19:34:40Z",
+      "source_sha256": "2cc0a1e9d554e359b62f54e12f4a4558018229666ce41770032665e5347b68ac",
+      "question": "research(model): evaluate heterogeneity-aware microscaling",
+      "context": "\u003c!-- quant-interop-child: microscaleeval --\u003e\n\n## Current state\n\nThe quantization interoperability epic #6221 has no shipped microscaleeval leaf. Existing support is fragmented or implicit, so agents cannot cite a neutral capability contract for this seam.\n\n## Why now\n\nQuantization formats and runtimes are changing quickly; this seam is required now so support remains explicit rather than inferred.\n\n## Working spine\n\nStart from the public fixtures and neutral contract in #6221; deliver the smallest parser/adjudicator/adapter path that returns a typed result end to end.\n\n## Parent context\n\nChild of #6221. This leaf supports broad industry interoperability and must not select a universal quantization winner.\n\n## In scope\n\nPin arXiv:2608.03867 and compare its format assumptions with OCP/vendor microscaling support.\n\n## Acceptance gate\n\nThe named witness passes, unknown or unsupported input has an explicit typed result, and fak validate --mine passes for exactly the owned paths.\n\n## Out of scope\n\nDo not implement unrelated model kernels, redistribute restricted weights, or claim quality/performance outside the witnessed envelope. Do not create a fak-only artifact format.\n\n## Done condit",
+      "readback_labels": [
+        "repo_search",
+        "commit_state",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6342",
+      "split": "test",
+      "source_issue": 6342,
+      "source_updated_at": "2026-08-10T19:42:37Z",
+      "source_sha256": "2dd574f5d267ef8df86487038aec32ba747bdd5588a19087dfc526e79fb9765d",
+      "question": "feat(gateway): wire provider stream callbacks into generation control",
+      "context": "## Parent context\n\nParent: #6219\n\n## Problem\n\nThe provider-neutral `generationctl` spine is shipped, but gateway/provider streaming callbacks do not yet feed accepted output and speculative tool-call deltas into it. Live behavior therefore remains demonstrated locally rather than integrated with a real provider stream.\n\n## Done condition\n\nA real streaming adapter starts a generation epoch, reports its steering resolution, feeds ordered deltas into `generationctl`, cancels at the adapter's next safe boundary on redirect, and resumes from the returned checkpoint. A captured integration test proves partial tool arguments never become an executed effect and accepted prefix survives restart. Non-streaming adapters explicitly report request-boundary resolution rather than silently claiming live steering.\n\n## Work estimate\nEstimate: 5 points. Uncertainty: operator-supplied estimate; revise through the parent denominator when evidence changes.\n\n## Overall completion contribution\nContribution: 5/11 points.\n\n## Completion standard\ndevelopment",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6277",
+      "split": "tune",
+      "source_issue": 6277,
+      "source_updated_at": "2026-08-10T19:26:09Z",
+      "source_sha256": "2ef96549f05c3b01b704bee7f5d66e3e79bcbe459743ab5844868f0124d6de5b",
+      "question": "feat(disambiguation): model explicit contrasts and forbidden conflations",
+      "context": "Parent: #6272\n\n## Problem\nRepresent the pairwise distinctions agents must preserve instead of relying on glossary prose alone.\n\n## Done condition\nThe `contrasts` work unit is implemented through the public fak seam, documented where agents discover it, and does not introduce a second writer or private-source dependency.\n\n## Acceptance gate\nValidation rejects self-contrasts, unknown targets, asymmetric required pairs, and empty contrast explanations.\n\n## Likely files\n- internal/disambiguation\n\n## Dependencies\n- Parent epic #6272\n- Sequence hint: spine\n\n## Dedupe query\n`is:issue repo:anthony-chaudhary/fak in:title \"contrasts\"`\n\n## Work unit\nleaf\n\n## Expected steps\n3",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6209",
+      "split": "tune",
+      "source_issue": 6209,
+      "source_updated_at": "2026-08-10T21:45:41Z",
+      "source_sha256": "2f1f2bed03cfa7f0d1552765bc5da54408d2230c24744895275179f6528212f2",
+      "question": "research(workpatterns): synthesize a cited coding-workload vocabulary",
+      "context": "## Problem\nThe project needs names that are reusable beyond one tool or repository, but inventing them from local intuition risks relabeling established concepts or conflating workflow, failure mode, and mechanism.\n\n## Scope\nSurvey relevant software-engineering-agent, workflow-pattern, program-repair, issue-resolution, and human-computer interaction literature. Produce a compact evidence table and a proposed vocabulary separating workload patterns (goal/shape) from subpatterns (reusable moves), mechanisms, and antipatterns. Record synonyms and rejected conflations.\n\n## Definition of done\n- [ ] At least 12 credible primary or authoritative sources are cited with stable URLs and access dates.\n- [ ] At least 8 candidate patterns and 12 subpatterns have concise definitions, aliases, inclusion/exclusion criteria, and provenance labels (\borrowed, ^Gdapted, or \new synthesis).\n- [ ] The report distinguishes workload shape, orchestration topology, verification strategy, and failure mode as separate axes.\n- [ ] At least three tempting but invalid conflations are documented with counterexamples.\n- [ ] The research index links the report and a machine-readable companion artifact or table is de",
+      "readback_labels": [
+        "repo_search",
+        "issue_state",
+        "commit_state",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6182",
+      "split": "tune",
+      "source_issue": 6182,
+      "source_updated_at": "2026-08-10T21:22:08Z",
+      "source_sha256": "2f8447d96bf74d72a8f2009344a717a42e10c192c6136bdd465b436da6fcef4e",
+      "question": "Benchmark Go AST queries against structural search tools",
+      "context": "## Problem\n`internal/astquery.Search`, consumed by `codesearch ast`, performs Go expression-pattern matching with metavariable back-references and wildcard selectors. It lacks a same-workload comparison against text search and practical structural-search tools.\n\n## Required arms\n- fak native Go AST query\n- literal text search\n- Semgrep\n- ast-grep\n- Comby\n- gogrep\n\nNo equivalent first-class fak integration currently exists; add any discovered integration as its own arm before completion.\n\n## Same workload\nEvery arm searches the same Go source for a repeated-metavariable call pattern, with true matches, same-shape inconsistent arguments, comments/strings containing textual decoys, and unrelated calls. Correctness requires exact ordered locations and bindings. Complete witnesses report precision/recall, binding/location errors, parse failures, latency/throughput, CPU/RSS, bytes, setup/operator time, and total cost.\n\n## Acceptance\nNative and tuned literal baseline run locally; external tools remain explicit unavailable zero rows; native benchmark; classify structural expression search separately from higher-level codesearch indexing/graph/feature modes; dated packet/index row; issue st",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6327",
+      "split": "tune",
+      "source_issue": 6327,
+      "source_updated_at": "2026-08-10T23:39:42Z",
+      "source_sha256": "2fba54d75e03028e7055e0ce8e8e66ca04189bccdd72a8fd068d33069f057a6d",
+      "question": "test(disambiguation): add scale and latency witness for repository-sized index",
+      "context": "Parent: #6272\n\n## Problem\nMeasure generation and exact/alias/reverse query performance at projected repository scale without unsupported efficiency claims.\n\n## Done condition\nThe `scale` work unit is implemented through the public fak seam, documented where agents discover it, and does not introduce a second writer or private-source dependency.\n\n## Acceptance gate\nReproducible benchmark reports dataset size, tuned baseline, hardware scope, and observed provenance.\n\n## Likely files\n- internal/disambiguation\n\n## Dependencies\n- Parent epic #6272\n- Sequence hint: fan-out after schema/generator/query spine\n\n## Dedupe query\n`is:issue repo:anthony-chaudhary/fak in:title \"scale\"`\n\n## Work unit\nleaf\n\n## Expected steps\n3",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6031",
+      "split": "tune",
+      "source_issue": 6031,
+      "source_updated_at": "2026-08-10T01:55:40Z",
+      "source_sha256": "30989ba94a77e6a25f8ae0cbc6fcb7d24acffda7470e62faa88ee6985810ef1c",
+      "question": "feat(microcontextdemo): read-only tool enrichment fan-out with quotas and cancellation",
+      "context": "## Parent context\n\n#5785 and the large-input operator spine.\n\n## Current state\n\nPer-record semantic judgments cannot selectively enrich themselves through external read tools under one bounded, cacheable, cancellable contract.\n\n## Working spine\n\nA selector can request an allowlisted read-only stage such as `fetch-comments(issue_id)`; the kernel deduplicates identical requests, enforces per-resource and global quotas, separates model slots from tool waits, caches typed observations, and cancels unopened work when the answer contract permits.\n\n## In scope\n\n- Typed read request and observation schemas.\n- Capability check, host/resource quotas, timeout/retry budget, and dedupe.\n- Tool waits that do not pin model slots.\n- Recursive handling for large tool output with depth/amplification caps.\n- Error/abstain/cancel/not-run separation.\n- Restart and cancellation witness.\n\n## Out of scope\n\nWrites, issue mutation, shell access, or claiming cancellation reverses a dispatched call.\n\n## Done condition\n\nA fixture/live-stub run enriches only uncertain issues; duplicate reads execute once; quotas and timeout remain bounded; restart does not duplicate completed reads; cancelled unopened reads nev",
+      "readback_labels": [
+        "repo_search",
+        "commit_state",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6146",
+      "split": "tune",
+      "source_issue": 6146,
+      "source_updated_at": "2026-08-10T21:22:57Z",
+      "source_sha256": "311dde60d3892da42e1ac5f5bb49a799dc2bde3b3f9cc6e637dc45b8a8e8c82d",
+      "question": "bench(cachesweep): run cache simulator alternative arms",
+      "context": "## Parent context\n\nParent production-scope benchmark coverage epic: #6036.\n\n## Missing witness\n\nThe native `internal/cachesweep` prefix-cache budget sweep, infinite-cache ceiling, and ROI-knee planner has no complete same-workload alternatives run.\n\n## Done when\n\nRun one fixed prefix-access trace and identical cache budgets/cost model through fak native, a tuned no-cache baseline, libCacheSim, Caffeine's simulator, Redis/Valkey maxmemory policies, and any equivalent first-class fak cache integration as a separate `fak + integration` arm if repository inspection identifies one.\n\nFor each available arm independently capture hit/reuse correctness, saved tokens and ROI-knee quality, simulation/runtime latency and throughput, CPU/RSS/storage/network, and total cost. A shared cache adapter or in-memory mock is not an external cache witness.\n\n## Reproduction seed\n\nUse a deterministic trace with repeated exact prefixes, divergent children, timestamps, and budgets that span zero reuse through the infinite-cache ceiling. Keep write-delay and token-cost assumptions identical.\n\n## Work estimate\nEstimate: 5 points. Uncertainty: operator-supplied estimate; revise through the parent denominator w",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6195",
+      "split": "test",
+      "source_issue": 6195,
+      "source_updated_at": "2026-08-10T19:21:57Z",
+      "source_sha256": "3278f6934dc35f201eeda2dfa10d37bfd03d50d6602f7d1d32a48e98aebb9b8a",
+      "question": "research(microcontextdemo): audit live scheduler quality disagreements",
+      "context": "## Parent context\n\n#6033, #6111, and live matrix #6185.\n\n## Finding\n\nS8o found fixed cascade uniquely best at 12/16 exact in both cold and warm passes, while adaptive arms scored 10–11/16. Before changing scheduler policy, classify all per-record disagreements by evidence need, prompt/fold failure, label uncertainty, tool-receipt influence, and stochastic variance.\n\n## Scope\n\n- Replay and tabulate every S8o error and cross-arm disagreement from the frozen raw receipts.\n- Blind re-grade disputed records without exposing policy identity.\n- Separate selector errors, model classification errors, fold errors, mutable-state changes, and questionable gold.\n- Rerun only a predeclared diagnostic subset enough times to estimate variance; do not tune on the held-out answer labels.\n- Propose a scheduler change only if the causal class is repeatable and observable before answer generation.\n\n## Done condition\n\nA machine-verifiable error atlas explains every disagreement and identifies either one pre-answer routing signal with a falsifiable intervention or an explicit no-signal result. No quality claim is made from post-hoc labels.\n\n## Witness\n\nFrozen S8o artifact hash, blinded adjudication pac",
+      "readback_labels": [
+        "repo_search",
+        "issue_state",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6028",
+      "split": "test",
+      "source_issue": 6028,
+      "source_updated_at": "2026-08-09T19:43:21Z",
+      "source_sha256": "3295744f8446296b2c4be8dc8692af40c6da35337beed3c1b8119b60c05d102e",
+      "question": "docs(arch): classify portable dev patterns versus fak-specific tooling",
+      "context": "## Problem\n\nThe runtime/dev ownership inventory answers which binary owns a command, but it collapses two materially different kinds of development work: portable agent-development patterns that fak can dogfood and teach (leases, isolated workers, scoped commits, dispatch, validation), and tooling that exists only to maintain or operate this repository and its lab. Without a second axis, extraction can either hide useful patterns as maintainer internals or accidentally present fak-specific machinery as supported product API.\n\n## Scope\n\n- Define an orthogonal reuse classification for dev-owned commands: portable pattern, fak-maintainer specific, or lab-operations specific; runtime commands remain not applicable.\n- Add that classification to the machine-readable ownership inventory and require every dev-owned command to have exactly one class and a rationale.\n- Seed and test representative portable work-pattern families, including lease/coordination, isolated worker, scoped commit, validation, issue-contract, and dispatch concepts.\n- Document the contract: portable means the pattern is suitable for examples/dogfood and possible later extraction, not that today's repository-bound comm",
+      "readback_labels": [
+        "repo_search",
+        "commit_state",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6229",
+      "split": "tune",
+      "source_issue": 6229,
+      "source_updated_at": "2026-08-10T19:33:09Z",
+      "source_sha256": "344b02d915789a27798f9026d4aa8584b30e17f0dc8f1bd1433ef384e7ffe733",
+      "question": "feat(observability): emit quantization route and residency telemetry",
+      "context": "\u003c!-- quant-interop-child: quantobs --\u003e\n\n## Current state\n\nThe quantization interoperability epic #6221 has no shipped quantobs leaf. Existing support is fragmented or implicit, so agents cannot cite a neutral capability contract for this seam.\n\n## Why now\n\nQuantization formats and runtimes are changing quickly; this seam is required now so support remains explicit rather than inferred.\n\n## Working spine\n\nStart from the public fixtures and neutral contract in #6221; deliver the smallest parser/adjudicator/adapter path that returns a typed result end to end.\n\n## Parent context\n\nChild of #6221. This leaf supports broad industry interoperability and must not select a universal quantization winner.\n\n## In scope\n\nDefine low-cardinality events for artifact format, effective precision, runtime delegation, conversion, memory residency and refusal reasons.\n\n## Acceptance gate\n\nThe named witness passes, unknown or unsupported input has an explicit typed result, and fak validate --mine passes for exactly the owned paths.\n\n## Out of scope\n\nDo not implement unrelated model kernels, redistribute restricted weights, or claim quality/performance outside the witnessed envelope. Do not create a fak-o",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6117",
+      "split": "tune",
+      "source_issue": 6117,
+      "source_updated_at": "2026-08-10T06:48:43Z",
+      "source_sha256": "346fa13483437b48206299af01f068b3962fd0daa12c10030cfd068ee19b27ed",
+      "question": "feat(archreport): gate increased tier-gap drift",
+      "context": "## Parent context\n\n#6115\n\n## Problem\n\nTier-gap drift is now visible, but an increased gap still leaves the comparison verdict `clean` and cannot be selected by `--fail-on`. CI and pre-push consumers must parse JSON and invent policy logic to stop new sink drift.\n\n## Spine\n\nClassify any positive tier-gap delta as a regression and add a policy-specific `--fail-on increased-tier-gap` gate that returns 3 only when comparable leaves drift farther above their import-derived floor.\n\n## Done\n\n- Positive tier-gap deltas produce `regression`; zero/negative deltas do not.\n- `--fail-on increased-tier-gap` returns 3 only when at least one `tier_gap_change.delta \u003e 0`.\n- Violation-only or diagnostic-only regressions remain exit 0 under this policy.\n- Text output names remediation and baseline→workspace direction.\n- JSON behavior, invalid-policy guidance, and CLI docs cover the gate.\n\n## Witness\n\n`go test ./internal/archreport ./cmd/fak -run 'TierGap.*Regression|FailOnIncreasedTierGap|RejectsInvalidFailOn' -count=1`\n\n## Work estimate\n\n2 points.\n\n## Completion standard\n\nProduction.\n\n## Overall completion contribution\nContribution: 2/2 points.\n\n## Target operating envelope\n- increased tier-gap reg",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6121",
+      "split": "tune",
+      "source_issue": 6121,
+      "source_updated_at": "2026-08-10T07:21:56Z",
+      "source_sha256": "358788c5454c37ff4f3fde042eaeedf0e51b086b7978ac3f41d443a92f5a92b8",
+      "question": "fix(microcontextdemo): remove duplicated labels from S8f answer facts",
+      "context": "## Parent context\n\n#6108 and #6109.\n\n## Defect\n\nThe S8f freezer copied source labels into the public record correctly, then appended the same labels twice while constructing per-record answer facts. Set-based grading masked the duplicate, but the answer artifact was not canonical and inflated serialized facts. Aggregate counts remained correct.\n\n## Done condition\n\nThe freezer emits each source label exactly once in both public and answer records, a regression test rejects duplicate answer labels, corrected answer/report hashes are captured, the artifact verifier and blind grader pass, and the correction is origin-witnessed.\n\n## Witness\n\nRegression test plus corrected S8f answer/report artifacts and exact hash update.\n\n## Lane\n\nmicrocontextdemo\n\n## Work unit\n\nleaf\n\n## Likely files\n\n- `cmd/microcontextdemo/corpus_bench.go`\n- `cmd/microcontextdemo/corpus_bench_test.go`\n- `docs/research/micro-context-s8f-corpus-grader.md`\n- `experiments/microcontext/s8f-github-issues-answers-2026-08-09.json`\n- `experiments/microcontext/s8f-github-issues-report-2026-08-09.json`",
+      "readback_labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6279",
+      "split": "tune",
+      "source_issue": 6279,
+      "source_updated_at": "2026-08-10T19:26:05Z",
+      "source_sha256": "35afbaac679430eac3c22d78d8ff13a836388662f24a25871e7db52f33de400a",
+      "question": "feat(disambiguation): assign owner leaf and lane to every entry",
+      "context": "Parent: #6272\n\n## Problem\nBind each distinction to a maintained leaf and dispatch lane so drift has an accountable remediation target.\n\n## Done condition\nThe `ownership` work unit is implemented through the public fak seam, documented where agents discover it, and does not introduce a second writer or private-source dependency.\n\n## Acceptance gate\nGenerator rejects entries whose owner leaf/lane is absent from public manifests.\n\n## Likely files\n- internal/disambiguation\n\n## Dependencies\n- Parent epic #6272\n- Sequence hint: spine\n\n## Dedupe query\n`is:issue repo:anthony-chaudhary/fak in:title \"ownership\"`\n\n## Work unit\nleaf\n\n## Expected steps\n3",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6243",
+      "split": "tune",
+      "source_issue": 6243,
+      "source_updated_at": "2026-08-10T19:34:31Z",
+      "source_sha256": "363a8a85d0f723e7891f258bff32bf7340d604e0efe5bb87cb8f875a40985cfb",
+      "question": "feat(engine): add BitNet runtime capability and delegation spine",
+      "context": "\u003c!-- quant-interop-child: bitnetruntime --\u003e\n\n## Current state\n\nThe quantization interoperability epic #6221 has no shipped bitnetruntime leaf. Existing support is fragmented or implicit, so agents cannot cite a neutral capability contract for this seam.\n\n## Why now\n\nQuantization formats and runtimes are changing quickly; this seam is required now so support remains explicit rather than inferred.\n\n## Working spine\n\nStart from the public fixtures and neutral contract in #6221; deliver the smallest parser/adjudicator/adapter path that returns a typed result end to end.\n\n## Parent context\n\nChild of #6221. This leaf supports broad industry interoperability and must not select a universal quantization winner.\n\n## In scope\n\nIntegrate Microsoft BitNet runtime discovery/admission as an external delegate with CPU feature and model-family checks.\n\n## Acceptance gate\n\nThe named witness passes, unknown or unsupported input has an explicit typed result, and fak validate --mine passes for exactly the owned paths.\n\n## Out of scope\n\nDo not implement unrelated model kernels, redistribute restricted weights, or claim quality/performance outside the witnessed envelope. Do not create a fak-only artifac",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6179",
+      "split": "tune",
+      "source_issue": 6179,
+      "source_updated_at": "2026-08-10T16:21:15Z",
+      "source_sha256": "3663b8d3e871bce9d96573ea93f91f8a539d72acf794feee32443a3a0f3f2754",
+      "question": "feat(archreport): expose lateral minimum-cut partitions",
+      "context": "## Parent context\n\n#6172\n\n## Problem\n\nA minimum-cut witness names the crossing dependency edges but not the two package sets those edges separate. In a larger resilient block, an operator still has to reconstruct the residual partition by hand to understand the failure domain and choose which side should own or absorb a replacement seam.\n\n## Spine\n\nRetain the deterministic source/sink package partition alongside every pairwise minimum-cut witness.\n\n## Done\n\n- Every pairwise cut row carries canonical sorted `source_side` and `sink_side` package lists derived from positive final residual reachability.\n- The queried left package is always in `source_side`, right is always in `sink_side`, the sides are disjoint, and their union equals block membership.\n- Every `cut_edges` row crosses the reported partition and no non-crossing edge appears.\n- Partition choice is deterministic when multiple minimum cuts exist and duplicate import orientation has no effect.\n- Critical-pair text renders the partition concisely; JSON retains complete lists.\n- Cycle, K4, asymmetric multiple-cut, ordering, scoped output, and determinism are covered.\n- CLI reference documents partition semantics.\n\n## Witness\n\n",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6074",
+      "split": "tune",
+      "source_issue": 6074,
+      "source_updated_at": "2026-08-10T00:02:14Z",
+      "source_sha256": "36c8145e8b8e6b3f24aa0285cd0602f754ebcd7d3a6e9ab2551ccbf5ca82295f",
+      "question": "qa: determinism + race witness for Architecture graph report",
+      "context": "\u003c!-- fak-issuefanout-key: fanout-archreport-qa-determinism --\u003e\n\n## Generation stream\n\ngen/now\n\n## Parent context\n\n#6068\n\n## Current state\n\nThe working spine of Architecture graph report exists (e0338749c41d); this follow-on has not started.\n\n## Why this is next\n\nSpine-first default: the spine just shipped, so its follow-on backlog is filed at creation time while context is hot.\n\n## Working spine\n\nThe same input yields byte-identical output every run, and the package is race-clean, so cohort/replay layers can trust it.\n\n## In scope\n\nA determinism test (two runs, deep-equal) and a -race run over internal/archreport/, cmd/fak/architecture.go.\n\n## Out of scope\n\nPerformance tuning.\n\n## Done condition\n\nDeterminism test lands; -race run over the package is clean.\n\n## Witness\n\ngo test ./internal/archreport -race -run Determinism -v output captured in the commit or issue.\n\n## Acceptance gate\n\nmake test-race green.\n\n## Work estimate\n\nEstimate: 2 points\n\n## Overall completion contribution\n\nContribution: 2/3 points\n\n## Completion standard\n\nproduction\n\n## Target operating envelope\n\n- declared leaves: \u003e= 1 leaves\n- report modes: \u003e= 2 modes\n\n## Witnessed operating envelope\n\n- declared leaves: \u003e= ",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6271",
+      "split": "test",
+      "source_issue": 6271,
+      "source_updated_at": "2026-08-10T20:53:21Z",
+      "source_sha256": "37a8788c48018e79d21c90ec20c2096424ebe18027ef802186ef3cfcfd400f62",
+      "question": "refactor(amdgpu): retire superseded Python AMD GPU facts implementation",
+      "context": "Parent: #6220\n\n## Problem\n`internal/devcmd/amd_gpu_facts.go` exposes the Go implementation, while `tools/amd_gpu_facts.py` and `tools/amd_gpu_facts_test.py` remain duplicate Python.\n\n## Done when\n- Compare contracts and add focused Go parity tests for any missing behavior.\n- Delete both Python files atomically.\n- Run relevant devcmd/fak-dev tests and pythongate.\n- Leave baseline tightening to cohort reconciliation.\n\n## Witness\nSigned path-scoped `(fak devcmd)` commit deleting the pair with focused Go tests green.",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6027",
+      "split": "tune",
+      "source_issue": 6027,
+      "source_updated_at": "2026-08-09T20:36:14Z",
+      "source_sha256": "392770973385afe63e05dbe329a6a9fd443e0de7fcf6dee647640a857aa458c2",
+      "question": "fix(accounts): a corrupt cooldown store silently disables the whole cooldown gate",
+      "context": "## Problem\n\nA **corrupt** `account-cooldown.json` silently disables the entire account-cooldown\ngate fleet-wide. Every seat resolution and launch then runs cooldown-blind and\nre-offers capped accounts, which is the exact failure this store exists to prevent.\n\n`loadCooldownStoreFailOpen` (`cmd/fak/accounts_cooldown.go:56`) returns **nil** on any\nread/parse error, and that nil is the \"cooldown-blind fold\":\n\n- `cmd/fak/accounts_launch.go:354` — `reg.ServeAt(name, loadCooldownStoreFailOpen(), time.Now())`\n- `cmd/fak/accounts.go:667` — `accountsResolveServe(..., loadCooldownStoreFailOpen(), ...)`\n\nFail-open is deliberate (#4675: bad cooldown state must never block a resolve, launch\nor preflight) and that part is right. The defect is that it is **silent** — nothing on\nany of these paths tells the operator the gate is off. A one-byte corruption\ndowngrades a fleet safety gate to a no-op with no signal at all, and the fleet keeps\ndispatching into walls until somebody happens to run `fak accounts cooldown`.\n\n## Witness\n\nObserved on a maintainer box 2026-08-09. The store was a complete, valid JSON object\nof 3611 bytes followed by a stray `}\\n` (3613 bytes total):\n\n```\n$ fak accounts coo",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6084",
+      "split": "tune",
+      "source_issue": 6084,
+      "source_updated_at": "2026-08-10T01:00:34Z",
+      "source_sha256": "3978e9c8cce044cbde88d3e7f41060fa6d2857320c2951746541f7536ec5bc79",
+      "question": "fix(archreport): keep reports usable with stale tier declarations",
+      "context": "\u003c!-- archreport-dogfood-defect: stale-declaration-global-outage --\u003e\n\n## Parent context\n\n#6075\n\n## Problem\n\nA real `fak architecture` dogfood run against committed `origin/main` fails at the stale `docrender` tier row because `internal/docrender` does not exist. Since `Analyze` inspects every declared leaf even for `--leaf`, one stale row prevents both full reports and every scoped query.\n\n## Done\n\n- Architecture reporting represents stale tier declarations as named diagnostics instead of aborting the whole graph.\n- `--leaf` remains usable when an unrelated declaration is stale.\n- Full JSON/text reports name the stale declaration and recovery action.\n- A synthetic fixture proves one stale row does not suppress healthy leaves.\n\n## Witness\n\n`go test ./internal/archreport ./cmd/fak -run 'Stale|Missing|Architecture' -count=1`\n\n## Work estimate\n\n3 points.\n\n## Completion standard\n\nProduction.\n\n## Overall completion contribution\nContribution: 3/3 points.\n\n## Target operating envelope\n- healthy declared leaves: \u003e= 1 leaves\n- stale declarations: \u003e= 1 declarations\n\n## Witnessed operating envelope\n- healthy declared leaves: \u003e= 1 leaves\n- stale declarations: \u003e= 1 declarations",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6250",
+      "split": "tune",
+      "source_issue": 6250,
+      "source_updated_at": "2026-08-10T19:34:43Z",
+      "source_sha256": "39a2399bc1f7245240b2a85d8d45378e23e671be6f62e85c4fc1797fc37e69a9",
+      "question": "research(model): reproduce LightRot low-bit results",
+      "context": "\u003c!-- quant-interop-child: lightroteval --\u003e\n\n## Current state\n\nThe quantization interoperability epic #6221 has no shipped lightroteval leaf. Existing support is fragmented or implicit, so agents cannot cite a neutral capability contract for this seam.\n\n## Why now\n\nQuantization formats and runtimes are changing quickly; this seam is required now so support remains explicit rather than inferred.\n\n## Working spine\n\nStart from the public fixtures and neutral contract in #6221; deliver the smallest parser/adjudicator/adapter path that returns a typed result end to end.\n\n## Parent context\n\nChild of #6221. This leaf supports broad industry interoperability and must not select a universal quantization winner.\n\n## In scope\n\nPin arXiv:2607.27704 and compare a bounded reproduction to tuned rotation and no-rotation baselines.\n\n## Acceptance gate\n\nThe named witness passes, unknown or unsupported input has an explicit typed result, and fak validate --mine passes for exactly the owned paths.\n\n## Out of scope\n\nDo not implement unrelated model kernels, redistribute restricted weights, or claim quality/performance outside the witnessed envelope. Do not create a fak-only artifact format.\n\n## Done con",
+      "readback_labels": [
+        "repo_search",
+        "commit_state",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6296",
+      "split": "tune",
+      "source_issue": 6296,
+      "source_updated_at": "2026-08-10T19:28:48Z",
+      "source_sha256": "39b1596f25de67e4e90c04919320c7386d9b4983337de470e92fe6b1046754f3",
+      "question": "fix(disambiguation): represent fresh stale unknown and invalid separately",
+      "context": "Parent: #6272\n\n## Problem\nUse a four-state freshness verdict so unavailable probes cannot become false fresh and malformed evidence cannot look merely stale.\n\n## Done condition\nThe `freshness` work unit is implemented through the public fak seam, documented where agents discover it, and does not introduce a second writer or private-source dependency.\n\n## Acceptance gate\nTable test covers fresh, stale, unknown, and invalid with stable reason codes.\n\n## Likely files\n- internal/disambiguation\n\n## Dependencies\n- Parent epic #6272\n- Sequence hint: spine\n\n## Dedupe query\n`is:issue repo:anthony-chaudhary/fak in:title \"freshness\"`\n\n## Work unit\nleaf\n\n## Expected steps\n3",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6313",
+      "split": "tune",
+      "source_issue": 6313,
+      "source_updated_at": "2026-08-10T19:24:53Z",
+      "source_sha256": "3a33836a968bcb0493268d213e73567d6104130c711c88f4449ee6194d039f6f",
+      "question": "feat(disambiguation): index module leaf lane and commit-stamp vocabulary",
+      "context": "Parent: #6272\n\n## Problem\nConnect module paths, leaf identities, lane ownership, and commit-stamp tokens so similarly named units cannot misroute work.\n\n## Done condition\nThe `ownership-source` work unit is implemented through the public fak seam, documented where agents discover it, and does not introduce a second writer or private-source dependency.\n\n## Acceptance gate\nFixture resolves one path to module@rev, leaf, lane, and valid stamp; mismatches are typed.\n\n## Likely files\n- internal/disambiguation\n\n## Dependencies\n- Parent epic #6272\n- Sequence hint: fan-out after schema/generator/query spine\n\n## Dedupe query\n`is:issue repo:anthony-chaudhary/fak in:title \"ownership-source\"`\n\n## Work unit\nleaf\n\n## Expected steps\n3",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6119",
+      "split": "test",
+      "source_issue": 6119,
+      "source_updated_at": "2026-08-10T07:11:34Z",
+      "source_sha256": "3c20769d64948d2e64d1539c7f1910d79ef6baca0310d247ead88ff2188f864f",
+      "question": "bench(cacheprice): reconcile native cache pricing with cloud calculators",
+      "context": "## Parent context\n\nChild of #6036 repository-wide native implementation benchmark coverage.\n\n## Done condition\n\nPrice the same provider-observed prompt/cache trace with fak native, the tuned full-prompt baseline, AWS Pricing Calculator, Google Cloud Pricing Calculator, and Azure Pricing Calculator using matching service/SKU/rates. Independently reconcile admission tokens, billed units, bytes/resource use, latency, and total cost. Keep unavailable calculator arms explicit; arithmetic alone is not a billed-cost witness.\n\n## Current evidence\n\nThe local fixture prices 4,096 prompt tokens with a 3,072-token resident prefix. No cloud calculator or bill has been reconciled.\n\n## Work estimate\nEstimate: 3 points. Uncertainty: operator-supplied estimate; revise through the parent denominator when evidence changes.\n\n## Overall completion contribution\nContribution: 3/3 points.\n\n## Completion standard\nresearch",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6315",
+      "split": "test",
+      "source_issue": 6315,
+      "source_updated_at": "2026-08-10T23:40:34Z",
+      "source_sha256": "3cb7971b7bd52ff23a4a9ac375b9b6bbd5e3b16d1b7886296ae5e236899675b4",
+      "question": "feat(disambiguation): index cache prefix radix KV and provider reuse terms",
+      "context": "Parent: #6272\n\n## Problem\nDistinguish cache layers and reuse mechanisms by owner, object cached, lookup key, and invalidation boundary.\n\n## Done condition\nThe `cache-source` work unit is implemented through the public fak seam, documented where agents discover it, and does not introduce a second writer or private-source dependency.\n\n## Acceptance gate\nQuery fixture returns contrasts among at least four cache concepts and cites public sources.\n\n## Likely files\n- internal/disambiguation\n\n## Dependencies\n- Parent epic #6272\n- Sequence hint: fan-out after schema/generator/query spine\n\n## Dedupe query\n`is:issue repo:anthony-chaudhary/fak in:title \"cache-source\"`\n\n## Work unit\nleaf\n\n## Expected steps\n3",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6343",
+      "split": "test",
+      "source_issue": 6343,
+      "source_updated_at": "2026-08-10T19:42:39Z",
+      "source_sha256": "3cc356383e3993aab655587d65deb361fbf2407e39a350a3a048dacc339a708e",
+      "question": "feat(sessionjournal): persist generation epochs and steering points",
+      "context": "## Parent context\n\nParent: #6219\n\n## Problem\n\nGeneration epochs, checkpoints, and steering transitions currently exist as in-memory control objects. Continuous sessions need crash-resumable identity and independent evidence of when ownership or compute placement changed.\n\n## Done condition\n\nThe session journal persists generation epoch start/end, typed directive, accepted-prefix checkpoint identity, micro-agent owner, and compute placement without storing speculative partial tool arguments as admitted state. Replay reconstructs epoch ordering for one trajectory and rejects gaps or cross-trajectory checkpoint reuse. A crash/restart witness proves the next epoch resumes with the same trajectory identity.\n\n## Work estimate\nEstimate: 3 points. Uncertainty: operator-supplied estimate; revise through the parent denominator when evidence changes.\n\n## Overall completion contribution\nContribution: 3/11 points.\n\n## Completion standard\ndevelopment",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6111",
+      "split": "test",
+      "source_issue": 6111,
+      "source_updated_at": "2026-08-10T23:38:05Z",
+      "source_sha256": "3cef2e01979d28d54f824e7176950c1c71b29074eb260f403522d27bb6534a1f",
+      "question": "research(microcontextdemo): publish net-true large-input decision boundary",
+      "context": "## Parent context\n\n#6033 and closed fixture spine #6100.\n## Current state\n\n#6100 reports only a fixture-modeled hypothesis. Parent #6033 closes only after live quality/cost evidence is folded against the strongest tuned alternatives under the net-true standard.\n\n## Scope\n\n- Join corpus/grader, tuned configurations, and live matrix without averaging away task slices or tail latency.\n- Compute Pareto eligibility at fixed quality, sensitivity/error bars, and decision regions over ambiguity, relation density, cache reuse, update locality, tool latency, and input density.\n- Include all selector, scheduler, indexing, retry, tool, and invalidation costs.\n- Run `fak claim-check` against the strongest tuned baseline.\n- Publish where SQL/search, retrieval, long context, chunks, or micro-context wins, loses, or remains not-yet.\n\n## Done condition\n\nThe report provides a measured, reproducible decision boundary with net-true claim-check artifacts and no headline based on a naive or quality-inferior baseline. This issue may close parent #6033 only if all of its acceptance criteria are independently witnessed.\n\n## Witness\n\nFinal report, common result bundle, sensitivity outputs, claim-check artif",
+      "readback_labels": [
+        "repo_search",
+        "commit_state",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6287",
+      "split": "tune",
+      "source_issue": 6287,
+      "source_updated_at": "2026-08-10T23:44:14Z",
+      "source_sha256": "3dcc1295bd115640a11612e254111add24cd06ba6bc37bcd546a1c8a802542b4",
+      "question": "feat(disambiguation): add a committed-tip freshness verifier",
+      "context": "Parent: #6272\n\n## Problem\nVerify generated output against committed sources in an isolated archive, not peer-dirty worktree state.\n\n## Done condition\nThe `committed-freshness` work unit is implemented through the public fak seam, documented where agents discover it, and does not introduce a second writer or private-source dependency.\n\n## Acceptance gate\nVerifier distinguishes committed clean, own-overlay drift, and unavailable probe.\n\n## Likely files\n- internal/disambiguation\n- cmd/fak\n\n## Dependencies\n- Parent epic #6272\n- Sequence hint: fan-out after schema/generator/query spine\n\n## Dedupe query\n`is:issue repo:anthony-chaudhary/fak in:title \"committed-freshness\"`\n\n## Work unit\nleaf\n\n## Expected steps\n3",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6289",
+      "split": "tune",
+      "source_issue": 6289,
+      "source_updated_at": "2026-08-10T19:28:23Z",
+      "source_sha256": "3dfedfeddd79a632f1963b3d1c0cb6a461344f424002fb8a979d1c97b4a5b87e",
+      "question": "feat(disambiguation): define the machine-readable entry schema and version contract",
+      "context": "Parent: #6272\n\n## Problem\nDefine canonical term, aliases, contrasts, scope, owner, source witnesses, freshness verdict, and lifecycle fields with strict validation.\n\n## Done condition\nThe `schema` work unit is implemented through the public fak seam, documented where agents discover it, and does not introduce a second writer or private-source dependency.\n\n## Acceptance gate\nA schema self-test accepts one complete record and rejects missing identity, owner, contrast, source, or freshness fields.\n\n## Likely files\n- internal/disambiguation\n\n## Dependencies\n- Parent epic #6272\n- Sequence hint: spine\n\n## Dedupe query\n`is:issue repo:anthony-chaudhary/fak in:title \"schema\"`\n\n## Work unit\nleaf\n\n## Expected steps\n3",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6218",
+      "split": "tune",
+      "source_issue": 6218,
+      "source_updated_at": "2026-08-10T18:41:56Z",
+      "source_sha256": "3e58562d79a18ee3e5516e18f2d63b5afb068bf2a3755e14c988a90895ad4e9f",
+      "question": "feat(claimcheck): CLAIMS.md has no exposure state — 16 [SHIPPED] claims are default-off and the lint cannot tell",
+      "context": "## Parent context\n\nThe claims-ledger half of the gated-feature problem filed as #6091 (feature-gate registry) and\n#6090 (rollout-ladder vocabulary). Those two ask *where a gate is declared* and *what its rungs are\ncalled*. This one asks the question neither covers: **once a feature has landed default-off, how is\nit honestly claimed?**\n\n## Current state\n\n`CLAIMS.md` is the honesty ledger. It admits **exactly three tags**, defined at the top of the file:\n\n- `[SHIPPED]` — \"real code **on the critical path**, closed by a mechanical witness … **Reproducible now.**\"\n- `[SIMULATED]` — modeled with labeled stand-in data.\n- `[STUB]` — \"plumbing present, **behavior deferred**\".\n\nA feature that is fully implemented, fully tested, and **off by default** fits none of them. It is\nnot `[STUB]` (the behavior is not deferred — it is written and witnessed) and it is not on the\ncritical path for any operator who has not opted in. In practice authors resolve this by tagging it\n`[SHIPPED]` and disclosing the gating in prose:\n\n```\ngrep -cE '^- \\[SHIPPED\\]' CLAIMS.md                                        # 174\ngrep -E '^- \\[SHIPPED\\]' CLAIMS.md | grep -icE 'opt-in|default-off|off by default|di",
+      "readback_labels": [
+        "repo_search",
+        "issue_state",
+        "commit_state",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6205",
+      "split": "tune",
+      "source_issue": 6205,
+      "source_updated_at": "2026-08-10T21:21:49Z",
+      "source_sha256": "3e7a1d6b20d11e00d9f17777e0712fe517ddf301f9c5b53b3f88dfa382e7faac",
+      "question": "Benchmark Go call graph against type-aware and code-intelligence alternatives",
+      "context": "## Capability\nBenchmark `internal/codegraph` syntactic multi-file Go function/method call-graph construction and forward/reverse shortest-path traversal on the exact same frozen source fixture.\n\n## Required arms\n- fak native syntactic Go call graph\n- tuned `go/ast` direct-call scan baseline\n- `golang.org/x/tools/go/callgraph`\n- gopls call hierarchy\n- Go guru callers/callees\n- CodeQL Go call graph\n- SCIP Go code-intelligence graph\n\n## Done condition\nPin versions, Go version, fixture, package-loading/index setup, translations, and commands. Independently witness node/edge precision and recall, forward/reverse reach, distance/path correctness, latency/throughput, CPU/RSS, input/index/storage/network bytes, setup/operator time, and total cost. Update the dated packet and comparison index only from raw witnessed outputs. Add a separate `fak + integration` arm if an equivalent first-class fak integration is discovered.",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6174",
+      "split": "tune",
+      "source_issue": 6174,
+      "source_updated_at": "2026-08-10T16:08:21Z",
+      "source_sha256": "3eb84789e5ae2d3ba665b5e9567ac81b80ac800b0aac41a087209a9e419c7e09",
+      "question": "feat(archreport): retain cut witnesses across connectivity drift",
+      "context": "## Parent context\n\n#6170\n#6172\n\n## Problem\n\nA negative `lateral_edge_connectivity_change` identifies the degraded package pair and cut delta but discards the before/after minimum-cut witnesses now available in snapshots. The failure policy therefore recommends restoring redundancy without naming the dependency edges that became the active bottleneck.\n\n## Spine\n\nCarry deterministic before/after cut-edge witnesses into pairwise connectivity drift and render the degraded seam in policy output.\n\n## Done\n\n- Every stable-pair connectivity change carries canonical `before_cut_edges` and `after_cut_edges` copied from its snapshot pair rows.\n- Negative drift text and `--fail-on decreased-lateral-edge-connectivity` output name the before and after witness edge sets.\n- Positive drift remains policy-clean while retaining structured witness evidence.\n- Ordering and `Changes()` cardinality remain unchanged; witness fields are additive JSON.\n- Decrease, increase, JSON, text, policy isolation, scoped output, and determinism are covered.\n- CLI reference documents witness-bearing drift.\n\n## Witness\n\n`go test ./internal/archreport ./cmd/fak -run 'LateralEdgeConnectivityWitness' -count=1`\n\n## Work est",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6344",
+      "split": "tune",
+      "source_issue": 6344,
+      "source_updated_at": "2026-08-10T19:42:41Z",
+      "source_sha256": "40cf1d042dfff445c9b69fadf5d351b6de2172d7a58078c1e7847ec374a14971",
+      "question": "feat(generationobs): measure steering resolution, latency, and speculative waste",
+      "context": "## Parent context\n\nParent: #6219\n\n## Problem\n\nLive steering is valuable only if its realized granularity and costs are visible. The current spine does not report provider steering resolution, observation-to-stop latency, discarded speculative tokens, or checkpoint/resume overhead.\n\n## Done condition\n\nAdd counters and a report grouped by adapter capability: token/logit, streaming cancel, tool-argument delta, or request-boundary. Measure p50/p95 steering latency, speculative tokens discarded, accepted-prefix reuse, and resume overhead. Include a deterministic replay witness and avoid making a performance claim until a live-provider ledger satisfies the net-true standard.\n\n## Work estimate\nEstimate: 3 points. Uncertainty: operator-supplied estimate; revise through the parent denominator when evidence changes.\n\n## Overall completion contribution\nContribution: 3/11 points.\n\n## Completion standard\ndevelopment",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6359",
+      "split": "test",
+      "source_issue": 6359,
+      "source_updated_at": "2026-08-10T21:41:42Z",
+      "source_sha256": "4143327649671a30fa565487c894bda4e76226f4120766a64e94162494b33248",
+      "question": "dogfood: usage ledger so Native micro-agent shared-cache swarm proof adoption is measured, not claimed",
+      "context": "\u003c!-- fak-issuefanout-key: fanout-microcachedemo-dogfood-usage-ledger --\u003e\n\n## Generation stream\n\ngen/next\n\n## Parent context\n\n#6351\n\n## Current state\n\nThe working spine of Native micro-agent shared-cache swarm proof exists (e7b90f8944f0); this follow-on has not started.\n\n## Why this is next\n\nSpine-first default: the spine just shipped, so its follow-on backlog is filed at creation time while context is hot.\n\n## Working spine\n\nEvery invocation of Native micro-agent shared-cache swarm proof appends a durable row, so adoption/neglect shows up in a fold instead of an anecdote.\n\n## In scope\n\nA minimal JSONL ledger row (or an existing ledger/conceptusage fold) recording invocation + outcome for the verb.\n\n## Out of scope\n\nDashboards; provider-price math.\n\n## Done condition\n\nInvocations append a row; a fold surfaces counts per week.\n\n## Witness\n\nThe ledger file with real rows plus the fold output, captured in the issue.\n\n## Acceptance gate\n\ngo vet + make test-fast green with the ledger wired.\n\n## Work estimate\n\nEstimate: 4 points\n\n## Overall completion contribution\n\nContribution: 4/8 points\n\n## Completion standard\n\nproduction\n\n## Target operating envelope\n\n- concurrent agents: 32 agents\n- ",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6192",
+      "split": "test",
+      "source_issue": 6192,
+      "source_updated_at": "2026-08-10T17:35:23Z",
+      "source_sha256": "41462db43cfd9a6da005f9e6a5974f2439a22e56ea6d8cb7334b1f72cbdb9763",
+      "question": "feat(archreport): expose transitive dependency reach",
+      "context": "## Parent context\n\n#6068\n\n## Problem\n\n`fak architecture --leaf` shows direct dependencies and reverse transitive blast radius, but not the package's own forward transitive dependency footprint. Operators cannot answer how many internal packages a leaf relies on, how deep its dependency stack is, or which shortest paths create that depth. A shallow façade and a deeply layered package can therefore look identical when their direct dependency counts match.\n\n## Spine\n\nAdd deterministic forward dependency reach, shortest paths, and maximum depth to every architecture leaf.\n\n## Done\n\n- Every leaf carries sorted `transitive_dependencies`, `dependency_reach`, `dependency_depth`, and canonical shortest `dependency_paths` from the leaf to each reachable dependency.\n- Paths include source and destination; ties choose the lexically smallest full path and ordering is dependency then path.\n- Cycles terminate without including the source as its own dependency.\n- Scoped and whole reports derive from the same complete graph and retain identical evidence for the selected leaf.\n- Text renders dependency reach/depth and paths for `--leaf`; JSON retains structured rows.\n- Chain, diamond tie, cycle, di",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6045",
+      "split": "tune",
+      "source_issue": 6045,
+      "source_updated_at": "2026-08-10T00:16:05Z",
+      "source_sha256": "43a5fcc16fe201f560b78444652b575d642a7a3ddeb98278289e4b482a5e9290",
+      "question": "Define typed tool-call plugin stages and user preference layering",
+      "context": "## Problem\n\nThe stable verdict ABI exposes `TRANSFORM`, restrictive registered verdict kinds, `REQUIRE_WITNESS`, and result `QUARANTINE`, but there is no explicit plugin host contract separating typed extension stages from authority. Without one, `TRANSFORM` can be mistaken for the plugin entry point itself, and user-selected plugins can accidentally imply authority widening.\n\n## Scope\n\nDefine and implement the minimal typed plugin profile and host interfaces around these stages:\n\n- proposal canonicalizer/transform producer;\n- adjudicator;\n- witness request adapter and attestation verifier;\n- result-admission filter;\n- audit/notification observer.\n\nA profile pins plugin identity/version/digest, stage, permissions/data egress, timeout, fail-closed fallback, and precedence. Folding must be monotone: plugins can narrow, transform subject to re-adjudication, require a witness, quarantine, or defer; they cannot override the kernel capability floor or execute tools directly.\n\n## User preference boundary\n\nProve layered resolution of kernel floor + organization + project + user + per-call narrowing. Include preferences for witness route, wait/background mode, transform auto-apply versus pr",
+      "readback_labels": [
+        "repo_search",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6141",
+      "split": "tune",
+      "source_issue": 6141,
+      "source_updated_at": "2026-08-10T11:46:24Z",
+      "source_sha256": "455901261bf49715a02f21430a223342be0356d2f55b1e96e0de7fe588b78805",
+      "question": "feat(archreport): gate deeper transitive blast paths",
+      "context": "## Parent context\n\n#6138\n\n## Problem\n\nBlast-impact identity now survives closure membership replacement, but a stable `(source, dependent)` pair is treated as unchanged even when its shortest causal path changes. A path can lengthen from one edge to several intermediary seams while membership and blast-radius counts stay constant, hiding increased coupling depth and leaving no policy gate.\n\n## Spine\n\nExpose typed shortest blast-path changes for stable impact pairs, classify increased hop count as regression, and add `--fail-on increased-blast-path-length`.\n\n## Done\n\n- `ReportDiff` exposes deterministic `blast_path_changes` with source, dependent, before/after paths, before/after hop counts, and signed hop delta.\n- Stable impact identity is `(source, dependent)`; any path change is visible even when hop count is unchanged.\n- Ordering puts length increases before contractions, then absolute hop delta, source, and dependent.\n- The derived path view is not double-counted in `Changes()`.\n- Positive hop drift produces `regression`; equal-length reroutes and contractions remain clean absent another regression.\n- `--fail-on increased-blast-path-length` exits 3 only for positive hop drift a",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6275",
+      "split": "tune",
+      "source_issue": 6275,
+      "source_updated_at": "2026-08-10T19:26:12Z",
+      "source_sha256": "45a8d0d61166d25c41b2b251d492be5bce3cdb2d962fdf7f4376c24d504a979e",
+      "question": "feat(disambiguation): add query-by-canonical-term with structured JSON",
+      "context": "Parent: #6272\n\n## Problem\nExpose a narrow read path for exact canonical-term lookup, including meaning, scope, contrasts, ownership, sources, and freshness.\n\n## Done condition\nThe `query` work unit is implemented through the public fak seam, documented where agents discover it, and does not introduce a second writer or private-source dependency.\n\n## Acceptance gate\nA CLI selfcheck queries a seeded canonical term and validates the JSON contract.\n\n## Likely files\n- internal/disambiguation\n- cmd/fak\n\n## Dependencies\n- Parent epic #6272\n- Sequence hint: spine\n\n## Dedupe query\n`is:issue repo:anthony-chaudhary/fak in:title \"query\"`\n\n## Work unit\nleaf\n\n## Expected steps\n3",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6126",
+      "split": "tune",
+      "source_issue": 6126,
+      "source_updated_at": "2026-08-10T14:25:18Z",
+      "source_sha256": "476774cca25c4526ad676319bcbe515dfe2e082e6ab32116985ce9c52f641075",
+      "question": "fix(cuda): Qwen3.5 GDN stage 3 invalid launch reds sm_80 acceptance",
+      "context": "## Parent context\n\nParent: #4784\n\n## Problem\n\nThe canonical `internal/compute/build_cuda.sh` acceptance run fails reproducibly on both lab A100 40GB nodes at current trunk after successfully compiling `libfakcuda.a` for `sm_80`.\n\nObserved on two independent sanctioned nodes:\n\n- repeated `Qwen3.5 GDN stage 3 launch failed: invalid configuration argument`;\n- follow-on `asynchronous execution failed: unspecified launch failure`;\n- `TestCUDAForwardMatchesRef` then fails (one node: gen0 next-token mismatch at cosine 0.999901; the other: gen4 cosine -0.999755 \u003c 0.9990).\n\nThe exact targeted GLM routed-expert witness still passes independently on both nodes, so this is not evidence against #5111's device-route path; it is a separate full CUDA acceptance regression.\n\n## Definition of done\n\n- [ ] Reproduce `TestCUDAForwardMatchesRef` with a freshly rebuilt `internal/compute/libfakcuda.a` on sanctioned sm_80 hardware.\n- [ ] Correct the GDN stage-3 launch configuration or fail before poisoning subsequent asynchronous CUDA work.\n- [ ] Add a regression witness that captures the invalid launch geometry/configuration before an asynchronous failure can masquerade as a forward-parity defect.\n- [ ] T",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6294",
+      "split": "tune",
+      "source_issue": 6294,
+      "source_updated_at": "2026-08-10T19:28:18Z",
+      "source_sha256": "4773465352588f264a65a918411957b3033e1dfb7026f4637806072c73927a88",
+      "question": "feat(disambiguation): attach scope qualifiers to overloaded terms",
+      "context": "Parent: #6272\n\n## Problem\nDisambiguate the same token by product surface, package, CLI, runtime, protocol, or operator context.\n\n## Done condition\nThe `scope` work unit is implemented through the public fak seam, documented where agents discover it, and does not introduce a second writer or private-source dependency.\n\n## Acceptance gate\nFixture with one overloaded token resolves deterministically when scoped and reports ambiguity when unscoped.\n\n## Likely files\n- internal/disambiguation\n\n## Dependencies\n- Parent epic #6272\n- Sequence hint: spine\n\n## Dedupe query\n`is:issue repo:anthony-chaudhary/fak in:title \"scope\"`\n\n## Work unit\nleaf\n\n## Expected steps\n3",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6150",
+      "split": "tune",
+      "source_issue": 6150,
+      "source_updated_at": "2026-08-10T13:00:27Z",
+      "source_sha256": "483f9d002b5ae3ad2b2671d16ce120eb3c4d9ffdf021a420b1517df07f285716",
+      "question": "feat(archreport): diff lateral component coupling",
+      "context": "## Parent context\n\n#6148\n\n## Problem\n\nLateral components are useful snapshots, but component identity is unstable under growth, merges, shrinkage, and splits. Comparing whole member arrays cannot distinguish the actual semantic change: which pair of leaves became coupled through a same-tier lateral path. A one-edge bridge can merge two clusters and introduce many hidden co-memberships.\n\n## Spine\n\nDiff lateral-component reachability as typed unordered co-membership pairs, and gate newly coupled pairs.\n\n## Done\n\n- `ReportDiff` exposes deterministic `introduced_lateral_couplings` and `resolved_lateral_couplings` with tier evidence and canonical lexical `left \u003c right` members.\n- Pair identity is `(tier,left,right)` derived from every two-member combination inside each component.\n- Component growth/merge introduces exactly the newly reachable pairs; shrink/split resolves exactly the lost pairs.\n- Derived pair views are not double-counted in `Changes()`.\n- Introduced lateral coupling produces `regression`; resolved-only coupling remains clean absent another regression.\n- `--fail-on introduced-lateral-couplings` exits 3 only for introduced reachability and names bridge-removal/extract-sea",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6158",
+      "split": "tune",
+      "source_issue": 6158,
+      "source_updated_at": "2026-08-10T13:58:59Z",
+      "source_sha256": "4843269ca0c982cf5de103c367eb9cad34c77c594d1475aa203c62cd6657b4ac",
+      "question": "feat(archreport): gate lateral articulation-point impact",
+      "context": "## Parent context\n\n#6156\n\n## Problem\n\nArticulation-point snapshots identify package seams, but comparisons ignore when a package becomes or ceases to be an articulation point and when its induced cross-fragment coupling grows. Edge-bridge policies cannot cover convergence seams with several incident dependencies.\n\n## Spine\n\nExpose introduced/resolved lateral articulation points plus stable impact drift, and gate introductions or increased impact.\n\n## Done\n\n- `ReportDiff` exposes deterministic `introduced_lateral_articulation_points`, `resolved_lateral_articulation_points`, and `lateral_articulation_point_changes`.\n- Stable identity is `(tier,name)`; changes include before/after fragments, fragment counts, coupling-pair counts, and signed pair delta.\n- Introductions and positive stable coupling drift produce `regression`; resolutions/decreases remain clean absent another regression.\n- `--fail-on introduced-or-increased-lateral-articulation-points` exits 3 only for introductions or positive impact drift and names package-seam extraction/removal remediation.\n- Derived point views are not double-counted in `Changes()`.\n- JSON, text, identity, impact drift, policy isolation, ordering, d",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6139",
+      "split": "tune",
+      "source_issue": 6139,
+      "source_updated_at": "2026-08-10T21:23:05Z",
+      "source_sha256": "4865d5311d99f387806486468b2c5773aee540c2b80bbf5c6b1b6422c05b4573",
+      "question": "bench(computeadmit): run scheduler alternative arms",
+      "context": "## Parent context\n\nParent production-scope benchmark coverage epic: #6036.\n\n## Missing witness\n\nThe native `internal/computeadmit` requirement-aware compute-node selector has no complete same-workload alternatives run.\n\n## Done when\n\nRun an identical node inventory and GPU/CPU/DC-network workload set through separate arms for fak native, a tuned first-fit/no-scoring baseline, Kubernetes scheduler node affinity/resources, Slurm scheduling, Ray placement/scheduling, and AWS Batch where its capability envelope overlaps. Add every equivalent first-class fak integration as a distinct `fak + integration` arm if repository inspection identifies one.\n\nFor each available arm independently capture selection correctness and constraint violations, scheduling latency/throughput, CPU/RSS/control-plane/network use, accelerator idle time, and total cost. Configuration parsers, mocks, and package discovery are not scheduler witnesses.\n\n## Reproduction seed\n\nUse fixed nodes containing a local CPU-only control point, one CUDA GPU node, and one DC-network CPU node. Include GPU, DC-network, heavy-CPU, and ordinary workloads plus a tie requiring deterministic scoring.\n\n## Work estimate\nEstimate: 5 point",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6102",
+      "split": "tune",
+      "source_issue": 6102,
+      "source_updated_at": "2026-08-10T08:10:44Z",
+      "source_sha256": "48fd267129c91a13931cea66a0c446ddb78d04b396430f88daa6853c368635af",
+      "question": "bench(adjudicator): run equivalent OPA and Cedar policy arms",
+      "context": "## Parent context\n\nParent: #6036\n\n## Done condition\n\nExecute OPA/Rego and Cedar against policy artifacts semantically equivalent to the frozen fak adjudication workload, then ingest independently reproducible process results into the native benchmark witness.\n\n## Required witness\n\n- versioned fak, Rego, and Cedar policy artifacts with a documented semantic mapping;\n- identical serialized call corpus and expected verdict oracle;\n- cold compilation/startup and warm p50/p95 latency;\n- throughput under a fixed concurrency schedule;\n- peak RSS and total operating cost;\n- feature-coverage differences disclosed rather than flattened to booleans;\n- machine-readable result linked from `docs/benchmarks/POLICY-ADJUDICATION-ALTERNATIVES-2026-08-09.md`.\n\n## Honesty guard\n\nA mock evaluator, package import, translated expected-output fixture, or native-only nanosecond benchmark is partial evidence. If OPA or Cedar becomes a first-class fak integration, add a separate `fak + integration` arm.\n\n## Work estimate\nEstimate: 5 points.\n\n## Overall completion contribution\nContribution: 5/100 points.\n\n## Completion standard\nresearch\n\n## Target operating envelope\n- policy engines: \u003e= 3 engines\n\n## Witnesse",
+      "readback_labels": [
+        "repo_search",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6064",
+      "split": "tune",
+      "source_issue": 6064,
+      "source_updated_at": "2026-08-09T21:21:30Z",
+      "source_sha256": "49889dcfab45bfc87adec2d65eceb14aa4165820c3f79bb20fd831245ee2d929",
+      "question": "bench(headroom): compare native compression with cached full history and LLMLingua-2",
+      "context": "## Goal\nRun an end-to-end, same-workload comparison of fak native context compression against the tuned no-compression baseline and LLMLingua-2 through fak's first-class Compressor seam.\n\n## Parent context\nParent: #6036. Consumes the LLMLingua integration leaf in #3204.\n\n## Required arms\n1. `fak + native` (`internal/headroom/native.go`).\n2. `fak + no compression`, with provider prefix caching enabled where supported.\n3. `fak + LLMLingua-2`, selected through the Compressor seam from #3204.\n\n## Done condition\n- Freeze one corpus containing dense prose, tool results, failures, structured payloads, and long-horizon transcripts.\n- Run all arms with the same model, context budget, cache state, prompts, and grader.\n- Report retained-fact recall/task success, input tokens, compression ratio, TTFT/latency, regrowth/re-read tax, and total cost.\n- Preserve originals in CAS for lossy arms and include provenance for model weights/runtime.\n- Publish raw artifacts and a net-true verdict headed by the tuned baseline, not native-only byte savings.\n- Attach the witness to `internal/nativebench` so the context-compression contract can pass.\n\n## Why separate from #3204\n#3204 creates the LLMLingua inte",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6124",
+      "split": "tune",
+      "source_issue": 6124,
+      "source_updated_at": "2026-08-10T12:14:11Z",
+      "source_sha256": "4a6a445c7f10d33cf267754fe80ff04819705aabc1ba2efa42ad5c1477924d15",
+      "question": "experiment(microcontextdemo): add adjudicated semantic-residual corpus",
+      "context": "## Parent context\n\n#6033, #6108, and tuned-baseline leaf #6109.\n\n## Finding\n\nThe S8f public GitHub-issue corpus is a valid leakage-controlled corpus/grader witness, but its current answer contract has zero semantic residual. Every scored state, label, chronology, reference, duplicate target, conflict cue, and aggregate is exactly recoverable from candidate-visible metadata plus deterministic parsing. Consequently, a tuned SQL/search/parser baseline reaches the exact frontier with zero model calls, and model-based retrieval, long-context, chunk map-reduce, and micro-context execution cannot be compared honestly on semantic quality there.\n\n## Scope\n\n- Define independently adjudicated semantic facts that are not literal projections of candidate-visible fields.\n- Preserve grouped train/tune/held-out separation and duplicate/reference-component leakage controls.\n- Include ambiguity and abstention cases rather than forcing a label.\n- Keep source metadata visible so deterministic preprocessing remains a fair component of every pipeline.\n- Publish hidden answers, a deterministic grader, inter-adjudicator agreement/disagreement, and contamination checks.\n- Exercise filter selection and read",
+      "readback_labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6176",
+      "split": "tune",
+      "source_issue": 6176,
+      "source_updated_at": "2026-08-10T19:26:22Z",
+      "source_sha256": "4ab207e62642076b7123bf3ea65adbbaaaa0cab9173ab72a12136fbae8e8cd73",
+      "question": "idea-scout: NiyamAI - An Intent-Bound AI Agent with Cryptographically Verifiable Guardrails using Zero-Knowle…",
+      "context": "\u003e Auto-filed by the daily **idea-scout** (`tools/idea_scout.py`, 2026-08-10). A candidate RELATED idea found on arXiv; **needs human triage** — close as `wontfix`/`duplicate` if it is not worth pursuing.\n\n**Source:** https://arxiv.org/abs/2608.07167\n\n**Authors:** Aditya Katkar, Om Karkele, Kartik Mandhane, Manisha More, Yash Kashid\n**Submitted:** 2026-08-07\n\n**Why surfaced** (topic `prompt-injection-defense`, score 63): terms: prompt injection, guardrail(title), defense, tool, agent(title); recent (3d); very fresh (≤30d)\n\n### Dispatchability\n- dispatchability: `triage_only`\n- reason: idea-scout candidates need human scope, lane, witness, and acceptance criteria before they become worker-ready leaves.\n\n**Summary**\n\nGiving an AI agent the ability to send emails, query databases, or execute commands is useful--until the agent is tricked into doing something it shouldn't. Prompt injection, hallucinated reasoning, and unsafe tool calls form the primary attack surface for autonomous LLM agents. Existing defenses rely on software checks like system prompts or policy filters running on the same machine the attacker targets, offering no verifiable proof of execution. We introduce Niyam-",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6311",
+      "split": "test",
+      "source_issue": 6311,
+      "source_updated_at": "2026-08-10T23:45:11Z",
+      "source_sha256": "4bb447da4df492acd9b6b220dea07fece47efe8c0037bd841f8225c4489a7bff",
+      "question": "feat(disambiguation): index reason codes and verdict vocabulary",
+      "context": "Parent: #6272\n\n## Problem\nInventory public reason/verdict constants across policy, hooks, DOS seams, and runtime surfaces to prevent semantic collisions.\n\n## Done condition\nThe `reason-source` work unit is implemented through the public fak seam, documented where agents discover it, and does not introduce a second writer or private-source dependency.\n\n## Acceptance gate\nFixture detects duplicate code with incompatible meanings and permits declared cross-package aliases.\n\n## Likely files\n- internal/disambiguation\n\n## Dependencies\n- Parent epic #6272\n- Sequence hint: fan-out after schema/generator/query spine\n\n## Dedupe query\n`is:issue repo:anthony-chaudhary/fak in:title \"reason-source\"`\n\n## Work unit\nleaf\n\n## Expected steps\n3",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6062",
+      "split": "test",
+      "source_issue": 6062,
+      "source_updated_at": "2026-08-09T20:31:38Z",
+      "source_sha256": "4be371cfa9747b1382dcd870dc13667453b0ee230f46dbde7d4f0f20a266eb65",
+      "question": "feat(scorecard): pure delivery-flow fold — measure how work flows, not just how much is open",
+      "context": "## Current state\n\nThe fleet measures how much work is OPEN (an issue count) but nothing measures how work\nFLOWS. A backlog count cannot distinguish a lane shipping steadily from a lane that has\nstarted everything and finished nothing — both read identically as a number of open issues.\n\nConcretely, at the time of filing this repository's own working tree showed:\n\n- **105 untracked `.go` files**, none older than 11 days and 103 of them under 7 days —\n  roughly 10 new uncommitted files per day. This is real work in flight that no dashboard\n  can see, because an issue tracker structurally cannot read a working tree.\n- **39 of those are scratch probe litter** (`zz_*`, `zz*probe*`, dot-prefixed `.slopdedup_*.go`)\n  left behind by agent sessions rather than deliberate WIP.\n- **Two independent build breaks caused by half-applied multi-file refactors** — a\n  `callID` parameter added to `admissionLedger.admit` with one production call site missed,\n  and an `exec.Command` → `windowgate.Command` swap that orphaned its `os/exec` import.\n  Both violated AGENTS.md:359-372 (\"leave the shared tree buildable\"), and neither was\n  visible to any instrument until `go build ./...` was run by han",
+      "readback_labels": [
+        "repo_search",
+        "issue_state",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6154",
+      "split": "test",
+      "source_issue": 6154,
+      "source_updated_at": "2026-08-10T13:20:28Z",
+      "source_sha256": "4bf58c1d2727dff69e031420e38142502eb95aed1eb3fcfebcd16355c5b25ad2",
+      "question": "feat(archreport): gate lateral bridge impact",
+      "context": "## Parent context\n\n#6153\n\n## Problem\n\nBridge snapshots identify high-leverage lateral dependencies, but diffs and policies ignore bridge status. An introduced lateral edge that merges two components can become an articulation bridge inducing hundreds of co-memberships, yet the existing lateral-edge gate treats it like any other same-tier edge.\n\n## Spine\n\nExpose introduced/resolved lateral bridges and gate newly introduced bridges by their witnessed coupling impact.\n\n## Done\n\n- `ReportDiff` exposes deterministic `introduced_lateral_bridges` and `resolved_lateral_bridges` with full bridge evidence.\n- Bridge identity is `(tier, canonical left, canonical right)`; after evidence supplies introductions and before evidence supplies resolutions.\n- Stable bridge impact changes expose before/after coupling pairs and signed delta without fabricating introduce/resolve churn.\n- Introduced bridge or increased stable bridge impact produces `regression`; resolution/decrease remains clean absent another regression.\n- `--fail-on introduced-or-increased-lateral-bridges` exits 3 only for introductions or positive impact drift and names bridge removal/extract-seam remediation.\n- Derived bridge views ar",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6133",
+      "split": "tune",
+      "source_issue": 6133,
+      "source_updated_at": "2026-08-10T21:23:19Z",
+      "source_sha256": "4c99c253116fd87a6c4c110eb416ee24aa5eb6622899dda73f23d017f365b88a",
+      "question": "bench(timeoutphase): run OpenTelemetry, Datadog, and X-Ray tracing arms",
+      "context": "## Parent context\n\nChild of #6036 repository-wide native implementation benchmark coverage.\n\n## Done condition\n\nClassify the same timeout-at-stage trace with fak native, one undifferentiated timeout bucket, OpenTelemetry spans, Datadog APM, and AWS X-Ray. Independently witness phase attribution precision/recall, dropped traces, ingest/query latency, CPU/RSS/network/storage, and total cost. Keep unavailable tracing backends explicit; local classification is not a collector/backend witness.\n\n## Current evidence\n\nThe local fixture spans every closed fak timeout phase. No external tracing pipeline has run.\n\n## Work estimate\nEstimate: 5 points. Uncertainty: operator-supplied estimate; revise through the parent denominator when evidence changes.\n\n## Overall completion contribution\nContribution: 5/5 points.\n\n## Completion standard\nresearch",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6123",
+      "split": "tune",
+      "source_issue": 6123,
+      "source_updated_at": "2026-08-10T08:13:38Z",
+      "source_sha256": "4da0370153a7c5f6c18488af890fbb30e862db6dc185376c8c7123fcc15ca187",
+      "question": "feat(archreport): gate deeper upward violations",
+      "context": "## Parent context\n\n#6120\n\n## Problem\n\nViolation identity correctly keys on `(from, to)`, so changing the tiers of an already-violating endpoint pair does not fabricate an introduced/resolved edge. But comparisons now hide a real semantic regression when that same edge jumps farther upward—for example distance 1→2—and no `--fail-on` policy can stop it.\n\n## Spine\n\nExpose two-sided `violation_distance_changes` for stable endpoint pairs, classify positive distance deltas as regressions, and add `--fail-on increased-violation-distance`.\n\n## Done\n\n- `ReportDiff` records from/to, before/after distance, and signed delta for stable violation edges.\n- Changes sort worsening before improvement by absolute delta then endpoints.\n- This derived view is not double-counted in `Changes()`.\n- Positive distance drift produces `regression`; improvement remains clean absent another regression.\n- `--fail-on increased-violation-distance` exits 3 only for positive drift and names remediation.\n- JSON, text, policy isolation, and docs are covered.\n\n## Witness\n\n`go test ./internal/archreport ./cmd/fak -run 'ViolationDistance|RejectsInvalidFailOn' -count=1`\n\n## Work estimate\n\n3 points.\n\n## Completion st",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6232",
+      "split": "tune",
+      "source_issue": 6232,
+      "source_updated_at": "2026-08-10T19:58:05Z",
+      "source_sha256": "4de3807683a38ae7866a9e30718620b165693ef1ee4d78219b2f47c4e37b594a",
+      "question": "feat(engine): delegate quantized models to llama.cpp with capability checks",
+      "context": "\u003c!-- quant-interop-child: llamacppinterop --\u003e\n\n## Current state\n\nThe quantization interoperability epic #6221 has no shipped llamacppinterop leaf. Existing support is fragmented or implicit, so agents cannot cite a neutral capability contract for this seam.\n\n## Why now\n\nQuantization formats and runtimes are changing quickly; this seam is required now so support remains explicit rather than inferred.\n\n## Working spine\n\nStart from the public fixtures and neutral contract in #6221; deliver the smallest parser/adjudicator/adapter path that returns a typed result end to end.\n\n## Parent context\n\nChild of #6221. This leaf supports broad industry interoperability and must not select a universal quantization winner.\n\n## In scope\n\nBuild a versioned adapter contract for llama.cpp server/CLI discovery, model admission and health without owning its kernels.\n\n## Acceptance gate\n\nThe named witness passes, unknown or unsupported input has an explicit typed result, and fak validate --mine passes for exactly the owned paths.\n\n## Out of scope\n\nDo not implement unrelated model kernels, redistribute restricted weights, or claim quality/performance outside the witnessed envelope. Do not create a fak-onl",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6368",
+      "split": "tune",
+      "source_issue": 6368,
+      "source_updated_at": "2026-08-10T22:13:39Z",
+      "source_sha256": "4e55566adf06d6efe0c315f33a8910d116b1e67abda23d1b3d021b3fbd337f7c",
+      "question": "Track workflow concept drift and lineage across windows",
+      "context": "## Problem\nStable concept IDs currently derive from the medoid signature, but operators need to know whether a recurring workflow is growing, shrinking, splitting, merging, or degrading across time windows. A point-in-time cluster is not enough for steering or Grafana-level triage.\n\n## Done when\n- A windowed report emits concept prevalence, error rate, and cost deltas with explicit comparison windows.\n- Lineage classifies unchanged, new, retired, split, and merged concepts using explainable signature overlap; ambiguous lineage is reported as ambiguous.\n- Metrics use bounded-cardinality labels and link to the concept selector rather than putting session IDs in metric labels.\n- A captured fixture proves dashboard aggregate -\u003e changed concept -\u003e exemplar sessions -\u003e exact calls.\n\n## Spine witness\n`578169f544` (`internal/toolseq@r3`, `docs/workflow-concepts.md@r1`).",
+      "readback_labels": [
+        "repo_search",
+        "issue_state",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6180",
+      "split": "tune",
+      "source_issue": 6180,
+      "source_updated_at": "2026-08-10T21:22:11Z",
+      "source_sha256": "4e593f29ffe70c90744f4001be9fddc2afd08854af0086299a517d1469d38a7f",
+      "question": "Benchmark net-true claim grading against evaluation systems",
+      "context": "## Problem\n`internal/claimcheck.Grade`, exposed as `fak claim-check`, mechanically gates performance/value claims against six net-true questions. It has no same-workload benchmark against ungated claim acceptance, fak observability integrations, or practical evaluation/policy systems.\n\n## Required arms\n- fak native net-true claim grader\n- accept claim when any witness URI exists\n- fak + Prometheus\n- fak + OpenTelemetry\n- OPA/Rego\n- OpenAI Evals graders\n- LangSmith evaluators\n- Braintrust scorers\n- DeepEval metrics\n\n## Same workload\nAll arms grade the same ordered corpus spanning net-true, strawman baseline, missing scope, invalid provenance, missing witness, non-realized estimates, and honestly-gated realized gains. Correctness requires exact verdicts (`net-true`, `strawman`, `not-yet`) and failing-question classes. Complete witnesses report confusion matrix, reason fidelity, latency/throughput, CPU/RSS, input/network/storage bytes, evaluator/model tokens, setup/operator time, and total cost.\n\n## Acceptance\nNative and tuned URI-only baseline run locally; integrations/external products remain explicit unavailable zero rows; native benchmark; classify net-true grading separately from",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6310",
+      "split": "tune",
+      "source_issue": 6310,
+      "source_updated_at": "2026-08-10T23:33:36Z",
+      "source_sha256": "4f3e0d613a9da0c6c8501b5ee36bd9bf9cb90c2f8aa5e248c70871262eed8e22",
+      "question": "feat(disambiguation): index exported package capability terminology",
+      "context": "Parent: #6272\n\n## Problem\nDerive candidate canonical/incidental terms from reviewed exported Go symbols and package capability manifests.\n\n## Done condition\nThe `go-source` work unit is implemented through the public fak seam, documented where agents discover it, and does not introduce a second writer or private-source dependency.\n\n## Acceptance gate\nFixture inventory is deterministic and excludes tests, generated internals, and unexported helpers by rule.\n\n## Likely files\n- internal/disambiguation\n\n## Dependencies\n- Parent epic #6272\n- Sequence hint: fan-out after schema/generator/query spine\n\n## Dedupe query\n`is:issue repo:anthony-chaudhary/fak in:title \"go-source\"`\n\n## Work unit\nleaf\n\n## Expected steps\n3",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6364",
+      "split": "test",
+      "source_issue": 6364,
+      "source_updated_at": "2026-08-10T22:10:36Z",
+      "source_sha256": "50228f7fcfc8a1347d4bfa3db8db8ba77e6334edbebeb87ddac81651ca40a654",
+      "question": "Benchmark issue close batching against hosted alternatives",
+      "context": "Benchmark budgeted issue-close planning across fak native, fixed chunks, fak + GitHub Issues, gh CLI loop, GraphQL batching, Jira, and Linear using the same seven issues and budget. Independently witness plan/cost/rollback accuracy, latency, CPU/RSS/network, setup/operator time, and total cost; pin versions/configuration and commands.",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6164",
+      "split": "tune",
+      "source_issue": 6164,
+      "source_updated_at": "2026-08-10T21:22:34Z",
+      "source_sha256": "531c7dcc0282948950a7b941b94dc2e4732b63cbc65279de922acf25dc2ca2fd",
+      "question": "Benchmark provider cache economics fold against observability alternatives",
+      "context": "## Problem\n`internal/vcacheobserve` implements a provider-cache economics and realized-value fold distinct from raw cache counters, but remains unclassified and lacks an alternatives comparison.\n\n## Deliverable\nBenchmark `Observe` on one mixed provider-cache trace against raw usage/no economics, first-class fak telemetry integrations, and practical cost-observability alternatives.\n\n## Arms\nfak native; raw provider usage; fak + Prometheus; fak + OpenTelemetry; Anthropic usage/cost reporting; OpenAI usage/cost reporting; Datadog LLM Observability; LangSmith.\n\n## Same workload\nIdentical cold/write/read/context rows, provider multipliers, TTL assumptions, and independent totals/value oracle. Complete arms report correctness, fold/query latency, input/cache-write/cache-read/context tokens, CPU/RSS/network/storage, and total cost.\n\n## Acceptance\nExact arms, unavailable-zero tests, benchmark, multi-capability classification, dated packet/index row; remain open for real integration/external witnesses.\n\nWork estimate: 3 points\nOverall completion contribution: one native leaf classified; provider action planning/application and context joins remain separate debt.\nTarget envelope: production ",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6172",
+      "split": "tune",
+      "source_issue": 6172,
+      "source_updated_at": "2026-08-10T15:57:36Z",
+      "source_sha256": "533aed51aed462b001317b291d7003858608ca11b93815bc67b61e2ecb05cdc3",
+      "question": "feat(archreport): expose lateral minimum-cut witnesses",
+      "context": "## Parent context\n\n#6166\n\n## Problem\n\nPairwise lateral edge-connectivity reports only cut cardinality. An operator can see that two packages have cut 2 but cannot see which two dependency edges form the minimum cut, so the evidence does not identify the concrete diversification seam.\n\n## Spine\n\nRetain one deterministic minimum-cut edge witness for every pairwise cut and render the critical witnesses.\n\n## Done\n\n- Every pairwise cut row carries canonical, sorted undirected cut edges derived from the final residual graph.\n- Witness edge count equals the reported cut, and duplicate directed import orientation cannot duplicate an edge.\n- Witness choice and ordering are deterministic even when multiple minimum cuts exist.\n- Architecture text renders critical-pair witness edges concisely; JSON preserves complete structured rows.\n- Cycle, K4, asymmetric multiple-cut, duplicate-orientation, ordering, scoped output, and determinism behavior are covered.\n- CLI reference documents the witness semantics.\n\n## Witness\n\n`go test ./internal/archreport ./cmd/fak -run 'LateralMinimumCutWitness' -count=1`\n\n## Work estimate\n\n3 points.\n\n## Completion standard\n\nProduction.\n\n## Overall completion contribu",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6356",
+      "split": "tune",
+      "source_issue": 6356,
+      "source_updated_at": "2026-08-10T21:41:35Z",
+      "source_sha256": "53a3ae1cc4fb9817e1ee1a6d603f2bd64d80cbaa98177d5185c61a9e898d6df5",
+      "question": "qa: failure-path + refusal coverage for Native micro-agent shared-cache swarm proof",
+      "context": "\u003c!-- fak-issuefanout-key: fanout-microcachedemo-qa-failure-paths --\u003e\n\n## Generation stream\n\ngen/now\n\n## Parent context\n\n#6351\n\n## Current state\n\nThe working spine of Native micro-agent shared-cache swarm proof exists (e7b90f8944f0); this follow-on has not started.\n\n## Why this is next\n\nSpine-first default: the spine just shipped, so its follow-on backlog is filed at creation time while context is hot.\n\n## Working spine\n\nEvery refusal or error Native micro-agent shared-cache swarm proof can return names the fix in its message, and a test asserts each one.\n\n## In scope\n\nTests asserting each error return of cmd/microcachedemo/; message-quality fixes those tests force.\n\n## Out of scope\n\nHappy-path behavior changes.\n\n## Done condition\n\nEach error return has a test asserting both the refusal and that its message names the recovery.\n\n## Witness\n\ngo test ./internal/microcachedemo -run 'Refus|Error|Requir' -v output captured in the commit or issue.\n\n## Acceptance gate\n\nmake test-fast green including the new tests.\n\n## Work estimate\n\nEstimate: 3 points\n\n## Overall completion contribution\n\nContribution: 3/8 points\n\n## Completion standard\n\nproduction\n\n## Target operating envelope\n\n- concurrent",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6208",
+      "split": "tune",
+      "source_issue": 6208,
+      "source_updated_at": "2026-08-10T21:46:48Z",
+      "source_sha256": "53abc1086a66e85555d379697ce56e63b55bfc6c107fae156f7b4752fd31b681",
+      "question": "epic(workpatterns): name and mine reusable agent coding workloads",
+      "context": "## Problem\nAgent coding work is described today as ad-hoc tasks, issue labels, and tool-specific runbooks. The repository has trajectory capture/query infrastructure and portable-development classifications, but lacks a stable vocabulary of named workload patterns and composable subpatterns grounded in research, source evidence, and our own agent trajectories.\n\n## Scope\nCreate a reusable workload-pattern program covering four evidence streams: external research, unnamed patterns already encoded in this repository, mined agent/chat trajectories, and durable Go tooling that supports repeatable discovery and classification. Child issues should ship narrow witnessed slices rather than one speculative taxonomy dump.\n\n## Definition of done\n- [ ] A versioned pattern vocabulary names top-level patterns and composable subpatterns with inclusion/exclusion criteria.\n- [ ] Research claims carry citations and distinguish borrowed terminology from fak-specific synthesis.\n- [ ] Repository mining maps representative patterns to concrete source evidence without treating naming coincidence as proof.\n- [ ] Trajectory mining consumes at least one real supported trajectory/chat export format with priva",
+      "readback_labels": [
+        "repo_search",
+        "issue_state",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6187",
+      "split": "test",
+      "source_issue": 6187,
+      "source_updated_at": "2026-08-10T21:22:02Z",
+      "source_sha256": "555591e6e721ba5ff9858dd9cb85ccd6ba6712b90335ae6bb163c6f539c9c2f0",
+      "question": "Benchmark native Go syntax checks against lint toolchains",
+      "context": "## Problem\n`internal/codelint` provides zero-dependency in-process Go/JSON syntax validation behind `fak codelint`, plus separate external language packs. The native Go syntax capability has no same-workload comparison against tuned parser baselines or practical linters/language servers.\n\n## Required arms\n- fak native Go syntax pack\n- `go/parser` first-error-only baseline\n- `go test` compile\n- gofmt\n- go vet\n- staticcheck\n- golangci-lint\n- gopls diagnostics\n\nNo equivalent first-class fak integration currently exists; add one separately if discovered.\n\n## Same workload\nEvery arm checks the same ordered standalone Go files: valid source, one syntax error, multiple recoverable syntax errors, and valid code with unresolved identifiers. Correctness requires syntax-only classification, exact error count/location where supported, and no semantic false positive on unresolved identifiers. Complete witnesses report quality, startup/latency/throughput, CPU/RSS, bytes, setup/operator time, and total cost.\n\n## Acceptance\nNative and tuned parser baseline run locally; real external tools remain unavailable zero rows until independently run; native benchmark; classify only Go syntax validation, le",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6036",
+      "split": "test",
+      "source_issue": 6036,
+      "source_updated_at": "2026-08-09T20:33:47Z",
+      "source_sha256": "559a73e25dd5631a6eea73a38d17482c7cbfd7fe93d36730acec8b0820e6a740",
+      "question": "bench(native): benchmark every native capability against tuned, next-best, and integrated alternatives",
+      "context": "## Goal\nMake the repository-wide set of shipped fak-native capabilities explicit and benchmark each against the strongest practical alternatives, including equivalent first-class fak integrations.\n\n## Parent context\nParent: #2236\n\n## Spine\n`fak native-benchmarks --json` and `internal/nativebench` define comparison obligations without pretending missing results exist. Initial contracts cover tool filtering and context compression.\n\n## Done condition\n- Enumerate every shipped native implementation/capability from authoritative registries and code owners; no hand-picked-only inventory.\n- For every capability, declare native, tuned incumbent/no-feature, next-best external, and every equivalent first-class integration arm (`fak + native` vs `fak + integration`) on one shared workload.\n- Require correctness/quality, latency, resource/token, and total-cost outcomes.\n- Attach reproducible witnesses and provenance; tuned baseline is the headline per `docs/standards/net-true-value.md`.\n- `fak native-benchmarks --check` exits 0 and an automated gate prevents newly shipped native capabilities from escaping the inventory.\n\n## Current honest state\nThe initial registry is structurally tested but ",
+      "readback_labels": [
+        "repo_search",
+        "commit_state",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6231",
+      "split": "tune",
+      "source_issue": 6231,
+      "source_updated_at": "2026-08-10T19:33:27Z",
+      "source_sha256": "56ffa80861ae511b88b381e25517efb7694f5a79843907103b6a6bd40c7d2e95",
+      "question": "feat(model): map GGUF quantization types and metadata",
+      "context": "\u003c!-- quant-interop-child: ggufinterop --\u003e\n\n## Current state\n\nThe quantization interoperability epic #6221 has no shipped ggufinterop leaf. Existing support is fragmented or implicit, so agents cannot cite a neutral capability contract for this seam.\n\n## Why now\n\nQuantization formats and runtimes are changing quickly; this seam is required now so support remains explicit rather than inferred.\n\n## Working spine\n\nStart from the public fixtures and neutral contract in #6221; deliver the smallest parser/adjudicator/adapter path that returns a typed result end to end.\n\n## Parent context\n\nChild of #6221. This leaf supports broad industry interoperability and must not select a universal quantization winner.\n\n## In scope\n\nMap current GGUF quantization families, architecture metadata and split shards into the neutral contract without reimplementing llama.cpp.\n\n## Acceptance gate\n\nThe named witness passes, unknown or unsupported input has an explicit typed result, and fak validate --mine passes for exactly the owned paths.\n\n## Out of scope\n\nDo not implement unrelated model kernels, redistribute restricted weights, or claim quality/performance outside the witnessed envelope. Do not create a fa",
+      "readback_labels": [
+        "repo_search",
+        "commit_state"
+      ]
+    },
+    {
+      "id": "gh-6107",
+      "split": "tune",
+      "source_issue": 6107,
+      "source_updated_at": "2026-08-10T08:10:42Z",
+      "source_sha256": "586b6079605c7476cba9ada1ee2f26252af4943500ac569e6038a0e319866b5b",
+      "question": "bench(ctxmmu): run Letta and first-class memory integration arms",
+      "context": "## Parent context\n\nParent: #6036\n\n## Done condition\n\nRun one frozen long-horizon memory workload through fak native, full-history baseline, standalone Letta, and separate fak + mem0, fak + Letta, fak + Zep/Graphiti, and fak + LangMem arms.\n\n## Required witness\n\n- identical model, context/token budget, planted facts, distractors, read-back questions, concurrency, and independent grader;\n- task success, memory-write precision, retained-fact recall, input tokens, p50/p95 latency, peak RSS or equivalent resources, and total cost;\n- versioned services/configuration and machine-readable results;\n- temporal validity preserved in Zep/Graphiti evaluation;\n- result linked from `docs/benchmarks/CONTEXT-MEMORY-ALTERNATIVES-2026-08-09.md`.\n\n## Honesty guard\n\nAdapter registration, mock stores, local write-admission accuracy, and byte retention alone are partial evidence. Every first-class integration remains its own arm.\n\n## Work estimate\nEstimate: 8 points.\n\n## Overall completion contribution\nContribution: 8/100 points.\n\n## Completion standard\nresearch\n\n## Target operating envelope\n- memory arms: \u003e= 7 arms\n\n## Witnessed operating envelope\n- memory arms: \u003e= 2 arms",
+      "readback_labels": [
+        "repo_search",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6204",
+      "split": "tune",
+      "source_issue": 6204,
+      "source_updated_at": "2026-08-10T18:30:48Z",
+      "source_sha256": "587f814e45ed14bb0e6ede0cf616292c71ac170fa2de8c9cd728f2dbb3836077",
+      "question": "feat(archreport): rank dependency-burden hotspots",
+      "context": "## Parent context\n\n#6192\n\n## Problem\n\nWhole-graph architecture output ranks reverse-risk hotspots (`fan_in`, blast radius, blast depth) but not forward dependency burden. The report now computes each leaf's direct fan-out, transitive dependency reach, and dependency depth, yet operators must scan every leaf or query them one at a time to find packages with the broadest or deepest dependency footprint.\n\n## Spine\n\nAdd deterministic whole-graph dependency-burden hotspot tables for direct fan-out and transitive reach/depth.\n\n## Done\n\n- `Report` carries `dependency_hotspots` with leaf, direct fan-out, dependency reach, and dependency depth.\n- Rows include leaves with nonzero forward dependency reach and rank by reach descending, depth descending, fan-out descending, then name.\n- A separate `fan_out_hotspots` table ranks direct dependency count descending then name, complementing existing fan-in hotspots.\n- Scoped reports omit both whole-graph forward-hotspot tables while retaining selected-leaf evidence.\n- Text clearly distinguishes direct fan-out from transitive dependency burden; JSON retains structured rows.\n- Chain, broad shallow fan-out, mixed ranking, zero-dependency omission, sco",
+      "readback_labels": [
+        "repo_search",
+        "issue_state"
+      ]
+    },
+    {
+      "id": "gh-6168",
+      "split": "tune",
+      "source_issue": 6168,
+      "source_updated_at": "2026-08-10T15:18:37Z",
+      "source_sha256": "58ca4e6df0b4b29031d8760248043289d1b59caa83f71614d0e3559f49f4710a",
+      "question": "docs(research): separate selector filter and tool-result micro-windows",
+      "context": "## Parent context\n\n#6033, closed framing issue #6106, measured routing issue #6105, tail-policy issue #6160, and executable follow-up #6167.\n\n## Scope\n\nExtend `docs/research/micro-context-filter-tool-routing.md` to distinguish three uses that are easy to conflate:\n\n1. a control micro-window deciding which filter/tool stage to admit;\n2. a data micro-window running a semantic filter over one bounded record/value;\n3. an observation micro-window interpreting one bounded tool result before the typed fold.\n\nDocument query-dependent stopping (existence/top-k/exhaustive), independently witnessed sufficiency, queue-aware cancellation, selective hedging, effect boundaries, and steelmanned static alternatives. Bind each claim to current S8h/S8l evidence and #6167 rather than implying an unmeasured winner.\n\n## Done condition\n\nThe research note names the three seams, defines their separate authority and cache identities, gives safe/unsafe stopping examples, steelmans opposing architectures, and points to #6167 as the executable falsification contract.\n\n## Witness\n\nCommitted Markdown diff, link check/doc tests, origin ancestry, and module version.\n\n## Work estimate\nEstimate: 2 points\n\n## Overall",
+      "readback_labels": [
+        "repo_search",
+        "commit_state",
+        "docs_read"
+      ]
+    },
+    {
+      "id": "gh-6016",
+      "split": "tune",
+      "source_issue": 6016,
+      "source_updated_at": "2026-08-09T19:07:21Z",
+      "source_sha256": "591a35ee6983c31393f1c97512601be50d7a39417e7a392621ee4f05d6fd1b1c",
+      "question": "idea-scout: The Bitter Lesson of Tool Calling",
+      "context": "\u003e Auto-filed by the daily **idea-scout** (`tools/idea_scout.py`, 2026-08-09). A candidate RELATED idea found on arXiv; **needs human triage** — close as `wontfix`/`duplicate` if it is not worth pursuing.\n\n**Source:** https://arxiv.org/abs/2608.06370\n\n**Authors:** Ishan Patel, Sahil Sen, Elias Lumer, Vamse Kumar Subbiah\n**Submitted:** 2026-08-06\n\n**Why surfaced** (topic `tool-call-adjudication`, score 47): terms: tool call(title), capability; recent (2d); very fresh (≤30d)\n\n### Dispatchability\n- dispatchability: `triage_only`\n- reason: idea-scout candidates need human scope, lane, witness, and acceptance criteria before they become worker-ready leaves.\n\n**Summary**\n\nTool use transforms LLMs into agents that act beyond their training data, and for code-capable models, programmatic tool calling extends this further by replacing rigid JSON calls with scripts that chain and parallelize naturally. However, a systematic evaluation of tools as code on an established benchmark across current and prior model generations under real-world task conditions has not been conducted. In this work, we empirically compare programmatic tool calling (PTC) to native JSON tool calling across 14 langua",
+      "readback_labels": [
+        "repo_search"
+      ]
+    },
+    {
+      "id": "gh-6050",
+      "split": "tune",
+      "source_issue": 6050,
+      "source_updated_at": "2026-08-09T21:21:43Z",
+      "source_sha256": "595fad70f2ec8223b0f6aff6053961a845e8f4d6bfc19d4984c8785aefe4e739",
+      "question": "feat(coordination): couple serve admission and backpressure to the global plan",
+      "context": "## Parent\n\nPart of #6042; this is the serving-layer adapter, not a replacement serving scheduler.\n\n## Deliverable\n\nExpose model/engine readiness, queue and batch pressure, prefill/decode capacity, admission estimate, backpressure, cancellation and cache-affinity signals as typed observations. Apply admit, defer, reroute, resize-batch, prewarm, or reject actions through existing serve seams.\n\n## Definition of done\n\n- [ ] Observations are cheap, bounded, freshness-tagged and available without exposing request content.\n- [ ] Queue pressure can defer harness fan-out or select another compute candidate; cache affinity can select among otherwise equivalent engines.\n- [ ] Admission decisions state deadline/budget impact and distinguish retryable from terminal rejection.\n- [ ] Action apply is idempotent and race-tested against capacity changes between plan and apply.\n- [ ] Backpressure propagates to the harness adapter instead of becoming hidden queue latency.\n- [ ] Coordination-off preserves current serve admission behavior.\n- [ ] A captured fixture proves cache + compute + harness inputs alter a serve action.",
+      "readback_labels": [
+        "repo_search"
+      ]
+    }
+  ]
+}
