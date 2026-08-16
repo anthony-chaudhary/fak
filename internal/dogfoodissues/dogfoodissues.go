@@ -583,6 +583,7 @@ func actionCandidate(item ActionItem, opt BuildOptions) issuepolicy.Candidate {
 		item.SourceProbe, item.Finding, item.Grade, item.DebtName, item.DebtCount)
 	c := issuepolicy.Candidate{
 		Schema:             issuepolicy.Schema,
+		ProblemFrame:       dogfoodProblemFrame(),
 		Key:                item.Key,
 		Title:              item.Title,
 		ParentRef:          strmatch.FirstTrimmed(item.ParentRef, "fak dogfood-issues"),
@@ -629,6 +630,16 @@ func actionCandidate(item ActionItem, opt BuildOptions) issuepolicy.Candidate {
 	}
 	return c
 }
+func dogfoodProblemFrame() issuepolicy.ProblemFrame {
+	checks := map[string]issuepolicy.ProblemCheck{
+		"p1": {ID: "p1", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "the action preserves its source probe, finding, debt, and stable marker context", Valid: true},
+		"p2": {ID: "p2", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "measured dogfood debt becomes one bounded improvement instead of recurring manual triage", Valid: true},
+		"p3": {ID: "p3", Status: issuepolicy.ProblemCheckPreserved, Evidence: "the generated leaf remains independently reviewable and reruns update by stable key", Valid: true},
+		"p4": {ID: "p4", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "the scorecard action flows through shared candidate review and dispatch", Valid: true},
+	}
+	return issuepolicy.ProblemFrame{Schema: issuepolicy.ProblemFrameSchema, Ready: true, Enforced: true, Centrality: issuepolicy.CentralityEnabling, CentralityTarget: "improve the kernel outcome measured by the source dogfood scorecard", Checks: checks}
+}
+
 func dogfoodIssueTrigger(item ActionItem) string {
 	probe := strmatch.FirstTrimmed(item.SourceProbe, "dogfood scorecard")
 	finding := strmatch.FirstTrimmed(item.Finding, item.Key, "ACTION row")

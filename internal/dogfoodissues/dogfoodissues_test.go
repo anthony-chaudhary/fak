@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 // fixtureReport mirrors the Python test's fixture_report(): a recent-feature
@@ -710,5 +713,24 @@ func TestSaveSeenStampsSchemaAndRoundTrips(t *testing.T) {
 	}
 	if back.Schema != schema || back.Seen["key-1"].IssueURL != "u" {
 		t.Fatalf("round trip = %+v, want the record and schema preserved", back)
+	}
+}
+
+func TestActionCandidateCarriesCanonicalProblemFrameIndependentOfMetadata(t *testing.T) {
+	item := ActionItem{Key: "dogfood/action", Title: "Core-looking title", SourceProbe: "score", Finding: "debt", InScope: "one fix", OutOfScope: "other work", DoneCondition: "debt drops", Witness: "score rerun", AcceptanceGate: "go test", WorkingSpine: "fix one measured row", Lane: "dogfoodissues", Paths: []string{"internal/dogfoodissues"}}
+	left := actionCandidate(item, BuildOptions{})
+	item.Title = "Peripheral-looking title"
+	item.ParentRef = "Core epic"
+	item.Labels = []string{"core"}
+	right := actionCandidate(item, BuildOptions{})
+	if !reflect.DeepEqual(left.ProblemFrame, right.ProblemFrame) {
+		t.Fatalf("metadata altered dogfood frame:\nleft=%+v\nright=%+v", left.ProblemFrame, right.ProblemFrame)
+	}
+	frame := left.ProblemFrame
+	if !frame.Enforced || !frame.Ready || frame.Centrality != issuepolicy.CentralityEnabling || frame.CentralityTarget == "" || len(frame.Checks) != 4 {
+		t.Fatalf("frame = %+v", frame)
+	}
+	if review := ReviewActionItem(item, BuildOptions{}); review.ProblemFrame.Centrality != frame.Centrality {
+		t.Fatalf("review lost frame: %+v", review.ProblemFrame)
 	}
 }
