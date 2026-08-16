@@ -61,6 +61,10 @@ func TestIssueFindingDryRunCandidatesAreDispatchable(t *testing.T) {
 	if len(result.Candidates) != 1 {
 		t.Fatalf("want 1 generated candidate, got %d", len(result.Candidates))
 	}
+	frame := result.Candidates[0].ProblemFrame
+	if !frame.Enforced || !frame.Ready || frame.Centrality != issuepolicy.CentralityStewardship || frame.CentralityTarget == "" || len(frame.Checks) != 4 {
+		t.Fatalf("generated candidate frame = %+v", frame)
+	}
 	// The generated candidate must be admitted by the strict, armed contract.
 	review := issuepolicy.ReviewCandidate(result.Candidates[0], issuepolicy.Options{
 		Live: true, DedupeChecked: true, DedupeCap: 50,

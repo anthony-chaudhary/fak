@@ -444,6 +444,16 @@ func buildFindingCandidateWithProjectWork(item modelroute.FindingPlanItem, lane 
 // tier, scale, and born-routed labels — is populated so the generated fixture is
 // admitted rather than filed as an unscoped worker prompt. The done-condition
 // binds closure to a witnessed fix PLUS an independent re-audit PASS.
+func findingProblemFrame() issuepolicy.ProblemFrame {
+	checks := map[string]issuepolicy.ProblemCheck{
+		"p1": {ID: "p1", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "the follow-up preserves audited issue, commit, receipt, severity, and independent finding context", Valid: true},
+		"p2": {ID: "p2", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "one bounded corrective issue replaces repeated manual claim re-audit", Valid: true},
+		"p3": {ID: "p3", Status: issuepolicy.ProblemCheckPreserved, Evidence: "new evidence can update the stable finding key without multiplying issues", Valid: true},
+		"p4": {ID: "p4", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "the independent REFUTE receipt gates correction through the normal issue contract", Valid: true},
+	}
+	return issuepolicy.ProblemFrame{Schema: issuepolicy.ProblemFrameSchema, Ready: true, Enforced: true, Centrality: issuepolicy.CentralityStewardship, CentralityTarget: "keep shipped-resolution claims bound to independent evidence", Checks: checks}
+}
+
 func buildFindingCandidate(item modelroute.FindingPlanItem, lane string, dedupeCap int) issuepolicy.Candidate {
 	n := item.AuditedIssue
 	sev := strings.ToUpper(strings.TrimSpace(string(item.Severity)))
@@ -463,6 +473,7 @@ func buildFindingCandidate(item modelroute.FindingPlanItem, lane string, dedupeC
 	}
 	return issuepolicy.Candidate{
 		Schema:         issuepolicy.Schema,
+		ProblemFrame:   findingProblemFrame(),
 		Key:            item.Key,
 		Title:          findingIssueTitle(n),
 		ParentRef:      ref,
