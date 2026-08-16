@@ -6660,28 +6660,40 @@
           "category": "incidental",
           "reason": "A Go test function name cited in a doc comment as the place the HARD => un-lifted invariant is pinned. It names a test, not a concept in the scorer's vocabulary: its meaning is fully given by the invariant it checks, which is itself positioned under the grade rows. Positioning every test identifier would book coverage for the test suite rather than the domain.",
           "token": "TestModeDebtGradeInvariants"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON compatibility field carrying the canonical release-debt metric, not a new score-debt concept",
+          "token": "ReleaseDebt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Per-band aggregation field for the existing release-debt metric, not a new score-debt concept",
+          "token": "DebtByBand"
         }
       ],
       "id": "score-debt",
       "ignore": [
         "CacheValueGateDebtKey",
+        "DebtByBand",
+        "GitDailyDebtKey",
+        "NegationOperatorDebtKey",
+        "ReleaseDebt",
+        "ScorecardAxis",
+        "ScorecardAxisOracle",
+        "TestModeDebtGradeInvariants",
         "commit_quality_scorecard",
         "commit_quality_scorecard_test",
         "debtCeiling",
         "dogfoodDebtNextAction",
         "flow_debt",
-        "GitDailyDebtKey",
         "lightgap_debt",
         "lightgap_scorecard",
         "negation_operator_debt",
-        "NegationOperatorDebtKey",
+        "scorecardPath",
         "scorecard_since",
         "scorecard_since_test",
-        "ScorecardAxis",
-        "ScorecardAxisOracle",
-        "scorecardPath",
-        "scorecards",
-        "TestModeDebtGradeInvariants"
+        "scorecards"
       ],
       "min_files": 3,
       "name": "Scorecard / debt family",

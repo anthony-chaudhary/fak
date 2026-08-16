@@ -75,25 +75,19 @@ func TestReleaseDispatchesKnownHelper(t *testing.T) {
 }
 
 func TestReleaseDispatchesReadinessAliases(t *testing.T) {
-	old := releaseRunScript
-	defer func() { releaseRunScript = old }()
+	old := releaseRunReadiness
+	defer func() { releaseRunReadiness = old }()
 
 	for _, subcommand := range []string{"readiness", "release-readiness", "scorecard", "release-scorecard"} {
 		t.Run(subcommand, func(t *testing.T) {
-			var gotScript string
 			var gotArgs []string
-			releaseRunScript = func(root, script string, args []string, stdout, stderr io.Writer) int {
-				gotScript = script
+			releaseRunReadiness = func(stdout, stderr io.Writer, args []string) int {
 				gotArgs = append([]string(nil), args...)
 				return 0
 			}
-
 			rc := runRelease(io.Discard, io.Discard, []string{subcommand, "--json"})
 			if rc != 0 {
 				t.Fatalf("exit = %d, want 0", rc)
-			}
-			if gotScript != "release_readiness_scorecard.py" {
-				t.Fatalf("script = %q, want release_readiness_scorecard.py", gotScript)
 			}
 			if !reflect.DeepEqual(gotArgs, []string{"--json"}) {
 				t.Fatalf("args = %#v", gotArgs)
@@ -101,7 +95,6 @@ func TestReleaseDispatchesReadinessAliases(t *testing.T) {
 		})
 	}
 }
-
 func TestReleasePythonSelection(t *testing.T) {
 	old := releaseLookPath
 	defer func() { releaseLookPath = old }()
