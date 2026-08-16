@@ -5969,6 +5969,11 @@
           "category": "incidental",
           "reason": "Witness command name for stackpreflight; not a new policy capability.",
           "token": "stackpreflightdemo"
+        },
+        {
+          "category": "incidental",
+          "reason": "Study receipt field naming the already-frozen participant assistance rule; it grants no runtime capability and introduces no policy engine.",
+          "token": "AssistancePolicy"
         }
       ],
       "exclude": [
@@ -5981,6 +5986,7 @@
         "AdjudicatorAgreement",
         "AdjudicatorSHA256",
         "ArmFakCapability",
+        "AssistancePolicy",
         "CAPABILITY_NOT_ADVERTISED",
         "CapabilityAdded",
         "CapabilityDocument",

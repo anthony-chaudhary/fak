@@ -92,6 +92,7 @@ var tier = map[string]int{
 	"harnessdiscover":      1, // provenance-bearing scoped declaration discovery before contextual selection (#6898).
 	"harnessclassify":      1, // deterministic explicit-first domain/task classification before contextual selection (#6900).
 	"harnesscrossover":     1, // pure reproducible net-work comparison for contextual versus tuned native profiles (#6903).
+	"harnesscreationstudy": 1, // deterministic independent-participant denominator and claim eligibility fold (#6937).
 	"harnesscompose":       1, // typed inert asset overlap semantics before dependency solving and launch (#6904).
 	"harnesspreview":       2, // deterministic contextual lock-risk diff over classifier, composition, and resolver facts (#6902).
 	"harnessresolve":       2, // deterministic product lock over typed assets plus stackresolve dependency facts (#6792).
@@ -596,6 +597,7 @@ var tier = map[string]int{
 	"projectassets":         1, // stdlib-only project asset registry and parity adapter; off the runtime hot path.
 	"wavefuel":              1, // stdlib-only fleet-wave operator-receipt contract witness.
 	"workaccount":           1, // stdlib-only WORK DONE mechanism coverage registry and validator; off the runtime hot path.
+	"orientation":           2, // versioned temporal product-orientation snapshot; imports issue-free stdlib only, off the runtime hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

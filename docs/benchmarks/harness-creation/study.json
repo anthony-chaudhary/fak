@@ -1,0 +1,29 @@
+{
+  "schema": "fak.harness-creation-study/v1alpha1",
+  "id": "harness-creation-promo-2026-08",
+  "protocol": {
+    "frozen": true,
+    "ten_minute_limit_seconds": 600,
+    "assistance_policy": "task-card-and-help-only",
+    "failures_in_denominator": true
+  },
+  "baseline": {
+    "id": "pending-tuned-alternative",
+    "runnable": false,
+    "tuned": false,
+    "frozen": false,
+    "evidence": "not-yet: select before participant timing"
+  },
+  "runs": [
+    {
+      "id": "maintainer-warm-calibration-1",
+      "participant_id": "maintainer-calibration",
+      "track": "ten-minute",
+      "participant_class": "maintainer-calibration",
+      "independent": false,
+      "outcome": "success",
+      "elapsed_seconds": 10.259,
+      "receipt": "docs/notes/HARNESS-CREATOR-SPINE-WITNESS-2026-08-15.md"
+    }
+  ]
+}

@@ -1,0 +1,206 @@
+package harnesscreationstudy
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+const Schema = "fak.harness-creation-study/v1alpha1"
+
+var safeID = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+
+type Study struct {
+	Schema   string   `json:"schema"`
+	ID       string   `json:"id"`
+	Protocol Protocol `json:"protocol"`
+	Baseline Baseline `json:"baseline"`
+	Runs     []Run    `json:"runs"`
+}
+
+type Protocol struct {
+	Frozen                bool   `json:"frozen"`
+	TenMinuteLimitSeconds int    `json:"ten_minute_limit_seconds"`
+	AssistancePolicy      string `json:"assistance_policy"`
+	FailuresInDenominator bool   `json:"failures_in_denominator"`
+}
+
+type Baseline struct {
+	ID       string `json:"id"`
+	Runnable bool   `json:"runnable"`
+	Tuned    bool   `json:"tuned"`
+	Frozen   bool   `json:"frozen"`
+	Evidence string `json:"evidence"`
+}
+
+type Run struct {
+	ID                    string   `json:"id"`
+	ParticipantID         string   `json:"participant_id"`
+	Track                 string   `json:"track"`
+	ParticipantClass      string   `json:"participant_class"`
+	Independent           bool     `json:"independent"`
+	Outcome               string   `json:"outcome"`
+	ElapsedSeconds        float64  `json:"elapsed_seconds"`
+	HelpRequests          []string `json:"help_requests,omitempty"`
+	Receipt               string   `json:"receipt"`
+	IndependentlyAuthored bool     `json:"independently_authored,omitempty"`
+	ConformancePassed     bool     `json:"conformance_passed,omitempty"`
+}
+
+type Result struct {
+	Schema      string      `json:"schema"`
+	StudyID     string      `json:"study_id"`
+	BaselineOK  bool        `json:"baseline_ready"`
+	Calibration int         `json:"calibration_runs"`
+	TenMinute   TrackResult `json:"ten_minute"`
+	Weekend     TrackResult `json:"weekend"`
+}
+
+type TrackResult struct {
+	EligibleRuns         int      `json:"eligible_runs"`
+	DistinctParticipants int      `json:"distinct_participants"`
+	Successes            int      `json:"successes"`
+	Failures             int      `json:"failures"`
+	PassRate             float64  `json:"pass_rate"`
+	MedianSuccessSeconds *float64 `json:"median_success_seconds,omitempty"`
+	ClaimStatus          string   `json:"claim_status"`
+	Reasons              []string `json:"reasons,omitempty"`
+	successTimes         []float64
+}
+
+func Parse(raw []byte) (Study, error) {
+	var s Study
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&s); err != nil {
+		return Study{}, err
+	}
+	if s.Schema != Schema {
+		return Study{}, fmt.Errorf("schema must be %q", Schema)
+	}
+	if !safeID.MatchString(s.ID) {
+		return Study{}, errors.New("study id must be a privacy-safe slug")
+	}
+	if !s.Protocol.Frozen || s.Protocol.TenMinuteLimitSeconds != 600 || s.Protocol.AssistancePolicy != "task-card-and-help-only" || !s.Protocol.FailuresInDenominator {
+		return Study{}, errors.New("protocol must freeze the 600-second limit, task-card-and-help-only assistance, and failures-in-denominator rule")
+	}
+	if !safeID.MatchString(s.Baseline.ID) || strings.TrimSpace(s.Baseline.Evidence) == "" {
+		return Study{}, errors.New("baseline requires a privacy-safe id and evidence reference")
+	}
+	seen := map[string]bool{}
+	for i, r := range s.Runs {
+		if !safeID.MatchString(r.ID) || !safeID.MatchString(r.ParticipantID) {
+			return Study{}, fmt.Errorf("run %d requires privacy-safe run and participant slugs", i)
+		}
+		key := r.ParticipantID + "\x00" + r.Track
+		if seen[key] {
+			return Study{}, fmt.Errorf("participant %q has duplicate %s attempt", r.ParticipantID, r.Track)
+		}
+		seen[key] = true
+		if r.Track != "ten-minute" && r.Track != "weekend" {
+			return Study{}, fmt.Errorf("run %q has invalid track", r.ID)
+		}
+		if r.ParticipantClass != "unfamiliar-builder" && r.ParticipantClass != "maintainer-calibration" {
+			return Study{}, fmt.Errorf("run %q has invalid participant_class", r.ID)
+		}
+		if r.Outcome != "success" && r.Outcome != "failure" && r.Outcome != "timeout" {
+			return Study{}, fmt.Errorf("run %q has invalid outcome", r.ID)
+		}
+		if math.IsNaN(r.ElapsedSeconds) || math.IsInf(r.ElapsedSeconds, 0) || r.ElapsedSeconds < 0 || strings.TrimSpace(r.Receipt) == "" {
+			return Study{}, fmt.Errorf("run %q requires finite non-negative elapsed_seconds and receipt", r.ID)
+		}
+	}
+	return s, nil
+}
+
+func Evaluate(s Study) Result {
+	baselineOK := s.Baseline.Runnable && s.Baseline.Tuned && s.Baseline.Frozen
+	result := Result{Schema: Schema, StudyID: s.ID, BaselineOK: baselineOK}
+	for _, r := range s.Runs {
+		if r.ParticipantClass == "maintainer-calibration" || !r.Independent {
+			result.Calibration++
+			continue
+		}
+		if r.Track == "ten-minute" {
+			addTenMinute(&result.TenMinute, r, s.Protocol.TenMinuteLimitSeconds)
+		} else {
+			addWeekend(&result.Weekend, r)
+		}
+	}
+	finish(&result.TenMinute)
+	finish(&result.Weekend)
+	result.TenMinute.Reasons = claimReasons(result.TenMinute, baselineOK, 2)
+	result.Weekend.Reasons = claimReasons(result.Weekend, baselineOK, 1)
+	if len(result.TenMinute.Reasons) == 0 {
+		result.TenMinute.ClaimStatus = "supported"
+	} else {
+		result.TenMinute.ClaimStatus = "not_yet"
+	}
+	if len(result.Weekend.Reasons) == 0 {
+		result.Weekend.ClaimStatus = "supported"
+	} else {
+		result.Weekend.ClaimStatus = "not_yet"
+	}
+	return result
+}
+
+func addTenMinute(t *TrackResult, r Run, limit int) {
+	t.EligibleRuns++
+	t.DistinctParticipants++
+	if r.Outcome == "success" && r.ElapsedSeconds <= float64(limit) {
+		t.Successes++
+		addSuccessTime(t, r.ElapsedSeconds)
+	} else {
+		t.Failures++
+	}
+}
+
+func addWeekend(t *TrackResult, r Run) {
+	t.EligibleRuns++
+	t.DistinctParticipants++
+	if r.Outcome == "success" && r.IndependentlyAuthored && r.ConformancePassed {
+		t.Successes++
+		addSuccessTime(t, r.ElapsedSeconds)
+	} else {
+		t.Failures++
+	}
+}
+
+func addSuccessTime(t *TrackResult, seconds float64) {
+	t.successTimes = append(t.successTimes, seconds)
+}
+
+func finish(t *TrackResult) {
+	if t.EligibleRuns > 0 {
+		t.PassRate = float64(t.Successes) / float64(t.EligibleRuns)
+	}
+	values := t.successTimes
+	t.successTimes = nil
+	if len(values) == 0 {
+		return
+	}
+	sort.Float64s(values)
+	median := values[len(values)/2]
+	if len(values)%2 == 0 {
+		median = (values[len(values)/2-1] + median) / 2
+	}
+	t.MedianSuccessSeconds = &median
+}
+
+func claimReasons(t TrackResult, baselineOK bool, required int) []string {
+	var reasons []string
+	if !baselineOK {
+		reasons = append(reasons, "tuned runnable baseline is not frozen")
+	}
+	if t.DistinctParticipants < required {
+		reasons = append(reasons, fmt.Sprintf("need at least %d eligible independent participant(s)", required))
+	}
+	if t.Successes < required {
+		reasons = append(reasons, fmt.Sprintf("need at least %d successful eligible run(s)", required))
+	}
+	return reasons
+}
