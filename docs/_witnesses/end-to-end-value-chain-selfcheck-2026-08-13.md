@@ -1,3 +1,8 @@
+---
+title: "End-to-end value-chain selfcheck witness — 2026-08-13"
+description: "Documentation for End-to-end value-chain selfcheck witness — 2026-08-13, including the captured behavior, operating context, and reproducible fak evidence."
+---
+
 # End-to-end value-chain selfcheck witness — 2026-08-13
 
 ## Command

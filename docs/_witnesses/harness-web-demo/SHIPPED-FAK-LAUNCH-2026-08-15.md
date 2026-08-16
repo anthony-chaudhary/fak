@@ -1,3 +1,8 @@
+---
+title: "Shipped `fak harness web` launch witness — 2026-08-15"
+description: "Documentation for Shipped `fak harness web` launch witness — 2026-08-15, including the captured behavior, operating context, and reproducible fak evidence."
+---
+
 # Shipped `fak harness web` launch witness — 2026-08-15
 
 Issue: #6980.

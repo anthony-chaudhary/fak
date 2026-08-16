@@ -1,3 +1,8 @@
+---
+title: "fak capability map: spend fewer tokens and turns"
+description: "Documentation for fak capability map: spend fewer tokens and turns, including the captured behavior, operating context, and reproducible fak evidence."
+---
+
 # fak capability map: spend fewer tokens and turns
 
 fak's current product focus is **agent efficiency**: keep stable prompt work reusable, avoid

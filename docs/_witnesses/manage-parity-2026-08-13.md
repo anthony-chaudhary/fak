@@ -1,3 +1,8 @@
+---
+title: "Managed-harness parity packet — 2026-08-13"
+description: "Documentation for Managed-harness parity packet — 2026-08-13, including the captured behavior, operating context, and reproducible fak evidence."
+---
+
 # Managed-harness parity packet — 2026-08-13
 
 ## Command

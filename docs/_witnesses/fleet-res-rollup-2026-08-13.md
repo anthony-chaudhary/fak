@@ -1,3 +1,8 @@
+---
+title: "Fleet resource accountant witness — 2026-08-13"
+description: "Documentation for Fleet resource accountant witness — 2026-08-13, including the captured behavior, operating context, and reproducible fak evidence."
+---
+
 # Fleet resource accountant witness — 2026-08-13
 
 Issue: #6557 (rung 1 of epic #6552)

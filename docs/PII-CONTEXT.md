@@ -1,3 +1,8 @@
+---
+title: "Context-aware PII handling"
+description: "Documentation for Context-aware PII handling, including the captured behavior, operating context, and reproducible fak evidence."
+---
+
 # Context-aware PII handling
 
 fak's lexical PII detector identifies **shapes**, not the meaning or policy of a value.

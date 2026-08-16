@@ -1,3 +1,8 @@
+---
+title: "Caveman native control — captured witness (2026-08-14)"
+description: "Documentation for Caveman native control — captured witness (2026-08-14), including the captured behavior, operating context, and reproducible fak evidence."
+---
+
 # Caveman native control — captured witness (2026-08-14)
 
 ## Verdict

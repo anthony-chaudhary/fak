@@ -1,3 +1,8 @@
+---
+title: "Live native coding browser witness — 2026-08-15"
+description: "Documentation for Live native coding browser witness — 2026-08-15, including the captured behavior, operating context, and reproducible fak evidence."
+---
+
 # Live native coding browser witness — 2026-08-15
 
 Issue: #6968, completing the live render leaf of #6962.

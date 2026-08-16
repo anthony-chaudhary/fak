@@ -1,3 +1,8 @@
+---
+title: "Live six-arm witness"
+description: "Documentation for Live six-arm witness, including the captured behavior, operating context, and reproducible fak evidence."
+---
+
 # Live six-arm witness
 
 Run date: 2026-08-14. Model: `gpt-5.6-sol`. Corpus revision: `JuliusBrussee/caveman@c72984e4392c7a154e55c11dbf445f01ce5c35d4`.

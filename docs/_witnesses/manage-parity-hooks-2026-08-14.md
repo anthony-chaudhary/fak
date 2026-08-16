@@ -1,3 +1,8 @@
+---
+title: "Native managed-hook capability witness — 2026-08-14"
+description: "Documentation for Native managed-hook capability witness — 2026-08-14, including the captured behavior, operating context, and reproducible fak evidence."
+---
+
 # Native managed-hook capability witness — 2026-08-14
 
 ## Commands

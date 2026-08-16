@@ -1,3 +1,8 @@
+---
+title: "Live native UI / agent seam probe — 2026-08-15"
+description: "Documentation for Live native UI / agent seam probe — 2026-08-15, including the captured behavior, operating context, and reproducible fak evidence."
+---
+
 # Live native UI / agent seam probe — 2026-08-15
 
 Issues: #6910, #1380, parent #6790.

@@ -1,3 +1,8 @@
+---
+title: "Harness web UI operating-envelope witness — 2026-08-15"
+description: "Documentation for Harness web UI operating-envelope witness — 2026-08-15, including the captured behavior, operating context, and reproducible fak evidence."
+---
+
 # Harness web UI operating-envelope witness — 2026-08-15
 
 Issue: #6790 follow-on to the shipped #6882 spine.
