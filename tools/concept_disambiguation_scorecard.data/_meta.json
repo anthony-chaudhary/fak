@@ -3928,6 +3928,26 @@
           "category": "incidental",
           "reason": "Implementation symbol for #1365 durable serve state, not a separate session-runtime concept.",
           "token": "serveSessionStateOff"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #2174 scheduled-task launcher audit, not a separate session-runtime concept.",
+          "token": "schedSessionDesktop"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #2174 scheduled-task launcher audit, not a separate session-runtime concept.",
+          "token": "schedSessionIsolated"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #2174 scheduled-task launcher audit, not a separate session-runtime concept.",
+          "token": "schedSessionIsolation"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #2174 scheduled-task launcher audit, not a separate session-runtime concept.",
+          "token": "schedSessionUnknown"
         }
       ],
       "id": "session-runtime",
@@ -4107,6 +4127,10 @@
         "runSessionOpenSelfcheck",
         "runtuisessions",
         "sanitizeSessionForPath",
+        "schedSessionDesktop",
+        "schedSessionIsolated",
+        "schedSessionIsolation",
+        "schedSessionUnknown",
         "scheduled",
         "schedulerAttempt",
         "schedulerFixture",
@@ -6096,6 +6120,11 @@
           "category": "incidental",
           "reason": "Implementation symbol for #1365 durable serve state, not a separate policy-capability concept.",
           "token": "serveDurabilityPosture"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #2174 scheduled-task launcher audit, not a separate policy-capability concept.",
+          "token": "schedLauncherPosture"
         }
       ],
       "exclude": [
@@ -6215,6 +6244,7 @@
         "runSemanticAdjudicator",
         "runTailPolicyMatrix",
         "runWindow",
+        "schedLauncherPosture",
         "schedulerPolicyResult",
         "semanticAdjudicator",
         "semanticConsensus",
@@ -8534,6 +8564,11 @@
           "category": "incidental",
           "reason": "Private text formatter for the start-admission command, not a reusable rendering abstraction",
           "token": "wipAdmitRender"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #2174 scheduled-task launcher audit, not a separate render-materialize concept.",
+          "token": "renderSchedLauncherTable"
         }
       ],
       "id": "render-materialize",
@@ -8582,6 +8617,7 @@
         "renderREADME",
         "renderResumeDedup",
         "renderRunaway",
+        "renderSchedLauncherTable",
         "renderSeatCells",
         "renderSessionOpen",
         "renderShellChoice",

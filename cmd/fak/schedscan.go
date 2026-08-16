@@ -156,6 +156,10 @@ type schedScanTaskInfo struct {
 	NumberOfMissedRuns int64  `json:"NumberOfMissedRuns"`
 	ActionExecute      string `json:"ActionExecute"`
 	ActionArguments    string `json:"ActionArguments"`
+	// ActionWorkingDirectory is the first Action's working directory. The launcher
+	// posture audit (#2174) reports it because "which tree does this task actually
+	// run in" is half of whether an out-of-tree script is recoverable at all.
+	ActionWorkingDirectory string `json:"ActionWorkingDirectory"`
 }
 
 // schedScanTaskReport is the decoded, classified per-task record in the JSON doc.
@@ -186,12 +190,7 @@ type schedScanTaskReport struct {
 // A NON-zero result through the shim is still meaningful (it is Task Scheduler
 // itself failing to launch, e.g. 0x800710E0), so this only ever weakens a zero.
 func schedActionMasksExit(execute string) bool {
-	exe := strings.ToLower(strings.Trim(strings.TrimSpace(execute), `"'`))
-	exe = strings.TrimSuffix(exe, ".exe")
-	if i := strings.LastIndexAny(exe, `\/`); i >= 0 {
-		exe = exe[i+1:]
-	}
-	return exe == "conhost"
+	return schedExeBase(execute) == "conhost"
 }
 
 // applySchedExitMask demotes a healthy-looking row whose exit 0 arrived through a
@@ -355,6 +354,7 @@ Get-ScheduledTask | ForEach-Object {
     NumberOfMissedRuns = [int64]$i.NumberOfMissedRuns
     ActionExecute = [string]$a.Execute
     ActionArguments = [string]$a.Arguments
+    ActionWorkingDirectory = [string]$a.WorkingDirectory
   }
 } | ConvertTo-Json -Depth 3`
 
@@ -382,9 +382,18 @@ func runSchedScan(stdout, stderr io.Writer, argv []string) int {
 	from := fs.String("from", "", "read Get-ScheduledTaskInfo JSON from a file instead of a live query (works off-Windows)")
 	failingOnly := fs.Bool("failing-only", false, "show only failing tasks (table rows and the JSON task list)")
 	strict := fs.Bool("strict", false, "exit 3 if any task is failing (1=runtime error, 2=usage)")
+	launchers := fs.Bool("launchers", false, "report LAUNCHER POSTURE (headless/process-isolated contract, #2174) instead of task health")
+	xmlDir := fs.String("xml-dir", "", "audit the versioned task definitions in this directory (implies --launchers; works off-Windows)")
+	repoRootDir := fs.String("repo-root", "", "repo root used to decide whether a launched script is in-tree (default: the enclosing checkout)")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
+	filterSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "filter" {
+			filterSet = true
+		}
+	})
 
 	var filter *regexp.Regexp
 	if !*all {
@@ -394,6 +403,32 @@ func runSchedScan(stdout, stderr io.Writer, argv []string) int {
 			return 2
 		}
 		filter = re
+	}
+	root := strings.TrimSpace(*repoRootDir)
+	if root == "" {
+		root = repoRoot()
+	}
+
+	// --xml-dir audits the repo-owned task DEFINITIONS (tools/scheduled-tasks/)
+	// rather than the live Task Scheduler, which is what lets the launcher-posture
+	// gate run in CI on any OS. A static definition carries no run history, so it
+	// feeds the launcher report only — reporting health from a LastTaskResult nobody
+	// ever recorded would be exactly the trusted zero schedscan exists to refuse.
+	// The Fak*/Fleet*/User* name filter is dropped here unless the caller asked for
+	// one explicitly: everything in the capture directory is repo-owned by
+	// construction, so prefix-filtering it would silently drop rows from a report
+	// whose whole job is to be exhaustive.
+	if *xmlDir != "" {
+		if !filterSet {
+			filter = nil
+		}
+		rows, err := loadSchedTaskXMLDir(*xmlDir)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak schedscan: --xml-dir: %v\n", err)
+			return 2
+		}
+		doc := buildSchedLauncherDoc(rows, filter, root, *xmlDir, time.Now().UTC().Format(time.RFC3339), false)
+		return emitSchedLauncherDoc(stdout, stderr, doc, *jsonOut, *strict)
 	}
 
 	var raw, source string
@@ -431,6 +466,11 @@ func runSchedScan(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak schedscan: parse task JSON: %v\n", err)
 		}
 		return 1
+	}
+
+	if *launchers {
+		doc := buildSchedLauncherDoc(rows, filter, root, source, time.Now().UTC().Format(time.RFC3339), true)
+		return emitSchedLauncherDoc(stdout, stderr, doc, *jsonOut, *strict)
 	}
 
 	doc := buildSchedScanDoc(rows, filter, source, time.Now().UTC().Format(time.RFC3339))
