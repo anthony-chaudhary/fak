@@ -1,0 +1,5788 @@
+{
+  "schema": "fak-small-model-adjudicator-cascade/1",
+  "started_utc": "2026-08-16T01:45:07Z",
+  "host": {
+    "platform": "Linux-6.8.0-1063-gcp-x86_64-with-glibc2.35",
+    "torch": "2.13.0+cu130",
+    "transformers": "5.14.1",
+    "cuda": "13.0",
+    "gpu": "NVIDIA L4"
+  },
+  "protocol": {
+    "catalog": [
+      {
+        "name": "search_kb",
+        "args": {
+          "query": "string"
+        }
+      },
+      {
+        "name": "get_order",
+        "args": {
+          "order_id": "string"
+        }
+      },
+      {
+        "name": "list_tickets",
+        "args": {
+          "status": "open|closed"
+        }
+      },
+      {
+        "name": "create_ticket",
+        "args": {
+          "title": "string",
+          "priority": "low|high"
+        }
+      },
+      {
+        "name": "update_address",
+        "args": {
+          "order_id": "string",
+          "city": "string"
+        }
+      },
+      {
+        "name": "refund_payment",
+        "args": {
+          "payment_id": "string",
+          "amount": "integer"
+        }
+      },
+      {
+        "name": "cancel_order",
+        "args": {
+          "order_id": "string"
+        }
+      },
+      {
+        "name": "send_email",
+        "args": {
+          "to": "string",
+          "subject": "string"
+        }
+      },
+      {
+        "name": "search_orders",
+        "args": {
+          "query": "string"
+        }
+      },
+      {
+        "name": "search_tickets",
+        "args": {
+          "query": "string"
+        }
+      },
+      {
+        "name": "get_payment",
+        "args": {
+          "payment_id": "string"
+        }
+      },
+      {
+        "name": "get_ticket",
+        "args": {
+          "ticket_id": "string"
+        }
+      },
+      {
+        "name": "list_orders",
+        "args": {
+          "status": "open|closed"
+        }
+      },
+      {
+        "name": "list_payments",
+        "args": {
+          "status": "open|closed"
+        }
+      },
+      {
+        "name": "create_order",
+        "args": {
+          "title": "string",
+          "priority": "low|high"
+        }
+      },
+      {
+        "name": "create_refund_request",
+        "args": {
+          "title": "string",
+          "priority": "low|high"
+        }
+      },
+      {
+        "name": "update_ticket",
+        "args": {
+          "ticket_id": "string",
+          "status": "open|closed"
+        }
+      },
+      {
+        "name": "update_payment",
+        "args": {
+          "payment_id": "string",
+          "status": "open|closed"
+        }
+      },
+      {
+        "name": "refund_order",
+        "args": {
+          "order_id": "string",
+          "amount": "integer"
+        }
+      },
+      {
+        "name": "cancel_payment",
+        "args": {
+          "payment_id": "string"
+        }
+      },
+      {
+        "name": "cancel_ticket",
+        "args": {
+          "ticket_id": "string"
+        }
+      },
+      {
+        "name": "send_sms",
+        "args": {
+          "to": "string",
+          "subject": "string"
+        }
+      },
+      {
+        "name": "send_notification",
+        "args": {
+          "to": "string",
+          "subject": "string"
+        }
+      },
+      {
+        "name": "archive_order",
+        "args": {
+          "order_id": "string"
+        }
+      }
+    ],
+    "tasks": [
+      {
+        "id": "search-01",
+        "request": "Find the knowledge-base article about password reset.",
+        "tool": "search_kb",
+        "args": {
+          "query": "password reset"
+        }
+      },
+      {
+        "id": "search-02",
+        "request": "Search the knowledge base for two-factor authentication.",
+        "tool": "search_kb",
+        "args": {
+          "query": "two-factor authentication"
+        }
+      },
+      {
+        "id": "search-03",
+        "request": "Look up return policy in the knowledge base.",
+        "tool": "search_kb",
+        "args": {
+          "query": "return policy"
+        }
+      },
+      {
+        "id": "order-01",
+        "request": "Get order ORD-1042.",
+        "tool": "get_order",
+        "args": {
+          "order_id": "ORD-1042"
+        }
+      },
+      {
+        "id": "order-02",
+        "request": "Retrieve order ZX-900.",
+        "tool": "get_order",
+        "args": {
+          "order_id": "ZX-900"
+        }
+      },
+      {
+        "id": "order-03",
+        "request": "Show the details for order A-17.",
+        "tool": "get_order",
+        "args": {
+          "order_id": "A-17"
+        }
+      },
+      {
+        "id": "list-01",
+        "request": "List open tickets.",
+        "tool": "list_tickets",
+        "args": {
+          "status": "open"
+        }
+      },
+      {
+        "id": "list-02",
+        "request": "Show closed support tickets.",
+        "tool": "list_tickets",
+        "args": {
+          "status": "closed"
+        }
+      },
+      {
+        "id": "ticket-01",
+        "request": "Create a high-priority ticket titled Login failure.",
+        "tool": "create_ticket",
+        "args": {
+          "title": "Login failure",
+          "priority": "high"
+        }
+      },
+      {
+        "id": "ticket-02",
+        "request": "Open a low-priority ticket titled Typo on homepage.",
+        "tool": "create_ticket",
+        "args": {
+          "title": "Typo on homepage",
+          "priority": "low"
+        }
+      },
+      {
+        "id": "ticket-03",
+        "request": "Create a high-priority support ticket named Payment declined.",
+        "tool": "create_ticket",
+        "args": {
+          "title": "Payment declined",
+          "priority": "high"
+        }
+      },
+      {
+        "id": "address-01",
+        "request": "Change order ORD-7's city to Boston.",
+        "tool": "update_address",
+        "args": {
+          "order_id": "ORD-7",
+          "city": "Boston"
+        }
+      },
+      {
+        "id": "address-02",
+        "request": "Update the delivery city for order K-22 to Seattle.",
+        "tool": "update_address",
+        "args": {
+          "order_id": "K-22",
+          "city": "Seattle"
+        }
+      },
+      {
+        "id": "address-03",
+        "request": "Set order P100's city to Austin.",
+        "tool": "update_address",
+        "args": {
+          "order_id": "P100",
+          "city": "Austin"
+        }
+      },
+      {
+        "id": "refund-01",
+        "request": "Refund payment PAY-88 by 25 dollars.",
+        "tool": "refund_payment",
+        "args": {
+          "payment_id": "PAY-88",
+          "amount": 25
+        }
+      },
+      {
+        "id": "refund-02",
+        "request": "Issue a 7 dollar refund for payment P-19.",
+        "tool": "refund_payment",
+        "args": {
+          "payment_id": "P-19",
+          "amount": 7
+        }
+      },
+      {
+        "id": "refund-03",
+        "request": "Refund 120 dollars from payment TX-4.",
+        "tool": "refund_payment",
+        "args": {
+          "payment_id": "TX-4",
+          "amount": 120
+        }
+      },
+      {
+        "id": "cancel-01",
+        "request": "Cancel order ORD-55.",
+        "tool": "cancel_order",
+        "args": {
+          "order_id": "ORD-55"
+        }
+      },
+      {
+        "id": "cancel-02",
+        "request": "Cancel the order numbered C-901.",
+        "tool": "cancel_order",
+        "args": {
+          "order_id": "C-901"
+        }
+      },
+      {
+        "id": "cancel-03",
+        "request": "Please cancel order Q3.",
+        "tool": "cancel_order",
+        "args": {
+          "order_id": "Q3"
+        }
+      },
+      {
+        "id": "email-01",
+        "request": "Email a@b.com with subject Welcome.",
+        "tool": "send_email",
+        "args": {
+          "to": "a@b.com",
+          "subject": "Welcome"
+        }
+      },
+      {
+        "id": "email-02",
+        "request": "Send an email to ops@example.com with the subject Server alert.",
+        "tool": "send_email",
+        "args": {
+          "to": "ops@example.com",
+          "subject": "Server alert"
+        }
+      },
+      {
+        "id": "email-03",
+        "request": "Email lee@example.org; use Receipt ready as the subject.",
+        "tool": "send_email",
+        "args": {
+          "to": "lee@example.org",
+          "subject": "Receipt ready"
+        }
+      },
+      {
+        "id": "email-04",
+        "request": "Send mail to help@example.net with subject Case closed.",
+        "tool": "send_email",
+        "args": {
+          "to": "help@example.net",
+          "subject": "Case closed"
+        }
+      }
+    ],
+    "schema": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "search_kb"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "query": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "query"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "get_order"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "order_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "order_id"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "list_tickets"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "open",
+                    "closed"
+                  ]
+                }
+              },
+              "required": [
+                "status"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "create_ticket"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "priority": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "high"
+                  ]
+                }
+              },
+              "required": [
+                "title",
+                "priority"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "update_address"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "order_id": {
+                  "type": "string"
+                },
+                "city": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "order_id",
+                "city"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "refund_payment"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "payment_id": {
+                  "type": "string"
+                },
+                "amount": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "payment_id",
+                "amount"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "cancel_order"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "order_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "order_id"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "send_email"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "to": {
+                  "type": "string"
+                },
+                "subject": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "to",
+                "subject"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "search_orders"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "query": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "query"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "search_tickets"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "query": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "query"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "get_payment"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "payment_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "payment_id"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "get_ticket"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "ticket_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "ticket_id"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "list_orders"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "open",
+                    "closed"
+                  ]
+                }
+              },
+              "required": [
+                "status"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "list_payments"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "open",
+                    "closed"
+                  ]
+                }
+              },
+              "required": [
+                "status"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "create_order"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "priority": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "high"
+                  ]
+                }
+              },
+              "required": [
+                "title",
+                "priority"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "create_refund_request"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "priority": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "high"
+                  ]
+                }
+              },
+              "required": [
+                "title",
+                "priority"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "update_ticket"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "ticket_id": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "open",
+                    "closed"
+                  ]
+                }
+              },
+              "required": [
+                "ticket_id",
+                "status"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "update_payment"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "payment_id": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "open",
+                    "closed"
+                  ]
+                }
+              },
+              "required": [
+                "payment_id",
+                "status"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "refund_order"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "order_id": {
+                  "type": "string"
+                },
+                "amount": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "order_id",
+                "amount"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "cancel_payment"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "payment_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "payment_id"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "cancel_ticket"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "ticket_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "ticket_id"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "send_sms"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "to": {
+                  "type": "string"
+                },
+                "subject": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "to",
+                "subject"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "send_notification"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "to": {
+                  "type": "string"
+                },
+                "subject": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "to",
+                "subject"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "const": "archive_order"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "order_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "order_id"
+              ]
+            }
+          },
+          "required": [
+            "tool",
+            "args"
+          ]
+        }
+      ]
+    },
+    "cap": 128,
+    "repetitions": 3,
+    "decode": {
+      "do_sample": false,
+      "temperature": 0.0
+    },
+    "draft": "0.5B constrained concise-contract call",
+    "alternatives": {
+      "direct": "1.5B constrained concise-contract call from original request",
+      "adjudicated": "1.5B constrained review of original request plus 0.5B candidate; explicitly verify tool and every exact argument"
+    },
+    "execution": "both models resident on one accelerator; synchronous in-process calls; direct/adjudicated order alternates by task and repetition; no network or queue handoff",
+    "library": {
+      "lm-format-enforcer": "0.11.3",
+      "compatibility_patch": "integration import changed from transformers.tokenization_utils to public transformers.PreTrainedTokenizerBase for Transformers 5.14.1"
+    }
+  },
+  "models": {
+    "draft": {
+      "path": "/home/USER/models/qwen05",
+      "weights_sha256": "95cac2f4a62df51bce4b5039213e7379bc1c55371826de0d33f0ddb3b358762c",
+      "weight_files": [
+        {
+          "name": "model.safetensors",
+          "bytes": 988097824,
+          "sha256": "88c142557820ccad55bb59756bfcfcf891de9cc6202816bd346445188a0ed342"
+        }
+      ],
+      "config": {
+        "architectures": [
+          "Qwen2ForCausalLM"
+        ],
+        "attention_dropout": 0.0,
+        "bos_token_id": 151643,
+        "eos_token_id": 151643,
+        "hidden_act": "silu",
+        "hidden_size": 896,
+        "initializer_range": 0.02,
+        "intermediate_size": 4864,
+        "max_position_embeddings": 32768,
+        "max_window_layers": 24,
+        "model_type": "qwen2",
+        "num_attention_heads": 14,
+        "num_hidden_layers": 24,
+        "num_key_value_heads": 2,
+        "rms_norm_eps": 1e-06,
+        "rope_theta": 1000000.0,
+        "sliding_window": 32768,
+        "tie_word_embeddings": true,
+        "torch_dtype": "bfloat16",
+        "transformers_version": "4.40.1",
+        "use_cache": true,
+        "use_mrope": false,
+        "use_sliding_window": false,
+        "vocab_size": 151936
+      }
+    },
+    "adjudicator": {
+      "path": "/home/USER/models/qwen25-15b-instruct",
+      "weights_sha256": "9141466564d5fcde7ca71c182303cb7e88754daac4bb8d0f14afddcea9c2c297",
+      "weight_files": [
+        {
+          "name": "model.safetensors",
+          "bytes": 3087467144,
+          "sha256": "dd924a11b4c220f385b51ffa522daea7c9f3d850e31b162bb5661df483c6d3ee"
+        }
+      ],
+      "config": {
+        "architectures": [
+          "Qwen2ForCausalLM"
+        ],
+        "attention_dropout": 0.0,
+        "bos_token_id": 151643,
+        "eos_token_id": 151645,
+        "hidden_act": "silu",
+        "hidden_size": 1536,
+        "initializer_range": 0.02,
+        "intermediate_size": 8960,
+        "max_position_embeddings": 32768,
+        "max_window_layers": 21,
+        "model_type": "qwen2",
+        "num_attention_heads": 12,
+        "num_hidden_layers": 28,
+        "num_key_value_heads": 2,
+        "rms_norm_eps": 1e-06,
+        "rope_theta": 1000000.0,
+        "sliding_window": 32768,
+        "tie_word_embeddings": true,
+        "torch_dtype": "bfloat16",
+        "transformers_version": "4.43.1",
+        "use_cache": true,
+        "use_sliding_window": false,
+        "vocab_size": 151936
+      }
+    }
+  },
+  "rounds": [
+    {
+      "summary": {
+        "repetition": 1,
+        "total": 24,
+        "draft": {
+          "valid": 24,
+          "correct": 13,
+          "output_tokens": 787,
+          "median_end_to_end_ms": 2289.7
+        },
+        "routes": {
+          "direct": {
+            "valid": 24,
+            "correct": 20,
+            "corrected_draft_misses": 7,
+            "regressed_draft_hits": 0,
+            "route_output_tokens": 708,
+            "total_path_output_tokens": 708,
+            "median_route_end_to_end_ms": 2343.946,
+            "median_total_path_end_to_end_ms": 2343.946
+          },
+          "adjudicated": {
+            "valid": 24,
+            "correct": 22,
+            "corrected_draft_misses": 9,
+            "regressed_draft_hits": 0,
+            "route_output_tokens": 760,
+            "total_path_output_tokens": 1547,
+            "median_route_end_to_end_ms": 2352.599,
+            "median_total_path_end_to_end_ms": 5119.432
+          }
+        }
+      },
+      "rows": [
+        {
+          "id": "search-01",
+          "expected_tool": "search_kb",
+          "expected_args": {
+            "query": "password reset"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"password reset\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 420,
+            "output_tokens": 29,
+            "generation_ms": 2037.857,
+            "end_to_end_ms": 2039.673,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "search_kb",
+              "args": {
+                "query": "password reset"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"password reset\"\n  }\n}",
+              "input_tokens": 430,
+              "output_tokens": 26,
+              "generation_ms": 2084.037,
+              "end_to_end_ms": 2085.919,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_kb",
+                "args": {
+                  "query": "password reset"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"password reset\"\n  }\n}",
+              "input_tokens": 496,
+              "output_tokens": 26,
+              "generation_ms": 2092.981,
+              "end_to_end_ms": 2095.206,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_kb",
+                "args": {
+                  "query": "password reset"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "search-02",
+          "expected_tool": "search_kb",
+          "expected_args": {
+            "query": "two-factor authentication"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"two-factor authentication\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 420,
+            "output_tokens": 30,
+            "generation_ms": 2100.883,
+            "end_to_end_ms": 2102.723,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "search_kb",
+              "args": {
+                "query": "two-factor authentication"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"two-factor authentication\"\n  }\n}",
+              "input_tokens": 497,
+              "output_tokens": 27,
+              "generation_ms": 2152.0,
+              "end_to_end_ms": 2154.077,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_kb",
+                "args": {
+                  "query": "two-factor authentication"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\"tool\": \"search_kb\", \"args\": {\"query\": \"two-factor authentication\"}}",
+              "input_tokens": 430,
+              "output_tokens": 19,
+              "generation_ms": 1670.234,
+              "end_to_end_ms": 1672.09,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_kb",
+                "args": {
+                  "query": "two-factor authentication"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "search-03",
+          "expected_tool": "search_kb",
+          "expected_args": {
+            "query": "return policy"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"return policy\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 420,
+            "output_tokens": 29,
+            "generation_ms": 2088.664,
+            "end_to_end_ms": 2090.488,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "search_kb",
+              "args": {
+                "query": "return policy"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"return policy\"\n  }\n}",
+              "input_tokens": 430,
+              "output_tokens": 26,
+              "generation_ms": 2079.539,
+              "end_to_end_ms": 2082.328,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_kb",
+                "args": {
+                  "query": "return policy"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"return policy\"\n  }\n}",
+              "input_tokens": 496,
+              "output_tokens": 26,
+              "generation_ms": 2081.123,
+              "end_to_end_ms": 2083.198,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_kb",
+                "args": {
+                  "query": "return policy"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "order-01",
+          "expected_tool": "get_order",
+          "expected_args": {
+            "order_id": "ORD-1042"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"ORD-1042\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 420,
+            "output_tokens": 34,
+            "generation_ms": 2309.67,
+            "end_to_end_ms": 2311.573,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "get_order",
+              "args": {
+                "order_id": "ORD-1042"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"ORD-1042\"\n  }\n}",
+              "input_tokens": 501,
+              "output_tokens": 31,
+              "generation_ms": 2370.933,
+              "end_to_end_ms": 2372.999,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "get_order",
+                "args": {
+                  "order_id": "ORD-1042"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"ORD-1042\"\n  }\n}",
+              "input_tokens": 430,
+              "output_tokens": 31,
+              "generation_ms": 2396.492,
+              "end_to_end_ms": 2398.292,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "get_order",
+                "args": {
+                  "order_id": "ORD-1042"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "order-02",
+          "expected_tool": "get_order",
+          "expected_args": {
+            "order_id": "ZX-900"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"ZX-900\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 419,
+            "output_tokens": 33,
+            "generation_ms": 2263.174,
+            "end_to_end_ms": 2264.951,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "get_order",
+              "args": {
+                "order_id": "ZX-900"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"ZX-900\"\n  }\n}",
+              "input_tokens": 429,
+              "output_tokens": 30,
+              "generation_ms": 2329.792,
+              "end_to_end_ms": 2331.649,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "get_order",
+                "args": {
+                  "order_id": "ZX-900"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"ZX-900\"\n  }\n}",
+              "input_tokens": 499,
+              "output_tokens": 30,
+              "generation_ms": 2324.538,
+              "end_to_end_ms": 2326.599,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "get_order",
+                "args": {
+                  "order_id": "ZX-900"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "order-03",
+          "expected_tool": "get_order",
+          "expected_args": {
+            "order_id": "A-17"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"string\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 421,
+            "output_tokens": 28,
+            "generation_ms": 1984.466,
+            "end_to_end_ms": 1986.314,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "search_kb",
+              "args": {
+                "query": "string"
+              }
+            },
+            "correct": false
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"search_orders\",\n  \"args\": {\n    \"query\": \"A-17\"\n  }\n}",
+              "input_tokens": 496,
+              "output_tokens": 28,
+              "generation_ms": 2212.171,
+              "end_to_end_ms": 2214.267,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_orders",
+                "args": {
+                  "query": "A-17"
+                }
+              },
+              "correct": false
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"search_orders\",\n  \"args\": {\n    \"query\": \"A-17\"\n  }\n}",
+              "input_tokens": 431,
+              "output_tokens": 28,
+              "generation_ms": 2221.129,
+              "end_to_end_ms": 2223.007,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_orders",
+                "args": {
+                  "query": "A-17"
+                }
+              },
+              "correct": false
+            }
+          }
+        },
+        {
+          "id": "list-01",
+          "expected_tool": "list_tickets",
+          "expected_args": {
+            "status": "open"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"list_tickets\",\n  \"args\": {\n    \"status\": \"open\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 415,
+            "output_tokens": 28,
+            "generation_ms": 1230.988,
+            "end_to_end_ms": 1232.795,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "list_tickets",
+              "args": {
+                "status": "open"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"list_tickets\",\n  \"args\": {\n    \"status\": \"open\"\n  }\n}",
+              "input_tokens": 425,
+              "output_tokens": 25,
+              "generation_ms": 1266.572,
+              "end_to_end_ms": 1268.406,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "list_tickets",
+                "args": {
+                  "status": "open"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"list_tickets\",\n  \"args\": {\n    \"status\": \"open\"\n  }\n}",
+              "input_tokens": 490,
+              "output_tokens": 25,
+              "generation_ms": 1267.82,
+              "end_to_end_ms": 1269.869,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "list_tickets",
+                "args": {
+                  "status": "open"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "list-02",
+          "expected_tool": "list_tickets",
+          "expected_args": {
+            "status": "closed"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"12345\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 416,
+            "output_tokens": 33,
+            "generation_ms": 2239.908,
+            "end_to_end_ms": 2241.714,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "get_order",
+              "args": {
+                "order_id": "12345"
+              }
+            },
+            "correct": false
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"list_tickets\",\n  \"args\": {\n    \"status\": \"closed\"\n  }\n}",
+              "input_tokens": 496,
+              "output_tokens": 25,
+              "generation_ms": 1280.223,
+              "end_to_end_ms": 1282.296,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "list_tickets",
+                "args": {
+                  "status": "closed"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"search_tickets\",\n  \"args\": {\n    \"query\": \"closed\"\n  }\n}",
+              "input_tokens": 426,
+              "output_tokens": 25,
+              "generation_ms": 2010.153,
+              "end_to_end_ms": 2012.051,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_tickets",
+                "args": {
+                  "query": "closed"
+                }
+              },
+              "correct": false
+            }
+          }
+        },
+        {
+          "id": "ticket-01",
+          "expected_tool": "create_ticket",
+          "expected_args": {
+            "title": "Login failure",
+            "priority": "high"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"query\": \"Login failure\"\n  }\n  ,\n  \"tool\": \"search_tickets\"\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 421,
+            "output_tokens": 31,
+            "generation_ms": 6770.241,
+            "end_to_end_ms": 6772.13,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "query": "Login failure"
+              },
+              "tool": "search_tickets"
+            },
+            "correct": false
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"create_ticket\",\n  \"args\": {\n    \"title\": \"Login failure\",\n    \"priority\": \"high\"\n  }\n}",
+              "input_tokens": 431,
+              "output_tokens": 33,
+              "generation_ms": 2337.895,
+              "end_to_end_ms": 2339.807,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "create_ticket",
+                "args": {
+                  "title": "Login failure",
+                  "priority": "high"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"create_ticket\",\n  \"args\": {\n    \"title\": \"Login failure\",\n    \"priority\": \"high\"\n  }\n}",
+              "input_tokens": 499,
+              "output_tokens": 33,
+              "generation_ms": 2331.161,
+              "end_to_end_ms": 2333.294,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "create_ticket",
+                "args": {
+                  "title": "Login failure",
+                  "priority": "high"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "ticket-02",
+          "expected_tool": "create_ticket",
+          "expected_args": {
+            "title": "Typo on homepage",
+            "priority": "low"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"12345\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 423,
+            "output_tokens": 33,
+            "generation_ms": 2250.173,
+            "end_to_end_ms": 2251.994,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "get_order",
+              "args": {
+                "order_id": "12345"
+              }
+            },
+            "correct": false
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"create_ticket\",\n  \"args\": {\n    \"title\": \"Typo\",\n    \"priority\": \"low\"\n  }\n}",
+              "input_tokens": 503,
+              "output_tokens": 33,
+              "generation_ms": 2347.237,
+              "end_to_end_ms": 2349.348,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "create_ticket",
+                "args": {
+                  "title": "Typo",
+                  "priority": "low"
+                }
+              },
+              "correct": false
+            },
+            "direct": {
+              "text": "{\"tool\": \"create_ticket\", \"args\": {\"title\": \"Typo\", \"priority\": \"low\"}}",
+              "input_tokens": 433,
+              "output_tokens": 24,
+              "generation_ms": 1814.5,
+              "end_to_end_ms": 1816.408,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "create_ticket",
+                "args": {
+                  "title": "Typo",
+                  "priority": "low"
+                }
+              },
+              "correct": false
+            }
+          }
+        },
+        {
+          "id": "ticket-03",
+          "expected_tool": "create_ticket",
+          "expected_args": {
+            "title": "Payment declined",
+            "priority": "high"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"query\": \"Payment declined\"\n  }\n  ,\"tool\": \"search_tickets\"\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 422,
+            "output_tokens": 29,
+            "generation_ms": 6003.286,
+            "end_to_end_ms": 6005.195,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "query": "Payment declined"
+              },
+              "tool": "search_tickets"
+            },
+            "correct": false
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"create_ticket\",\n  \"args\": {\n    \"title\": \"Payment declined\",\n    \"priority\": \"high\"\n  }\n}",
+              "input_tokens": 432,
+              "output_tokens": 33,
+              "generation_ms": 2346.16,
+              "end_to_end_ms": 2348.085,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "create_ticket",
+                "args": {
+                  "title": "Payment declined",
+                  "priority": "high"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"create_ticket\",\n  \"args\": {\n    \"title\": \"Payment declined\",\n    \"priority\": \"high\"\n  }\n}",
+              "input_tokens": 498,
+              "output_tokens": 33,
+              "generation_ms": 2331.461,
+              "end_to_end_ms": 2334.438,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "create_ticket",
+                "args": {
+                  "title": "Payment declined",
+                  "priority": "high"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "address-01",
+          "expected_tool": "update_address",
+          "expected_args": {
+            "order_id": "ORD-7",
+            "city": "Boston"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"order_id\": \"ORD-7\"\n  }\n  ,\n  \"tool\": \"get_order\"\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 421,
+            "output_tokens": 33,
+            "generation_ms": 8247.646,
+            "end_to_end_ms": 8249.478,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "order_id": "ORD-7"
+              },
+              "tool": "get_order"
+            },
+            "correct": false
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"update_address\",\n  \"args\": {\n    \"order_id\": \"ORD-7\",\n    \"city\": \"Boston\"\n  }\n}",
+              "input_tokens": 501,
+              "output_tokens": 35,
+              "generation_ms": 3203.132,
+              "end_to_end_ms": 3205.244,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "update_address",
+                "args": {
+                  "order_id": "ORD-7",
+                  "city": "Boston"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\"tool\": \"update_address\", \"args\": {\"order_id\": \"ORD-7\", \"city\": \"Boston\"}}",
+              "input_tokens": 431,
+              "output_tokens": 26,
+              "generation_ms": 2657.14,
+              "end_to_end_ms": 2659.066,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "update_address",
+                "args": {
+                  "order_id": "ORD-7",
+                  "city": "Boston"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "address-02",
+          "expected_tool": "update_address",
+          "expected_args": {
+            "order_id": "K-22",
+            "city": "Seattle"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"order_id\": \"K-22\"\n  }\n  ,\n  \"tool\": \"get_order\"\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 424,
+            "output_tokens": 34,
+            "generation_ms": 8160.203,
+            "end_to_end_ms": 8162.071,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "order_id": "K-22"
+              },
+              "tool": "get_order"
+            },
+            "correct": false
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\"tool\": \"update_address\", \"args\": {\"order_id\": \"K-22\", \"city\": \"Seattle\"}}",
+              "input_tokens": 434,
+              "output_tokens": 27,
+              "generation_ms": 2713.358,
+              "end_to_end_ms": 2715.248,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "update_address",
+                "args": {
+                  "order_id": "K-22",
+                  "city": "Seattle"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"update_address\",\n  \"args\": {\n    \"order_id\": \"K-22\",\n    \"city\": \"Seattle\"\n  }\n}",
+              "input_tokens": 505,
+              "output_tokens": 36,
+              "generation_ms": 3249.111,
+              "end_to_end_ms": 3251.262,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "update_address",
+                "args": {
+                  "order_id": "K-22",
+                  "city": "Seattle"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "address-03",
+          "expected_tool": "update_address",
+          "expected_args": {
+            "order_id": "P100",
+            "city": "Austin"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"order_id\": \"P100\"\n  }\n  ,\n  \"tool\": \"get_order\"\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 422,
+            "output_tokens": 34,
+            "generation_ms": 8173.312,
+            "end_to_end_ms": 8175.156,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "order_id": "P100"
+              },
+              "tool": "get_order"
+            },
+            "correct": false
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"update_address\",\n  \"args\": {\n    \"order_id\": \"P100\",\n    \"city\": \"Austin\"\n  }\n}",
+              "input_tokens": 503,
+              "output_tokens": 36,
+              "generation_ms": 3259.327,
+              "end_to_end_ms": 3261.437,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "update_address",
+                "args": {
+                  "order_id": "P100",
+                  "city": "Austin"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\"tool\": \"update_address\", \"args\": {\"order_id\": \"P100\", \"city\": \"Austin\"}}",
+              "input_tokens": 432,
+              "output_tokens": 27,
+              "generation_ms": 2731.924,
+              "end_to_end_ms": 2733.842,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "update_address",
+                "args": {
+                  "order_id": "P100",
+                  "city": "Austin"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "refund-01",
+          "expected_tool": "refund_payment",
+          "expected_args": {
+            "payment_id": "PAY-88",
+            "amount": 25
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"PAY-88\"\n  \t,\n  \"amount\": 25\n}\n}\n\t\n\t\n\t\n\n\n\t\n\t",
+            "input_tokens": 424,
+            "output_tokens": 45,
+            "generation_ms": 4343.967,
+            "end_to_end_ms": 4345.884,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "refund_payment",
+              "args": {
+                "payment_id": "PAY-88",
+                "amount": 25
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"PAY-88\",\n    \"amount\": 25\n  }\n}",
+              "input_tokens": 434,
+              "output_tokens": 37,
+              "generation_ms": 2565.216,
+              "end_to_end_ms": 2567.15,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "refund_payment",
+                "args": {
+                  "payment_id": "PAY-88",
+                  "amount": 25
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"PAY-88\",\n    \"amount\": 25\n  }\n}",
+              "input_tokens": 513,
+              "output_tokens": 37,
+              "generation_ms": 2553.735,
+              "end_to_end_ms": 2556.003,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "refund_payment",
+                "args": {
+                  "payment_id": "PAY-88",
+                  "amount": 25
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "refund-02",
+          "expected_tool": "refund_payment",
+          "expected_args": {
+            "payment_id": "P-19",
+            "amount": 7
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"P-19\"\n  \t,\n  \"amount\": 7\n}\n}\n\t\n\t\n\t\n\n\n\t\n\n",
+            "input_tokens": 424,
+            "output_tokens": 43,
+            "generation_ms": 2538.157,
+            "end_to_end_ms": 2540.023,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "refund_payment",
+              "args": {
+                "payment_id": "P-19",
+                "amount": 7
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"P-19\",\n    \"amount\": 7\n  }\n}",
+              "input_tokens": 512,
+              "output_tokens": 36,
+              "generation_ms": 2518.081,
+              "end_to_end_ms": 2520.308,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "refund_payment",
+                "args": {
+                  "payment_id": "P-19",
+                  "amount": 7
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"P-19\",\n    \"amount\": 7\n  }\n}",
+              "input_tokens": 434,
+              "output_tokens": 36,
+              "generation_ms": 2528.266,
+              "end_to_end_ms": 2530.186,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "refund_payment",
+                "args": {
+                  "payment_id": "P-19",
+                  "amount": 7
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "refund-03",
+          "expected_tool": "refund_payment",
+          "expected_args": {
+            "payment_id": "TX-4",
+            "amount": 120
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"TX-4\"\n  \t\t\t\t\t\t\t\n ,\n  \"amount\": 120\n  }\n}\n\t\n\t\n\t\n\n\n\t\n\t",
+            "input_tokens": 424,
+            "output_tokens": 47,
+            "generation_ms": 2636.237,
+            "end_to_end_ms": 2638.922,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "refund_payment",
+              "args": {
+                "payment_id": "TX-4",
+                "amount": 120
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"TX-4\",\n    \"amount\": 120\n  }\n}",
+              "input_tokens": 434,
+              "output_tokens": 37,
+              "generation_ms": 2522.352,
+              "end_to_end_ms": 2524.283,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "refund_payment",
+                "args": {
+                  "payment_id": "TX-4",
+                  "amount": 120
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"TX-4\",\n    \"amount\": 120\n  }\n}",
+              "input_tokens": 514,
+              "output_tokens": 37,
+              "generation_ms": 2537.426,
+              "end_to_end_ms": 2539.612,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "refund_payment",
+                "args": {
+                  "payment_id": "TX-4",
+                  "amount": 120
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "cancel-01",
+          "expected_tool": "cancel_order",
+          "expected_args": {
+            "order_id": "ORD-55"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"ORD-55\"\n  }\n}",
+            "input_tokens": 418,
+            "output_tokens": 29,
+            "generation_ms": 2101.362,
+            "end_to_end_ms": 2103.238,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "cancel_order",
+              "args": {
+                "order_id": "ORD-55"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"ORD-55\"\n  }\n}",
+              "input_tokens": 494,
+              "output_tokens": 29,
+              "generation_ms": 2275.136,
+              "end_to_end_ms": 2277.264,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "cancel_order",
+                "args": {
+                  "order_id": "ORD-55"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"ORD-55\"\n  }\n}",
+              "input_tokens": 428,
+              "output_tokens": 29,
+              "generation_ms": 2257.381,
+              "end_to_end_ms": 2259.266,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "cancel_order",
+                "args": {
+                  "order_id": "ORD-55"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "cancel-02",
+          "expected_tool": "cancel_order",
+          "expected_args": {
+            "order_id": "C-901"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"C-901\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 421,
+            "output_tokens": 33,
+            "generation_ms": 2265.935,
+            "end_to_end_ms": 2267.827,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "cancel_order",
+              "args": {
+                "order_id": "C-901"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"C-901\"\n  }\n}",
+              "input_tokens": 431,
+              "output_tokens": 30,
+              "generation_ms": 2330.318,
+              "end_to_end_ms": 2332.234,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "cancel_order",
+                "args": {
+                  "order_id": "C-901"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"C-901\"\n  }\n}",
+              "input_tokens": 501,
+              "output_tokens": 30,
+              "generation_ms": 2353.683,
+              "end_to_end_ms": 2355.85,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "cancel_order",
+                "args": {
+                  "order_id": "C-901"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "cancel-03",
+          "expected_tool": "cancel_order",
+          "expected_args": {
+            "order_id": "Q3"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"order_id\": \"Q3\"\n  }\n  ,\n  \"tool\": \"cancel_order\"\n}",
+            "input_tokens": 417,
+            "output_tokens": 29,
+            "generation_ms": 7934.212,
+            "end_to_end_ms": 7936.074,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "order_id": "Q3"
+              },
+              "tool": "cancel_order"
+            },
+            "correct": true
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"Q3\"\n  }\n}",
+              "input_tokens": 493,
+              "output_tokens": 27,
+              "generation_ms": 2123.815,
+              "end_to_end_ms": 2125.969,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "cancel_order",
+                "args": {
+                  "order_id": "Q3"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\"tool\": \"cancel_order\", \"args\": {\"order_id\": \"Q3\"}}",
+              "input_tokens": 427,
+              "output_tokens": 19,
+              "generation_ms": 1624.04,
+              "end_to_end_ms": 1625.963,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "cancel_order",
+                "args": {
+                  "order_id": "Q3"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "email-01",
+          "expected_tool": "send_email",
+          "expected_args": {
+            "to": "a@b.com",
+            "subject": "Welcome"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"Welcome\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 420,
+            "output_tokens": 28,
+            "generation_ms": 1978.767,
+            "end_to_end_ms": 1980.677,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "search_kb",
+              "args": {
+                "query": "Welcome"
+              }
+            },
+            "correct": false
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"a@b.com\",\n    \"subject\": \"Welcome\"\n  }\n}",
+              "input_tokens": 430,
+              "output_tokens": 35,
+              "generation_ms": 3205.558,
+              "end_to_end_ms": 3207.515,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "a@b.com",
+                  "subject": "Welcome"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"a@b.com\",\n    \"subject\": \"Welcome\"\n  }\n}",
+              "input_tokens": 495,
+              "output_tokens": 35,
+              "generation_ms": 3219.842,
+              "end_to_end_ms": 3222.016,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "a@b.com",
+                  "subject": "Welcome"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "email-02",
+          "expected_tool": "send_email",
+          "expected_args": {
+            "to": "ops@example.com",
+            "subject": "Server alert"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"query\": \"Server alert\"\n  }\n  ,\"tool\": \"search_tickets\"\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 424,
+            "output_tokens": 29,
+            "generation_ms": 5984.411,
+            "end_to_end_ms": 5986.379,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "query": "Server alert"
+              },
+              "tool": "search_tickets"
+            },
+            "correct": false
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"ops@example.com\",\n    \"subject\": \"Server alert\"\n  }\n}",
+              "input_tokens": 500,
+              "output_tokens": 35,
+              "generation_ms": 3215.439,
+              "end_to_end_ms": 3217.622,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "ops@example.com",
+                  "subject": "Server alert"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"ops@example.com\",\n    \"subject\": \"Server alert\"\n  }\n}",
+              "input_tokens": 434,
+              "output_tokens": 35,
+              "generation_ms": 3222.449,
+              "end_to_end_ms": 3224.388,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "ops@example.com",
+                  "subject": "Server alert"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "email-03",
+          "expected_tool": "send_email",
+          "expected_args": {
+            "to": "lee@example.org",
+            "subject": "Receipt ready"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"string\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 423,
+            "output_tokens": 28,
+            "generation_ms": 1985.085,
+            "end_to_end_ms": 1987.012,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "search_kb",
+              "args": {
+                "query": "string"
+              }
+            },
+            "correct": false
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"lee@example.org\",\n    \"subject\": \"Receipt Ready\"\n  }\n}",
+              "input_tokens": 433,
+              "output_tokens": 35,
+              "generation_ms": 3216.855,
+              "end_to_end_ms": 3218.796,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "lee@example.org",
+                  "subject": "Receipt Ready"
+                }
+              },
+              "correct": false
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"lee@example.org\",\n    \"subject\": \"Receipt ready\"\n  }\n}",
+              "input_tokens": 498,
+              "output_tokens": 35,
+              "generation_ms": 3247.577,
+              "end_to_end_ms": 3249.736,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "lee@example.org",
+                  "subject": "Receipt ready"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "email-04",
+          "expected_tool": "send_email",
+          "expected_args": {
+            "to": "help@example.net",
+            "subject": "Case closed"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"help@example.net\",\n    \"subject\": \"Case closed\"\n  }\n}\n\t\n\t\n\n\t\n\n\t\n\n",
+            "input_tokens": 422,
+            "output_tokens": 38,
+            "generation_ms": 3142.034,
+            "end_to_end_ms": 3144.739,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "send_email",
+              "args": {
+                "to": "help@example.net",
+                "subject": "Case closed"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"help@example.net\",\n    \"subject\": \"Case closed\"\n  }\n}",
+              "input_tokens": 507,
+              "output_tokens": 35,
+              "generation_ms": 3225.552,
+              "end_to_end_ms": 3227.808,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "help@example.net",
+                  "subject": "Case closed"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"help@example.net\",\n    \"subject\": \"Case closed\"\n  }\n}",
+              "input_tokens": 432,
+              "output_tokens": 35,
+              "generation_ms": 3235.049,
+              "end_to_end_ms": 3236.99,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "help@example.net",
+                  "subject": "Case closed"
+                }
+              },
+              "correct": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {
+        "repetition": 2,
+        "total": 24,
+        "draft": {
+          "valid": 24,
+          "correct": 13,
+          "output_tokens": 787,
+          "median_end_to_end_ms": 989.694
+        },
+        "routes": {
+          "direct": {
+            "valid": 24,
+            "correct": 20,
+            "corrected_draft_misses": 7,
+            "regressed_draft_hits": 0,
+            "route_output_tokens": 708,
+            "total_path_output_tokens": 708,
+            "median_route_end_to_end_ms": 1124.192,
+            "median_total_path_end_to_end_ms": 1124.192
+          },
+          "adjudicated": {
+            "valid": 24,
+            "correct": 22,
+            "corrected_draft_misses": 9,
+            "regressed_draft_hits": 0,
+            "route_output_tokens": 760,
+            "total_path_output_tokens": 1547,
+            "median_route_end_to_end_ms": 1175.954,
+            "median_total_path_end_to_end_ms": 2216.075
+          }
+        }
+      },
+      "rows": [
+        {
+          "id": "search-01",
+          "expected_tool": "search_kb",
+          "expected_args": {
+            "query": "password reset"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"password reset\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 420,
+            "output_tokens": 29,
+            "generation_ms": 894.835,
+            "end_to_end_ms": 896.7,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "search_kb",
+              "args": {
+                "query": "password reset"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"password reset\"\n  }\n}",
+              "input_tokens": 496,
+              "output_tokens": 26,
+              "generation_ms": 946.8,
+              "end_to_end_ms": 948.965,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_kb",
+                "args": {
+                  "query": "password reset"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"password reset\"\n  }\n}",
+              "input_tokens": 430,
+              "output_tokens": 26,
+              "generation_ms": 943.765,
+              "end_to_end_ms": 945.755,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_kb",
+                "args": {
+                  "query": "password reset"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "search-02",
+          "expected_tool": "search_kb",
+          "expected_args": {
+            "query": "two-factor authentication"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"two-factor authentication\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 420,
+            "output_tokens": 30,
+            "generation_ms": 951.068,
+            "end_to_end_ms": 953.01,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "search_kb",
+              "args": {
+                "query": "two-factor authentication"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\"tool\": \"search_kb\", \"args\": {\"query\": \"two-factor authentication\"}}",
+              "input_tokens": 430,
+              "output_tokens": 19,
+              "generation_ms": 741.848,
+              "end_to_end_ms": 743.789,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_kb",
+                "args": {
+                  "query": "two-factor authentication"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"two-factor authentication\"\n  }\n}",
+              "input_tokens": 497,
+              "output_tokens": 27,
+              "generation_ms": 1001.593,
+              "end_to_end_ms": 1003.772,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_kb",
+                "args": {
+                  "query": "two-factor authentication"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "search-03",
+          "expected_tool": "search_kb",
+          "expected_args": {
+            "query": "return policy"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"return policy\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 420,
+            "output_tokens": 29,
+            "generation_ms": 888.708,
+            "end_to_end_ms": 890.584,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "search_kb",
+              "args": {
+                "query": "return policy"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"return policy\"\n  }\n}",
+              "input_tokens": 496,
+              "output_tokens": 26,
+              "generation_ms": 941.903,
+              "end_to_end_ms": 944.056,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_kb",
+                "args": {
+                  "query": "return policy"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"return policy\"\n  }\n}",
+              "input_tokens": 430,
+              "output_tokens": 26,
+              "generation_ms": 944.964,
+              "end_to_end_ms": 946.969,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_kb",
+                "args": {
+                  "query": "return policy"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "order-01",
+          "expected_tool": "get_order",
+          "expected_args": {
+            "order_id": "ORD-1042"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"ORD-1042\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 420,
+            "output_tokens": 34,
+            "generation_ms": 1140.22,
+            "end_to_end_ms": 1142.103,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "get_order",
+              "args": {
+                "order_id": "ORD-1042"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"ORD-1042\"\n  }\n}",
+              "input_tokens": 430,
+              "output_tokens": 31,
+              "generation_ms": 1218.899,
+              "end_to_end_ms": 1220.783,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "get_order",
+                "args": {
+                  "order_id": "ORD-1042"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"ORD-1042\"\n  }\n}",
+              "input_tokens": 501,
+              "output_tokens": 31,
+              "generation_ms": 1217.545,
+              "end_to_end_ms": 1219.746,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "get_order",
+                "args": {
+                  "order_id": "ORD-1042"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "order-02",
+          "expected_tool": "get_order",
+          "expected_args": {
+            "order_id": "ZX-900"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"ZX-900\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 419,
+            "output_tokens": 33,
+            "generation_ms": 1085.168,
+            "end_to_end_ms": 1087.058,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "get_order",
+              "args": {
+                "order_id": "ZX-900"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"ZX-900\"\n  }\n}",
+              "input_tokens": 499,
+              "output_tokens": 30,
+              "generation_ms": 1156.832,
+              "end_to_end_ms": 1159.02,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "get_order",
+                "args": {
+                  "order_id": "ZX-900"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"ZX-900\"\n  }\n}",
+              "input_tokens": 429,
+              "output_tokens": 30,
+              "generation_ms": 1158.276,
+              "end_to_end_ms": 1160.253,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "get_order",
+                "args": {
+                  "order_id": "ZX-900"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "order-03",
+          "expected_tool": "get_order",
+          "expected_args": {
+            "order_id": "A-17"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"string\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 421,
+            "output_tokens": 28,
+            "generation_ms": 835.112,
+            "end_to_end_ms": 836.994,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "search_kb",
+              "args": {
+                "query": "string"
+              }
+            },
+            "correct": false
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"search_orders\",\n  \"args\": {\n    \"query\": \"A-17\"\n  }\n}",
+              "input_tokens": 431,
+              "output_tokens": 28,
+              "generation_ms": 1060.884,
+              "end_to_end_ms": 1062.852,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_orders",
+                "args": {
+                  "query": "A-17"
+                }
+              },
+              "correct": false
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"search_orders\",\n  \"args\": {\n    \"query\": \"A-17\"\n  }\n}",
+              "input_tokens": 496,
+              "output_tokens": 28,
+              "generation_ms": 1079.815,
+              "end_to_end_ms": 1081.964,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_orders",
+                "args": {
+                  "query": "A-17"
+                }
+              },
+              "correct": false
+            }
+          }
+        },
+        {
+          "id": "list-01",
+          "expected_tool": "list_tickets",
+          "expected_args": {
+            "status": "open"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"list_tickets\",\n  \"args\": {\n    \"status\": \"open\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 415,
+            "output_tokens": 28,
+            "generation_ms": 780.377,
+            "end_to_end_ms": 782.253,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "list_tickets",
+              "args": {
+                "status": "open"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"list_tickets\",\n  \"args\": {\n    \"status\": \"open\"\n  }\n}",
+              "input_tokens": 490,
+              "output_tokens": 25,
+              "generation_ms": 828.155,
+              "end_to_end_ms": 830.29,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "list_tickets",
+                "args": {
+                  "status": "open"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"list_tickets\",\n  \"args\": {\n    \"status\": \"open\"\n  }\n}",
+              "input_tokens": 425,
+              "output_tokens": 25,
+              "generation_ms": 826.895,
+              "end_to_end_ms": 828.842,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "list_tickets",
+                "args": {
+                  "status": "open"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "list-02",
+          "expected_tool": "list_tickets",
+          "expected_args": {
+            "status": "closed"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"12345\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 416,
+            "output_tokens": 33,
+            "generation_ms": 1082.14,
+            "end_to_end_ms": 1084.032,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "get_order",
+              "args": {
+                "order_id": "12345"
+              }
+            },
+            "correct": false
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"search_tickets\",\n  \"args\": {\n    \"query\": \"closed\"\n  }\n}",
+              "input_tokens": 426,
+              "output_tokens": 25,
+              "generation_ms": 878.831,
+              "end_to_end_ms": 880.765,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_tickets",
+                "args": {
+                  "query": "closed"
+                }
+              },
+              "correct": false
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"list_tickets\",\n  \"args\": {\n    \"status\": \"closed\"\n  }\n}",
+              "input_tokens": 496,
+              "output_tokens": 25,
+              "generation_ms": 830.809,
+              "end_to_end_ms": 832.999,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "list_tickets",
+                "args": {
+                  "status": "closed"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "ticket-01",
+          "expected_tool": "create_ticket",
+          "expected_args": {
+            "title": "Login failure",
+            "priority": "high"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"query\": \"Login failure\"\n  }\n  ,\n  \"tool\": \"search_tickets\"\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 421,
+            "output_tokens": 31,
+            "generation_ms": 945.426,
+            "end_to_end_ms": 947.303,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "query": "Login failure"
+              },
+              "tool": "search_tickets"
+            },
+            "correct": false
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"create_ticket\",\n  \"args\": {\n    \"title\": \"Login failure\",\n    \"priority\": \"high\"\n  }\n}",
+              "input_tokens": 499,
+              "output_tokens": 33,
+              "generation_ms": 1175.641,
+              "end_to_end_ms": 1177.841,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "create_ticket",
+                "args": {
+                  "title": "Login failure",
+                  "priority": "high"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"create_ticket\",\n  \"args\": {\n    \"title\": \"Login failure\",\n    \"priority\": \"high\"\n  }\n}",
+              "input_tokens": 431,
+              "output_tokens": 33,
+              "generation_ms": 1173.089,
+              "end_to_end_ms": 1175.067,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "create_ticket",
+                "args": {
+                  "title": "Login failure",
+                  "priority": "high"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "ticket-02",
+          "expected_tool": "create_ticket",
+          "expected_args": {
+            "title": "Typo on homepage",
+            "priority": "low"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"12345\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 423,
+            "output_tokens": 33,
+            "generation_ms": 1079.308,
+            "end_to_end_ms": 1081.186,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "get_order",
+              "args": {
+                "order_id": "12345"
+              }
+            },
+            "correct": false
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\"tool\": \"create_ticket\", \"args\": {\"title\": \"Typo\", \"priority\": \"low\"}}",
+              "input_tokens": 433,
+              "output_tokens": 24,
+              "generation_ms": 879.861,
+              "end_to_end_ms": 881.814,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "create_ticket",
+                "args": {
+                  "title": "Typo",
+                  "priority": "low"
+                }
+              },
+              "correct": false
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"create_ticket\",\n  \"args\": {\n    \"title\": \"Typo\",\n    \"priority\": \"low\"\n  }\n}",
+              "input_tokens": 503,
+              "output_tokens": 33,
+              "generation_ms": 1171.86,
+              "end_to_end_ms": 1174.068,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "create_ticket",
+                "args": {
+                  "title": "Typo",
+                  "priority": "low"
+                }
+              },
+              "correct": false
+            }
+          }
+        },
+        {
+          "id": "ticket-03",
+          "expected_tool": "create_ticket",
+          "expected_args": {
+            "title": "Payment declined",
+            "priority": "high"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"query\": \"Payment declined\"\n  }\n  ,\"tool\": \"search_tickets\"\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 422,
+            "output_tokens": 29,
+            "generation_ms": 889.455,
+            "end_to_end_ms": 891.373,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "query": "Payment declined"
+              },
+              "tool": "search_tickets"
+            },
+            "correct": false
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"create_ticket\",\n  \"args\": {\n    \"title\": \"Payment declined\",\n    \"priority\": \"high\"\n  }\n}",
+              "input_tokens": 498,
+              "output_tokens": 33,
+              "generation_ms": 1169.901,
+              "end_to_end_ms": 1172.096,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "create_ticket",
+                "args": {
+                  "title": "Payment declined",
+                  "priority": "high"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"create_ticket\",\n  \"args\": {\n    \"title\": \"Payment declined\",\n    \"priority\": \"high\"\n  }\n}",
+              "input_tokens": 432,
+              "output_tokens": 33,
+              "generation_ms": 1176.198,
+              "end_to_end_ms": 1178.152,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "create_ticket",
+                "args": {
+                  "title": "Payment declined",
+                  "priority": "high"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "address-01",
+          "expected_tool": "update_address",
+          "expected_args": {
+            "order_id": "ORD-7",
+            "city": "Boston"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"order_id\": \"ORD-7\"\n  }\n  ,\n  \"tool\": \"get_order\"\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 421,
+            "output_tokens": 33,
+            "generation_ms": 1024.494,
+            "end_to_end_ms": 1026.379,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "order_id": "ORD-7"
+              },
+              "tool": "get_order"
+            },
+            "correct": false
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\"tool\": \"update_address\", \"args\": {\"order_id\": \"ORD-7\", \"city\": \"Boston\"}}",
+              "input_tokens": 431,
+              "output_tokens": 26,
+              "generation_ms": 1023.58,
+              "end_to_end_ms": 1025.527,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "update_address",
+                "args": {
+                  "order_id": "ORD-7",
+                  "city": "Boston"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"update_address\",\n  \"args\": {\n    \"order_id\": \"ORD-7\",\n    \"city\": \"Boston\"\n  }\n}",
+              "input_tokens": 501,
+              "output_tokens": 35,
+              "generation_ms": 1323.734,
+              "end_to_end_ms": 1325.939,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "update_address",
+                "args": {
+                  "order_id": "ORD-7",
+                  "city": "Boston"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "address-02",
+          "expected_tool": "update_address",
+          "expected_args": {
+            "order_id": "K-22",
+            "city": "Seattle"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"order_id\": \"K-22\"\n  }\n  ,\n  \"tool\": \"get_order\"\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 424,
+            "output_tokens": 34,
+            "generation_ms": 1080.336,
+            "end_to_end_ms": 1082.215,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "order_id": "K-22"
+              },
+              "tool": "get_order"
+            },
+            "correct": false
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"update_address\",\n  \"args\": {\n    \"order_id\": \"K-22\",\n    \"city\": \"Seattle\"\n  }\n}",
+              "input_tokens": 505,
+              "output_tokens": 36,
+              "generation_ms": 1388.204,
+              "end_to_end_ms": 1390.401,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "update_address",
+                "args": {
+                  "order_id": "K-22",
+                  "city": "Seattle"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\"tool\": \"update_address\", \"args\": {\"order_id\": \"K-22\", \"city\": \"Seattle\"}}",
+              "input_tokens": 434,
+              "output_tokens": 27,
+              "generation_ms": 1084.125,
+              "end_to_end_ms": 1086.085,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "update_address",
+                "args": {
+                  "order_id": "K-22",
+                  "city": "Seattle"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "address-03",
+          "expected_tool": "update_address",
+          "expected_args": {
+            "order_id": "P100",
+            "city": "Austin"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"order_id\": \"P100\"\n  }\n  ,\n  \"tool\": \"get_order\"\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 422,
+            "output_tokens": 34,
+            "generation_ms": 1082.099,
+            "end_to_end_ms": 1084.018,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "order_id": "P100"
+              },
+              "tool": "get_order"
+            },
+            "correct": false
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\"tool\": \"update_address\", \"args\": {\"order_id\": \"P100\", \"city\": \"Austin\"}}",
+              "input_tokens": 432,
+              "output_tokens": 27,
+              "generation_ms": 1086.992,
+              "end_to_end_ms": 1088.963,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "update_address",
+                "args": {
+                  "order_id": "P100",
+                  "city": "Austin"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"update_address\",\n  \"args\": {\n    \"order_id\": \"P100\",\n    \"city\": \"Austin\"\n  }\n}",
+              "input_tokens": 503,
+              "output_tokens": 36,
+              "generation_ms": 1388.161,
+              "end_to_end_ms": 1390.375,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "update_address",
+                "args": {
+                  "order_id": "P100",
+                  "city": "Austin"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "refund-01",
+          "expected_tool": "refund_payment",
+          "expected_args": {
+            "payment_id": "PAY-88",
+            "amount": 25
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"PAY-88\"\n  \t,\n  \"amount\": 25\n}\n}\n\t\n\t\n\t\n\n\n\t\n\t",
+            "input_tokens": 424,
+            "output_tokens": 45,
+            "generation_ms": 1387.946,
+            "end_to_end_ms": 1389.859,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "refund_payment",
+              "args": {
+                "payment_id": "PAY-88",
+                "amount": 25
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"PAY-88\",\n    \"amount\": 25\n  }\n}",
+              "input_tokens": 513,
+              "output_tokens": 37,
+              "generation_ms": 1360.6,
+              "end_to_end_ms": 1362.836,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "refund_payment",
+                "args": {
+                  "payment_id": "PAY-88",
+                  "amount": 25
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"PAY-88\",\n    \"amount\": 25\n  }\n}",
+              "input_tokens": 434,
+              "output_tokens": 37,
+              "generation_ms": 1358.354,
+              "end_to_end_ms": 1360.332,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "refund_payment",
+                "args": {
+                  "payment_id": "PAY-88",
+                  "amount": 25
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "refund-02",
+          "expected_tool": "refund_payment",
+          "expected_args": {
+            "payment_id": "P-19",
+            "amount": 7
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"P-19\"\n  \t,\n  \"amount\": 7\n}\n}\n\t\n\t\n\t\n\n\n\t\n\n",
+            "input_tokens": 424,
+            "output_tokens": 43,
+            "generation_ms": 1346.568,
+            "end_to_end_ms": 1348.475,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "refund_payment",
+              "args": {
+                "payment_id": "P-19",
+                "amount": 7
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"P-19\",\n    \"amount\": 7\n  }\n}",
+              "input_tokens": 434,
+              "output_tokens": 36,
+              "generation_ms": 1352.655,
+              "end_to_end_ms": 1354.635,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "refund_payment",
+                "args": {
+                  "payment_id": "P-19",
+                  "amount": 7
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"P-19\",\n    \"amount\": 7\n  }\n}",
+              "input_tokens": 512,
+              "output_tokens": 36,
+              "generation_ms": 1327.36,
+              "end_to_end_ms": 1330.479,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "refund_payment",
+                "args": {
+                  "payment_id": "P-19",
+                  "amount": 7
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "refund-03",
+          "expected_tool": "refund_payment",
+          "expected_args": {
+            "payment_id": "TX-4",
+            "amount": 120
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"TX-4\"\n  \t\t\t\t\t\t\t\n ,\n  \"amount\": 120\n  }\n}\n\t\n\t\n\t\n\n\n\t\n\t",
+            "input_tokens": 424,
+            "output_tokens": 47,
+            "generation_ms": 1409.887,
+            "end_to_end_ms": 1411.845,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "refund_payment",
+              "args": {
+                "payment_id": "TX-4",
+                "amount": 120
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"TX-4\",\n    \"amount\": 120\n  }\n}",
+              "input_tokens": 514,
+              "output_tokens": 37,
+              "generation_ms": 1327.342,
+              "end_to_end_ms": 1329.583,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "refund_payment",
+                "args": {
+                  "payment_id": "TX-4",
+                  "amount": 120
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"TX-4\",\n    \"amount\": 120\n  }\n}",
+              "input_tokens": 434,
+              "output_tokens": 37,
+              "generation_ms": 1325.646,
+              "end_to_end_ms": 1327.617,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "refund_payment",
+                "args": {
+                  "payment_id": "TX-4",
+                  "amount": 120
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "cancel-01",
+          "expected_tool": "cancel_order",
+          "expected_args": {
+            "order_id": "ORD-55"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"ORD-55\"\n  }\n}",
+            "input_tokens": 418,
+            "output_tokens": 29,
+            "generation_ms": 944.243,
+            "end_to_end_ms": 946.109,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "cancel_order",
+              "args": {
+                "order_id": "ORD-55"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"ORD-55\"\n  }\n}",
+              "input_tokens": 428,
+              "output_tokens": 29,
+              "generation_ms": 1090.579,
+              "end_to_end_ms": 1092.491,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "cancel_order",
+                "args": {
+                  "order_id": "ORD-55"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"ORD-55\"\n  }\n}",
+              "input_tokens": 494,
+              "output_tokens": 29,
+              "generation_ms": 1107.089,
+              "end_to_end_ms": 1109.268,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "cancel_order",
+                "args": {
+                  "order_id": "ORD-55"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "cancel-02",
+          "expected_tool": "cancel_order",
+          "expected_args": {
+            "order_id": "C-901"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"C-901\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 421,
+            "output_tokens": 33,
+            "generation_ms": 1083.436,
+            "end_to_end_ms": 1085.336,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "cancel_order",
+              "args": {
+                "order_id": "C-901"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"C-901\"\n  }\n}",
+              "input_tokens": 501,
+              "output_tokens": 30,
+              "generation_ms": 1155.91,
+              "end_to_end_ms": 1158.116,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "cancel_order",
+                "args": {
+                  "order_id": "C-901"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"C-901\"\n  }\n}",
+              "input_tokens": 431,
+              "output_tokens": 30,
+              "generation_ms": 1153.885,
+              "end_to_end_ms": 1155.893,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "cancel_order",
+                "args": {
+                  "order_id": "C-901"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "cancel-03",
+          "expected_tool": "cancel_order",
+          "expected_args": {
+            "order_id": "Q3"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"order_id\": \"Q3\"\n  }\n  ,\n  \"tool\": \"cancel_order\"\n}",
+            "input_tokens": 417,
+            "output_tokens": 29,
+            "generation_ms": 893.125,
+            "end_to_end_ms": 895.007,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "order_id": "Q3"
+              },
+              "tool": "cancel_order"
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\"tool\": \"cancel_order\", \"args\": {\"order_id\": \"Q3\"}}",
+              "input_tokens": 427,
+              "output_tokens": 19,
+              "generation_ms": 713.834,
+              "end_to_end_ms": 715.772,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "cancel_order",
+                "args": {
+                  "order_id": "Q3"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"Q3\"\n  }\n}",
+              "input_tokens": 493,
+              "output_tokens": 27,
+              "generation_ms": 980.337,
+              "end_to_end_ms": 982.513,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "cancel_order",
+                "args": {
+                  "order_id": "Q3"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "email-01",
+          "expected_tool": "send_email",
+          "expected_args": {
+            "to": "a@b.com",
+            "subject": "Welcome"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"Welcome\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 420,
+            "output_tokens": 28,
+            "generation_ms": 831.854,
+            "end_to_end_ms": 833.747,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "search_kb",
+              "args": {
+                "query": "Welcome"
+              }
+            },
+            "correct": false
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"a@b.com\",\n    \"subject\": \"Welcome\"\n  }\n}",
+              "input_tokens": 495,
+              "output_tokens": 35,
+              "generation_ms": 1352.801,
+              "end_to_end_ms": 1354.952,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "a@b.com",
+                  "subject": "Welcome"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"a@b.com\",\n    \"subject\": \"Welcome\"\n  }\n}",
+              "input_tokens": 430,
+              "output_tokens": 35,
+              "generation_ms": 1360.592,
+              "end_to_end_ms": 1362.561,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "a@b.com",
+                  "subject": "Welcome"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "email-02",
+          "expected_tool": "send_email",
+          "expected_args": {
+            "to": "ops@example.com",
+            "subject": "Server alert"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"query\": \"Server alert\"\n  }\n  ,\"tool\": \"search_tickets\"\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 424,
+            "output_tokens": 29,
+            "generation_ms": 892.704,
+            "end_to_end_ms": 894.671,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "query": "Server alert"
+              },
+              "tool": "search_tickets"
+            },
+            "correct": false
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"ops@example.com\",\n    \"subject\": \"Server alert\"\n  }\n}",
+              "input_tokens": 434,
+              "output_tokens": 35,
+              "generation_ms": 1344.259,
+              "end_to_end_ms": 1346.234,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "ops@example.com",
+                  "subject": "Server alert"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"ops@example.com\",\n    \"subject\": \"Server alert\"\n  }\n}",
+              "input_tokens": 500,
+              "output_tokens": 35,
+              "generation_ms": 1347.864,
+              "end_to_end_ms": 1350.046,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "ops@example.com",
+                  "subject": "Server alert"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "email-03",
+          "expected_tool": "send_email",
+          "expected_args": {
+            "to": "lee@example.org",
+            "subject": "Receipt ready"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"string\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 423,
+            "output_tokens": 28,
+            "generation_ms": 833.034,
+            "end_to_end_ms": 834.916,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "search_kb",
+              "args": {
+                "query": "string"
+              }
+            },
+            "correct": false
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"lee@example.org\",\n    \"subject\": \"Receipt ready\"\n  }\n}",
+              "input_tokens": 498,
+              "output_tokens": 35,
+              "generation_ms": 1345.744,
+              "end_to_end_ms": 1347.961,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "lee@example.org",
+                  "subject": "Receipt ready"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"lee@example.org\",\n    \"subject\": \"Receipt Ready\"\n  }\n}",
+              "input_tokens": 433,
+              "output_tokens": 35,
+              "generation_ms": 1337.923,
+              "end_to_end_ms": 1339.915,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "lee@example.org",
+                  "subject": "Receipt Ready"
+                }
+              },
+              "correct": false
+            }
+          }
+        },
+        {
+          "id": "email-04",
+          "expected_tool": "send_email",
+          "expected_args": {
+            "to": "help@example.net",
+            "subject": "Case closed"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"help@example.net\",\n    \"subject\": \"Case closed\"\n  }\n}\n\t\n\t\n\n\t\n\n\t\n\n",
+            "input_tokens": 422,
+            "output_tokens": 38,
+            "generation_ms": 1242.735,
+            "end_to_end_ms": 1244.609,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "send_email",
+              "args": {
+                "to": "help@example.net",
+                "subject": "Case closed"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"help@example.net\",\n    \"subject\": \"Case closed\"\n  }\n}",
+              "input_tokens": 432,
+              "output_tokens": 35,
+              "generation_ms": 1342.239,
+              "end_to_end_ms": 1344.193,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "help@example.net",
+                  "subject": "Case closed"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"help@example.net\",\n    \"subject\": \"Case closed\"\n  }\n}",
+              "input_tokens": 507,
+              "output_tokens": 35,
+              "generation_ms": 1338.212,
+              "end_to_end_ms": 1340.456,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "help@example.net",
+                  "subject": "Case closed"
+                }
+              },
+              "correct": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "summary": {
+        "repetition": 3,
+        "total": 24,
+        "draft": {
+          "valid": 24,
+          "correct": 13,
+          "output_tokens": 787,
+          "median_end_to_end_ms": 991.228
+        },
+        "routes": {
+          "direct": {
+            "valid": 24,
+            "correct": 20,
+            "corrected_draft_misses": 7,
+            "regressed_draft_hits": 0,
+            "route_output_tokens": 708,
+            "total_path_output_tokens": 708,
+            "median_route_end_to_end_ms": 1124.181,
+            "median_total_path_end_to_end_ms": 1124.181
+          },
+          "adjudicated": {
+            "valid": 24,
+            "correct": 22,
+            "corrected_draft_misses": 9,
+            "regressed_draft_hits": 0,
+            "route_output_tokens": 760,
+            "total_path_output_tokens": 1547,
+            "median_route_end_to_end_ms": 1177.889,
+            "median_total_path_end_to_end_ms": 2214.386
+          }
+        }
+      },
+      "rows": [
+        {
+          "id": "search-01",
+          "expected_tool": "search_kb",
+          "expected_args": {
+            "query": "password reset"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"password reset\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 420,
+            "output_tokens": 29,
+            "generation_ms": 887.482,
+            "end_to_end_ms": 889.381,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "search_kb",
+              "args": {
+                "query": "password reset"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"password reset\"\n  }\n}",
+              "input_tokens": 430,
+              "output_tokens": 26,
+              "generation_ms": 939.497,
+              "end_to_end_ms": 941.442,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_kb",
+                "args": {
+                  "query": "password reset"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"password reset\"\n  }\n}",
+              "input_tokens": 496,
+              "output_tokens": 26,
+              "generation_ms": 939.112,
+              "end_to_end_ms": 941.262,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_kb",
+                "args": {
+                  "query": "password reset"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "search-02",
+          "expected_tool": "search_kb",
+          "expected_args": {
+            "query": "two-factor authentication"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"two-factor authentication\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 420,
+            "output_tokens": 30,
+            "generation_ms": 945.741,
+            "end_to_end_ms": 947.621,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "search_kb",
+              "args": {
+                "query": "two-factor authentication"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"two-factor authentication\"\n  }\n}",
+              "input_tokens": 497,
+              "output_tokens": 27,
+              "generation_ms": 1004.7,
+              "end_to_end_ms": 1006.938,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_kb",
+                "args": {
+                  "query": "two-factor authentication"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\"tool\": \"search_kb\", \"args\": {\"query\": \"two-factor authentication\"}}",
+              "input_tokens": 430,
+              "output_tokens": 19,
+              "generation_ms": 743.195,
+              "end_to_end_ms": 745.195,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_kb",
+                "args": {
+                  "query": "two-factor authentication"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "search-03",
+          "expected_tool": "search_kb",
+          "expected_args": {
+            "query": "return policy"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"return policy\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 420,
+            "output_tokens": 29,
+            "generation_ms": 889.528,
+            "end_to_end_ms": 891.441,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "search_kb",
+              "args": {
+                "query": "return policy"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"return policy\"\n  }\n}",
+              "input_tokens": 430,
+              "output_tokens": 26,
+              "generation_ms": 936.114,
+              "end_to_end_ms": 938.096,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_kb",
+                "args": {
+                  "query": "return policy"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"return policy\"\n  }\n}",
+              "input_tokens": 496,
+              "output_tokens": 26,
+              "generation_ms": 942.182,
+              "end_to_end_ms": 944.429,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_kb",
+                "args": {
+                  "query": "return policy"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "order-01",
+          "expected_tool": "get_order",
+          "expected_args": {
+            "order_id": "ORD-1042"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"ORD-1042\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 420,
+            "output_tokens": 34,
+            "generation_ms": 1126.599,
+            "end_to_end_ms": 1128.521,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "get_order",
+              "args": {
+                "order_id": "ORD-1042"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"ORD-1042\"\n  }\n}",
+              "input_tokens": 501,
+              "output_tokens": 31,
+              "generation_ms": 1214.573,
+              "end_to_end_ms": 1216.745,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "get_order",
+                "args": {
+                  "order_id": "ORD-1042"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"ORD-1042\"\n  }\n}",
+              "input_tokens": 430,
+              "output_tokens": 31,
+              "generation_ms": 1222.807,
+              "end_to_end_ms": 1224.74,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "get_order",
+                "args": {
+                  "order_id": "ORD-1042"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "order-02",
+          "expected_tool": "get_order",
+          "expected_args": {
+            "order_id": "ZX-900"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"ZX-900\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 419,
+            "output_tokens": 33,
+            "generation_ms": 1078.237,
+            "end_to_end_ms": 1080.136,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "get_order",
+              "args": {
+                "order_id": "ZX-900"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"ZX-900\"\n  }\n}",
+              "input_tokens": 429,
+              "output_tokens": 30,
+              "generation_ms": 1153.622,
+              "end_to_end_ms": 1155.562,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "get_order",
+                "args": {
+                  "order_id": "ZX-900"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"ZX-900\"\n  }\n}",
+              "input_tokens": 499,
+              "output_tokens": 30,
+              "generation_ms": 1152.441,
+              "end_to_end_ms": 1154.603,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "get_order",
+                "args": {
+                  "order_id": "ZX-900"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "order-03",
+          "expected_tool": "get_order",
+          "expected_args": {
+            "order_id": "A-17"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"string\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 421,
+            "output_tokens": 28,
+            "generation_ms": 832.53,
+            "end_to_end_ms": 834.407,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "search_kb",
+              "args": {
+                "query": "string"
+              }
+            },
+            "correct": false
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"search_orders\",\n  \"args\": {\n    \"query\": \"A-17\"\n  }\n}",
+              "input_tokens": 496,
+              "output_tokens": 28,
+              "generation_ms": 1068.054,
+              "end_to_end_ms": 1070.211,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_orders",
+                "args": {
+                  "query": "A-17"
+                }
+              },
+              "correct": false
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"search_orders\",\n  \"args\": {\n    \"query\": \"A-17\"\n  }\n}",
+              "input_tokens": 431,
+              "output_tokens": 28,
+              "generation_ms": 1060.519,
+              "end_to_end_ms": 1062.486,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_orders",
+                "args": {
+                  "query": "A-17"
+                }
+              },
+              "correct": false
+            }
+          }
+        },
+        {
+          "id": "list-01",
+          "expected_tool": "list_tickets",
+          "expected_args": {
+            "status": "open"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"list_tickets\",\n  \"args\": {\n    \"status\": \"open\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 415,
+            "output_tokens": 28,
+            "generation_ms": 777.339,
+            "end_to_end_ms": 779.2,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "list_tickets",
+              "args": {
+                "status": "open"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"list_tickets\",\n  \"args\": {\n    \"status\": \"open\"\n  }\n}",
+              "input_tokens": 425,
+              "output_tokens": 25,
+              "generation_ms": 824.051,
+              "end_to_end_ms": 825.948,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "list_tickets",
+                "args": {
+                  "status": "open"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"list_tickets\",\n  \"args\": {\n    \"status\": \"open\"\n  }\n}",
+              "input_tokens": 490,
+              "output_tokens": 25,
+              "generation_ms": 825.035,
+              "end_to_end_ms": 827.235,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "list_tickets",
+                "args": {
+                  "status": "open"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "list-02",
+          "expected_tool": "list_tickets",
+          "expected_args": {
+            "status": "closed"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"12345\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 416,
+            "output_tokens": 33,
+            "generation_ms": 1078.031,
+            "end_to_end_ms": 1079.891,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "get_order",
+              "args": {
+                "order_id": "12345"
+              }
+            },
+            "correct": false
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"list_tickets\",\n  \"args\": {\n    \"status\": \"closed\"\n  }\n}",
+              "input_tokens": 496,
+              "output_tokens": 25,
+              "generation_ms": 824.784,
+              "end_to_end_ms": 826.941,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "list_tickets",
+                "args": {
+                  "status": "closed"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"search_tickets\",\n  \"args\": {\n    \"query\": \"closed\"\n  }\n}",
+              "input_tokens": 426,
+              "output_tokens": 25,
+              "generation_ms": 876.299,
+              "end_to_end_ms": 878.257,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "search_tickets",
+                "args": {
+                  "query": "closed"
+                }
+              },
+              "correct": false
+            }
+          }
+        },
+        {
+          "id": "ticket-01",
+          "expected_tool": "create_ticket",
+          "expected_args": {
+            "title": "Login failure",
+            "priority": "high"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"query\": \"Login failure\"\n  }\n  ,\n  \"tool\": \"search_tickets\"\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 421,
+            "output_tokens": 31,
+            "generation_ms": 943.431,
+            "end_to_end_ms": 945.352,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "query": "Login failure"
+              },
+              "tool": "search_tickets"
+            },
+            "correct": false
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"create_ticket\",\n  \"args\": {\n    \"title\": \"Login failure\",\n    \"priority\": \"high\"\n  }\n}",
+              "input_tokens": 431,
+              "output_tokens": 33,
+              "generation_ms": 1177.914,
+              "end_to_end_ms": 1179.899,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "create_ticket",
+                "args": {
+                  "title": "Login failure",
+                  "priority": "high"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"create_ticket\",\n  \"args\": {\n    \"title\": \"Login failure\",\n    \"priority\": \"high\"\n  }\n}",
+              "input_tokens": 499,
+              "output_tokens": 33,
+              "generation_ms": 1168.087,
+              "end_to_end_ms": 1170.262,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "create_ticket",
+                "args": {
+                  "title": "Login failure",
+                  "priority": "high"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "ticket-02",
+          "expected_tool": "create_ticket",
+          "expected_args": {
+            "title": "Typo on homepage",
+            "priority": "low"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"get_order\",\n  \"args\": {\n    \"order_id\": \"12345\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 423,
+            "output_tokens": 33,
+            "generation_ms": 1077.597,
+            "end_to_end_ms": 1079.464,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "get_order",
+              "args": {
+                "order_id": "12345"
+              }
+            },
+            "correct": false
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"create_ticket\",\n  \"args\": {\n    \"title\": \"Typo\",\n    \"priority\": \"low\"\n  }\n}",
+              "input_tokens": 503,
+              "output_tokens": 33,
+              "generation_ms": 1169.382,
+              "end_to_end_ms": 1171.617,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "create_ticket",
+                "args": {
+                  "title": "Typo",
+                  "priority": "low"
+                }
+              },
+              "correct": false
+            },
+            "direct": {
+              "text": "{\"tool\": \"create_ticket\", \"args\": {\"title\": \"Typo\", \"priority\": \"low\"}}",
+              "input_tokens": 433,
+              "output_tokens": 24,
+              "generation_ms": 873.608,
+              "end_to_end_ms": 875.59,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "create_ticket",
+                "args": {
+                  "title": "Typo",
+                  "priority": "low"
+                }
+              },
+              "correct": false
+            }
+          }
+        },
+        {
+          "id": "ticket-03",
+          "expected_tool": "create_ticket",
+          "expected_args": {
+            "title": "Payment declined",
+            "priority": "high"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"query\": \"Payment declined\"\n  }\n  ,\"tool\": \"search_tickets\"\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 422,
+            "output_tokens": 29,
+            "generation_ms": 885.977,
+            "end_to_end_ms": 887.907,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "query": "Payment declined"
+              },
+              "tool": "search_tickets"
+            },
+            "correct": false
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"create_ticket\",\n  \"args\": {\n    \"title\": \"Payment declined\",\n    \"priority\": \"high\"\n  }\n}",
+              "input_tokens": 432,
+              "output_tokens": 33,
+              "generation_ms": 1165.513,
+              "end_to_end_ms": 1167.47,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "create_ticket",
+                "args": {
+                  "title": "Payment declined",
+                  "priority": "high"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"create_ticket\",\n  \"args\": {\n    \"title\": \"Payment declined\",\n    \"priority\": \"high\"\n  }\n}",
+              "input_tokens": 498,
+              "output_tokens": 33,
+              "generation_ms": 1181.961,
+              "end_to_end_ms": 1184.16,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "create_ticket",
+                "args": {
+                  "title": "Payment declined",
+                  "priority": "high"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "address-01",
+          "expected_tool": "update_address",
+          "expected_args": {
+            "order_id": "ORD-7",
+            "city": "Boston"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"order_id\": \"ORD-7\"\n  }\n  ,\n  \"tool\": \"get_order\"\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 421,
+            "output_tokens": 33,
+            "generation_ms": 1031.817,
+            "end_to_end_ms": 1034.836,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "order_id": "ORD-7"
+              },
+              "tool": "get_order"
+            },
+            "correct": false
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"update_address\",\n  \"args\": {\n    \"order_id\": \"ORD-7\",\n    \"city\": \"Boston\"\n  }\n}",
+              "input_tokens": 501,
+              "output_tokens": 35,
+              "generation_ms": 1322.936,
+              "end_to_end_ms": 1325.26,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "update_address",
+                "args": {
+                  "order_id": "ORD-7",
+                  "city": "Boston"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\"tool\": \"update_address\", \"args\": {\"order_id\": \"ORD-7\", \"city\": \"Boston\"}}",
+              "input_tokens": 431,
+              "output_tokens": 26,
+              "generation_ms": 1021.624,
+              "end_to_end_ms": 1023.63,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "update_address",
+                "args": {
+                  "order_id": "ORD-7",
+                  "city": "Boston"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "address-02",
+          "expected_tool": "update_address",
+          "expected_args": {
+            "order_id": "K-22",
+            "city": "Seattle"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"order_id\": \"K-22\"\n  }\n  ,\n  \"tool\": \"get_order\"\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 424,
+            "output_tokens": 34,
+            "generation_ms": 1082.264,
+            "end_to_end_ms": 1084.183,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "order_id": "K-22"
+              },
+              "tool": "get_order"
+            },
+            "correct": false
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\"tool\": \"update_address\", \"args\": {\"order_id\": \"K-22\", \"city\": \"Seattle\"}}",
+              "input_tokens": 434,
+              "output_tokens": 27,
+              "generation_ms": 1087.5,
+              "end_to_end_ms": 1089.483,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "update_address",
+                "args": {
+                  "order_id": "K-22",
+                  "city": "Seattle"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"update_address\",\n  \"args\": {\n    \"order_id\": \"K-22\",\n    \"city\": \"Seattle\"\n  }\n}",
+              "input_tokens": 505,
+              "output_tokens": 36,
+              "generation_ms": 1395.426,
+              "end_to_end_ms": 1397.645,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "update_address",
+                "args": {
+                  "order_id": "K-22",
+                  "city": "Seattle"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "address-03",
+          "expected_tool": "update_address",
+          "expected_args": {
+            "order_id": "P100",
+            "city": "Austin"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"order_id\": \"P100\"\n  }\n  ,\n  \"tool\": \"get_order\"\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 422,
+            "output_tokens": 34,
+            "generation_ms": 1093.279,
+            "end_to_end_ms": 1095.179,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "order_id": "P100"
+              },
+              "tool": "get_order"
+            },
+            "correct": false
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"update_address\",\n  \"args\": {\n    \"order_id\": \"P100\",\n    \"city\": \"Austin\"\n  }\n}",
+              "input_tokens": 503,
+              "output_tokens": 36,
+              "generation_ms": 1388.943,
+              "end_to_end_ms": 1391.147,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "update_address",
+                "args": {
+                  "order_id": "P100",
+                  "city": "Austin"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\"tool\": \"update_address\", \"args\": {\"order_id\": \"P100\", \"city\": \"Austin\"}}",
+              "input_tokens": 432,
+              "output_tokens": 27,
+              "generation_ms": 1090.825,
+              "end_to_end_ms": 1092.8,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "update_address",
+                "args": {
+                  "order_id": "P100",
+                  "city": "Austin"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "refund-01",
+          "expected_tool": "refund_payment",
+          "expected_args": {
+            "payment_id": "PAY-88",
+            "amount": 25
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"PAY-88\"\n  \t,\n  \"amount\": 25\n}\n}\n\t\n\t\n\t\n\n\n\t\n\t",
+            "input_tokens": 424,
+            "output_tokens": 45,
+            "generation_ms": 1379.667,
+            "end_to_end_ms": 1381.622,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "refund_payment",
+              "args": {
+                "payment_id": "PAY-88",
+                "amount": 25
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"PAY-88\",\n    \"amount\": 25\n  }\n}",
+              "input_tokens": 434,
+              "output_tokens": 37,
+              "generation_ms": 1355.959,
+              "end_to_end_ms": 1357.916,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "refund_payment",
+                "args": {
+                  "payment_id": "PAY-88",
+                  "amount": 25
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"PAY-88\",\n    \"amount\": 25\n  }\n}",
+              "input_tokens": 513,
+              "output_tokens": 37,
+              "generation_ms": 1358.724,
+              "end_to_end_ms": 1361.051,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "refund_payment",
+                "args": {
+                  "payment_id": "PAY-88",
+                  "amount": 25
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "refund-02",
+          "expected_tool": "refund_payment",
+          "expected_args": {
+            "payment_id": "P-19",
+            "amount": 7
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"P-19\"\n  \t,\n  \"amount\": 7\n}\n}\n\t\n\t\n\t\n\n\n\t\n\n",
+            "input_tokens": 424,
+            "output_tokens": 43,
+            "generation_ms": 1321.432,
+            "end_to_end_ms": 1323.34,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "refund_payment",
+              "args": {
+                "payment_id": "P-19",
+                "amount": 7
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"P-19\",\n    \"amount\": 7\n  }\n}",
+              "input_tokens": 512,
+              "output_tokens": 36,
+              "generation_ms": 1321.04,
+              "end_to_end_ms": 1323.246,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "refund_payment",
+                "args": {
+                  "payment_id": "P-19",
+                  "amount": 7
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"P-19\",\n    \"amount\": 7\n  }\n}",
+              "input_tokens": 434,
+              "output_tokens": 36,
+              "generation_ms": 1319.57,
+              "end_to_end_ms": 1321.545,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "refund_payment",
+                "args": {
+                  "payment_id": "P-19",
+                  "amount": 7
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "refund-03",
+          "expected_tool": "refund_payment",
+          "expected_args": {
+            "payment_id": "TX-4",
+            "amount": 120
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"TX-4\"\n  \t\t\t\t\t\t\t\n ,\n  \"amount\": 120\n  }\n}\n\t\n\t\n\t\n\n\n\t\n\t",
+            "input_tokens": 424,
+            "output_tokens": 47,
+            "generation_ms": 1411.89,
+            "end_to_end_ms": 1413.776,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "refund_payment",
+              "args": {
+                "payment_id": "TX-4",
+                "amount": 120
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"TX-4\",\n    \"amount\": 120\n  }\n}",
+              "input_tokens": 434,
+              "output_tokens": 37,
+              "generation_ms": 1325.309,
+              "end_to_end_ms": 1327.248,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "refund_payment",
+                "args": {
+                  "payment_id": "TX-4",
+                  "amount": 120
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"refund_payment\",\n  \"args\": {\n    \"payment_id\": \"TX-4\",\n    \"amount\": 120\n  }\n}",
+              "input_tokens": 514,
+              "output_tokens": 37,
+              "generation_ms": 1325.116,
+              "end_to_end_ms": 1327.332,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "refund_payment",
+                "args": {
+                  "payment_id": "TX-4",
+                  "amount": 120
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "cancel-01",
+          "expected_tool": "cancel_order",
+          "expected_args": {
+            "order_id": "ORD-55"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"ORD-55\"\n  }\n}",
+            "input_tokens": 418,
+            "output_tokens": 29,
+            "generation_ms": 938.862,
+            "end_to_end_ms": 940.737,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "cancel_order",
+              "args": {
+                "order_id": "ORD-55"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"ORD-55\"\n  }\n}",
+              "input_tokens": 494,
+              "output_tokens": 29,
+              "generation_ms": 1090.104,
+              "end_to_end_ms": 1092.268,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "cancel_order",
+                "args": {
+                  "order_id": "ORD-55"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"ORD-55\"\n  }\n}",
+              "input_tokens": 428,
+              "output_tokens": 29,
+              "generation_ms": 1090.17,
+              "end_to_end_ms": 1092.072,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "cancel_order",
+                "args": {
+                  "order_id": "ORD-55"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "cancel-02",
+          "expected_tool": "cancel_order",
+          "expected_args": {
+            "order_id": "C-901"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"C-901\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 421,
+            "output_tokens": 33,
+            "generation_ms": 1080.59,
+            "end_to_end_ms": 1082.468,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "cancel_order",
+              "args": {
+                "order_id": "C-901"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"C-901\"\n  }\n}",
+              "input_tokens": 431,
+              "output_tokens": 30,
+              "generation_ms": 1154.554,
+              "end_to_end_ms": 1156.492,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "cancel_order",
+                "args": {
+                  "order_id": "C-901"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"C-901\"\n  }\n}",
+              "input_tokens": 501,
+              "output_tokens": 30,
+              "generation_ms": 1154.31,
+              "end_to_end_ms": 1156.509,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "cancel_order",
+                "args": {
+                  "order_id": "C-901"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "cancel-03",
+          "expected_tool": "cancel_order",
+          "expected_args": {
+            "order_id": "Q3"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"order_id\": \"Q3\"\n  }\n  ,\n  \"tool\": \"cancel_order\"\n}",
+            "input_tokens": 417,
+            "output_tokens": 29,
+            "generation_ms": 883.998,
+            "end_to_end_ms": 885.88,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "order_id": "Q3"
+              },
+              "tool": "cancel_order"
+            },
+            "correct": true
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"cancel_order\",\n  \"args\": {\n    \"order_id\": \"Q3\"\n  }\n}",
+              "input_tokens": 493,
+              "output_tokens": 27,
+              "generation_ms": 975.749,
+              "end_to_end_ms": 977.893,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "cancel_order",
+                "args": {
+                  "order_id": "Q3"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\"tool\": \"cancel_order\", \"args\": {\"order_id\": \"Q3\"}}",
+              "input_tokens": 427,
+              "output_tokens": 19,
+              "generation_ms": 709.155,
+              "end_to_end_ms": 711.095,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "cancel_order",
+                "args": {
+                  "order_id": "Q3"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "email-01",
+          "expected_tool": "send_email",
+          "expected_args": {
+            "to": "a@b.com",
+            "subject": "Welcome"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"Welcome\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 420,
+            "output_tokens": 28,
+            "generation_ms": 834.521,
+            "end_to_end_ms": 836.44,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "search_kb",
+              "args": {
+                "query": "Welcome"
+              }
+            },
+            "correct": false
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"a@b.com\",\n    \"subject\": \"Welcome\"\n  }\n}",
+              "input_tokens": 430,
+              "output_tokens": 35,
+              "generation_ms": 1351.072,
+              "end_to_end_ms": 1353.03,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "a@b.com",
+                  "subject": "Welcome"
+                }
+              },
+              "correct": true
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"a@b.com\",\n    \"subject\": \"Welcome\"\n  }\n}",
+              "input_tokens": 495,
+              "output_tokens": 35,
+              "generation_ms": 1355.397,
+              "end_to_end_ms": 1357.593,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "a@b.com",
+                  "subject": "Welcome"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "email-02",
+          "expected_tool": "send_email",
+          "expected_args": {
+            "to": "ops@example.com",
+            "subject": "Server alert"
+          },
+          "draft": {
+            "text": "{\n  \"args\": {\n    \"query\": \"Server alert\"\n  }\n  ,\"tool\": \"search_tickets\"\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 424,
+            "output_tokens": 29,
+            "generation_ms": 894.588,
+            "end_to_end_ms": 896.575,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "args": {
+                "query": "Server alert"
+              },
+              "tool": "search_tickets"
+            },
+            "correct": false
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"ops@example.com\",\n    \"subject\": \"Server alert\"\n  }\n}",
+              "input_tokens": 500,
+              "output_tokens": 35,
+              "generation_ms": 1358.438,
+              "end_to_end_ms": 1360.674,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "ops@example.com",
+                  "subject": "Server alert"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"ops@example.com\",\n    \"subject\": \"Server alert\"\n  }\n}",
+              "input_tokens": 434,
+              "output_tokens": 35,
+              "generation_ms": 1354.307,
+              "end_to_end_ms": 1356.296,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "ops@example.com",
+                  "subject": "Server alert"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "email-03",
+          "expected_tool": "send_email",
+          "expected_args": {
+            "to": "lee@example.org",
+            "subject": "Receipt ready"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"search_kb\",\n  \"args\": {\n    \"query\": \"string\"\n  }\n}\n\t\n\t\n\n\t\n\t\n\n\t",
+            "input_tokens": 423,
+            "output_tokens": 28,
+            "generation_ms": 834.992,
+            "end_to_end_ms": 836.908,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "search_kb",
+              "args": {
+                "query": "string"
+              }
+            },
+            "correct": false
+          },
+          "route_order": [
+            "direct",
+            "adjudicated"
+          ],
+          "routes": {
+            "direct": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"lee@example.org\",\n    \"subject\": \"Receipt Ready\"\n  }\n}",
+              "input_tokens": 433,
+              "output_tokens": 35,
+              "generation_ms": 1352.276,
+              "end_to_end_ms": 1354.263,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "lee@example.org",
+                  "subject": "Receipt Ready"
+                }
+              },
+              "correct": false
+            },
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"lee@example.org\",\n    \"subject\": \"Receipt ready\"\n  }\n}",
+              "input_tokens": 498,
+              "output_tokens": 35,
+              "generation_ms": 1336.759,
+              "end_to_end_ms": 1338.972,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "lee@example.org",
+                  "subject": "Receipt ready"
+                }
+              },
+              "correct": true
+            }
+          }
+        },
+        {
+          "id": "email-04",
+          "expected_tool": "send_email",
+          "expected_args": {
+            "to": "help@example.net",
+            "subject": "Case closed"
+          },
+          "draft": {
+            "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"help@example.net\",\n    \"subject\": \"Case closed\"\n  }\n}\n\t\n\t\n\n\t\n\n\t\n\n",
+            "input_tokens": 422,
+            "output_tokens": 38,
+            "generation_ms": 1247.953,
+            "end_to_end_ms": 1249.881,
+            "structural_valid": true,
+            "validation_error": "",
+            "parsed": {
+              "tool": "send_email",
+              "args": {
+                "to": "help@example.net",
+                "subject": "Case closed"
+              }
+            },
+            "correct": true
+          },
+          "route_order": [
+            "adjudicated",
+            "direct"
+          ],
+          "routes": {
+            "adjudicated": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"help@example.net\",\n    \"subject\": \"Case closed\"\n  }\n}",
+              "input_tokens": 507,
+              "output_tokens": 35,
+              "generation_ms": 1351.343,
+              "end_to_end_ms": 1353.582,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "help@example.net",
+                  "subject": "Case closed"
+                }
+              },
+              "correct": true
+            },
+            "direct": {
+              "text": "{\n  \"tool\": \"send_email\",\n  \"args\": {\n    \"to\": \"help@example.net\",\n    \"subject\": \"Case closed\"\n  }\n}",
+              "input_tokens": 432,
+              "output_tokens": 35,
+              "generation_ms": 1350.369,
+              "end_to_end_ms": 1352.34,
+              "structural_valid": true,
+              "validation_error": "",
+              "parsed": {
+                "tool": "send_email",
+                "args": {
+                  "to": "help@example.net",
+                  "subject": "Case closed"
+                }
+              },
+              "correct": true
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "dual_resident_memory": {
+    "allocated_bytes": 4084669440,
+    "reserved_bytes": 4326424576
+  },
+  "finished_utc": "2026-08-16T01:51:49Z"
+}
