@@ -73,6 +73,9 @@ func TestSelfAuthoredUntrackedRemovalAllowsUnrelatedGlobalInclude(t *testing.T) 
 	a := New(Policy{Allow: map[string]bool{"Bash": true}})
 	a.receiptRoot = root
 	selfDisposalReceipt(a, "trace-include", target, 1)
+	if operation, ok := a.AuthoredPath("trace-include", target); !ok {
+		t.Fatalf("receipt = %d,%v; root=%q target=%q", operation, ok, root, target)
+	}
 	call := receiptCall("trace-include", "Bash", `{"command":"rm scratch.txt"}`, 2)
 	if !a.selfAuthoredUntrackedRemoval(call, decodeArgs(context.Background(), call)) {
 		t.Fatal("unrelated global include suppressed eligible self-disposal")
@@ -98,6 +101,9 @@ func TestSelfAuthoredUntrackedRemovalAllowsUnrelatedConditionalInclude(t *testin
 	a := New(Policy{Allow: map[string]bool{"Bash": true}})
 	a.receiptRoot = root
 	selfDisposalReceipt(a, "trace-conditional", target, 1)
+	if operation, ok := a.AuthoredPath("trace-conditional", target); !ok {
+		t.Fatalf("receipt = %d,%v; root=%q target=%q", operation, ok, root, target)
+	}
 	call := receiptCall("trace-conditional", "Bash", `{"command":"rm scratch.txt"}`, 2)
 	if !a.selfAuthoredUntrackedRemoval(call, decodeArgs(context.Background(), call)) {
 		t.Fatal("unrelated conditional include suppressed eligible self-disposal")
