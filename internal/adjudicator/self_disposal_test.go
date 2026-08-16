@@ -67,6 +67,9 @@ func TestSelfAuthoredUntrackedRemovalAllowsUnrelatedGlobalInclude(t *testing.T) 
 	root := selfDisposalRepo(t)
 	target := filepath.Join(root, "scratch.txt")
 	selfDisposalWrite(t, target)
+	if ignored, err := repositoryIgnores(root, target); err != nil || ignored {
+		t.Fatalf("repositoryIgnores = %v,%v", ignored, err)
+	}
 	a := New(Policy{Allow: map[string]bool{"Bash": true}})
 	a.receiptRoot = root
 	selfDisposalReceipt(a, "trace-include", target, 1)
@@ -89,6 +92,9 @@ func TestSelfAuthoredUntrackedRemovalAllowsUnrelatedConditionalInclude(t *testin
 	root := selfDisposalRepo(t)
 	target := filepath.Join(root, "scratch.txt")
 	selfDisposalWrite(t, target)
+	if ignored, err := repositoryIgnores(root, target); err != nil || ignored {
+		t.Fatalf("repositoryIgnores = %v,%v", ignored, err)
+	}
 	a := New(Policy{Allow: map[string]bool{"Bash": true}})
 	a.receiptRoot = root
 	selfDisposalReceipt(a, "trace-conditional", target, 1)
