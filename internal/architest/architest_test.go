@@ -89,6 +89,7 @@ var tier = map[string]int{
 	"callavoid":            1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
 	"harnessres":           1, // cross-platform, stdlib-only process resource sampler for the fak guard harness (CPU/mem/IO); imports nothing internal, off the hot path (#2045, epic #2044).
 	"harnessinit":          1, // external product scaffold renderer; stdlib-only and outside kernel hot paths (#6788).
+	"harnessrelease":       1, // release-asset checksum/extraction and external-product witness runner (#6957).
 	"harnessdiscover":      1, // provenance-bearing scoped declaration discovery before contextual selection (#6898).
 	"harnessclassify":      1, // deterministic explicit-first domain/task classification before contextual selection (#6900).
 	"harnesscrossover":     1, // pure reproducible net-work comparison for contextual versus tuned native profiles (#6903).
