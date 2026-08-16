@@ -121,3 +121,59 @@ func TestInitUpgradesOwnedGeneratedGoSum(t *testing.T) {
 		t.Fatalf("go.sum not restored: %s", body)
 	}
 }
+
+func TestInitUserConfigSupportsTaskCardCustomization(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Init(Options{Dir: root, Module: "example.test/acme"}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "product", "config.go")
+	custom := `package product
+
+type Config struct {
+ ID string
+ Version string
+ Profile string
+ SystemPrompt string
+ Task string
+}
+
+func DefaultConfig() Config {
+ return Config{
+  ID: "local-support-harness",
+  Version: "0.1.0",
+  Profile: "support-summary",
+  SystemPrompt: "Answer from admitted context.",
+  Task: "Summarize the support request.",
+ }
+}
+
+func OfflineReply(prompt string) string { return "admitted support summary: " + prompt }
+`
+	if err := os.WriteFile(path, []byte(custom), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Init(Options{Dir: root, Module: "example.test/acme"}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatal("generator rerun changed task-card customization")
+	}
+	for _, generated := range []string{"generated/runtime.go", "README.md"} {
+		body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(generated)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), "DefaultConfig") {
+			t.Fatalf("%s does not use or document stable config seam", generated)
+		}
+	}
+}

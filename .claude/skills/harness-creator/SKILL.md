@@ -42,7 +42,7 @@ Use this when the need fits product identity, profile/config, policy, instructio
    ```
 
 3. Read `<target>/harness.lock.json` before editing. Change only files marked `user`; the default customization seam is `<target>/product/config.go`.
-4. Express the smallest user need in the profile/config. Do not edit `generated/` or `cmd/product/main.go`.
+4. Express the smallest user need by changing field values returned by `product.DefaultConfig` and, when needed, the body of `product.OfflineReply`. Preserve the `Config`, `DefaultConfig`, and `OfflineReply` signatures consumed by generated runtime code. Do not edit `generated/` or `cmd/product/main.go`.
 5. Rebuild and selfcheck from the target:
 
    ```text

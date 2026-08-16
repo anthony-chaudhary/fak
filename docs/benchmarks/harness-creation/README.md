@@ -20,7 +20,7 @@ The clock starts when the participant opens this task card. Within 600.0 elapsed
 1. Retrieve the declared fak artifact.
 2. State one bounded harness need in one sentence.
 3. Generate the product outside a fak checkout.
-4. Represent the need by editing only `product/config.go`.
+4. Represent the need by editing only field values returned by `product.DefaultConfig` and, if needed, the body of `product.OfflineReply`; preserve those signatures.
 5. Build the generated product and pass its offline `--selfcheck`.
 6. Read `harness.lock.json` and record its exact upgrade command.
 
