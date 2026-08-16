@@ -26,6 +26,7 @@ var commitFn = safecommit.Commit
 // remains inside safecommit.Commit; this seam only prevents queued contenders from starting
 // expensive build checks while a live writer already owns the lane.
 var commitLaneBusyFn = commitLaneBusy
+var commitRecordTreeReceipt = recordCommittedTreeReceipt
 
 // runCommitCommand routes `fak commit [<sub>]` to its subcommand handler and returns the
 // process exit code. main.go calls it directly (inside the observed-git-operation wrapper)
@@ -228,6 +229,9 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	// ever being compiled must not be graded like one that passed the gate (#6006).
 	res.BuildCheck = &buildCheck
 	res = safecommit.ScoreResult(res)
+	if res.Committed && buildCheckOutcome == safecommit.BuildCheckPassed {
+		commitRecordTreeReceipt(root, time.Now())
+	}
 	if res.Review != nil {
 		if err := recordCommitReviewForLoop(res); err != nil {
 			fmt.Fprintf(stderr, "fak commit: record review evidence: %v\n", err)
@@ -246,6 +250,12 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		renderCommitResult(stdout, res)
 	}
 	return commitExitCode(res)
+}
+
+func recordCommittedTreeReceipt(root string, now time.Time) {
+	if tree, err := gitRevParse(root, "HEAD^{tree}"); err == nil {
+		recordPrepushSuccessForTree(root, tree, now)
+	}
 }
 
 func deriveCommitMessageStamp(message string, paths []string, root string) (string, bool) {

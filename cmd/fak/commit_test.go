@@ -807,3 +807,26 @@ var errTest = errTestErr{}
 type errTestErr struct{}
 
 func (errTestErr) Error() string { return "test infra failure" }
+
+func TestRunCommitRecordsTreeReceiptOnlyAfterSuccessfulBuildAndCommit(t *testing.T) {
+	oldBusy, oldBuild, oldCommit, oldRecord := commitLaneBusyFn, commitBuildCheckGate, commitFn, commitRecordTreeReceipt
+	t.Cleanup(func() {
+		commitLaneBusyFn, commitBuildCheckGate, commitFn, commitRecordTreeReceipt = oldBusy, oldBuild, oldCommit, oldRecord
+	})
+	commitLaneBusyFn = func(string) (bool, int) { return false, 0 }
+	commitBuildCheckGate = func(io.Writer, string, []string) (safecommit.BuildCheckOutcome, string) {
+		return safecommit.BuildCheckPassed, ""
+	}
+	commitFn = func(_ context.Context, opts safecommit.Options) (safecommit.Result, error) {
+		return safecommit.Result{Committed: true, Verified: true, SHA: "abc", Paths: opts.Paths}, nil
+	}
+	var recorded int
+	commitRecordTreeReceipt = func(string, time.Time) { recorded++ }
+	var out, errOut bytes.Buffer
+	if code := runCommit(&out, &errOut, []string{"-m", "fix(test): add receipt witness (fak cmd)", "--path", "cmd/fak/x.go"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if recorded != 1 {
+		t.Fatalf("record calls=%d, want 1", recorded)
+	}
+}
