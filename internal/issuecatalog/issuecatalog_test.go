@@ -2,6 +2,7 @@ package issuecatalog
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -35,6 +36,12 @@ func completeRow() Row {
 		Milestone:      "The KV cache value is owned, observed & 2x",
 		Lens:           "default-off",
 		Priority:       "P1",
+		ProblemFrame: issuepolicy.ProblemFrame{Schema: issuepolicy.ProblemFrameSchema, Ready: true, Enforced: true, Centrality: issuepolicy.CentralityEnabling, CentralityTarget: "measured cross-agent KV reuse", Checks: map[string]issuepolicy.ProblemCheck{
+			"p1": {ID: "p1", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "reuse context", Valid: true},
+			"p2": {ID: "p2", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "measured value", Valid: true},
+			"p3": {ID: "p3", Status: issuepolicy.ProblemCheckPreserved, Evidence: "bounded default", Valid: true},
+			"p4": {ID: "p4", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "fleet witness", Valid: true},
+		}},
 	}
 }
 
@@ -282,4 +289,19 @@ func containsStr(xs []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestCandidateCarriesExplicitProblemFrameWithoutMetadataInference(t *testing.T) {
+	row := completeRow()
+	candidate := row.Candidate()
+	if !reflect.DeepEqual(candidate.ProblemFrame, row.ProblemFrame) {
+		t.Fatalf("frame not projected:\nrow=%+v\ncandidate=%+v", row.ProblemFrame, candidate.ProblemFrame)
+	}
+	row.ProblemFrame = issuepolicy.ProblemFrame{}
+	row.Title = "Core parent"
+	row.Labels = []string{"core", "priority/P0"}
+	candidate = row.Candidate()
+	if candidate.ProblemFrame.Enforced || candidate.ProblemFrame.Centrality != "" {
+		t.Fatalf("metadata inferred frame: %+v", candidate.ProblemFrame)
+	}
 }

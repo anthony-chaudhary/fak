@@ -39,31 +39,32 @@ var markerRE = regexp.MustCompile(`<!--\s*` + MarkerName + `:\s*([^>\s]+)\s*-->`
 // The JSON tags match the recon-agent gap-row schema exactly, and unknown fields
 // (e.g. expected_steps) decode away harmlessly.
 type Row struct {
-	Key            string   `json:"key"`
-	Title          string   `json:"title"`
-	ParentRef      string   `json:"parent_ref"`
-	CurrentState   string   `json:"current_state"`
-	WhyNow         string   `json:"why_now"`
-	WorkingSpine   string   `json:"working_spine"`
-	WorkUnit       string   `json:"work_unit"`
-	ExpectedSteps  int      `json:"expected_steps"`
-	Assumptions    []string `json:"assumptions"`
-	ConfusionRisks []string `json:"confusion_risks"`
-	Coordination   []string `json:"coordination"`
-	Trigger        string   `json:"trigger"`
-	BatchPolicy    string   `json:"batch_policy"`
-	InScope        string   `json:"in_scope"`
-	OutOfScope     string   `json:"out_of_scope"`
-	DoneCondition  string   `json:"done_condition"`
-	Witness        string   `json:"witness"`
-	AcceptanceGate string   `json:"acceptance_gate"`
-	ClosureBinding string   `json:"closure_binding"`
-	Lane           string   `json:"lane"`
-	Paths          []string `json:"paths"`
-	Labels         []string `json:"labels"`
-	Milestone      string   `json:"milestone"`
-	Lens           string   `json:"lens"`
-	Priority       string   `json:"priority"`
+	Key            string                   `json:"key"`
+	Title          string                   `json:"title"`
+	ParentRef      string                   `json:"parent_ref"`
+	CurrentState   string                   `json:"current_state"`
+	WhyNow         string                   `json:"why_now"`
+	WorkingSpine   string                   `json:"working_spine"`
+	WorkUnit       string                   `json:"work_unit"`
+	ExpectedSteps  int                      `json:"expected_steps"`
+	Assumptions    []string                 `json:"assumptions"`
+	ConfusionRisks []string                 `json:"confusion_risks"`
+	Coordination   []string                 `json:"coordination"`
+	Trigger        string                   `json:"trigger"`
+	BatchPolicy    string                   `json:"batch_policy"`
+	InScope        string                   `json:"in_scope"`
+	OutOfScope     string                   `json:"out_of_scope"`
+	DoneCondition  string                   `json:"done_condition"`
+	Witness        string                   `json:"witness"`
+	AcceptanceGate string                   `json:"acceptance_gate"`
+	ClosureBinding string                   `json:"closure_binding"`
+	Lane           string                   `json:"lane"`
+	Paths          []string                 `json:"paths"`
+	Labels         []string                 `json:"labels"`
+	Milestone      string                   `json:"milestone"`
+	Lens           string                   `json:"lens"`
+	Priority       string                   `json:"priority"`
+	ProblemFrame   issuepolicy.ProblemFrame `json:"problem_frame"`
 }
 
 // PlanRow is one create/update decision for a single Row.
@@ -177,6 +178,7 @@ func (r Row) Candidate() issuepolicy.Candidate {
 		Paths:          append([]string(nil), r.Paths...),
 		Labels:         append([]string(nil), r.Labels...),
 		Priority:       r.Priority,
+		ProblemFrame:   r.ProblemFrame,
 		ClosureBinding: r.ClosureBinding,
 	}
 }
@@ -227,6 +229,7 @@ func IssueBody(r Row) string {
 	section(&b, "Batch policy", r.BatchPolicy)
 	section(&b, "Core through-line", r.InScope)
 	section(&b, "Gold-plating boundary", r.OutOfScope)
+	problemFrameSection(&b, r.ProblemFrame)
 	section(&b, "Done condition", r.DoneCondition)
 	section(&b, "Witness", r.Witness)
 	section(&b, "Acceptance gate", r.AcceptanceGate)
@@ -239,6 +242,21 @@ func IssueBody(r Row) string {
 	fmt.Fprintln(&b, "Managed by `fak issue-catalog` (the performance-enablement catalog). Re-running the")
 	fmt.Fprintln(&b, "helper updates this issue in place by marker key instead of opening duplicates.")
 	return b.String()
+}
+
+func problemFrameSection(b *strings.Builder, frame issuepolicy.ProblemFrame) {
+	fmt.Fprintln(b, "## Problem frame")
+	fmt.Fprintln(b)
+	centrality := frame.Centrality
+	if frame.CentralityTarget != "" {
+		centrality += " (" + frame.CentralityTarget + ")"
+	}
+	fmt.Fprintf(b, "- Centrality: %s\n", centrality)
+	for _, id := range []string{"p1", "p2", "p3", "p4"} {
+		check := frame.Checks[id]
+		fmt.Fprintf(b, "- %s: %s - %s\n", strings.ToUpper(id), check.Status, check.Evidence)
+	}
+	fmt.Fprintln(b)
 }
 
 func section(b *strings.Builder, title, body string) {
