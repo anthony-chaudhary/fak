@@ -272,6 +272,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [No-progress verdict vocabulary split](docs/notes/NO-PROGRESS-VERDICT-VOCABULARY-SPLIT-2026-08-03.md) — separates terminal blockage from recoverable no-progress states
 - [Breadcrumbing search-agent research triage](docs/notes/RESEARCH-breadcrumbing-search-agents-triage-2026-08-08.md) — research triage for breadcrumbed retrieval and search-agent control
 - [First-class harness stack resolution witness — 2026-08-15](docs/notes/HARNESS-STACK-RESOLVE-CLI-2026-08-15.md) -- auto-indexed dated note.
+- [Harness stacks are typed assemblies, not uniform profile piles — 2026-08-15](docs/notes/HARNESS-STACK-LOCAL-FIRST-MODEL-2026-08-15.md) -- local-first dimension, cardinality, merge, and invalidation contract.
 - **[Support witness ingestion and GPU dispatch packet](docs/notes/SUPPORT-WITNESS-INGESTION-AND-GPU-DISPATCH-2026-08-15.md)** — Hashed evidence ingestion, baseline invalidation, sanctioned GCP preflight, and private-node command packet (#6896).
 - **[Integrated stack preflight spine](docs/notes/INTEGRATED-STACK-PREFLIGHT-SPINE-2026-08-15.md)** — Composition, workload fitness, and exact support evidence joined into required/recommended launch receipts (#6897).
 - **[Hardware and quantization support-graph spine](docs/notes/HARDWARE-QUANT-SUPPORT-GRAPH-SPINE-2026-08-15.md)** — Exact artifact/backend/kernel/runtime/hardware tuples with provenance, proof tiers, freshness, baselines, and fallback (#6895).
