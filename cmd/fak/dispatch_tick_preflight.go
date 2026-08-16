@@ -54,6 +54,7 @@ func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workK
 	t0 = time.Now()
 	kernel := dispatchPreflightKernel(root)
 	stamp("kernel_probe", t0)
+	wip := dispatchPreflightWIP(root)
 	// OSWorkerProcs is the PUBLISHED per-worker load (#3376), not the raw per-tick
 	// probe: dispatchPublishWorkerLoad still samples every tick but only lets a CHANGED
 	// value through, and only after it survives a reset-on-change coalescing window.
@@ -68,6 +69,7 @@ func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workK
 		Resources:     dispatchBuildHostResources(processes),
 		Budgets:       dispatchtick.DefaultHostBudgets(),
 		OSWorkerProcs: dispatchPublishWorkerLoad(root, product),
+		WIP:           wip,
 	}
 	// The operator concurrency setpoint (#4036, wired live by #4165): fold
 	// FAK_DISPATCH_SETPOINT through the pure ReconcileSetpoint plan into the input
@@ -626,6 +628,28 @@ func dispatchFallbackReadout(root string, stderr io.Writer, workKind, primaryPro
 		in.FallbackReason = firstString(acct.Reason, acct.Error)
 	}
 	return dispatchtick.DecideFallbackProduct(in).Map(), true
+}
+
+// dispatchPreflightWIP measures started-and-unfinished work from the same durable
+// ledger dispatch ticks write. The operator limit is opt-in; unreadable evidence
+// abstains rather than inventing either headroom or pressure.
+func dispatchPreflightWIP(root string) dispatchtick.WIPCensus {
+	raw := strings.TrimSpace(os.Getenv(dispatchtick.WIPLimitEnv))
+	limit, err := strconv.Atoi(raw)
+	if raw == "" || err != nil || limit <= 0 {
+		return dispatchtick.WIPCensus{}
+	}
+	ledger := filepath.Join(root, defaultLoopLedger())
+	if _, err := os.Stat(ledger); err != nil {
+		return dispatchtick.WIPCensus{Limit: limit}
+	}
+	events, err := loopmgr.Load(ledger)
+	if err != nil {
+		return dispatchtick.WIPCensus{Limit: limit}
+	}
+	status := loopmgr.Summarize(events, time.Now())
+	started, inventory := status.WIP()
+	return dispatchtick.WIPCensus{Measured: true, Started: started, Inventory: inventory, Limit: limit}
 }
 
 func dispatchPreflightAccount(root string, _ io.Writer, workKind, product string) dispatchtick.AccountCheck {

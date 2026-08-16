@@ -219,6 +219,12 @@ type PreflightInput struct {
 	// tests that assert the ordinary mid-scale SPAWN path (alive < target still admits toward
 	// target). The behavior can be enabled deliberately alongside its integration-test flip.
 	SettleBeforeRedecide bool
+	// WIP is the OPTIONAL flow-limit census (wiplimit.go): how many started-and-unfinished
+	// units the fleet already owns, and the most it may own. Every other term in this input
+	// is a RESOURCE limit; this is the only one that charges a spawn against WORK IN HAND.
+	// Its zero value (Measured=false, Limit=0) abstains, so the fold is byte-identical to
+	// before this term existed unless a producer supplies a measured census.
+	WIP WIPCensus
 }
 
 type PreflightResult struct {
@@ -261,7 +267,15 @@ type CapTerms struct {
 	// cap, or 0 when no proven raise applied. When it is what set the effective cap,
 	// Limiting reads "worktree" so an operator can see the A/B poison-free evidence -- not
 	// a min() cap -- is what permits the fleet to run above the old shared-trunk ceiling.
-	WorktreeCap  int    `json:"worktree_cap"`
+	WorktreeCap int `json:"worktree_cap"`
+	// WIPStarted and WIPLimit record the flow limit (wiplimit.go) when it is the binding
+	// term: the started-and-unfinished units the fleet owns, and the most it may own.
+	// Every other term here is a RESOURCE limit -- what the box and the seat pool can
+	// carry -- so when Limiting reads "wip_limit" an operator can see the cap came from
+	// work in hand, not from capacity, and that the remedy is to FINISH rather than to
+	// provision. Both stay 0 unless the term binds, so the JSON is unchanged otherwise.
+	WIPStarted   int    `json:"wip_started,omitempty"`
+	WIPLimit     int    `json:"wip_limit,omitempty"`
 	EffectiveCap int    `json:"effective_cap"`
 	Limiting     string `json:"limiting"`
 }
@@ -410,7 +424,13 @@ func EvaluatePreflight(in PreflightInput) PreflightResult {
 	classifyInput.Seat = seat
 	verdict, reason := classifyPreflight(classifyInput, capacity, live, seatsDepleted, hostCapInfo.HostCap)
 	ok := verdict == PreflightOKVerdict
-	return PreflightResult{
+	// The flow-limit term (wiplimit.go) is applied LAST, over the fully classified
+	// verdict, for the same reason the other backpressure folds are: it must only speak
+	// when it is the SOLE binding term. A preflight that already refused for host, seat,
+	// account, or at-cap is not growing anyway, and its verdict names a more actionable
+	// cause. An unmeasured census (the zero value every existing caller passes) makes
+	// this an identity function.
+	return ApplyWIPLimit(PreflightResult{
 		Schema:        PreflightSchema,
 		OK:            ok,
 		Verdict:       verdict,
@@ -429,7 +449,7 @@ func EvaluatePreflight(in PreflightInput) PreflightResult {
 		Account:       publicAccount(in.Account),
 		Kernel:        in.Kernel,
 		OSWorkerProcs: in.OSWorkerProcs,
-	}
+	}, in.WIP)
 }
 
 func accountUnattributedLiveSlots(seat SeatCheck, live int) SeatCheck {
@@ -609,6 +629,8 @@ func (c CapTerms) Map() map[string]any {
 		"seat_cap":        ptrAny(c.SeatCap),
 		"worker_floor":    c.WorkerFloor,
 		"worktree_cap":    c.WorktreeCap,
+		"wip_started":     c.WIPStarted,
+		"wip_limit":       c.WIPLimit,
 		"effective_cap":   c.EffectiveCap,
 		"limiting":        c.Limiting,
 	}
