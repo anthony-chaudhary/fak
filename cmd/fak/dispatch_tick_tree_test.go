@@ -8,6 +8,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
 )
 
 func TestDispatchTreeBuildCachesSuccessByHead(t *testing.T) {
@@ -68,11 +71,12 @@ func TestDispatchTreeBuildDoesNotCacheFailure(t *testing.T) {
 }
 
 func TestDispatchProbeTreeBuildNamesCompilerFailure(t *testing.T) {
-	old := dispatchTreeBuildCommand
+	oldBuild, oldHead := dispatchTreeBuildCommand, dispatchTreeBuildHead
+	dispatchTreeBuildHead = func(string) string { return "red-head" }
 	dispatchTreeBuildCommand = func(string) (string, error) {
 		return "# example/broken\nbroken.go:3: undefined: nope", errors.New("exit status 1")
 	}
-	t.Cleanup(func() { dispatchTreeBuildCommand = old })
+	t.Cleanup(func() { dispatchTreeBuildCommand, dispatchTreeBuildHead = oldBuild, oldHead })
 	got := dispatchProbeTreeBuild(t.TempDir())
 	if !got.Poisoned || got.Package != "# example/broken" {
 		t.Fatalf("got=%+v", got)
@@ -188,5 +192,34 @@ func TestDispatchTreeBuildIgnoresBrokenUntrackedPeerFile(t *testing.T) {
 	}
 	if got := dispatchProbeTreeBuild(root); got.Poisoned || got.Error != "" {
 		t.Fatalf("committed tree probe = %+v, want green despite unrelated untracked WIP", got)
+	}
+}
+
+func TestDispatchProbeTreeBuildReusesCrossProcessCommittedWitness(t *testing.T) {
+	root := t.TempDir()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	const head = "0123456789abcdef0123456789abcdef01234567"
+	committedbuildwitness.Record(root, head, "ci-preflight", time.Now())
+
+	oldHead, oldBuild := dispatchTreeBuildHead, dispatchTreeBuildCommand
+	defer func() {
+		dispatchTreeBuildHead, dispatchTreeBuildCommand = oldHead, oldBuild
+	}()
+	dispatchTreeBuildHead = func(string) string { return head }
+	builds := 0
+	dispatchTreeBuildCommand = func(string) (string, error) {
+		builds++
+		return "", errors.New("must not compile a witnessed HEAD")
+	}
+
+	if got := dispatchProbeTreeBuild(root); got.Poisoned || got.Error != "" {
+		t.Fatalf("cache hit returned %+v", got)
+	}
+	if builds != 0 {
+		t.Fatalf("builds=%d want 0 after independent witness", builds)
 	}
 }

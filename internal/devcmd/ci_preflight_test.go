@@ -7,6 +7,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
 )
 
 // ci_preflight_test.go — proves `fak ci-preflight` reads the COMMITTED tip (not the working
@@ -98,6 +101,9 @@ func TestCIPreflight_cleanCommittedTip_OK(t *testing.T) {
 	res, code := runPreflightJSON(t, []string{"--root", repo, "--json"})
 	if !res.OK || code != 0 {
 		t.Fatalf("clean committed tip should verify OK; got OK=%v code=%d failures=%+v", res.OK, code, res.Failures)
+	}
+	if !committedbuildwitness.Fresh(repo, res.Tip, time.Now()) {
+		t.Fatal("successful ci-preflight did not publish committed build witness")
 	}
 }
 

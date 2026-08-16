@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
+	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
 	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -436,7 +437,9 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 	}
 	if tree, err := prepushTreeResolveFn(r, resolvedTip+"^{tree}"); err == nil && prepushTreeSuccessReusable(r, tree, prepushNow()) && prepushCommitPathsCoveredFn(r, resolvedTip) {
 		fmt.Fprintf(stdout, "PREPUSH_REUSED tip=%s tree=%s source=commit-build-check age<=%s\n", resolvedTip, tree, prepushSuccessReuseTTL)
-		recordPrepushSuccess(r, resolvedTip, prepushNow())
+		now := prepushNow()
+		recordPrepushSuccess(r, resolvedTip, now)
+		committedbuildwitness.Record(r, resolvedTip, "pre-push", now)
 		return 0
 	}
 	owner, releaseClaim := claimPrepushTip(r, resolvedTip, prepushNow)
@@ -489,7 +492,9 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	if code == 0 {
-		recordPrepushSuccess(r, resolvedTip, prepushNow())
+		now := prepushNow()
+		recordPrepushSuccess(r, resolvedTip, now)
+		committedbuildwitness.Record(r, resolvedTip, "pre-push", now)
 	}
 	return code
 }

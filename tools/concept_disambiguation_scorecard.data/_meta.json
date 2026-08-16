@@ -4957,6 +4957,11 @@
           "category": "incidental",
           "reason": "Issue #6372 research witness artifact naming inside cmd/microcontextdemo, not a distinct operator-facing concept",
           "token": "natural-traffic"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal package name for the exact-HEAD build receipt shared by existing ci-preflight, pre-push, and dispatch gates; it implements the existing committed-build witness rather than introducing a separate proof concept.",
+          "token": "committedbuildwitness"
         }
       ],
       "id": "witness-proof",
@@ -5017,6 +5022,7 @@
         "checkpoint_no_tree_witness",
         "closeProxyFillWitnesses",
         "collectDogfoodKernelValue",
+        "committedbuildwitness",
         "compactionWitness",
         "conptyWitness",
         "coreLockWitnessFromMessage",

@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/trunkbuildprobe"
@@ -1145,7 +1146,7 @@ var dispatchTreeBuildCommand = func(root string) (string, error) {
 func dispatchProbeTreeBuild(root string) dispatchtick.TreeCheck {
 	now := time.Now()
 	cacheRoot, head := dispatchTreeBuildKey(root)
-	if dispatchTreeBuildSucceededRecently(cacheRoot, head, now) {
+	if dispatchTreeBuildSucceededRecently(cacheRoot, head, now) || committedbuildwitness.Fresh(cacheRoot, head, now) {
 		return dispatchtick.TreeCheck{}
 	}
 	out, err := dispatchTreeBuildCommand(root)
@@ -1153,7 +1154,9 @@ func dispatchProbeTreeBuild(root string) dispatchtick.TreeCheck {
 		// Record the HEAD observed before the build. If HEAD moved during the
 		// probe, the next lookup sees a mismatch and rebuilds rather than
 		// attributing the old build to the new commit.
-		dispatchRecordTreeBuildSuccess(cacheRoot, head, time.Now())
+		completedAt := time.Now()
+		dispatchRecordTreeBuildSuccess(cacheRoot, head, completedAt)
+		committedbuildwitness.Record(cacheRoot, head, "dispatch-preflight", completedAt)
 		return dispatchtick.TreeCheck{}
 	}
 	// Missing toolchain/probe infrastructure fails open; a real compiler diagnostic

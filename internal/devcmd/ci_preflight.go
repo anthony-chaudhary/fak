@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
 	"github.com/anthony-chaudhary/fak/internal/committedtree"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -101,6 +103,8 @@ func RunCIPreflight(stdout, stderr io.Writer, argv []string) int {
 	} else if detail, ok := goBuildAll(dir); !ok {
 		res.OK = false
 		res.Failures = append(res.Failures, ciPreflightFailure{Step: "build", Detail: detail})
+	} else {
+		committedbuildwitness.Record(r, tip, "ci-preflight", time.Now())
 	}
 
 	if *asJSON {
