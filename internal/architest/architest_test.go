@@ -599,6 +599,7 @@ var tier = map[string]int{
 	"toolcatalog":           1,
 	"projectassets":         1, // stdlib-only project asset registry and parity adapter; off the runtime hot path.
 	"wavefuel":              1, // stdlib-only fleet-wave operator-receipt contract witness.
+	"bitnetmeta":            1, // stdlib-only low-bit artifact metadata contract and typed adjudication.
 	"workaccount":           1, // stdlib-only WORK DONE mechanism coverage registry and validator; off the runtime hot path.
 	"orientation":           2, // versioned temporal product-orientation snapshot; imports issue-free stdlib only, off the runtime hot path.
 	"harnessweb":            2, // loopback browser runtime over public harnesskit plus persisted semantic sessions; off kernel hot path (#6980).
