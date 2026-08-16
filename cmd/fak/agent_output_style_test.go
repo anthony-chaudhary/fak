@@ -44,7 +44,7 @@ func TestAgentOutputProfilesUserReadout(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := out.String()
-	for _, want := range []string{"caveman:medium", "caveman:original:*", "not-yet", "--output-style full", "does not change work policy"} {
+	for _, want := range []string{"caveman:medium", "caveman:original:*", "not-yet", "--output-style full", "independent axis"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("profiles readout missing %q:\n%s", want, text)
 		}

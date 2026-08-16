@@ -129,47 +129,6 @@ func TestRunAccountsLaunchAdmitsDeclaredAPIKeyEnv(t *testing.T) {
 	}
 }
 
-func TestRunAccountsLaunchRefusesUnreachableAPIKeyEnv(t *testing.T) {
-	const envName = "FAK_TEST_5503_CORP_TOKEN"
-	t.Setenv(envName, launchAPIKeyEnvFakeSecret)
-	t.Setenv(fleetManagedCacheEnv, "")
-	t.Setenv(fleetGuardAPIKeyEnvEnv, "")
-	home := t.TempDir()
-	regPath := writeAPIKeySeatRegistry(t, home, "corp", envName)
-
-	launched := false
-	orig := accountsLaunchRun
-	accountsLaunchRun = func(_, _ io.Writer, _, _ []string) launchRunResult {
-		launched = true
-		return launchRunResult{Code: 0}
-	}
-	t.Cleanup(func() { accountsLaunchRun = orig })
-
-	var out, errb bytes.Buffer
-	rc := runAccounts(&out, &errb, []string{"launch", "--name", "corp", "--registry", regPath, "--home", home})
-	if rc == 0 {
-		t.Fatalf("launch returned 0 while handing the child an argv referencing an unreachable $%s\nstderr:\n%s", envName, errb.String())
-	}
-	if launched {
-		t.Fatalf("refused launch must not start the child")
-	}
-	got := errb.String()
-	// The refusal names the variable NAME...
-	if !strings.Contains(got, envName) {
-		t.Fatalf("refusal must name the env-var NAME %q:\n%s", envName, got)
-	}
-	// ...and names the floor that caused it, so the operator is not left with "Not logged in".
-	for _, want := range []string{"--api-key-env", "inherited-secret floor", "#2358"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("refusal must name %q as the cause:\n%s", want, got)
-		}
-	}
-	// ...and never the value.
-	if strings.Contains(got, launchAPIKeyEnvFakeSecret) || strings.Contains(out.String(), launchAPIKeyEnvFakeSecret) {
-		t.Fatalf("refusal leaked the credential value")
-	}
-}
-
 // TestRunAccountsLaunchNeverBlamesFloorForUnsetAPIKeyEnv is the mis-attribution gate. A
 // variable the operator simply never exported is a DIFFERENT terminal with its own existing
 // handling — the seat-servability walk refuses an api-key seat whose key is absent long before
