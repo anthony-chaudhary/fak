@@ -357,6 +357,20 @@ class LauncherWiringTest(unittest.TestCase):
         self.assertIn("'plan'", text)              # the decide-only verb
         self.assertIn("admissionShortfall", text)  # folded into the plan's shortfall
 
+    def test_wave_launcher_refills_until_requested_total_or_deadline(self):
+        text = self.WAVE.read_text(encoding="utf-8")
+        self.assertIn("[int]$RefillCadenceSeconds = 60", text)
+        self.assertIn("[int]$RefillForMinutes = 240", text)
+        self.assertIn("while ($remaining -gt 0 -and (Get-Date) -lt $deadline)", text)
+        self.assertIn("Start-Sleep -Seconds $RefillCadenceSeconds", text)
+        self.assertIn("'-NoRefill', '-Launch'", text)
+        self.assertIn("WAVE REFILL DONE", text)
+        self.assertIn("WAVE REFILL STOP", text)
+        self.assertIn("WAVE WAIT         initial allocation empty", text)
+        self.assertIn("WAVE CENSUS", text)
+        self.assertIn("os_worker_procs=", text)
+        self.assertIn("seat_free=", text)
+
     def test_wave_launcher_paces_spawns_with_a_jittered_delay(self):
         text = self.WAVE.read_text(encoding="utf-8")
         self.assertIn("FAK_LAUNCH_SPAWN_PACING_MS", text)   # env-overridable pacing knob

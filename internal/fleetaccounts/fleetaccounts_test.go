@@ -714,66 +714,50 @@ func TestResolveSurfacesLoginBlockedTarget(t *testing.T) {
 }
 
 func TestAllocateWaveGrantsDistinctPoolsAndUnderfills(t *testing.T) {
-	home, cfg, regPath := fixture(t)
-	reg := LoadRegistry(regPath)
-	rows := AnnotatedRoster(home, cfg, DefaultPolicy(), reg)
-
-	wave := AllocateWave(rows, WaveRequest{
-		Count:             3,
-		WorkKind:          "engineering",
-		AllowTierFallback: true,
-	}, DefaultPolicy())
+	rows := []Account{
+		{Dir: "C:/seats/a", Product: "claude", Account: ".claude-seat-a", Tag: "seat-a", Kind: KindWorker, Reason: "real offered account", AccountUUID: strp("acct-a"), ModelTier: intp(1), Available: boolp(true)},
+		{Dir: "C:/seats/b", Product: "claude", Account: ".claude-seat-b", Tag: "seat-b", Kind: KindWorker, Reason: "real offered account", AccountUUID: strp("acct-b"), ModelTier: intp(1), Available: boolp(true)},
+		{Dir: "C:/seats/c", Product: "claude", Account: ".claude-seat-c", Tag: "seat-c", Kind: KindWorker, Reason: "real offered account", AccountUUID: strp("acct-c"), ModelTier: intp(1), Available: boolp(true)},
+		{Dir: "C:/seats/blocked", Product: "claude", Account: ".claude-blocked", Tag: "blocked", Kind: KindWorker, Reason: "real offered account", AccountUUID: strp("acct-blocked"), ModelTier: intp(1), Available: boolp(false), BlockReason: strp("usage limit")},
+	}
+	wave := AllocateWave(rows, WaveRequest{Count: 3, WorkKind: "engineering", Product: "claude"}, DefaultPolicy())
 	if !wave.OK || wave.Requested != 3 || wave.Granted != 3 || wave.Shortfall != 0 ||
-		wave.DistinctPools != 1 || wave.Size != 3 || wave.WaveID == "" {
-		t.Fatalf("wave = %+v, want 3 session slots on the one fresh tier-1 pool", wave)
+		wave.DistinctPools != 3 || wave.Size != 3 || wave.WaveID == "" {
+		t.Fatalf("wave = %+v, want 3 slots on 3 independent identities", wave)
 	}
 	if len(wave.Lanes) != 3 || wave.Lanes[0].Rank != 0 || wave.Lanes[1].Rank != 1 ||
 		wave.Lanes[2].Rank != 2 || wave.Lanes[0].WaveID != wave.WaveID || wave.Lanes[2].Size != 3 {
 		t.Fatalf("lane membership = %+v, want rank-stamped shared wave", wave.Lanes)
 	}
 	for i, lane := range wave.Lanes {
-		if lane.Pool != wave.Lanes[0].Pool || lane.SessionSlot != i+1 || lane.SessionCap != DefaultClaudeSessionsPerAccount {
-			t.Fatalf("lane %d = %+v, want repeated slots 1..3 on one Claude pool", i, lane)
+		if lane.SessionSlot != 1 || lane.SessionCap != 1 {
+			t.Fatalf("lane %d = %+v, want one slot on an independent Claude pool", i, lane)
 		}
 	}
-	for _, lane := range wave.Lanes {
-		if lane.Tag == "dup" || lane.Tag == "gem8" {
-			t.Fatalf("wave allocated duplicate or blocked lane: %+v", wave.Lanes)
-		}
-	}
-	if len(wave.BlockedTargetAccounts) != 1 || wave.BlockedTargetAccounts[0].Tag != "gem8" {
-		t.Fatalf("blocked target accounts = %+v, want throttled gem8", wave.BlockedTargetAccounts)
+	if len(wave.BlockedTargetAccounts) != 1 || wave.BlockedTargetAccounts[0].Tag != "blocked" {
+		t.Fatalf("blocked target accounts = %+v, want blocked identity", wave.BlockedTargetAccounts)
 	}
 }
 
 func TestAllocateWaveSubtractsLiveLeaseSlots(t *testing.T) {
-	rows := []Account{{
-		Dir:         "C:/seats/a",
-		Product:     "claude",
-		Account:     ".claude-seat-a",
-		Tag:         "seat-a",
-		Kind:        KindWorker,
-		Reason:      "real offered account",
-		AccountUUID: strp("acct-a"),
-		ModelTier:   intp(1),
-		Available:   boolp(true),
-	}}
+	rows := []Account{
+		{Dir: "C:/seats/a", Product: "claude", Account: ".claude-seat-a", Tag: "seat-a", Kind: KindWorker, Reason: "real offered account", AccountUUID: strp("acct-a"), ModelTier: intp(1), Available: boolp(true)},
+		{Dir: "C:/seats/b", Product: "claude", Account: ".claude-seat-b", Tag: "seat-b", Kind: KindWorker, Reason: "real offered account", AccountUUID: strp("acct-b"), ModelTier: intp(1), Available: boolp(true)},
+		{Dir: "C:/seats/c", Product: "claude", Account: ".claude-seat-c", Tag: "seat-c", Kind: KindWorker, Reason: "real offered account", AccountUUID: strp("acct-c"), ModelTier: intp(1), Available: boolp(true)},
+		{Dir: "C:/seats/d", Product: "claude", Account: ".claude-seat-d", Tag: "seat-d", Kind: KindWorker, Reason: "real offered account", AccountUUID: strp("acct-d"), ModelTier: intp(1), Available: boolp(true)},
+	}
 	leases := []Lease{
 		{Worker: "resolve-1", Tag: "seat-a", Dir: "C:/seats/a"},
-		{Worker: "resolve-2", Tag: "seat-a", Dir: "C:/seats/a"},
-		{Worker: "resolve-3", Tag: "seat-a", Dir: "C:/seats/a"},
+		{Worker: "resolve-2", Tag: "seat-b", Dir: "C:/seats/b"},
+		{Worker: "resolve-3", Tag: "seat-c", Dir: "C:/seats/c"},
 	}
-	wave := AllocateWave(rows, WaveRequest{
-		Count:    4,
-		WorkKind: "engineering",
-		Product:  "claude",
-		Leases:   leases,
-	}, DefaultPolicy())
-	if !wave.OK || wave.Granted != 1 || wave.Shortfall != 3 || wave.DistinctPools != 1 {
-		t.Fatalf("wave = %+v, want only the fourth session slot free", wave)
+	wave := AllocateWave(rows, WaveRequest{Count: 4, WorkKind: "engineering", Product: "claude", Leases: leases}, DefaultPolicy())
+	if !wave.OK || wave.Granted != 1 || wave.Shortfall != 3 || len(wave.Lanes) != 1 {
+		t.Fatalf("wave = %+v, want only the fourth identity free", wave)
 	}
-	if wave.Lanes[0].SessionSlot != 4 || wave.Lanes[0].SessionCap != DefaultClaudeSessionsPerAccount {
-		t.Fatalf("lane = %+v, want slot 4/%d", wave.Lanes[0], DefaultClaudeSessionsPerAccount)
+	got := wave.Lanes[0]
+	if got.Tag != "seat-d" || got.SessionSlot != 1 || got.SessionCap != 1 {
+		t.Fatalf("lane = %+v, want seat-d slot/cap 1/1", got)
 	}
 }
 

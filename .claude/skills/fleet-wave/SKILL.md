@@ -196,10 +196,15 @@ fak fleet-accounts wave --count 30 --work-kind codex --product codex --json
 fak fleet-accounts status --provider codex --json
 ```
 
-The `fleet-accounts wave` receipt—not account-directory count—is the seat-room authority.
-Use `granted`, `shortfall`, `distinct_pools`, and each lane's `config_dir`, `pool`, and
-`session_slot`. `status` is health context, not allocation; if it unexpectedly says zero
-while the offer grants seats, preserve the offer and surface the inconsistency.
+The `fleet-accounts wave` receipt—not account-directory count—is the account-pool authority,
+but it is not sufficient by itself. Quote the preflight's OS process census (`live`, `headroom`,
+`os_worker_procs`) beside `seat_free`, plus `granted`, `shortfall`, `distinct_pools`, and each
+lane's `config_dir`, `pool`, and `session_slot`. A large leased/live claim that disagrees with
+top-level Codex process trees is a **pricing defect**, not a reason to stop: preserve both
+readings, use the independently witnessed process count for host headroom, and fix/file the
+stale registry or sidecar source. If allocation underfills, launch the available tranche and
+let the refill controller reprice on cadence. If status says zero while the offer grants seats,
+preserve the offer and surface the inconsistency.
 
 Current `dispatch wave` is dry-run unless `--live` is present:
 
@@ -216,6 +221,11 @@ a child prompt argument.
 
 Do not pass stale `--deadline`, `--fuel-dir`, `--dry-run`, `--launch`, or `--accounts` flags
 unless installed help advertises them. The deadline remains the monitor/refill stop condition.
+The launcher defaults to a 60-second capacity recheck for four hours
+(`-RefillCadenceSeconds 60 -RefillForMinutes 240`): do not add `-NoRefill`, shorten that window,
+or stop after the first tranche unless the operator explicitly changes the deadline. `Count` is
+the total workers to launch over the window, not a promise that all N must fit concurrently;
+completed processes create refill headroom.
 
 Launch exactly once after explicit intent and a clean dry run:
 
@@ -335,7 +345,9 @@ fak dispatch closure-audit --workspace . --json
 | 8 | `fak intent claim … \| head` | `$?` is the pipe's: a live collision reads rc=0 and stays on the roster |
 | 9 | reusing a wave id / pointer name | last wave's logs and pid crumbs answer as if they were this run's |
 | 10 | monitor announcing a wait | one pass, clean exit, no further samples — sleep must be inside the Bash call |
-| 11 | trusting a worker's `LANDED:` line | report says none; `git log` for that lane says three |
-| 12 | `hold/*` refs never pushed | `for-each-ref` count ≫ `ls-remote` count — and only if you check BOTH namespaces |
-| 13 | an OPEN issue read as unstarted | the fix is already on the trunk under a commit that never cited it |
-| 14 | reporting launches as closes | "30 sessions" ≠ "30 issues" — only a witnessed `Fixes #N` on the trunk closes |
+| 11 | treating the first capacity sample as final | underfilled tranche exits while seats later open — keep the launcher's 60s refill loop alive to the deadline |
+| 12 | trusting leased-seat counts without a process census | "nearly full" with few top-level Codex trees — quote `live`/`os_worker_procs`, repair stale sidecars, and reprice |
+| 13 | trusting a worker's `LANDED:` line | report says none; `git log` for that lane says three |
+| 14 | `hold/*` refs never pushed | `for-each-ref` count ≫ `ls-remote` count — and only if you check BOTH namespaces |
+| 15 | an OPEN issue read as unstarted | the fix is already on the trunk under a commit that never cited it |
+| 16 | reporting launches as closes | "30 sessions" ≠ "30 issues" — only a witnessed `Fixes #N` on the trunk closes |

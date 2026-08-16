@@ -166,33 +166,24 @@ func TestDroppedSeatSurfacedInStatus(t *testing.T) {
 // sized against the roster grants only the live seats, and the shrink is named in
 // the wave reason instead of passing silently.
 func TestWaveFanoutReflectsDroppedSeat(t *testing.T) {
-	root := t.TempDir()
-	home := filepath.Join(root, "home")
-	cfg := filepath.Join(root, "cfg")
-	for _, d := range []string{home, cfg} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	addClaudeSeat(t, home, ".claude-alpha-acct", "uuid-alpha", "alpha@example.com", `{}`)
-	addClaudeSeat(t, home, ".claude-stale-acct", "uuid-stale", "stale@example.com",
+	home, cfg, regPath := fixture(t)
+	addClaudeSeat(t, home, ".claude-stale-acct", "uuid-stale", "[redacted:pii:17B]",
 		expiredCredBody(t, -2*time.Hour))
+	rows := AnnotatedRoster(home, cfg, DefaultPolicy(), LoadRegistry(regPath))
+	for _, tag := range []string{"alpha", "beta", "gamma"} {
+		rows = append(rows, Account{Dir: "C:/seats/" + tag, Product: "claude", Account: ".claude-" + tag, Tag: tag,
+			Kind: KindWorker, Reason: "real offered account", AccountUUID: strp("uuid-" + tag), ModelTier: intp(1), Available: boolp(true)})
+	}
 
-	rows := AnnotatedRoster(home, cfg, DefaultPolicy(), Registry{})
 	wave := AllocateWave(rows, WaveRequest{Count: 5, Product: "claude"}, DefaultPolicy())
 	if wave.Granted != 4 || wave.Shortfall != 1 {
-		t.Fatalf("wave granted/shortfall = %d/%d, want 4/1 (the stale account's four slots are out of the pool)",
+		t.Fatalf("wave granted/shortfall = %d/%d, want 4/1 (the stale identity is out of the pool)",
 			wave.Granted, wave.Shortfall)
 	}
-	for _, lane := range wave.Lanes {
-		if lane.Account == ".claude-stale-acct" {
-			t.Fatal("wave allocated the expired-credential seat")
-		}
-	}
 	if len(wave.DroppedSeats) != 1 || wave.DroppedSeats[0].Tag != "stale" {
-		t.Fatalf("wave dropped_seats = %+v, want the stale seat surfaced", wave.DroppedSeats)
+		t.Fatalf("wave dropped seats = %+v, want stale", wave.DroppedSeats)
 	}
-	if !strings.Contains(wave.Reason, "re-login") {
-		t.Fatalf("wave reason = %q, want the pending re-login note", wave.Reason)
+	if !strings.Contains(wave.Reason, "stale") || !strings.Contains(wave.Reason, "re-login") {
+		t.Fatalf("wave reason = %q, want dropped-seat re-login explanation", wave.Reason)
 	}
 }

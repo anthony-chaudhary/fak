@@ -291,6 +291,31 @@ func TestLaunchGoalDetachedGuardBudgetsMirrorDispatchWorker(t *testing.T) {
 // launcher reported a wave, so the run read as launched-and-unproductive rather than never
 // started. Nothing in the tracked tree asserted these strings — the same coverage gap that
 // let the guard budget drift in TestLaunchGoalDetachedGuardBudgetsMirrorDispatchWorker.
+func TestWaveLauncherRefillsAndReconcilesProcessCensus(t *testing.T) {
+	path := filepath.Join("..", "..", "tools", "launch_wave_detached.ps1")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(b)
+	for _, want := range []string{
+		"[int]$RefillCadenceSeconds = 60",
+		"[int]$RefillForMinutes = 240",
+		"while ($remaining -gt 0 -and (Get-Date) -lt $deadline)",
+		"$refillEligible = $Launch",
+		"WAVE WAIT         initial allocation empty",
+		"Start-Sleep -Seconds $RefillCadenceSeconds",
+		"'-NoRefill', '-Launch'",
+		"WAVE CENSUS",
+		"os_worker_procs=",
+		"seat_free=",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("wave launcher missing refill/census contract %q", want)
+		}
+	}
+}
+
 func TestDetachedLauncherDefaultsSpawnFromABareInvocation(t *testing.T) {
 	repoRoot := filepath.Join("..", "..")
 	for _, name := range []string{"launch_goal_detached.ps1", "launch_wave_detached.ps1"} {

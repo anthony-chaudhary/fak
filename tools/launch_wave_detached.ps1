@@ -89,7 +89,11 @@ param(
   # Actually spawn the workers. Without it, this is a dry-run that only prints the plan.
   [switch]$Launch,
   # Emit a machine-readable dry-run plan and spawn nothing. Refuses with -Launch.
-  [switch]$Json
+  [switch]$Json,
+  # Re-price an underfilled live wave on cadence until the requested total or deadline.
+  [ValidateRange(1, 86400)] [int]$RefillCadenceSeconds = 60,
+  [ValidateRange(0, 1440)] [int]$RefillForMinutes = 240,
+  [switch]$NoRefill
 )
 
 $ErrorActionPreference = "Stop"
@@ -597,6 +601,21 @@ try {
 $w = $null
 if (Test-Path $tmpOut) { try { $w = Get-Content -Raw $tmpOut | ConvertFrom-Json } catch { $w = $null }; Remove-Item $tmpOut -ErrorAction SilentlyContinue }
 if (-not $w)    { throw "wave allocation produced no JSON (fak=$fak, rc=$rc) -- cannot dispatch" }
+if ($Launch -and (-not $NoRefill) -and $RefillForMinutes -gt 0 -and
+    (-not $w.ok) -and $wavePreflight -and $wavePreflight.verdict -eq 'SPAWN_OK') {
+  Write-Output "WAVE WAIT         initial allocation empty; rechecking in ${RefillCadenceSeconds}s"
+  Start-Sleep -Seconds $RefillCadenceSeconds
+  $child = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath,
+    '-Count', "$Count", '-PointerFile', $PointerFile, '-Workspace', $Workspace,
+    '-LogDir', $LogDir, '-WorkKind', $WorkKind, '-Product', $Product, '-FakExe', $fak,
+    '-PreflightMaxWorkers', "$(if ($PreflightMaxWorkers -gt 0) { $PreflightMaxWorkers } else { $Count })",
+    '-RefillCadenceSeconds', "$RefillCadenceSeconds", '-RefillForMinutes', "$([Math]::Max(0, $RefillForMinutes - 1))", '-Launch')
+  if ($AllowTierFallback) { $child += '-AllowTierFallback' }
+  if ($SkipPreflight) { $child += '-SkipPreflight' }
+  if ($ExtendStanding) { $child += @('-ExtendStanding', '-StandingTaskName', $StandingTaskName) }
+  & powershell @child
+  return
+}
 if (-not $w.ok) {
   if ($Json) {
     New-WavePlanPayload -Requested $Count -AllocationRequested $allocationCount `
@@ -643,6 +662,9 @@ Write-Output ("WAVE PLAN  requested={0}  allocation_requested={1}  granted={2}  
   $Count, $allocationCount, $plannedGranted, $totalShortfall, $w.distinct_pools, $w.target_tier)
 $pfLine = Format-WavePreflightLine -Preflight $wavePreflight
 if ($pfLine) { Write-Output $pfLine }
+if ($wavePreflight) {
+  Write-Output "WAVE CENSUS       live=$($wavePreflight.live) headroom=$($wavePreflight.headroom) os_worker_procs=$($wavePreflight.os_worker_procs) seat_free=$($wavePreflight.seat.free)"
+}
 Write-Output "  (naive burst would give 1 pool; this wave uses $($w.distinct_pools) distinct pool(s) and $($w.granted) bounded session slot(s))"
 $lane = 0
 $w.lanes | ForEach-Object {
@@ -735,3 +757,55 @@ $ok = ($results | Where-Object { $_.dispatched }).Count
 $distinctOk = @($results | Where-Object { $_.dispatched } | Select-Object -ExpandProperty pool -Unique).Count
 Write-Output "`nWAVE DISPATCHED  $ok/$($w.granted) lanes live across $distinctOk distinct rate-limit pool(s)."
 $results | Format-Table -AutoSize
+# A zero-seat or zero-headroom reading is a temporary sample during a live wave. Enter
+# the same cadence loop even when the first tranche is empty, provided preflight was
+# inspectable; hard REFUSE_* verdicts remain refusals rather than blind retry storms.
+$refillEligible = $Launch -and (-not $wavePreflight -or $wavePreflight.verdict -eq 'SPAWN_OK')
+
+# A wave is a requested amount of work over a deadline, not a one-shot process snapshot.
+# Keep checking the same authoritative preflight/allocation seams while seats turn over.
+# Each child pass disables its own refill loop; the parent counts witnessed DISPATCHED
+# receipts, so completions can open new work without ever exceeding the requested total.
+if (-not $NoRefill -and $refillEligible -and $ok -lt $Count -and $RefillForMinutes -gt 0) {
+  $remaining = $Count - $ok
+  $deadline = (Get-Date).AddMinutes($RefillForMinutes)
+  $emptyPasses = 0
+  Write-Output "WAVE REFILL       remaining=$remaining cadence=${RefillCadenceSeconds}s deadline=$($deadline.ToString('o'))"
+  while ($remaining -gt 0 -and (Get-Date) -lt $deadline) {
+    Start-Sleep -Seconds $RefillCadenceSeconds
+    $child = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath,
+      '-Count', "$remaining", '-PointerFile', $PointerFile, '-Workspace', $Workspace,
+      '-LogDir', $LogDir, '-WorkKind', $WorkKind, '-Product', $Product, '-FakExe', $fak,
+      '-PreflightMaxWorkers', "$(if ($PreflightMaxWorkers -gt 0) { $PreflightMaxWorkers } else { $Count })",
+      '-RefillCadenceSeconds', "$RefillCadenceSeconds", '-RefillForMinutes', '0', '-NoRefill', '-Launch')
+    if ($AllowTierFallback) { $child += '-AllowTierFallback' }
+    if ($SkipPreflight) { $child += '-SkipPreflight' }
+    if ($ExtendStanding) { $child += @('-ExtendStanding', '-StandingTaskName', $StandingTaskName) }
+    $pass = & powershell @child 2>&1 | Out-String
+    Write-Output $pass.TrimEnd()
+    $launched = 0
+    foreach ($m in [regex]::Matches($pass, 'WAVE DISPATCHED\s+(\d+)/')) { $launched += [int]$m.Groups[1].Value }
+    if ($launched -gt 0) {
+      $remaining = [Math]::Max(0, $remaining - $launched)
+      $emptyPasses = 0
+      Write-Output "WAVE REFILL       launched=$launched remaining=$remaining"
+    } else {
+      $emptyPasses++
+      Write-Output "WAVE REFILL       no opening yet; rechecking in ${RefillCadenceSeconds}s"
+      # Do not let an aggregate seat claim masquerade as an OS-process fact. Re-read
+      # the independent process census after repeated empty passes and keep both values
+      # in the receipt so stale registry/sidecar evidence is diagnosable rather than final.
+      if ($emptyPasses -ge 2) {
+        $census = Invoke-WavePreflight -RepoRoot $repoRoot -Workspace $Workspace `
+          -MaxWorkers $(if ($PreflightMaxWorkers -gt 0) { $PreflightMaxWorkers } else { $Count }) `
+          -WorkKind $WorkKind -Product $Product
+        Write-Output "WAVE CENSUS       live=$($census.live) headroom=$($census.headroom) os_worker_procs=$($census.os_worker_procs) seat_free=$($census.seat.free)"
+      }
+    }
+  }
+  if ($remaining -gt 0) {
+    Write-Output "WAVE REFILL STOP  deadline reached with $remaining/$Count still unlaunched"
+  } else {
+    Write-Output "WAVE REFILL DONE  launched requested total=$Count"
+  }
+}
