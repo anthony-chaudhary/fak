@@ -2362,11 +2362,16 @@ func TestMCPStdioRoundtrip(t *testing.T) {
 	if got := resps[0].Result.(map[string]any)["protocolVersion"]; got != "2024-11-05" {
 		t.Errorf("initialize protocolVersion = %v", got)
 	}
-	// tools/list exposes the descriptor table; name-level coverage lives in
-	// TestMCPIndexToolsMirrorDevIndex and the focused MCP tool tests.
-	tools := resps[1].Result.(map[string]any)["tools"].([]any)
-	if len(tools) != len(toolDescriptors()) {
-		t.Errorf("tools/list returned %d tools, want %d", len(tools), len(toolDescriptors()))
+	// tools/list exposes the default-on resident bootstrap. Cold schemas remain
+	// discoverable through fak_tools_search and callable through tools/call.
+	list := resps[1].Result.(map[string]any)
+	tools := list["tools"].([]any)
+	if len(tools) != len(srv.toolsListDescriptors()) {
+		t.Errorf("tools/list returned %d tools, want %d resident tools", len(tools), len(srv.toolsListDescriptors()))
+	}
+	meta := list["_meta"].(map[string]any)["fak/tool_filter"].(map[string]any)
+	if meta["mode"] != "active" || meta["saved_bytes"].(float64) <= 0 {
+		t.Errorf("tools/list filter receipt = %+v, want active savings", meta)
 	}
 	// tools/call fak_syscall (allow) -> verdict ALLOW in the embedded text
 	sc := unwrapToolResult(t, resps[2])
