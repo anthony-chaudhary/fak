@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -96,9 +97,38 @@ func TestLaunchAPIKeyEnvFloorContradictionPremise(t *testing.T) {
 	}
 }
 
-// TestRunAccountsLaunchRefusesUnreachableAPIKeyEnv is the behavior gate. Launching an api-key
-// seat whose reference the floor strips must REFUSE with a message that names the variable
-// NAME and the floor, and must not start the child at all.
+// TestRunAccountsLaunchAdmitsDeclaredAPIKeyEnv proves an API-key seat declares its own
+// credential to the inherited-secret floor. The child receives the referenced variable, while
+// diagnostics continue to name only the variable and never its value.
+func TestRunAccountsLaunchAdmitsDeclaredAPIKeyEnv(t *testing.T) {
+	const envName = "FAK_TEST_5503_CORP_TOKEN"
+	t.Setenv(envName, launchAPIKeyEnvFakeSecret)
+	t.Setenv(fleetManagedCacheEnv, "")
+	t.Setenv(fleetGuardAPIKeyEnvEnv, "")
+	home := t.TempDir()
+	regPath := writeAPIKeySeatRegistry(t, home, "corp", envName)
+
+	launched := false
+	orig := accountsLaunchRun
+	accountsLaunchRun = func(_, _ io.Writer, _, env []string) launchRunResult {
+		launched = true
+		if !slices.Contains(env, envName+"="+launchAPIKeyEnvFakeSecret) {
+			t.Fatalf("declared seat credential missing from child environment")
+		}
+		return launchRunResult{Code: 0}
+	}
+	t.Cleanup(func() { accountsLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runAccounts(&out, &errb, []string{"launch", "--name", "corp", "--registry", regPath, "--home", home})
+	if rc != 0 || !launched {
+		t.Fatalf("declared credential launch rc=%d launched=%t\nstderr:\n%s", rc, launched, errb.String())
+	}
+	if strings.Contains(out.String(), launchAPIKeyEnvFakeSecret) || strings.Contains(errb.String(), launchAPIKeyEnvFakeSecret) {
+		t.Fatal("launch diagnostics leaked the credential value")
+	}
+}
+
 func TestRunAccountsLaunchRefusesUnreachableAPIKeyEnv(t *testing.T) {
 	const envName = "FAK_TEST_5503_CORP_TOKEN"
 	t.Setenv(envName, launchAPIKeyEnvFakeSecret)

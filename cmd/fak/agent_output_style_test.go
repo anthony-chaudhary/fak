@@ -15,8 +15,9 @@ func TestResolveAgentOutputStyle(t *testing.T) {
 	if err != nil || got.Style != "caveman:native:medium" || got.Family != "caveman:native" || got.Intensity != "medium" || got.Level != 2 {
 		t.Fatalf("resolve = %+v, err=%v", got, err)
 	}
-	if _, err := resolveAgentOutputStyle("caveman:original:medium"); err == nil || !strings.Contains(err.Error(), "invalid --output-style") {
-		t.Fatalf("original profile should fail closed, err=%v", err)
+	original, err := resolveAgentOutputStyle("caveman:original:medium")
+	if err != nil || original.Style != "caveman:original:medium" || original.Family != "caveman:original" || original.Intensity != "medium" {
+		t.Fatalf("original profile resolve = %+v, err=%v", original, err)
 	}
 }
 

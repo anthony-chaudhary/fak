@@ -262,7 +262,7 @@ func TestBuildAccountsSeatDeficitUnderCapacity(t *testing.T) {
 		{Kind: fleetaccounts.KindWorker, Product: "claude", Tag: "b", AccountUUID: &uuid2, Available: &available},
 	}
 	got := buildAccountsSeatDeficit(rows, "claude", 7)
-	if got.Required != 7 || got.FreshCeiling != 4 || got.Shortfall != 3 || got.Verdict != "UNDER_CAPACITY" {
+	if got.Required != 7 || got.FreshCeiling != 2 || got.Shortfall != 5 || got.Verdict != "UNDER_CAPACITY" {
 		t.Fatalf("got=%+v", got)
 	}
 }
@@ -271,8 +271,8 @@ func TestBuildAccountsSeatDeficitSufficient(t *testing.T) {
 	t.Setenv(fleetaccounts.SessionsPerAccountEnv, "3")
 	available := true
 	uuid := "u1"
-	got := buildAccountsSeatDeficit([]fleetaccounts.Account{{Kind: fleetaccounts.KindWorker, Product: "claude", Tag: "a", AccountUUID: &uuid, Available: &available}}, "claude", 2)
-	if got.FreshCeiling != 3 || got.Shortfall != 0 || got.Verdict != "OK" {
+	got := buildAccountsSeatDeficit([]fleetaccounts.Account{{Kind: fleetaccounts.KindWorker, Product: "claude", Tag: "a", AccountUUID: &uuid, Available: &available}}, "claude", 1)
+	if got.FreshCeiling != 1 || got.Shortfall != 0 || got.Verdict != "OK" {
 		t.Fatalf("got=%+v", got)
 	}
 }
