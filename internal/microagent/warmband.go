@@ -163,7 +163,7 @@ type WarmBand struct {
 	blanks  map[string]func() Hibernable // per-id vessel factory, kept after the value is dropped
 	held    map[string]Hibernable        // ids holding a resident slot right now
 	warmAt  map[string]time.Time         // when each reserved id entered the reserve
-	warming map[string]bool              // ids the producer is mid warm-wake on
+	warming map[string]bool              // ids with one claimed warm/cold wake resolver
 	freed   chan struct{}                // broadcast generation: residency freed or a warm agent landed
 
 	hits, thaws, refills, sheds int
@@ -316,13 +316,50 @@ func (b *WarmBand) Acquire(ctx context.Context, id string) (Hibernable, error) {
 			}
 			continue
 		}
+		// Claim the one live resolver for this id only after obtaining a resident
+		// slot, then re-check under the band lock. Without this second check, the
+		// refill producer can remove the snapshot after the first warming check but
+		// before take reaches the store, leaving this Acquire with no context.
+		b.mu.Lock()
+		if b.closed {
+			b.mu.Unlock()
+			b.releaseSlot()
+			return nil, ErrWarmBandClosed
+		}
+		if h, ok := b.held[id]; ok {
+			b.mu.Unlock()
+			b.releaseSlot()
+			return h, nil
+		}
+		if _, ok := b.blanks[id]; !ok {
+			b.mu.Unlock()
+			b.releaseSlot()
+			return nil, fmt.Errorf("microagent: warm band acquire %q: %w", id, ErrNotEnrolled)
+		}
+		wait = b.freed
+		if b.warming[id] {
+			b.mu.Unlock()
+			b.releaseSlot()
+			if err := b.await(ctx, wait); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		b.warming[id] = true
+		b.mu.Unlock()
+
 		h, err := b.take(id)
 		if err != nil {
+			b.mu.Lock()
+			delete(b.warming, id)
+			b.mu.Unlock()
 			b.releaseSlot()
 			return nil, err
 		}
 		b.mu.Lock()
+		delete(b.warming, id)
 		b.held[id] = h
+		b.broadcastLocked()
 		b.mu.Unlock()
 		return h, nil
 	}
@@ -575,8 +612,19 @@ func (b *WarmBand) refillOne() bool {
 		b.mu.Unlock()
 		return false
 	}
-	id := b.parked[0]
-	b.parked = b.parked[1:]
+	i := -1
+	for j, id := range b.parked {
+		if !b.warming[id] {
+			i = j
+			break
+		}
+	}
+	if i < 0 {
+		b.mu.Unlock()
+		return false
+	}
+	id := b.parked[i]
+	b.parked = append(b.parked[:i], b.parked[i+1:]...)
 	delete(b.onDisk, id)
 	blank := b.blanks[id]
 	if blank == nil { // retired under us — nothing to warm, but keep draining
@@ -595,8 +643,8 @@ func (b *WarmBand) refillOne() bool {
 	}
 
 	b.mu.Lock()
-	delete(b.warming, id)
 	if err != nil {
+		delete(b.warming, id)
 		b.addParkedLocked(id)
 		b.broadcastLocked()
 		b.mu.Unlock()
@@ -608,31 +656,32 @@ func (b *WarmBand) refillOne() bool {
 		// agent's context in the pool — pinned in RAM until Close, and handed to no
 		// Acquire, since the band no longer knows the id. Drop the value instead and
 		// keep draining.
+		delete(b.warming, id)
+		b.broadcastLocked()
+		b.mu.Unlock()
+		return true
+	}
+	if b.reserve.Reserve(id, h) {
+		delete(b.warming, id)
+		b.warmAt[id] = b.now()
+		b.refills++
 		b.broadcastLocked()
 		b.mu.Unlock()
 		return true
 	}
 	b.mu.Unlock()
 
-	if !b.reserve.Reserve(id, h) {
-		// No room, or the id is already warm: cold-park it straight back rather than hold a
-		// live reference the band no longer tracks.
-		if _, perr := b.store.Park(id, h); perr == nil {
-			b.mu.Lock()
-			b.addParkedLocked(id)
-			b.mu.Unlock()
-		}
-		b.mu.Lock()
-		b.broadcastLocked()
-		b.mu.Unlock()
-		return false
-	}
+	// No room, or the id is already warm: cold-park it straight back rather than hold a
+	// live reference the band no longer tracks.
+	_, perr := b.store.Park(id, h)
 	b.mu.Lock()
-	b.warmAt[id] = b.now()
-	b.refills++
+	delete(b.warming, id)
+	if perr == nil {
+		b.addParkedLocked(id)
+	}
 	b.broadcastLocked()
 	b.mu.Unlock()
-	return true
+	return false
 }
 
 // shed enforces the staleness horizon: a warm agent that has sat in the reserve longer than
