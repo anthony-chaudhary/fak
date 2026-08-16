@@ -1024,7 +1024,7 @@ func TestArchitectureDecreasedLateralEdgeConnectivityPolicyIgnoresGain(t *testin
 
 func TestArchitectureRejectsInvalidFailOn(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, introduced-or-increased-rootward-layer-skips, increased-fan-out, increased-dependency-reach, increased-dependency-depth, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, introduced-lateral-couplings, introduced-or-increased-lateral-bridges, introduced-or-increased-lateral-articulation-points, resolved-lateral-resilient-pairs, or decreased-lateral-edge-connectivity") {
+	if code := runArchitecture(&out, &errOut, []string{"--fail-on", "anything"}); code != 2 || !strings.Contains(errOut.String(), "want introduced-violations, introduced-diagnostics, increased-tier-gap, increased-violation-distance, introduced-or-increased-rootward-layer-skips, increased-fan-out, increased-dependency-reach, increased-dependency-depth, increased-blast-radius, introduced-blast-impacts, increased-blast-path-length, introduced-lateral-edges, introduced-lateral-couplings, introduced-or-increased-lateral-bridges, introduced-or-increased-lateral-articulation-points, resolved-lateral-resilient-pairs, decreased-lateral-edge-connectivity, decreased-lateral-vertex-connectivity, or decreased-lateral-vertex-pair-cuts") {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 }
