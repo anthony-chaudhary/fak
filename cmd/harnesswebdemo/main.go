@@ -174,8 +174,39 @@ func (s *store) replace(runID string, events []harnesskit.Envelope) error {
 }
 
 type liveAdapter struct {
-	baseURL string
-	client  *http.Client
+	baseURL   string
+	client    *http.Client
+	workspace workspaceStatus
+}
+
+type workspaceStatus struct {
+	Armed bool     `json:"armed"`
+	Tools []string `json:"tools,omitempty"`
+}
+
+func (a *liveAdapter) probeWorkspace(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(a.baseURL, "/")+"/healthz", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("fak health returned %s", resp.Status)
+	}
+	var body struct {
+		NativeCodeWorkspace *workspaceStatus `json:"native_code_workspace"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
+		return err
+	}
+	if body.NativeCodeWorkspace != nil {
+		a.workspace = *body.NativeCodeWorkspace
+	}
+	return nil
 }
 
 func (a *liveAdapter) run(ctx context.Context, runID, message string) ([]harnesskit.Envelope, error) {
@@ -310,6 +341,14 @@ func handlerWithLive(s *store, live *liveAdapter) http.Handler {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'")
 		_, _ = io.WriteString(w, page)
+	})
+	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, _ *http.Request) {
+		status := map[string]any{"mode": "offline", "workspace": workspaceStatus{}}
+		if live != nil {
+			status["mode"] = "live"
+			status["workspace"] = live.workspace
+		}
+		writeJSON(w, status)
 	})
 	mux.HandleFunc("POST /api/runs", func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
@@ -487,6 +526,12 @@ func run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 	var live *liveAdapter
 	if strings.TrimSpace(*fakURL) != "" {
 		live = &liveAdapter{baseURL: *fakURL, client: &http.Client{Timeout: 10 * time.Minute}}
+		probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := live.probeWorkspace(probeCtx)
+		cancel()
+		if err != nil {
+			fmt.Fprintf(stderr, "harnesswebdemo: fak capability probe: %v\n", err)
+		}
 	}
 	server := &http.Server{Handler: handlerWithLive(s, live), ReadHeaderTimeout: 5 * time.Second}
 	fmt.Fprintf(stdout, "fak native harness UI: http://%s\n", listener.Addr())

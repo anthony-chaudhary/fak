@@ -19,3 +19,16 @@ The page includes three offline operating scenarios:
 This is a practical local product-development surface, not yet a complete coding-harness replacement: a live model/tool adapter, durable sessions across process restart, authenticated non-loopback deployment, full screen-reader/browser automation, and the independent second implementation remain follow-ons under #6790.
 
 Captured normal, approval, and failure renders are indexed in [the operating-envelope witness](_witnesses/harness-web-demo/README.md).
+## Native coding workspace capability
+
+Launch the gateway with its existing bounded coding catalog, then point the browser at it:
+
+```text
+fak serve --native --native-code-workspace <workspace> [...model flags]
+go run ./cmd/harnesswebdemo -fak-url http://127.0.0.1:8080
+```
+
+`GET /healthz` exposes `native_code_workspace.armed` and the six tool names without
+returning the private workspace path. The browser probes that contract at startup and
+projects it through `GET /api/status`. This proves that the connected session is capable
+of bounded coding; the full browser-driven read/patch/diff/test witness remains #6962.

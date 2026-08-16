@@ -1407,6 +1407,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"model":   s.model,
 		"planner": plannerKind(s.planner),
 	}
+	if len(s.nativeCodeCatalog) > 0 {
+		tools := make([]string, 0, len(s.nativeCodeCatalog))
+		for _, def := range s.nativeCodeCatalog {
+			tools = append(tools, def.Function.Name)
+		}
+		health["native_code_workspace"] = map[string]any{"armed": true, "tools": tools}
+	}
 	if s.inKernelModelButChatIsMock {
 		health["in_kernel_model_but_chat_is_mock"] = true
 	}
