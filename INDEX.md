@@ -265,6 +265,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Learning observation lineage](docs/learning-observation.md) — content-addressed source/candidate/witness/verdict records and closed-enum edges; separate from witness-gated admission.
 
 ## Notes & research (`docs/notes/`)
+- [Harness domain boundary audit — 2026-08-15](docs/notes/HARNESS-DOMAIN-PRODUCTION-BOUNDARY-AUDIT-2026-08-15.md) -- auto-indexed dated note.
 - [Concept study: C2C / Rosetta](docs/notes/CONCEPT-STUDY-C2C-2026-08-08.md) — pinned cache-to-cache research study, acquisition caveat, and clean-room borrow ledger
 - [Concept study: hermes-webui](docs/notes/CONCEPT-STUDY-HERMES-WEBUI-2026-08-11.md) — pinned UI-boundary study for a separately buildable fak client
 - [Governed-agent quickstart witness](docs/notes/GOVERNED-AGENT-QUICKSTART-WITNESS-2026-08-06.md) — dated runnable governed-agent proof and acceptance record
