@@ -830,3 +830,12 @@ func TestRunCommitRecordsTreeReceiptOnlyAfterSuccessfulBuildAndCommit(t *testing
 		t.Fatalf("record calls=%d, want 1", recorded)
 	}
 }
+
+func TestRenderCommitResultShowsBuildCheckOutcome(t *testing.T) {
+	res := safecommit.Result{Committed: true, SHA: "abc", Paths: []string{"x.go"}, BuildCheck: &safecommit.BuildCheckResult{Outcome: safecommit.BuildCheckSkippedTimeout}}
+	var out bytes.Buffer
+	renderCommitResult(&out, res)
+	if !strings.Contains(out.String(), "build check: skipped-timeout (compiled=false)") {
+		t.Fatalf("output omitted build outcome: %q", out.String())
+	}
+}

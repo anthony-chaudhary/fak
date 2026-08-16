@@ -684,6 +684,9 @@ func renderCommitResult(stdout io.Writer, res safecommit.Result) {
 	if res.Reason == "" {
 		fmt.Fprintf(stdout, "committed %s (%d path(s))%s\n", short(res.SHA), len(res.Paths), pushedSuffix(res))
 		renderCommitScore(stdout, res)
+		if res.BuildCheck != nil {
+			fmt.Fprintf(stdout, "  build check: %s (compiled=%t)\n", res.BuildCheck.Outcome, res.BuildCheck.Compiled)
+		}
 		renderCommitVelocity(stdout, res)
 		renderCommitReview(stdout, res)
 		return
