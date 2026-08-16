@@ -475,13 +475,16 @@ func TestOrgPullFutureDatedCacheFloors(t *testing.T) {
 // A cache that cannot be read must never be able to widen, and must never be
 // mistaken for a cache that was never written.
 func TestOrgPullCacheFailsClosed(t *testing.T) {
-	damage := map[string]func(t *testing.T, path string){
-		"garbage": func(t *testing.T, path string) {
+	damage := []struct {
+		name    string
+		breakIt func(t *testing.T, path string)
+	}{
+		{name: "garbage", breakIt: func(t *testing.T, path string) {
 			if err := os.WriteFile(path, []byte("{nope"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-		},
-		"truncated": func(t *testing.T, path string) {
+		}},
+		{name: "truncated", breakIt: func(t *testing.T, path string) {
 			b, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatal(err)
@@ -489,23 +492,23 @@ func TestOrgPullCacheFailsClosed(t *testing.T) {
 			if err := os.WriteFile(path, b[:len(b)/2], 0o600); err != nil {
 				t.Fatal(err)
 			}
-		},
-		"tampered version": func(t *testing.T, path string) {
+		}},
+		{name: "tampered version", breakIt: func(t *testing.T, path string) {
 			rewriteJSON(t, path, func(m map[string]any) { m["version"] = 99 })
-		},
-		"tampered envelope": func(t *testing.T, path string) {
+		}},
+		{name: "tampered envelope", breakIt: func(t *testing.T, path string) {
 			rewriteJSON(t, path, func(m map[string]any) { m["envelope"] = "AAAA" })
-		},
-		"stripped sum": func(t *testing.T, path string) {
+		}},
+		{name: "stripped sum", breakIt: func(t *testing.T, path string) {
 			rewriteJSON(t, path, func(m map[string]any) { m["sum"] = "" })
-		},
-		"wrong schema": func(t *testing.T, path string) {
+		}},
+		{name: "wrong schema", breakIt: func(t *testing.T, path string) {
 			rewriteJSON(t, path, func(m map[string]any) { m["schema"] = "fak-org-policy-lastgood/v2" })
-		},
-		"unknown field": func(t *testing.T, path string) {
+		}},
+		{name: "unknown field", breakIt: func(t *testing.T, path string) {
 			rewriteJSON(t, path, func(m map[string]any) { m["widen_everything"] = true })
-		},
-		"oversize": func(t *testing.T, path string) {
+		}},
+		{name: "oversize", breakIt: func(t *testing.T, path string) {
 			pad := make([]byte, maxOrgLastGoodBytes+1)
 			for i := range pad {
 				pad[i] = ' '
@@ -513,14 +516,14 @@ func TestOrgPullCacheFailsClosed(t *testing.T) {
 			if err := os.WriteFile(path, pad, 0o600); err != nil {
 				t.Fatal(err)
 			}
-		},
+		}},
 	}
 
-	for name, breakIt := range damage {
-		t.Run(name, func(t *testing.T) {
+	for _, damageCase := range damage {
+		t.Run(damageCase.name, func(t *testing.T) {
 			f := newPullFix(t, 22)
 			f.pull(t)
-			breakIt(t, f.cache)
+			damageCase.breakIt(t, f.cache)
 
 			f.fetchErr = errors.New("offline")
 			res := f.pull(t)
