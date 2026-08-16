@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-import fleet_version
+import appversion
 
 
 SCHEMA = "fak.api-host-readiness.v1"
@@ -159,7 +159,7 @@ def probe_target(target: dict[str, str], timeout_s: float = 10.0, probe_missing_
     err = target_error(target)
     if err:
         return {
-            "version": fleet_version.app_version(),
+            "version": appversion.app_version(),
             **target,
             "url": "",
             "status": "INVALID_TARGET",
@@ -172,7 +172,7 @@ def probe_target(target: dict[str, str], timeout_s: float = 10.0, probe_missing_
     key = os.environ.get(key_env) if key_env else ""
     if key_env and not key and not probe_missing_auth:
         return {
-            "version": fleet_version.app_version(),
+            "version": appversion.app_version(),
             **target,
             "url": models_url(target["base_url"]),
             "status": "AUTH_ENV_MISSING",
@@ -190,7 +190,7 @@ def probe_target(target: dict[str, str], timeout_s: float = 10.0, probe_missing_
             raw = resp.read().decode("utf-8", errors="replace")
             status = int(resp.status)
             return {
-                "version": fleet_version.app_version(),
+                "version": appversion.app_version(),
                 **target,
                 "url": req.full_url,
                 "status": classify_http(status, raw),
@@ -202,7 +202,7 @@ def probe_target(target: dict[str, str], timeout_s: float = 10.0, probe_missing_
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")
         return {
-            "version": fleet_version.app_version(),
+            "version": appversion.app_version(),
             **target,
             "url": req.full_url,
             "status": classify_http(int(exc.code), raw),
@@ -213,7 +213,7 @@ def probe_target(target: dict[str, str], timeout_s: float = 10.0, probe_missing_
         }
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         return {
-            "version": fleet_version.app_version(),
+            "version": appversion.app_version(),
             **target,
             "url": req.full_url,
             "status": "TRANSIENT_TRANSPORT",
@@ -229,7 +229,7 @@ def build_report(
     timeout_s: float = 10.0,
     probe_missing_auth: bool = False,
 ) -> dict[str, Any]:
-    app_ver = fleet_version.app_version()
+    app_ver = appversion.app_version()
     targets = targets or DEFAULT_TARGETS
     probes = [probe_target(t, timeout_s=timeout_s, probe_missing_auth=probe_missing_auth) for t in targets]
     summary = {

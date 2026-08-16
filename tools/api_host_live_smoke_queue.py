@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import fleet_version
+import appversion
 
 
 SCHEMA = "fak.api-host-live-smoke-queue.v1"
@@ -100,7 +100,7 @@ def operator_prerequisite(queue_state: str, qualification: dict[str, Any], actio
 def build_queue_row(qualification: dict[str, Any], action: dict[str, Any], version: str | None = None) -> dict[str, Any]:
     qualification_status = str(qualification.get("qualification_status") or "UNCLASSIFIED")
     queue_state = QUALIFICATION_TO_QUEUE.get(qualification_status, "UNCLASSIFIED")
-    version = version or fleet_version.app_version()
+    version = version or appversion.app_version()
     if qualification_status in {"OUT_OF_CONTRACT", "INVALID_TARGET"} or qualification.get("in_contract") is not True:
         queue_state = "UNQUALIFIED"
 
@@ -147,7 +147,7 @@ def qualification_targets(qualification: dict[str, Any] | None, errors: dict[str
 def build_report(root: Path | None = None, paths: dict[str, str] | None = None) -> dict[str, Any]:
     root = root or ROOT
     paths = paths or DEFAULT_PATHS
-    app_ver = fleet_version.app_version(root)
+    app_ver = appversion.app_version(root)
     qualification, qualification_error = load_json(root, paths["qualification"])
     retry, retry_error = load_json(root, paths["retry"])
     errors: dict[str, str] = {}

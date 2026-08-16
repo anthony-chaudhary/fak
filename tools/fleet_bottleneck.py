@@ -71,9 +71,9 @@ WATCH_DIR = os.path.join(HERE, "_watchdog")
 # session_audit lives next to us; import it for EXACT token accounting (no re-parse).
 sys.path.insert(0, HERE)
 try:
-    import fleet_version
+    import appversion
 except Exception:  # keep serving even if the version helper is unavailable (mirrors session_audit)
-    class fleet_version:  # type: ignore  # minimal fallback matching app_version()'s real contract
+    class appversion:  # type: ignore  # minimal fallback matching app_version()'s real contract
         @staticmethod
         def app_version(*a, **k):
             return os.environ.get("FAK_APP_VERSION", "").strip() or "dev"
@@ -304,7 +304,7 @@ def _token_audit(days, cap):
 def collect(audit=True, audit_days=1.5, audit_max=80):
     """Build the unified FleetSnapshot from every available source."""
     snap = {
-        "app_version": fleet_version.app_version(),
+        "app_version": appversion.app_version(),
         "generated_utc": NOW().isoformat(timespec="seconds"),
         "fleet_dir": FLEET_DIR,
         "registry": None, "audit": None,
@@ -1101,7 +1101,7 @@ class _SnapStore:
             # Match _loop's swallow-and-continue: a fragile first snapshot (e.g. a
             # corrupt registry) must not abort startup before the socket binds.
             snap = {"generated_utc": NOW().isoformat(timespec="seconds"),
-                    "app_version": fleet_version.app_version(),
+                    "app_version": appversion.app_version(),
                     "fleet_dir": FLEET_DIR, "registry": None, "audit": None,
                     "errors": [f"initial snapshot failed: {e}"]}
             with self.lock:
@@ -1248,7 +1248,7 @@ def main():
     ranked = rank_bottlenecks(snap)
     txt = write_artifacts(snap, ranked)
     if cmd == "json":
-        payload = {"app_version": fleet_version.app_version(), "generated_utc": snap["generated_utc"], **ranked, "snapshot": snap}
+        payload = {"app_version": appversion.app_version(), "generated_utc": snap["generated_utc"], **ranked, "snapshot": snap}
         out = json.dumps(payload, default=str, indent=2)
         if a.out:
             open(a.out, "w", encoding="utf-8").write(out)

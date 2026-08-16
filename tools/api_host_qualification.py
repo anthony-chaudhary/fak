@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import fleet_version
+import appversion
 
 
 SCHEMA = "fak.api-host-qualification.v1"
@@ -163,7 +163,7 @@ def qualify_target(
         evidence_state = "UNQUALIFIED"
 
     return {
-        "version": fleet_version.app_version(),
+        "version": appversion.app_version(),
         "name": name,
         "provider": target.get("provider", ""),
         "base_url": base_url,
@@ -198,7 +198,7 @@ def artifact_targets(external_state: dict[str, Any] | None, errors: dict[str, st
 
 def build_report(root: Path | None = None, paths: dict[str, str] | None = None) -> dict[str, Any]:
     root = root or ROOT
-    app_ver = fleet_version.app_version(root)
+    app_ver = appversion.app_version(root)
     paths = paths or DEFAULT_PATHS
     loaded: dict[str, dict[str, Any] | None] = {}
     errors: dict[str, str] = {}

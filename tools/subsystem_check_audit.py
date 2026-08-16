@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-import fleet_version
+import appversion
 install_no_window_subprocess_defaults(subprocess)
 
 
@@ -467,7 +467,7 @@ def build_report(
     failed = [run for run in runs if run["status"] != "passed"]
     report: dict[str, Any] = {
         "schema": SCHEMA,
-        "app_version": fleet_version.app_version(root),
+        "app_version": appversion.app_version(root),
         "generated_at": utc_now(),
         "root": str(root),
         "profile": profile,

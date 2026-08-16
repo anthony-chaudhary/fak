@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import fleet_version
+import appversion
 
 
 SCHEMA = "fak.api-host-conformance-certificate.v1"
@@ -99,7 +99,7 @@ def non_claim_ids(contract: dict[str, Any] | None) -> set[str]:
 
 def capability(id: str, claim: str, checks: dict[str, bool], evidence: dict[str, Any]) -> dict[str, Any]:
     return {
-        "version": fleet_version.app_version(),
+        "version": appversion.app_version(),
         "id": id,
         "claim": claim,
         "status": "PROVEN" if all(checks.values()) else "FAILED",
@@ -325,7 +325,7 @@ def qualification_rules(app_ver: str) -> list[dict[str, Any]]:
 
 def build_report(root: Path | None = None, paths: dict[str, str] | None = None) -> dict[str, Any]:
     root = root or ROOT
-    app_ver = fleet_version.app_version(root)
+    app_ver = appversion.app_version(root)
     paths = paths or DEFAULT_PATHS
     loaded, errors = load_artifacts(root, paths)
 
@@ -368,7 +368,7 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
         "qualification_rules": qualification_rules(app_ver),
         "capabilities": capabilities,
         "non_claims": [
-            fleet_version.versioned(item, app_ver)
+            appversion.versioned(item, app_ver)
             for item in (contract or {}).get("non_claims", [])
             if isinstance(item, dict)
         ],

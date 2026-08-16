@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import api_host_bridge_matrix as matrix
-import fleet_version
+import appversion
 
 
 SCHEMA = "fak.api-host-bridge-gate.v1"
@@ -35,7 +35,7 @@ def run_command(root: Path, witness: dict[str, Any], timeout_s: int) -> dict[str
     argv = witness.get("argv") or []
     cwd_rel = witness.get("cwd") or ""
     base = {
-        "version": fleet_version.app_version(root),
+        "version": appversion.app_version(root),
         "id": witness["id"],
         "claim": witness["claim"],
         "required": witness["required"],
@@ -103,7 +103,7 @@ def run_command(root: Path, witness: dict[str, Any], timeout_s: int) -> dict[str
 
 def build_report(root: Path | None = None, timeout_s: int = 180, execute: bool = True) -> dict[str, Any]:
     root = root or ROOT
-    app_ver = fleet_version.app_version(root)
+    app_ver = appversion.app_version(root)
     index = matrix.build_report(root)
     runs: list[dict[str, Any]] = []
     for witness in index["witnesses"]:

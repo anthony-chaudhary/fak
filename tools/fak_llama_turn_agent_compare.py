@@ -10,7 +10,7 @@ import json
 import os
 import sys
 
-import fleet_version
+import appversion
 
 
 def load(path):
@@ -55,7 +55,7 @@ def main(argv):
 
     fak = load(args.fak)
     llama = load(args.llama)
-    app_ver = fleet_version.app_version()
+    app_ver = appversion.app_version()
     fak_points = {key_fak(p): p for p in fak.get("points", [])}
     llama_points = {key_llama(p): p for p in llama.get("points", [])}
 

@@ -29,7 +29,7 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
-import fleet_version
+import appversion
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -223,7 +223,7 @@ def coupon_cross_uplift(turns: float, agents: float, pool: float, p_shared: floa
 
 
 def project(level: dict[str, Any], inputs: dict[str, Any]) -> dict[str, Any]:
-    app_ver = fleet_version.app_version(ROOT)
+    app_ver = appversion.app_version(ROOT)
     agents = int(level["agents"])
     turns = int(level["turns_per_agent"])
     context = int(level["context_tokens"])
@@ -313,7 +313,7 @@ def write_csv(rows: list[dict[str, Any]], out: Path) -> None:
 def write_json_payload(inputs: dict[str, Any], rows: list[dict[str, Any]], out: Path) -> None:
     payload = {
         "schema": "fak.value-sweep.v1",
-        "app_version": fleet_version.app_version(ROOT),
+        "app_version": appversion.app_version(ROOT),
         "generated_by": "tools/fleet_value_projection.py",
         "scale_ladder": {
             "min": {"agents": 1, "turns_per_agent": 25, "context_tokens": 20_000},

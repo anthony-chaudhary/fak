@@ -15,7 +15,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import fleet_control_pane as pane  # noqa: E402
-import fleet_version  # noqa: E402
+import appversion  # noqa: E402
 
 
 class FleetControlPaneTest(unittest.TestCase):
@@ -131,13 +131,13 @@ class FleetControlPaneTest(unittest.TestCase):
     def test_app_version_hides_conflicted_version_file(self) -> None:
         (self.root / "VERSION").write_text("<<<<<<< HEAD\n0.8.15\n=======\n0.10.0\n>>>>>>> master\n", encoding="utf-8")
 
-        self.assertEqual(fleet_version.app_version(self.root), fleet_version.DEFAULT_VERSION)
+        self.assertEqual(appversion.app_version(self.root), appversion.DEFAULT_VERSION)
 
     def test_dirty_commit_plan_blocks_unmerged_groups(self) -> None:
         plan = pane.dirty_commit_plan(
             [
                 {"code": "UU", "path": "VERSION"},
-                {"code": " M", "path": "tools/fleet_version.py"},
+                {"code": " M", "path": "tools/appversion.py"},
                 {"code": " M", "path": "docs/readme.md"},
             ],
             {"python": "python"},
@@ -145,7 +145,7 @@ class FleetControlPaneTest(unittest.TestCase):
 
         groups = {group["group"]: group for group in plan["groups"]}
         self.assertTrue(groups["tools/fleet-control-pane"]["blocked"])
-        self.assertIn("tools/fleet_version.py", groups["tools/fleet-control-pane"]["paths"])
+        self.assertIn("tools/appversion.py", groups["tools/fleet-control-pane"]["paths"])
         self.assertNotIn("command", groups["tools/fleet-control-pane"])
         self.assertIn("resolve merge conflicts", groups["tools/fleet-control-pane"]["reason"])
         self.assertIn("command", groups["docs"])

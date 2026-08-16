@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-import fleet_version
+import appversion
 
 
 SCHEMA = "fak.api-host-bridge-verify-all.v1"
@@ -266,7 +266,7 @@ def run_step(root: Path, step: dict[str, Any], default_timeout_s: int, version: 
     timeout_s = int(step.get("timeout_s", default_timeout_s))
     started = utc_now()
     t0 = time.perf_counter()
-    version = version or fleet_version.app_version(root)
+    version = version or appversion.app_version(root)
     try:
         proc = subprocess.run(
             step["argv"],
@@ -467,7 +467,7 @@ def build_report(
     timeout_s: int = 180,
 ) -> dict[str, Any]:
     root = root or ROOT
-    app_ver = fleet_version.app_version(root)
+    app_ver = appversion.app_version(root)
     steps = generation_steps()
     if not skip_tests:
         steps += test_steps()

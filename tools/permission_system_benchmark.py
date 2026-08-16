@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import fleet_version
+import appversion
 
 
 SCHEMA = "fak.permission-system-benchmark.v1"
@@ -260,22 +260,22 @@ def metric(system: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_report() -> dict[str, Any]:
-    app_ver = fleet_version.app_version()
+    app_ver = appversion.app_version()
     return {
         "schema": SCHEMA,
         "app_version": app_ver,
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         "scope_note": "Vendor rows are sourced structural comparisons; FAK rows point to local executable witnesses.",
-        "sources": {key: fleet_version.versioned(value, app_ver) for key, value in SOURCES.items()},
-        "scenarios": fleet_version.versioned_rows(SCENARIOS, app_ver),
-        "api_host_bridge_dimensions": fleet_version.versioned_rows(BRIDGE_DIMENSIONS, app_ver),
-        "systems": fleet_version.versioned_rows(SYSTEMS, app_ver),
+        "sources": {key: appversion.versioned(value, app_ver) for key, value in SOURCES.items()},
+        "scenarios": appversion.versioned_rows(SCENARIOS, app_ver),
+        "api_host_bridge_dimensions": appversion.versioned_rows(BRIDGE_DIMENSIONS, app_ver),
+        "systems": appversion.versioned_rows(SYSTEMS, app_ver),
         "outcomes": {
-            system: {scenario: fleet_version.versioned(row, app_ver) for scenario, row in rows.items()}
+            system: {scenario: appversion.versioned(row, app_ver) for scenario, row in rows.items()}
             for system, rows in OUTCOMES.items()
         },
         "api_host_bridge_outcomes": {
-            system: {dimension: fleet_version.versioned(row, app_ver) for dimension, row in rows.items()}
+            system: {dimension: appversion.versioned(row, app_ver) for dimension, row in rows.items()}
             for system, rows in BRIDGE_OUTCOMES.items()
         },
         "metrics": [metric(s) for s in SYSTEMS],

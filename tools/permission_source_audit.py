@@ -14,7 +14,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-import fleet_version
+import appversion
 
 
 SCHEMA = "fak.permission-source-audit.v1"
@@ -158,7 +158,7 @@ def audit_source(source: dict[str, Any], timeout_s: float, retries: int = 2, ret
     ]
     passed = bool(body) and not error and all(c["matched"] for c in checks)
     return {
-        "version": fleet_version.app_version(),
+        "version": appversion.app_version(),
         "id": source["id"],
         "system": source["system"],
         "url": source["url"],
@@ -178,7 +178,7 @@ def build_report(
     retry_sleep_s: float = 0.5,
 ) -> dict[str, Any]:
     sources = sources or SOURCES
-    app_ver = fleet_version.app_version()
+    app_ver = appversion.app_version()
     rows = [
         audit_source(source, timeout_s=timeout_s, retries=retries, retry_sleep_s=retry_sleep_s)
         for source in sources

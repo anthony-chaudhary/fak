@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-import fleet_version
+import appversion
 
 
 SCHEMA = "fak.api-host-bridge-matrix.v1"
@@ -241,7 +241,7 @@ def resolve_witness(root: Path, witness: dict[str, Any]) -> dict[str, Any]:
     evidence = [resolve_check(root, check) for check in witness["checks"]]
     ok = all(item["status"] == "resolved" for item in evidence)
     return {
-        "version": fleet_version.app_version(),
+        "version": appversion.app_version(),
         "id": witness["id"],
         "claim": witness["claim"],
         "required": witness["required"],
@@ -256,7 +256,7 @@ def resolve_witness(root: Path, witness: dict[str, Any]) -> dict[str, Any]:
 
 def build_report(root: Path | None = None) -> dict[str, Any]:
     root = root or ROOT
-    app_ver = fleet_version.app_version(root)
+    app_ver = appversion.app_version(root)
     witnesses = [resolve_witness(root, item) for item in WITNESSES]
     required = [w for w in witnesses if w["required"]]
     resolved = [w for w in required if w["status"] == "resolved"]

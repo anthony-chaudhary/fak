@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import fleet_version
+import appversion
 
 
 SCHEMA = "fak.api-host-compat-contract.v1"
@@ -77,7 +77,7 @@ def run_status(gate: dict[str, Any] | None, id: str) -> str:
 def contract_row(id: str, claim: str, checks: dict[str, bool], evidence: dict[str, Any]) -> dict[str, Any]:
     proven = all(checks.values())
     return {
-        "version": fleet_version.app_version(),
+        "version": appversion.app_version(),
         "id": id,
         "claim": claim,
         "status": "PROVEN" if proven else "FAILED",
@@ -100,7 +100,7 @@ def acceptance_models_confirmed(acceptance: dict[str, Any] | None) -> int:
 
 def build_report(root: Path | None = None, paths: dict[str, str] | None = None) -> dict[str, Any]:
     root = root or ROOT
-    app_ver = fleet_version.app_version(root)
+    app_ver = appversion.app_version(root)
     paths = paths or DEFAULT_PATHS
     loaded: dict[str, dict[str, Any] | None] = {}
     errors: dict[str, str] = {}

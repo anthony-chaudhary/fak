@@ -52,7 +52,7 @@ import statistics
 import collections
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import fleet_version
+import appversion
 from session_audit import discover, DEFAULT_ROOTS, NS_INCLUDE_PREFIX, READ_ONLY_TOOLS
 
 SCHEMA = "fak.workload.v1"
@@ -221,7 +221,7 @@ def analyze_turns(path):
 
 
 def build_profile(sessions, replay_tracks=4):
-    app_ver = fleet_version.app_version()
+    app_ver = appversion.app_version()
     S = [s for s in sessions if s]
     # Keep sessions that are meaningful agent trajectories: >=3 turns AND a real shared
     # preamble. A prefix of ~0 means the first record carried no usage (a resumed/compacted
@@ -266,7 +266,7 @@ def build_profile(sessions, replay_tracks=4):
             "prefix_tokens": s["prefix_tokens"],
             "n_turns": s["n_turns"],
             "tool_call_fraction": round(s["tool_call_fraction"], 3),
-            "track": fleet_version.versioned_rows(s["track"], app_ver),
+            "track": appversion.versioned_rows(s["track"], app_ver),
         })
         if len(replay) >= replay_tracks:
             break

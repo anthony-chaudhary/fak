@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-import fleet_version
+import appversion
 
 
 SCHEMA = "fak.api-host-retry-packet.v1"
@@ -163,7 +163,7 @@ def classify_action(target: dict[str, Any], live: dict[str, Any] | None, version
     key_env = suggested_api_key_env(target)
     provider = str(target.get("provider") or "")
     can_run_sweep = provider in {"openai-compatible", "openai", "xai"}
-    version = version or fleet_version.app_version()
+    version = version or appversion.app_version()
 
     row: dict[str, Any] = {
         "version": version,
@@ -234,7 +234,7 @@ def classify_action(target: dict[str, Any], live: dict[str, Any] | None, version
 def build_report(root: Path | None = None, paths: dict[str, str] | None = None) -> dict[str, Any]:
     root = root or ROOT
     paths = paths or DEFAULT_PATHS
-    app_ver = fleet_version.app_version(root)
+    app_ver = appversion.app_version(root)
     acceptance, acceptance_error = load_json(root, paths["acceptance"])
     live, live_error = load_json(root, paths["live"])
     artifact_errors = {}

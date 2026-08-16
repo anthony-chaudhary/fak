@@ -11,7 +11,7 @@ import json
 import os
 import sys
 
-import fleet_version
+import appversion
 
 
 REQUIRED_ARTIFACTS = (
@@ -222,7 +222,7 @@ def validate(args):
         validate_batchbench(batchbench, args.min_speedup, failures)
 
     return {
-        "app_version": fleet_version.app_version(),
+        "app_version": appversion.app_version(),
         "node_dir": node_dir,
         "host": manifest.get("host") or node_info.get("host") or os.path.basename(node_dir),
         "clean_node_asserted": args.clean_node,

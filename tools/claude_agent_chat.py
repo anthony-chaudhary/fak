@@ -54,7 +54,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import fleet_accounts  # noqa: E402
-import fleet_version  # noqa: E402
+import appversion  # noqa: E402
 
 
 SCHEMA = "claude-agent-chat/1"
@@ -96,7 +96,7 @@ class GatewayError(RuntimeError):
 
 
 def repo_root() -> Path:
-    return fleet_version.repo_root(Path(__file__))
+    return appversion.repo_root(Path(__file__))
 
 
 def default_claude_exe() -> str:
@@ -563,7 +563,7 @@ def build_packet(args: argparse.Namespace, rows: list[dict[str, Any]],
     agents = agent_definition(args)
     packet: dict[str, Any] = {
         "schema": SCHEMA,
-        "app_version": fleet_version.app_version(repo_root()),
+        "app_version": appversion.app_version(repo_root()),
         "mode": "print" if args.print else "interactive",
         "account": public_account(account),
         "agent": {

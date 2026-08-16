@@ -46,7 +46,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import fleet_version  # noqa: E402
+import appversion  # noqa: E402
 
 
 SCHEMA = "fleet-control-pane/1"
@@ -118,7 +118,7 @@ TRACKED_DEFAULT_DRIFT_KEYS = (
 
 PANE_SOURCE_PATHS = [
     "VERSION",
-    "tools/fleet_version.py",
+    "tools/appversion.py",
     "tools/fleet_control_pane.py",
     "tools/fleet_control_pane_test.py",
     "tools/control_pane.example.json",
@@ -153,7 +153,7 @@ def iso_now() -> str:
 
 
 def repo_root(start: Path | None = None) -> Path:
-    return fleet_version.repo_root(start or Path(__file__))
+    return appversion.repo_root(start or Path(__file__))
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -3084,7 +3084,7 @@ def collect_status(
     status: dict[str, Any] = {
         "schema": SCHEMA,
         "generated_utc": iso_now(),
-        "app_version": fleet_version.app_version(Path(config["root"])),
+        "app_version": appversion.app_version(Path(config["root"])),
         "machine": {
             "id": machine_id(config),
             "host": socket.gethostname(),
@@ -4509,7 +4509,7 @@ def fleet_view(
         machines = [m for m in machines if m.get("id") != local_id]
         machines.append(local_machine)
         machines.sort(key=lambda m: str(m.get("id") or ""))
-    current_version = fleet_version.app_version(Path(config["root"])) if config.get("root") else ""
+    current_version = appversion.app_version(Path(config["root"])) if config.get("root") else ""
     for machine in machines:
         drift = machine_version_drift(machine, current_version)
         if drift:

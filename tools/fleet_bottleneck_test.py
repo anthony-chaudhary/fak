@@ -335,9 +335,9 @@ class PrometheusExpositionTest(unittest.TestCase):
             self.assertIn(val, {0.0, 1.0, 2.0, 3.0, 4.0}, f"severity must be 0..4: {line!r}")
             self.assertNotIn("severity=", line)
 
-    def test_fleet_version_fallback_does_not_crash_engine(self):
+    def test_appversion_fallback_does_not_crash_engine(self):
         # the import is guarded; app_version() must always return a usable string.
-        self.assertTrue(fb.fleet_version.app_version())
+        self.assertTrue(fb.appversion.app_version())
 
 
 class WriteArtifactsTest(unittest.TestCase):

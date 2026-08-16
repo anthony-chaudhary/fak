@@ -38,7 +38,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import fleet_version  # noqa: E402
+import appversion  # noqa: E402
 import fleet_regdir  # noqa: E402  -- the host's one registry dir (never a second one)
 import fleet_trend  # noqa: E402
 from dispatch_worker import install_no_window_subprocess_defaults  # noqa: E402
@@ -845,7 +845,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         pass
 
-    root = Path(args.workspace).resolve() if args.workspace else fleet_version.repo_root(Path(__file__))
+    root = Path(args.workspace).resolve() if args.workspace else appversion.repo_root(Path(__file__))
 
     if args.json:
         print(json.dumps(snapshot(root, args.window), indent=2))

@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import fleet_version
+import appversion
 
 
 SCHEMA = "fak.api-host-goal-audit.v1"
@@ -171,7 +171,7 @@ def host_agnostic_detail(matrix: dict[str, Any] | None, gate: dict[str, Any] | N
 
 def audit_row(id: str, requirement: str, status: str, evidence: str, detail: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
-        "version": fleet_version.app_version(),
+        "version": appversion.app_version(),
         "id": id,
         "requirement": requirement,
         "status": status,
@@ -511,7 +511,7 @@ def residual_claim_rows(loaded: dict[str, dict[str, Any] | None], paths: dict[st
 def build_report(root: Path | None = None, paths: dict[str, str] | None = None) -> dict[str, Any]:
     root = root or ROOT
     paths = paths or DEFAULT_PATHS
-    app_ver = fleet_version.app_version(root)
+    app_ver = appversion.app_version(root)
     loaded, errors = load_artifacts(root, paths)
 
     rows: list[dict[str, Any]] = []

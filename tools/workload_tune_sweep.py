@@ -32,7 +32,7 @@ import subprocess
 import sys
 import tempfile
 
-import fleet_version
+import appversion
 
 KNOB_FLAG = {
     "toolfrac": "-tune-toolfrac",
@@ -111,7 +111,7 @@ def main():
     a = ap.parse_args()
 
     grid = [float(x) for x in a.grid.split(",") if x.strip()]
-    app_ver = fleet_version.app_version()
+    app_ver = appversion.app_version()
     quant = not a.no_quant
     sweep = []
     for v in grid:

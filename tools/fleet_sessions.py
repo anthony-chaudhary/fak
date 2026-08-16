@@ -35,7 +35,7 @@ import hashlib
 import datetime as dt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # import sibling helper
-import fleet_version  # noqa: E402
+import appversion  # noqa: E402
 import fleet_regdir  # noqa: E402  -- the host's one registry dir (never a second one)
 import fleet_accounts  # noqa: E402  -- account-policy layer (worker/excluded/non-account)
 import fleet_session_signals  # noqa: E402
@@ -1446,7 +1446,7 @@ def write_registry(rows, throttle, auth, probes=None):
     # synthetic probe rows (project == "_probe") feed the mergers but are NOT real
     # sessions -- keep them out of the sessions list so the operator view stays honest.
     session_rows = [r for r in rows if r.get("project") != "_probe"]
-    reg = {"schema": "fleet-sessions/3", "app_version": fleet_version.app_version(), "generated_utc": NOW.isoformat(),
+    reg = {"schema": "fleet-sessions/3", "app_version": appversion.app_version(), "generated_utc": NOW.isoformat(),
            "window_h": WINDOW_H, "throttle": throttle, "auth": auth,
            "accounts": account_availability(throttle, rows, auth),
             "sessions": [{**{k: r[k] for k in ("account", "project", "session", "cwd", "git",
@@ -1466,7 +1466,7 @@ def write_registry(rows, throttle, auth, probes=None):
     with open(sessions_path, "w", encoding="utf-8") as f:
         json.dump(reg, f, indent=1)
     with open(plan_path, "w", encoding="utf-8") as f:
-        json.dump({"app_version": fleet_version.app_version(), "generated_utc": NOW.isoformat(), "plan": plan}, f, indent=1)
+        json.dump({"app_version": appversion.app_version(), "generated_utc": NOW.isoformat(), "plan": plan}, f, indent=1)
     _log_decisions(rows)
     return sessions_path, plan_path, len(plan)
 
@@ -1552,7 +1552,7 @@ def main():
     # evidence. _live_resume_sids() is the process-table half and fails open to empty.
     decide(rows, throttle, availability, live_sids=_live_resume_sids())
     if MODE == "json":
-        print(json.dumps({"app_version": fleet_version.app_version(), "now": NOW.isoformat(),
+        print(json.dumps({"app_version": appversion.app_version(), "now": NOW.isoformat(),
                           "throttle": throttle, "auth": auth,
                           "accounts": account_availability(throttle, rows, auth),
                           "probes": probe_verdicts,
@@ -1569,7 +1569,7 @@ def main():
         return
     if MODE == "plan":  # machine-readable AUTO_RESUME set for the watchdog
         plan = [plan_entry(r) for r in rows if r["action"] == "AUTO_RESUME"]
-        print(json.dumps({"app_version": fleet_version.app_version(), "generated_utc": NOW.isoformat(), "plan": plan}, indent=1))
+        print(json.dumps({"app_version": appversion.app_version(), "generated_utc": NOW.isoformat(), "plan": plan}, indent=1))
         return
     if MODE == "resume":
         auto = [r for r in rows if r["action"] == "AUTO_RESUME"]

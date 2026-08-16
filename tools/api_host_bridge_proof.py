@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import fleet_version
+import appversion
 
 
 SCHEMA = "fak.api-host-bridge-proof.v1"
@@ -75,7 +75,7 @@ def load_json(root: Path, rel_path: str) -> tuple[dict[str, Any] | None, str]:
 
 def row(id: str, claim: str, proven: bool, evidence: str, detail: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
-        "version": fleet_version.app_version(),
+        "version": appversion.app_version(),
         "id": id,
         "claim": claim,
         "status": "PROVEN" if proven else "FAILED",
@@ -85,7 +85,7 @@ def row(id: str, claim: str, proven: bool, evidence: str, detail: dict[str, Any]
 
 
 def missing_row(id: str, claim: str, evidence: str) -> dict[str, Any]:
-    return {"version": fleet_version.app_version(), "id": id, "claim": claim, "status": "MISSING", "evidence": evidence, "detail": {}}
+    return {"version": appversion.app_version(), "id": id, "claim": claim, "status": "MISSING", "evidence": evidence, "detail": {}}
 
 
 def metric(report: dict[str, Any], system: str) -> dict[str, Any]:
@@ -663,7 +663,7 @@ def residual_scope_rows(app_ver: str) -> list[dict[str, Any]]:
 
 def build_report(root: Path | None = None, paths: dict[str, str] | None = None) -> dict[str, Any]:
     root = root or ROOT
-    app_ver = fleet_version.app_version(root)
+    app_ver = appversion.app_version(root)
     paths = paths or DEFAULT_PATHS
     loaded, errors = load_artifacts(root, paths)
 

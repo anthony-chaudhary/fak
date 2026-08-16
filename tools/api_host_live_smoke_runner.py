@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-import fleet_version
+import appversion
 
 
 SCHEMA = "fak.api-host-live-smoke-runner.v1"
@@ -66,7 +66,7 @@ def command_list(value: Any) -> list[str]:
 def run_command(command: str, root: Path, timeout_s: int) -> dict[str, Any]:
     started = utc_now()
     t0 = time.perf_counter()
-    version = fleet_version.app_version(root)
+    version = appversion.app_version(root)
     try:
         proc = subprocess.run(
             command,
@@ -154,7 +154,7 @@ def queue_rows(queue: dict[str, Any] | None, errors: dict[str, str]) -> list[dic
 def build_runner_row(row: dict[str, Any], root: Path, execute_ready: bool, timeout_s: int, version: str | None = None) -> dict[str, Any]:
     queue_state = str(row.get("queue_state") or "UNCLASSIFIED")
     commands = command_list(row.get("commands"))
-    version = version or fleet_version.app_version(root)
+    version = version or appversion.app_version(root)
     out: dict[str, Any] = {
         "version": version,
         "target": row.get("target"),
@@ -187,7 +187,7 @@ def build_report(
 ) -> dict[str, Any]:
     root = root or ROOT
     paths = paths or DEFAULT_PATHS
-    app_ver = fleet_version.app_version(root)
+    app_ver = appversion.app_version(root)
     queue, queue_error = load_json(root, paths["queue"])
     errors: dict[str, str] = {}
     if queue_error:

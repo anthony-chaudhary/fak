@@ -146,9 +146,9 @@ class CouponCrossUplift(unittest.TestCase):
 
 class Project(unittest.TestCase):
     def setUp(self):
-        self.original = M.fleet_version
-        M.fleet_version = types.SimpleNamespace(app_version=lambda root: "0.0.0-test")
-        self.addCleanup(lambda: setattr(M, "fleet_version", self.original))
+        self.original = M.appversion
+        M.appversion = types.SimpleNamespace(app_version=lambda root: "0.0.0-test")
+        self.addCleanup(lambda: setattr(M, "appversion", self.original))
 
     def test_a_row_outside_the_measured_grid_says_so_and_uses_the_fit(self):
         row = M.project(level(), inputs())
@@ -266,9 +266,9 @@ class DefaultLadder(unittest.TestCase):
 
 class Writers(unittest.TestCase):
     def setUp(self):
-        self.original = M.fleet_version
-        M.fleet_version = types.SimpleNamespace(app_version=lambda root: "0.0.0-test")
-        self.addCleanup(lambda: setattr(M, "fleet_version", self.original))
+        self.original = M.appversion
+        M.appversion = types.SimpleNamespace(app_version=lambda root: "0.0.0-test")
+        self.addCleanup(lambda: setattr(M, "appversion", self.original))
         self.rows = [M.project(lv, inputs()) for lv in M.DEFAULT_LEVELS[:3]]
         self.out = Path(tempfile.mkdtemp())
 

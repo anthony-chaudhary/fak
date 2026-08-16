@@ -10,7 +10,7 @@ from typing import Any
 
 import api_host_acceptance_probe as acceptance
 import api_host_readiness_probe as readiness
-import fleet_version
+import appversion
 
 
 SCHEMA = "fak.api-host-roster.v1"
@@ -204,7 +204,7 @@ def target_row(raw: dict[str, Any]) -> dict[str, Any]:
     supported = cls != "unsupported"
     status = "SUPPORTED_TEMPLATE" if valid and supported else ("UNSUPPORTED_WIRE" if valid else "INVALID_TARGET")
     return {
-        "version": fleet_version.app_version(),
+        "version": appversion.app_version(),
         **target,
         "contract_class": cls,
         "status": status,
@@ -216,7 +216,7 @@ def target_row(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_report(targets: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    app_ver = fleet_version.app_version()
+    app_ver = appversion.app_version()
     raw_targets = targets or DEFAULT_TARGETS
     rows = [target_row(item) for item in raw_targets]
     names = [row["name"] for row in rows]

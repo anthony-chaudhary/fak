@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import fleet_version
+import appversion
 
 
 SCHEMA = "fak.api-host-live-inventory.v1"
@@ -29,7 +29,7 @@ def load_json(path: Path) -> tuple[Any | None, str]:
 
 
 def artifact_error(root: Path, path: Path, error: str, version: str | None = None) -> dict[str, Any]:
-    return {"version": version or fleet_version.app_version(root), "path": rel(root, path), "artifact_error": error}
+    return {"version": version or appversion.app_version(root), "path": rel(root, path), "artifact_error": error}
 
 
 def rel(root: Path, path: Path) -> str:
@@ -50,11 +50,11 @@ def classify_error(error: str) -> str:
 
 
 def proof(id: str, claim: str, status: str, evidence: dict[str, Any], version: str | None = None) -> dict[str, Any]:
-    return {"version": version or fleet_version.app_version(), "id": id, "claim": claim, "status": status, "evidence": evidence}
+    return {"version": version or appversion.app_version(), "id": id, "claim": claim, "status": status, "evidence": evidence}
 
 
 def inspect_turntax(root: Path, version: str | None = None) -> dict[str, Any]:
-    version = version or fleet_version.app_version(root)
+    version = version or appversion.app_version(root)
     path = root / "fak/experiments/agent-live/turntax-injection-live.json"
     if not path.exists():
         return proof("gemini_openai_compatible_turntax", "Live Gemini OpenAI-compatible turn-tax run exists.", "MISSING", {"path": rel(root, path)}, version)
@@ -97,7 +97,7 @@ def inspect_turntax(root: Path, version: str | None = None) -> dict[str, Any]:
 
 
 def inspect_gemini_safety_reports(root: Path, version: str | None = None) -> dict[str, Any]:
-    version = version or fleet_version.app_version(root)
+    version = version or appversion.app_version(root)
     paths = sorted((root / "fak/experiments/agent-live").glob("gemini-2.5-flash*.json"))
     rows: list[dict[str, Any]] = []
     artifact_errors: list[dict[str, Any]] = []
@@ -138,7 +138,7 @@ def inspect_gemini_safety_reports(root: Path, version: str | None = None) -> dic
 
 
 def load_sweep_rows(root: Path, version: str | None = None) -> list[dict[str, Any]]:
-    version = version or fleet_version.app_version(root)
+    version = version or appversion.app_version(root)
     out: list[dict[str, Any]] = []
     for path in sorted((root / "fak/experiments/agent-live").glob("transcript-adapter-sweep*/sweep-summary.json")):
         data, error = load_json(path)
@@ -172,7 +172,7 @@ def load_sweep_rows(root: Path, version: str | None = None) -> list[dict[str, An
 
 
 def inspect_sweep_blockers(root: Path, rows: list[dict[str, Any]], base_url: str, expected: str, id: str, claim: str, version: str | None = None) -> dict[str, Any]:
-    version = version or fleet_version.app_version(root)
+    version = version or appversion.app_version(root)
     matched = [r for r in rows if r.get("kind") == "api" and r.get("base_url") == base_url]
     classified = [
         {
@@ -190,7 +190,7 @@ def inspect_sweep_blockers(root: Path, rows: list[dict[str, Any]], base_url: str
 
 
 def inspect_local_shims(rows: list[dict[str, Any]], version: str | None = None) -> dict[str, Any]:
-    version = version or fleet_version.app_version()
+    version = version or appversion.app_version()
     matched = [
         r for r in rows
         if r.get("kind") == "local-shim" and r.get("status") == "ok" and r.get("live") is True
@@ -219,7 +219,7 @@ def inspect_local_shims(rows: list[dict[str, Any]], version: str | None = None) 
 
 def build_report(root: Path | None = None) -> dict[str, Any]:
     root = root or ROOT
-    app_ver = fleet_version.app_version(root)
+    app_ver = appversion.app_version(root)
     rows = load_sweep_rows(root, app_ver)
     proofs = [
         inspect_turntax(root, app_ver),

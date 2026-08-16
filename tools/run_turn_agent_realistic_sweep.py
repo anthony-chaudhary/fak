@@ -22,7 +22,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-import fleet_version
+import appversion
 
 
 PROFILES = {
@@ -95,7 +95,7 @@ def repo_root():
 
 
 def profile_estimates(p):
-    app_ver = fleet_version.app_version()
+    app_ver = appversion.app_version()
     turns = parse_ints(p["turns"])
     agents = parse_ints(p["agents"])
     rows = []
@@ -157,7 +157,7 @@ def main(argv):
     names = ["interactive", "long"] if args.profile == "all" else [args.profile]
     manifest = {
         "schema": "fak.turn-agent-realistic-sweep.v1",
-        "app_version": fleet_version.app_version(Path(root)),
+        "app_version": appversion.app_version(Path(root)),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "engine": args.engine,
         "baseline_policy": {
@@ -174,7 +174,7 @@ def main(argv):
         p = dict(PROFILES[name])
         if args.reps > 0:
             p["reps"] = args.reps
-        p["version"] = fleet_version.app_version(Path(root))
+        p["version"] = appversion.app_version(Path(root))
         p["name"] = name
         p["estimates"] = profile_estimates(p)
         manifest["profiles"].append(p)

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import api_host_readiness_probe as readiness
-import fleet_version
+import appversion
 
 
 SCHEMA = "fak.api-host-acceptance.v1"
@@ -226,7 +226,7 @@ def classify_target(
     err = target_error(normalized)
     if err:
         return {
-            "version": fleet_version.app_version(),
+            "version": appversion.app_version(),
             **normalized,
             "contract_class": cls,
             "status": "INVALID_TARGET",
@@ -253,7 +253,7 @@ def classify_target(
     if live_status:
         status, reason = live_status, live_reason
     return {
-        "version": fleet_version.app_version(),
+        "version": appversion.app_version(),
         **normalized,
         "contract_class": cls,
         "status": status,
@@ -282,7 +282,7 @@ def build_report(
     root: Path | None = None,
 ) -> dict[str, Any]:
     root = root or ROOT
-    app_ver = fleet_version.app_version(root)
+    app_ver = appversion.app_version(root)
     targets = targets or DEFAULT_TARGETS
     sweep_rows, artifact_errors = load_sweep_rows(root)
     rows = [classify_target(t, timeout_s=timeout_s, probe_missing_auth=probe_missing_auth, sweep_rows=sweep_rows) for t in targets]

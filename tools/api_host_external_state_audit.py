@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-import fleet_version
+import appversion
 
 
 SCHEMA = "fak.api-host-external-state-audit.v1"
@@ -210,7 +210,7 @@ def audit_target(
         cred_state,
     )
     return {
-        "version": fleet_version.app_version(),
+        "version": appversion.app_version(),
         "name": name,
         "provider": target.get("provider", ""),
         "contract_class": target.get("contract_class", ""),
@@ -241,7 +241,7 @@ def artifact_rows(data: dict[str, Any] | None, field: str, errors: dict[str, str
 
 def build_report(root: Path | None = None, paths: dict[str, str] | None = None) -> dict[str, Any]:
     root = root or ROOT
-    app_ver = fleet_version.app_version(root)
+    app_ver = appversion.app_version(root)
     paths = paths or DEFAULT_PATHS
     loaded: dict[str, dict[str, Any] | None] = {}
     errors: dict[str, str] = {}
