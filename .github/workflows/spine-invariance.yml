@@ -76,7 +76,18 @@ jobs:
           for f in static-binary-arm64.txt default-deny-arm64.txt quarantine-arm64.txt kv-reuse-arm64.txt audit-arm64.txt; do
             normalize_go_test_output "$f"
           done
+      - name: Print failed arm64 invariant evidence
+        if: failure()
+        run: |
+          for f in static-binary-arm64.txt default-deny-arm64.txt quarantine-arm64.txt kv-reuse-arm64.txt audit-arm64.txt; do
+            if [ -f "$f" ]; then
+              echo "::group::$f"
+              cat "$f"
+              echo "::endgroup::"
+            fi
+          done
       - name: Upload arm64 artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: spine-arm64
