@@ -214,6 +214,7 @@ var epFanoutExemptRoutes = map[string]string{
 	"/v1/fak/sharedtask/":           epExemptNoDecode,
 	"/v1/fak/loops":                 epExemptNoDecode,
 	"/v1/fak/account/rehome":        epExemptNoDecode,
+	"/v1/fak/discovery/":            epExemptNoDecode,
 
 	// The agent-runtime spine drives agent.RunGovernedArm over the server's planner —
 	// a real decode, but an owned multi-turn one.
