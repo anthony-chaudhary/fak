@@ -336,6 +336,16 @@ func buildBatches(units []IssueUnit) []LoopBatch {
 	return out
 }
 
+func staleWorkProblemFrame() issuepolicy.ProblemFrame {
+	checks := map[string]issuepolicy.ProblemCheck{
+		"p1": {ID: "p1", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "the candidate preserves path, semantic commit, evidence digest, and score provenance", Valid: true},
+		"p2": {ID: "p2", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "one adjudication prevents repeated rediscovery while refusing unsupported mutation", Valid: true},
+		"p3": {ID: "p3", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "retain, update, or delete remains a bounded worker decision after fresh evidence", Valid: true},
+		"p4": {ID: "p4", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "the evidence-backed packet flows through cohort planning and witnessed closure", Valid: true},
+	}
+	return issuepolicy.ProblemFrame{Schema: issuepolicy.ProblemFrameSchema, Ready: true, Enforced: true, Centrality: issuepolicy.CentralityStewardship, CentralityTarget: "adjudicate stale tracked work without losing evidence or silently deleting value", Checks: checks}
+}
+
 func contractCandidate(c Candidate, digest string) issuepolicy.Candidate {
 	why := make([]string, 0, len(c.Components))
 	for _, component := range c.Components {
@@ -345,7 +355,7 @@ func contractCandidate(c Candidate, digest string) issuepolicy.Candidate {
 		why = append(why, "the stale-work packet supplied a supported semantic-drift candidate")
 	}
 	return issuepolicy.Candidate{
-		Schema: issuepolicy.Schema, Key: c.DedupeKey,
+		Schema: issuepolicy.Schema, ProblemFrame: staleWorkProblemFrame(), Key: c.DedupeKey,
 		Title: "stale-work: adjudicate " + c.Path, ParentRef: "#6618",
 		CurrentState: fmt.Sprintf("Packet evidence digest `%s` names `%s`; last semantic commit `%s`.", digest, c.Path, c.LastSemanticCommit),
 		WhyNow:       strings.Join(why, "; "),
@@ -389,6 +399,7 @@ func renderIssue(c issuepolicy.Candidate, source Candidate, digest string) (stri
 		"", "## Batch policy", c.BatchPolicy,
 		"", "## Core through-line", c.InScope,
 		"", "## Gold-plating boundary", c.OutOfScope,
+		"", "## Problem frame", problemFrameLines(c.ProblemFrame),
 		"", "## Done condition", c.DoneCondition,
 		"", "## Witness", c.Witness,
 		"", "## Acceptance gate", c.AcceptanceGate,
@@ -400,6 +411,19 @@ func renderIssue(c issuepolicy.Candidate, source Candidate, digest string) (stri
 		"", "## Completion standard", c.CompletionStandard,
 	}
 	return c.Title, strings.Join(lines, "\n") + "\n"
+}
+
+func problemFrameLines(frame issuepolicy.ProblemFrame) string {
+	centrality := frame.Centrality
+	if frame.CentralityTarget != "" {
+		centrality += " (" + frame.CentralityTarget + ")"
+	}
+	lines := []string{"- Centrality: " + centrality}
+	for _, id := range []string{"p1", "p2", "p3", "p4"} {
+		check := frame.Checks[id]
+		lines = append(lines, "- "+strings.ToUpper(id)+": "+check.Status+" - "+check.Evidence)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func issueCreateCommand(title, body string, dry bool) []string {

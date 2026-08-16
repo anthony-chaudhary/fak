@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 func loopCandidate(path string) Candidate {
@@ -34,6 +35,10 @@ func TestBuildLoopRefusesDispatchUntilDedicatedIssueExists(t *testing.T) {
 		t.Fatalf("units=%d, want 1", len(plan.Units))
 	}
 	u := plan.Units[0]
+	frame := u.Issue.Review.ProblemFrame
+	if !frame.Enforced || !frame.Ready || frame.Centrality != issuepolicy.CentralityStewardship || frame.CentralityTarget == "" || len(frame.Checks) != 4 {
+		t.Fatalf("problem frame = %+v", frame)
+	}
 	if u.Issue.Action != "create" || !u.Issue.Review.OK {
 		t.Fatalf("issue plan=%+v, want contract-valid create", u.Issue)
 	}
