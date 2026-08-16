@@ -74,7 +74,7 @@ func runStallscan(stdout, stderr io.Writer, argv []string) int {
 	}
 	v := stallscan.Classify(sample, stallscan.DefaultThresholds())
 	if *asJSON {
-		return encodeJSONOrFail(stdout, stderr, stallFingerprint(sample, v), "fak stallscan")
+		return encodeJSONOrFail(stdout, stderr, stallFingerprintSkewed(sample, v, stallscanSkewGuard(stallscanBuildSkew())), "fak stallscan")
 	}
 	renderStallFingerprint(stdout, sample, v, *topN)
 	if v.Level == stallscan.LevelStall {
@@ -132,7 +132,7 @@ func runStallscanWatch(stdout, stderr io.Writer, interval time.Duration, logPath
 		}
 		baseline := updateGrowthBaseline(baseHandles, baseThreads, sample)
 		v := stallscan.ClassifyWithBaseline(baseline, sample, stallscan.DefaultThresholds())
-		appendStallJSONL(logPath, stallFingerprint(sample, v), maxBytes)
+		appendStallJSONL(logPath, stallFingerprintSkewed(sample, v, stallscanSkewGuard(stallscanBuildSkew())), maxBytes)
 		if v.Level != stallscan.LevelCalm {
 			fmt.Fprintf(stdout, "%s  %-8s %-18s %s\n",
 				time.Now().UTC().Format("15:04:05"), v.Level, v.Cause, stallJoinReasons(v.Reasons))
@@ -353,4 +353,12 @@ func sortProcIOByOps(in []stallscan.ProcIO) []stallscan.ProcIO {
 	copy(cp, in)
 	sort.SliceStable(cp, func(i, j int) bool { return cp[i].Ops > cp[j].Ops })
 	return cp
+}
+
+func stallFingerprintSkewed(s stallscan.Sample, v stallscan.Verdict, skew *stallBuildSkew) map[string]any {
+	rec := stallFingerprint(s, v)
+	if skew != nil {
+		rec["build_skew"] = skew
+	}
+	return rec
 }

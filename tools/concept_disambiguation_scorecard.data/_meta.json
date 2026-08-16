@@ -2330,6 +2330,11 @@
           "category": "incidental",
           "reason": "Bounded quantobs schema symbol, not a guard-gate concept.",
           "token": "CodeRuntimeDelegated"
+        },
+        {
+          "category": "incidental",
+          "reason": "Stallscan output annotation helper for #6611, not a separate guard/gate concept.",
+          "token": "stallscanSkewGuard"
         }
       ],
       "exclude": [
@@ -2639,6 +2644,7 @@
         "setGuardCompactionAnchorMode",
         "setGuardCoreLockAll",
         "shrinkLeverGuardCommand",
+        "stallscanSkewGuard",
         "startBoundGuardRegistration",
         "startGuardRegistration",
         "summarizeGates",
