@@ -17,26 +17,26 @@ func TestStatusReportRollsUpMixedProviderTierLimits(t *testing.T) {
 	if rep.Schema != StatusReportSchema {
 		t.Fatalf("schema = %q", rep.Schema)
 	}
-	if rep.Totals.TotalSlots != 9 || rep.Totals.FreeSlots != 4 ||
-		rep.Totals.LeasedSlots != 1 || rep.Totals.BlockedSlots != 4 {
-		t.Fatalf("totals slots free/leased/blocked/total = %d/%d/%d/%d, want 4/1/4/9",
+	if rep.Totals.TotalSlots != 3 || rep.Totals.FreeSlots != 1 ||
+		rep.Totals.LeasedSlots != 1 || rep.Totals.BlockedSlots != 1 {
+		t.Fatalf("totals slots free/leased/blocked/total = %d/%d/%d/%d, want 1/1/1/3",
 			rep.Totals.FreeSlots, rep.Totals.LeasedSlots, rep.Totals.BlockedSlots, rep.Totals.TotalSlots)
 	}
 	ru := findStatusRollup(rep, "provider=anthropic tier=t1")
 	if ru == nil {
 		t.Fatalf("missing anthropic tier rollup: %+v", rep.Rollups)
 	}
-	if !ru.Mixed || ru.FreeSlots != 3 || ru.LeasedSlots != 1 || ru.BlockedSlots != 4 {
-		t.Fatalf("anthropic t1 rollup = %+v, want mixed with 3 free, 1 leased, 4 blocked", *ru)
+	if ru.Mixed || ru.FreeSlots != 0 || ru.LeasedSlots != 1 || ru.BlockedSlots != 1 {
+		t.Fatalf("anthropic t1 rollup = %+v, want uniform hard cap with 0 free, 1 leased, 1 blocked", *ru)
 	}
-	if len(rep.Warnings) == 0 || !strings.Contains(strings.Join(rep.Warnings, "\n"), "mixed limit posture") {
-		t.Fatalf("warnings should name mixed limit posture: %+v", rep.Warnings)
+	if strings.Contains(strings.Join(rep.Warnings, "\n"), "mixed limit posture") {
+		t.Fatalf("uniform hard cap should not report mixed limit posture: %+v", rep.Warnings)
 	}
 	rendered := RenderStatusReport(rep, false)
 	if !strings.Contains(rendered, "rollups by provider+tier") ||
 		!strings.Contains(rendered, "provider=anthropic tier=t1") ||
-		!strings.Contains(rendered, "limits:") {
-		t.Fatalf("render missing rollup/limits:\n%s", rendered)
+		!strings.Contains(rendered, "slots=0/2 free leased=1 blocked=1") {
+		t.Fatalf("render missing hard-cap rollup:\n%s", rendered)
 	}
 }
 

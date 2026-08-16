@@ -2,11 +2,9 @@ package fleetaccounts
 
 import "testing"
 
-// TestAccountSessionCapEnvKnob pins the FAK_SESSIONS_PER_ACCOUNT override: it retunes
-// the Claude per-account session budget, is ignored for non-Claude products, and
-// falls back to the default on a non-positive or unparseable value. Python reads the
-// same variable in fleet_accounts._session_cap (see fleet_session_cap_env_test.py) so
-// the two stay one-knob-one-way.
+// TestAccountSessionCapEnvKnob pins the hard Claude OAuth identity bound: the
+// compatibility knob is parsed but cannot widen concurrency, while non-Claude
+// products retain their own default.
 func TestAccountSessionCapEnvKnob(t *testing.T) {
 	claude := Account{Product: "claude"}
 
@@ -15,10 +13,10 @@ func TestAccountSessionCapEnvKnob(t *testing.T) {
 	}
 
 	t.Setenv(SessionsPerAccountEnv, "7")
-	if got := AccountSessionCap(claude); got != 7 {
-		t.Fatalf("FAK_SESSIONS_PER_ACCOUNT=7 claude cap = %d, want 7", got)
+	if got := AccountSessionCap(claude); got != DefaultClaudeSessionsPerAccount {
+		t.Fatalf("FAK_SESSIONS_PER_ACCOUNT=7 claude cap = %d, want hard default %d", got, DefaultClaudeSessionsPerAccount)
 	}
-	// the knob only widens Claude accounts; non-Claude stays at one session.
+	// Non-Claude products retain their own one-session default.
 	if got := AccountSessionCap(Account{Product: "opencode"}); got != DefaultAccountSessionsPerWorker {
 		t.Fatalf("opencode cap = %d, want %d", got, DefaultAccountSessionsPerWorker)
 	}
