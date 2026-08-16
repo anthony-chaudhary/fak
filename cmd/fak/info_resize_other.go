@@ -5,6 +5,7 @@ package main
 import (
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 )
 
@@ -42,9 +43,12 @@ func newInfoResizeChan(_, _ int) (<-chan struct{}, func()) {
 			}
 		}
 	}()
+	var once sync.Once
 	stop := func() {
-		signal.Stop(sig)
-		close(done)
+		once.Do(func() {
+			signal.Stop(sig)
+			close(done)
+		})
 	}
 	return out, stop
 }
