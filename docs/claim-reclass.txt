@@ -31,3 +31,10 @@ commit: 953af9bfefe57ceb8cae3881da83e4289f3fd2df
 type: docs
 witness: internal/orphanscan/keep_allowlist.txt
 reason: The landed subject reads `test(orphanscan): pin existing orphan debt`, but the diff changes only the orphan allowlist and no test source. The commit records existing scan debt rather than adding or changing a test, so the evidence supports a `docs` claim and nothing more.
+commit: 7de313e10cac1148fbd2d2e7a1efc57a407cf384
+type: chore
+witness: internal/quantobs/testdata/delegated_safetensors_unmeasured.golden.json
+witness: internal/quantobs/testdata/local_gguf_measured.golden.json
+witness: internal/quantobs/testdata/unsupported_measured_storage.golden.json
+reason: The landed subject says test(quantobs), but the diff adds only the three golden fixture documents consumed by the already-landed TestSchemaGolden and changes no test source. The evidence supports a fixture/documentation claim, not a new test-code claim.
+
