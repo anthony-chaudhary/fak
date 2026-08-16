@@ -175,6 +175,22 @@ type leaf struct {
 // Build folds candidates into a cohort Plan. Input order is preserved for stable
 // wave assignment; the derived queues are sorted for determinism.
 func Build(candidates []issuepolicy.Candidate, opt Options) Plan {
+	return build(candidates, nil, opt)
+}
+
+// BuildIssueDrafts preserves the advisory problem-frame boundary for historical
+// GitHub bodies while applying the same wave planning as direct candidates.
+func BuildIssueDrafts(drafts []issuepolicy.IssueDraft, opt Options) Plan {
+	candidates := make([]issuepolicy.Candidate, 0, len(drafts))
+	reviews := make([]issuepolicy.Review, 0, len(drafts))
+	for _, draft := range drafts {
+		candidates = append(candidates, issuepolicy.CandidateFromIssueDraft(draft))
+		reviews = append(reviews, issuepolicy.ReviewIssueDraft(draft, opt.Options))
+	}
+	return build(candidates, reviews, opt)
+}
+
+func build(candidates []issuepolicy.Candidate, reviews []issuepolicy.Review, opt Options) Plan {
 	plan := Plan{Schema: Schema, Total: len(candidates)}
 
 	keyCounts := map[string]int{}
@@ -186,7 +202,7 @@ func Build(candidates []issuepolicy.Candidate, opt Options) Plan {
 
 	seen := map[string]bool{}
 	var leaves []leaf
-	for _, c := range candidates {
+	for i, c := range candidates {
 		key := strings.TrimSpace(c.Key)
 		if key != "" {
 			if seen[key] {
@@ -195,6 +211,9 @@ func Build(candidates []issuepolicy.Candidate, opt Options) Plan {
 			seen[key] = true
 		}
 		review := issuepolicy.ReviewCandidate(c, opt.Options)
+		if reviews != nil {
+			review = reviews[i]
+		}
 		appendPortfolioRow(&plan, c, review)
 		switch {
 		case review.OK && review.Dispatchability == issuepolicy.Dispatchable:

@@ -12,6 +12,7 @@ func envelopeCandidate() Candidate {
 		WorkUnit: "leaf", ExpectedSteps: 3, InScope: "Envelope contract.", OutOfScope: "Load generator.",
 		DoneCondition: "Target is enforced.", Witness: "go test ./internal/issuecontract", AcceptanceGate: "go test ./internal/issuecontract",
 		Lane: "issuecontract", Paths: []string{"internal/issuecontract/**"}, ClosureBinding: "Commit cites #4648.",
+		ProblemFrame: completeProblemFrame(),
 	}
 }
 

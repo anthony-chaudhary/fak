@@ -11,6 +11,10 @@ import (
 // review as a dispatchable leaf. Tests mutate the returned value to exercise one
 // axis at a time.
 func fullCandidate(key string) issuepolicy.Candidate {
+	checks := make(map[string]issuepolicy.ProblemCheck, 4)
+	for _, id := range []string{"P1", "P2", "P3", "P4"} {
+		checks[id] = issuepolicy.ProblemCheck{ID: id, Status: issuepolicy.ProblemCheckPreserved, Evidence: "The leaf preserves this shared invariant.", Valid: true}
+	}
 	return issuepolicy.Candidate{
 		Schema:         issuepolicy.Schema,
 		Key:            key,
@@ -26,6 +30,7 @@ func fullCandidate(key string) issuepolicy.Candidate {
 		AcceptanceGate: "make ci",
 		ClosureBinding: "commit cites #1 and (fak leaf)",
 		Paths:          []string{"internal/" + key + "/**"},
+		ProblemFrame:   issuepolicy.ProblemFrame{Schema: issuepolicy.ProblemFrameSchema, Ready: true, Enforced: true, Centrality: issuepolicy.CentralityCore, Checks: checks},
 	}
 }
 
@@ -221,6 +226,7 @@ func TestPortfolioCarriesCentralityWithoutReorderingOrScoring(t *testing.T) {
 	peripheral.ProblemFrame = issuepolicy.ProblemFrame{Schema: issuepolicy.ProblemFrameSchema, Ready: true, Enforced: true, Centrality: issuepolicy.CentralityPeripheral, Checks: map[string]issuepolicy.ProblemCheck{}}
 
 	legacy := fullCandidate("legacy")
+	legacy.ProblemFrame = issuepolicy.ProblemFrame{}
 	plan := Build([]issuepolicy.Candidate{core, stewardship, enabling, peripheral, legacy}, Options{})
 	if len(plan.Portfolio) != 5 {
 		t.Fatalf("portfolio rows = %d, want 5", len(plan.Portfolio))
@@ -267,6 +273,7 @@ func TestPortfolioDoesNotInferCentralityFromMetadata(t *testing.T) {
 	candidate.Title = "Core epic implementation"
 	candidate.ParentRef = "Core outcome #99"
 	candidate.Labels = []string{"core", "priority/P0"}
+	candidate.ProblemFrame = issuepolicy.ProblemFrame{}
 	plan := Build([]issuepolicy.Candidate{candidate}, Options{})
 	if got := plan.Portfolio[0].Centrality; got != issuepolicy.CentralityUnclassified {
 		t.Fatalf("metadata inferred centrality %q, want unclassified", got)
@@ -279,7 +286,7 @@ func TestRenderSmoke(t *testing.T) {
 	b.ExpectedSteps = 20
 	plan := Build([]issuepolicy.Candidate{a, b}, Options{})
 	out := Render(plan)
-	for _, want := range []string{"issue-cohort:", "concurrency:", "centrality (non-scoring):", "portfolio: alpha centrality=unclassified", "wave 0:", "split-first"} {
+	for _, want := range []string{"issue-cohort:", "concurrency:", "centrality (non-scoring):", "portfolio: alpha centrality=core", "wave 0:", "split-first"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("render missing %q in:\n%s", want, out)
 		}
@@ -370,4 +377,36 @@ func TestIsSplitTargetCoversBothSplitReasons(t *testing.T) {
 	if IsSplitTarget(issuepolicy.Review{}) {
 		t.Fatalf("IsSplitTarget(no reasons) = true, want false")
 	}
+}
+
+func TestBuildIssueDraftsKeepsHistoricalUnclassifiedFrameAdvisory(t *testing.T) {
+	draft := issuepolicy.IssueDraft{Number: 42, Title: "historical leaf", Body: "## Current state\n\nnot done\n\n## In scope\n\none file\n\n## Out of scope\n\nrest\n\n## Done condition\n\nit changes\n\n## Witness\n\ngo test passes\n\n## Parent context\n\nepic #1\n\n## Why this is next\n\nunblocks\n\n## Working spine\n\nmake it true\n\n## Acceptance gate\n\nmake ci\n\n## Closure binding\n\ncites #1 (fak leaf)\n\n## Work estimate\n\nEstimate: 3 points\n\n## Overall completion contribution\n\nParent scope baseline: #1, 13 points. Contribution: 3/13 points.\n\n## Completion standard\n\nproduction\n\n## Target operating envelope\n\n- acceptance pass rate: = 100 percent\n\n## Witnessed operating envelope\n\n- acceptance pass rate: = 100 percent\n\n## Likely files\n\n- `internal/legacy/**`\n"}
+	plan := BuildIssueDrafts([]issuepolicy.IssueDraft{draft}, Options{Options: issuepolicy.Options{StrictProjectWork: true}})
+	if plan.Dispatchable != 1 || len(plan.Waves) != 1 || plan.TriageOnly != 0 {
+		t.Fatalf("historical plan = %+v, want one advisory unclassified dispatch wave", plan)
+	}
+	if plan.Portfolio[0].Centrality != issuepolicy.CentralityUnclassified {
+		t.Fatalf("portfolio = %+v, want visible unclassified centrality", plan.Portfolio)
+	}
+}
+
+func TestBuildKeepsUnframedDirectCandidateOutOfDispatchWaves(t *testing.T) {
+	candidate := fullCandidate("external-plan")
+	candidate.ProblemFrame = issuepolicy.ProblemFrame{}
+	plan := Build([]issuepolicy.Candidate{candidate}, Options{})
+	if plan.Dispatchable != 0 || len(plan.Waves) != 0 || len(plan.Triage) != 1 {
+		t.Fatalf("plan = %+v, want one triage candidate and no dispatch wave", plan)
+	}
+	if !stringSliceContains(plan.Triage[0].Reasons, issuepolicy.ReasonProblemFrameIncomplete) || !stringSliceContains(plan.Triage[0].MissingFields, "problem_frame_unclassified") {
+		t.Fatalf("triage = %+v, want %s and problem_frame_unclassified", plan.Triage, issuepolicy.ReasonProblemFrameIncomplete)
+	}
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

@@ -5,6 +5,17 @@ import (
 	"testing"
 )
 
+func completeProblemFrame() ProblemFrame {
+	checks := make(map[string]ProblemCheck, 4)
+	for _, id := range []string{"P1", "P2", "P3", "P4"} {
+		checks[id] = ProblemCheck{ID: id, Status: ProblemCheckPreserved, Evidence: "The scoped leaf preserves this shared invariant.", Valid: true}
+	}
+	return ProblemFrame{
+		Schema: ProblemFrameSchema, Ready: true, Enforced: true,
+		Centrality: CentralityCore, Checks: checks,
+	}
+}
+
 func completeCandidate() Candidate {
 	return Candidate{
 		Schema:          Schema,
@@ -31,6 +42,7 @@ func completeCandidate() Candidate {
 		Paths:           []string{"internal/taskmgr/handoff.go"},
 		BoundaryNotes:   []string{"Public issue only; no private lab evidence."},
 		ClosureBinding:  "Resolving commit cites #N and carries a matching (fak <leaf>) trailer.",
+		ProblemFrame:    completeProblemFrame(),
 	}
 }
 

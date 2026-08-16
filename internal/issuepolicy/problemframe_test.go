@@ -125,3 +125,25 @@ func TestReviewIssueDraftGatesMalformedProblemFrame(t *testing.T) {
 		t.Fatalf("missing field-specific repair: %v", review.ProblemFrame.RepairActions)
 	}
 }
+func TestReviewCandidateRejectsUnclassifiedDirectCandidate(t *testing.T) {
+	candidate := completeCandidate()
+	candidate.ProblemFrame = ProblemFrame{}
+	review := ReviewCandidate(candidate, Options{})
+	if review.Dispatchability != TriageOnly || review.Verdict != "needs_problem_frame" || !containsString(review.Reasons, ReasonProblemFrameIncomplete) {
+		t.Fatalf("unframed direct candidate escaped frame gate: %+v", review)
+	}
+	if !containsString(review.MissingFields, "problem_frame_unclassified") {
+		t.Fatalf("missing fields = %v, want problem_frame_unclassified", review.MissingFields)
+	}
+}
+
+func TestReviewIssueDraftKeepsHistoricalUnclassifiedFrameAdvisory(t *testing.T) {
+	draft := IssueDraft{Number: 9, Title: "historical issue", Body: "## Scope\n\nOne bounded legacy leaf.\n\n## Definition of done\n\nThe legacy behavior is captured.\n\n## Witness\n\ngo test ./internal/issuepolicy"}
+	review := ReviewIssueDraft(draft, Options{})
+	if review.ProblemFrame.Enforced || review.ProblemFrame.Centrality != CentralityUnclassified {
+		t.Fatalf("legacy frame = %+v, want advisory unclassified", review.ProblemFrame)
+	}
+	if containsString(review.Reasons, ReasonProblemFrameIncomplete) || containsString(review.MissingFields, "problem_frame_unclassified") {
+		t.Fatalf("historical draft gained direct-candidate hold: %+v", review)
+	}
+}

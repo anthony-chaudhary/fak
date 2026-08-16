@@ -9,6 +9,7 @@ func TestRootPointStrictModeRefusesMissingFields(t *testing.T) {
 		InScope: "one origin check", OutOfScope: "unrelated cleanup", DoneCondition: "origin check rejects defect",
 		Witness: "go test ./internal/issuecontract -run RootPoint", Lane: "issuecontract",
 		Paths: []string{"internal/issuecontract/**"}, ExpectedSteps: 2,
+		ProblemFrame: completeProblemFrame(),
 	}
 	got := ReviewCandidate(c, Options{StrictRootPoint: true})
 	if got.Verdict != "needs_scope" {

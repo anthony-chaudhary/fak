@@ -292,6 +292,10 @@ type Review struct {
 // dispatchable public issue; non-OK reviews still preserve enough detail to render
 // a triage-only row or refuse a live sync.
 func ReviewCandidate(c Candidate, opt Options) Review {
+	return reviewCandidate(c, opt, false)
+}
+
+func reviewCandidate(c Candidate, opt Options, allowLegacyProblemFrame bool) Review {
 	c = normalize(c)
 
 	scopeMissing := missingScopeFields(c)
@@ -305,7 +309,10 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 		missing = append(missing, noiseMissing...)
 	}
 	reasons := reasonSet{}
-	if c.ProblemFrame.Enforced && !c.ProblemFrame.Ready {
+	if !c.ProblemFrame.Enforced && !allowLegacyProblemFrame {
+		reasons.add(ReasonProblemFrameIncomplete)
+		missing = appendUnique(missing, "problem_frame_unclassified")
+	} else if c.ProblemFrame.Enforced && !c.ProblemFrame.Ready {
 		reasons.add(ReasonProblemFrameIncomplete)
 		missing = appendUnique(missing, c.ProblemFrame.Reasons...)
 	}
@@ -470,7 +477,7 @@ func ReviewCandidate(c Candidate, opt Options) Review {
 // the same dispatchability language used by generated issue producers.
 func ReviewIssueDraft(d IssueDraft, opt Options) Review {
 	candidate := CandidateFromIssueDraft(d)
-	review := ReviewCandidate(candidate, opt)
+	review := reviewCandidate(candidate, opt, true)
 	review.BriefReadiness = assessIssueBrief(d, candidate)
 	review.ProblemFrame = AssessProblemFrame(d)
 	if review.BriefReadiness.Enforced && !review.BriefReadiness.Ready {

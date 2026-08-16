@@ -179,6 +179,28 @@ func TestIssueContractLiveRequiresDedupeArmor(t *testing.T) {
 	}
 }
 
+func TestIssueContractFromPlanRejectsUnframedCandidate(t *testing.T) {
+	candidate := completeIssueCandidate()
+	candidate.ProblemFrame = issuepolicy.ProblemFrame{}
+	path := filepath.Join(t.TempDir(), "plan.json")
+	body := map[string]any{"candidates": []issuepolicy.Candidate{candidate}}
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := RunIssue(&out, &errb, []string{"contract", "--from-plan", path, "--json"})
+	if code != 3 {
+		t.Fatalf("exit = %d, want 3\nstderr:\n%s\nstdout:\n%s", code, errb.String(), out.String())
+	}
+	if !strings.Contains(out.String(), issuepolicy.ReasonProblemFrameIncomplete) || !strings.Contains(out.String(), "problem_frame_unclassified") {
+		t.Fatalf("missing fail-closed evidence:\n%s", out.String())
+	}
+}
+
 func TestIssueContractFromPlanReviewsCandidatesArray(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "plan.json")
 	body := map[string]any{"candidates": []issuepolicy.Candidate{completeIssueCandidate()}}
@@ -940,6 +962,14 @@ func TestIssueContractStrictWitnessFlagHoldsForgeableCandidate(t *testing.T) {
 	}
 }
 
+func completeIssueProblemFrame() issuepolicy.ProblemFrame {
+	checks := make(map[string]issuepolicy.ProblemCheck, 4)
+	for _, id := range []string{"P1", "P2", "P3", "P4"} {
+		checks[id] = issuepolicy.ProblemCheck{ID: id, Status: issuepolicy.ProblemCheckPreserved, Evidence: "The scoped leaf preserves this shared invariant.", Valid: true}
+	}
+	return issuepolicy.ProblemFrame{Schema: issuepolicy.ProblemFrameSchema, Ready: true, Enforced: true, Centrality: issuepolicy.CentralityCore, Checks: checks}
+}
+
 func completeIssueCandidate() issuepolicy.Candidate {
 	return issuepolicy.Candidate{
 		Schema:          issuepolicy.Schema,
@@ -966,6 +996,7 @@ func completeIssueCandidate() issuepolicy.Candidate {
 		Paths:           []string{"internal/taskmgr/handoff.go"},
 		BoundaryNotes:   []string{"Public issue only; no private lab evidence."},
 		ClosureBinding:  "Resolving commit cites #N and carries a matching (fak <leaf>) trailer.",
+		ProblemFrame:    completeIssueProblemFrame(),
 	}
 }
 

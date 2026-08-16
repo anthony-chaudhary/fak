@@ -33,6 +33,7 @@ func cohortTestCandidate(key string, paths []string) issuepolicy.Candidate {
 		CompletionStandard: "production",
 		TargetEnvelope:     "- acceptance pass rate: = 100 percent",
 		WitnessedEnvelope:  "- acceptance pass rate: = 100 percent",
+		ProblemFrame:       completeIssueProblemFrame(),
 	}
 }
 

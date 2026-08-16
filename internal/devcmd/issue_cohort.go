@@ -62,8 +62,10 @@ func runIssueCohort(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	var candidates []issuepolicy.Candidate
+	var issues []issuepolicy.IssueDraft
 	if *fromIssues != "" {
-		issues, derr := decodeIssueContractIssues(b)
+		var derr error
+		issues, derr = decodeIssueContractIssues(b)
 		if derr != nil {
 			fmt.Fprintf(stderr, "fak-dev issue cohort: %v\n", derr)
 			return 2
@@ -82,7 +84,7 @@ func runIssueCohort(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
-	plan := issuecohort.Build(candidates, issuecohort.Options{
+	cohortOpt := issuecohort.Options{
 		Options: issuepolicy.Options{
 			Live:              *live,
 			DedupeChecked:     *dedupeChecked,
@@ -90,7 +92,13 @@ func runIssueCohort(stdout, stderr io.Writer, argv []string) int {
 			StrictProjectWork: *strictProjectWork,
 		},
 		MaxWave: *maxWave,
-	})
+	}
+	var plan issuecohort.Plan
+	if *fromIssues != "" {
+		plan = issuecohort.BuildIssueDrafts(issues, cohortOpt)
+	} else {
+		plan = issuecohort.Build(candidates, cohortOpt)
+	}
 
 	if *asJSON {
 		return encodeJSONOrFail(stdout, stderr, plan, "fak-dev issue cohort")
