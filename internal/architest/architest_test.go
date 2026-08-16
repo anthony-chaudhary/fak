@@ -574,6 +574,7 @@ var tier = map[string]int{
 	"residualquant":         1, // stdlib-only RRQ metadata/research adjudication; no model kernel.
 	"rotationmeta":          1, // stdlib-only rotation-transform metadata and runtime capability adjudication; no model kernel.
 	"quantwatch":            1, // stdlib-only public metadata ingestion and deterministic ranking; no model or runtime kernel.
+	"toolpriorbench":        1, // stdlib-only reproducible tool-name compatibility corpus and raw-call benchmark ledger (#6820).
 	"quantbench":            2, // stdlib-only benchmark evidence contract and adjudication; no runtime kernel.
 	"kvint2eval":            1, // stdlib-only INT2 KV rotation evidence contract; CUDA producer is fixture-only.
 	"codexresume":           2,

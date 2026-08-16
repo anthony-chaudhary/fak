@@ -1,0 +1,2116 @@
+{
+  "version": "fak.tool-prior-ledger/v1",
+  "date": "2026-08-14",
+  "provider": "ollama",
+  "endpoint": "http://127.0.0.1:11434",
+  "model": "qwen2.5:14b",
+  "model_digest": "sha256:7cdf5a0187d5c58cc5d369b255592f7841d1c4696d45a8c8a9489440385b22f6",
+  "snapshot_digest": "sha256:8afa4160a8021639ca17fe6b25224f565c35bca92b317dec67864471ce36daba",
+  "system_prompt": "You are evaluating tool selection. Call exactly one appropriate tool. Copy the user's requested search query exactly into the query field. Do not answer in prose.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Exact repository search query from the user."
+      }
+    },
+    "required": [
+      "query"
+    ],
+    "additionalProperties": false
+  },
+  "variants": [
+    {
+      "id": "private",
+      "class": "private_canonical",
+      "name": "fak_repo_lookup_7c",
+      "semantics": "repository_text_search_v1",
+      "accepted": true
+    },
+    {
+      "id": "provider",
+      "class": "provider_native_style",
+      "name": "search_repository",
+      "semantics": "repository_text_search_v1",
+      "accepted": true
+    },
+    {
+      "id": "api",
+      "class": "popular_api_style",
+      "name": "github_search_code",
+      "semantics": "repository_text_search_v1",
+      "accepted": true
+    },
+    {
+      "id": "command",
+      "class": "popular_command_style",
+      "name": "grep",
+      "semantics": "repository_text_search_v1",
+      "accepted": true
+    },
+    {
+      "id": "shell",
+      "class": "harness_builtin",
+      "name": "functions.shell_command",
+      "semantics": "arbitrary_shell_v1",
+      "accepted": false,
+      "reason": "rejected: shell_command has argv/shell side effects and result semantics that do not match repository_text_search_v1"
+    }
+  ],
+  "corpus": [
+    {
+      "id": "literal",
+      "prompt": "Find the exact text registration_digest in the repository. Use the repository search tool once; do not answer from memory.",
+      "query": "registration_digest"
+    },
+    {
+      "id": "path",
+      "prompt": "Find the exact text internal/toolcatalog in the repository. Use the repository search tool once; do not answer from memory.",
+      "query": "internal/toolcatalog"
+    },
+    {
+      "id": "flaglike",
+      "prompt": "Find the exact text --expose in the repository. Use the repository search tool once; do not answer from memory.",
+      "query": "--expose"
+    }
+  ],
+  "trials": [
+    {
+      "variant": "private",
+      "case": "literal",
+      "attempt": 1,
+      "selected": "fak_repo_lookup_7c",
+      "arguments": {
+        "query": "registration_digest"
+      },
+      "selection_ok": true,
+      "arguments_ok": true,
+      "latency_ms": 35619,
+      "usage": {
+        "prompt_tokens": 297,
+        "completion_tokens": 26
+      },
+      "request": {
+        "model": "qwen2.5:14b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are evaluating tool selection. Call exactly one appropriate tool. Copy the user's requested search query exactly into the query field. Do not answer in prose."
+          },
+          {
+            "role": "user",
+            "content": "Find the exact text registration_digest in the repository. Use the repository search tool once; do not answer from memory."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "fak_repo_lookup_7c",
+              "description": "Search repository text for an exact query. Use for requests to find text in a repository.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Exact repository search query from the user."
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "read_repository_file",
+              "description": "Read a known repository file by exact path. Do not use to search for text.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "list_repository_tree",
+              "description": "List repository paths. Do not use to search file contents.",
+              "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "stream": false,
+        "options": {
+          "temperature": 0,
+          "seed": 6820
+        }
+      },
+      "response": {
+        "model": "qwen2.5:14b",
+        "created_at": "2026-08-14T18:45:20.454382045Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_3l2kj2ma",
+              "function": {
+                "index": 0,
+                "name": "fak_repo_lookup_7c",
+                "arguments": {
+                  "query": "registration_digest"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 35612709870,
+        "load_duration": 291530659,
+        "prompt_eval_count": 297,
+        "prompt_eval_duration": 26990339000,
+        "eval_count": 26,
+        "eval_duration": 8318043000
+      }
+    },
+    {
+      "variant": "private",
+      "case": "path",
+      "attempt": 1,
+      "selected": "fak_repo_lookup_7c",
+      "arguments": {
+        "query": "internal\\/toolcatalog"
+      },
+      "selection_ok": true,
+      "arguments_ok": false,
+      "latency_ms": 12078,
+      "usage": {
+        "prompt_tokens": 298,
+        "completion_tokens": 28
+      },
+      "request": {
+        "model": "qwen2.5:14b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are evaluating tool selection. Call exactly one appropriate tool. Copy the user's requested search query exactly into the query field. Do not answer in prose."
+          },
+          {
+            "role": "user",
+            "content": "Find the exact text internal/toolcatalog in the repository. Use the repository search tool once; do not answer from memory."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "fak_repo_lookup_7c",
+              "description": "Search repository text for an exact query. Use for requests to find text in a repository.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Exact repository search query from the user."
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "read_repository_file",
+              "description": "Read a known repository file by exact path. Do not use to search for text.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "list_repository_tree",
+              "description": "List repository paths. Do not use to search file contents.",
+              "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "stream": false,
+        "options": {
+          "temperature": 0,
+          "seed": 6820
+        }
+      },
+      "response": {
+        "model": "qwen2.5:14b",
+        "created_at": "2026-08-14T18:45:32.533903178Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_2pi1f28i",
+              "function": {
+                "index": 0,
+                "name": "fak_repo_lookup_7c",
+                "arguments": {
+                  "query": "internal\\/toolcatalog"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 12076125162,
+        "load_duration": 255881589,
+        "prompt_eval_count": 298,
+        "prompt_eval_duration": 2843459000,
+        "eval_count": 28,
+        "eval_duration": 8971806000
+      }
+    },
+    {
+      "variant": "private",
+      "case": "path",
+      "attempt": 2,
+      "selected": "fak_repo_lookup_7c",
+      "arguments": {
+        "query": "internal/toolcatalog"
+      },
+      "selection_ok": true,
+      "arguments_ok": true,
+      "latency_ms": 12191,
+      "usage": {
+        "prompt_tokens": 319,
+        "completion_tokens": 27
+      },
+      "request": {
+        "model": "qwen2.5:14b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are evaluating tool selection. Call exactly one appropriate tool. Copy the user's requested search query exactly into the query field. Do not answer in prose."
+          },
+          {
+            "role": "user",
+            "content": "Find the exact text internal/toolcatalog in the repository. Use the repository search tool once; do not answer from memory."
+          },
+          {
+            "role": "user",
+            "content": "Your prior call was invalid. Call the repository search tool now with the exact query requested by the user."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "fak_repo_lookup_7c",
+              "description": "Search repository text for an exact query. Use for requests to find text in a repository.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Exact repository search query from the user."
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "read_repository_file",
+              "description": "Read a known repository file by exact path. Do not use to search for text.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "list_repository_tree",
+              "description": "List repository paths. Do not use to search file contents.",
+              "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "stream": false,
+        "options": {
+          "temperature": 0,
+          "seed": 6820
+        }
+      },
+      "response": {
+        "model": "qwen2.5:14b",
+        "created_at": "2026-08-14T18:45:44.725334733Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_rez10puk",
+              "function": {
+                "index": 0,
+                "name": "fak_repo_lookup_7c",
+                "arguments": {
+                  "query": "internal/toolcatalog"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 12189981340,
+        "load_duration": 252227248,
+        "prompt_eval_count": 319,
+        "prompt_eval_duration": 3315156000,
+        "eval_count": 27,
+        "eval_duration": 8618097000
+      }
+    },
+    {
+      "variant": "private",
+      "case": "flaglike",
+      "attempt": 1,
+      "selected": "fak_repo_lookup_7c",
+      "arguments": {
+        "query": "--expose"
+      },
+      "selection_ok": true,
+      "arguments_ok": true,
+      "latency_ms": 11386,
+      "usage": {
+        "prompt_tokens": 298,
+        "completion_tokens": 26
+      },
+      "request": {
+        "model": "qwen2.5:14b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are evaluating tool selection. Call exactly one appropriate tool. Copy the user's requested search query exactly into the query field. Do not answer in prose."
+          },
+          {
+            "role": "user",
+            "content": "Find the exact text --expose in the repository. Use the repository search tool once; do not answer from memory."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "fak_repo_lookup_7c",
+              "description": "Search repository text for an exact query. Use for requests to find text in a repository.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Exact repository search query from the user."
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "read_repository_file",
+              "description": "Read a known repository file by exact path. Do not use to search for text.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "list_repository_tree",
+              "description": "List repository paths. Do not use to search file contents.",
+              "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "stream": false,
+        "options": {
+          "temperature": 0,
+          "seed": 6820
+        }
+      },
+      "response": {
+        "model": "qwen2.5:14b",
+        "created_at": "2026-08-14T18:45:56.110336523Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_5l287t9r",
+              "function": {
+                "index": 0,
+                "name": "fak_repo_lookup_7c",
+                "arguments": {
+                  "query": "--expose"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 11383634460,
+        "load_duration": 250303962,
+        "prompt_eval_count": 298,
+        "prompt_eval_duration": 2853656000,
+        "eval_count": 26,
+        "eval_duration": 8275023999
+      }
+    },
+    {
+      "variant": "provider",
+      "case": "literal",
+      "attempt": 1,
+      "selected": "search_repository",
+      "arguments": {
+        "query": "registration_digest"
+      },
+      "selection_ok": true,
+      "arguments_ok": true,
+      "latency_ms": 26496,
+      "usage": {
+        "prompt_tokens": 292,
+        "completion_tokens": 21
+      },
+      "request": {
+        "model": "qwen2.5:14b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are evaluating tool selection. Call exactly one appropriate tool. Copy the user's requested search query exactly into the query field. Do not answer in prose."
+          },
+          {
+            "role": "user",
+            "content": "Find the exact text registration_digest in the repository. Use the repository search tool once; do not answer from memory."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "search_repository",
+              "description": "Search repository text for an exact query. Use for requests to find text in a repository.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Exact repository search query from the user."
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "read_repository_file",
+              "description": "Read a known repository file by exact path. Do not use to search for text.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "list_repository_tree",
+              "description": "List repository paths. Do not use to search file contents.",
+              "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "stream": false,
+        "options": {
+          "temperature": 0,
+          "seed": 6820
+        }
+      },
+      "response": {
+        "model": "qwen2.5:14b",
+        "created_at": "2026-08-14T18:46:22.607581939Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_4d8vr540",
+              "function": {
+                "index": 0,
+                "name": "search_repository",
+                "arguments": {
+                  "query": "registration_digest"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 26493871626,
+        "load_duration": 250249592,
+        "prompt_eval_count": 292,
+        "prompt_eval_duration": 19550396000,
+        "eval_count": 21,
+        "eval_duration": 6640230000
+      }
+    },
+    {
+      "variant": "provider",
+      "case": "path",
+      "attempt": 1,
+      "selected": "search_repository",
+      "arguments": {
+        "query": "internal\\/toolcatalog"
+      },
+      "selection_ok": true,
+      "arguments_ok": false,
+      "latency_ms": 10456,
+      "usage": {
+        "prompt_tokens": 293,
+        "completion_tokens": 23
+      },
+      "request": {
+        "model": "qwen2.5:14b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are evaluating tool selection. Call exactly one appropriate tool. Copy the user's requested search query exactly into the query field. Do not answer in prose."
+          },
+          {
+            "role": "user",
+            "content": "Find the exact text internal/toolcatalog in the repository. Use the repository search tool once; do not answer from memory."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "search_repository",
+              "description": "Search repository text for an exact query. Use for requests to find text in a repository.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Exact repository search query from the user."
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "read_repository_file",
+              "description": "Read a known repository file by exact path. Do not use to search for text.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "list_repository_tree",
+              "description": "List repository paths. Do not use to search file contents.",
+              "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "stream": false,
+        "options": {
+          "temperature": 0,
+          "seed": 6820
+        }
+      },
+      "response": {
+        "model": "qwen2.5:14b",
+        "created_at": "2026-08-14T18:46:33.063774349Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_vdnpnnh2",
+              "function": {
+                "index": 0,
+                "name": "search_repository",
+                "arguments": {
+                  "query": "internal\\/toolcatalog"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 10454814251,
+        "load_duration": 248760606,
+        "prompt_eval_count": 293,
+        "prompt_eval_duration": 2849225000,
+        "eval_count": 23,
+        "eval_duration": 7352515000
+      }
+    },
+    {
+      "variant": "provider",
+      "case": "path",
+      "attempt": 2,
+      "selected": "search_repository",
+      "arguments": {
+        "query": "internal\\/toolcatalog"
+      },
+      "selection_ok": true,
+      "arguments_ok": false,
+      "latency_ms": 10841,
+      "usage": {
+        "prompt_tokens": 314,
+        "completion_tokens": 23
+      },
+      "request": {
+        "model": "qwen2.5:14b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are evaluating tool selection. Call exactly one appropriate tool. Copy the user's requested search query exactly into the query field. Do not answer in prose."
+          },
+          {
+            "role": "user",
+            "content": "Find the exact text internal/toolcatalog in the repository. Use the repository search tool once; do not answer from memory."
+          },
+          {
+            "role": "user",
+            "content": "Your prior call was invalid. Call the repository search tool now with the exact query requested by the user."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "search_repository",
+              "description": "Search repository text for an exact query. Use for requests to find text in a repository.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Exact repository search query from the user."
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "read_repository_file",
+              "description": "Read a known repository file by exact path. Do not use to search for text.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "list_repository_tree",
+              "description": "List repository paths. Do not use to search file contents.",
+              "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "stream": false,
+        "options": {
+          "temperature": 0,
+          "seed": 6820
+        }
+      },
+      "response": {
+        "model": "qwen2.5:14b",
+        "created_at": "2026-08-14T18:46:43.904485038Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_3ivw5g3m",
+              "function": {
+                "index": 0,
+                "name": "search_repository",
+                "arguments": {
+                  "query": "internal\\/toolcatalog"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 10839326245,
+        "load_duration": 247302893,
+        "prompt_eval_count": 314,
+        "prompt_eval_duration": 3304224000,
+        "eval_count": 23,
+        "eval_duration": 7283405000
+      }
+    },
+    {
+      "variant": "provider",
+      "case": "flaglike",
+      "attempt": 1,
+      "selected": "search_repository",
+      "arguments": {
+        "query": "--expose"
+      },
+      "selection_ok": true,
+      "arguments_ok": true,
+      "latency_ms": 9717,
+      "usage": {
+        "prompt_tokens": 293,
+        "completion_tokens": 21
+      },
+      "request": {
+        "model": "qwen2.5:14b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are evaluating tool selection. Call exactly one appropriate tool. Copy the user's requested search query exactly into the query field. Do not answer in prose."
+          },
+          {
+            "role": "user",
+            "content": "Find the exact text --expose in the repository. Use the repository search tool once; do not answer from memory."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "search_repository",
+              "description": "Search repository text for an exact query. Use for requests to find text in a repository.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Exact repository search query from the user."
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "read_repository_file",
+              "description": "Read a known repository file by exact path. Do not use to search for text.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "list_repository_tree",
+              "description": "List repository paths. Do not use to search file contents.",
+              "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "stream": false,
+        "options": {
+          "temperature": 0,
+          "seed": 6820
+        }
+      },
+      "response": {
+        "model": "qwen2.5:14b",
+        "created_at": "2026-08-14T18:46:53.621974586Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_xzqxfmfp",
+              "function": {
+                "index": 0,
+                "name": "search_repository",
+                "arguments": {
+                  "query": "--expose"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 9716109604,
+        "load_duration": 248940838,
+        "prompt_eval_count": 293,
+        "prompt_eval_duration": 2846739000,
+        "eval_count": 21,
+        "eval_duration": 6616044000
+      }
+    },
+    {
+      "variant": "api",
+      "case": "literal",
+      "attempt": 1,
+      "selected": "github_search_code",
+      "arguments": {
+        "query": "registration_digest"
+      },
+      "selection_ok": true,
+      "arguments_ok": true,
+      "latency_ms": 27066,
+      "usage": {
+        "prompt_tokens": 293,
+        "completion_tokens": 22
+      },
+      "request": {
+        "model": "qwen2.5:14b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are evaluating tool selection. Call exactly one appropriate tool. Copy the user's requested search query exactly into the query field. Do not answer in prose."
+          },
+          {
+            "role": "user",
+            "content": "Find the exact text registration_digest in the repository. Use the repository search tool once; do not answer from memory."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "github_search_code",
+              "description": "Search repository text for an exact query. Use for requests to find text in a repository.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Exact repository search query from the user."
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "read_repository_file",
+              "description": "Read a known repository file by exact path. Do not use to search for text.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "list_repository_tree",
+              "description": "List repository paths. Do not use to search file contents.",
+              "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "stream": false,
+        "options": {
+          "temperature": 0,
+          "seed": 6820
+        }
+      },
+      "response": {
+        "model": "qwen2.5:14b",
+        "created_at": "2026-08-14T18:47:20.686913948Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_fo42yhqs",
+              "function": {
+                "index": 0,
+                "name": "github_search_code",
+                "arguments": {
+                  "query": "registration_digest"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 27063577980,
+        "load_duration": 248764701,
+        "prompt_eval_count": 293,
+        "prompt_eval_duration": 19780536000,
+        "eval_count": 22,
+        "eval_duration": 6983033000
+      }
+    },
+    {
+      "variant": "api",
+      "case": "path",
+      "attempt": 1,
+      "selected": "github_search_code",
+      "arguments": {
+        "query": "internal\\/toolcatalog"
+      },
+      "selection_ok": true,
+      "arguments_ok": false,
+      "latency_ms": 10747,
+      "usage": {
+        "prompt_tokens": 294,
+        "completion_tokens": 24
+      },
+      "request": {
+        "model": "qwen2.5:14b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are evaluating tool selection. Call exactly one appropriate tool. Copy the user's requested search query exactly into the query field. Do not answer in prose."
+          },
+          {
+            "role": "user",
+            "content": "Find the exact text internal/toolcatalog in the repository. Use the repository search tool once; do not answer from memory."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "github_search_code",
+              "description": "Search repository text for an exact query. Use for requests to find text in a repository.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Exact repository search query from the user."
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "read_repository_file",
+              "description": "Read a known repository file by exact path. Do not use to search for text.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "list_repository_tree",
+              "description": "List repository paths. Do not use to search file contents.",
+              "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "stream": false,
+        "options": {
+          "temperature": 0,
+          "seed": 6820
+        }
+      },
+      "response": {
+        "model": "qwen2.5:14b",
+        "created_at": "2026-08-14T18:47:31.435755195Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_udabnvtq",
+              "function": {
+                "index": 0,
+                "name": "github_search_code",
+                "arguments": {
+                  "query": "internal\\/toolcatalog"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 10745337024,
+        "load_duration": 249477286,
+        "prompt_eval_count": 294,
+        "prompt_eval_duration": 2836198000,
+        "eval_count": 24,
+        "eval_duration": 7654840000
+      }
+    },
+    {
+      "variant": "api",
+      "case": "path",
+      "attempt": 2,
+      "selected": "github_search_code",
+      "arguments": {
+        "query": "internal\\/toolcatalog"
+      },
+      "selection_ok": true,
+      "arguments_ok": false,
+      "latency_ms": 11209,
+      "usage": {
+        "prompt_tokens": 315,
+        "completion_tokens": 24
+      },
+      "request": {
+        "model": "qwen2.5:14b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are evaluating tool selection. Call exactly one appropriate tool. Copy the user's requested search query exactly into the query field. Do not answer in prose."
+          },
+          {
+            "role": "user",
+            "content": "Find the exact text internal/toolcatalog in the repository. Use the repository search tool once; do not answer from memory."
+          },
+          {
+            "role": "user",
+            "content": "Your prior call was invalid. Call the repository search tool now with the exact query requested by the user."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "github_search_code",
+              "description": "Search repository text for an exact query. Use for requests to find text in a repository.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Exact repository search query from the user."
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "read_repository_file",
+              "description": "Read a known repository file by exact path. Do not use to search for text.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "list_repository_tree",
+              "description": "List repository paths. Do not use to search file contents.",
+              "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "stream": false,
+        "options": {
+          "temperature": 0,
+          "seed": 6820
+        }
+      },
+      "response": {
+        "model": "qwen2.5:14b",
+        "created_at": "2026-08-14T18:47:42.644696731Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_tqbkhio3",
+              "function": {
+                "index": 0,
+                "name": "github_search_code",
+                "arguments": {
+                  "query": "internal\\/toolcatalog"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 11207699469,
+        "load_duration": 251271046,
+        "prompt_eval_count": 315,
+        "prompt_eval_duration": 3315114000,
+        "eval_count": 24,
+        "eval_duration": 7636656000
+      }
+    },
+    {
+      "variant": "api",
+      "case": "flaglike",
+      "attempt": 1,
+      "selected": "github_search_code",
+      "arguments": {
+        "query": "--expose"
+      },
+      "selection_ok": true,
+      "arguments_ok": true,
+      "latency_ms": 10068,
+      "usage": {
+        "prompt_tokens": 294,
+        "completion_tokens": 22
+      },
+      "request": {
+        "model": "qwen2.5:14b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are evaluating tool selection. Call exactly one appropriate tool. Copy the user's requested search query exactly into the query field. Do not answer in prose."
+          },
+          {
+            "role": "user",
+            "content": "Find the exact text --expose in the repository. Use the repository search tool once; do not answer from memory."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "github_search_code",
+              "description": "Search repository text for an exact query. Use for requests to find text in a repository.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Exact repository search query from the user."
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "read_repository_file",
+              "description": "Read a known repository file by exact path. Do not use to search for text.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "list_repository_tree",
+              "description": "List repository paths. Do not use to search file contents.",
+              "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "stream": false,
+        "options": {
+          "temperature": 0,
+          "seed": 6820
+        }
+      },
+      "response": {
+        "model": "qwen2.5:14b",
+        "created_at": "2026-08-14T18:47:52.712370812Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_nuhdww10",
+              "function": {
+                "index": 0,
+                "name": "github_search_code",
+                "arguments": {
+                  "query": "--expose"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 10066366084,
+        "load_duration": 253259675,
+        "prompt_eval_count": 294,
+        "prompt_eval_duration": 2847944000,
+        "eval_count": 22,
+        "eval_duration": 6960879000
+      }
+    },
+    {
+      "variant": "command",
+      "case": "literal",
+      "attempt": 1,
+      "selected": "",
+      "arguments": {},
+      "selection_ok": false,
+      "arguments_ok": false,
+      "latency_ms": 25877,
+      "usage": {
+        "prompt_tokens": 291,
+        "completion_tokens": 20
+      },
+      "request": {
+        "model": "qwen2.5:14b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are evaluating tool selection. Call exactly one appropriate tool. Copy the user's requested search query exactly into the query field. Do not answer in prose."
+          },
+          {
+            "role": "user",
+            "content": "Find the exact text registration_digest in the repository. Use the repository search tool once; do not answer from memory."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "grep",
+              "description": "Search repository text for an exact query. Use for requests to find text in a repository.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Exact repository search query from the user."
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "read_repository_file",
+              "description": "Read a known repository file by exact path. Do not use to search for text.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "list_repository_tree",
+              "description": "List repository paths. Do not use to search file contents.",
+              "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "stream": false,
+        "options": {
+          "temperature": 0,
+          "seed": 6820
+        }
+      },
+      "response": {
+        "model": "qwen2.5:14b",
+        "created_at": "2026-08-14T18:48:18.587919026Z",
+        "message": {
+          "role": "assistant",
+          "content": "\u0e04\u0e13\u0e30\u0e01\u0e23\u0e23\u0e21\n{\"name\": \"grep\", \"arguments\": {\"query\": \"registration_digest\"}}\n\u0e04\u0e13\u0e30\u0e01\u0e23\u0e23\u0e21"
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 25874284268,
+        "load_duration": 248602031,
+        "prompt_eval_count": 291,
+        "prompt_eval_duration": 19276208000,
+        "eval_count": 20,
+        "eval_duration": 6297832000
+      }
+    },
+    {
+      "variant": "command",
+      "case": "literal",
+      "attempt": 2,
+      "selected": "grep",
+      "arguments": {
+        "query": "registration_digest"
+      },
+      "selection_ok": true,
+      "arguments_ok": true,
+      "latency_ms": 9841,
+      "usage": {
+        "prompt_tokens": 312,
+        "completion_tokens": 20
+      },
+      "request": {
+        "model": "qwen2.5:14b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are evaluating tool selection. Call exactly one appropriate tool. Copy the user's requested search query exactly into the query field. Do not answer in prose."
+          },
+          {
+            "role": "user",
+            "content": "Find the exact text registration_digest in the repository. Use the repository search tool once; do not answer from memory."
+          },
+          {
+            "role": "user",
+            "content": "Your prior call was invalid. Call the repository search tool now with the exact query requested by the user."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "grep",
+              "description": "Search repository text for an exact query. Use for requests to find text in a repository.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Exact repository search query from the user."
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "read_repository_file",
+              "description": "Read a known repository file by exact path. Do not use to search for text.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "list_repository_tree",
+              "description": "List repository paths. Do not use to search file contents.",
+              "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "stream": false,
+        "options": {
+          "temperature": 0,
+          "seed": 6820
+        }
+      },
+      "response": {
+        "model": "qwen2.5:14b",
+        "created_at": "2026-08-14T18:48:28.430400258Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_yn3xqcz4",
+              "function": {
+                "index": 0,
+                "name": "grep",
+                "arguments": {
+                  "query": "registration_digest"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 9839083620,
+        "load_duration": 251144608,
+        "prompt_eval_count": 312,
+        "prompt_eval_duration": 3301246000,
+        "eval_count": 20,
+        "eval_duration": 6281417000
+      }
+    },
+    {
+      "variant": "command",
+      "case": "path",
+      "attempt": 1,
+      "selected": "grep",
+      "arguments": {
+        "query": "internal\\/toolcatalog"
+      },
+      "selection_ok": true,
+      "arguments_ok": false,
+      "latency_ms": 10066,
+      "usage": {
+        "prompt_tokens": 292,
+        "completion_tokens": 22
+      },
+      "request": {
+        "model": "qwen2.5:14b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are evaluating tool selection. Call exactly one appropriate tool. Copy the user's requested search query exactly into the query field. Do not answer in prose."
+          },
+          {
+            "role": "user",
+            "content": "Find the exact text internal/toolcatalog in the repository. Use the repository search tool once; do not answer from memory."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "grep",
+              "description": "Search repository text for an exact query. Use for requests to find text in a repository.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Exact repository search query from the user."
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "read_repository_file",
+              "description": "Read a known repository file by exact path. Do not use to search for text.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "list_repository_tree",
+              "description": "List repository paths. Do not use to search file contents.",
+              "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "stream": false,
+        "options": {
+          "temperature": 0,
+          "seed": 6820
+        }
+      },
+      "response": {
+        "model": "qwen2.5:14b",
+        "created_at": "2026-08-14T18:48:38.496454108Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_otm28dla",
+              "function": {
+                "index": 0,
+                "name": "grep",
+                "arguments": {
+                  "query": "internal\\/toolcatalog"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 10064760324,
+        "load_duration": 249922809,
+        "prompt_eval_count": 292,
+        "prompt_eval_duration": 2849743000,
+        "eval_count": 22,
+        "eval_duration": 6960887000
+      }
+    },
+    {
+      "variant": "command",
+      "case": "path",
+      "attempt": 2,
+      "selected": "grep",
+      "arguments": {
+        "query": "internal/toolcatalog"
+      },
+      "selection_ok": true,
+      "arguments_ok": true,
+      "latency_ms": 10228,
+      "usage": {
+        "prompt_tokens": 313,
+        "completion_tokens": 21
+      },
+      "request": {
+        "model": "qwen2.5:14b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are evaluating tool selection. Call exactly one appropriate tool. Copy the user's requested search query exactly into the query field. Do not answer in prose."
+          },
+          {
+            "role": "user",
+            "content": "Find the exact text internal/toolcatalog in the repository. Use the repository search tool once; do not answer from memory."
+          },
+          {
+            "role": "user",
+            "content": "Your prior call was invalid. Call the repository search tool now with the exact query requested by the user."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "grep",
+              "description": "Search repository text for an exact query. Use for requests to find text in a repository.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Exact repository search query from the user."
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "read_repository_file",
+              "description": "Read a known repository file by exact path. Do not use to search for text.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "list_repository_tree",
+              "description": "List repository paths. Do not use to search file contents.",
+              "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "stream": false,
+        "options": {
+          "temperature": 0,
+          "seed": 6820
+        }
+      },
+      "response": {
+        "model": "qwen2.5:14b",
+        "created_at": "2026-08-14T18:48:48.7245726Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_h29ashr4",
+              "function": {
+                "index": 0,
+                "name": "grep",
+                "arguments": {
+                  "query": "internal/toolcatalog"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 10226750109,
+        "load_duration": 250040297,
+        "prompt_eval_count": 313,
+        "prompt_eval_duration": 3318423000,
+        "eval_count": 21,
+        "eval_duration": 6653943000
+      }
+    },
+    {
+      "variant": "command",
+      "case": "flaglike",
+      "attempt": 1,
+      "selected": "grep",
+      "arguments": {
+        "query": "--expose"
+      },
+      "selection_ok": true,
+      "arguments_ok": true,
+      "latency_ms": 9399,
+      "usage": {
+        "prompt_tokens": 292,
+        "completion_tokens": 20
+      },
+      "request": {
+        "model": "qwen2.5:14b",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are evaluating tool selection. Call exactly one appropriate tool. Copy the user's requested search query exactly into the query field. Do not answer in prose."
+          },
+          {
+            "role": "user",
+            "content": "Find the exact text --expose in the repository. Use the repository search tool once; do not answer from memory."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "grep",
+              "description": "Search repository text for an exact query. Use for requests to find text in a repository.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Exact repository search query from the user."
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "read_repository_file",
+              "description": "Read a known repository file by exact path. Do not use to search for text.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "list_repository_tree",
+              "description": "List repository paths. Do not use to search file contents.",
+              "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "stream": false,
+        "options": {
+          "temperature": 0,
+          "seed": 6820
+        }
+      },
+      "response": {
+        "model": "qwen2.5:14b",
+        "created_at": "2026-08-14T18:48:58.123210403Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_5aup2tf2",
+              "function": {
+                "index": 0,
+                "name": "grep",
+                "arguments": {
+                  "query": "--expose"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 9397371636,
+        "load_duration": 247789950,
+        "prompt_eval_count": 292,
+        "prompt_eval_duration": 2843740000,
+        "eval_count": 20,
+        "eval_duration": 6301529000
+      }
+    }
+  ],
+  "compatibility": [
+    {
+      "variant": "shell",
+      "model": "qwen2.5:14b",
+      "harness": "codex",
+      "verdict": "rejected_semantic_mismatch",
+      "reason": "rejected: shell_command has argv/shell side effects and result semantics that do not match repository_text_search_v1"
+    },
+    {
+      "variant": "private",
+      "model": "qwen2.5:14b",
+      "harness": "ollama_openai_tool_shape",
+      "verdict": "compatible",
+      "reason": "same semantics; measured against tuned private-name baseline",
+      "metrics": {
+        "trials": 4,
+        "selection_accuracy": 1.0,
+        "argument_validity": 0.75,
+        "correction_turns": 1,
+        "mean_latency_ms": 17818.5,
+        "prompt_tokens": 1212,
+        "completion_tokens": 107
+      }
+    },
+    {
+      "variant": "provider",
+      "model": "qwen2.5:14b",
+      "harness": "ollama_openai_tool_shape",
+      "verdict": "not_preferred",
+      "reason": "quality is below the tuned private-name baseline",
+      "metrics": {
+        "trials": 4,
+        "selection_accuracy": 1.0,
+        "argument_validity": 0.5,
+        "correction_turns": 1,
+        "mean_latency_ms": 14377.5,
+        "prompt_tokens": 1192,
+        "completion_tokens": 88
+      }
+    },
+    {
+      "variant": "api",
+      "model": "qwen2.5:14b",
+      "harness": "ollama_openai_tool_shape",
+      "verdict": "not_preferred",
+      "reason": "quality is below the tuned private-name baseline",
+      "metrics": {
+        "trials": 4,
+        "selection_accuracy": 1.0,
+        "argument_validity": 0.5,
+        "correction_turns": 1,
+        "mean_latency_ms": 14772.5,
+        "prompt_tokens": 1196,
+        "completion_tokens": 92
+      }
+    },
+    {
+      "variant": "command",
+      "model": "qwen2.5:14b",
+      "harness": "ollama_openai_tool_shape",
+      "verdict": "not_preferred",
+      "reason": "quality is below the tuned private-name baseline",
+      "metrics": {
+        "trials": 5,
+        "selection_accuracy": 0.8,
+        "argument_validity": 0.6,
+        "correction_turns": 2,
+        "mean_latency_ms": 13082.2,
+        "prompt_tokens": 1500,
+        "completion_tokens": 103
+      }
+    }
+  ],
+  "tuned_no_alias_baseline": "private",
+  "honest_conclusion": "No measured alias improves selection plus argument validity over the tuned private-name baseline; keep canonical names unless a model-specific table says otherwise."
+}

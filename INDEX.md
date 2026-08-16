@@ -182,6 +182,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 - [Mac metal node overnight run plan (2026-06-28)](docs/notes/MAC-OVERNIGHT-PLAN-2026-06-28.md) — the Apple-Silicon companion: the fak-kernel Qwen3.6-27B Q4_K decode witness collected on the Metal verify node (warm ~1.6–1.9 tok/s, climbing with length), why `--context-budget-tokens` is load-bearing on the 36 GB box, and the resume conditions.
 
 ## Benchmarks & methodology
+- [Tool-prior compatibility ledger](docs/benchmarks/tool-prior/qwen2.5-14b-2026-08-14.json) — dated Qwen 2.5 14B raw-call corpus comparing canonical, provider-native, API, and command-style tool names (#6820)
 
 - [Benchmark evidence authority](BENCHMARK-AUTHORITY.md) — the governed sheet for scoped benchmark rows, tuned baselines, artifacts, and reproduce commands.
 - [Benchmark template](BENCHMARK-TEMPLATE.md) — the shape a new benchmark result doc must take.
