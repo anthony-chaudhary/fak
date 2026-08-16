@@ -957,7 +957,7 @@ func TestArchitectureLateralEdgeConnectivityPartitionPolicy(t *testing.T) {
 		AfterSourceSide: []string{"a", "c"}, AfterSinkSide: []string{"b", "d"},
 	}}}
 	var out, errOut bytes.Buffer
-	if code := writeArchitectureDiff(&out, &errOut, diff, false, "decreased-lateral-edge-connectivity, or decreased-lateral-vertex-connectivity, or decreased-lateral-vertex-pair-cuts"); code != 3 {
+	if code := writeArchitectureDiff(&out, &errOut, diff, false, "decreased-lateral-edge-connectivity"); code != 3 {
 		t.Fatalf("code=%d output=%s", code, out.String())
 	}
 	for _, want := range []string{"lateral-edge-connectivity tier=foundation-composite(2) a <=> b cut 3 -> 2 (-1)", "witnesses [a--b a--c a--d] -> [a--b a--c]", "partitions [a]|[b c d] -> [a c]|[b d]", "edge-disjoint same-tier path"} {
