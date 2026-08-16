@@ -157,9 +157,8 @@ func TestFleetCapacityPreflightJSON(t *testing.T) {
 	t.Setenv("FLEET_CONFIG_HOME", cfg)
 	t.Setenv("FLEET_REG_DIR", regDir)
 	t.Setenv("FLEET_POLICY_PATH", policyPath)
-	// Pin the per-account session budget: the 4/4/4 seat assertions below assume the
-	// default cap, and an ambient FAK_SESSIONS_PER_ACCOUNT on the host (e.g. 6) would
-	// otherwise skew every seat count and flip the verdict to OK.
+	// The Claude OAuth identity pool is hard-capped at one concurrent session; this
+	// compatibility knob must not widen that safety bound.
 	t.Setenv(fleetaccounts.SessionsPerAccountEnv, "4")
 
 	var out, errb bytes.Buffer
@@ -171,8 +170,8 @@ func TestFleetCapacityPreflightJSON(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 		t.Fatalf("bad json: %v\n%s", err, out.String())
 	}
-	if rep.TrueConcurrentCeiling != 4 || rep.FreshSeats != 4 || rep.StaleSeats != 4 || rep.BlockedSeats != 4 || rep.Verdict != "UNDER_CAPACITY" {
-		t.Fatalf("capacity report = %+v, want ceiling=4 fresh/stale/blocked=4/4/4 under-capacity", rep)
+	if rep.TrueConcurrentCeiling != 1 || rep.FreshSeats != 1 || rep.StaleSeats != 1 || rep.BlockedSeats != 1 || rep.Verdict != "UNDER_CAPACITY" {
+		t.Fatalf("capacity report = %+v, want ceiling=1 fresh/stale/blocked=1/1/1 under-capacity", rep)
 	}
 	states := map[string]fleetaccounts.CapacityAccount{}
 	for _, acct := range rep.Accounts {
