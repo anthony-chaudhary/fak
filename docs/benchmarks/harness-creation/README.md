@@ -17,6 +17,8 @@ support, coding workspace, cited research, and incident-operations examples with
 required and excluded capabilities, starter artifacts, ten-minute spines, weekend
 extensions, and witnesses. Gallery selection does not count as independent authorship for
 the weekend track; the participant must still implement the selected public-seam extension.
+Independent operators begin with the [participant handoff](participant-handoff.md) and machine-check receipts against [the template](participant-receipt-template.json) before appending any study row.
+
 ## Ten-minute task card
 
 Prerequisite environment: a fresh machine or VM with Go installed, working network, no

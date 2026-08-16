@@ -1,0 +1,119 @@
+package harnesscreationreceipt
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"regexp"
+	"time"
+)
+
+const Schema = "fak.harness-creation-receipt/v1alpha1"
+
+var slug = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{5,63}$`)
+
+type Command struct {
+	Command string `json:"command"`
+	Exit    int    `json:"exit"`
+}
+type Receipt struct {
+	Schema                string    `json:"schema"`
+	RunID                 string    `json:"run_id"`
+	ParticipantID         string    `json:"participant_id"`
+	ParticipantClass      string    `json:"participant_class"`
+	PriorFamiliarity      string    `json:"prior_fak_internals_familiarity"`
+	Track                 string    `json:"track"`
+	Independent           bool      `json:"independent"`
+	Artifact              string    `json:"artifact"`
+	ArtifactDigest        string    `json:"artifact_digest"`
+	OS                    string    `json:"os"`
+	CPU                   string    `json:"cpu"`
+	Toolchain             string    `json:"toolchain"`
+	NetworkState          string    `json:"network_state"`
+	CacheState            string    `json:"cache_state"`
+	StartedAt             time.Time `json:"started_at"`
+	StoppedAt             time.Time `json:"stopped_at"`
+	ElapsedSeconds        float64   `json:"elapsed_seconds"`
+	Commands              []Command `json:"commands"`
+	FilesChanged          []string  `json:"files_changed"`
+	Rebuilds              int       `json:"rebuilds"`
+	RebuildSeconds        float64   `json:"rebuild_seconds"`
+	Outcome               string    `json:"outcome"`
+	HelpRequests          int       `json:"help_requests"`
+	Transcript            string    `json:"transcript"`
+	Receipt               string    `json:"receipt"`
+	IndependentAuthorship string    `json:"independent_authorship,omitempty"`
+	Conformance           string    `json:"conformance,omitempty"`
+}
+type StudyRow struct {
+	ID               string  `json:"id"`
+	ParticipantID    string  `json:"participant_id"`
+	Track            string  `json:"track"`
+	ParticipantClass string  `json:"participant_class"`
+	Independent      bool    `json:"independent"`
+	Outcome          string  `json:"outcome"`
+	ElapsedSeconds   float64 `json:"elapsed_seconds"`
+	Receipt          string  `json:"receipt"`
+}
+type Result struct {
+	Schema string   `json:"schema"`
+	Valid  bool     `json:"valid"`
+	Row    StudyRow `json:"study_row"`
+}
+
+func Parse(raw []byte) (Receipt, error) {
+	var r Receipt
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return r, err
+	}
+	if r.Schema != Schema {
+		return r, fmt.Errorf("schema must be %q", Schema)
+	}
+	for name, value := range map[string]string{"run_id": r.RunID, "participant_id": r.ParticipantID} {
+		if !slug.MatchString(value) {
+			return r, fmt.Errorf("%s must be a privacy-safe random slug", name)
+		}
+	}
+	for name, value := range map[string]string{"participant_class": r.ParticipantClass, "prior familiarity": r.PriorFamiliarity, "artifact": r.Artifact, "artifact_digest": r.ArtifactDigest, "os": r.OS, "cpu": r.CPU, "toolchain": r.Toolchain, "network_state": r.NetworkState, "cache_state": r.CacheState, "transcript": r.Transcript, "receipt": r.Receipt} {
+		if value == "" {
+			return r, fmt.Errorf("%s is required", name)
+		}
+	}
+	if r.Track != "ten-minute" && r.Track != "weekend" {
+		return r, errors.New("track must be ten-minute or weekend")
+	}
+	if r.Outcome != "success" && r.Outcome != "failure" {
+		return r, errors.New("outcome must be success or failure")
+	}
+	if r.StartedAt.IsZero() || r.StoppedAt.IsZero() || !r.StoppedAt.After(r.StartedAt) || r.ElapsedSeconds <= 0 {
+		return r, errors.New("valid clock fields are required")
+	}
+	if len(r.Commands) == 0 || len(r.FilesChanged) == 0 || r.Rebuilds < 1 || r.RebuildSeconds <= 0 || r.HelpRequests < 0 {
+		return r, errors.New("commands, changed files, rebuild, and help evidence are required")
+	}
+	if r.Track == "weekend" && (r.IndependentAuthorship == "" || r.Conformance == "") {
+		return r, errors.New("weekend receipt requires independent_authorship and conformance")
+	}
+	return r, nil
+}
+func Evaluate(r Receipt) Result {
+	return Result{Schema: "fak.harness-creation-receipt-result/v1alpha1", Valid: true, Row: StudyRow{ID: r.RunID, ParticipantID: r.ParticipantID, Track: r.Track, ParticipantClass: r.ParticipantClass, Independent: r.Independent, Outcome: r.Outcome, ElapsedSeconds: r.ElapsedSeconds, Receipt: r.Receipt}}
+}
+
+func CheckUnique(studyRaw []byte, row StudyRow) error {
+	var study struct {
+		Runs []StudyRow `json:"runs"`
+	}
+	if err := json.Unmarshal(studyRaw, &study); err != nil {
+		return fmt.Errorf("parse study: %w", err)
+	}
+	for _, existing := range study.Runs {
+		if existing.ID == row.ID {
+			return fmt.Errorf("duplicate run_id %q", row.ID)
+		}
+		if existing.ParticipantID == row.ParticipantID {
+			return fmt.Errorf("duplicate participant_id %q", row.ParticipantID)
+		}
+	}
+	return nil
+}
