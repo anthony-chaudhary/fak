@@ -1,0 +1,67 @@
+{
+  "schema_version": "quantobs/v1",
+  "outcome": "observed",
+  "reason": "none",
+  "events": [
+    {
+      "schema_version": "quantobs/v1",
+      "kind": "artifact_format",
+      "outcome": "observed",
+      "value": "safetensors",
+      "recipe": "not_applicable",
+      "evidence": "artifact_metadata",
+      "hardware_envelope": "not_applicable",
+      "reason": "none"
+    },
+    {
+      "schema_version": "quantobs/v1",
+      "kind": "effective_precision",
+      "outcome": "observed",
+      "value": "bf16",
+      "recipe": "none",
+      "evidence": "recipe_declaration",
+      "hardware_envelope": "not_applicable",
+      "reason": "none"
+    },
+    {
+      "schema_version": "quantobs/v1",
+      "kind": "runtime_delegation",
+      "outcome": "observed",
+      "value": "delegated",
+      "recipe": "not_applicable",
+      "evidence": "runtime_report",
+      "hardware_envelope": "not_applicable",
+      "reason": "none"
+    },
+    {
+      "schema_version": "quantobs/v1",
+      "kind": "conversion",
+      "outcome": "observed",
+      "value": "lossless",
+      "recipe": "not_applicable",
+      "evidence": "conversion_record",
+      "hardware_envelope": "not_applicable",
+      "reason": "none"
+    },
+    {
+      "schema_version": "quantobs/v1",
+      "kind": "memory_residency",
+      "outcome": "observed",
+      "value": "split",
+      "recipe": "not_applicable",
+      "evidence": "runtime_report",
+      "hardware_envelope": "unmeasured",
+      "reason": "none"
+    },
+    {
+      "schema_version": "quantobs/v1",
+      "kind": "refusal_reason",
+      "outcome": "observed",
+      "value": "none",
+      "recipe": "not_applicable",
+      "evidence": "adjudication",
+      "hardware_envelope": "not_applicable",
+      "reason": "none"
+    }
+  ]
+}

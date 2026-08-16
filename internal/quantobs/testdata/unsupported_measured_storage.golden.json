@@ -1,0 +1,67 @@
+{
+  "schema_version": "quantobs/v1",
+  "outcome": "refused",
+  "reason": "unsupported_combination",
+  "events": [
+    {
+      "schema_version": "quantobs/v1",
+      "kind": "artifact_format",
+      "outcome": "refused",
+      "value": "unknown",
+      "recipe": "not_applicable",
+      "evidence": "artifact_metadata",
+      "hardware_envelope": "not_applicable",
+      "reason": "unsupported_combination"
+    },
+    {
+      "schema_version": "quantobs/v1",
+      "kind": "effective_precision",
+      "outcome": "refused",
+      "value": "unknown",
+      "recipe": "not_applicable",
+      "evidence": "recipe_declaration",
+      "hardware_envelope": "not_applicable",
+      "reason": "unsupported_combination"
+    },
+    {
+      "schema_version": "quantobs/v1",
+      "kind": "runtime_delegation",
+      "outcome": "refused",
+      "value": "unknown",
+      "recipe": "not_applicable",
+      "evidence": "runtime_report",
+      "hardware_envelope": "not_applicable",
+      "reason": "unsupported_combination"
+    },
+    {
+      "schema_version": "quantobs/v1",
+      "kind": "conversion",
+      "outcome": "refused",
+      "value": "unknown",
+      "recipe": "not_applicable",
+      "evidence": "conversion_record",
+      "hardware_envelope": "not_applicable",
+      "reason": "unsupported_combination"
+    },
+    {
+      "schema_version": "quantobs/v1",
+      "kind": "memory_residency",
+      "outcome": "refused",
+      "value": "unknown",
+      "recipe": "not_applicable",
+      "evidence": "runtime_report",
+      "hardware_envelope": "not_applicable",
+      "reason": "unsupported_combination"
+    },
+    {
+      "schema_version": "quantobs/v1",
+      "kind": "refusal_reason",
+      "outcome": "refused",
+      "value": "unsupported_combination",
+      "recipe": "not_applicable",
+      "evidence": "adjudication",
+      "hardware_envelope": "not_applicable",
+      "reason": "unsupported_combination"
+    }
+  ]
+}
