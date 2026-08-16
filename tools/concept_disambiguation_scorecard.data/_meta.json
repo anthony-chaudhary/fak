@@ -8397,6 +8397,11 @@
           "category": "incidental",
           "reason": "Private text formatter for the wip owner command, not a reusable render abstraction",
           "token": "wipOwnerRender"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private text formatter for the start-admission command, not a reusable rendering abstraction",
+          "token": "wipAdmitRender"
         }
       ],
       "id": "render-materialize",
@@ -8466,6 +8471,7 @@
         "tuiRenderUsage",
         "tuioverviewsavingsrender",
         "unmaterialized",
+        "wipAdmitRender",
         "wipBlockedRender",
         "wipOwnerRender",
         "wipReclaimRender"

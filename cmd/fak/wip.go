@@ -74,6 +74,8 @@ func runWip(stdout, stderr io.Writer, argv []string) int {
 		return runWipReconcile(stdout, stderr, argv[1:])
 	case "sweep-guard", "sweepguard":
 		return runWipSweepGuard(stdout, stderr, argv[1:])
+	case "admit":
+		return runWipAdmit(stdout, stderr, argv[1:])
 	case "selfcheck", "--selfcheck", "-selfcheck":
 		return runWipSelfcheck(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
@@ -197,6 +199,11 @@ func wipUsage(w io.Writer) {
       add/clean). Defaults to every untracked path; --unclaimed prints only the at-risk
       set and exits 3 if any exist. Read-only. The --ttl claim window is also the cost
       bound: only checkpoints inside it (or held by a live session) are read.
+
+  fak wip admit [-C <repo>] --self <session> [--intend <glob>]... [--strict] [--ceiling N] [--json]
+      Read-only start-of-task admission. Refuse hard peer collisions and untracked
+      WIP before beginning another unit; optionally promote soft intent/self-WIP
+      pressure to HOLD with --strict.
 
   fak wip blocked [-C <repo>] [--ledger <path>] [--stale-days N] [--landable] [--json]
       Rank the dirty working tree by the dispatch admissions each path has REFUSED
