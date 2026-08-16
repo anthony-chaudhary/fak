@@ -1,3 +1,8 @@
+---
+title: "Managed Claude Tool Search compatibility witness — 2026-08-13"
+description: "Documentation for Managed Claude Tool Search compatibility witness — 2026-08-13, including the captured behavior, operating context, and reproducible fak evidence."
+---
+
 # Managed Claude Tool Search compatibility witness — 2026-08-13
 
 Issue: #6653  

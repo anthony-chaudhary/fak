@@ -1,3 +1,8 @@
+---
+title: "Microagent paired-value spine witness — 2026-08-13"
+description: "Documentation for Microagent paired-value spine witness — 2026-08-13, including the captured behavior, operating context, and reproducible fak evidence."
+---
+
 # Microagent paired-value spine witness — 2026-08-13
 
 Issue: #6520  
