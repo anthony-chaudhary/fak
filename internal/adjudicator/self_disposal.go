@@ -317,15 +317,12 @@ func inspectGitConfig(path string, data []byte) (bool, []string, error) {
 		if key == "excludesfile" {
 			return true, nil, nil
 		}
-		if section == "include" && key == "path" {
+		if (section == "include" || strings.HasPrefix(section, "includeif ")) && key == "path" {
 			include := expandGitConfigPath(filepath.Dir(path), value)
 			if include == "" {
 				return false, nil, errors.New("invalid git config include path")
 			}
 			includes = append(includes, include)
-		}
-		if strings.HasPrefix(section, "includeif ") {
-			return false, nil, errors.New("conditional git config includes unsupported")
 		}
 	}
 	return false, includes, nil

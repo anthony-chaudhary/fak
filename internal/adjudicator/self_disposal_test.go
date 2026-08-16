@@ -76,6 +76,28 @@ func TestSelfAuthoredUntrackedRemovalAllowsUnrelatedGlobalInclude(t *testing.T) 
 	}
 }
 
+func TestSelfAuthoredUntrackedRemovalAllowsUnrelatedConditionalInclude(t *testing.T) {
+	home := t.TempDir()
+	included := filepath.Join(home, "runner.gitconfig")
+	writeSelfDisposalText(t, included, "[safe]\n\tdirectory = *\n")
+	writeSelfDisposalText(t, filepath.Join(home, ".gitconfig"), fmt.Sprintf("[includeIf %q]\n\tpath = %q\n", "gitdir:~/work/", filepath.ToSlash(included)))
+	t.Setenv("HOME", home)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", home)
+	}
+
+	root := selfDisposalRepo(t)
+	target := filepath.Join(root, "scratch.txt")
+	selfDisposalWrite(t, target)
+	a := New(Policy{Allow: map[string]bool{"Bash": true}})
+	a.receiptRoot = root
+	selfDisposalReceipt(a, "trace-conditional", target, 1)
+	call := receiptCall("trace-conditional", "Bash", `{"command":"rm scratch.txt"}`, 2)
+	if !a.selfAuthoredUntrackedRemoval(call, decodeArgs(context.Background(), call)) {
+		t.Fatal("unrelated conditional include suppressed eligible self-disposal")
+	}
+}
+
 func TestSelfAuthoredUntrackedRemovalRejectsIncludedExternalExcludes(t *testing.T) {
 	home := t.TempDir()
 	included := filepath.Join(home, "included.gitconfig")
