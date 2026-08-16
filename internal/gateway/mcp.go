@@ -428,6 +428,10 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		return mcpDecodeCall[ToolsSearchRequest](p.Arguments, "fak_tools_search", func(req ToolsSearchRequest) (any, error) {
 			return s.toolsSearch(req)
 		})
+	case "fak_trajquery":
+		return mcpDecodeCall[TrajQueryRequest](p.Arguments, "fak_trajquery", func(req TrajQueryRequest) (any, error) {
+			return s.trajQuery(req)
+		})
 	case "fak_feature_query":
 		return mcpDecodeCall[FeatureQueryRequest](p.Arguments, "fak_feature_query", func(req FeatureQueryRequest) (any, error) {
 			return s.featureQuery(req)

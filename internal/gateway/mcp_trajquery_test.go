@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -74,6 +75,17 @@ func TestMCPTrajQueryToolAdvertisesScopedViewSchema(t *testing.T) {
 		if _, ok := parsed.Properties.View.Properties[want]; !ok {
 			t.Fatalf("inputSchema view schema missing %q property; got keys %v", want, trajSchemaKeys(parsed.Properties.View.Properties))
 		}
+	}
+}
+
+func TestMCPTrajQueryDispatchRegistered(t *testing.T) {
+	srv := newTestServer(t)
+	result, rpcErr := srv.callTool(context.Background(), json.RawMessage(`{"name":"fak_trajquery","arguments":{"view":{"name":"myturns","base":"turns","columns":["id"],"scope":[{"column":"role","equals":"agent"}]},"sql":"SELECT id FROM myturns","corpus":[]}}`))
+	if rpcErr != nil {
+		t.Fatalf("fak_trajquery dispatch missing: %v", rpcErr)
+	}
+	if result == nil {
+		t.Fatal("fak_trajquery dispatch returned nil result")
 	}
 }
 
