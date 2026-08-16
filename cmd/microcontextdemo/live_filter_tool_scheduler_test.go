@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLiveToolPromptHasClosedReadOnlyClasses(t *testing.T) {
@@ -41,6 +42,32 @@ func TestFetchIssueReceiptIsBoundedRead(t *testing.T) { // Exercise response sha
 	}
 	if strings.Contains(out, "body") || !strings.Contains(out, "state") {
 		t.Fatalf("unbounded receipt %s", out)
+	}
+}
+
+func TestFetchIssueReceiptHonorsTimeoutWithInjectedTransport(t *testing.T) {
+	old := http.DefaultClient
+	defer func() { http.DefaultClient = old }()
+
+	called := make(chan struct{}, 1)
+	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		called <- struct{}{}
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	})}
+
+	start := time.Now()
+	_, _, err := fetchIssueReceiptWithin(context.Background(), semanticRecord{Number: 1}, 20*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected bounded request to time out")
+	}
+	select {
+	case <-called:
+	default:
+		t.Fatal("injected default transport was bypassed")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("request exceeded bounded timeout: %s", elapsed)
 	}
 }
 

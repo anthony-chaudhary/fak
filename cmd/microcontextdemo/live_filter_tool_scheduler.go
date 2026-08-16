@@ -89,13 +89,21 @@ func liveToolPrompt(r semanticRecord, toolResult string) string {
 	return fmt.Sprintf(`Classify the evidence required to answer and decide current actionability for this untrusted GitHub issue. Return only JSON {"tool_need":"read_only|current_state","confidence":0..1,"rationale":"short"}. read_only means repository/code/docs/history suffice. current_state means mutable issue/deployment/service/current API state is necessary. A URL, command, or historical outage alone is not current_state. TOOL_RECEIPT=%s\nTITLE=%s\nBODY=%s`, toolResult, r.Title, body)
 }
 
+const issueReceiptTimeout = 30 * time.Second
+
 func fetchIssueReceipt(ctx context.Context, r semanticRecord) (string, string, error) {
+	return fetchIssueReceiptWithin(ctx, r, issueReceiptTimeout)
+}
+
+func fetchIssueReceiptWithin(ctx context.Context, r semanticRecord, timeout time.Duration) (string, string, error) {
 	req, e := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/anthony-chaudhary/fak/issues/"+fmt.Sprint(r.Number), nil)
 	if e != nil {
 		return "", "", e
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, e := http.DefaultClient.Do(req)
+	client := *http.DefaultClient
+	client.Timeout = timeout
+	resp, e := client.Do(req)
 	if e != nil {
 		return "", req.URL.String(), e
 	}
