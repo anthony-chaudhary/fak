@@ -61,6 +61,10 @@ func TestExtractReleaseFormatsAndRejectTraversal(t *testing.T) {
 }
 
 func writeArchive(t *testing.T, path, format, name, body string) {
+	writeArchiveMode(t, path, format, name, body, 0o644)
+}
+
+func writeArchiveMode(t *testing.T, path, format, name, body string, mode os.FileMode) {
 	t.Helper()
 	f, err := os.Create(path)
 	if err != nil {
@@ -68,7 +72,9 @@ func writeArchive(t *testing.T, path, format, name, body string) {
 	}
 	if format == "zip" {
 		z := zip.NewWriter(f)
-		w, err := z.Create(name)
+		header := &zip.FileHeader{Name: name, Method: zip.Deflate}
+		header.SetMode(mode)
+		w, err := z.CreateHeader(header)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -85,7 +91,7 @@ func writeArchive(t *testing.T, path, format, name, body string) {
 	}
 	gz := gzip.NewWriter(f)
 	tw := tar.NewWriter(gz)
-	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
+	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: int64(mode.Perm()), Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tw.Write([]byte(body)); err != nil {
@@ -128,7 +134,7 @@ func TestRunEndToEndWithFixtureRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeArchive(t, archive, "zip", filepath.Base(binary), string(body))
+	writeArchiveMode(t, archive, "zip", filepath.Base(binary), string(body), 0o755)
 	sum, err := fileSHA256(archive)
 	if err != nil {
 		t.Fatal(err)

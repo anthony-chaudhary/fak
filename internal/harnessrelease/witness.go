@@ -116,7 +116,7 @@ func Run(ctx context.Context, opts Options) (Receipt, error) {
 
 	r.Commands = append(r.Commands, run(ctx, "", binary, "harness", "init", "--dir", opts.ProductDir, "--module", r.Module))
 	if lastFailed(r.Commands) {
-		return writeFailure(r, opts.Receipt, started, errors.New("released harness init failed"))
+		return writeFailure(r, opts.Receipt, started, fmt.Errorf("released harness init failed: %s", commandFailure(r.Commands[len(r.Commands)-1])))
 	}
 	configPath := filepath.Join(opts.ProductDir, "product", "config.go")
 	if err := os.WriteFile(configPath, []byte(customConfig), 0o644); err != nil {
@@ -181,6 +181,12 @@ func run(ctx context.Context, dir, name string, args ...string) CommandReceipt {
 	return CommandReceipt{Command: append([]string{name}, args...), ExitCode: exit, ElapsedSeconds: seconds(time.Since(started)), Output: string(out)}
 }
 
+func commandFailure(command CommandReceipt) string {
+	if output := strings.TrimSpace(command.Output); output != "" {
+		return output
+	}
+	return fmt.Sprintf("exit_code=%d", command.ExitCode)
+}
 func lastFailed(commands []CommandReceipt) bool {
 	return len(commands) > 0 && commands[len(commands)-1].ExitCode != 0
 }
