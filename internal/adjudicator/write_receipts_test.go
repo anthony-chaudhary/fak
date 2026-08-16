@@ -29,7 +29,11 @@ func TestCanonicalLocalReceiptPathResolvesRootSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, ok := canonicalLocalReceiptPath(aliasRoot, target)
-	want := filepath.Join(realRoot, "scratch.txt")
+	wantRoot, err := filepath.EvalSymlinks(realRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(wantRoot, "scratch.txt")
 	if !ok || got != want {
 		t.Fatalf("canonicalLocalReceiptPath = %q,%v, want %q,true", got, ok, want)
 	}

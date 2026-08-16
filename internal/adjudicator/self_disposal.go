@@ -52,11 +52,12 @@ func (a *Adjudicator) selfAuthoredUntrackedRemoval(c *abi.ToolCall, args map[str
 	if err != nil || !info.Mode().IsRegular() || !a.hasPriorWriteReceipt(c.TraceID, canonical, c.SeqNo) {
 		return false
 	}
-	ignored, err := repositoryIgnores(a.receiptRoot, canonical)
+	repositoryRoot := canonicalReceiptRoot(a.receiptRoot)
+	ignored, err := repositoryIgnores(repositoryRoot, canonical)
 	if err != nil || ignored {
 		return false
 	}
-	tracked, err := gitIndexTracks(a.receiptRoot, canonical)
+	tracked, err := gitIndexTracks(repositoryRoot, canonical)
 	return err == nil && !tracked
 }
 

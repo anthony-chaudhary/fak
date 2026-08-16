@@ -147,10 +147,7 @@ func canonicalLocalReceiptPath(root, path string) (string, bool) {
 	if parent, err := filepath.EvalSymlinks(filepath.Dir(absolute)); err == nil {
 		absolute = filepath.Join(parent, filepath.Base(absolute))
 	}
-	root = filepath.Clean(root)
-	if resolvedRoot, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolvedRoot
-	}
+	root = canonicalReceiptRoot(root)
 	rel, err := filepath.Rel(root, absolute)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return "", false
@@ -159,6 +156,14 @@ func canonicalLocalReceiptPath(root, path string) (string, bool) {
 		absolute = strings.ToLower(absolute)
 	}
 	return absolute, true
+}
+
+func canonicalReceiptRoot(root string) string {
+	root = filepath.Clean(root)
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		return resolved
+	}
+	return root
 }
 
 // receiptWorkspaceRoot discovers the local workspace once, when the
