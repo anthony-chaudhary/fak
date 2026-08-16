@@ -374,7 +374,12 @@ func cmdServe(argv []string) {
 	rt.resolveObservers(sf)
 	rt.buildGateway(sf)
 	rt.wireGateway(sf)
-	writeServeDurabilityBanner(os.Stdout, durability)
+	bannerOut := io.Writer(os.Stdout)
+	if *sf.stdio {
+		// MCP reserves stdout for newline-delimited JSON-RPC; startup diagnostics belong on stderr.
+		bannerOut = os.Stderr
+	}
+	writeServeDurabilityBanner(bannerOut, durability)
 	rt.run(sf)
 }
 
@@ -891,7 +896,7 @@ func restoreServeSessions(tbl *session.Table, path string) error {
 		return fmt.Errorf("--session-state %s: %w", path, err)
 	}
 	if n > 0 {
-		fmt.Printf("fak: cold resume (#629) — re-attached %d session(s) drive state from %s\n", n, path)
+		fmt.Fprintf(os.Stderr, "fak: cold resume (#629) — re-attached %d session(s) drive state from %s\n", n, path)
 	}
 	return nil
 }
@@ -922,7 +927,7 @@ func dumpServeSessions(tbl *session.Table, path string) {
 		fmt.Fprintf(os.Stderr, "fak: persist session state to %s failed: %v\n", path, err)
 		return
 	}
-	fmt.Printf("fak: persisted live session drive state → %s (#629)\n", path)
+	fmt.Fprintf(os.Stderr, "fak: persisted live session drive state → %s (#629)\n", path)
 }
 
 // toGatewayLoadProfile mirrors a ggufload.LoadProfile into the gateway's import-

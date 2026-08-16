@@ -146,6 +146,17 @@ func TestDispatchProbeTreeBuildKilledFailsOpen(t *testing.T) {
 // `go build` names the missing module differently: "cannot find main module, but
 // found .git/config ...". That is still infrastructure-missing, not a red tree, so
 // it must fail open — otherwise every git-init'd tick test refuses TREE_POISONED.
+func TestDispatchProbeTreeBuildUnbornRepositoryFailsOpen(t *testing.T) {
+	old := dispatchTreeBuildCommand
+	dispatchTreeBuildCommand = func(string) (string, error) {
+		return "fatal: not a valid object name: HEAD", errors.New("git archive: fatal: not a valid object name: HEAD")
+	}
+	t.Cleanup(func() { dispatchTreeBuildCommand = old })
+	if got := dispatchProbeTreeBuild(t.TempDir()); got.Poisoned {
+		t.Fatalf("unborn repository is missing probe infrastructure, got=%+v", got)
+	}
+}
+
 func TestDispatchProbeTreeBuildGitDirNoModuleFailsOpen(t *testing.T) {
 	old := dispatchTreeBuildCommand
 	dispatchTreeBuildCommand = func(string) (string, error) {
