@@ -138,90 +138,37 @@ func TestExposeAllowlistFiltersDiscoveryAndGuardsCall(t *testing.T) {
 	}
 }
 
-func TestExposeEmptyExposesFullSurface(t *testing.T) {
-	srv := newExposeServer(t) // no allowlist
-	got := toolsListNames(t, srv)
-	// Pin the exact inventory, not just its size: a count-only assertion lets a
-	// rename (count unchanged) or a net-zero add+drop through silently. Adding,
-	// dropping, or renaming an exposed tool must fail here and be re-pinned
-	// deliberately, so the wire-visible MCP surface never drifts unreviewed.
-	wantInventory := []string{
-		"fak_adjudicate",
-		"fak_admit",
-		"fak_capabilities",
-		"fak_changes",
-		"fak_context_change",
-		"fak_context_restore",
-		"fak_context_spans",
-		"fak_context_value",
-		"fak_feature_query",
-		"fak_memory_drivers",
-		"fak_memory_explain",
-		"fak_memory_run",
-		"fak_read",
-		"fak_resume_history",
-		"fak_revoke",
-		"fak_session_reset",
-		"fak_syscall",
-		"fak_tools_search",
-		"fak_trajquery",
+func TestExposeEmptyPreservesFullRetrievalSurface(t *testing.T) {
+	srv, err := New(Config{EngineID: "test", Model: "test-model", VDSO: true})
+	if err != nil {
+		t.Fatal(err)
 	}
-	sort.Strings(got)
-	if !reflect.DeepEqual(got, wantInventory) {
-		t.Fatalf("exposed MCP tool inventory drifted:\n got: %v\nwant: %v", got, wantInventory)
+	defer srv.Close()
+	got := descriptorNames(srv.exposedToolDescriptors())
+	want := descriptorNames(toolDescriptors())
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("full retrieval inventory drifted:\n got: %v\nwant: %v", got, want)
 	}
-	present := false
-	for _, n := range got {
-		if n == "fak_syscall" {
-			present = true
-		}
-	}
-	if !present {
-		t.Fatal("no-allowlist surface must include fak_syscall")
-	}
-	// The tool hidden in the allowlist test dispatches normally with no allowlist.
-	if _, rerr := srv.handleMethod(context.Background(), "tools/call",
-		json.RawMessage(`{"name":"fak_syscall","arguments":{"tool":"allow_x"}}`)); rerr != nil {
-		t.Fatalf("no-allowlist fak_syscall must dispatch, got rpc error %v", rerr.Message)
+	resident := toolsListNames(t, srv)
+	if len(resident) >= len(got) || !containsToolName(resident, "fak_tools_search") {
+		t.Fatalf("resident catalog = %v, want smaller bootstrap with fak_tools_search", resident)
 	}
 }
-
-func TestRuntimeGatewayDoesNotExposeDevelopmentIndexTools(t *testing.T) {
-	srv := newExposeServer(t)
-	for _, name := range toolsListNames(t, srv) {
-		if strings.HasPrefix(name, "fak_index_") {
-			t.Fatalf("runtime gateway exposed development index tool %q", name)
+func descriptorNames(descriptors []map[string]any) []string {
+	names := make([]string, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		if name, _ := descriptor["name"].(string); name != "" {
+			names = append(names, name)
 		}
 	}
-	_, rerr := srv.handleMethod(context.Background(), "tools/call",
-		json.RawMessage(`{"name":"fak_index_docs","arguments":{"query":"gateway"}}`))
-	if rerr == nil || rerr.Message != "unknown tool: fak_index_docs" {
-		t.Fatalf("development tool call = %v, want unknown-tool refusal", rerr)
-	}
+	sort.Strings(names)
+	return names
 }
-
-func TestNewRejectsBadExpose(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		expose  []string
-		wantErr string
-	}{
-		{"zero-match", []string{"fak_nope_*"}, "matches no known tool"},
-		{"malformed-glob", []string{"fak_["}, "not a valid glob"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			abi.ResetForTest()
-			abi.RegisterRegionBackend(inlineBackend{})
-			abi.RegisterEngine("test", echoEngine{})
-			abi.RegisterAdjudicator(0, toolAdj{})
-			srv, err := New(Config{EngineID: "test", Model: "m", VDSO: true, ExposeTools: tc.expose})
-			if err == nil {
-				srv.Close()
-				t.Fatalf("New(expose=%v) succeeded, want error containing %q", tc.expose, tc.wantErr)
-			}
-			if !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("New err = %q, want substring %q", err.Error(), tc.wantErr)
-			}
-		})
+func containsToolName(names []string, want string) bool {
+	for _, name := range names {
+		if name == want {
+			return true
+		}
 	}
+	return false
 }

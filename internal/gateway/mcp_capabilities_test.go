@@ -8,21 +8,18 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/selfquery"
 )
 
-func TestMCPCapabilitiesListed(t *testing.T) {
+func TestMCPCapabilitiesDiscoverable(t *testing.T) {
 	srv := newTestServer(t)
-	list := resultMap(t, rpcRoundTrip(t, srv, "tools/list", ""))
-	tools, ok := list["tools"].([]any)
-	if !ok {
-		t.Fatalf("tools/list malformed: %v", list)
+	search, err := srv.toolsSearch(ToolsSearchRequest{Query: "query available capabilities", DetailLevel: "name"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	names := map[string]bool{}
-	for _, raw := range tools {
-		tool := raw.(map[string]any)
-		names[tool["name"].(string)] = true
+	for _, descriptor := range search.Tools {
+		if descriptor["name"] == "fak_capabilities" {
+			return
+		}
 	}
-	if !names["fak_capabilities"] {
-		t.Fatal("tools/list missing fak_capabilities")
-	}
+	t.Fatal("fak_tools_search missing fak_capabilities")
 }
 
 func TestMCPCapabilitiesEmptyQueryListsToolbelt(t *testing.T) {
