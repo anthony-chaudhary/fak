@@ -11,6 +11,39 @@ fak's center is the **kernel-mediated agent turn**:
 
 This is one connected outcome, not four competing products. Managed context (P1), net-true efficiency (P2), bounded adaptation (P3), and integrated operations (P4) are checks on every change. Problem centrality says how directly a change relieves that outcome; it does not replace urgency, dependency order, risk, or stewardship obligations.
 
+## Core is temporal, but identity is not fashion
+
+“Core” must not answer four different questions at once:
+
+1. **Enduring promise (constitutional, multi-cycle):** turn agent intent into economical, bounded, portable, and observable execution over long-running work.
+2. **Owned seam:** mediate between agent intent and model/tool execution, including the state needed to preserve that contract across turns and harnesses.
+3. **Current strategic emphasis (roughly 2–4 quarters):** invest most where the highest evidenced, controllable bottleneck limits that promise now.
+4. **Change centrality:** classify a proposed effect as Core, Enabling, Stewardship, or Peripheral relative to the promise and current evidence.
+
+A mechanism can move between headline wedge, active bottleneck, table stakes, reference implementation, optional substrate, and retired machinery without changing the enduring promise. De-emphasis never licenses regression of the contract the mechanism established.
+
+### Why performance is emphasized now—and how it can recede
+
+Performance means avoided total work, turns, latency, and cost **after** fak’s overhead, not a permanent allegiance to a particular cache implementation. It is a buying wedge now because repeated model setup, prompt replay, avoidable turns, and context reconstruction remain expensive and controllable. Cache stability and managed context are therefore strategic Core work today.
+
+Performance emphasis should fall when representative tuned provider-native paths make fak’s marginal savings immaterial across two review cycles and no recovery or control advantage depends on the mechanism. At that point, “do not cause avoidable repeated work; report gains only when net-true” remains a constitutional invariant, while specialized cache machinery becomes Enabling, optional, or retired. If inference becomes nearly free but human attention, reliability, or effect risk dominates, investment moves to those bottlenecks.
+
+### Why harness ownership is emphasized now—and how it can recede
+
+A kernel that cannot preserve its semantics through a harness is not an integrated product. Harness and binding work is strategically central now because external seams are fragmented: they often lose context, recovery, capability, or operator-control semantics. fak needs at least one owned end-to-end path to prove the full contract and enough bindings to prove portability.
+
+The first-party harness itself is not constitutionally Core. It can become a reference implementation when two independent external bindings pass the same portable-intent, capability, session, recovery, and operator-control witnesses without harness-specific behavior. Binding conformance remains central; UI breadth and harness-specific convenience then become Enabling or Peripheral.
+
+### Transition discipline
+
+- **Increase emphasis** only from a measured user-path bottleneck, required obligation, or evidence gap blocking a named decision.
+- **Decrease emphasis** only when a tuned alternative satisfies the retained contract over representative paths—not because a mechanism became unfashionable.
+- **Promote an option** when a named user path cannot meet privacy, availability, economics, or control requirements through the next-best substrate.
+- **Demote or retire machinery** when usage and avoided cost no longer exceed maintenance, integration, and cognitive load.
+- **Review before stale:** the canonical snapshot has an explicit review date; staleness requests judgment but never auto-rewrites strategy.
+
+The machine-readable authority is `internal/orientation/orientation.json`; inspect it with `fak orientation` or `fak orientation --json`. It records current role, horizon, evidence state, retained contract, and increase/decrease triggers for each capability family.
+
 The original fail-closed policy seam remains central, but it is not the whole product. Concurrent cache reuse exposed the larger user problem: agents repeatedly pay to reconstruct context and execution setup. Routing, compaction, repeat serving, recovery, and policy belong together when they improve one real mediated turn. Project automation does not become product Core merely because fak's maintainers use it heavily.
 
 ## Capability portfolio
@@ -49,6 +82,8 @@ This decision does **not** yet prove which individual legacy issues should close
 ## Repeat the audit
 
 ```bash
+fak orientation
+fak orientation --json
 fak centrality-audit --repo anthony-chaudhary/fak
 fak centrality-audit --repo anthony-chaudhary/fak --json
 fak centrality-audit --repo anthony-chaudhary/fak --sample > active-sample-ledger.json
@@ -64,4 +99,3 @@ The command reports explicit Core, Enabling, Stewardship, Peripheral, unknown, a
 3. Complete #6544 so centrality is visible beside urgency, readiness, dependency, and obligation.
 4. Sample active `gen/now` and milestone-less work by capability family; retain, reframe, merge, defer, or close with evidence.
 5. Revisit this record after that sample and after the next measured kernel-path spine; change classifications when evidence changes.
-

@@ -515,6 +515,10 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 }
 
 func dispatchExtendedVerbB(name string, args []string) bool {
+	if name == "orientation" {
+		cmdOrientation(args)
+		return true
+	}
 	if name == "centrality-audit" {
 		cmdCentralityAudit(args)
 		return true

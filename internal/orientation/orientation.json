@@ -1,0 +1,102 @@
+{
+  "schema": "fak-orientation/1",
+  "effective_date": "2026-08-15",
+  "review_by": "2026-10-15",
+  "enduring_promise": "Turn agent intent into economical, bounded, portable, and observable execution over long-running work.",
+  "owned_seam": "The mediation boundary between agent intent and model or tool execution, including the state needed to preserve that contract across turns and harnesses.",
+  "investment_principle": "Emphasize the evidenced bottleneck with the highest marginal user value now; retain every must-not-regress contract when its mechanism becomes table stakes.",
+  "items": [
+    {
+      "id": "performance-cache",
+      "label": "Performance, cache reuse, and managed context",
+      "horizon": "strategic",
+      "current_role": "buying-wedge",
+      "why_now": "Repeated model setup, prompt replay, and avoidable turns remain large, visible costs; provider cache behavior and long-session context still require active mediation.",
+      "retained_contract": "fak must not cause avoidable repeated work and must keep efficiency claims net-true against the best real alternative.",
+      "evidence_state": "witnessed",
+      "evidence": ["docs/CAPABILITIES.md", "docs/benchmarks/"],
+      "increase_when": "Representative tuned-baseline traces show repeated work or context reconstruction is the dominant controllable cost.",
+      "decrease_when": "Across representative harnesses and two review cycles, tuned provider-native behavior makes fak's marginal savings immaterial and no recovery or control advantage depends on the mechanism.",
+      "future_state": "A maintained must-not-regress efficiency invariant rather than the headline, with specialized optimization moved behind measured demand."
+    },
+    {
+      "id": "harness-bindings",
+      "label": "Harness ownership, bindings, and portable intent",
+      "horizon": "strategic",
+      "current_role": "strategic-bottleneck",
+      "why_now": "External harness seams are fragmented and often cannot preserve context, capability, recovery, and control semantics; a working owned path is needed to prove the kernel reaches users.",
+      "retained_contract": "At least one real path must exercise the full mediation contract, and independent bindings must preserve intent without widening capability.",
+      "evidence_state": "observed",
+      "evidence": ["docs/integrations/", "docs/project-orientation.md"],
+      "increase_when": "Integration gaps prevent the kernel's measured or bounded behavior from surviving in the harnesses users actually operate.",
+      "decrease_when": "Two independent external bindings pass the same portable-intent, capability, session, and recovery conformance witnesses without first-party harness-specific behavior.",
+      "future_state": "The first-party harness becomes a reference and conformance fixture; binding semantics remain central while UI and harness breadth become Enabling or Peripheral."
+    },
+    {
+      "id": "policy-floor",
+      "label": "Fail-closed capability and effect mediation",
+      "horizon": "constitutional",
+      "current_role": "must-not-regress",
+      "why_now": "Performance work already crosses the tool-call seam; enforcing a structural capability floor there prevents optimization from widening effects or relying on model persuasion.",
+      "retained_contract": "Every mediated effect is checked before execution and ambiguous authority fails closed, regardless of which mechanism or model implements the decision.",
+      "evidence_state": "witnessed",
+      "evidence": ["docs/repro-packet.md", "examples/customer-support-readonly-policy.json"],
+      "increase_when": "New autonomous effects, delegation, or remote execution enlarge the authority exposed through the seam.",
+      "decrease_when": "Never as an implementation priority merely because the floor is quiet; only an explicit product-identity change that stops mediating effects can remove this contract.",
+      "future_state": "Stable infrastructure and conformance evidence rather than necessarily the buying headline."
+    },
+    {
+      "id": "routing-adaptation",
+      "label": "Model routing and bounded adaptation",
+      "horizon": "strategic",
+      "current_role": "strategic-bottleneck",
+      "why_now": "Capability, cost, latency, and availability vary materially across calls and providers, so whole-session model pinning leaves controllable value unused.",
+      "retained_contract": "Adaptation must remain bounded, inspectable, reversible, and correctness-preserving.",
+      "evidence_state": "observed",
+      "evidence": ["docs/model-routing.md"],
+      "increase_when": "Cross-model heterogeneity creates a measured end-to-end advantage after routing and evaluation overhead.",
+      "decrease_when": "Provider-native routing meets fak's correctness, cost, inspectability, portability, and operator-control contract on representative workloads.",
+      "future_state": "A policy and observability contract over provider routing, with custom routing retained only where it produces witnessed marginal value."
+    },
+    {
+      "id": "local-backends",
+      "label": "Local inference and compute backends",
+      "horizon": "strategic",
+      "current_role": "option",
+      "why_now": "Local execution can supply privacy, availability, cost, and control for particular users, but backend breadth is not itself the product outcome.",
+      "retained_contract": "Execution substrates remain replaceable beneath the mediation seam and are judged on full-path value.",
+      "evidence_state": "observed",
+      "evidence": ["docs/local-inference.md"],
+      "increase_when": "A named user path requires local privacy, availability, latency, or economics that hosted alternatives cannot meet.",
+      "decrease_when": "Maintaining a backend costs more than its witnessed user-path advantage or equivalent controlled execution is available elsewhere.",
+      "future_state": "Optional substrates with explicit support envelopes, not permanent Core breadth."
+    },
+    {
+      "id": "evidence-operations",
+      "label": "Evidence, observability, recovery, and operator control",
+      "horizon": "constitutional",
+      "current_role": "must-not-regress",
+      "why_now": "An invisible optimization or adaptation cannot be trusted, priced, recovered, or distinguished from task failure in long-running operation.",
+      "retained_contract": "Every material kernel decision and claimed gain remains attributable, recoverable where promised, and inspectable at the operating boundary.",
+      "evidence_state": "observed",
+      "evidence": ["CLAIMS.md", "docs/problems-we-solve.md"],
+      "increase_when": "Autonomy, session duration, or adaptation grows faster than operators can explain and recover behavior.",
+      "decrease_when": "Individual instrumentation mechanisms may recede after the contract is provided reliably by a lower layer; the inspectability and recovery contract does not recede.",
+      "future_state": "A stable operational contract whose implementation follows the active bottleneck."
+    },
+    {
+      "id": "project-machinery",
+      "label": "Fleet, dispatch, CI, release, and portfolio machinery",
+      "horizon": "tactical",
+      "current_role": "stewardship",
+      "why_now": "The repository's scale and concurrency create real delivery obligations, but internal operating intensity is not external product centrality.",
+      "retained_contract": "The product remains buildable, releasable, and honestly evidenced without project machinery consuming disproportionate capacity.",
+      "evidence_state": "observed",
+      "evidence": ["AGENTS.md"],
+      "increase_when": "A measured delivery or reliability bottleneck blocks a named product spine or required obligation.",
+      "decrease_when": "The named bottleneck clears, usage falls, or maintenance exceeds avoided delivery cost; then freeze, simplify, merge, or retire the mechanism.",
+      "future_state": "The smallest reliable stewardship layer, with successful one-off machinery removed from strategic identity."
+    }
+  ]
+}
+
