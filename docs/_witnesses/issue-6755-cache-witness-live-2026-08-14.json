@@ -1,0 +1,27 @@
+{
+  "schema": "fak-micro-cache-affinity-witness/1",
+  "captured_at": "2026-08-14T08:21:29.1689091Z",
+  "verdict": "not-yet",
+  "reason": "provider reported no cache-token witness; zero is not treated as proof of no cache",
+  "distinct_seat_endpoints": 2,
+  "affinity_on": {
+    "affinity": true,
+    "calls": 2,
+    "selected_seats": [
+      "seat-b",
+      "seat-b"
+    ],
+    "prompt_tokens": 4828,
+    "cached_prompt_tokens": 0
+  },
+  "affinity_off": {
+    "affinity": false,
+    "calls": 2,
+    "selected_seats": [
+      "seat-a",
+      "seat-b"
+    ],
+    "prompt_tokens": 4828,
+    "cached_prompt_tokens": 0
+  }
+}

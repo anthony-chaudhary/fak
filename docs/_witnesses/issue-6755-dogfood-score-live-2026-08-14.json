@@ -1,0 +1,296 @@
+{
+  "schema": "fak-dogfood-scorecard/1",
+  "ok": true,
+  "verdict": "OK",
+  "finding": "dogfood_loop_wired_and_honest",
+  "reason": "dogfood loop: wiring value 0.89, honesty value 1, chain value 1, composite value 0.97 (A, legacy score 97); zero hard gaps; 0 conflation turn(s) across 6531 recent transcript(s)",
+  "next_action": "hold the line; re-run after a launched session, a settings change, or a memory_sync change",
+  "workspace": "C:\\work\\fak",
+  "corpus": {
+    "chain_measured": true,
+    "chain_score": 100,
+    "chain_value": 1,
+    "conflation_turns": 0,
+    "dogfood_debt": 0,
+    "grade": "A",
+    "honesty_score": 100,
+    "honesty_value": 1,
+    "legacy_score": 97,
+    "legacy_score_scale": 100,
+    "pressure": 3.333,
+    "pressure_unit": "weighted_score_deficit",
+    "recent_wedged": 0,
+    "score": 97,
+    "slack": 0,
+    "stop_markers": 479,
+    "transcripts_seen": 6531,
+    "value": 0.97,
+    "value_unit": "quality_ratio",
+    "wiring_score": 89,
+    "wiring_value": 0.89
+  },
+  "kpis": [
+    {
+      "kpi": "guard_wired",
+      "group": "wiring",
+      "score": 100,
+      "value": 1,
+      "detail": "settings.json carries the dos hook pretool/stop + repoguard PreToolUse hooks",
+      "defects": null,
+      "soft": null
+    },
+    {
+      "kpi": "stop_hook_target_present",
+      "group": "wiring",
+      "score": 100,
+      "value": 1,
+      "detail": "../fak-private/tools/memory_sync.py exists, so the Stop hook is not pointing at a missing file",
+      "defects": null,
+      "soft": null
+    },
+    {
+      "kpi": "stop_hook_wired",
+      "group": "wiring",
+      "score": 0,
+      "value": 0,
+      "detail": "settings.local.json Stop hook runs memory_sync.py push --commit --push",
+      "defects": null,
+      "soft": [
+        "stop_hook_wired: settings.local.json Stop hook runs memory_sync.py push --commit --push"
+      ]
+    },
+    {
+      "kpi": "skill_deny_declared",
+      "group": "wiring",
+      "score": 100,
+      "value": 1,
+      "detail": "cmd/fak/guard.go names DEFAULT_DENY as a closed-vocabulary refusal reason",
+      "defects": null,
+      "soft": null
+    },
+    {
+      "kpi": "registered_in_main",
+      "group": "wiring",
+      "score": 100,
+      "value": 1,
+      "detail": "cmd/fak/main.go dispatches `dogfood-score`",
+      "defects": null,
+      "soft": null
+    },
+    {
+      "kpi": "no_narration_conflation",
+      "group": "honesty",
+      "score": 100,
+      "value": 1,
+      "detail": "0 conflation turns across 6531 recent transcript(s) (2 reported a Stop-hook error, none narrated over it)",
+      "defects": null,
+      "soft": null
+    },
+    {
+      "kpi": "stop_hook_healthy",
+      "group": "honesty",
+      "score": 100,
+      "value": 1,
+      "detail": "0 of 307 recent session(s) wedged (consecutive\u003e0); 479 total marker(s), max consecutive 0",
+      "defects": null,
+      "soft": null
+    },
+    {
+      "kpi": "registered_in_control_pane",
+      "group": "honesty",
+      "score": 100,
+      "value": 1,
+      "detail": "scorecard_control_pane carries a dogfood row + the baseline pins dogfood_debt",
+      "defects": null,
+      "soft": null
+    },
+    {
+      "kpi": "paired_honesty_test",
+      "group": "honesty",
+      "score": 100,
+      "value": 1,
+      "detail": "internal/dogfoodscore/dogfoodscore_test.go proves a conflation transcript reds and a clean one greens",
+      "defects": null,
+      "soft": null
+    },
+    {
+      "kpi": "chain_packet_fresh",
+      "group": "chain",
+      "score": 100,
+      "value": 1,
+      "detail": "newest packet report is 0h old (within the 168h window): 20260814T073524Z",
+      "defects": null,
+      "soft": null
+    },
+    {
+      "kpi": "chain_actions_bridged",
+      "group": "chain",
+      "score": 100,
+      "value": 1,
+      "detail": "1 action(s) filed/updated as deduped tracker issues (receipt mode live)",
+      "defects": null,
+      "soft": null
+    }
+  ],
+  "wiring": [
+    {
+      "key": "guard_wired",
+      "label": "the guard is wired on the loop (pretool + stop + repoguard hooks)",
+      "hard": true,
+      "weight": 3,
+      "axis": "wiring",
+      "passed": true,
+      "detail": "settings.json carries the dos hook pretool/stop + repoguard PreToolUse hooks"
+    },
+    {
+      "key": "stop_hook_target_present",
+      "label": "the memory-sync Stop-hook target exists (no dangling hook command)",
+      "hard": true,
+      "weight": 2,
+      "axis": "wiring",
+      "passed": true,
+      "detail": "../fak-private/tools/memory_sync.py exists, so the Stop hook is not pointing at a missing file"
+    },
+    {
+      "key": "stop_hook_wired",
+      "label": "the memory-sync Stop hook is wired in settings.local.json",
+      "hard": false,
+      "weight": 1,
+      "axis": "wiring",
+      "passed": false,
+      "detail": "settings.local.json Stop hook runs memory_sync.py push --commit --push"
+    },
+    {
+      "key": "skill_deny_declared",
+      "label": "the Skill DEFAULT_DENY refusal is a declared reason, not prose drift",
+      "hard": true,
+      "weight": 2,
+      "axis": "wiring",
+      "passed": true,
+      "detail": "cmd/fak/guard.go names DEFAULT_DENY as a closed-vocabulary refusal reason"
+    },
+    {
+      "key": "registered_in_main",
+      "label": "the dogfood-score verb is registered in main.go",
+      "hard": false,
+      "weight": 1,
+      "axis": "wiring",
+      "passed": true,
+      "detail": "cmd/fak/main.go dispatches `dogfood-score`"
+    }
+  ],
+  "honesty": [
+    {
+      "key": "no_narration_conflation",
+      "label": "no recent turn claims success over an OBSERVED Stop-hook error",
+      "hard": true,
+      "weight": 4,
+      "axis": "honesty",
+      "passed": true,
+      "detail": "0 conflation turns across 6531 recent transcript(s) (2 reported a Stop-hook error, none narrated over it)"
+    },
+    {
+      "key": "stop_hook_healthy",
+      "label": "no recent session is wedged on a consecutive Stop-hook failure",
+      "hard": true,
+      "weight": 2,
+      "axis": "honesty",
+      "passed": true,
+      "detail": "0 of 307 recent session(s) wedged (consecutive\u003e0); 479 total marker(s), max consecutive 0"
+    },
+    {
+      "key": "registered_in_control_pane",
+      "label": "the dogfood scorecard is registered in the control-pane ratchet",
+      "hard": false,
+      "weight": 1,
+      "axis": "honesty",
+      "passed": true,
+      "detail": "scorecard_control_pane carries a dogfood row + the baseline pins dogfood_debt"
+    },
+    {
+      "key": "paired_honesty_test",
+      "label": "a paired test proves the conflation scan + the clean-tree floor",
+      "hard": true,
+      "weight": 2,
+      "axis": "honesty",
+      "passed": true,
+      "detail": "internal/dogfoodscore/dogfoodscore_test.go proves a conflation transcript reds and a clean one greens"
+    }
+  ],
+  "chain": [
+    {
+      "key": "chain_packet_fresh",
+      "label": "the recent-feature dogfood packet has run recently on this host",
+      "hard": true,
+      "weight": 2,
+      "axis": "chain",
+      "passed": true,
+      "detail": "newest packet report is 0h old (within the 168h window): 20260814T073524Z"
+    },
+    {
+      "key": "chain_actions_bridged",
+      "label": "the newest packet report's ACTION findings are bridged to tracker issues",
+      "hard": true,
+      "weight": 2,
+      "axis": "chain",
+      "passed": true,
+      "detail": "1 action(s) filed/updated as deduped tracker issues (receipt mode live)"
+    }
+  ],
+  "evidence": {
+    "transcripts_scanned": 6531,
+    "transcripts_with_stop_error": 2,
+    "conflation_turns": 0,
+    "stop_markers": 479,
+    "wedged_markers": 0,
+    "max_consecutive": 0,
+    "recent_markers": 307,
+    "recent_wedged": 0,
+    "transcripts_reachable": true,
+    "chain": {
+      "evidence_dir": "C:\\work\\fak\\.fak\\recent-feature-dogfood",
+      "reports": 4,
+      "newest_report": "C:\\work\\fak\\.fak\\recent-feature-dogfood\\20260814T073524Z\\report.json",
+      "newest_age_hours": 0.7299252947777778,
+      "receipt_present": true,
+      "receipt_fresh": true,
+      "receipt_mode": "live",
+      "actions": 1,
+      "pending_creates": 0,
+      "synced_ok": 1,
+      "synced_failed": 0,
+      "skipped": 0
+    }
+  },
+  "kernel_value": {
+    "schema": "fak-dogfood-kernel-value/1",
+    "repo_pulse_launches": 3,
+    "context_tokens_saved": 11006,
+    "tool_turns_skipped": 6,
+    "cohort": {
+      "status": "not-yet",
+      "reason": "need 2 more durable post-default launch receipt(s) before outcome comparison"
+    },
+    "cache": {
+      "status": "not-yet",
+      "reason": "provider reported no cache-token witness; zero is not treated as proof of no cache"
+    },
+    "velocity": {
+      "status": "regressed",
+      "reason": "post-default matched dispatch ship rate is below the immediately preceding cohort",
+      "cutoff": "20260813-122202",
+      "matched_samples": 14,
+      "pre": {
+        "launches": 14,
+        "shipped": 2,
+        "ship_rate": 0.14285714285714285
+      },
+      "post": {
+        "launches": 14,
+        "shipped": 0,
+        "ship_rate": 0
+      },
+      "ship_rate_delta": -0.14285714285714285
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "schema": "fak-scorecard-metadata/1",
+  "issue": 6755,
+  "captured_at": "2026-08-14T08:21:29.1689091Z",
+  "commands": [
+    "fak micro collapse cache-witness --model gpt-5.6-sol --gateway-seat seat-a=http://127.0.0.1:49243 --gateway-seat seat-b=http://127.0.0.1:49581 --calls 2",
+    "fak dogfood-score --json"
+  ],
+  "artifacts": [
+    "docs/_witnesses/issue-6755-cache-witness-live-2026-08-14.json",
+    "docs/_witnesses/issue-6755-dogfood-score-live-2026-08-14.json"
+  ],
+  "cache_witness_exit": 3,
+  "dogfood_score_exit": 1,
+  "distinct_seat_endpoints": 2,
+  "cache_verdict": "not-yet",
+  "reason": "provider reported no cache-token witness; zero is not treated as proof of no cache",
+  "inference": "No cache gain inferred. The default dogfood score read back the canonical not-yet receipt without --cache-witness."
+}
