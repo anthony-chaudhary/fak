@@ -200,6 +200,10 @@ type SyncResult struct {
 	// Published is how many local checkpoint refs the push covered — the count whose
 	// mirror entries the successful push justifies writing.
 	Published int `json:"published"`
+	// MaxDeltaBytes and MetadataOnly describe the optional fleet publication gate.
+	// Zero values preserve the ordinary glob-refspec sync contract.
+	MaxDeltaBytes int64 `json:"max_delta_bytes,omitempty"`
+	MetadataOnly  int   `json:"metadata_only,omitempty"`
 	// Mirrored is how many refs the mirror holds for this remote after the sync.
 	Mirrored int `json:"mirrored"`
 	// Replicated / StaleRemote / LocalOnly summarize the LOCAL checkpoints after the

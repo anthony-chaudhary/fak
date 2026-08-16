@@ -601,6 +601,8 @@ func wipCheckpointScoped(ctx context.Context, repo, session string, buildable bo
 		return res, err
 	}
 	res.Leaves = wipLeavesFromNames(names)
+	host := wipLocalHost(repo)
+	deltaBytes := wipDeltaBytes(ctx, repo, head, tree)
 
 	msg, err := wipref.EncodeStamp(wipref.Stamp{
 		SessionID:      session,
@@ -609,6 +611,8 @@ func wipCheckpointScoped(ctx context.Context, repo, session string, buildable bo
 		Scope:          res.Scope,
 		Buildable:      buildable,
 		CheckpointedAt: nowUnix,
+		Host:           host,
+		DeltaBytes:     deltaBytes,
 	})
 	if err != nil {
 		return res, err
@@ -627,6 +631,8 @@ func wipCheckpointScoped(ctx context.Context, repo, session string, buildable bo
 			Scope:          res.Scope,
 			Buildable:      buildable,
 			CheckpointedAt: nowUnix,
+			Host:           host,
+			DeltaBytes:     deltaBytes,
 		},
 	}
 	if err := wipCheckpointFaultAt("before-ref-update"); err != nil {
@@ -771,8 +777,37 @@ func runWipStatus(stdout, stderr io.Writer, argv []string) int {
 	repo := fs.String("C", "", "run in this git repo (default: cwd)")
 	remote := fs.String("remote", "origin", "grade replication against this remote's mirror (a local ref read, never a network probe)")
 	asJSON := fs.Bool("json", false, "emit the status report as JSON")
+	fleet := fs.Bool("fleet", false, "enumerate checkpoint refs mirrored from peer hosts")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
+	}
+
+	if *fleet {
+		report, err := wipStatusFor(context.Background(), *repo, *remote, time.Now().Unix())
+		if err != nil {
+			fmt.Fprintf(stderr, "fak wip status --fleet: %v\n", err)
+			return 1
+		}
+		fleetReport, err := wipFleetStatus(context.Background(), *repo, *remote, time.Now().Unix())
+		if err != nil {
+			fmt.Fprintf(stderr, "fak wip status --fleet: %v\n", err)
+			return 1
+		}
+		report.Fleet = &fleetReport
+		if *asJSON {
+			return encodeJSONOrFail(stdout, stderr, report, "fak wip status --fleet")
+		}
+		if report.Count == 0 {
+			fmt.Fprintln(stdout, "no working-tree checkpoints")
+		}
+		for _, session := range report.Sessions {
+			fmt.Fprintf(stdout, "%s\t%s\t%d leaves\tage=%ds\tbuildable=%v\t%s\n", session.Session, shortWipSHA(session.StartSHA), len(session.Leaves), session.AgeSeconds, session.Buildable, session.Replication)
+		}
+		wipFleetRender(stdout, fleetReport)
+		if report.Mirror != nil {
+			fmt.Fprintln(stdout, wipMirrorLine(*report.Mirror))
+		}
+		return 0
 	}
 
 	report, err := wipStatusFor(context.Background(), *repo, *remote, time.Now().Unix())

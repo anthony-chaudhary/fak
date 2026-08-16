@@ -8569,6 +8569,11 @@
           "category": "incidental",
           "reason": "Implementation symbol for #2174 scheduled-task launcher audit, not a separate render-materialize concept.",
           "token": "renderSchedLauncherTable"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI formatter for #3880 fleet checkpoint status, not a distinct render/materialization concept.",
+          "token": "wipFleetRender"
         }
       ],
       "id": "render-materialize",
@@ -8641,6 +8646,7 @@
         "unmaterialized",
         "wipAdmitRender",
         "wipBlockedRender",
+        "wipFleetRender",
         "wipOwnerRender",
         "wipReclaimRender"
       ],

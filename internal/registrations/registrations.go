@@ -139,6 +139,7 @@ import (
 	_ "github.com/anthony-chaudhary/fak/internal/operatorresolve"
 	_ "github.com/anthony-chaudhary/fak/internal/planresolve"
 	_ "github.com/anthony-chaudhary/fak/internal/quantdetect"
+	_ "github.com/anthony-chaudhary/fak/internal/quantmeta"
 	_ "github.com/anthony-chaudhary/fak/internal/quantprov"
 	_ "github.com/anthony-chaudhary/fak/internal/tokenprofile"
 	_ "github.com/anthony-chaudhary/fak/internal/toollint"
