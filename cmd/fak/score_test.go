@@ -8,24 +8,29 @@ import (
 // TestScoreRoutesCoverTheMetaVerbs pins the `fak score <name>` parent (#1505) to exactly the
 // meta-scorecard / RSI subcommands it consolidated. If a route is dropped or a new one is added
 // without updating this list, the test reds -- the parent's surface is a contract, not incidental.
+//
+// The list is reconciled against scoreRoutes as of the flow wiring (#6198): "catchup" left the
+// runtime in 0f5ec3f674 (#6022) and "lightgap" arrived in 70d61594c0 (#6348), and neither move
+// updated this pin, so the contract had been red on two stale entries before "flow" was added.
 func TestScoreRoutesCoverTheMetaVerbs(t *testing.T) {
 	want := []string{
 		"agent-readiness",
 		"brittleness",
 		"cache-health",
 		"cachevalue-gate",
-		"catchup",
 		"code-quality",
 		"conflation",
 		"concept-usage",
 		"default-value",
 		"dogfood",
 		"dojo-rsi",
+		"flow",
 		"focus",
 		"guard-accuracy",
 		"guard-rsi",
 		"guard-verdict-rsi",
 		"issue-hygiene",
+		"lightgap",
 		"loop",
 		"loop-index",
 		"milestone",
