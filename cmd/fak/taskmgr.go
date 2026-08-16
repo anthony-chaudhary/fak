@@ -469,6 +469,7 @@ func runTaskQueue(stdout, stderr io.Writer, argv []string) int {
 		attemptData, err = os.ReadFile(attemptsFile)
 	} else {
 		cmd := exec.Command("dos", "lease-lane", "live")
+		cmd.Dir = repoRoot()
 		configureDispatchHelperCommand(cmd)
 		attemptData, err = cmd.Output()
 	}
