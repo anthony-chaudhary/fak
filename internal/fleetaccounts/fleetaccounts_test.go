@@ -809,12 +809,12 @@ func TestSeatPoolBindingAndHeadroom(t *testing.T) {
 	pool := BuildSeatPool(rows, leases, "")
 
 	// routable seats: .claude (canonical), gem8, opencode-glm. dup is NOT a seat (one pool).
-	if pool.TotalSeats != 9 {
-		t.Errorf("total_seats = %d want 9 (two Claude pools x4 + one opencode slot; dup collapsed)", pool.TotalSeats)
+	if pool.TotalSeats != 3 {
+		t.Errorf("total_seats = %d want 3 (two Claude identities + one opencode slot; dup collapsed)", pool.TotalSeats)
 	}
 	// opencode-glm leased, .claude free, gem8 blocked.
-	if pool.LeasedSeats != 1 || pool.FreeSeats != 4 || pool.BlockedSeats != 4 {
-		t.Errorf("seat states leased/free/blocked = %d/%d/%d want 1/4/4",
+	if pool.LeasedSeats != 1 || pool.FreeSeats != 1 || pool.BlockedSeats != 1 {
+		t.Errorf("seat states leased/free/blocked = %d/%d/%d want 1/1/1",
 			pool.LeasedSeats, pool.FreeSeats, pool.BlockedSeats)
 	}
 	if pool.Depleted {
