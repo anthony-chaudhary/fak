@@ -48,14 +48,36 @@ X was requested explicitly, but this environment has no sanctioned X search/expo
 - **Better because:** a content-addressed pack composes explicit capabilities over the stock kernel.
 - **Witness:** install, compose, project to two hosts, evaluate, remove, and byte-check restoration; `not yet`, owned by #6796 plus #6792/#6793.
 
+## 2026-08-16 shipped-state refresh
+
+Several local gaps closed after the original collection window:
+
+- The loopback browser now runs a bounded real coding task through fak-native
+  Read/Edit/focused-test/diff tools, persists its timeline across restart, and has a
+  captured [`gpt-5.6-sol` receipt](../_witnesses/harness-web-demo/LIVE-CODING-GPT-5.6-SOL-2026-08-15.md).
+- Four executable starters now cover read-only support, coding workspace, cited research,
+  and incident operations; full composable extension remains #6796.
+- Released-asset clean-room automation now verifies checksum, extraction, user-owned
+  preservation, rebuild, upgrade provenance, and rollback. Publication plus Windows/Linux
+  receipts remain #6935.
+- The tuned `create-mastra@1.25.0` comparison and participant receipt validator are
+  frozen. Eligible independent runs remain zero, so both promotional claims remain
+  `not_yet` (#6809, #6911).
+
+The X-specific evidence remains **not yet**. No X connector, authenticated export, or
+reproducible primary-source search artifact was available for either collection session.
+That is an evidence-boundary result—not evidence that X discussion is absent, unpopular,
+or negative. Any X claim still requires a dated artifact with query, account scope,
+timestamps, canonical post URLs, and retained raw results.
+
 ## Promo status
 
 | Copy | Status | Reason |
 |---|---|---|
-| “Target: a rebuilt offline harness in ten minutes.” | Witnessed locally, scoped | Warm build+selfcheck exists; full clean-machine path does not. |
+| “Target: a rebuilt offline harness in ten minutes.” | Witnessed calibration, scoped | Warm and clean maintainer calibrations exist; independent denominator remains zero. |
 | “Create a working fak-native harness in 10 minutes.” | **Not yet** | Needs independent clean-machine timing and real-alternative comparison (#6809). |
 | “Create your own harness this weekend.” | Modeled target | Bounded examples exist; pack/UI paths have not passed independent conformance. |
-| “Use a local fak-native UI today.” | Observed spine | #6882 provides loopback offline UI selfcheck, not a complete coding-harness replacement. |
+| “Use a local fak-native UI today.” | Witnessed bounded coding spine | The loopback UI completed and replayed a real edit/test/diff run; it is not a full IDE or packaged desktop app. |
 
 ## Decisions
 
