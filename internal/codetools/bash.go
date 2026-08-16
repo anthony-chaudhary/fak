@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -63,6 +64,9 @@ func (t *Toolset) bash(ctx context.Context, body []byte) ([]byte, bool) {
 	if r := a.Validate(); r != nil {
 		return r.JSON(), true
 	}
+	if t.focusedCommands && !focusedCommandAllowed(a.Command) {
+		return refuse(CodeCommandDeny, "command is outside the focused coding allowlist").JSON(), true
+	}
 	cwd := t.root
 	if a.Cwd != "" {
 		resolved, r := t.resolve(a.Cwd)
@@ -111,4 +115,27 @@ func shellCommand(command string) (string, []string) {
 		return "cmd.exe", []string{"/d", "/s", "/c", command}
 	}
 	return "/bin/sh", []string{"-c", command}
+}
+
+func focusedCommandAllowed(command string) bool {
+	if strings.ContainsAny(command, "\r\n;&|<>`$%") {
+		return false
+	}
+	fields := strings.Fields(command)
+	if len(fields) < 2 {
+		return false
+	}
+	for _, field := range fields {
+		if strings.Trim(field, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./:=,@+-") != "" {
+			return false
+		}
+	}
+	switch fields[0] {
+	case "go":
+		return fields[1] == "test"
+	case "git":
+		return fields[1] == "diff" || (fields[1] == "status" && len(fields) == 3 && fields[2] == "--short")
+	default:
+		return false
+	}
 }

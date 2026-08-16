@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -410,5 +411,68 @@ func TestNativeServeArmsCodingCatalogAndSpeculator(t *testing.T) {
 	}
 	if m.EngineCalls < 2 || m.SpecIssued < 1 || m.SpecSquashed < 1 || m.SpecServed < 1 {
 		t.Fatalf("native metrics=%+v", m)
+	}
+}
+
+type nativeEditTestDiffPlanner struct {
+	turn int
+}
+
+func (p *nativeEditTestDiffPlanner) Model() string { return "native-edit-test-diff" }
+func (p *nativeEditTestDiffPlanner) Complete(_ context.Context, _ []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+	p.turn++
+	call := func(id, name, args string) (*agent.Completion, error) {
+		return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, ToolCalls: []agent.ToolCall{{ID: id, Type: "function", Function: agent.Func{Name: name, Arguments: args}}}}, FinishReason: "tool_calls"}, nil
+	}
+	switch p.turn {
+	case 1:
+		return call("read", codetools.ToolRead, `{"file_path":"fixture.go"}`)
+	case 2:
+		return call("edit", codetools.ToolEdit, `{"file_path":"fixture.go","old_string":"return 1","new_string":"return 2"}`)
+	case 3:
+		return call("test", codetools.ToolBash, `{"command":"go test ./... -run TestValue -count=1"}`)
+	case 4:
+		return call("diff", codetools.ToolBash, `{"command":"git diff -- fixture.go fixture_test.go"}`)
+	default:
+		return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "fixed and verified"}, FinishReason: "stop"}, nil
+	}
+}
+
+func TestNativeServeFixtureEditTestDiffWitness(t *testing.T) {
+	agent.Configure()
+	abi.RegisterRegionBackend(inlineBackend{})
+	root := t.TempDir()
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module fixture\n\ngo 1.26\n")
+	write("fixture.go", "package fixture\n\nfunc Value() int { return 1 }\n")
+	write("fixture_test.go", "package fixture\n\nimport \"testing\"\n\nfunc TestValue(t *testing.T) { if Value() != 2 { t.Fatal(Value()) } }\n")
+	if err := exec.Command("git", "init", "-q", root).Run(); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "-C", root, "add", "go.mod", "fixture.go", "fixture_test.go")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v: %s", err, out)
+	}
+
+	srv, err := New(Config{EngineID: "localtools", Model: "test", VDSO: true, Native: true, NativeMaxTurns: 8, NativeCodeWorkspace: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	srv.planner = &nativeEditTestDiffPlanner{}
+	metrics, err := srv.runNativeArmSeed(context.Background(), nativeWireSeed{Task: "fix fixture"}, "coding-witness")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(root, "fixture.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "return 2") || metrics.EngineCalls < 4 {
+		t.Fatalf("body=%q metrics=%+v", body, metrics)
 	}
 }

@@ -177,11 +177,13 @@ type liveAdapter struct {
 	baseURL   string
 	client    *http.Client
 	workspace workspaceStatus
+	identity  string
 }
 
 type workspaceStatus struct {
-	Armed bool     `json:"armed"`
-	Tools []string `json:"tools,omitempty"`
+	Armed    bool     `json:"armed"`
+	Tools    []string `json:"tools,omitempty"`
+	Identity string   `json:"identity,omitempty"`
 }
 
 func (a *liveAdapter) probeWorkspace(ctx context.Context) error {
@@ -205,6 +207,7 @@ func (a *liveAdapter) probeWorkspace(ctx context.Context) error {
 	}
 	if body.NativeCodeWorkspace != nil {
 		a.workspace = *body.NativeCodeWorkspace
+		a.workspace.Identity = a.identity
 	}
 	return nil
 }
@@ -267,7 +270,16 @@ func (a *liveAdapter) run(ctx context.Context, runID, message string) ([]harness
 			events = append(events, event(runID, seq, harnesskit.EventToolStarted, harnesskit.ToolPayload{CallID: stringField(obj, "call_id"), Name: stringField(obj, "tool"), Status: "running"}))
 		case "result_admitted":
 			seq++
-			events = append(events, event(runID, seq, harnesskit.EventToolCompleted, harnesskit.ToolPayload{CallID: stringField(obj, "call_id"), Name: stringField(obj, "tool"), Status: "completed", Summary: "result admitted by fak"}))
+			tool := stringField(obj, "tool")
+			summary := stringField(obj, "summary")
+			if summary == "" {
+				summary = "result admitted by fak"
+			}
+			events = append(events, event(runID, seq, harnesskit.EventToolCompleted, harnesskit.ToolPayload{CallID: stringField(obj, "call_id"), Name: tool, Status: "completed", Summary: summary}))
+			if tool == "Edit" || tool == "Write" || (tool == "Bash" && strings.Contains(summary, "git diff")) {
+				seq++
+				events = append(events, event(runID, seq, harnesskit.EventArtifactPublished, harnesskit.ArtifactPayload{ArtifactID: fmt.Sprintf("artifact-%d", seq), MediaType: "text/x-diff", URI: "fak-native://" + runID + "/" + stringField(obj, "call_id"), Name: "Workspace patch"}))
+			}
 		case "call_adjudicated":
 			if strings.EqualFold(stringField(obj, "verdict"), "DENY") {
 				seq++
@@ -483,12 +495,18 @@ func get(client *http.Client, url string) (string, error) {
 	return string(body), err
 }
 
+func workspaceIdentity(root string) string {
+	sum := sha256.Sum256([]byte(filepath.Clean(root)))
+	return "ws-" + hex.EncodeToString(sum[:6])
+}
+
 func run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("harnesswebdemo", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	addr := fs.String("addr", "127.0.0.1:8787", "loopback listen address")
 	check := fs.Bool("selfcheck", false, "run captured render and protocol witness")
 	statePath := fs.String("state", "", "session state file (default: user config directory)")
+	workspace := fs.String("workspace", "", "explicit workspace bound to the fak native gateway")
 	fakURL := fs.String("fak-url", "", "stock fak base URL; non-example prompts run live when set")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -524,13 +542,35 @@ func run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 		return 1
 	}
 	var live *liveAdapter
+	if strings.TrimSpace(*workspace) != "" && strings.TrimSpace(*fakURL) == "" {
+		fmt.Fprintln(stderr, "-workspace requires -fak-url")
+		return 2
+	}
 	if strings.TrimSpace(*fakURL) != "" {
-		live = &liveAdapter{baseURL: *fakURL, client: &http.Client{Timeout: 10 * time.Minute}}
+		identity := ""
+		if strings.TrimSpace(*workspace) != "" {
+			resolved, resolveErr := filepath.EvalSymlinks(*workspace)
+			if resolveErr != nil {
+				fmt.Fprintf(stderr, "harnesswebdemo: resolve workspace: %v\n", resolveErr)
+				return 2
+			}
+			resolved, resolveErr = filepath.Abs(resolved)
+			if resolveErr != nil {
+				fmt.Fprintf(stderr, "harnesswebdemo: resolve workspace: %v\n", resolveErr)
+				return 2
+			}
+			identity = workspaceIdentity(resolved)
+		}
+		live = &liveAdapter{baseURL: *fakURL, client: &http.Client{Timeout: 10 * time.Minute}, identity: identity}
 		probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		err := live.probeWorkspace(probeCtx)
 		cancel()
 		if err != nil {
 			fmt.Fprintf(stderr, "harnesswebdemo: fak capability probe: %v\n", err)
+		}
+		if identity != "" && !live.workspace.Armed {
+			fmt.Fprintln(stderr, "harnesswebdemo: -workspace requires an armed native code workspace at -fak-url")
+			return 2
 		}
 	}
 	server := &http.Server{Handler: handlerWithLive(s, live), ReadHeaderTimeout: 5 * time.Second}

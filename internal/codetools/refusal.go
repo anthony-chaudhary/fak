@@ -32,6 +32,7 @@ const (
 	CodeExists        = "ALREADY_EXISTS" // create mode addressed an existing file
 	CodeEditConflict  = "EDIT_CONFLICT"  // exact edit match count violated semantics
 	CodeTooLarge      = "TOO_LARGE"      // mutation input exceeded the configured bound
+	CodeCommandDeny   = "COMMAND_DENY"   // Bash command is outside the focused coding allowlist
 )
 
 // Refusal is one denied or failed operation: the closed Code, the abi reason the rung

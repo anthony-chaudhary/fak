@@ -25,10 +25,21 @@ Launch the gateway with its existing bounded coding catalog, then point the brow
 
 ```text
 fak serve --native --native-code-workspace <workspace> [...model flags]
-go run ./cmd/harnesswebdemo -fak-url http://127.0.0.1:8080
+go run ./cmd/harnesswebdemo -fak-url http://127.0.0.1:8080 -workspace <workspace>
 ```
 
 `GET /healthz` exposes `native_code_workspace.armed` and the six tool names without
 returning the private workspace path. The browser probes that contract at startup and
-projects it through `GET /api/status`. This proves that the connected session is capable
-of bounded coding; the full browser-driven read/patch/diff/test witness remains #6962.
+projects it through `GET /api/status`. `-workspace` resolves the same operator-declared
+root once and exposes only a stable `ws-…` identity in browser status, never the private
+path.
+
+The gateway's native catalog remains the sole execution path: Read/Write/Edit/Grep/Glob
+are root-confined (including symlink checks), while Bash admits only focused `go test`,
+`git diff`, and `git status --short` commands. Shell composition, destructive commands,
+and ambient-credential enumeration are typed `COMMAND_DENY` refusals. The browser never
+executes a browser-supplied command.
+
+Rollback is exact: stop `harnesswebdemo` and restart without `-fak-url`/`-workspace` for
+the deterministic offline product, or stop the workspace-armed `fak serve` process. Use
+`fak harness gallery show --id coding-workspace` for the corresponding user-needs pack.

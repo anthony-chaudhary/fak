@@ -2030,7 +2030,7 @@ func New(cfg Config) (*Server, error) {
 	var nativeCodeCatalog []agent.ToolDef
 	if cfg.NativeCodeWorkspace != "" {
 		var armErr error
-		nativeCodeCatalog, armErr = agent.ArmCodeTools(cfg.NativeCodeWorkspace)
+		nativeCodeCatalog, armErr = agent.ArmFocusedCodeTools(cfg.NativeCodeWorkspace)
 		if armErr != nil {
 			return nil, fmt.Errorf("native code workspace: %w", armErr)
 		}

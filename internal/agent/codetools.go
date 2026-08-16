@@ -66,7 +66,17 @@ func (codeToolGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict
 // Call it BEFORE the run: Configure() reads the armed state to widen the loop's
 // adjudicator policy, and Configure runs at the start of every fak-arm RunArm.
 func ArmCodeTools(root string) ([]ToolDef, error) {
-	ts, err := codetools.New(codetools.Config{Root: root})
+	return armCodeTools(root, false)
+}
+
+// ArmFocusedCodeTools uses the same kernel catalog with Bash narrowed to focused tests
+// and diff/status inspection for browser-operated coding sessions.
+func ArmFocusedCodeTools(root string) ([]ToolDef, error) {
+	return armCodeTools(root, true)
+}
+
+func armCodeTools(root string, focused bool) ([]ToolDef, error) {
+	ts, err := codetools.New(codetools.Config{Root: root, FocusedCommands: focused})
 	if err != nil {
 		return nil, err
 	}

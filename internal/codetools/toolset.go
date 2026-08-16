@@ -114,19 +114,21 @@ func DefaultPolicy() Policy {
 // Config configures a Toolset. Root is the workspace every path is confined to; empty
 // means the process working directory, matching RegisterReadEngine's convention.
 type Config struct {
-	Root   string
-	Limits Limits
-	Policy Policy
+	Root            string
+	Limits          Limits
+	Policy          Policy
+	FocusedCommands bool // restrict Bash to the browser coding spine command set
 }
 
 // Toolset is a configured, confinement-bound instance of the coding engines plus the
 // adjudicator rung that admits them. It is safe for concurrent use: every field is set
 // once at construction and read-only thereafter.
 type Toolset struct {
-	root     string
-	evalRoot string // root with symlinks resolved — the base every escape check compares against
-	limits   Limits
-	policy   Policy
+	root            string
+	evalRoot        string // root with symlinks resolved — the base every escape check compares against
+	limits          Limits
+	policy          Policy
+	focusedCommands bool
 }
 
 // New builds a Toolset over cfg. It resolves the root ONCE (including symlinks) so every
@@ -159,7 +161,7 @@ func New(cfg Config) (*Toolset, error) {
 	if pol.Allow == nil {
 		pol = DefaultPolicy()
 	}
-	return &Toolset{root: abs, evalRoot: evalRoot, limits: cfg.Limits.normalize(), policy: pol}, nil
+	return &Toolset{root: abs, evalRoot: evalRoot, limits: cfg.Limits.normalize(), policy: pol, focusedCommands: cfg.FocusedCommands}, nil
 }
 
 // Root reports the workspace root every path is confined to.
