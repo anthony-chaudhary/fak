@@ -1,6 +1,10 @@
 package main
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+)
 
 // dispatchLowYieldExcludes returns the #2062 low-yield soft-exclude lane set the
 // Python fold (low_yield_soft_excludes) flags: lanes whose recent FINISHED sessions
@@ -16,6 +20,12 @@ import "encoding/json"
 // --lane <flagged> still overrides the soft demote (parity with the Python picker's
 // soft_exclude.discard(lane)).
 func dispatchLowYieldExcludes(root string) map[string]bool {
+	// Synthetic test repositories intentionally omit the legacy Python helper. Treat
+	// that as no advisory exclusions instead of spawning interpreters that cannot
+	// possibly succeed (and can race the picker's short-lived fixture state).
+	if _, err := os.Stat(filepath.Join(root, "tools", "issue_resolve_dispatch.py")); err != nil {
+		return nil
+	}
 	out, err := runPythonTool(root, []string{"tools/issue_resolve_dispatch.py", "--low-yield-excludes"})
 	if err != nil {
 		return nil
