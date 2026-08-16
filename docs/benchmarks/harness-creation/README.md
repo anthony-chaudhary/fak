@@ -9,6 +9,14 @@ harness in 10 minutes” and “create your own harness this weekend.” Run:
 fak harness study creation --input docs/benchmarks/harness-creation/study.json
 ```
 
+## Representative pack blueprints
+
+Before timing, a participant may select one bounded need from `fak harness gallery list`
+or state an equivalent need in one sentence. The gallery provides concrete readonly
+support, coding workspace, cited research, and incident-operations examples with explicit
+required and excluded capabilities, starter artifacts, ten-minute spines, weekend
+extensions, and witnesses. Gallery selection does not count as independent authorship for
+the weekend track; the participant must still implement the selected public-seam extension.
 ## Ten-minute task card
 
 Prerequisite environment: a fresh machine or VM with Go installed, working network, no

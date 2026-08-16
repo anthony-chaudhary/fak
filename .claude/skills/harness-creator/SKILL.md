@@ -54,6 +54,20 @@ Use this when the need fits product identity, profile/config, policy, instructio
 
 If the timed witness is missing or red, say `not yet`; do not turn the slogan into a claim.
 
+### Start from a user-need gallery
+
+When the builder knows the job but not the extension seam, inspect concrete bounded packs first:
+
+```text
+fak harness gallery list
+fak harness gallery show --id coding-workspace
+fak harness gallery init --id coding-workspace --dir ./my-pack
+```
+
+The built-ins cover readonly support, a local coding workspace, cited research, and incident
+operations. Preserve each pack's explicit capability exclusions. A gallery blueprint is a
+decision aid and starter artifact, not a claim that its weekend integration is already built.
+
 ### Weekend harness
 
 Use this when the user needs a new provider/model adapter, lifecycle middleware, skill pack, durable state, tool/policy adapter, channel, or custom UI. Start with the ten-minute spine, then add exactly one public seam at a time:

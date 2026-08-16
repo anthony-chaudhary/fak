@@ -8237,6 +8237,11 @@
           "category": "incidental",
           "reason": "idea-scout report formatting helper for conversion-health observations",
           "token": "renderConversion"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local Markdown formatting helper for the harness gallery; it introduces no reusable render/materialize contract.",
+          "token": "renderREADME"
         }
       ],
       "id": "render-materialize",
@@ -8282,6 +8287,7 @@
         "renderGhostReport",
         "renderGitSpawnDelta",
         "renderGitSpawnReport",
+        "renderREADME",
         "renderResumeDedup",
         "renderRunaway",
         "renderSeatCells",
