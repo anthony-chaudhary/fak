@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/policy"
 )
@@ -139,7 +140,7 @@ func reloadLandedPolicy(url string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
 	if err != nil {
 		return fmt.Errorf("reload policy: %w", err)
 	}

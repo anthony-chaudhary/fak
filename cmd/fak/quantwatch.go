@@ -15,7 +15,8 @@ import (
 )
 
 func cmdQuantwatch(argv []string) {
-	os.Exit(runQuantwatch(os.Stdout, os.Stderr, argv, http.DefaultClient, time.Now))
+	// nil client: runQuantwatch builds one from --timeout once the flags are parsed.
+	os.Exit(runQuantwatch(os.Stdout, os.Stderr, argv, nil, time.Now))
 }
 
 func runQuantwatch(stdout, stderr io.Writer, argv []string, client *http.Client, now func() time.Time) int {
@@ -44,6 +45,9 @@ func runQuantwatch(stdout, stderr io.Writer, argv []string, client *http.Client,
 		}
 		result = quantwatch.IngestSnapshot(raw)
 	} else {
+		if client == nil {
+			client = &http.Client{Timeout: *timeout}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 		defer cancel()
 		var repositories []string
