@@ -208,20 +208,22 @@ func TestStashRestoreMediaCap(t *testing.T) {
 	srv.ctxRestoreMu.Unlock()
 }
 
-// TestRestoreOverMCP: the verb is listed and callable end-to-end over the MCP dispatch, returning the
-// stashed bytes.
+// TestRestoreOverMCP proves the cold restore schema remains discoverable through
+// fak_tools_search and callable end-to-end after default-on tool filtering.
 func TestRestoreOverMCP(t *testing.T) {
 	srv := newTestServer(t)
-	list := resultMap(t, rpcRoundTrip(t, srv, "tools/list", ""))
-	tools := list["tools"].([]any)
+	search, err := srv.toolsSearch(ToolsSearchRequest{Query: "context restore", DetailLevel: "name"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	found := false
-	for _, raw := range tools {
-		if raw.(map[string]any)["name"] == "fak_context_restore" {
+	for _, descriptor := range search.Tools {
+		if descriptor["name"] == "fak_context_restore" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatal("tools/list missing fak_context_restore")
+		t.Fatal("fak_tools_search missing fak_context_restore")
 	}
 
 	const trace = "t-mcp-restore"

@@ -149,16 +149,18 @@ func TestContextSpansEmptyTraceIsEmptyAnswer(t *testing.T) {
 // dispatch, returning the stashed handles with the right schema.
 func TestContextSpansOverMCP(t *testing.T) {
 	srv := newTestServer(t)
-	list := resultMap(t, rpcRoundTrip(t, srv, "tools/list", ""))
-	tools := list["tools"].([]any)
+	search, err := srv.toolsSearch(ToolsSearchRequest{Query: "context spans", DetailLevel: "name"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	found := false
-	for _, raw := range tools {
-		if raw.(map[string]any)["name"] == "fak_context_spans" {
+	for _, descriptor := range search.Tools {
+		if descriptor["name"] == "fak_context_spans" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatal("tools/list missing fak_context_spans")
+		t.Fatal("fak_tools_search missing fak_context_spans")
 	}
 
 	const trace = "t-mcp-spans"

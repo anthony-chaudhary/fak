@@ -299,23 +299,22 @@ func TestCtxValueHTTPEndpoint(t *testing.T) {
 	}
 }
 
-// TestCtxValueMCPTool proves the agent-facing seam: fak_context_value is listed,
-// and a call with a trace id returns that session's report through the MCP wire.
+// TestCtxValueMCPTool proves the cold value schema remains discoverable through
+// fak_tools_search and callable with a trace id through the MCP wire.
 func TestCtxValueMCPTool(t *testing.T) {
 	srv := newTestServer(t)
-	list := resultMap(t, rpcRoundTrip(t, srv, "tools/list", ""))
-	tools, ok := list["tools"].([]any)
-	if !ok {
-		t.Fatalf("tools/list malformed: %v", list)
+	search, err := srv.toolsSearch(ToolsSearchRequest{Query: "managed context pressure", DetailLevel: "name"})
+	if err != nil {
+		t.Fatal(err)
 	}
 	found := false
-	for _, raw := range tools {
-		if raw.(map[string]any)["name"] == "fak_context_value" {
+	for _, descriptor := range search.Tools {
+		if descriptor["name"] == "fak_context_value" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatal("tools/list missing fak_context_value")
+		t.Fatal("fak_tools_search missing fak_context_value")
 	}
 
 	// Two served turns for a known trace, then query it over MCP.
