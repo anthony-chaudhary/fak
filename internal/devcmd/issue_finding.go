@@ -581,6 +581,12 @@ func renderFindingIssueBodyWithProjectWork(item modelroute.FindingPlanItem, a fi
 	fmt.Fprintf(&b, "## Working spine\n%s\n\n", c.WorkingSpine)
 	fmt.Fprintf(&b, "## Core through-line\n%s\n\n", c.InScope)
 	fmt.Fprintf(&b, "## Gold-plating boundary\n%s\n\n", c.OutOfScope)
+	fmt.Fprintf(&b, "## Problem frame\n- Centrality: %s (%s)\n", c.ProblemFrame.Centrality, c.ProblemFrame.CentralityTarget)
+	for _, id := range []string{"p1", "p2", "p3", "p4"} {
+		check := c.ProblemFrame.Checks[id]
+		fmt.Fprintf(&b, "- %s: %s - %s\n", strings.ToUpper(id), check.Status, check.Evidence)
+	}
+	fmt.Fprintln(&b)
 	fmt.Fprintf(&b, "## Done condition / witness\nDone condition: %s\nWitness: %s\n\n", c.DoneCondition, c.Witness)
 	fmt.Fprintf(&b, "## Acceptance gate\n%s\n\n", c.AcceptanceGate)
 	fmt.Fprintf(&b, "## Work estimate\n%s\n\n", c.WorkEstimate)

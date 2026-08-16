@@ -73,6 +73,14 @@ func TestIssueFindingDryRunCandidatesAreDispatchable(t *testing.T) {
 	if !review.OK || review.Dispatchability != issuepolicy.Dispatchable {
 		t.Fatalf("generated candidate not dispatchable: verdict=%s reasons=%v", review.Dispatchability, review.Reasons)
 	}
+	body, bodyErr := renderFindingIssueBodyWithProjectWork(modelroute.PlanCrossAuditFindings(deps.receipts, nil).Items[0], findingProjectWork{Baseline: 8, Standard: "demo"})
+	if bodyErr != nil {
+		t.Fatal(bodyErr)
+	}
+	bodyReview := issuepolicy.ReviewIssueDraft(issuepolicy.IssueDraft{Title: result.Candidates[0].Title, Body: body}, issuepolicy.Options{})
+	if !bodyReview.ProblemFrame.Ready || bodyReview.ProblemFrame.Centrality != issuepolicy.CentralityStewardship {
+		t.Fatalf("finding body lost frame: %+v", bodyReview.ProblemFrame)
+	}
 	if result.Items[0].ContractOK == nil || !*result.Items[0].ContractOK {
 		t.Fatalf("adapter did not mark the CREATE item contract-ok: %+v", result.Items[0])
 	}
