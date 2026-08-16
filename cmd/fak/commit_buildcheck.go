@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/buildwitness"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
@@ -134,6 +135,7 @@ var commitBuildCheckGate = func(stderr io.Writer, root string, paths []string) (
 	}
 	buildDetail, buildOK := goBuildPackages(propDir, propPkgs)
 	if buildOK || commitBuildCheckOnlyUnbuildable(buildDetail) {
+		recordPrepushSuccessForTree(root, prospectiveTree, time.Now())
 		return safecommit.BuildCheckPassed, "" // the common fast path: ONE build, green
 	}
 

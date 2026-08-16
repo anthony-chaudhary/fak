@@ -822,3 +822,39 @@ func TestPrunePrepushSuccessReceiptsBoundsFiles(t *testing.T) {
 		t.Fatalf("receipt files=%d want=%d", len(entries), prepushSuccessMaxFiles)
 	}
 }
+
+func TestPrepushTreeReceiptReusesCommitBuildCheck(t *testing.T) {
+	oldCommon := prepushSuccessCommonDir
+	dir := t.TempDir()
+	prepushSuccessCommonDir = func(string) string { return dir }
+	t.Cleanup(func() { prepushSuccessCommonDir = oldCommon })
+	now := time.Unix(1_700_000_000, 0)
+	recordPrepushSuccessForTree("repo", "tree-a", now)
+	if !prepushTreeSuccessReusable("repo", "tree-a", now.Add(time.Minute)) {
+		t.Fatal("green prospective-tree receipt was not reusable by pre-push")
+	}
+	if prepushTreeSuccessReusable("repo", "tree-b", now.Add(time.Minute)) {
+		t.Fatal("receipt for a different immutable tree was reused")
+	}
+}
+
+func TestRunPrepushReusesCommitBuildReceiptOnlyForCoveredCommit(t *testing.T) {
+	oldCommon, oldRev, oldCovered, oldNow := prepushSuccessCommonDir, prepushTreeResolveFn, prepushCommitPathsCoveredFn, prepushNow
+	dir := t.TempDir()
+	prepushSuccessCommonDir = func(string) string { return dir }
+	prepushTreeResolveFn = func(string, string) (string, error) { return "tree-a", nil }
+	prepushCommitPathsCoveredFn = func(string, string) bool { return true }
+	now := time.Unix(1_700_000_000, 0)
+	prepushNow = func() time.Time { return now }
+	t.Cleanup(func() {
+		prepushSuccessCommonDir, prepushTreeResolveFn, prepushCommitPathsCoveredFn, prepushNow = oldCommon, oldRev, oldCovered, oldNow
+	})
+	recordPrepushSuccessForTree("repo", "tree-a", now)
+	var out, errOut bytes.Buffer
+	if code := runHooksPrePush(&out, &errOut, []string{"--root", "repo", "--tip", "tip-a"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "source=commit-build-check") {
+		t.Fatalf("output did not name receipt source: %q", out.String())
+	}
+}

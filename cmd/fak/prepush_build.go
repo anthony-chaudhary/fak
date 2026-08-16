@@ -76,13 +76,15 @@ import (
 // gate stays self-contained on the shared trunk — it must not depend on a sibling file that may
 // be a peer's uncommitted WIP (the very build-integrity hazard this gate exists to catch).
 var (
-	prepushRevParse     = prepushGitRevParse
-	prepushResolveBase  = resolvePrepushBase
-	prepushChangedFiles = gitChangedGoFilesRange
-	prepushExtractTip   = prepushArchiveTip
-	prepushListGraph    = goListGraph
-	prepushBuild        = goBuildPackages
-	prepushNow          = time.Now
+	prepushRevParse             = prepushGitRevParse
+	prepushResolveBase          = resolvePrepushBase
+	prepushChangedFiles         = gitChangedGoFilesRange
+	prepushExtractTip           = prepushArchiveTip
+	prepushListGraph            = goListGraph
+	prepushBuild                = goBuildPackages
+	prepushNow                  = time.Now
+	prepushCommitPathsCoveredFn = prepushCommitPathsCovered
+	prepushTreeResolveFn        = prepushGitRevParse
 )
 
 // prepushTestQuality is the seam over the ADVISORY test-quality ratchet this gate runs after its
@@ -336,6 +338,34 @@ func recordPrepushSuccess(root, tip string, now time.Time) {
 	_ = os.Remove(tmp)
 }
 
+func prepushCommitPathsCovered(root, tip string) bool {
+	out, err := gitOut(root, "diff-tree", "--no-commit-id", "--name-only", "-r", tip)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(out, "\n") {
+		p := filepath.ToSlash(strings.TrimSpace(line))
+		if p == "" {
+			continue
+		}
+		if !strings.HasSuffix(p, ".go") && p != "go.mod" && p != "go.sum" {
+			return false
+		}
+	}
+	return true
+}
+
+func recordPrepushSuccessForTree(root, tree string, now time.Time) {
+	if strings.TrimSpace(tree) == "" {
+		return
+	}
+	recordPrepushSuccess(root, "tree-"+tree, now)
+}
+
+func prepushTreeSuccessReusable(root, tree string, now time.Time) bool {
+	return strings.TrimSpace(tree) != "" && prepushSuccessReusable(root, "tree-"+tree, now)
+}
+
 const prepushClaimStaleAfter = 15 * time.Minute
 
 func prepushClaimPath(root, tip string) string {
@@ -402,6 +432,11 @@ func runHooksPrePush(stdout, stderr io.Writer, argv []string) int {
 	}
 	if prepushSuccessReusable(r, resolvedTip, prepushNow()) {
 		fmt.Fprintf(stdout, "PREPUSH_REUSED tip=%s age<=%s\n", resolvedTip, prepushSuccessReuseTTL)
+		return 0
+	}
+	if tree, err := prepushTreeResolveFn(r, resolvedTip+"^{tree}"); err == nil && prepushTreeSuccessReusable(r, tree, prepushNow()) && prepushCommitPathsCoveredFn(r, resolvedTip) {
+		fmt.Fprintf(stdout, "PREPUSH_REUSED tip=%s tree=%s source=commit-build-check age<=%s\n", resolvedTip, tree, prepushSuccessReuseTTL)
+		recordPrepushSuccess(r, resolvedTip, prepushNow())
 		return 0
 	}
 	owner, releaseClaim := claimPrepushTip(r, resolvedTip, prepushNow)
