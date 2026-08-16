@@ -20,9 +20,13 @@ import (
 // withCommitFn swaps the commitFn seam for the duration of a test.
 func withCommitFn(t *testing.T, fn func(context.Context, safecommit.Options) (safecommit.Result, error)) {
 	t.Helper()
-	prev := commitFn
+	prevCommit, prevBusy := commitFn, commitLaneBusyFn
 	commitFn = fn
-	t.Cleanup(func() { commitFn = prev })
+	commitLaneBusyFn = func(string) (bool, int) { return false, 0 }
+	t.Cleanup(func() {
+		commitFn = prevCommit
+		commitLaneBusyFn = prevBusy
+	})
 }
 
 func TestRunCommitBusyLaneSkipsBuildCheckAndCommit(t *testing.T) {
