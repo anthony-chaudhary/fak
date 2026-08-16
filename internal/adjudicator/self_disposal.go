@@ -172,7 +172,11 @@ func repositoryIgnores(root, target string) (bool, error) {
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return false, errors.New("target outside repository")
 	}
-	if configuredExternalExcludes(root) {
+	unsupported, err := configuredExternalExcludes(root)
+	if err != nil {
+		return false, err
+	}
+	if unsupported {
 		return false, errors.New("external excludes configuration unsupported")
 	}
 	type source struct{ path, base string }
@@ -253,25 +257,96 @@ func gitIgnorePatternMatch(raw, base, rel string) (bool, bool, error) {
 	return matched, negate, nil
 }
 
-func configuredExternalExcludes(root string) bool {
-	paths := []string{filepath.Join(root, ".git", "config")}
+func configuredExternalExcludes(root string) (bool, error) {
+	type configSource struct {
+		path     string
+		required bool
+	}
+	sources := []configSource{{path: filepath.Join(root, ".git", "config")}}
 	if home, err := os.UserHomeDir(); err == nil {
-		paths = append(paths, filepath.Join(home, ".gitconfig"))
+		sources = append(sources, configSource{path: filepath.Join(home, ".gitconfig")})
 	}
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		paths = append(paths, filepath.Join(xdg, "git", "config"))
+		sources = append(sources, configSource{path: filepath.Join(xdg, "git", "config")})
 	}
-	for _, path := range paths {
+	seen := make(map[string]bool)
+	for len(sources) > 0 {
+		source := sources[0]
+		sources = sources[1:]
+		path := filepath.Clean(source.path)
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
 		data, err := os.ReadFile(path)
-		if err == nil {
-			lower := strings.ToLower(string(data))
-			if strings.Contains(lower, "excludesfile") || strings.Contains(lower, "[include") {
-				return true
-			}
+		if errors.Is(err, os.ErrNotExist) && !source.required {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		unsupported, includes, err := inspectGitConfig(path, data)
+		if err != nil || unsupported {
+			return unsupported, err
+		}
+		for _, include := range includes {
+			sources = append(sources, configSource{path: include, required: true})
 		}
 	}
-	return false
+	return false, nil
 }
+
+func inspectGitConfig(path string, data []byte) (bool, []string, error) {
+	section := ""
+	var includes []string
+	for _, raw := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(strings.TrimSuffix(raw, "\r"))
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			section = strings.ToLower(strings.TrimSpace(line[1 : len(line)-1]))
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.ToLower(strings.TrimSpace(key))
+		value = strings.Trim(strings.TrimSpace(value), `"`)
+		if key == "excludesfile" {
+			return true, nil, nil
+		}
+		if section == "include" && key == "path" {
+			include := expandGitConfigPath(filepath.Dir(path), value)
+			if include == "" {
+				return false, nil, errors.New("invalid git config include path")
+			}
+			includes = append(includes, include)
+		}
+		if strings.HasPrefix(section, "includeif ") {
+			return false, nil, errors.New("conditional git config includes unsupported")
+		}
+	}
+	return false, includes, nil
+}
+
+func expandGitConfigPath(base, value string) string {
+	if value == "" {
+		return ""
+	}
+	if value == "~" || strings.HasPrefix(value, "~/") || strings.HasPrefix(value, `~\`) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		value = filepath.Join(home, strings.TrimLeft(value[1:], `/\`))
+	} else if !filepath.IsAbs(value) {
+		value = filepath.Join(base, value)
+	}
+	return filepath.Clean(value)
+}
+
 func repositoryIndexPath(root string) (string, error) {
 	gitPath := filepath.Join(root, ".git")
 	info, err := os.Stat(gitPath)

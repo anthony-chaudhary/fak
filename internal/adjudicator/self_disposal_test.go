@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -33,6 +34,16 @@ func selfDisposalWrite(t *testing.T, path string) {
 	}
 }
 
+func writeSelfDisposalText(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func selfDisposalReceipt(a *Adjudicator, trace, path string, seq uint64) {
 	call := receiptCall(trace, "write_file", fmt.Sprintf(`{"path":%q}`, path), seq)
 	a.ObserveResult(context.Background(), call, &abi.Result{Call: call, Status: abi.StatusOK, Outcome: abi.OutcomeCommitted})
@@ -41,6 +52,50 @@ func selfDisposalReceipt(a *Adjudicator, trace, path string, seq uint64) {
 func selfDisposalVerdict(a *Adjudicator, trace, command string, seq uint64) abi.Verdict {
 	call := receiptCall(trace, "Bash", fmt.Sprintf(`{"command":%q}`, command), seq)
 	return a.Adjudicate(context.Background(), call)
+}
+
+func TestSelfAuthoredUntrackedRemovalAllowsUnrelatedGlobalInclude(t *testing.T) {
+	home := t.TempDir()
+	included := filepath.Join(home, "included.gitconfig")
+	writeSelfDisposalText(t, included, "[user]\n\tname = CI Runner\n")
+	writeSelfDisposalText(t, filepath.Join(home, ".gitconfig"), fmt.Sprintf("[include]\n\tpath = %q\n", filepath.ToSlash(included)))
+	t.Setenv("HOME", home)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", home)
+	}
+
+	root := selfDisposalRepo(t)
+	target := filepath.Join(root, "scratch.txt")
+	selfDisposalWrite(t, target)
+	a := New(Policy{Allow: map[string]bool{"Bash": true}})
+	a.receiptRoot = root
+	selfDisposalReceipt(a, "trace-include", target, 1)
+	call := receiptCall("trace-include", "Bash", `{"command":"rm scratch.txt"}`, 2)
+	if !a.selfAuthoredUntrackedRemoval(call, decodeArgs(context.Background(), call)) {
+		t.Fatal("unrelated global include suppressed eligible self-disposal")
+	}
+}
+
+func TestSelfAuthoredUntrackedRemovalRejectsIncludedExternalExcludes(t *testing.T) {
+	home := t.TempDir()
+	included := filepath.Join(home, "included.gitconfig")
+	writeSelfDisposalText(t, included, "[core]\n\texcludesFile = ~/.global-ignore\n")
+	writeSelfDisposalText(t, filepath.Join(home, ".gitconfig"), fmt.Sprintf("[include]\n\tpath = %q\n", filepath.ToSlash(included)))
+	t.Setenv("HOME", home)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", home)
+	}
+
+	root := selfDisposalRepo(t)
+	target := filepath.Join(root, "scratch.txt")
+	selfDisposalWrite(t, target)
+	a := New(Policy{Allow: map[string]bool{"Bash": true}})
+	a.receiptRoot = root
+	selfDisposalReceipt(a, "trace-excludes", target, 1)
+	call := receiptCall("trace-excludes", "Bash", `{"command":"rm scratch.txt"}`, 2)
+	if a.selfAuthoredUntrackedRemoval(call, decodeArgs(context.Background(), call)) {
+		t.Fatal("included external excludes did not fail closed")
+	}
 }
 
 func TestSelfAuthoredUntrackedRemovalAllowsOnlyPriorSameTraceReceipt(t *testing.T) {
