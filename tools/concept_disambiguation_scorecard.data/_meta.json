@@ -3886,6 +3886,36 @@
           "category": "incidental",
           "reason": "Closed ownership-report reason code, not a session lifecycle state or runtime control",
           "token": "ReasonSessionLive"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #1365 durable serve state, not a separate session-runtime concept.",
+          "token": "defaultServeSessionStatePath"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #1365 durable serve state, not a separate session-runtime concept.",
+          "token": "FAK_SESSION_STATE"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #1365 durable serve state, not a separate session-runtime concept.",
+          "token": "resolveServeSessionState"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #1365 durable serve state, not a separate session-runtime concept.",
+          "token": "serveSessionStateEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #1365 durable serve state, not a separate session-runtime concept.",
+          "token": "serveSessionStateFile"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #1365 durable serve state, not a separate session-runtime concept.",
+          "token": "serveSessionStateOff"
         }
       ],
       "id": "session-runtime",
@@ -3898,6 +3928,7 @@
         "ConfigureSessionClientAuth",
         "ConfigureSessionMove",
         "FAK_SESSION_CLIENT_TOKEN",
+        "FAK_SESSION_STATE",
         "FinalizeSessionMoveCheckpoint",
         "GatewaySeat",
         "HeldScheduleReport",
@@ -3991,6 +4022,7 @@
         "control-window",
         "deadline_released_slot",
         "decodeSessionClientJSON",
+        "defaultServeSessionStatePath",
         "defaultclaudesessionsperaccount",
         "dispatchsessionsaudittest",
         "endpointSessionState",
@@ -4044,6 +4076,7 @@
         "repairMalformedLooseSessionRef",
         "repository-read",
         "requireminimaxsession",
+        "resolveServeSessionState",
         "restartfreshsession",
         "rotateSessionDiscoveryEpoch",
         "runFilterToolScheduler",
@@ -4076,6 +4109,9 @@
         "semantic-window",
         "serveSessionRegistryPath",
         "serveSessionRegistryScopeLabel",
+        "serveSessionStateEnv",
+        "serveSessionStateFile",
+        "serveSessionStateOff",
         "sessionAffinity",
         "sessionBearer",
         "sessionCapabilityCorpus",
@@ -6043,6 +6079,11 @@
           "category": "incidental",
           "reason": "Bounded quantobs schema symbol, not a policy-capability concept.",
           "token": "EvidenceAdjudication"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #1365 durable serve state, not a separate policy-capability concept.",
+          "token": "serveDurabilityPosture"
         }
       ],
       "exclude": [
@@ -6168,6 +6209,7 @@
         "semanticGold",
         "semanticGrade",
         "semanticSubmission",
+        "serveDurabilityPosture",
         "sessionCapabilityCorpus",
         "sessionCapabilityDefinition",
         "stackpreflight",

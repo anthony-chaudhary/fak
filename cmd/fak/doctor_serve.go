@@ -63,10 +63,11 @@ type serveReadinessRow struct {
 // serveReadinessReport is the whole table plus the rolled-up worst tier and a
 // count of non-green rows.
 type serveReadinessReport struct {
-	Facts    serveHostFacts      `json:"facts"`
-	Rows     []serveReadinessRow `json:"rows"`
-	Rollup   string              `json:"rollup"` // "Ready" | "Marginal" | "Unready"
-	Findings int                 `json:"findings"`
+	Facts      serveHostFacts          `json:"facts"`
+	Rows       []serveReadinessRow     `json:"rows"`
+	Durability *serveDurabilityPosture `json:"durability,omitempty"`
+	Rollup     string                  `json:"rollup"` // "Ready" | "Marginal" | "Unready"
+	Findings   int                     `json:"findings"`
 }
 
 // serveStatusRank orders the three rungs so the report can roll up the worst one.
@@ -336,7 +337,7 @@ func runServeDoctor(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	facts := probeServeHost(*modelBytes, *headroom)
-	rep := buildServeReadiness(facts)
+	rep := withServeDurabilityRow(buildServeReadiness(facts), resolveServeSessionState("", os.Getenv))
 	if *asJSON {
 		return encodeJSONOrFail(stdout, stderr, rep, "fak doctor serve")
 	}

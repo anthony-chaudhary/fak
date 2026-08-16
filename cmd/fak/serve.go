@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -281,6 +282,8 @@ func cmdServe(argv []string) {
 	tParse := time.Now()
 	_ = fs.Parse(argv)
 	parseDur := time.Since(tParse)
+	durability := resolveServeSessionState(*sf.sessionStatePath, os.Getenv)
+	*sf.sessionStatePath = durability.Path
 
 	explicit := explicitFlagNames(fs)
 	toolPlugins, toolPreferences, err := compileToolPluginConfig(manifest)
@@ -370,6 +373,7 @@ func cmdServe(argv []string) {
 	rt.resolveObservers(sf)
 	rt.buildGateway(sf)
 	rt.wireGateway(sf)
+	writeServeDurabilityBanner(os.Stdout, durability)
 	rt.run(sf)
 }
 
@@ -900,6 +904,10 @@ func restoreServeSessions(tbl *session.Table, path string) error {
 func dumpServeSessions(tbl *session.Table, path string) {
 	path = strings.TrimSpace(path)
 	if path == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "fak: create session-state parent for %s failed: %v\n", path, err)
 		return
 	}
 	snap, err := snapshot.DumpFleet("serve", tbl, 0)
