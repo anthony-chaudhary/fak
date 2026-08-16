@@ -55,6 +55,28 @@ func TestIsNonFastForward(t *testing.T) {
 	}
 }
 
+func TestSafePush_ReconcilesConcurrentPublicationAfterHookFailure(t *testing.T) {
+	sr := &scriptedRunner{
+		push:      []RunResult{{Code: 1, Stderr: []byte("DUPLICATION (advisory): stale hook output")}},
+		fetch:     RunResult{Code: 0},
+		ancestors: map[string]int{"HEAD..origin/main": 0},
+	}
+	res, err := SafePush(context.Background(), PushOptions{Repo: ".", Branch: "main", Runner: sr.run})
+	if err != nil {
+		t.Fatalf("SafePush: %v", err)
+	}
+	if !res.Pushed || res.Reason != "" || res.Attempts != 1 {
+		t.Fatalf("concurrently published push = %+v, want PUSHED on attempt 1", res)
+	}
+	if !strings.Contains(res.Detail, "concurrent publication") {
+		t.Fatalf("detail = %q, want concurrent-publication explanation", res.Detail)
+	}
+	wantCalls := []string{"push origin main", "fetch origin main", "merge-base --is-ancestor HEAD origin/main"}
+	if strings.Join(sr.calls, "|") != strings.Join(wantCalls, "|") {
+		t.Fatalf("calls = %v, want %v", sr.calls, wantCalls)
+	}
+}
+
 func TestSafePush_HeadlineNamesTheBlockingGateNotAnEarlierAdvisory(t *testing.T) {
 	// A pre-push run prints its gates in order and only the last one can be the blocker, so a
 	// gate that merely WARNED reaches stderr first. Reporting the first line sends the operator

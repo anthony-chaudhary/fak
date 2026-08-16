@@ -204,6 +204,18 @@ func SafePush(ctx context.Context, opts PushOptions) (res PushResult, err error)
 			continue
 		}
 		if !isNonFastForward(msg) {
+			// A long pre-push hook can lose a race in the useful direction: another
+			// worker publishes this shared-trunk tip while our hook is still running,
+			// after which git reports the hook's stale failure even though the requested
+			// source is now on the remote. Reconcile once before calling that a refusal.
+			if fr := run(ctx, repo, "fetch", remote, branch); fr.Err == nil && fr.Code == 0 {
+				remoteContainsSource, aerr := isAncestor(ctx, run, repo, compareRef, remoteRef)
+				if aerr == nil && remoteContainsSource {
+					res.Pushed = true
+					res.Detail = "remote contains requested ref after concurrent publication"
+					return res, nil
+				}
+			}
 			res.Reason = PushReasonError
 			res.Detail = pushHeadline(msg)
 			return res, nil
