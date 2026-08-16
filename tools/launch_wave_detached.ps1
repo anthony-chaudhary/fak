@@ -93,6 +93,9 @@ param(
   # Re-price an underfilled live wave on cadence until the requested total or deadline.
   [ValidateRange(1, 86400)] [int]$RefillCadenceSeconds = 60,
   [ValidateRange(0, 1440)] [int]$RefillForMinutes = 240,
+  # Internal absolute wall-clock propagated across initially-empty retry processes. Without
+  # it, each recursive retry silently bought a fresh refill window.
+  [datetime]$RefillDeadlineUtc = [datetime]::MinValue,
   [switch]$NoRefill
 )
 
@@ -103,6 +106,10 @@ $repoRoot = Split-Path -Parent $PSScriptRoot   # tools/ -> repo root
 if (-not $LogDir) { $LogDir = Join-Path $Workspace '.goal-runs' }
 if ($Json -and $Launch) {
   throw "-Json is a dry-run plan format; remove -Launch or run the text launcher explicitly."
+}
+if ($Launch -and (-not $NoRefill) -and $RefillForMinutes -gt 0 -and
+    $RefillDeadlineUtc -eq [datetime]::MinValue) {
+  $RefillDeadlineUtc = [datetime]::UtcNow.AddMinutes($RefillForMinutes)
 }
 
 function Get-StandingGardenerContract {
@@ -402,6 +409,7 @@ function Format-WavePreflightLine {
   if ($Preflight.seat) { $seatFree = Get-ObjectInt -Object $Preflight.seat -Name 'free' }
   $parts = @("  preflight: $($Preflight.verdict)", "live=$($Preflight.live)", "cap=$($Preflight.cap)", "headroom=$($Preflight.headroom)")
   if ($null -ne $seatFree) { $parts += "seat_free=$seatFree" }
+  if ($Preflight.seat -and $Preflight.seat.process_consistency) { $parts += "process_consistency=$($Preflight.seat.process_consistency)" }
   if ($Preflight.reason) { $parts += "reason=$($Preflight.reason)" }
   return ($parts -join "  ")
 }
@@ -426,9 +434,10 @@ function Convert-WavePreflightPublic {
   if ($Preflight.capacity_limiter) { $out['capacity_limiter'] = $Preflight.capacity_limiter }
   if ($Preflight.seat) {
     $seat = [ordered]@{}
-    foreach ($name in @('total', 'free', 'leased', 'unattributed_live')) {
+    foreach ($name in @('total', 'free', 'leased', 'unattributed_live', 'process_gap')) {
       Add-IfPresent -Map $seat -Name $name -Value (Get-ObjectInt -Object $Preflight.seat -Name $name)
     }
+    if ($Preflight.seat.process_consistency) { $seat['process_consistency'] = [string]$Preflight.seat.process_consistency }
     if ($null -ne $Preflight.seat.depleted) { $seat['depleted'] = [bool]$Preflight.seat.depleted }
     $out['seat'] = $seat
   }
@@ -609,7 +618,8 @@ if ($Launch -and (-not $NoRefill) -and $RefillForMinutes -gt 0 -and
     '-Count', "$Count", '-PointerFile', $PointerFile, '-Workspace', $Workspace,
     '-LogDir', $LogDir, '-WorkKind', $WorkKind, '-Product', $Product, '-FakExe', $fak,
     '-PreflightMaxWorkers', "$(if ($PreflightMaxWorkers -gt 0) { $PreflightMaxWorkers } else { $Count })",
-    '-RefillCadenceSeconds', "$RefillCadenceSeconds", '-RefillForMinutes', "$([Math]::Max(0, $RefillForMinutes - 1))", '-Launch')
+    '-RefillCadenceSeconds', "$RefillCadenceSeconds", '-RefillForMinutes', "$RefillForMinutes",
+    '-RefillDeadlineUtc', $RefillDeadlineUtc.ToString('o'), '-Launch')
   if ($AllowTierFallback) { $child += '-AllowTierFallback' }
   if ($SkipPreflight) { $child += '-SkipPreflight' }
   if ($ExtendStanding) { $child += @('-ExtendStanding', '-StandingTaskName', $StandingTaskName) }
@@ -768,10 +778,10 @@ $refillEligible = $Launch -and (-not $wavePreflight -or $wavePreflight.verdict -
 # receipts, so completions can open new work without ever exceeding the requested total.
 if (-not $NoRefill -and $refillEligible -and $ok -lt $Count -and $RefillForMinutes -gt 0) {
   $remaining = $Count - $ok
-  $deadline = (Get-Date).AddMinutes($RefillForMinutes)
+  $deadline = $RefillDeadlineUtc.ToUniversalTime()
   $emptyPasses = 0
   Write-Output "WAVE REFILL       remaining=$remaining cadence=${RefillCadenceSeconds}s deadline=$($deadline.ToString('o'))"
-  while ($remaining -gt 0 -and (Get-Date) -lt $deadline) {
+  while ($remaining -gt 0 -and [datetime]::UtcNow -lt $deadline) {
     Start-Sleep -Seconds $RefillCadenceSeconds
     $child = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath,
       '-Count', "$remaining", '-PointerFile', $PointerFile, '-Workspace', $Workspace,

@@ -5,8 +5,10 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -301,7 +303,9 @@ func TestWaveLauncherRefillsAndReconcilesProcessCensus(t *testing.T) {
 	for _, want := range []string{
 		"[int]$RefillCadenceSeconds = 60",
 		"[int]$RefillForMinutes = 240",
-		"while ($remaining -gt 0 -and (Get-Date) -lt $deadline)",
+		"while ($remaining -gt 0 -and [datetime]::UtcNow -lt $deadline)",
+		"[datetime]$RefillDeadlineUtc = [datetime]::MinValue",
+		"'-RefillDeadlineUtc', $RefillDeadlineUtc.ToString('o')",
 		"$refillEligible = $Launch",
 		"WAVE WAIT         initial allocation empty",
 		"Start-Sleep -Seconds $RefillCadenceSeconds",
@@ -309,10 +313,120 @@ func TestWaveLauncherRefillsAndReconcilesProcessCensus(t *testing.T) {
 		"WAVE CENSUS",
 		"os_worker_procs=",
 		"seat_free=",
+		"process_consistency=",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("wave launcher missing refill/census contract %q", want)
 		}
+	}
+}
+
+func TestWaveLauncherRefillsAfterCapacityOpensWithoutOverlaunch(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("launch_wave_detached.ps1 is a Windows launcher")
+	}
+	powershell, err := exec.LookPath("powershell.exe")
+	if err != nil {
+		t.Skip("powershell.exe unavailable")
+	}
+
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := t.TempDir()
+	tools := filepath.Join(tmp, "tools")
+	if err := os.MkdirAll(tools, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	copyFile := func(dst, src string) {
+		t.Helper()
+		body, readErr := os.ReadFile(src)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if writeErr := os.WriteFile(dst, body, 0o644); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+	}
+	copyFile(filepath.Join(tools, "launch_wave_detached.ps1"), filepath.Join(repoRoot, "tools", "launch_wave_detached.ps1"))
+	if err := os.MkdirAll(filepath.Join(tmp, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "docs", "pointer.md"), []byte("goal\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(tools, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("launch_goal_detached.ps1", `param(
+  [string]$PointerFile, [string]$Workspace, [string]$LogDir, [string]$Account,
+  [string]$WorkKind, [string]$FakExe, [int]$PreflightMaxWorkers,
+  [switch]$AllowTierFallback, [switch]$SkipPreflight, [switch]$ExtendStanding,
+  [string]$StandingTaskName
+)
+Add-Content -Path (Join-Path $PSScriptRoot 'dispatches.txt') -Value $Account
+`)
+	write("fake-fak.ps1", `param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Rest)
+if ($Rest -contains '-h') { Write-Output '  --count int'; exit 0 }
+$state = Join-Path $PSScriptRoot 'allocation-count.txt'
+$n = if (Test-Path $state) { [int](Get-Content $state) } else { 0 }
+$n++; Set-Content $state $n
+$countAt = [Array]::IndexOf($Rest, '--count'); $asked = [int]$Rest[$countAt + 1]
+$grant = if ($n -eq 1) { 0 } elseif ($n -eq 2) { [Math]::Min(2, $asked) } else { $asked }
+if ($grant -eq 0) {
+  Write-Output ('{"ok":false,"requested":' + $asked + ',"granted":0,"shortfall":' + $asked + ',"reason":"NO_FREE_SEATS","lanes":[]}')
+  exit 0
+}
+$lanes = @()
+1..$grant | ForEach-Object { $lanes += @{tag="acct-$n-$_"; pool="pool-$n-$_"; tier=1; session_cap=1} }
+@{ok=$true; requested=$asked; granted=$grant; shortfall=($asked-$grant); target_tier=1; distinct_pools=$grant; lanes=$lanes} |
+  ConvertTo-Json -Depth 5 -Compress
+`)
+	write("python.cmd", `@echo off
+set args=%*
+echo %args% | findstr /c:"dispatch_preflight.py" >nul
+if not errorlevel 1 (
+  echo {"verdict":"SPAWN_OK","reason":"capacity available","cap":10,"live":0,"headroom":10,"os_worker_procs":0,"seat":{"total":10,"free":10,"leased":0,"unattributed_live":0}}
+  exit /b 0
+)
+echo {"schema":"launch-admission/1","verdict":"ADMIT","reason":"CLEAR","failopen":false}
+exit /b 0
+`)
+
+	launcher := filepath.Join(tools, "launch_wave_detached.ps1")
+	fakeFak := filepath.Join(tools, "fake-fak.ps1")
+	cmd := exec.Command(powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", launcher,
+		"-Count", "5", "-PointerFile", "docs/pointer.md", "-Workspace", tmp, "-LogDir", filepath.Join(tmp, "logs"),
+		"-WorkKind", "engineering", "-Product", "claude", "-FakExe", fakeFak,
+		"-RefillCadenceSeconds", "1", "-RefillForMinutes", "1", "-Launch")
+	cmd.Env = append(os.Environ(), "PATH="+tools+string(os.PathListSeparator)+os.Getenv("PATH"), "FAK_LAUNCH_SPAWN_PACING_MS=1")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("launcher failed: %v\n%s", err, output)
+	}
+	body := string(output)
+	if !strings.Contains(body, "WAVE WAIT         initial allocation empty") ||
+		!strings.Contains(body, "WAVE REFILL DONE  launched requested total=5") {
+		t.Fatalf("launcher did not wait then complete its refill:\n%s", body)
+	}
+	dispatches, err := os.ReadFile(filepath.Join(tools, "dispatches.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Fields(string(dispatches))
+	if len(lines) != 5 {
+		t.Fatalf("dispatched %d workers, want exactly requested total 5 (no under/overlaunch): %q\n%s", len(lines), lines, body)
+	}
+	calls, err := os.ReadFile(filepath.Join(tools, "allocation-count.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(calls)); got != "3" {
+		t.Fatalf("allocation passes=%s, want 3 (empty, partial 2, remaining 3)", got)
 	}
 }
 

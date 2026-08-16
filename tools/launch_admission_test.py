@@ -361,7 +361,9 @@ class LauncherWiringTest(unittest.TestCase):
         text = self.WAVE.read_text(encoding="utf-8")
         self.assertIn("[int]$RefillCadenceSeconds = 60", text)
         self.assertIn("[int]$RefillForMinutes = 240", text)
-        self.assertIn("while ($remaining -gt 0 -and (Get-Date) -lt $deadline)", text)
+        self.assertIn("while ($remaining -gt 0 -and [datetime]::UtcNow -lt $deadline)", text)
+        self.assertIn("[datetime]$RefillDeadlineUtc = [datetime]::MinValue", text)
+        self.assertIn("'-RefillDeadlineUtc', $RefillDeadlineUtc.ToString('o')", text)
         self.assertIn("Start-Sleep -Seconds $RefillCadenceSeconds", text)
         self.assertIn("'-NoRefill', '-Launch'", text)
         self.assertIn("WAVE REFILL DONE", text)
@@ -370,6 +372,7 @@ class LauncherWiringTest(unittest.TestCase):
         self.assertIn("WAVE CENSUS", text)
         self.assertIn("os_worker_procs=", text)
         self.assertIn("seat_free=", text)
+        self.assertIn("process_consistency=", text)
 
     def test_wave_launcher_paces_spawns_with_a_jittered_delay(self):
         text = self.WAVE.read_text(encoding="utf-8")

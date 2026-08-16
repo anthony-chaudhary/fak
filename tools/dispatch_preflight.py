@@ -1757,7 +1757,15 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
     # starving each other (claude+GLM ran 3 total instead of 3+3 before this).
     # MAX of the two views: neither a stale lease nor an unleased orphan hides load.
     live = max(alive_kernel_for_cap or 0, alive_proc)
+    observed_seat_leases = int(seat.get("leased", 0))
     seat = account_unattributed_live_slots(seat, live)
+    process_gap = observed_seat_leases - alive_proc
+    seat["process_gap"] = process_gap
+    seat["process_consistency"] = (
+        "SEATS_EXCEED_PROCESS_TREES" if process_gap > 0 else
+        "PROCESS_TREES_EXCEED_SEATS" if process_gap < 0 else
+        "CONSISTENT"
+    )
     headroom = cap - live
     limiter = capacity_limiter(max_workers=max_workers, target=target,
                                host_cap_info=host_cap_info, seat=seat,

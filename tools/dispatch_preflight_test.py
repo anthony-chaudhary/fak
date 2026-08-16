@@ -387,6 +387,31 @@ class EvaluateVerdictTest(unittest.TestCase):
         self.assertEqual(p["os_worker_procs"], 2)
         self.assertEqual(p["verdict"], mod.REFUSE_AT_CAP)
 
+    def test_seat_process_disagreement_is_typed_without_weakening_capacity(self) -> None:
+        mod = load()
+        patch_checks(
+            mod, procs=2, kernel={"alive": 0, "target": 20, "verdict": "BELOW_TARGET"},
+            seat={"total": 12, "free": 9, "leased": 3, "depleted": False},
+        )
+        p = run_eval(mod, max_workers=20)
+        self.assertEqual(p["os_worker_procs"], 2)
+        self.assertEqual(p["live"], 2)
+        self.assertEqual(p["seat"]["process_gap"], 1)
+        self.assertEqual(p["seat"]["process_consistency"], "SEATS_EXCEED_PROCESS_TREES")
+        self.assertEqual(p["seat"]["free"], 9)
+
+    def test_process_tree_excess_is_typed_and_reserves_unattributed_capacity(self) -> None:
+        mod = load()
+        patch_checks(
+            mod, procs=4, kernel={"alive": 0, "target": 20, "verdict": "BELOW_TARGET"},
+            seat={"total": 12, "free": 11, "leased": 1, "depleted": False},
+        )
+        p = run_eval(mod, max_workers=20)
+        self.assertEqual(p["seat"]["process_gap"], -3)
+        self.assertEqual(p["seat"]["process_consistency"], "PROCESS_TREES_EXCEED_SEATS")
+        self.assertEqual(p["seat"]["unattributed_live"], 3)
+        self.assertEqual(p["seat"]["free"], 8)
+
     def test_refuse_inspect_when_host_check_errored(self) -> None:
         mod = load()
         patch_checks(mod, host={"safe": False, "error": "guard not found", "flagged": 0})
