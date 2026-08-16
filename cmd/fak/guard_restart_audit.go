@@ -261,11 +261,15 @@ func guardRestartAuditScan(journalDir string, seedDirs []string, trace string) g
 	if dir := strings.TrimSpace(journalDir); dir != "" {
 		files, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
 		for _, f := range files {
-			rows, err := journal.ReadRows(f)
+			// Segment-aware (#6488): the scan promises every hop row, and the glob only
+			// matches live *.jsonl files — the sealed <name>.jsonl.cut-<seq> archives are
+			// reachable only through the segment read (so they are read once, not twice).
+			rows, err := journal.ReadAllSegments(f)
 			if err != nil {
 				rep.Notes = append(rep.Notes, fmt.Sprintf("journal %s: %v", filepath.Base(f), err))
 				continue
 			}
+			rows = journal.WithoutCutAnchors(rows)
 			rep.Journals++
 			for _, row := range rows {
 				if row.Kind == "CHILD_CRASH" && row.Reason == guardCrashRestartExhaustedReason {

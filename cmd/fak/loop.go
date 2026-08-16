@@ -1170,23 +1170,55 @@ func renderLoopHealth(w io.Writer, rep loopmgr.HealthReport, ledger, registry st
 	if rep.Rollup.OSFiredNoLedgerRow > 0 {
 		fmt.Fprintf(w, " os-live-ledger-dark=%d", rep.Rollup.OSFiredNoLedgerRow)
 	}
-	fmt.Fprint(w, "\n\n")
+	fmt.Fprint(w, "\n")
+	// #6497: the liveness line above answers "is it ticking"; this one answers "is it
+	// working". A loop can be perfectly live on cadence and have failed every single
+	// recorded run, which is exactly how the quarantined scout/logvault loops looked.
+	fmt.Fprintf(w, "utility: runs=%d effects=%d no-fuel=%d unattributed=%d failed=%d alerting=%d never-succeeded=%d cost=%s\n",
+		rep.Rollup.Runs, rep.Rollup.Effects, rep.Rollup.NoFuel, rep.Rollup.Unattributed,
+		rep.Rollup.Failed, rep.Rollup.FailureAlert, rep.Rollup.NeverSucceeded,
+		loopHealthCost(rep.Rollup.CostMilliUSD, rep.Rollup.CostedRuns))
+	fmt.Fprint(w, "\n")
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "LOOP\tSTATE\tLAST\tAGE\tCADENCE\tRUNS\tWITNESSED\tKEEP\tDEBT")
+	fmt.Fprintln(tw, "LOOP\tSTATE\tLAST\tAGE\tCADENCE\tRUNS\tFAILED\tALERT\tWITNESSED\tKEEP\tDEBT")
 	for _, row := range rep.Rows {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\t%d\t%s\t%s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\t%d\t%s\t%d\t%s\t%s\n",
 			row.LoopID,
 			loopHealthState(row),
 			formatLoopTime(row.LastTickUnixNano),
 			loopHealthAge(row),
 			humanCadence(float64(row.CadenceSeconds)),
 			row.Runs,
+			row.Failed,
+			loopHealthAlert(row),
 			row.Witnessed,
 			loopHealthKeepRate(row.KeepRate),
 			loopHealthDebt(row.LearningDebt),
 		)
 	}
 	_ = tw.Flush()
+}
+
+// loopHealthAlert names the loudest #6497 alarm on a row. never-succeeded outranks a
+// mere repeated failure: a loop with zero successful recorded runs has never been
+// shown to work at all, which is a different conversation from one that broke today.
+func loopHealthAlert(row loopmgr.HealthRow) string {
+	switch {
+	case row.NeverSucceeded:
+		return fmt.Sprintf("never-succeeded(%d)", row.ConsecutiveFailures)
+	case row.FailureAlert:
+		return fmt.Sprintf("repeated-failure(%d)", row.ConsecutiveFailures)
+	}
+	return "-"
+}
+
+// loopHealthCost renders the reported cost, keeping "nobody measured it" distinct
+// from "it was free" — a zero over zero runs is the former.
+func loopHealthCost(milliUSD int64, runs int) string {
+	if runs == 0 {
+		return "unmeasured"
+	}
+	return fmt.Sprintf("$%.3f/%drun", float64(milliUSD)/1000, runs)
 }
 
 func loopHealthState(row loopmgr.HealthRow) string {
