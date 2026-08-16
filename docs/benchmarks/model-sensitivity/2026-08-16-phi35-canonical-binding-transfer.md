@@ -1,4 +1,4 @@
-# Phi-3.5-mini canonical bound-routing transfer — 2026-08-16
+# Phi-3.5-mini canonical bound-routing transfer â€” 2026-08-16
 
 **Verdict: reject admission at the frozen 23/24 bar.** Phi-3.5-mini produced
 **84/96 exact calls and 21/24 unique requests**, perfectly invariant across four
@@ -26,7 +26,7 @@ under cross-model sensitivity umbrella
   greedy generation, 128-token cap.
 - **Postprocessor:** unchanged fail-closed `send_email` literal binder; selected-tool
   changes are forbidden.
-- **Calls:** 96 total (24 requests × 4 source orders).
+- **Calls:** 96 total (24 requests Ã— 4 source orders).
 - **Admission rule, declared before the run:** at least 23/24 unique exact requests.
 
 ## Results

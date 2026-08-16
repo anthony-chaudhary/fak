@@ -1,4 +1,4 @@
-# Local 3B canonical bound-routing transfer — 2026-08-16
+# Local 3B canonical bound-routing transfer â€” 2026-08-16
 
 **Verdict: neither 3B model reaches the frozen 23/24 unique-exact admission bar.**
 Qwen2.5-3B and SmolLM3-3B each finish at **80/96 exact calls and 20/24
@@ -28,7 +28,7 @@ under cross-model sensitivity umbrella
   128-token cap.
 - **Postprocessor:** unchanged fail-closed `send_email` literal binder; selected-tool
   changes are forbidden.
-- **Calls:** 192 total (24 requests × 4 source orders × 2 models).
+- **Calls:** 192 total (24 requests Ã— 4 source orders Ã— 2 models).
 - **Admission rule, declared before the run:** at least 23/24 unique requests exact
   after binding.
 
@@ -62,7 +62,7 @@ always-failing requests were all three knowledge-base searches plus one email re
 it selected the correct search tool but produced wrong search arguments, and selected
 a notification tool for the email miss. SmolLM3 selected the correct tool on every
 call, but all three search arguments and one high-priority ticket argument remained
-wrong. This makes argument fidelity—not catalog order or structural validity—the
+wrong. This makes argument fidelityâ€”not catalog order or structural validityâ€”the
 observed floor at 3B.
 
 ## Interpretation and boundary

@@ -1,4 +1,4 @@
-# Qwen2.5-0.5B non-oracle shortlist routing — 2026-08-16
+# Qwen2.5-0.5B non-oracle shortlist routing â€” 2026-08-16
 
 **Verdict: reject the route at the frozen admission bar.** A deterministic lexical
 shortlist raised Qwen2.5-0.5B from the prior 24-tool baseline of 8/24 to **17/24**
@@ -34,7 +34,7 @@ under cross-model sensitivity umbrella
   the selected tool.
 - **Admission rule, declared before the run:** at least 18/24 exact at one size without
   a token or accelerator-time regression that erases the value.
-- **Calls:** 48 total (24 requests × 2 candidate sizes), one primary model. The
+- **Calls:** 48 total (24 requests Ã— 2 candidate sizes), one primary model. The
   predeclared SmolLM2-360M extension was not run because Qwen missed admission, leaving
   no decision value worth another 48 calls.
 
