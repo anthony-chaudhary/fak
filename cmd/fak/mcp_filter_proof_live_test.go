@@ -53,8 +53,13 @@ func TestLiveMCPFilterProofAB(t *testing.T) {
 	if proof.Verdict != "PASS" || proof.Active.TaskSuccessRate != 1 || proof.Control.TaskSuccessRate != 1 || proof.Active.SearchRecall != 1 || proof.Active.SavedDescriptorBytes <= 0 {
 		t.Fatalf("proof=%+v", proof)
 	}
-	if len(descriptorCounts) != 9 { // active search+route x3, then control direct x3
-		t.Fatalf("provider calls=%d counts=%v", len(descriptorCounts), descriptorCounts)
+	// The relation, not a frozen total: runMCPFilterLiveArm drives the same task
+	// table through both arms. The active arm cannot see the required tool, so each
+	// task costs a fak_tools_search round-trip plus the route call; the control arm
+	// sees it directly and lands each task in one.
+	const tasksPerArm = 3 // runMCPFilterLiveArm's task table
+	if want := tasksPerArm*2 + tasksPerArm; len(descriptorCounts) != want {
+		t.Fatalf("provider calls=%d want=%d counts=%v", len(descriptorCounts), want, descriptorCounts)
 	}
 }
 
