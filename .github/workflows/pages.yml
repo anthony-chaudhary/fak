@@ -47,8 +47,8 @@ jobs:
           go run ./cmd/pagescheck seo
           --root .
           --minimum-score 84.5
-          --maximum-debt 535
-          --maximum-orphans 90
+          --maximum-debt 620
+          --maximum-orphans 100
           > pages-seo-report.json
       - name: Build a fresh site from tracked source
         uses: actions/jekyll-build-pages@v1

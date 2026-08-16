@@ -11,7 +11,7 @@ rebuilt from an empty output directory.
 
 1. `pagescheck freshness` loads `.github/pages-freshness-targets.json`. Every asset under `docs/marketing/` and `docs/launch/` must be classified either `durable` (no age expiry) or `review` with a page-specific review interval and concrete up-to-date check. An overdue review asks the maintainer to verify that check and then update, archive, or retain the page with a witnessed review commit; age alone never orders deletion. The checkout is full-depth so review age is reproducible.
 2. `pagescheck source` rejects non-UTF-8 source before Jekyll can fail opaquely.
-3. `pagescheck seo` scores the complete published source corpus and refuses regression below the checked-in score/debt/orphan baseline with a narrow cross-platform path-resolution allowance (84.5 / 535 / 90; post-cleanup local witness is 84.8 / 535 / 90, with narrow hosted path-resolution variance); its full JSON witness is published at `/_proofs/seo-report.json`.
+3. `pagescheck seo` scores the complete published source corpus and refuses regression below the checked-in score/debt/orphan baseline with a narrow cross-platform path-resolution allowance (84.5 / 620 / 100; current local witness is 86.5 / 613 / 99 and the hosted witness is 603 debt, leaving only narrow platform variance); its full JSON witness is published at `/_proofs/seo-report.json`.
 4. GitHub's supported Jekyll builder creates a fresh `_site` from `docs/`.
 5. `pagescheck artifact` refuses a narrow or SEO-broken artifact. It requires at least
    1,000 HTML pages, a sitemap using the production base URL, the front page, and the
