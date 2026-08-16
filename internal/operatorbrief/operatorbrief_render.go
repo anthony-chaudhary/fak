@@ -29,6 +29,8 @@ func RenderCompact(r Report) string {
 	lines = appendCompactSection(lines, "human", r.Human, 6)
 	lines = appendCompactSection(lines, "agent", r.Agent, 6)
 	lines = appendCompactSection(lines, "watch", r.Watch, 6)
+	lines = appendDebtSection(lines, "origin_debt", r.OriginDebt, 6)
+	lines = appendDebtSection(lines, "late_found_debt", r.LateFoundDebt, 6)
 	lines = append(lines, "", "  -> "+r.NextAction, "  (--full for the full explanation; --json for agents)")
 	return strings.Join(lines, "\n")
 }
@@ -47,6 +49,28 @@ func appendCompactSection(lines []string, name string, items []Item, limit int) 
 	}
 	for _, it := range shown {
 		lines = append(lines, "    - "+it.Source+": "+it.Title)
+	}
+	if extra > 0 {
+		lines = append(lines, fmt.Sprintf("    ... +%d more (--full)", extra))
+	}
+	return lines
+}
+
+// appendDebtSection prints a debt bucket as a title plus one line per witness,
+// capped like the item sections so the compact view stays scannable. The two
+// buckets stay visibly separate: origin debt is cleanup, late-found debt is a
+// missing control.
+func appendDebtSection(lines []string, name string, records []DebtWitnessRecord, limit int) []string {
+	if len(records) == 0 {
+		return lines
+	}
+	lines = append(lines, "  "+name+":")
+	shown, extra := records, 0
+	if len(records) > limit {
+		shown, extra = records[:limit], len(records)-limit
+	}
+	for _, record := range shown {
+		lines = append(lines, "    - "+debtLine(record))
 	}
 	if extra > 0 {
 		lines = append(lines, fmt.Sprintf("    ... +%d more (--full)", extra))
@@ -79,6 +103,8 @@ func Render(r Report) string {
 	lines = appendSection(lines, "agent", r.Agent)
 	lines = appendSection(lines, "watch", r.Watch)
 	lines = appendSection(lines, "background", capItems(r.Background, 4))
+	lines = appendFullDebtSection(lines, "origin_debt", r.OriginDebt)
+	lines = appendFullDebtSection(lines, "late_found_debt", r.LateFoundDebt)
 	lines = append(lines, "", "  -> "+r.NextAction)
 	return strings.Join(lines, "\n")
 }
@@ -261,6 +287,20 @@ func appendSection(lines []string, name string, items []Item) []string {
 		line = appendField(line, " - ", it.Detail)
 		line = appendField(line, " | ", it.Action)
 		lines = append(lines, line)
+	}
+	return lines
+}
+
+// appendFullDebtSection is the --full expansion of appendDebtSection: every
+// witness, uncapped, under a blank-line-separated heading like the other full
+// sections.
+func appendFullDebtSection(lines []string, name string, records []DebtWitnessRecord) []string {
+	if len(records) == 0 {
+		return lines
+	}
+	lines = append(lines, "", "  "+name+":")
+	for _, record := range records {
+		lines = append(lines, "    - "+debtLine(record))
 	}
 	return lines
 }

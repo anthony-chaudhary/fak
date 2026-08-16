@@ -34,6 +34,13 @@ type Inputs struct {
 	OSP         *OSP
 	Previous    *Report
 
+	// DebtWitnesses carries the normalized task/session witness projection. The
+	// brief separates debt caught at origin (ordinary cleanup the fleet retires)
+	// from debt first found later (a control gap: the origin check that should
+	// have refused the artifact is missing), because the two need different
+	// operator responses.
+	DebtWitnesses []DebtWitnessRecord
+
 	// Reboot carries per-sample host-reboot advice from stallscan. Advised
 	// crossings surface as human-authority pages (approve and schedule a reboot),
 	// deduplicated by (axis, process) so one sustained crossing pages once.
@@ -79,8 +86,16 @@ type Report struct {
 	Agent       []Item         `json:"agent,omitempty"`
 	Watch       []Item         `json:"watch,omitempty"`
 	Background  []Item         `json:"background,omitempty"`
-	GateExit    *int           `json:"gate_exit,omitempty"`
-	GateMessage string         `json:"gate_message,omitempty"`
+
+	// OriginDebt is debt the origin control caught before handoff; LateFoundDebt
+	// is debt that reached a later stage before anyone noticed. Keeping them
+	// apart is the point: the first is cleanup, the second names a missing root
+	// control the operator has to install.
+	OriginDebt    []DebtWitnessRecord `json:"origin_debt,omitempty"`
+	LateFoundDebt []DebtWitnessRecord `json:"late_found_debt,omitempty"`
+
+	GateExit    *int   `json:"gate_exit,omitempty"`
+	GateMessage string `json:"gate_message,omitempty"`
 }
 
 // SourceState records whether each upstream pane was present and measured.
@@ -356,6 +371,7 @@ func Fold(in Inputs) Report {
 	if in.OSP != nil {
 		addOSP(&r, *in.OSP)
 	}
+	addDebtWitnesses(&r, in.DebtWitnesses)
 	r.Coherence = sourceCoherence(r.Sources)
 	if r.Coherence.Status == "mixed" {
 		r.addWatch("sources", "source snapshots differ", r.Coherence.Summary, r.Coherence.Action)

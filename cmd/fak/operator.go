@@ -42,6 +42,7 @@ func runOperatorBrief(stdout, stderr io.Writer, argv []string) int {
 	milestonePath := fs.String("milestone", "", "path to `fak milestone report --json` output")
 	heavinessPath := fs.String("heaviness", "", "path to `fak operator heaviness --json` output")
 	ospPath := fs.String("osp", "", "path to `fak steer prs --json` (operator-steerability overlay) output; a missing/unreadable payload marks the source unmeasured rather than failing the brief")
+	debtPath := fs.String("debt-witnesses", "", "path to task/session debt witness JSON (array or {records:[...]})")
 	previousPath := fs.String("previous", "", "path to previous `fak operator brief --json` output for change compression")
 	collect := fs.Bool("collect", false, "collect any missing report input live before folding (slower; artifact inputs still win)")
 	collectTimeout := fs.Int("collect-timeout", 300, "per-source timeout seconds for --collect cadence/report calls")
@@ -60,7 +61,7 @@ func runOperatorBrief(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak operator brief: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
-	if stdinUses(*cadencePath, *programPath, *milestonePath, *heavinessPath, *ospPath, *previousPath) > 1 {
+	if stdinUses(*cadencePath, *programPath, *milestonePath, *heavinessPath, *ospPath, *debtPath, *previousPath) > 1 {
 		fmt.Fprintln(stderr, "fak operator brief: only one report input may use '-' for stdin")
 		return 2
 	}
@@ -152,6 +153,14 @@ func runOperatorBrief(stdout, stderr io.Writer, argv []string) int {
 	if *ospPath != "" {
 		o := loadOSPBriefInput(*ospPath, os.Stdin)
 		in.OSP = &o
+	}
+	if *debtPath != "" {
+		records, err := loadDebtWitnesses(*debtPath, os.Stdin)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak operator brief: --debt-witnesses: %v\n", err)
+			return 2
+		}
+		in.DebtWitnesses = records
 	}
 	if *ospPath == "" && *collect {
 		// Unlike the program/milestone/heaviness collect arms, the OSP overlay
@@ -320,6 +329,30 @@ func loadHeavinessBriefReport(path string, stdin io.Reader) (scorecard.Payload, 
 		return r, fmt.Errorf("schema %q, want %q", r.Schema, heavinessscore.Schema)
 	}
 	return r, nil
+}
+
+func loadDebtWitnesses(path string, stdin io.Reader) ([]operatorbrief.DebtWitnessRecord, error) {
+	var data []byte
+	var err error
+	if path == "-" {
+		data, err = io.ReadAll(stdin)
+	} else {
+		data, err = os.ReadFile(path)
+	}
+	if err != nil {
+		return nil, err
+	}
+	var records []operatorbrief.DebtWitnessRecord
+	if err := json.Unmarshal(data, &records); err == nil {
+		return records, nil
+	}
+	var envelope struct {
+		Records []operatorbrief.DebtWitnessRecord `json:"records"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return nil, fmt.Errorf("parse JSON: %w", err)
+	}
+	return envelope.Records, nil
 }
 
 func loadPreviousOperatorBrief(path string, stdin io.Reader) (operatorbrief.Report, error) {

@@ -4826,6 +4826,36 @@
           "category": "incidental",
           "reason": "Field carrying the support witness record identifier through ingestion output; not a new proof concept.",
           "token": "WitnessID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "DebtWitnessRecord"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "DebtWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "addDebtWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "loadDebtWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "sortDebtWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "splitDebtWitnesses"
         }
       ],
       "id": "witness-proof",
@@ -4834,6 +4864,8 @@
         "Attestation",
         "ClaimUnwitnessedCount",
         "CoreLockWitnessTrailer",
+        "DebtWitnessRecord",
+        "DebtWitnesses",
         "FAK_WITNESS_REF",
         "FairnessWitnessed",
         "GATED_UNWITNESSED",
@@ -4874,6 +4906,7 @@
         "WitnessSHA256",
         "WitnessedProgressFloor",
         "WorkProfileWitness",
+        "addDebtWitnesses",
         "appendGuardCompactionWitnessTo",
         "benchFleetWitnessSeconds",
         "cacheWitnessReadback",
@@ -4916,6 +4949,7 @@
         "kpiWitnessedProgress",
         "latestGuardCompactionWitness",
         "liveTreeWitness",
+        "loadDebtWitnesses",
         "maturityBaselineRunWitness",
         "maxWitnessFileBytes",
         "mergeDispatchWitnessRecords",
@@ -4948,6 +4982,8 @@
         "runSessionCheckpointWitness",
         "sessionOpenRestartWitness",
         "setup_not_witnessed",
+        "sortDebtWitnesses",
+        "splitDebtWitnesses",
         "supportwitness",
         "taskQuality",
         "taskSufficient",
@@ -6688,30 +6724,126 @@
           "category": "incidental",
           "reason": "Per-band aggregation field for the existing release-debt metric, not a new score-debt concept",
           "token": "DebtByBand"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "DebtCaughtAtOrigin"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "DebtFoundLate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "DebtWitnessRecord"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "DebtWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "LateFoundDebt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "OriginDebt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "addDebtWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "appendDebtSection"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "appendFullDebtSection"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "debtLine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "debtPath"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "debtSummary"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "loadDebtWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "pluralDebt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "sortDebtWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
+          "token": "splitDebtWitnesses"
         }
       ],
       "id": "score-debt",
       "ignore": [
         "CacheValueGateDebtKey",
         "DebtByBand",
+        "DebtCaughtAtOrigin",
+        "DebtFoundLate",
+        "DebtWitnessRecord",
+        "DebtWitnesses",
         "GitDailyDebtKey",
+        "LateFoundDebt",
         "NegationOperatorDebtKey",
+        "OriginDebt",
         "ReleaseDebt",
         "ScorecardAxis",
         "ScorecardAxisOracle",
         "TestModeDebtGradeInvariants",
+        "addDebtWitnesses",
+        "appendDebtSection",
+        "appendFullDebtSection",
         "commit_quality_scorecard",
         "commit_quality_scorecard_test",
         "debtCeiling",
+        "debtLine",
+        "debtPath",
+        "debtSummary",
         "dogfoodDebtNextAction",
         "flow_debt",
         "lightgap_debt",
         "lightgap_scorecard",
+        "loadDebtWitnesses",
         "negation_operator_debt",
+        "pluralDebt",
         "scorecardPath",
         "scorecard_since",
         "scorecard_since_test",
-        "scorecards"
+        "scorecards",
+        "sortDebtWitnesses",
+        "splitDebtWitnesses"
       ],
       "min_files": 3,
       "name": "Scorecard / debt family",
