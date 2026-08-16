@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
@@ -40,7 +41,7 @@ func runSessionOpen(stdout, stderr io.Writer, argv []string) int {
 	}
 	sessionID := strings.TrimSpace(fs.Arg(0))
 	endpoint := strings.TrimRight(*base, "/") + "/v1/fak/session/" + url.PathEscape(sessionID)
-	client := &sessionOpenClient{http: http.DefaultClient, bearer: strings.TrimSpace(*bearer), localToken: strings.TrimSpace(*localToken)}
+	client := &sessionOpenClient{http: &http.Client{Timeout: 30 * time.Second}, bearer: strings.TrimSpace(*bearer), localToken: strings.TrimSpace(*localToken)}
 	var desc gateway.SessionClientDescriptor
 	if err := client.call(http.MethodGet, endpoint+"/client", nil, &desc); err != nil {
 		fmt.Fprintf(stderr, "fak session open: describe: %v\n", err)

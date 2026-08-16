@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -382,7 +383,7 @@ func (c Client) client() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
-	return http.DefaultClient
+	return &http.Client{Timeout: 30 * time.Second}
 }
 func (c Client) Push(reference string, a Artifact) error {
 	if _, _, e := Inspect(a.RawManifest, a.Blobs); e != nil {
