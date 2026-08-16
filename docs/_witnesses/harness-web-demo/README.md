@@ -11,6 +11,7 @@ Playwright Desktop Chrome captured the running loopback product at `http://127.0
 | Normal message/tool/artifact run | `?scenario=normal` | [`normal.png`](../_witnesses/harness-web-demo/normal.png) |
 | Scoped approval pending | `?scenario=approval` | [`approval.png`](../_witnesses/harness-web-demo/approval.png) |
 | Typed failure, minimal skin | `?scenario=failure&skin=minimal` | [`failure-minimal.png`](../_witnesses/harness-web-demo/failure-minimal.png) |
+| Live native coding run after restart | `?run=live-1` | [`live-coding-gpt-5.6-sol-2026-08-15.png`](live-coding-gpt-5.6-sol-2026-08-15.png) · [receipt](LIVE-CODING-GPT-5.6-SOL-2026-08-15.md) |
 
 Capture command shape:
 

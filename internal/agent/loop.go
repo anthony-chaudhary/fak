@@ -724,7 +724,7 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 			// quarantined / tainted), derived from signals the loop already read (#5148).
 			cfg.emitProgress(ProgressEvent{
 				Kind: ProgressResultAdmitted, Turn: turn + 1, CallID: tc.ID, Tool: tool,
-				Taint: admittedTaint(ev, content),
+				Taint: admittedTaint(ev, content), Summary: progressResultSummary(tool, content),
 			})
 			// Capture this call's result as a prior output for the next speculation (only
 			// when speculating, so the historical loop allocates nothing extra).

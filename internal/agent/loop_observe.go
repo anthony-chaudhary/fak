@@ -53,6 +53,7 @@ type ProgressEvent struct {
 	Verdict string            `json:"verdict,omitempty"` // ALLOW/DENY/TRANSFORM/QUARANTINE/... (call_adjudicated)
 	Reason  string            `json:"reason,omitempty"`  // closed refusal token on a deny (call_adjudicated)
 	Taint   string            `json:"taint,omitempty"`   // clean | quarantined | tainted (result_admitted)
+	Summary string            `json:"summary,omitempty"` // bounded non-Read result for operator timelines
 }
 
 // ProgressObserver receives typed loop-lifecycle events as the owned loop runs. It is

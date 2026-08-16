@@ -194,3 +194,9 @@ func TestLiveAdapterFailureBecomesTypedRunFailure(t *testing.T) {
 		t.Fatalf("failure=%+v", failure)
 	}
 }
+
+func TestPageDeepLinksPersistedRun(t *testing.T) {
+	if !strings.Contains(page, `query.get("run")`) || !strings.Contains(page, `history.replaceState`) {
+		t.Fatal("page does not deep-link persisted run")
+	}
+}

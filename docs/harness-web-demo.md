@@ -43,3 +43,6 @@ executes a browser-supplied command.
 Rollback is exact: stop `harnesswebdemo` and restart without `-fak-url`/`-workspace` for
 the deterministic offline product, or stop the workspace-armed `fak serve` process. Use
 `fak harness gallery show --id coding-workspace` for the corresponding user-needs pack.
+
+
+The real edit/test/diff browser receipt and restart capture are archived in [the live coding witness](_witnesses/harness-web-demo/LIVE-CODING-GPT-5.6-SOL-2026-08-15.md).
