@@ -148,6 +148,9 @@ func canonicalLocalReceiptPath(root, path string) (string, bool) {
 		absolute = filepath.Join(parent, filepath.Base(absolute))
 	}
 	root = filepath.Clean(root)
+	if resolvedRoot, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolvedRoot
+	}
 	rel, err := filepath.Rel(root, absolute)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return "", false

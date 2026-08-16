@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -12,6 +13,26 @@ import (
 
 func receiptCall(trace, tool, args string, seq uint64) *abi.ToolCall {
 	return &abi.ToolCall{TraceID: trace, Tool: tool, SeqNo: seq, Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(args)}}
+}
+
+func TestCanonicalLocalReceiptPathResolvesRootSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows temp roots are not symlink aliases")
+	}
+	realRoot := t.TempDir()
+	aliasRoot := filepath.Join(t.TempDir(), "workspace")
+	if err := os.Symlink(realRoot, aliasRoot); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	target := filepath.Join(aliasRoot, "scratch.txt")
+	if err := os.WriteFile(target, []byte("scratch"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := canonicalLocalReceiptPath(aliasRoot, target)
+	want := filepath.Join(realRoot, "scratch.txt")
+	if !ok || got != want {
+		t.Fatalf("canonicalLocalReceiptPath = %q,%v, want %q,true", got, ok, want)
+	}
 }
 
 func TestWriteReceiptPostExecutionBoundary(t *testing.T) {
