@@ -831,6 +831,7 @@ func TestRunCommitRecordsTreeReceiptOnlyAfterSuccessfulBuildAndCommit(t *testing
 	}
 }
 
+// The human line is the live witness that qualifies exact-tree pre-push reuse.
 func TestRenderCommitResultShowsBuildCheckOutcome(t *testing.T) {
 	res := safecommit.Result{Committed: true, SHA: "abc", Paths: []string{"x.go"}, BuildCheck: &safecommit.BuildCheckResult{Outcome: safecommit.BuildCheckSkippedTimeout}}
 	var out bytes.Buffer
