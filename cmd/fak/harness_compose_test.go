@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -13,7 +15,7 @@ func TestHarnessComposeCLIMixedLayersAndProvenance(t *testing.T) {
 	raw := `{"schema":"fak.harness-assets/v1alpha1","layers":[
 		{"id":"company","scope":"company","assets":[{"kind":"policy","id":"tools","grants":["search","shell"],"denies":["refund"]},{"kind":"workflow","id":"audit","value":"record","mandatory":true}]},
 		{"id":"person","scope":"person","assets":[{"kind":"ui","id":"density","value":"compact"}]},
-		{"id":"matter-7","scope":"project","assets":[{"kind":"memory","id":"matter","boundary":"matter-7","value":"private"},{"kind":"policy","id":"tools","denies":["shell"]}]},
+		{"id":"matter-7","scope":"project","assets":[{"kind":"memory","id":"matter","boundary":"matter-7","value":"private"},{"kind":"policy","id":"tools","grants":["search"],"denies":["shell"]}]},
 		{"id":"legal","scope":"domain","assets":[{"kind":"instruction","id":"citations","value":"primary-only"},{"kind":"tool","id":"research","value":"legal-search"}]}
 	]}`
 	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
@@ -33,9 +35,27 @@ func TestHarnessComposeCLIMixedLayersAndProvenance(t *testing.T) {
 			t.Fatalf("missing %s:\n%s", want, out.String())
 		}
 	}
-	if strings.Contains(out.String(), `"shell"`) && !strings.Contains(out.String(), `"denies": [\n        "refund",\n        "shell"`) {
-		t.Fatalf("shell was not narrowed:\n%s", out.String())
+	var result struct {
+		Assets []struct {
+			Kind   string   `json:"kind"`
+			ID     string   `json:"id"`
+			Grants []string `json:"grants"`
+			Denies []string `json:"denies"`
+		} `json:"assets"`
 	}
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	for _, asset := range result.Assets {
+		if asset.Kind == "policy" && asset.ID == "tools" {
+			if !reflect.DeepEqual(asset.Grants, []string{"search"}) || !reflect.DeepEqual(asset.Denies, []string{"refund", "shell"}) {
+				t.Fatalf("policy tools = grants %v denies %v", asset.Grants, asset.Denies)
+			}
+			return
+		}
+	}
+	t.Fatal("composed policy/tools asset missing")
+
 }
 
 func TestHarnessComposeCLIRefusesPolicyWidening(t *testing.T) {
