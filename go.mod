@@ -11,10 +11,10 @@ module github.com/anthony-chaudhary/fak
 
 go 1.26
 
-// Pin the patched toolchain: go1.26.4 ships crypto/tls GO-2026-5856 (SSRF/TLS
-// handshake), which govulncheck flags via gateway.Serve and the net stack.
-// go1.26.5 carries the fix; GOTOOLCHAIN=auto fetches it in CI and locally.
-toolchain go1.26.5
+// Pin the patched toolchain: go1.26.6 fixes the reachable standard-library
+// vulnerabilities reported by govulncheck against go1.26.5.
+// GOTOOLCHAIN=auto fetches the same patched release in CI and locally.
+toolchain go1.26.6
 
 require golang.org/x/term v0.44.0
 
