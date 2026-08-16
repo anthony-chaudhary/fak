@@ -702,6 +702,11 @@
           "category": "incidental",
           "reason": "local estimate of suffix cache creation attributed to one compaction fire",
           "token": "inducedCacheCreation"
+        },
+        {
+          "category": "incidental",
+          "reason": "Bounded quantobs schema symbol, not a cache concept.",
+          "token": "CodeKVCache"
         }
       ],
       "id": "cache",
@@ -722,6 +727,7 @@
         "CacheValueFacts",
         "CacheValueGateDebtKey",
         "CodeCacheScope",
+        "CodeKVCache",
         "DefaultCacheBytes",
         "DefaultCacheStateAllowlist",
         "FAK_ORG_POLICY_CACHE_PATH",
@@ -2307,6 +2313,11 @@
           "category": "incidental",
           "reason": "idea-scout local data structure holding conversion filing checks",
           "token": "ConversionGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Bounded quantobs schema symbol, not a guard-gate concept.",
+          "token": "CodeRuntimeDelegated"
         }
       ],
       "exclude": [
@@ -2335,6 +2346,7 @@
         "CaseDelegate",
         "ClaimRuntimeDelegated",
         "ClassGuard",
+        "CodeRuntimeDelegated",
         "ConversionGate",
         "CorrectnessGate",
         "DELEGATE",
@@ -6026,6 +6038,11 @@
           "category": "incidental",
           "reason": "Closed verdict token for the existing dispatch preflight policy fold; not a separately configurable capability",
           "token": "PreflightRefuseWIPLimit"
+        },
+        {
+          "category": "incidental",
+          "reason": "Bounded quantobs schema symbol, not a policy-capability concept.",
+          "token": "EvidenceAdjudication"
         }
       ],
       "exclude": [
@@ -6051,6 +6068,7 @@
         "DispositionCapability",
         "DispositionMultiCapability",
         "ErrNotAdjudicated",
+        "EvidenceAdjudication",
         "FAK_ORG_POLICY_CACHE_PATH",
         "FAK_ORG_POLICY_URL",
         "FAK_PREFLIGHT_ALLOW_BIN_SKEW",
@@ -6536,6 +6554,11 @@
           "category": "incidental",
           "reason": "Study comparison row identifier, not a contextual configuration concept",
           "token": "ContextualID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Bounded quantobs schema symbol, not a context-ctx concept.",
+          "token": "SensitiveContext"
         }
       ],
       "id": "context-ctx",
@@ -6557,6 +6580,7 @@
         "RestoreCalls",
         "RetainedContextBytes",
         "SearchRecall",
+        "SensitiveContext",
         "WithAffinity",
         "affinityContextKey",
         "appendGuardCompactionWitnessTo",
@@ -7570,6 +7594,11 @@
           "category": "incidental",
           "reason": "Typed machine reason code in the bitnetmeta contract, not a support-maturity concept.",
           "token": "unsupported_activation"
+        },
+        {
+          "category": "incidental",
+          "reason": "Bounded quantobs schema symbol, not a support-maturity concept.",
+          "token": "CodeUnsupportedCombination"
         }
       ],
       "id": "support-maturity",
@@ -7580,6 +7609,7 @@
         "CaseSupported",
         "CaseUnsupported",
         "ClaudeKeychainSupported",
+        "CodeUnsupportedCombination",
         "ConfidenceUnsupported",
         "ConfigDefaultCoverage",
         "ConfigDescriptionCoverage",
