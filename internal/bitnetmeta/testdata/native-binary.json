@@ -1,0 +1,10 @@
+{
+  "schema": "bitnetmeta/v1",
+  "artifact": {"id":"native-binary-demo","format":"safetensors","version":"1","origin":"native-trained"},
+  "weights": {"semantic":"native-binary","label":"1-bit","levels":[-1,1]},
+  "activation": {"format":"integer","bits":8},
+  "packing": {"scheme":"bitplane-lsb","storage_bits":8,"values_per_unit":8},
+  "recipe": {"id":"native-bitnet","version":"1","kind":"native-training"},
+  "runtime": {"id":"bitnet.cpp","version":"2026.08"},
+  "hardware": {"measured":false}
+}

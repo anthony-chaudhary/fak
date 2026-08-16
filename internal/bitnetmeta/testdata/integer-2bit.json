@@ -1,0 +1,9 @@
+{
+  "schema": "bitnetmeta/v1",
+  "artifact": {"id":"integer-2bit-demo","format":"safetensors","version":"1","origin":"post-training-converted"},
+  "weights": {"semantic":"integer-2bit","label":"2-bit","levels":[-2,-1,0,1]},
+  "activation": {"format":"float","bits":16},
+  "packing": {"scheme":"two-bit-codes","storage_bits":8,"values_per_unit":4},
+  "recipe": {"id":"int2-quantize","version":"1","kind":"post-training-quantization"},
+  "hardware": {"measured":false}
+}

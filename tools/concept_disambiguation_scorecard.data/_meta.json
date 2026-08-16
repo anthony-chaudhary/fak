@@ -7530,6 +7530,46 @@
           "category": "incidental",
           "reason": "Return structure for ingestion mechanics; not a maturity concept.",
           "token": "IngestResult"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed machine reason code in the bitnetmeta contract, not a support-maturity concept.",
+          "token": "ReasonUnsupportedRecipe"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed machine reason code in the bitnetmeta contract, not a support-maturity concept.",
+          "token": "unsupported_recipe"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed machine reason code in the bitnetmeta contract, not a support-maturity concept.",
+          "token": "ReasonUnsupportedPacking"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed machine reason code in the bitnetmeta contract, not a support-maturity concept.",
+          "token": "unsupported_packing"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed machine reason code in the bitnetmeta contract, not a support-maturity concept.",
+          "token": "ReasonRuntimeDelegation"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed machine reason code in the bitnetmeta contract, not a support-maturity concept.",
+          "token": "runtime_delegation_required"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed machine reason code in the bitnetmeta contract, not a support-maturity concept.",
+          "token": "ReasonUnsupportedActivation"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed machine reason code in the bitnetmeta contract, not a support-maturity concept.",
+          "token": "unsupported_activation"
         }
       ],
       "id": "support-maturity",
@@ -7591,12 +7631,16 @@
         "QUANTPROV_UNSUPPORTED_QUANTIZER",
         "QUANTPROV_UNSUPPORTED_VERSION",
         "RUNTIME_NATIVE_PROBE_REQUIRED",
+        "ReasonRuntimeDelegation",
         "ReasonSupported",
         "ReasonUnknownScheme",
+        "ReasonUnsupportedActivation",
         "ReasonUnsupportedEncoding",
         "ReasonUnsupportedFormat",
         "ReasonUnsupportedFusion",
+        "ReasonUnsupportedPacking",
         "ReasonUnsupportedQuantizer",
+        "ReasonUnsupportedRecipe",
         "ReasonUnsupportedScale",
         "ReasonUnsupportedTransition",
         "ReasonUnsupportedVersion",
@@ -7675,6 +7719,7 @@
         "runInfoWorkCoverage",
         "runMaturityBaseline",
         "runMaturityBaselinePromote",
+        "runtime_delegation_required",
         "scoreparity",
         "seenSupport",
         "setup_parity_clean",
@@ -7693,8 +7738,11 @@
         "targetcoverage",
         "topncoverage",
         "unsupported",
+        "unsupported_activation",
         "unsupported_encoding",
         "unsupported_extension",
+        "unsupported_packing",
+        "unsupported_recipe",
         "unsupported_runtime_fusion",
         "unsupported_scale",
         "workCoverage",

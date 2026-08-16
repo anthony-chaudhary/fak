@@ -1,0 +1,10 @@
+{
+  "schema": "bitnetmeta/v1",
+  "artifact": {"id":"native-ternary-demo","format":"gguf","version":"3","origin":"native-trained"},
+  "weights": {"semantic":"native-ternary-1.58bit","label":"1.58-bit","levels":[-1,0,1]},
+  "activation": {"format":"integer","bits":8},
+  "packing": {"scheme":"i2_s-pair","storage_bits":8,"values_per_unit":4},
+  "recipe": {"id":"native-bitnet","version":"1","kind":"native-training"},
+  "runtime": {"id":"bitnet.cpp","version":"2026.08"},
+  "hardware": {"measured":true,"vendor":"cpu","architecture":"x86-64-avx2","metric":"tokens_per_second","value":12.5,"unit":"token/s","witness":"fixture://native-ternary-avx2"}
+}
