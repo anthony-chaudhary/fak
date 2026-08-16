@@ -8,11 +8,11 @@
     "failures_in_denominator": true
   },
   "baseline": {
-    "id": "pending-tuned-alternative",
-    "runnable": false,
-    "tuned": false,
-    "frozen": false,
-    "evidence": "not-yet: select before participant timing"
+    "id": "create-mastra-1.25.0",
+    "runnable": true,
+    "tuned": true,
+    "frozen": true,
+    "evidence": "docs/benchmarks/harness-creation/receipts/windows-clean-mastra-calibration-1/README.md"
   },
   "runs": [
     {

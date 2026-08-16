@@ -1,0 +1,205 @@
+run_id=windows-clean-mastra-calibration-1
+participant_id=maintainer-baseline-calibration
+participant_class=maintainer-calibration independent=false
+start=2026-08-16T04:27:56.0606794+00:00
+cache_state=empty npm cache
+node_host=v24.8.0
+generator=create-mastra@1.25.0 runtime=@mastra/core@1.59.0
+install: [36m⠋[39m Installing dependencies...
+install: [32m✔[39m  Dependencies installed successfully
+install: │
+install: ◆  Skipped skills (--no-skills). Skipped git (--no-git).
+install: │
+install: └  
+install:    [32mTo start your project:[39m
+install: 
+install:     [36mcd[39m product
+install:     [36mnpm run dev[39m
+install:   
+install: 
+install: npm notice
+install: npm notice New minor version of npm available! 11.6.0 -> 11.19.0
+install: npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.19.0
+install: npm notice To update run: npm install -g npm@11.19.0
+install: npm notice
+install_seconds=28.003
+selfcheck: BASELINE_SELFCHECK ok reply="readonly support ready: refund status" mutation_allowed=false
+selfcheck_seconds=0.139
+build: 
+build: > product@1.0.0 build
+build: > mastra build
+build: 
+build: [32mINFO[39m [2026-08-15 21:28:26.131 -0700] (Mastra CLI): [36mAnalyzing dependencies...[39m
+build: [32mINFO[39m [2026-08-15 21:28:29.372 -0700] (Mastra CLI): [36mOptimizing dependencies...[39m
+build: [32mINFO[39m [2026-08-15 21:28:29.376 -0700] (Mastra CLI): [36mBundling Mastra application[39m
+build: [32mINFO[39m [2026-08-15 21:28:32.064 -0700] (Mastra CLI): [36mBundling Mastra done[39m
+build: [32mINFO[39m [2026-08-15 21:28:32.064 -0700] (Mastra CLI): [36mCopying public files[39m
+build: [32mINFO[39m [2026-08-15 21:28:32.064 -0700] (Mastra CLI): [36mDone copying public files[39m
+build: [32mINFO[39m [2026-08-15 21:28:32.065 -0700] (Mastra CLI): [36mCopying .npmrc file[39m
+build: [32mINFO[39m [2026-08-15 21:28:32.065 -0700] (Mastra CLI): [36mDone copying .npmrc file[39m
+build: [32mINFO[39m [2026-08-15 21:28:32.065 -0700] (Mastra CLI): [36mInstalling dependencies[39m
+build: added 156 packages in 5s
+build: [32mINFO[39m [2026-08-15 21:28:37.126 -0700] (Mastra CLI): [36madded 156 packages in 5s[39m
+build: [32mINFO[39m [2026-08-15 21:28:37.169 -0700] (Mastra CLI): [36mDone installing dependencies[39m
+build: [32mINFO[39m [2026-08-15 21:28:37.169 -0700] (Mastra CLI): [36mGenerating package-lock.json for deploy[39m
+build: [32mINFO[39m [2026-08-15 21:28:38.262 -0700] (Mastra CLI): [36mDone generating package-lock.json[39m
+build: [32mINFO[39m [2026-08-15 21:28:38.271 -0700] (Mastra CLI): [36mBuild successful, you can now deploy the .mastra/output directory to your target platform.[39m
+build: [32mINFO[39m [2026-08-15 21:28:38.271 -0700] (Mastra CLI): [36mTo start the server, run: node .mastra/output/index.mjs[39m
+build_seconds=14.155
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/code-frame@8.0.0',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/compat-data@8.0.0',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/core@8.0.1',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/generator@8.0.0',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/helper-annotate-as-pure@8.0.0',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/helper-compilation-targets@8.0.0',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/helper-create-class-features-plugin@8.0.1',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/helper-globals@8.0.0',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/helper-member-expression-to-functions@8.0.0',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/helper-module-imports@8.0.0',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/helper-module-transforms@8.0.1',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/helper-optimise-call-expression@8.0.0',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/helper-plugin-utils@8.0.1',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/helper-replace-supers@8.0.1',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/helper-skip-transparent-expression-wrappers@8.0.0',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/helper-string-parser@8.0.0',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/helper-validator-identifier@8.0.4',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/helper-validator-option@8.0.0',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/helpers@8.0.0',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/parser@8.0.4',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/plugin-syntax-typescript@8.0.3',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/plugin-transform-modules-commonjs@8.0.1',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/plugin-transform-typescript@8.0.1',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/preset-typescript@8.0.1',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/template@8.0.0',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/traverse@8.0.4',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: npm warn EBADENGINE Unsupported engine {
+rerun: npm warn EBADENGINE   package: '@babel/types@8.0.4',
+rerun: npm warn EBADENGINE   required: { node: '^22.18.0 || >=24.11.0' },
+rerun: npm warn EBADENGINE   current: { node: 'v24.8.0', npm: '11.6.0' }
+rerun: npm warn EBADENGINE }
+rerun: 
+rerun: up to date, audited 496 packages in 1s
+rerun: 
+rerun: 143 packages are looking for funding
+rerun:   run `npm fund` for details
+rerun: 
+rerun: 2 low severity vulnerabilities
+rerun: 
+rerun: To address all issues, run:
+rerun:   npm audit fix
+rerun: 
+rerun: Run `npm audit` for details.
+rerun_seconds=1.586
+user_sha_before=87f15ef122d82d9f7bd306f3522699758af4a799d828f16a9f5874b7c0ccd99a
+user_sha_after=87f15ef122d82d9f7bd306f3522699758af4a799d828f16a9f5874b7c0ccd99a
+owned_files=2
+rebuilds=1 failures=0 help_requests=0
+upgrade_command=npm install --save-exact @mastra/core@1.59.0 && npm install --save-dev --save-exact mastra@1.25.0
+rollback=restore package.json package-lock.json and task-card TypeScript files; npm ci
+elapsed_seconds=44.157
+stop=2026-08-16T04:28:40.2008891+00:00
+outcome=success

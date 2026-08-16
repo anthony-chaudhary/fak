@@ -59,8 +59,10 @@ commands and exits; files changed; rebuild count and duration; outcome; help req
 privacy-safe transcript path; and, for weekend runs, independent authorship and conformance.
 
 The baseline must be runnable, tuned, selected, and frozen before participant timing. The
-checked-in placeholder deliberately keeps both promotional claims `not_yet`. Maintainer
-warm calibration remains visible but is excluded from the independent denominator.
+frozen next-best alternative is [`create-mastra@1.25.0`](baselines/create-mastra-1.25.0/README.md);
+its clean calibration is [archived here](receipts/windows-clean-mastra-calibration-1/README.md).
+Baseline readiness makes future independent runs eligible but does not support either
+claim. Maintainer calibration remains excluded from the independent denominator.
 
 ## Maintainer calibrations
 
