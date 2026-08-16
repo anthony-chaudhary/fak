@@ -101,7 +101,8 @@ func fetchIssueReceiptWithin(ctx context.Context, r semanticRecord, timeout time
 		return "", "", e
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	client := &http.Client{Timeout: timeout}
+	client := *http.DefaultClient
+	client.Timeout = timeout
 	resp, e := client.Do(req)
 	if e != nil {
 		return "", req.URL.String(), e
