@@ -1,4 +1,4 @@
-# Shipped `fak harness web` launch witness — 2026-08-15
+# Shipped `fak harness web` launch witness â€” 2026-08-15
 
 Issue: #6980.
 
