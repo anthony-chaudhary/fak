@@ -2,19 +2,23 @@ package hooks
 
 import (
 	"os/exec"
+	"strings"
 	"testing"
 )
 
-// gate_brandconsistency_test.go — parity for the BRAND_CONSISTENCY gate. Because the Python
-// checker is --audit-tree only (no --audit-staged / --root), the staged runParity harness does
-// not cover it. Instead we (1) replay the EXACT golden vectors from
-// tools/check_brand_consistency_test.py — the oracle's own must-flag / must-not-flag samples —
-// against the ported per-line decision, (2) prove the live tracked tree is clean (the twin of
-// the Python test_live_tree_is_clean), and (3) run a verdict-level differential against the live
-// Python over the real tree.
+// gate_brandconsistency_test.go — the BRAND_CONSISTENCY contract. the retired Python checker
+// and its _test.py were retired in #6265 (the Go gate had already been the committed checker), so
+// this file is now the SOLE owner of the behavior the oracle used to pin. It keeps every one of
+// the oracle's assertions: (1) the EXACT golden vectors from check_brand_consistency_test.py —
+// its must-flag / must-not-flag samples — replayed against the per-line decision, (2) the
+// boundary cases the retired verdict-level differential used to backstop (window, sentence stop,
+// word boundary, banner spacing, case), each expectation captured from the live Python before it
+// was deleted, (3) the audit() file-walk itself — 1-based line numbers, stripped detail, exempt
+// and non-scanned paths skipped, and (4) the live tracked tree is clean (the twin of the Python
+// test_live_tree_is_clean).
 
 // brandDrift are primary-descriptor DRIFT lines (fak declared to BE a retired descriptor) — the
-// gate MUST flag each. Copied verbatim from check_brand_consistency_test.py DRIFT.
+// gate MUST flag each. Inherited verbatim from check_brand_consistency_test.py DRIFT.
 var brandDrift = []string{
 	"`fak` is an agent tool firewall: a single Go binary that sits between an agent and its tools",
 	"fak — agent tool firewall",
@@ -24,7 +28,8 @@ var brandDrift = []string{
 }
 
 // brandAllowed are legitimate secondary uses (synonym lists, "also described as", the named
-// asset) — the gate MUST NOT flag any. Copied verbatim from check_brand_consistency_test.py ALLOWED.
+// asset) — the gate MUST NOT flag any. Inherited verbatim from check_brand_consistency_test.py
+// ALLOWED.
 var brandAllowed = []string{
 	"`fak` is an **agent kernel** (also described as an *agent tool firewall*): an in-process gate",
 	"<sub>Topics: agent kernel · agent tool firewall · AI agent security · prompt injection</sub>",
@@ -64,7 +69,6 @@ func TestBrandConsistency_FileFilter(t *testing.T) {
 		{"cmd/fak/main.go", true},
 		{"index.html", true},
 		{"CITATION.cff", true},
-		{"tools/check_brand_consistency.py", false},             // exempt file (Python oracle)
 		{"tools/gen_structured_data.py", false},                 // exempt file
 		{"llms-full.txt", false},                                // exempt file (generated)
 		{"internal/hooks/gate_brandconsistency.go", false},      // exempt: this gate's own source
@@ -99,41 +103,60 @@ func TestBrandConsistency_LiveTreeClean(t *testing.T) {
 	}
 }
 
-// TestBrandConsistency_PythonParity is the verdict-level differential: the ported gate and the
-// live Python checker must agree (clean vs. violation) over the SAME real tracked tree. The
-// Python checker is --audit-tree only and derives its root from __file__, so both sides scan the
-// real clone. Skipped under -short or when python/git is absent.
-func TestBrandConsistency_PythonParity(t *testing.T) {
-	if testing.Short() {
-		t.Skip("python parity skipped under -short")
+// TestBrandConsistency_PrimaryFormBoundaries pins the edges of the primary-descriptor decision
+// that the retired Python differential used to backstop. Every want below was captured from the
+// live the retired Python checker (PRIMARY_RE + ALLOW_MARKERS) before it was deleted in
+// #6265, so these are the oracle's verdicts, not re-derived guesses. They fence the four ways
+// the regex can drift: the 40-char lazy window between "fak" and the descriptor, the [^.\n]
+// sentence stop, the \bfak\b word boundary, and the banner branch's mandatory spacing.
+func TestBrandConsistency_PrimaryFormBoundaries(t *testing.T) {
+	cases := []struct {
+		line string
+		want bool
+	}{
+		{"fak - agent tool firewall", true},                                      // ASCII-hyphen banner
+		{"fak — the agent tool firewall", true},                                  // em-dash banner, optional article
+		{"FAK IS AN AGENT TOOL FIREWALL", true},                                  // case-insensitive
+		{"fak, the in-process kernel, is a tool call policy gateway", true},      // inside the 40-char window
+		{"fak is an tool-call policy gateway", true},                             // hyphenated spelling
+		{"   fak is an agent tool firewall   ", true},                            // leading/trailing space is irrelevant
+		{"the fak binary is an agent tool firewall", true},                       // fak need not start the line
+		{"fak: agent tool firewall", false},                                      // banner branch needs \s+ BEFORE the colon
+		{"fak" + strings.Repeat(" x", 25) + " is an agent tool firewall", false}, // past the 40-char window
+		{"fak. It is an agent tool firewall", false},                             // [^.\n]: a sentence stop breaks the claim
+		{"fakery is an agent tool firewall", false},                              // \bfak\b: not the word "fak"
+		{"`fak` is the Fused Agent Kernel and an agent kernel", false},           // the kept primary noun
+		{"fak is an agent tool firewall card", false},                            // ALLOW_MARKERS: \bcard\b
 	}
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
+	for _, c := range cases {
+		if got := brandLineViolates(c.line); got != c.want {
+			t.Errorf("brandLineViolates(%q) = %v, want %v", c.line, got, c.want)
+		}
 	}
-	py, pyArgs := pyExe()
-	if py == "" {
-		t.Skip("python not on PATH")
-	}
-	clone := repoRoot(t)
+}
 
-	tree, err := ReadTrackedTree(clone)
+// TestBrandConsistency_TreeWalk pins audit()'s file walk now that the Python original is gone:
+// in-scope files are scanned line by line, findings carry the path and a 1-BASED line number
+// with the line stripped, and exempt files, exempt prefixes and unscanned extensions contribute
+// nothing — even when they carry the very same drift line.
+func TestBrandConsistency_TreeWalk(t *testing.T) {
+	drift := "fak is an agent tool firewall"
+	tree := treeFromFiles(map[string]string{
+		"README.md":                    "intro\n   " + drift + "   \nouttro\n",
+		"llms-full.txt":                drift + "\n", // exempt file
+		"visuals/poster.md":            drift + "\n", // exempt prefix
+		"tools/gen_structured_data.py": drift + "\n", // exempt file (and unscanned ext)
+		"docs/design.png":              drift + "\n", // unscanned extension
+	})
+	findings, err := gateBrandConsistencyTree(tree)
 	if err != nil {
-		t.Skipf("ReadTrackedTree: %v", err)
+		t.Fatalf("gate error: %v", err)
 	}
-	findings, gerr := gateBrandConsistencyTree(tree)
-	if gerr != nil {
-		t.Fatalf("gate error: %v", gerr)
+	if len(findings) != 1 {
+		t.Fatalf("want exactly the README drift flagged, got %+v", findings)
 	}
-	goBad := len(findings) > 0
-
-	args := append(append([]string{}, pyArgs...), "tools/check_brand_consistency.py", "--audit-tree")
-	cmd := exec.Command(py, args...)
-	cmd.Dir = clone
-	out, _ := cmd.CombinedOutput()
-	pyBad := cmd.ProcessState.ExitCode() == 1
-
-	if goBad != pyBad {
-		t.Fatalf("VERDICT MISMATCH: go bad=%v (%d findings) vs python bad=%v\npython said: %s\ngo findings: %+v",
-			goBad, len(findings), pyBad, out, findings)
+	got := findings[0]
+	if got.Gate != "BRAND_CONSISTENCY" || got.File != "README.md" || got.Line != 2 || got.Detail != drift {
+		t.Errorf("finding = %+v, want gate BRAND_CONSISTENCY, file README.md, line 2, detail %q", got, drift)
 	}
 }
