@@ -3,6 +3,8 @@ package taskmgr
 import (
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 func verifiedHandoff() Handoff {
@@ -282,6 +284,7 @@ func TestHandoffIssueBodyIncludesStrictScopeSections(t *testing.T) {
 		"## Batch policy",
 		"## Core through-line",
 		"## Gold-plating boundary",
+		"## Problem frame",
 		"## Done condition",
 		"## Witness",
 		"## Acceptance gate",
@@ -312,4 +315,20 @@ func contains(items []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestHandoffStrictReviewCarriesCanonicalProblemFrame(t *testing.T) {
+	h := verifiedHandoff()
+	review := ReviewHandoffWithOptions(h, HandoffReviewOptions{StrictScope: true})
+	if len(review.IssueReviews) != 1 {
+		t.Fatalf("issue reviews = %+v", review.IssueReviews)
+	}
+	frame := review.IssueReviews[0].ProblemFrame
+	if !frame.Enforced || !frame.Ready || frame.Centrality != issuepolicy.CentralityStewardship || frame.CentralityTarget == "" || len(frame.Checks) != 4 {
+		t.Fatalf("problem frame = %+v", frame)
+	}
+	bodyReview := issuepolicy.ReviewIssueDraft(issuepolicy.IssueDraft{Title: h.NextSteps[0].Title, Body: HandoffIssueBody(h, h.NextSteps[0])}, issuepolicy.Options{})
+	if !bodyReview.ProblemFrame.Ready || bodyReview.ProblemFrame.Centrality != frame.Centrality {
+		t.Fatalf("body round trip lost frame: %+v", bodyReview.ProblemFrame)
+	}
 }

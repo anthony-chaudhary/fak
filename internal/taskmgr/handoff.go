@@ -297,9 +297,20 @@ func ReviewHandoffWithOptions(h Handoff, opt HandoffReviewOptions) HandoffReview
 	return review
 }
 
+func handoffProblemFrame() issuepolicy.ProblemFrame {
+	checks := map[string]issuepolicy.ProblemCheck{
+		"p1": {ID: "p1", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "the next step preserves task state, completion witness, evidence refs, assumptions, and scope", Valid: true},
+		"p2": {ID: "p2", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "one explicit handoff prevents the next worker from reconstructing verified task intent", Valid: true},
+		"p3": {ID: "p3", Status: issuepolicy.ProblemCheckPreserved, Evidence: "the next step remains independently revisable without changing completed parent work", Valid: true},
+		"p4": {ID: "p4", Status: issuepolicy.ProblemCheckAdvanced, Evidence: "the verified handoff flows through shared issue review and marker-key update", Valid: true},
+	}
+	return issuepolicy.ProblemFrame{Schema: issuepolicy.ProblemFrameSchema, Ready: true, Enforced: true, Centrality: issuepolicy.CentralityStewardship, CentralityTarget: "preserve verified problem intent across task handoff boundaries", Checks: checks}
+}
+
 func handoffIssueCandidate(h Handoff, step HandoffNextStep) issuepolicy.Candidate {
 	return issuepolicy.Candidate{
 		Schema:          issuepolicy.Schema,
+		ProblemFrame:    handoffProblemFrame(),
 		Key:             strings.TrimSpace(step.Key),
 		Title:           strings.TrimSpace(step.Title),
 		ParentRef:       strings.TrimSpace(h.Task.TaskID),
@@ -438,6 +449,7 @@ func HandoffIssueBody(h Handoff, step HandoffNextStep) string {
 	writeSection(&b, "Batch policy", strmatch.FirstTrimmed(step.BatchPolicy, "At most two follow-up issues per handoff; update by marker key on rerun."), "At most two follow-up issues per handoff; update by marker key on rerun.")
 	writeSection(&b, "Core through-line", strmatch.FirstTrimmed(step.InScope, step.Body), "Not specified by this handoff.")
 	writeSection(&b, "Gold-plating boundary", strings.TrimSpace(step.OutOfScope), "Not specified by this handoff.")
+	writeProblemFrame(&b, handoffProblemFrame())
 	writeSection(&b, "Done condition", strings.TrimSpace(step.DoneCondition), "Not specified by this handoff.")
 	writeSection(&b, "Witness", strings.TrimSpace(step.Witness), "Not specified by this handoff.")
 	writeSection(&b, "Acceptance gate", strings.TrimSpace(step.AcceptanceGate), "Not specified by this handoff.")
@@ -447,6 +459,17 @@ func HandoffIssueBody(h Handoff, step HandoffNextStep) string {
 	writeSection(&b, "Closure binding", strings.TrimSpace(step.ClosureBinding), "Resolving commit cites this issue and carries the matching fak trailer.")
 	fmt.Fprintln(&b, "Managed by `fak task handoff`; re-running the same handoff updates this issue in place.")
 	return b.String()
+}
+
+func writeProblemFrame(b *strings.Builder, frame issuepolicy.ProblemFrame) {
+	fmt.Fprintln(b, "## Problem frame")
+	fmt.Fprintln(b)
+	fmt.Fprintf(b, "- Centrality: %s (%s)\n", frame.Centrality, frame.CentralityTarget)
+	for _, id := range []string{"p1", "p2", "p3", "p4"} {
+		check := frame.Checks[id]
+		fmt.Fprintf(b, "- %s: %s - %s\n", strings.ToUpper(id), check.Status, check.Evidence)
+	}
+	fmt.Fprintln(b)
 }
 
 func writeSection(b *strings.Builder, title, value, fallback string) {
