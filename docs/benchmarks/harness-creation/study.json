@@ -24,6 +24,16 @@
       "outcome": "success",
       "elapsed_seconds": 10.259,
       "receipt": "docs/notes/HARNESS-CREATOR-SPINE-WITNESS-2026-08-15.md"
+    },
+    {
+      "id": "linux-clean-shape-calibration-4",
+      "participant_id": "maintainer-calibration-shape-safe",
+      "track": "ten-minute",
+      "participant_class": "maintainer-calibration",
+      "independent": false,
+      "outcome": "success",
+      "elapsed_seconds": 79.873,
+      "receipt": "docs/benchmarks/harness-creation/receipts/linux-clean-shape-calibration-4/README.md"
     }
   ]
 }

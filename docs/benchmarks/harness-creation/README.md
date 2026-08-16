@@ -53,3 +53,11 @@ privacy-safe transcript path; and, for weekend runs, independent authorship and 
 The baseline must be runnable, tuned, selected, and frozen before participant timing. The
 checked-in placeholder deliberately keeps both promotional claims `not_yet`. Maintainer
 warm calibration remains visible but is excluded from the independent denominator.
+
+## Maintainer calibrations
+
+Calibration receipts are archived under `receipts/` so friction and technical headroom
+remain reproducible. They are always marked non-independent and cannot satisfy either
+promotion threshold. In particular,
+[`linux-clean-shape-calibration-4`](receipts/linux-clean-shape-calibration-4/README.md)
+replays the natural customization that exposed #6940 against its shipped fix.

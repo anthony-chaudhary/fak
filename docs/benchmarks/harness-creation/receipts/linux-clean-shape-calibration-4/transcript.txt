@@ -1,0 +1,38 @@
+run_id=linux-clean-shape-calibration-4
+participant_id=maintainer-calibration
+participant_class=maintainer-calibration independent=false
+start=2026-08-16T01:47:20.394992034Z
+base=/tmp/fak-harness-cal4.eFBwSe
+os=Linux 6.6.114.1-microsoft-standard-WSL2 x86_64 GNU/Linux
+go: downloading go1.26.5 (linux/amd64)
+go_host=go version go1.26.5 linux/amd64
+cache_state=empty HOME/GOPATH/GOCACHE/GOMODCACHE
+artifact=github.com/anthony-chaudhary/fak/cmd/fak@83c7641b909e
+go: downloading github.com/anthony-chaudhary/fak v0.43.1-0.20260816013738-83c7641b909e
+go: github.com/anthony-chaudhary/fak@v0.43.1-0.20260816013738-83c7641b909e requires go >= 1.26; switching to go1.26.6
+go: downloading go1.26.6 (linux/amd64)
+go: downloading golang.org/x/sys v0.46.0
+go: downloading golang.org/x/term v0.44.0
+install_seconds=42.019
+created external product at /tmp/fak-harness-cal4.eFBwSe/product
+run: cd /tmp/fak-harness-cal4.eFBwSe/product && go run ./cmd/product --selfcheck
+go: downloading go1.26.0 (linux/amd64)
+go: downloading github.com/anthony-chaudhary/fak v0.43.1-0.20260814184635-613a82b762e2
+build_seconds=27.249
+{"type":"turn.started","turn":"offline-1","detail":"offline deterministic model"}
+{"type":"model.response","turn":"offline-1","detail":"admitted support summary: prove the external harness works"}
+{"type":"tool.requested","turn":"offline-1","detail":"record_selfcheck"}
+{"type":"tool.completed","turn":"offline-1","detail":"record_selfcheck:ok"}
+{"type":"turn.completed","turn":"offline-1","detail":"ok"}
+selfcheck_seconds=0.002
+upgrade_command=fak harness init --dir . --module example.test/calibration4 --fak-version v0.43.1-0.20260814184635-613a82b762e2
+created external product at /tmp/fak-harness-cal4.eFBwSe/product
+run: cd /tmp/fak-harness-cal4.eFBwSe/product && go run ./cmd/product --selfcheck
+rerun_seconds=0.019
+user_sha_before=9b96b0bc92c757958686e096ea6e080f005d42cfd3ad856faf47ad083fc5a92e
+user_sha_after=9b96b0bc92c757958686e096ea6e080f005d42cfd3ad856faf47ad083fc5a92e
+stop=2026-08-16T01:48:40.267710977Z
+elapsed_seconds=79.873
+outcome=success
+transcript_sha256=379be7022507678e39a8bc382e291ab86266ee2c43c07c3bda187819bd6f0a3f
+TRANSCRIPT=/tmp/fak-harness-cal4.eFBwSe/transcript.txt
