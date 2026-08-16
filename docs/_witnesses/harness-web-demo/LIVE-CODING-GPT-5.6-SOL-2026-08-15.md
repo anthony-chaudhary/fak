@@ -19,7 +19,7 @@ fak serve --addr 127.0.0.1:18084 --native \
   --provider openai --base-url http://127.0.0.1:59384/v1 \
   --api-key-env OPENAI_API_KEY --model gpt-5.6-sol
 
-go run ./cmd/harnesswebdemo -addr 127.0.0.1:18788 \
+fak harness web -addr 127.0.0.1:18788 \
   -fak-url http://127.0.0.1:18084 \
   -workspace %TEMP%\fak-harnessweb-6962-fixture \
   -state %TEMP%\fak-6962-sessions.json
@@ -70,6 +70,6 @@ raise per-call approval prompts. Typed denials still render for calls outside th
 The separate approval scenario remains captured and selfchecked for products that choose
 a prompt-per-call policy.
 
-Rollback: stop both loopback processes. Restart `harnesswebdemo` without `-fak-url` and
+Rollback: stop both loopback processes. Restart `fak harness web` without `-fak-url` and
 `-workspace` to return to its deterministic offline mode. Delete the temporary fixture and
 state file after auditing the hashes above.

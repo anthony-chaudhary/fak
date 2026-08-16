@@ -3,9 +3,12 @@
 `harnesswebdemo` is a separately built browser product over fak's public `pkg/harnesskit` contract. It serves embedded assets on loopback, submits deterministic offline turns, renders semantic message start/delta/completion, tools, artifacts, approvals, and typed failures, and reconnects from an exclusive sequence cursor. It does not import `internal/`, parse terminal output, or expose a remote listener.
 
 ```text
-go run ./cmd/harnesswebdemo -selfcheck
-go run ./cmd/harnesswebdemo
+fak harness web --selfcheck
+fak harness web
 # open http://127.0.0.1:8787
+
+# source-checkout compatibility wrapper:
+go run ./cmd/harnesswebdemo --selfcheck
 ```
 
 The page includes three offline operating scenarios:
@@ -25,7 +28,7 @@ Launch the gateway with its existing bounded coding catalog, then point the brow
 
 ```text
 fak serve --native --native-code-workspace <workspace> [...model flags]
-go run ./cmd/harnesswebdemo -fak-url http://127.0.0.1:8080 -workspace <workspace>
+fak harness web -fak-url http://127.0.0.1:8080 -workspace <workspace>
 ```
 
 `GET /healthz` exposes `native_code_workspace.armed` and the six tool names without
@@ -40,7 +43,7 @@ are root-confined (including symlink checks), while Bash admits only focused `go
 and ambient-credential enumeration are typed `COMMAND_DENY` refusals. The browser never
 executes a browser-supplied command.
 
-Rollback is exact: stop `harnesswebdemo` and restart without `-fak-url`/`-workspace` for
+Rollback is exact: stop `fak harness web` and restart without `-fak-url`/`-workspace` for
 the deterministic offline product, or stop the workspace-armed `fak serve` process. Use
 `fak harness gallery show --id coding-workspace` for the corresponding user-needs pack.
 
