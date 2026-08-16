@@ -707,6 +707,16 @@
           "category": "incidental",
           "reason": "Bounded quantobs schema symbol, not a cache concept.",
           "token": "CodeKVCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Low-cardinality metric counter for #2789, not a separate cache mechanism concept.",
+          "token": "inferCacheCreationTokensTierObserved"
+        },
+        {
+          "category": "incidental",
+          "reason": "Exported summary field for #2789 tier evidence, not a separate cache mechanism concept.",
+          "token": "CacheCreationTokensTierObserved"
         }
       ],
       "id": "cache",
@@ -717,6 +727,7 @@
         "CacheCounters",
         "CacheCreationTokensHeadOnly",
         "CacheCreationTokensMessagePrefix",
+        "CacheCreationTokensTierObserved",
         "CacheLever",
         "CacheLevers",
         "CacheLineage",
@@ -850,6 +861,7 @@
         "inducedCacheCreation",
         "inferCacheCreationTokensHeadOnly",
         "inferCacheCreationTokensMessagePrefix",
+        "inferCacheCreationTokensTierObserved",
         "infercachecreationtokens",
         "infercachedhits",
         "infercachedtokens",

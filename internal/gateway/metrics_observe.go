@@ -913,12 +913,16 @@ func cacheCreationSpanLabel(cacheCreateTok int, upgraded, messagePrefix bool) st
 }
 
 func (m *gatewayMetrics) recordCacheCreationTierSplit(cacheCreateTok int, upgraded, messagePrefix bool) {
-	if m == nil || cacheCreateTok <= 0 || !upgraded {
+	if m == nil || cacheCreateTok <= 0 {
 		return
 	}
 	m.inferenceMu.Lock()
 	defer m.inferenceMu.Unlock()
 	n := uint64(cacheCreateTok)
+	m.inferCacheCreationTokensTierObserved += n
+	if !upgraded {
+		return
+	}
 	m.inferCacheCreationTokensUpgraded += n
 	if messagePrefix {
 		m.inferCacheCreationTokensMessagePrefix += n

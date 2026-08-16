@@ -75,7 +75,8 @@ type gatewayMetrics struct {
 	// ATTRIBUTED (fak's own per-turn upgrade witness), never provider-reported: the
 	// Anthropic usage block does not split 5m vs 1h creation tokens (#2179). A turn's
 	// write only lands here when Server.ttl1hActiveFor reports true for its trace.
-	inferCacheCreationTokensUpgraded uint64
+	inferCacheCreationTokensUpgraded     uint64
+	inferCacheCreationTokensTierObserved uint64
 	// Split the upgraded write arm into the original head-only baseline and the
 	// message-prefix extension (#2186). Provider usage cannot subdivide a single
 	// write further, so each served turn is attributed by its admitted layout.
@@ -710,6 +711,7 @@ type AdjudicationSummary struct {
 	// stayed on the 5m tier; MechanismSavings/ProviderCacheNetSavings price the remainder
 	// (CacheCreationTokens - CacheCreationTokensUpgraded) at the 5m tier as before (#2179).
 	CacheCreationTokensUpgraded      uint64 `json:"cache_creation_tokens_upgraded,omitempty"`
+	CacheCreationTokensTierObserved  uint64 `json:"cache_creation_tokens_tier_observed,omitempty"`
 	CacheCreationTokensHeadOnly      uint64 `json:"cache_creation_tokens_head_only,omitempty"`
 	CacheCreationTokensMessagePrefix uint64 `json:"cache_creation_tokens_message_prefix,omitempty"`
 
@@ -889,6 +891,7 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	sum.VendorOutputTokens = m.inferVendorComplTokens
 	sum.CacheCreationTokens = m.inferCacheCreationTokens
 	sum.CacheCreationTokensUpgraded = m.inferCacheCreationTokensUpgraded
+	sum.CacheCreationTokensTierObserved = m.inferCacheCreationTokensTierObserved
 	sum.CacheCreationTokensHeadOnly = m.inferCacheCreationTokensHeadOnly
 	sum.CacheCreationTokensMessagePrefix = m.inferCacheCreationTokensMessagePrefix
 	// Observed per-turn E2E latency distribution (same lock observeInferenceTimed holds
