@@ -2202,7 +2202,8 @@ func TestSingleWitnessResolverRegistrant(t *testing.T) {
 // entry here is a deliberate, reviewed decision that a given Adjudicator's exec is off the
 // live tool-call decision path, not a silent pass.
 var adjudicatorExecAllow = map[string]string{
-	"shipgate": "RSI/ship harness â€” git + worktree exec, registered as a rank-40 Adjudicator but off the dispatch hot path (shipgate.go)",
+	"codetools": "bounded Bash tool engine — subprocess execution occurs only after the adjudicator admits a Bash call; non-Bash decisions remain in-process",
+	"shipgate":  "RSI/ship harness â€” git + worktree exec, registered as a rank-40 Adjudicator but off the dispatch hot path (shipgate.go)",
 }
 
 // TestEveryAdjudicatorIsExecFree is the "any Adjudicator" clause of DIRECTION.md's
