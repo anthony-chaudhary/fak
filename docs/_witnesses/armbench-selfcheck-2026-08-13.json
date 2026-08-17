@@ -59,7 +59,7 @@
       "name": "failclosed.missing_raw_evidence",
       "ok": true,
       "detail": "refused with MISSING_RAW_EVIDENCE as required",
-      "evidence": "arm fak-ctxmmu task task-charlie trial 0: MISSING_RAW_EVIDENCE: trial recorded no raw response and no failure reason — a usage/latency row with no response behind it is not evidence"
+      "evidence": "arm fak-ctxmmu task task-alpha trial 0: MISSING_RAW_EVIDENCE: trial recorded no raw response and no failure reason — a usage/latency row with no response behind it is not evidence"
     },
     {
       "name": "failclosed.bundled_capability",

@@ -30,7 +30,7 @@ func TestSelfcheckPasses(t *testing.T) {
 }
 
 func TestSelfcheckMissingEvidenceWitnessIsStable(t *testing.T) {
-	const want = "arm fak-ctxmmu task task-charlie trial 0: MISSING_RAW_EVIDENCE"
+	const want = "arm fak-ctxmmu task task-alpha trial 0: MISSING_RAW_EVIDENCE"
 	for i := 0; i < 5; i++ {
 		res, err := Selfcheck()
 		if err != nil {

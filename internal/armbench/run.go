@@ -371,10 +371,10 @@ func executeUnits(ctx context.Context, m *Manifest, identity string, units []Pai
 	)
 	sem := make(chan struct{}, m.Trials.Concurrency)
 	for _, unit := range units {
+		sem <- struct{}{}
 		wg.Add(1)
 		go func(unit PairUnit) {
 			defer wg.Done()
-			sem <- struct{}{}
 			defer func() { <-sem }()
 			mu.Lock()
 			stop := firstErr != nil
