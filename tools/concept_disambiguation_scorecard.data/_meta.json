@@ -2340,6 +2340,11 @@
           "category": "incidental",
           "reason": "package-local pure composition helper, not a new guard-gate concept or operator surface",
           "token": "GateCommitThroughput"
+        },
+        {
+          "category": "incidental",
+          "reason": "Aggregate join counter over guard witnesses; not a guard or gate.",
+          "token": "GuardJoined"
         }
       ],
       "exclude": [
@@ -2400,6 +2405,7 @@
         "GateSummary",
         "GatewayBound",
         "GatewaySeat",
+        "GuardJoined",
         "IsAggregate",
         "LifecycleGate",
         "NewSessionAffinityGateway",
@@ -3965,6 +3971,16 @@
           "category": "incidental",
           "reason": "Session constructor adapter for #4835 follower decode, not a distinct session-runtime concept.",
           "token": "epFollowerSessionFactory"
+        },
+        {
+          "category": "incidental",
+          "reason": "Session subcommand implementation; not a distinct session-runtime concept.",
+          "token": "runSessionsWorkflowDefaultReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Session report collector; not a distinct session-runtime concept.",
+          "token": "collectCodexWorkflowDefaultReport"
         }
       ],
       "id": "session-runtime",
@@ -4064,6 +4080,7 @@
         "boolInt",
         "bumpSessionHandoffBlocks",
         "capability_digest",
+        "collectCodexWorkflowDefaultReport",
         "compactThrashSessions",
         "conceptSessions",
         "confusedsessions",
@@ -4143,6 +4160,7 @@
         "runSessionMoveVerify",
         "runSessionOpen",
         "runSessionOpenSelfcheck",
+        "runSessionsWorkflowDefaultReport",
         "runtuisessions",
         "sanitizeSessionForPath",
         "schedSessionDesktop",
@@ -4993,6 +5011,16 @@
           "category": "incidental",
           "reason": "Per-session Codex hook telemetry helper; not a distinct proof or witness concept.",
           "token": "codexWorkflowDefaultOutput"
+        },
+        {
+          "category": "incidental",
+          "reason": "Aggregate projection over existing witnesses; not a new proof primitive.",
+          "token": "codexWorkflowDefaultReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Report count field; not a distinct witness concept.",
+          "token": "WitnessFiles"
         }
       ],
       "id": "witness-proof",
@@ -5037,6 +5065,7 @@
         "WithCoreLockWitness",
         "WitnessEvidenceOptions",
         "WitnessEvidenceStats",
+        "WitnessFiles",
         "WitnessID",
         "WitnessMove",
         "WitnessRoute",
@@ -5053,6 +5082,7 @@
         "checkpoint_no_tree_witness",
         "closeProxyFillWitnesses",
         "codexWorkflowDefaultOutput",
+        "codexWorkflowDefaultReport",
         "codexWorkflowDefaultWitness",
         "codexWorkflowDefaultWitnessExists",
         "codexWorkflowDefaultWitnessPath",
@@ -8342,6 +8372,11 @@
           "category": "incidental",
           "reason": "private constructor for an existing superloop DriveDecision; not a new decision concept",
           "token": "residualDriveDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Aggregate report counter; not a decision primitive.",
+          "token": "ValidDecisions"
         }
       ],
       "id": "decision",
@@ -8368,6 +8403,7 @@
         "ReuseDecision",
         "SessionClientDecisionRequest",
         "TotalDecisionOverhead",
+        "ValidDecisions",
         "appendsteerdecisions",
         "decisionReason",
         "decisionStderr",

@@ -13,6 +13,7 @@ package main
 //	fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json] [--fail-on none|loop|action|unguarded]
 //	                                                                          diagnose Codex JSONL for repeated tool loops
 //	fak sessions codex-loop-hook [--codex-home DIR] [--allow-direct]
+//	fak sessions workflow-default-report [--codex-home DIR] [--json]
 //	                                                                          internal Codex UserPromptSubmit continuation gate
 //
 // It reads transcripts and shells `git` (read-only) off any hot path; it writes
@@ -62,6 +63,8 @@ func runSessionsWithStdin(stdout, stderr io.Writer, stdin io.Reader, argv []stri
 		return sessionsCodexLoop(stdout, stderr, rest)
 	case "codex-loop-hook":
 		return sessionsCodexLoopHook(stdout, stderr, stdin, rest)
+	case "workflow-default-report":
+		return runSessionsWorkflowDefaultReport(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		sessionsUsage(stdout)
 		return 0
@@ -81,6 +84,7 @@ usage:
   fak sessions learn    [--corpus IN] [--project SUB] [--root DIR ...] [--max N] [--json]
   fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json] [--fail-on none|loop|action|unguarded]
   fak sessions codex-loop-hook [--codex-home DIR] [--allow-direct]
+  fak sessions workflow-default-report [--codex-home DIR] [--json]
   fak sessions codex-hook-install [--codex-home DIR] [--dry-run]
 
 Start here:
@@ -96,6 +100,7 @@ Start here:
                             token burn, livelock notices, and abort/status. With neither
                             --session nor --path, it audits $CODEX_THREAD_ID when set.
   fak sessions codex-loop-hook
+  fak sessions workflow-default-report --json
                             internal UserPromptSubmit hook: block the next prompt when the
                             active Codex session bypasses fak guard. Set
                             FAK_ALLOW_DIRECT_CODEX_CONTINUE=1 for an intentional override.
