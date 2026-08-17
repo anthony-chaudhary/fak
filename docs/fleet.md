@@ -266,6 +266,43 @@ single consistent fleet version. An all-healthy single-version fleet scores 100,
 all-down-but-visible fleet scores 20, an all-silent fleet scores 0. The score is a fence,
 not a benchmark — the per-state counts and the attention list carry the detail.
 
+## Commit-throughput health
+
+For an active coding fleet, process activity is not enough: healthy means real work is
+landing. `fak fleet health` counts file-changing commits on `HEAD`'s first-parent history
+in adjacent ten-minute windows. Working-tree edits, side-branch commits, empty commits,
+and agent self-reports do not increase the count.
+
+```bash
+fak fleet health
+# commits/10m=3 previous=1 state=healthy latest_age=2m0s
+# active_workers=3 healthy=true reason=3 landed commit(s) in the last 10 minutes
+
+fak fleet health --json
+fak fleet metrics | grep fak_fleet_commit
+```
+
+The top-level state contract is:
+
+| Active workers | Current 10m | Previous 10m | State | Meaning |
+|---:|---:|---:|---|---|
+| 0 | any | any | `idle` | Neutral: no fleet is expected to ship. |
+| >0 | >0 | any | `healthy` | Positive landed throughput. |
+| >0 | 0 | >0 | `stalled` | The current window stopped producing; inspect admission, leases, tests, and pushes. |
+| >0 | 0 | 0 | `blocked` | Two consecutive zero windows; stop adding fan-out and repair the shared blocker. |
+| >0 | unknown | any | `unknown` | Git history or the durable worker registry is unreadable; fail closed. |
+
+`fak fleet metrics` exports `fak_fleet_commits_per_10m`,
+`fak_fleet_commits_previous_10m`, `fak_fleet_commit_throughput_healthy`,
+`fak_fleet_commit_throughput_measured`, `fak_fleet_latest_commit_unixtime`, and the
+one-hot `fak_fleet_commit_throughput_state{state=...}` family. Alert on
+`fak_fleet_commit_throughput_healthy == 0` only while the fleet has active workers;
+an idle fleet is deliberately healthy-neutral.
+
+The reusable loop gate is `superloop.GateCommitThroughput`: it converts an otherwise
+clean active loop with zero throughput into a recovery member, without displacing
+concrete work already selected by the loop.
+
 ## Honesty
 
 `fleetctl` is the public **core**: roster + fold + render + score + the file transport that
