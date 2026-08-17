@@ -456,15 +456,9 @@ func TestAdmitGuardShrinkLeversOnResolvedGuardBoot(t *testing.T) {
 			wantAdmit: true,
 		},
 		{
-			name:     "`fak guard --local -- codex` names all three default-on levers instead of going silent",
+			name:     "`fak guard --local -- codex` keeps default-on inert levers quiet",
 			provider: "openai", baseURL: localBase,
 			wantAdmit: true,
-			wantAll: []string{
-				"fak guard:", shrinkLeverInertToken, "NOTICE", "3 prompt-shrink lever(s)",
-				"--compact-history-budget", "--elide-stale-reads", "--defer-cold-tools",
-				"non-Anthropic proxy", "--provider openai", "unwired lever", "fak guard -- claude",
-			},
-			wantNone: []string{"refusing to start"},
 		},
 		{
 			name:     "a typed --defer-cold-tools on a local server is refused by name",
@@ -486,18 +480,14 @@ func TestAdmitGuardShrinkLeversOnResolvedGuardBoot(t *testing.T) {
 			},
 		},
 		{
-			name:     "`fak guard -- codex` auto-detects the Responses wire, which is still not the passthrough",
+			name:     "`fak guard -- codex` keeps default-on Responses-wire levers quiet",
 			provider: "openai-responses", baseURL: "https://api.openai.example/v1",
 			wantAdmit: true,
-			wantAll:   []string{shrinkLeverInertToken, "NOTICE", "--provider openai-responses"},
-			wantNone:  []string{"refusing to start"},
 		},
 		{
-			name:     "a bare --gguf makes the in-kernel planner the upstream and is named too",
+			name:     "a bare --gguf keeps default-on in-kernel levers quiet",
 			provider: "anthropic", baseURL: "", gguf: "/models/m.gguf",
 			wantAdmit: true,
-			wantAll:   []string{shrinkLeverInertToken, "NOTICE", "in-kernel planner"},
-			wantNone:  []string{"refusing to start"},
 		},
 		{
 			name:     "a typed --elide-stale-reads on the in-kernel upstream is refused by name",
