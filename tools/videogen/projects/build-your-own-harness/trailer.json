@@ -1,0 +1,44 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "fps": 30,
+  "mp4": "out/build-your-own-harness.mp4",
+  "gif": "out/build-your-own-harness.gif",
+  "poster": "out/build-your-own-harness-poster.png",
+  "contactSheet": "out/review-contact-sheet.png",
+  "audit": "out/readability-audit.json",
+  "scenes": [
+    {
+      "kind": "harness-hook",
+      "secs": 3.5,
+      "eyebrow": "YOUR AGENT. YOUR RULES.",
+      "title": "Build your own harness.",
+      "subtitle": "Connect the parts you actually want."
+    },
+    {
+      "kind": "harness-blueprint",
+      "secs": 4.5,
+      "eyebrow": "PICK THE PARTS",
+      "title": "One typed blueprint.",
+      "detail": "generated shell · owned core · stable seams",
+      "items": ["BRAND", "MODEL", "TOOLS", "MEMORY", "POLICY", "UI"]
+    },
+    {
+      "kind": "harness-run",
+      "secs": 3.5,
+      "eyebrow": "RUN THE REAL SPINE",
+      "title": "Prompt in. Checked action out.",
+      "items": ["YOUR UI", "fak kernel", "YOUR TOOLS"],
+      "verdict": "SELF-CHECK  PASS"
+    },
+    {
+      "kind": "cta",
+      "secs": 7.0,
+      "eyebrow": "START HERE",
+      "title": "Make it yours.",
+      "command": "fak harness init my-agent"
+    }
+  ]
+}
+
+

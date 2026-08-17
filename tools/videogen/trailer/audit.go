@@ -52,7 +52,7 @@ func audit(c Config) (Audit, error) {
 	ctaCount := 0
 	at := 0.0
 	maxWords := 0
-	allowed := map[string]bool{"hook": true, "checkpoint": true, "proof": true, "cta": true, "token-hook": true, "token-grid": true, "token-flow": true}
+	allowed := map[string]bool{"hook": true, "checkpoint": true, "proof": true, "cta": true, "token-hook": true, "token-grid": true, "token-flow": true, "harness-hook": true, "harness-blueprint": true, "harness-run": true}
 	for i, s := range c.Scenes {
 		if !allowed[s.Kind] {
 			return a, fmt.Errorf("scene %d: unknown kind %q", i, s.Kind)
@@ -71,11 +71,11 @@ func audit(c Config) (Audit, error) {
 				return a, fmt.Errorf("scene %d: text region %q has %d words; max 8", i, v, n)
 			}
 		}
-		if s.Kind == "token-grid" && len(s.Items) != 6 {
-			return a, fmt.Errorf("scene %d: token-grid needs exactly 6 value cards", i)
+		if (s.Kind == "token-grid" || s.Kind == "harness-blueprint") && len(s.Items) != 6 {
+			return a, fmt.Errorf("scene %d: %s needs exactly 6 value cards", i, s.Kind)
 		}
-		if s.Kind == "token-flow" && len(s.Items) != 3 {
-			return a, fmt.Errorf("scene %d: token-flow needs exactly 3 steps", i)
+		if (s.Kind == "token-flow" || s.Kind == "harness-run") && len(s.Items) != 3 {
+			return a, fmt.Errorf("scene %d: %s needs exactly 3 steps", i, s.Kind)
 		}
 		if s.Kind == "cta" {
 			ctaCount++

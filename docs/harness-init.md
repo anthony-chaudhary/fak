@@ -2,6 +2,10 @@
 
 `fak harness init` creates the smallest runnable fak-based product outside the fak checkout. The generated program imports only the public `pkg/harnesskit` contract, pins an immutable Go module version, and performs one deterministic offline turn with semantic JSON events.
 
+[![Build your own harness — 18-second visual](../visuals/build-your-own-harness.gif)](../visuals/build-your-own-harness.mp4)
+
+**[Watch the 18-second build-your-own-harness video (MP4)](../visuals/build-your-own-harness.mp4)** · [reproduce the render](../tools/videogen/projects/build-your-own-harness/)
+
 ```text
 fak harness init --dir ./my-product --module example.com/my-product
 cd ./my-product

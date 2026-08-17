@@ -110,3 +110,36 @@ func TestTokenHeroKeepsWideSafeArea(t *testing.T) {
 		t.Fatalf("text edge=%d crosses safe boundary=%d", right, c.Width-a.SafeMarginPx)
 	}
 }
+
+func TestHarnessTrailerKindsAuditAndRender(t *testing.T) {
+	cfg := Config{Width: 1920, Height: 1080, FPS: 30, Scenes: []Scene{
+		{Kind: "harness-hook", Secs: 3.5, Eyebrow: "YOUR AGENT", Title: "Build your harness", Subtitle: "Connect the parts"},
+		{Kind: "harness-blueprint", Secs: 4.5, Eyebrow: "PICK PARTS", Title: "One blueprint", Detail: "owned core", Items: []string{"BRAND", "MODEL", "TOOLS", "MEMORY", "POLICY", "UI"}},
+		{Kind: "harness-run", Secs: 3.5, Eyebrow: "RUN IT", Title: "Checked action", Items: []string{"YOUR UI", "fak kernel", "YOUR TOOLS"}, Verdict: "SELF-CHECK PASS"},
+		{Kind: "cta", Secs: 7, Eyebrow: "START", Title: "Make it yours", Command: "fak harness init my-agent"},
+	}}
+	if _, err := audit(cfg); err != nil {
+		t.Fatalf("audit harness trailer: %v", err)
+	}
+	p, err := newPainter()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scene := range cfg.Scenes[:3] {
+		im := sceneFrame(cfg, scene, scene.Secs/2, p)
+		if got := im.Bounds().Size(); got.X != cfg.Width || got.Y != cfg.Height {
+			t.Fatalf("%s frame size = %v", scene.Kind, got)
+		}
+	}
+}
+
+func TestHarnessBlueprintRejectsMissingParts(t *testing.T) {
+	cfg := Config{Width: 1280, Height: 720, FPS: 30, Scenes: []Scene{
+		{Kind: "harness-blueprint", Secs: 5, Items: []string{"MODEL"}},
+		{Kind: "proof", Secs: 5},
+		{Kind: "cta", Secs: 8, Command: "fak harness init my-agent"},
+	}}
+	if _, err := audit(cfg); err == nil || !strings.Contains(err.Error(), "needs exactly 6") {
+		t.Fatalf("expected six-part blueprint error, got %v", err)
+	}
+}

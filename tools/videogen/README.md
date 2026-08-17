@@ -57,8 +57,12 @@ go run ./tools/videogen -trailer `
 ```
 
 The reusable scene vocabulary is intentionally small: `hook`, `checkpoint`,
-`proof`, and `cta`. Each manifest declares only copy, duration, action, verdict,
-and command; the renderer owns 720p composition, 30 fps motion, embedded fonts,
+`proof`, and `cta`, plus focused visual families for token flow and harness
+assembly. The harness family (`harness-hook`, `harness-blueprint`,
+`harness-run`) turns connections and build order into motion instead of using a
+decorative particle. Each manifest declares only copy, duration, action,
+verdict, command, and short item labels; the renderer owns 720p composition,
+30 fps motion, embedded fonts,
 contrast, safe areas, MP4/GIF encoding, poster, and contact sheet. `-verify`
 refuses more than six scenes, text regions over eight words, sub-two-second
 beats, trailers outside 18–30 seconds, a CTA after 12 seconds, or a CTA held
