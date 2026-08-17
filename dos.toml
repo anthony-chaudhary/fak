@@ -1108,7 +1108,7 @@ depthadmit = ["internal/depthadmit/**"]
 managedocs = ["internal/managedocs/**"]
 humanctl = ["internal/humanctl/**"]
 toolcatalog = ["internal/toolcatalog/**"]
-harnesskit = ["pkg/harnesskit/**", "internal/architest/harnesskit_external_test.go", "docs/harness-kit-contract.md", "docs/_witnesses/harness-kit-contract*"]
+harnesskit = ["pkg/harnesskit/**", "docs/harness-kit-contract.md", "docs/_witnesses/harness-kit-contract*"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose
