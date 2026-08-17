@@ -139,7 +139,7 @@ func TestFanoutDefaultIsWiredAtExactlyOneSeam(t *testing.T) {
 			calls[name] = n
 		}
 	}
-	if len(calls) != 1 || calls["dispatch_tick.go"] != 1 {
-		t.Fatalf("the fan-out default must have exactly one call site (dispatch_tick.go), got %v", calls)
+	if len(calls) != 1 || calls["dispatch_tick_evaluate.go"] != 1 {
+		t.Fatalf("the fan-out default must have exactly one call site (dispatch_tick_evaluate.go), got %v", calls)
 	}
 }

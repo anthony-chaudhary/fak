@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/configguide"
+	"github.com/anthony-chaudhary/fak/internal/configsurface"
 	"github.com/anthony-chaudhary/fak/internal/deploymanifest"
 )
 
@@ -80,7 +81,7 @@ func TestConfigAuditReportsBoundedDiscoverableSurface(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.Keys != 13 || report.Postures != 4 || report.DefaultCoverage != 1 || report.DescriptionCoverage != 1 || !report.Discoverable {
+	if report.Keys != configsurface.MaxKeys || report.Postures != 4 || report.DefaultCoverage != 1 || report.DescriptionCoverage != 1 || !report.Discoverable {
 		t.Fatalf("audit = %+v", report)
 	}
 }
