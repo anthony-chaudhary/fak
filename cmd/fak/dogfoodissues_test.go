@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
 	"time"
 )
 
@@ -57,6 +59,11 @@ func TestDogfoodIssuesDryRunPlansScopedCodeSlopRow(t *testing.T) {
 }
 
 func TestDogfoodIssuesLiveAcceptsScopedCodeSlopRow(t *testing.T) {
+	oldSync := dogfoodIssuesSync
+	dogfoodIssuesSync = func(plan []dogfoodissues.PlanRow, repo string, labels []string, _ dogfoodissues.Runner) []dogfoodissues.SyncRow {
+		return []dogfoodissues.SyncRow{{Key: plan[0].Key, Action: plan[0].Action, OK: true, Verified: true}}
+	}
+	t.Cleanup(func() { dogfoodIssuesSync = oldSync })
 	report := writeDogfoodIssuesReport(t, 0)
 	existing := filepath.Join(t.TempDir(), "existing.json")
 	if err := os.WriteFile(existing, []byte("[]\n"), 0o644); err != nil {

@@ -30,6 +30,8 @@ func cmdDogfoodIssues(argv []string) { os.Exit(runDogfoodIssues(os.Stdout, os.St
 // runDogfoodIssues is the testable core: it returns the process exit code instead
 // of calling os.Exit, and takes its streams explicitly. Exit codes: 0 ok, 1 a live
 // gh create/edit failed, 2 usage/parse/IO error.
+var dogfoodIssuesSync = dogfoodissues.Sync
+
 func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("dogfood-issues", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -162,7 +164,7 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 		result.Refused = true
 		result.Error = dogfoodissues.ErrorStrictScope
 	} else if *live && len(plan) > 0 {
-		result.Synced = dogfoodissues.Sync(plan, *repo, []string(labels), nil)
+		result.Synced = dogfoodIssuesSync(plan, *repo, []string(labels), nil)
 	}
 
 	// A tracker-consulting run leaves the bridge receipt beside the report — the
