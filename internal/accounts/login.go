@@ -157,33 +157,49 @@ func (r Registry) LoginReport() LoginReport {
 // nil store or zero now means no overlay — behaviorally identical to LoginReport.
 func (r Registry) LoginReportAt(cd *CooldownStore, now time.Time) LoginReport {
 	rec := r.Reconcile()
-	report := LoginReport{
-		Schema: LoginReportSchema,
-		Summary: LoginSummary{
-			ByStatus: map[string]int{},
-		},
-	}
-	accounts := map[string]bool{}
+	report := LoginReport{Schema: LoginReportSchema}
 	for _, h := range r.Homes {
-		obs := r.loginObservation(h, rec[h.Name], cd, now)
-		report.Seats = append(report.Seats, obs)
-		report.Summary.Total++
-		report.Summary.ByStatus[string(obs.Status)]++
+		report.Seats = append(report.Seats, r.loginObservation(h, rec[h.Name], cd, now))
+	}
+	report.Summary = summarizeLoginObservations(report.Seats)
+	return report
+}
+
+// WithoutTombstoned returns the operator-facing roster. Retired seats stay in the
+// canonical registry for audit and restore, but do not enter default selectors or TUI payloads.
+func (r LoginReport) WithoutTombstoned() LoginReport {
+	filtered := r
+	filtered.Seats = make([]LoginObservation, 0, len(r.Seats))
+	for _, obs := range r.Seats {
+		if obs.Status != LoginTombstoned {
+			filtered.Seats = append(filtered.Seats, obs)
+		}
+	}
+	filtered.Summary = summarizeLoginObservations(filtered.Seats)
+	return filtered
+}
+
+func summarizeLoginObservations(seats []LoginObservation) LoginSummary {
+	summary := LoginSummary{ByStatus: map[string]int{}}
+	accounts := map[string]bool{}
+	for _, obs := range seats {
+		summary.Total++
+		summary.ByStatus[string(obs.Status)]++
 		if obs.Status.ActiveStyle() {
-			report.Summary.ActiveStyleSeats++
+			summary.ActiveStyleSeats++
 		}
 		if obs.CanServe {
-			report.Summary.CanServe++
+			summary.CanServe++
 		}
 		if obs.Account != "" {
 			accounts[obs.Account] = true
 		}
 		if len(obs.Warnings) > 0 {
-			report.Summary.WarningSeats++
+			summary.WarningSeats++
 		}
 	}
-	report.Summary.DistinctAccounts = len(accounts)
-	return report
+	summary.DistinctAccounts = len(accounts)
+	return summary
 }
 
 func (r Registry) loginObservation(h Home, si SeatIdentity, cd *CooldownStore, now time.Time) LoginObservation {

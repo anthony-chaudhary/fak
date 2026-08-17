@@ -864,7 +864,7 @@ func syncViewsUnlessNoSync(stdout, stderr io.Writer, registryPath, dosView, jobV
 // views - the single-source inverse of add. It sets the home to status=tombstoned with a
 // rehome target (so anything pinned to it falls forward) and records the audit fields
 // (tombstoned_at, tombstone_reason), then re-syncs so the account drops from the dos view's
-// active rows and appears under the job view's tombstoned_accounts block. It does NOT delete
+// active rows while remaining available only in the canonical registry. It does NOT delete
 // the config dir - that is a separate, destructive operator step.
 func runAccountsRemove(stdout, stderr io.Writer, p removeParams) int {
 	if p.name == "" {

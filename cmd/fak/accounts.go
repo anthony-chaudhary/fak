@@ -315,6 +315,9 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			// consumer that iterates the top level then gets the real seat roster with
 			// per-seat can_serve/status/warnings, not one empty-fielded object. (#4593)
 			report := loginReportWithCooldown(stderr, reg)
+			if !*listAll {
+				report = report.WithoutTombstoned()
+			}
 			stdout.Write(mustJSON(report))
 			fmt.Fprintln(stdout)
 			return 0
@@ -443,7 +446,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		// Tombstone an account in the canonical registry and regenerate the views — the
 		// single-source inverse of `add`. The account becomes status=tombstoned with a rehome
 		// target + audit fields, drops out of the dos view's active rows, and moves to the job
-		// view's tombstoned_accounts block, all from one registry edit.
+		// generated views, all from one registry edit.
 		//
 		// --by-account (#4669) retires the WHOLE account rather than one seat: it tombstones
 		// every active seat resolving to the named account bucket in one audited pass, so a
@@ -981,6 +984,9 @@ func accountsStatus(stdout, stderr io.Writer, registryPath, homeDir string, asJS
 		// its credential serves B), which the offline MetadataStale heuristic — scoped to the
 		// default home's two-writer conflict — cannot see.
 		probeStatusIdentities(stderr, &report, enrollProfileURL())
+	}
+	if !showAll {
+		report = report.WithoutTombstoned()
 	}
 	if asJSON {
 		stdout.Write(mustJSON(report))

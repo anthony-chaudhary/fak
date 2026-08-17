@@ -62,10 +62,9 @@ func TestRunAccountsDiscoverAndList(t *testing.T) {
 	}
 }
 
-// TestAccountsTombstonedHiddenByDefault pins the "retired seats are not a mainline
-// row" behavior: `list` and `status` collapse tombstoned seats into a one-line count
-// (plus the summary's tombstoned=N tally) so a roster with dozens of them still reads
-// as the live seats. --all restores the full roster; --json is always complete.
+// TestAccountsTombstonedHiddenByDefault pins the presentation boundary: retired seats
+// do not appear in default human or JSON rosters or their summaries. --all remains the
+// explicit forensic escape hatch over the canonical registry.
 func TestAccountsTombstonedHiddenByDefault(t *testing.T) {
 	home := t.TempDir()
 	ready := mkHome(t, home, ".claude-ready-seat", "ready@example.test", true)
@@ -98,14 +97,11 @@ func TestAccountsTombstonedHiddenByDefault(t *testing.T) {
 			if strings.Contains(got, "old-1") || strings.Contains(got, "old-2") {
 				t.Fatalf("%s default must not print tombstoned seat rows:\n%s", sub, got)
 			}
-			if !strings.Contains(got, "2 tombstoned seats hidden") {
-				t.Fatalf("%s default should collapse tombstones into a count note:\n%s", sub, got)
+			if strings.Contains(got, "tombston") {
+				t.Fatalf("%s default must not disclose tombstones, even as a count:\n%s", sub, got)
 			}
-			if !strings.Contains(got, "--all") {
-				t.Fatalf("%s note should point at --all to reveal them:\n%s", sub, got)
-			}
-			if !strings.Contains(got, "tombstoned=2") {
-				t.Fatalf("%s summary should still carry the tombstoned tally:\n%s", sub, got)
+			if !strings.Contains(got, "1/2 active seat(s) can serve") {
+				t.Fatalf("%s summary should describe only the two visible seats:\n%s", sub, got)
 			}
 			if !strings.Contains(got, "ready-seat") {
 				t.Fatalf("%s must still list the live seats:\n%s", sub, got)
@@ -121,6 +117,25 @@ func TestAccountsTombstonedHiddenByDefault(t *testing.T) {
 			}
 		})
 	}
+
+	for _, sub := range []string{"list", "status"} {
+		t.Run(sub+" default JSON hides tombstones", func(t *testing.T) {
+			got := run(t, sub, "--json")
+			if strings.Contains(got, "old-1") || strings.Contains(got, "old-2") || strings.Contains(got, `"tombstoned"`) {
+				t.Fatalf("%s default JSON leaked retired seats: %s", sub, got)
+			}
+			if !strings.Contains(got, `"total": 2`) {
+				t.Fatalf("%s default JSON summary should cover visible seats only: %s", sub, got)
+			}
+		})
+		t.Run(sub+" --all JSON reveals tombstones", func(t *testing.T) {
+			got := run(t, sub, "--json", "--all")
+			if !strings.Contains(got, "old-1") || !strings.Contains(got, "old-2") || !strings.Contains(got, `"tombstoned"`) {
+				t.Fatalf("%s --all JSON should expose retired seats: %s", sub, got)
+			}
+		})
+	}
+
 }
 
 // TestRunAccountsListJSONRoster pins #4593: `list --json` must emit the per-seat
@@ -194,10 +209,13 @@ func TestRunAccountsStatusReport(t *testing.T) {
 		t.Fatalf("status rc=%d stderr=%s", rc, errb.String())
 	}
 	got := out.String()
-	for _, want := range []string{"fak.accounts.login.v1", "ready-seat", "needs_login", "tombstoned", "summary:"} {
+	for _, want := range []string{"fak.accounts.login.v1", "ready-seat", "needs_login", "summary:"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("status output missing %q:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "old") || strings.Contains(got, "tombston") {
+		t.Fatalf("default status leaked retired seat:\n%s", got)
 	}
 
 	out.Reset()

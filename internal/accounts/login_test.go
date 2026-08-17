@@ -88,6 +88,16 @@ func TestLoginReportWarningsAndSummary(t *testing.T) {
 		t.Fatalf("active-style seats = %d, want 5 (7 total minus 1 disabled, 1 tombstoned)", report.Summary.ActiveStyleSeats)
 	}
 
+	visible := report.WithoutTombstoned()
+	if visible.Summary.Total != 6 || visible.Summary.ByStatus[string(LoginTombstoned)] != 0 || len(visible.Seats) != 6 {
+		t.Fatalf("filtered report retained tombstone state: summary=%+v seats=%+v", visible.Summary, visible.Seats)
+	}
+	for _, obs := range visible.Seats {
+		if obs.Name == "old" || obs.Status == LoginTombstoned {
+			t.Fatalf("filtered report leaked tombstone: %+v", obs)
+		}
+	}
+
 	byName := map[string]LoginObservation{}
 	for _, obs := range report.Seats {
 		byName[obs.Name] = obs

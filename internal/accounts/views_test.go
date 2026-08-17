@@ -142,19 +142,9 @@ func TestRenderJobView(t *testing.T) {
 			t.Errorf("job view missing %q in:\n%s", want, got)
 		}
 	}
-	// Tombstone block carries the audit fields.
-	for _, want := range []string{
-		"\ntombstoned_accounts:\n",
-		"  - name: q-netra\n",
-		"    login_status: tombstoned\n",
-		"    can_serve: false\n",
-		"    enabled: false\n",
-		`    tombstoned_at: "2026-06-25T15:00:00Z"` + "\n", // contains ':' -> quoted
-		"    tombstone_reason: phantom duplicate of gem8-netra\n",
-		"    rehome_to: gem8-netra\n",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("job view missing tombstone line %q in:\n%s", want, got)
+	for _, retired := range []string{"tombstoned_accounts:", "q-netra", "phantom duplicate"} {
+		if strings.Contains(got, retired) {
+			t.Errorf("job switcher leaked tombstoned account marker %q:\n%s", retired, got)
 		}
 	}
 	// A list block (launch.extra_flags) emits as a YAML sequence.

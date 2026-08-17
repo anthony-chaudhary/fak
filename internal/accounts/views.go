@@ -26,9 +26,9 @@ const (
 	// ViewDos is the dos roster (~/.claude/accounts.yaml): name+config_dir rows plus a
 	// `rotation:` and `defaults:` block. Read by `dos accounts`.
 	ViewDos ViewName = "dos"
-	// ViewJob is the job switcher roster (job/config/claude_accounts.yaml): richer rows
-	// (chrome_profile/email/enabled/reserved), a `tombstoned_accounts:` block, and
-	// defaults/rotation/launch. Read by job_search.account_switcher.
+	// ViewJob is the job switcher roster (job/config/claude_accounts.yaml): richer active
+	// rows (chrome_profile/email/enabled/reserved) plus defaults/rotation/launch. Retired
+	// seats stay only in the canonical registry and never enter the default switcher.
 	ViewJob ViewName = "job"
 )
 
@@ -53,7 +53,7 @@ func (r Registry) RenderView(view ViewName) (string, error) {
 }
 
 // activeHomes returns the live (non-tombstoned) homes in registry order — the rows that go in
-// the `accounts:` list. tombstonedHomes returns the retired ones for `tombstoned_accounts:`.
+// the generated `accounts:` list. Retired homes remain canonical-registry state only.
 func (r Registry) activeHomes() []Home {
 	var out []Home
 	for _, h := range r.Homes {
@@ -64,18 +64,8 @@ func (r Registry) activeHomes() []Home {
 	return out
 }
 
-func (r Registry) tombstonedHomes() []Home {
-	var out []Home
-	for _, h := range r.Homes {
-		if !h.Active() {
-			out = append(out, h)
-		}
-	}
-	return out
-}
-
 // writeNameDirRow appends the `  - name: …` / `    config_dir: …` pair that opens
-// every account roster row (the shared head of the dos/job active + tombstoned loops).
+// every active account roster row (the shared head of the dos/job loops).
 func writeNameDirRow(b *strings.Builder, h Home) {
 	b.WriteString("  - name: " + yamlScalar(h.Name) + "\n")
 	b.WriteString("    config_dir: " + yamlScalar(h.Dir) + "\n")
@@ -141,8 +131,8 @@ func (r Registry) renderDos() string {
 	return b.String()
 }
 
-// renderJob emits the job roster: richer active rows, a tombstoned_accounts block built from
-// the registry's tombstone audit fields, then defaults/rotation/launch.
+// renderJob emits the job switcher roster: richer active rows followed by the
+// job-owned defaults/rotation/launch blocks. Tombstones remain registry-only.
 func (r Registry) renderJob() string {
 	var b strings.Builder
 	b.WriteString(generatedHeader)
@@ -152,22 +142,6 @@ func (r Registry) renderJob() string {
 		b.WriteString("    enabled: " + strconv.FormatBool(h.EnabledOrDefault()) + "\n")
 		if h.Reserved {
 			b.WriteString("    reserved: true\n")
-		}
-	}
-	if tomb := r.tombstonedHomes(); len(tomb) > 0 {
-		b.WriteString("\ntombstoned_accounts:\n")
-		for _, h := range tomb {
-			writeJobRowHead(&b, h)
-			b.WriteString("    enabled: false\n")
-			if h.TombstonedAt != "" {
-				b.WriteString("    tombstoned_at: " + yamlScalar(h.TombstonedAt) + "\n")
-			}
-			if h.TombstoneReason != "" {
-				b.WriteString("    tombstone_reason: " + yamlScalar(h.TombstoneReason) + "\n")
-			}
-			if h.RehomeTo != "" {
-				b.WriteString("    rehome_to: " + yamlScalar(h.RehomeTo) + "\n")
-			}
 		}
 	}
 	b.WriteString(r.renderBlocks(ViewJob))

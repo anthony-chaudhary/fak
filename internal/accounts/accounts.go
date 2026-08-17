@@ -206,7 +206,7 @@ type Home struct {
 	ExtraEnv map[string]string `json:"extra_env,omitempty"`
 	// Tombstone audit trail, canonical here so the generated views need not strand it: when
 	// this seat was retired and why. RehomeTo (above) is the third audit field. Empty for a
-	// live seat. These move the job roster's tombstoned_accounts prose into the registry.
+	// live seat. These retain retirement evidence in the canonical registry without exposing it in operator rosters.
 	TombstonedAt    string `json:"tombstoned_at,omitempty"`
 	TombstoneReason string `json:"tombstone_reason,omitempty"`
 	// HistoryAt names this seat's history BUNDLE in the registry's shared-history store
@@ -292,7 +292,7 @@ func (r Registry) Role(role string) (Home, bool) {
 }
 
 // ViewConfig is one generated view's non-account config: the named top-level YAML blocks it
-// carries below `accounts:`/`tombstoned_accounts:` (e.g. "defaults", "rotation", "launch"),
+// carries below `accounts:` (e.g. "defaults", "rotation", "launch"),
 // each an arbitrary nested map emitted as YAML by the projector. Order is fixed by BlockOrder
 // so the generated file is byte-stable across runs.
 type ViewConfig struct {

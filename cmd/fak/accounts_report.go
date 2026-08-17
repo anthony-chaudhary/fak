@@ -28,11 +28,13 @@ func printAccountsTable(w io.Writer, reg accounts.Registry, showAll bool) {
 	// as several) and a seat whose setup token belongs to a different login than its own.
 	rec := reg.Reconcile()
 	report := reg.LoginReport()
+	if !showAll {
+		report = report.WithoutTombstoned()
+	}
 	obsByName := loginObservationsByName(report)
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tSTATUS\tLOGIN\tIDENTITY\tCREDS\tREHOME\tFLAG")
 	dupes, twins := 0, 0
-	hiddenTombstones := 0
 	accountSet := map[string]bool{}
 	for _, h := range reg.Homes {
 		// Tombstoned seats are retired bookkeeping, not a mainline roster row: with
@@ -40,7 +42,6 @@ func printAccountsTable(w io.Writer, reg accounts.Registry, showAll bool) {
 		// them into the one-line count below the table unless --all is asked for; the
 		// login summary still carries the tombstoned=N tally, and --json stays complete.
 		if !h.Active() && !showAll {
-			hiddenTombstones++
 			continue
 		}
 		name := h.Name
@@ -101,7 +102,6 @@ func printAccountsTable(w io.Writer, reg accounts.Registry, showAll bool) {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", name, status, login, ident, creds, rehome, strings.Join(flags, "; "))
 	}
 	tw.Flush()
-	tombstoneHiddenNote(w, hiddenTombstones, "list")
 	printLoginSummary(w, report, "login")
 	// A one-line reconcile summary when there is anything to collapse or warn about, so
 	// the operator sees "N seats are really M accounts" instead of inferring it per row.
@@ -119,17 +119,15 @@ func printAccountsTable(w io.Writer, reg accounts.Registry, showAll bool) {
 }
 
 func printAccountsStatus(w io.Writer, report accounts.LoginReport, showAll bool) {
+	if !showAll {
+		report = report.WithoutTombstoned()
+	}
 	fmt.Fprintf(w, "# %s\n", report.Schema)
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tLOGIN\tCAN_SERVE\tACCOUNT\tIDENTITY\tROLES\tNEXT_ACTION\tWARNING")
-	hiddenTombstones := 0
 	for _, obs := range report.Seats {
 		// Same collapse as the list table: a retired seat is not a mainline status row.
 		// Hide it unless --all; the summary line below still tallies tombstoned=N.
-		if obs.Status == accounts.LoginTombstoned && !showAll {
-			hiddenTombstones++
-			continue
-		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			obs.Name,
 			obs.Status,
@@ -142,23 +140,7 @@ func printAccountsStatus(w io.Writer, report accounts.LoginReport, showAll bool)
 		)
 	}
 	tw.Flush()
-	tombstoneHiddenNote(w, hiddenTombstones, "status")
 	printLoginSummary(w, report, "summary")
-}
-
-// tombstoneHiddenNote prints the one-line collapse note when `hidden` tombstoned
-// seats were kept out of a default table. `sub` is the subcommand to re-run with
-// --all to reveal them. Nothing prints when hidden is zero, so a roster with no
-// tombstones (the --all view, or a fresh registry) reads exactly as before.
-func tombstoneHiddenNote(w io.Writer, hidden int, sub string) {
-	if hidden <= 0 {
-		return
-	}
-	seats := "seats"
-	if hidden == 1 {
-		seats = "seat"
-	}
-	fmt.Fprintf(w, "# %d tombstoned %s hidden — `fak accounts %s --all` to show\n", hidden, seats, sub)
 }
 
 func loginObservationsByName(report accounts.LoginReport) map[string]accounts.LoginObservation {
