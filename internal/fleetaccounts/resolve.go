@@ -188,6 +188,8 @@ func AccountSessionCap(row Account) int {
 	switch strings.ToLower(productOf(row)) {
 	case "claude":
 		return claudeSessionsPerAccount()
+	case "codex":
+		return 10
 	default:
 		return DefaultAccountSessionsPerWorker
 	}
