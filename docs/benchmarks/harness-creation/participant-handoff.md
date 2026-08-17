@@ -24,15 +24,6 @@ Use this card for #6911 only after the study baseline reports `baseline_ready=tr
    arm a fresh external directory and the protocol's declared empty cache. Do
    not reuse generated files, package/module caches, task answers, or process state across
    arms; record any unavoidable carryover as friction. Weekend receipts use `fak` only.
-6. For a ten-minute comparison, freeze one random `pair_id`, a privacy-safe random
-   `machine_id`, the SHA-256 digest of the exact task card as `task_digest`, and the
-   assigned `pair_order` (`fak-first` or `baseline-first`) before either clock. Use each assignment
-   once across the first two complete pairs. Record `arm_position` 1 or 2, use separate
-   run IDs and receipts, and never drop the second arm after seeing the first result.
-7. Run both arms on that same machine/OS/CPU and declared network condition. Give each
-   arm a fresh external directory and the protocol's declared empty cache. Do
-   not reuse generated files, package/module caches, task answers, or process state across
-   arms; record any unavoidable carryover as friction. Weekend receipts use `fak` only.
 
 ## During and after
 
