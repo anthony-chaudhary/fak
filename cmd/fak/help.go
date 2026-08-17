@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/devhandoff"
 )
 
 // overviewEntry is one curated line of the compact overview. The blurb is
@@ -149,7 +150,12 @@ func cmdHelp(args []string) {
 // usageAllVerbs prints runtime fak's complete usage wall. The development command
 // catalog belongs to fak-dev and is intentionally absent from this binary.
 func usageAllVerbs(w io.Writer) {
-	usageWall(w)
+	for _, line := range strings.Split(usageWallText(), "\n") {
+		if name, ok := wallHeaderVerb(line); ok && devhandoff.IsCommand(name) {
+			continue
+		}
+		fmt.Fprintln(w, line)
+	}
 }
 
 // printVerbHelp prints one verb's deep help: the catalog synopsis line (when
@@ -343,5 +349,9 @@ func suggestVerb(tok string) string {
 // `fak swep` already answers "did you mean 'fak dev sweep'?" (help stays ungated,
 // so `fak help <typo>` keeps suggesting the bare `fak help <verb>` spelling).
 func suggestVerbSpelling(tok string) string {
-	return suggestVerb(tok)
+	s := suggestVerb(tok)
+	if devhandoff.IsCommand(s) {
+		return "dev " + s
+	}
+	return s
 }

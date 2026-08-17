@@ -1,8 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/devhandoff"
 )
 
 // parseVerbArgv splits os.Args into the leading verb and its argument tail without
@@ -40,6 +44,12 @@ func resolveEarlyDispatch(verb *string, argv *[]string, start time.Time) bool {
 			return true
 		}
 		usage()
+		recordUsage(*verb, *argv, 2, start)
+		os.Exit(2)
+	}
+	if devhandoff.IsCommand(os.Args[1]) {
+		fmt.Fprintf(os.Stderr, "fak: %q moved to the separate fak-dev executable (DEV_COMMAND_MOVED)\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "  run: fak dev %s\n", strings.Join(os.Args[1:], " "))
 		recordUsage(*verb, *argv, 2, start)
 		os.Exit(2)
 	}
