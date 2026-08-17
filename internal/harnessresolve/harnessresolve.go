@@ -516,3 +516,19 @@ func VerifyLock(lock Lock) error {
 	}
 	return nil
 }
+
+// ReidentifyLock recomputes the canonical identity after a trusted resolver or
+// derivation has changed represented lock contents. It does not validate those
+// changes; callers must enforce their operation-specific rules first.
+func ReidentifyLock(lock *Lock) error {
+	if lock == nil {
+		return fmt.Errorf("lock is required")
+	}
+	lock.ID = ""
+	id, err := lockID(*lock)
+	if err != nil {
+		return err
+	}
+	lock.ID = id
+	return nil
+}
