@@ -41,6 +41,10 @@ are archived.
 
 ## Ten-minute task card
 
+Every paired run uses [`paired-task-card.md`](paired-task-card.md), whose SHA-256 is frozen
+as `protocol.task_digest` in `study.json`. Hash the exact checked-in UTF-8 bytes; a receipt
+with another digest is inadmissible even when both arms agree with each other.
+
 Prerequisite environment: a fresh machine or VM with Go installed, working network, no
 fak checkout, no fak binary, and empty relevant Go build/module caches. Record exact OS,
 architecture, Go version, cache state, and retrieval identity before opening this card.

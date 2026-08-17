@@ -15,6 +15,8 @@ Use this card for #6911 only after the study baseline reports `baseline_ready=tr
    task. Allocate a clean cache and random run slug.
 5. Copy `participant-receipt-template.json` into the external run directory. Choose the
    ten-minute or weekend task in [README.md](README.md); do not change tracks after start.
+   For a ten-minute comparison, provide the exact checked-in `paired-task-card.md` bytes
+   and verify their SHA-256 equals `protocol.task_digest` in `study.json`.
 6. For a ten-minute comparison, freeze one random `pair_id`, a privacy-safe random
    `machine_id`, the SHA-256 digest of the exact task card as `task_digest`, and the
    assigned `pair_order` (`fak-first` or `baseline-first`) before either clock. Use each assignment

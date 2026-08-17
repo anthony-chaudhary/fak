@@ -11,7 +11,8 @@
       "minimum_pairs": 2,
       "max_median_elapsed_ratio": 1.25,
       "counterbalanced_order": true
-    }
+    },
+    "task_digest": "sha256:bb21216e5f5742915e46c34f242e53a60a6bea12b3be18ba6afdc4f185834fdb"
   },
   "baseline": {
     "id": "create-mastra-1.25.0",

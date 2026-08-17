@@ -11,6 +11,7 @@ import (
 const Schema = "fak.harness-creation-receipt/v1alpha1"
 
 var slug = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{5,63}$`)
+var digestRE = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 type Command struct {
 	Command string `json:"command"`
@@ -107,7 +108,7 @@ func Parse(raw []byte) (Receipt, error) {
 	if !slug.MatchString(r.MachineID) {
 		return r, errors.New("machine_id must be a privacy-safe random slug")
 	}
-	if !regexp.MustCompile(`^sha256:[0-9a-f]{64}$`).MatchString(r.TaskDigest) {
+	if !digestRE.MatchString(r.TaskDigest) {
 		return r, errors.New("task_digest must be a lowercase sha256 digest")
 	}
 	if r.PairOrder != "fak-first" && r.PairOrder != "baseline-first" {
@@ -149,10 +150,21 @@ func Evaluate(r Receipt) Result {
 
 func CheckUnique(studyRaw []byte, row StudyRow) error {
 	var study struct {
+		Protocol struct {
+			TaskDigest string `json:"task_digest"`
+		} `json:"protocol"`
 		Runs []StudyRow `json:"runs"`
 	}
 	if err := json.Unmarshal(studyRaw, &study); err != nil {
 		return fmt.Errorf("parse study: %w", err)
+	}
+	if row.PairID != "" {
+		if !digestRE.MatchString(study.Protocol.TaskDigest) {
+			return errors.New("study protocol task_digest must be lowercase sha256:<64 hex>")
+		}
+		if row.TaskDigest != study.Protocol.TaskDigest {
+			return errors.New("receipt task_digest does not match study protocol task_digest")
+		}
 	}
 	for _, existing := range study.Runs {
 		if existing.ID == row.ID {

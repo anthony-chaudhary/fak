@@ -10,7 +10,7 @@ func frozenStudy() Study {
 	return Study{
 		Schema: Schema,
 		ID:     "study-1",
-		Protocol: Protocol{Frozen: true, TenMinuteLimitSeconds: 600,
+		Protocol: Protocol{TaskDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Frozen: true, TenMinuteLimitSeconds: 600,
 			AssistancePolicy: "task-card-and-help-only", FailuresInDenominator: true,
 			Parity: MatchedStudySpec{Frozen: true, MinimumPairs: 2, MaxMedianElapsedRatio: 1.25, CounterbalancedOrder: true}},
 		Baseline: Baseline{ID: "tuned-alt", Runnable: true, Tuned: true, Frozen: true, Evidence: "receipts/baseline.json"},
@@ -49,8 +49,26 @@ func TestEvaluateSupportsOnlyCompleteIndependentEnvelopes(t *testing.T) {
 	}
 }
 
+func TestParseRejectsTaskDigestOutsideProtocol(t *testing.T) {
+	study := frozenStudy()
+	study.Runs = []Run{{
+		ID: "run-one", ParticipantID: "person-one", Track: "ten-minute", Arm: "fak", PairID: "pair-one",
+		TaskDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		MachineID:  "machine-one", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder",
+		Independent: true, OS: "linux", CPU: "x86_64", NetworkState: "online", CacheState: "empty",
+		Outcome: "success", ElapsedSeconds: 100, Receipt: "receipt.json",
+	}}
+	raw, err := json.Marshal(study)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parse(raw); err == nil || !strings.Contains(err.Error(), "protocol.task_digest") {
+		t.Fatalf("protocol digest drift accepted: %v", err)
+	}
+}
+
 func TestParseFailsClosedOnPIIShapedIDsAndMutableProtocol(t *testing.T) {
-	raw := `{"schema":"fak.harness-creation-study/v1alpha1","id":"study","protocol":{"frozen":false,"ten_minute_limit_seconds":600,"assistance_policy":"task-card-and-help-only","failures_in_denominator":true,"parity":{"frozen":true,"minimum_pairs":2,"max_median_elapsed_ratio":1.25,"counterbalanced_order":true}},"baseline":{"id":"alt","runnable":true,"tuned":true,"frozen":true,"evidence":"x"},"runs":[]}`
+	raw := `{"schema":"fak.harness-creation-study/v1alpha1","id":"study","protocol":{"frozen":false,"ten_minute_limit_seconds":600,"assistance_policy":"task-card-and-help-only","failures_in_denominator":true,"task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parity":{"frozen":true,"minimum_pairs":2,"max_median_elapsed_ratio":1.25,"counterbalanced_order":true}},"baseline":{"id":"alt","runnable":true,"tuned":true,"frozen":true,"evidence":"x"},"runs":[]}`
 	if _, err := Parse([]byte(raw)); err == nil || !strings.Contains(err.Error(), "protocol") {
 		t.Fatalf("mutable protocol accepted: %v", err)
 	}

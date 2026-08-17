@@ -63,10 +63,18 @@ func TestWeekendWitnessAccepted(t *testing.T) {
 	}
 }
 
+func TestCheckUniqueRejectsTaskDigestOutsideProtocol(t *testing.T) {
+	row := Evaluate(validReceipt()).Row
+	study := []byte(`{"protocol":{"task_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"runs":[]}`)
+	if err := CheckUnique(study, row); err == nil || !strings.Contains(err.Error(), "protocol task_digest") {
+		t.Fatalf("protocol digest drift accepted: %v", err)
+	}
+}
+
 func TestCheckUniqueAdmitsSecondPairedArmAndRejectsDuplicates(t *testing.T) {
 	r := validReceipt()
 	row := Evaluate(r).Row
-	study := `{"runs":[{"id":"run-other","participant_id":"person-b7e14d","track":"ten-minute","arm":"baseline","pair_id":"pair-a8f29c","task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","machine_id":"machine-a8f29c","os":"linux-amd64","cpu":"x86_64","network_state":"online install; offline selfcheck","cache_state":"empty","pair_order":"fak-first","arm_position":2}]}`
+	study := `{"protocol":{"task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"runs":[{"id":"run-other","participant_id":"person-b7e14d","track":"ten-minute","arm":"baseline","pair_id":"pair-a8f29c","task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","machine_id":"machine-a8f29c","os":"linux-amd64","cpu":"x86_64","network_state":"online install; offline selfcheck","cache_state":"empty","pair_order":"fak-first","arm_position":2}]}`
 	if err := CheckUnique([]byte(study), row); err != nil {
 		t.Fatalf("second paired arm refused: %v", err)
 	}
@@ -77,7 +85,7 @@ func TestCheckUniqueAdmitsSecondPairedArmAndRejectsDuplicates(t *testing.T) {
 		"pair arm":         `{"id":"run-other","participant_id":"person-other","track":"ten-minute","arm":"fak","pair_id":"pair-a8f29c","task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","machine_id":"machine-a8f29c","os":"linux-amd64","cpu":"x86_64","network_state":"online install; offline selfcheck","cache_state":"empty","pair_order":"fak-first","arm_position":2}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := CheckUnique([]byte(`{"runs":[`+existing+`]}`), row); err == nil {
+			if err := CheckUnique([]byte(`{"protocol":{"task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"runs":[`+existing+`]}`), row); err == nil {
 				t.Fatal("expected duplicate refusal")
 			}
 		})
@@ -119,8 +127,13 @@ func TestCheckUniqueRejectsPairedEnvelopeDrift(t *testing.T) {
 			existing.ArmPosition = 2
 			mutate(&existing)
 			raw, _ := json.Marshal(struct {
+				Protocol struct {
+					TaskDigest string `json:"task_digest"`
+				} `json:"protocol"`
 				Runs []StudyRow `json:"runs"`
-			}{[]StudyRow{existing}})
+			}{Protocol: struct {
+				TaskDigest string `json:"task_digest"`
+			}{TaskDigest: row.TaskDigest}, Runs: []StudyRow{existing}})
 			if err := CheckUnique(raw, row); err == nil || !strings.Contains(err.Error(), "envelope") {
 				t.Fatalf("%s drift accepted: %v", name, err)
 			}

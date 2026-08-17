@@ -13,6 +13,7 @@ import (
 const Schema = "fak.harness-creation-study/v1alpha1"
 
 var safeID = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+var digestRE = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 type Study struct {
 	Schema   string   `json:"schema"`
@@ -27,6 +28,7 @@ type Protocol struct {
 	TenMinuteLimitSeconds int              `json:"ten_minute_limit_seconds"`
 	AssistancePolicy      string           `json:"assistance_policy"`
 	FailuresInDenominator bool             `json:"failures_in_denominator"`
+	TaskDigest            string           `json:"task_digest"`
 	Parity                MatchedStudySpec `json:"parity"`
 }
 
@@ -119,6 +121,9 @@ func Parse(raw []byte) (Study, error) {
 	if !s.Protocol.Frozen || s.Protocol.TenMinuteLimitSeconds != 600 || s.Protocol.AssistancePolicy != "task-card-and-help-only" || !s.Protocol.FailuresInDenominator {
 		return Study{}, errors.New("protocol must freeze the 600-second limit, task-card-and-help-only assistance, and failures-in-denominator rule")
 	}
+	if !digestRE.MatchString(s.Protocol.TaskDigest) {
+		return Study{}, errors.New("protocol.task_digest must be lowercase sha256:<64 hex>")
+	}
 	if !s.Protocol.Parity.Frozen || s.Protocol.Parity.MinimumPairs < 1 || s.Protocol.Parity.MaxMedianElapsedRatio < 1 || !s.Protocol.Parity.CounterbalancedOrder {
 		return Study{}, errors.New("protocol parity question must freeze minimum_pairs >= 1, max_median_elapsed_ratio >= 1, and counterbalanced_order")
 	}
@@ -153,7 +158,10 @@ func Parse(raw []byte) (Study, error) {
 			}
 		}
 		if r.PairID != "" {
-			if !safeID.MatchString(r.MachineID) || !regexp.MustCompile(`^sha256:[0-9a-f]{64}$`).MatchString(r.TaskDigest) || r.OS == "" || r.CPU == "" || r.NetworkState == "" || r.CacheState == "" {
+			if r.TaskDigest != s.Protocol.TaskDigest {
+				return Study{}, fmt.Errorf("run %q: task_digest does not match protocol.task_digest", r.ID)
+			}
+			if !safeID.MatchString(r.MachineID) || !digestRE.MatchString(r.TaskDigest) || r.OS == "" || r.CPU == "" || r.NetworkState == "" || r.CacheState == "" {
 				return Study{}, fmt.Errorf("run %q: complete comparison envelope is required", r.ID)
 			}
 			envelope := strings.Join([]string{r.TaskDigest, r.MachineID, r.OS, r.CPU, r.NetworkState, r.CacheState}, "\x00")

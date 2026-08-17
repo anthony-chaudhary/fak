@@ -7,7 +7,7 @@
   "track": "ten-minute",
   "arm": "fak",
   "pair_id": "pair-random-slug",
-  "task_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "task_digest": "sha256:bb21216e5f5742915e46c34f242e53a60a6bea12b3be18ba6afdc4f185834fdb",
   "machine_id": "machine-random-slug",
   "pair_order": "fak-first",
   "arm_position": 1,
