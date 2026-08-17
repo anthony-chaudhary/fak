@@ -1,19 +1,5 @@
 {
   "hooks": {
-    "PostToolUse": [
-      {
-        "hooks": [
-          {
-            "command": "python",
-            "args": [
-              "-c",
-              "import os,subprocess,sys; root=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); subprocess.call([sys.executable,os.path.join(root,'tools','dos_hook.py'),'posttool','--workspace',root]); sys.exit(0)"
-            ],
-            "type": "command"
-          }
-        ]
-      }
-    ],
     "PreToolUse": [
       {
         "hooks": [
@@ -27,33 +13,6 @@
           }
         ],
         "matcher": "Bash|Read|Write|Edit|MultiEdit|NotebookEdit"
-      },
-      {
-        "hooks": [
-          {
-            "command": "python",
-            "args": [
-              "-c",
-              "import os,subprocess,sys; root=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); subprocess.call([sys.executable,os.path.join(root,'tools','dos_hook.py'),'pretool','--workspace',root]); sys.exit(0)"
-            ],
-            "type": "command"
-          }
-        ],
-        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*dos.*"
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "command": "python",
-            "args": [
-              "-c",
-              "import os,subprocess,sys; root=os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd(); subprocess.call([sys.executable,os.path.join(root,'tools','dos_hook.py'),'stop','--workspace',root]); sys.exit(0)"
-            ],
-            "type": "command"
-          }
-        ]
       }
     ]
   }

@@ -147,6 +147,23 @@ func TestAgentHookRegistry_MirrorsSettingsJSON(t *testing.T) {
 	}
 }
 
+// TestProjectSettingsDoNotDuplicateDOSPlugin pins the #2702 boundary: Claude workers load
+// the enabled user-scope DOS plugin, so project settings retain only FAK-owned hooks. Registering
+// dos_hook.py here makes every headless tool result traverse DOS more than once.
+func TestProjectSettingsDoNotDuplicateDOSPlugin(t *testing.T) {
+	root := resolveRoot("")
+	if root == "" {
+		t.Skip("no repo root resolvable")
+	}
+	raw, err := os.ReadFile(filepath.Join(root, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatalf("read settings.json: %v", err)
+	}
+	if bytes.Contains(raw, []byte("dos_hook.py")) || bytes.Contains(raw, []byte("dos.cli hook")) {
+		t.Fatal("project settings duplicate the user-scope DOS plugin hook path")
+	}
+}
+
 // TestAgentHookPick_UnknownEventRefuses: an unrecognized event must refuse and name the valid
 // set, never select nothing and let the caller report a pass.
 func TestAgentHookPick_UnknownEventRefuses(t *testing.T) {
