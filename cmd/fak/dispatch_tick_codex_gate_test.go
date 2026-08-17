@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +14,7 @@ import (
 
 func TestDispatchTickLiveCodexAllowsGuardedChildFromUnguardedParent(t *testing.T) {
 	root, threadID := dispatchCodexGateFixture(t, false)
-	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", "http://127.0.0.1:18080/v1")
+	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", healthyDispatchProvider(t)+"/v1")
 
 	got, spawned, command := runDispatchCodexGateTick(t, root)
 	if !spawned {
@@ -40,7 +42,7 @@ func TestDispatchTickLiveCodexAllowsGuardedChildFromUnguardedParent(t *testing.T
 
 func TestDispatchTickLiveCodexStillRefusesGenuineLoopWithGuardedChild(t *testing.T) {
 	root, _ := dispatchCodexGateFixture(t, true)
-	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", "http://127.0.0.1:18080/v1")
+	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", healthyDispatchProvider(t)+"/v1")
 
 	got, spawned, _ := runDispatchCodexGateTick(t, root)
 	if spawned {
@@ -63,6 +65,7 @@ func TestDispatchTickLiveCodexStillRefusesGenuineLoopWithGuardedChild(t *testing
 
 func TestDispatchTickDryRunPredictsLiveCodexLoopRefusal(t *testing.T) {
 	root, _ := dispatchCodexGateFixture(t, true)
+	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", healthyDispatchProvider(t)+"/v1")
 
 	dry, drySpawned, _ := runDispatchCodexGateTickMode(t, root, false)
 	if lease, ok := dry["lease"].(map[string]any); ok {
@@ -84,8 +87,8 @@ func TestDispatchTickDryRunPredictsLiveCodexLoopRefusal(t *testing.T) {
 		}
 		gates, _ := got["launch_checks"].(map[string]any)
 		provider, _ := gates["provider_reachability"].(map[string]any)
-		if dispatchMapString(provider, "id") != "provider_reachability" || provider["evaluated"] != false || !strings.Contains(dispatchMapString(provider, "next_action"), "#7078") {
-			t.Fatalf("%s provider risk = %#v, want explicit not-evaluated handoff", name, provider)
+		if dispatchMapString(provider, "id") != "provider_reachability" || provider["evaluated"] != true || provider["ok"] != true {
+			t.Fatalf("%s provider check = %#v, want evaluated healthy route", name, provider)
 		}
 	}
 }
@@ -113,6 +116,16 @@ func TestDispatchTickLiveCodexStillRefusesUnguardedChild(t *testing.T) {
 		dispatchMapString(gate, "next_action") != "prepare the child through fak guard before spawning" {
 		t.Fatalf("codex loop gate receipt = %#v", gate)
 	}
+}
+
+func healthyDispatchProvider(t *testing.T) string {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"provider_reachability":{"evaluated":true,"ok":true,"status":405}}`))
+	}))
+	t.Cleanup(server.Close)
+	return server.URL
 }
 
 func dispatchCodexGateFixture(t *testing.T, loop bool) (string, string) {

@@ -1407,6 +1407,25 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"model":   s.model,
 		"planner": plannerKind(s.planner),
 	}
+	if r.URL.Query().Get("deep") == "1" {
+		probe, ok := s.planner.(interface {
+			ProbeReachability(context.Context) (int, error)
+		})
+		if !ok {
+			health["provider_reachability"] = map[string]any{"evaluated": false, "reason": "planner has no external provider hop"}
+		} else {
+			status, err := probe.ProbeReachability(r.Context())
+			reach := map[string]any{"evaluated": true, "status": status}
+			if err != nil {
+				health["ok"] = false
+				reach["ok"] = false
+				reach["error"] = err.Error()
+			} else {
+				reach["ok"] = true
+			}
+			health["provider_reachability"] = reach
+		}
+	}
 	if len(s.nativeCodeCatalog) > 0 {
 		tools := make([]string, 0, len(s.nativeCodeCatalog))
 		for _, def := range s.nativeCodeCatalog {

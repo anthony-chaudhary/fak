@@ -418,15 +418,18 @@ func completeDispatchTickEvaluation(root, runsDir string, opts dispatchTickOptio
 		return finish(payload), nil
 	}
 
-	gates := map[string]any{
-		"provider_reachability": map[string]any{
-			"id":          "provider_reachability",
-			"evaluated":   false,
-			"reason":      "no bounded zero-turn provider probe is installed",
-			"next_action": "implement the guarded provider probe tracked by #7078; dry-run does not silently certify this hop",
-		},
-	}
+	providerCheck := dispatchProviderReachabilityCheck(launchPreview)
+	gates := map[string]any{"provider_reachability": providerCheck}
 	payload["launch_checks"] = gates
+	if evaluated, _ := providerCheck["evaluated"].(bool); evaluated {
+		if ok, _ := providerCheck["ok"].(bool); !ok {
+			payload["ok"] = false
+			payload["action"] = "provider_unreachable"
+			payload["verdict"] = "PROVIDER_REACHABILITY_REFUSED"
+			payload["reason"] = dispatchMapString(providerCheck, "reason")
+			return finish(payload), nil
+		}
+	}
 	if gate, refused, err := dispatchCodexLoopGateForTick(opts, account, guardedPreview); err != nil {
 		return nil, err
 	} else if gate != nil {

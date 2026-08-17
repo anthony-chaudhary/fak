@@ -817,6 +817,44 @@ func plannerTimeout() time.Duration {
 // Model returns the planner's configured model id (for provenance).
 func (p *HTTPPlanner) Model() string { return p.ModelID }
 
+// ProbeReachability performs a bounded, zero-generation request against the exact
+// configured provider endpoint. It validates the network hop and authentication
+// without creating a model turn: 2xx and request-shape 4xx responses prove the
+// route answered, while auth, throttling, 5xx, and transport failures do not.
+func (p *HTTPPlanner) ProbeReachability(ctx context.Context) (int, error) {
+	adapter, err := NewTranscriptAdapter(p.Provider)
+	if err != nil {
+		return 0, err
+	}
+	endpoint := adapter.Endpoint(p.BaseURL, p.ModelID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodOptions, endpoint, nil)
+	if err != nil {
+		return 0, err
+	}
+	for key, value := range adapter.Headers(p.effectiveAPIKey()) {
+		if !strings.EqualFold(key, "Content-Type") {
+			req.Header.Set(key, value)
+		}
+	}
+	for key, value := range p.effectiveExtraHeaders() {
+		req.Header.Set(key, value)
+	}
+	client := p.Client
+	if client == nil {
+		client = &http.Client{Timeout: plannerTimeout()}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+	if resp.StatusCode >= 200 && resp.StatusCode < 500 && resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusTooManyRequests {
+		return resp.StatusCode, nil
+	}
+	return resp.StatusCode, fmt.Errorf("provider endpoint returned %s", resp.Status)
+}
+
 // Complete performs one chat-completions round-trip with one backoff retry on a
 // transport error. The optional SampleOpts override the planner's configured
 // sampling defaults for THIS request only: a caller-supplied max_tokens replaces
