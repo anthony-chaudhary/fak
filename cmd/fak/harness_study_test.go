@@ -71,7 +71,7 @@ func TestHarnessStudyReceiptRowsFormCompletePair(t *testing.T) {
 			}
 			receipt := harnesscreationreceipt.Receipt{
 				Schema: harnesscreationreceipt.Schema, RunID: "run-" + pair.id + "-" + arm, ParticipantID: pair.participant, ParticipantClass: "unfamiliar-builder", PriorFamiliarity: "none",
-				Track: "ten-minute", Arm: arm, PairID: pair.id, PairOrder: pair.order, ArmPosition: position, Independent: true, Artifact: arm + "@v1", ArtifactDigest: "sha256:abc", OS: "linux", CPU: "amd64", Toolchain: "go1.26", NetworkState: "online install; offline selfcheck", CacheState: "empty",
+				Track: "ten-minute", Arm: arm, PairID: pair.id, TaskDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MachineID: "machine-" + pair.id, PairOrder: pair.order, ArmPosition: position, Independent: true, Artifact: arm + "@v1", ArtifactDigest: "sha256:abc", OS: "linux", CPU: "amd64", Toolchain: "go1.26", NetworkState: "online install; offline selfcheck", CacheState: "empty",
 				StartedAt: start, StoppedAt: start.Add(100 * time.Second), ElapsedSeconds: 100, Commands: []harnesscreationreceipt.Command{{Command: "build", Exit: 0}}, FilesChanged: []string{"product/config.go"}, Rebuilds: 1, RebuildSeconds: 10, Outcome: "success", Transcript: arm + ".txt", Receipt: arm + ".json",
 			}
 			receiptPath := filepath.Join(dir, pair.id+"-"+arm+".json")
@@ -91,7 +91,7 @@ func TestHarnessStudyReceiptRowsFormCompletePair(t *testing.T) {
 				t.Fatal(err)
 			}
 			study.Runs = append(study.Runs, harnesscreationstudy.Run{
-				ID: result.Row.ID, ParticipantID: result.Row.ParticipantID, Track: result.Row.Track, Arm: result.Row.Arm, PairID: result.Row.PairID, PairOrder: result.Row.PairOrder, ArmPosition: result.Row.ArmPosition,
+				ID: result.Row.ID, ParticipantID: result.Row.ParticipantID, Track: result.Row.Track, Arm: result.Row.Arm, PairID: result.Row.PairID, TaskDigest: result.Row.TaskDigest, MachineID: result.Row.MachineID, OS: result.Row.OS, CPU: result.Row.CPU, NetworkState: result.Row.NetworkState, CacheState: result.Row.CacheState, PairOrder: result.Row.PairOrder, ArmPosition: result.Row.ArmPosition,
 				ParticipantClass: result.Row.ParticipantClass, Independent: result.Row.Independent, Outcome: result.Row.Outcome, ElapsedSeconds: result.Row.ElapsedSeconds, Receipt: result.Row.Receipt,
 			})
 			writeStudy()

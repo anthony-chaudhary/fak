@@ -51,10 +51,16 @@ type Run struct {
 	Track                 string   `json:"track"`
 	Arm                   string   `json:"arm,omitempty"`
 	PairID                string   `json:"pair_id,omitempty"`
+	TaskDigest            string   `json:"task_digest,omitempty"`
+	MachineID             string   `json:"machine_id,omitempty"`
 	PairOrder             string   `json:"pair_order,omitempty"`
 	ArmPosition           int      `json:"arm_position,omitempty"`
 	ParticipantClass      string   `json:"participant_class"`
 	Independent           bool     `json:"independent"`
+	OS                    string   `json:"os,omitempty"`
+	CPU                   string   `json:"cpu,omitempty"`
+	NetworkState          string   `json:"network_state,omitempty"`
+	CacheState            string   `json:"cache_state,omitempty"`
 	Outcome               string   `json:"outcome"`
 	ElapsedSeconds        float64  `json:"elapsed_seconds"`
 	HelpRequests          []string `json:"help_requests,omitempty"`
@@ -123,6 +129,7 @@ func Parse(raw []byte) (Study, error) {
 	seenPairArms := map[string]bool{}
 	pairParticipants := map[string]string{}
 	pairOrders := map[string]string{}
+	pairEnvelopes := map[string]string{}
 	for i, r := range s.Runs {
 		if !safeID.MatchString(r.ID) || !safeID.MatchString(r.ParticipantID) {
 			return Study{}, fmt.Errorf("run %d requires privacy-safe run and participant slugs", i)
@@ -146,6 +153,14 @@ func Parse(raw []byte) (Study, error) {
 			}
 		}
 		if r.PairID != "" {
+			if !safeID.MatchString(r.MachineID) || !regexp.MustCompile(`^sha256:[0-9a-f]{64}$`).MatchString(r.TaskDigest) || r.OS == "" || r.CPU == "" || r.NetworkState == "" || r.CacheState == "" {
+				return Study{}, fmt.Errorf("run %q: complete comparison envelope is required", r.ID)
+			}
+			envelope := strings.Join([]string{r.TaskDigest, r.MachineID, r.OS, r.CPU, r.NetworkState, r.CacheState}, "\x00")
+			if prior, ok := pairEnvelopes[r.PairID]; ok && prior != envelope {
+				return Study{}, fmt.Errorf("pair %q comparison envelope differs between arms", r.PairID)
+			}
+			pairEnvelopes[r.PairID] = envelope
 			if participant, ok := pairParticipants[r.PairID]; ok && participant != r.ParticipantID {
 				return Study{}, fmt.Errorf("pair %q spans participants %q and %q", r.PairID, participant, r.ParticipantID)
 			}

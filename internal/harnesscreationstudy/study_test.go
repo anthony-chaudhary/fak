@@ -64,10 +64,10 @@ func TestParseFailsClosedOnPIIShapedIDsAndMutableProtocol(t *testing.T) {
 func TestEvaluateReportsPairedParityWithoutCountingBaselineAsFak(t *testing.T) {
 	s := frozenStudy()
 	s.Runs = []Run{
-		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a-fak.json"},
-		{ID: "a-base", ParticipantID: "builder-a", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 90, Receipt: "a-base.json"},
-		{ID: "b-fak", ParticipantID: "builder-b", Track: "ten-minute", Arm: "fak", PairID: "pair-b", PairOrder: "baseline-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 120, Receipt: "b-fak.json"},
-		{ID: "b-base", ParticipantID: "builder-b", Track: "ten-minute", Arm: "baseline", PairID: "pair-b", PairOrder: "baseline-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b-base.json"},
+		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", TaskDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MachineID: "machine-a", OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a-fak.json"},
+		{ID: "a-base", ParticipantID: "builder-a", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", TaskDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MachineID: "machine-a", OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", PairOrder: "fak-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 90, Receipt: "a-base.json"},
+		{ID: "b-fak", ParticipantID: "builder-b", Track: "ten-minute", Arm: "fak", PairID: "pair-b", TaskDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", MachineID: "machine-b", OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", PairOrder: "baseline-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 120, Receipt: "b-fak.json"},
+		{ID: "b-base", ParticipantID: "builder-b", Track: "ten-minute", Arm: "baseline", PairID: "pair-b", TaskDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", MachineID: "machine-b", OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", PairOrder: "baseline-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b-base.json"},
 	}
 	r := Evaluate(s)
 	if r.Parity.ClaimStatus != "supported" || r.Parity.CompletePairs != 2 || r.Parity.FakSuccesses != 2 || r.Parity.BaselineSuccesses != 2 {
@@ -82,9 +82,9 @@ func TestEvaluateParityKeepsMissingAndFailedArmsVisible(t *testing.T) {
 	s := frozenStudy()
 	s.Protocol.Parity.MinimumPairs = 1
 	s.Runs = []Run{
-		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "failure", ElapsedSeconds: 600, Receipt: "a-fak.json"},
-		{ID: "a-base", ParticipantID: "builder-a", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a-base.json"},
-		{ID: "b-fak", ParticipantID: "builder-b", Track: "ten-minute", Arm: "fak", PairID: "pair-b", PairOrder: "baseline-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b-fak.json"},
+		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", TaskDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MachineID: "machine-a", OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "failure", ElapsedSeconds: 600, Receipt: "a-fak.json"},
+		{ID: "a-base", ParticipantID: "builder-a", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", TaskDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MachineID: "machine-a", OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", PairOrder: "fak-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a-base.json"},
+		{ID: "b-fak", ParticipantID: "builder-b", Track: "ten-minute", Arm: "fak", PairID: "pair-b", TaskDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", MachineID: "machine-b", OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", PairOrder: "baseline-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b-fak.json"},
 	}
 	r := Evaluate(s)
 	if r.Parity.ClaimStatus != "refuted" || r.Parity.CompletePairs != 1 || r.Parity.IncompletePairs != 1 || r.Parity.FakSuccesses != 0 || r.Parity.BaselineSuccesses != 1 {
@@ -96,8 +96,8 @@ func TestEvaluateParityRefutesElapsedRatioOutsideFrozenBound(t *testing.T) {
 	s := frozenStudy()
 	s.Protocol.Parity.MinimumPairs = 1
 	s.Runs = []Run{
-		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 200, Receipt: "a-fak.json"},
-		{ID: "a-base", ParticipantID: "builder-a", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a-base.json"},
+		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", TaskDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MachineID: "machine-a", OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 200, Receipt: "a-fak.json"},
+		{ID: "a-base", ParticipantID: "builder-a", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", TaskDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MachineID: "machine-a", OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", PairOrder: "fak-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a-base.json"},
 	}
 	r := Evaluate(s)
 	if r.Parity.ClaimStatus != "refuted" || r.Parity.MedianElapsedRatio == nil || *r.Parity.MedianElapsedRatio != 2 {
@@ -108,8 +108,8 @@ func TestEvaluateParityRefutesElapsedRatioOutsideFrozenBound(t *testing.T) {
 func TestParseRejectsDuplicateOrUnknownPairArms(t *testing.T) {
 	s := frozenStudy()
 	s.Runs = []Run{
-		{ID: "a", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a.json"},
-		{ID: "b", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b.json"},
+		{ID: "a", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", TaskDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MachineID: "machine-a", OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a.json"},
+		{ID: "b", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", TaskDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MachineID: "machine-a", OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b.json"},
 	}
 	raw, err := json.Marshal(s)
 	if err != nil {
@@ -131,8 +131,8 @@ func TestParseRejectsDuplicateOrUnknownPairArms(t *testing.T) {
 func TestParseRejectsPairSpanningParticipants(t *testing.T) {
 	s := frozenStudy()
 	s.Runs = []Run{
-		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a.json"},
-		{ID: "b-base", ParticipantID: "builder-b", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 90, Receipt: "b.json"},
+		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", TaskDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MachineID: "machine-a", OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a.json"},
+		{ID: "b-base", ParticipantID: "builder-b", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", TaskDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MachineID: "machine-a", OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", PairOrder: "fak-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 90, Receipt: "b.json"},
 	}
 	raw, err := json.Marshal(s)
 	if err != nil {
@@ -146,10 +146,10 @@ func TestParseRejectsPairSpanningParticipants(t *testing.T) {
 func TestEvaluateParityRequiresCounterbalancedCompletePairs(t *testing.T) {
 	s := frozenStudy()
 	s.Runs = []Run{
-		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a-fak.json"},
-		{ID: "a-base", ParticipantID: "builder-a", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a-base.json"},
-		{ID: "b-fak", ParticipantID: "builder-b", Track: "ten-minute", Arm: "fak", PairID: "pair-b", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b-fak.json"},
-		{ID: "b-base", ParticipantID: "builder-b", Track: "ten-minute", Arm: "baseline", PairID: "pair-b", PairOrder: "fak-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b-base.json"},
+		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", TaskDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MachineID: "machine-a", OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a-fak.json"},
+		{ID: "a-base", ParticipantID: "builder-a", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", TaskDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MachineID: "machine-a", OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", PairOrder: "fak-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a-base.json"},
+		{ID: "b-fak", ParticipantID: "builder-b", Track: "ten-minute", Arm: "fak", PairID: "pair-b", TaskDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", MachineID: "machine-b", OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b-fak.json"},
+		{ID: "b-base", ParticipantID: "builder-b", Track: "ten-minute", Arm: "baseline", PairID: "pair-b", TaskDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", MachineID: "machine-b", OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", PairOrder: "fak-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b-base.json"},
 	}
 	r := Evaluate(s)
 	if r.Parity.ClaimStatus != "not_yet" || r.Parity.FakFirstPairs != 2 || r.Parity.BaselineFirstPairs != 0 {
@@ -160,8 +160,8 @@ func TestEvaluateParityRequiresCounterbalancedCompletePairs(t *testing.T) {
 func TestParseRejectsInconsistentPairOrderAndPosition(t *testing.T) {
 	s := frozenStudy()
 	s.Runs = []Run{
-		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a.json"},
-		{ID: "a-base", ParticipantID: "builder-a", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", PairOrder: "baseline-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b.json"},
+		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", TaskDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MachineID: "machine-a", OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a.json"},
+		{ID: "a-base", ParticipantID: "builder-a", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", TaskDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MachineID: "machine-a", OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", PairOrder: "baseline-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b.json"},
 	}
 	raw, _ := json.Marshal(s)
 	if _, err := Parse(raw); err == nil || !strings.Contains(err.Error(), "conflicting order") {
@@ -171,5 +171,19 @@ func TestParseRejectsInconsistentPairOrderAndPosition(t *testing.T) {
 	raw, _ = json.Marshal(s)
 	if _, err := Parse(raw); err == nil || !strings.Contains(err.Error(), "arm_position") {
 		t.Fatalf("wrong arm position accepted: %v", err)
+	}
+}
+
+func TestParseRejectsPairedComparisonEnvelopeDrift(t *testing.T) {
+	s := frozenStudy()
+	base := Run{ParticipantID: "builder-a", Track: "ten-minute", PairID: "pair-a", TaskDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MachineID: "machine-a", PairOrder: "fak-first", ParticipantClass: "unfamiliar-builder", Independent: true, OS: "linux", CPU: "amd64", NetworkState: "online", CacheState: "empty", Outcome: "success", ElapsedSeconds: 100}
+	fak, baseline := base, base
+	fak.ID, fak.Arm, fak.ArmPosition, fak.Receipt = "fak", "fak", 1, "fak.json"
+	baseline.ID, baseline.Arm, baseline.ArmPosition, baseline.Receipt = "baseline", "baseline", 2, "baseline.json"
+	baseline.CacheState = "warm"
+	s.Runs = []Run{fak, baseline}
+	raw, _ := json.Marshal(s)
+	if _, err := Parse(raw); err == nil || !strings.Contains(err.Error(), "envelope") {
+		t.Fatalf("envelope drift accepted: %v", err)
 	}
 }

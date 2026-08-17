@@ -25,6 +25,8 @@ type Receipt struct {
 	Track                 string    `json:"track"`
 	Arm                   string    `json:"arm"`
 	PairID                string    `json:"pair_id"`
+	TaskDigest            string    `json:"task_digest"`
+	MachineID             string    `json:"machine_id"`
 	PairOrder             string    `json:"pair_order"`
 	ArmPosition           int       `json:"arm_position"`
 	Independent           bool      `json:"independent"`
@@ -55,10 +57,16 @@ type StudyRow struct {
 	Track            string  `json:"track"`
 	Arm              string  `json:"arm"`
 	PairID           string  `json:"pair_id"`
+	TaskDigest       string  `json:"task_digest"`
+	MachineID        string  `json:"machine_id"`
 	PairOrder        string  `json:"pair_order"`
 	ArmPosition      int     `json:"arm_position"`
 	ParticipantClass string  `json:"participant_class"`
 	Independent      bool    `json:"independent"`
+	OS               string  `json:"os"`
+	CPU              string  `json:"cpu"`
+	NetworkState     string  `json:"network_state"`
+	CacheState       string  `json:"cache_state"`
 	Outcome          string  `json:"outcome"`
 	ElapsedSeconds   float64 `json:"elapsed_seconds"`
 	Receipt          string  `json:"receipt"`
@@ -96,6 +104,12 @@ func Parse(raw []byte) (Receipt, error) {
 	if !slug.MatchString(r.PairID) {
 		return r, errors.New("pair_id must be a privacy-safe random slug")
 	}
+	if !slug.MatchString(r.MachineID) {
+		return r, errors.New("machine_id must be a privacy-safe random slug")
+	}
+	if !regexp.MustCompile(`^sha256:[0-9a-f]{64}$`).MatchString(r.TaskDigest) {
+		return r, errors.New("task_digest must be a lowercase sha256 digest")
+	}
 	if r.PairOrder != "fak-first" && r.PairOrder != "baseline-first" {
 		return r, errors.New("pair_order must be fak-first or baseline-first")
 	}
@@ -124,7 +138,13 @@ func Parse(raw []byte) (Receipt, error) {
 	return r, nil
 }
 func Evaluate(r Receipt) Result {
-	return Result{Schema: "fak.harness-creation-receipt-result/v1alpha1", Valid: true, Row: StudyRow{ID: r.RunID, ParticipantID: r.ParticipantID, Track: r.Track, Arm: r.Arm, PairID: r.PairID, PairOrder: r.PairOrder, ArmPosition: r.ArmPosition, ParticipantClass: r.ParticipantClass, Independent: r.Independent, Outcome: r.Outcome, ElapsedSeconds: r.ElapsedSeconds, Receipt: r.Receipt}}
+	return Result{Schema: "fak.harness-creation-receipt-result/v1alpha1", Valid: true, Row: StudyRow{
+		ID: r.RunID, ParticipantID: r.ParticipantID, Track: r.Track, Arm: r.Arm, PairID: r.PairID,
+		TaskDigest: r.TaskDigest, MachineID: r.MachineID, PairOrder: r.PairOrder, ArmPosition: r.ArmPosition,
+		ParticipantClass: r.ParticipantClass, Independent: r.Independent, OS: r.OS, CPU: r.CPU,
+		NetworkState: r.NetworkState, CacheState: r.CacheState, Outcome: r.Outcome,
+		ElapsedSeconds: r.ElapsedSeconds, Receipt: r.Receipt,
+	}}
 }
 
 func CheckUnique(studyRaw []byte, row StudyRow) error {
@@ -140,6 +160,11 @@ func CheckUnique(studyRaw []byte, row StudyRow) error {
 		}
 		if existing.ParticipantID == row.ParticipantID && existing.Track == row.Track && existing.Arm == row.Arm {
 			return fmt.Errorf("participant %q already has a %s/%s attempt", row.ParticipantID, row.Track, row.Arm)
+		}
+		if existing.PairID == row.PairID {
+			if existing.TaskDigest != row.TaskDigest || existing.MachineID != row.MachineID || existing.OS != row.OS || existing.CPU != row.CPU || existing.NetworkState != row.NetworkState || existing.CacheState != row.CacheState {
+				return fmt.Errorf("pair %q comparison envelope differs between arms", row.PairID)
+			}
 		}
 		if existing.PairID == row.PairID && existing.PairOrder != row.PairOrder {
 			return fmt.Errorf("pair %q has conflicting order %q and %q", row.PairID, existing.PairOrder, row.PairOrder)
