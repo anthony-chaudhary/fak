@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -144,6 +145,44 @@ func TestAgentHookRegistry_MirrorsSettingsJSON(t *testing.T) {
 	}
 	if wired == 0 {
 		t.Fatal("settings.json declared none of PreToolUse/PostToolUse/Stop — the mirror test would be vacuous")
+	}
+}
+
+// TestProjectSettingsUsesCrossPlatformRepoGuardDelegate pins #7053: the Windows hook host
+// has no `sh`, so project admission must travel through FAK's native hook registry.
+func TestProjectSettingsUsesCrossPlatformRepoGuardDelegate(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	settingsPath := filepath.Join(root, ".claude", "settings.json")
+	raw, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings struct {
+		Hooks map[string][]struct {
+			Matcher string `json:"matcher"`
+			Hooks   []struct {
+				Command string   `json:"command"`
+				Args    []string `json:"args"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		t.Fatalf("parse %s: %v", settingsPath, err)
+	}
+	pretool := settings.Hooks["PreToolUse"]
+	if len(pretool) != 1 || len(pretool[0].Hooks) != 1 {
+		t.Fatalf("PreToolUse must have exactly one project repo-guard hook: %+v", pretool)
+	}
+	if pretool[0].Matcher != "Bash|Read|Write|Edit|MultiEdit|NotebookEdit" {
+		t.Fatalf("repo-guard matcher changed: %q", pretool[0].Matcher)
+	}
+	hook := pretool[0].Hooks[0]
+	wantArgs := []string{"hooks", "agent", "pretool", "-delegate", "repoguard"}
+	if hook.Command != "fak" || !slices.Equal(hook.Args, wantArgs) {
+		t.Fatalf("repo-guard must use the cross-platform agent-hook registry, got command=%q args=%q", hook.Command, hook.Args)
+	}
+	if strings.Contains(strings.ToLower(hook.Command), "sh") {
+		t.Fatalf("repo-guard transport must not require a POSIX shell on Windows: %q", hook.Command)
 	}
 }
 

@@ -4,10 +4,13 @@
       {
         "hooks": [
           {
-            "command": "sh",
+            "command": "fak",
             "args": [
-              "-c",
-              "R=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; B=\"$R/tools/.bin/repoguard.exe\"; [ -x \"$B\" ] || B=\"$R/tools/.bin/repoguard\"; [ -x \"$B\" ] && exec \"$B\" --hook; exec python \"$R/tools/repo_guard.py\" --hook"
+              "hooks",
+              "agent",
+              "pretool",
+              "-delegate",
+              "repoguard"
             ],
             "type": "command"
           }
