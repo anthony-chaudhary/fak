@@ -132,6 +132,9 @@ func Parse(raw []byte) (Receipt, error) {
 	if r.StartedAt.IsZero() || r.StoppedAt.IsZero() || !r.StoppedAt.After(r.StartedAt) || r.ElapsedSeconds <= 0 {
 		return r, errors.New("valid clock fields are required")
 	}
+	if interval := r.StoppedAt.Sub(r.StartedAt).Seconds(); r.ElapsedSeconds != interval {
+		return r, fmt.Errorf("elapsed_seconds %.9g does not match started_at/stopped_at interval %.9g", r.ElapsedSeconds, interval)
+	}
 	if len(r.Commands) == 0 || r.Rebuilds < 0 || r.RebuildSeconds < 0 || r.HelpRequests < 0 {
 		return r, errors.New("commands and nonnegative rebuild/help evidence are required")
 	}

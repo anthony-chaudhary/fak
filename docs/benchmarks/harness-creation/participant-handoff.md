@@ -31,8 +31,10 @@ Use this card for #6911 only after the study baseline reports `baseline_ready=tr
 ## During and after
 
 Start the monotonic and wall clocks when the participant opens the selected task card.
-Record every command and exit, including failures and every human hint/help request. Stop
-only at the task card's success/failure boundary. An eligible failure before customization
+Record `started_at` and `stopped_at` as RFC3339 timestamps and set `elapsed_seconds` to
+their exact represented interval; admission rejects contradictory clock evidence. Record
+every command and exit, including failures and every human hint/help request. Stop only
+at the task card's success/failure boundary. An eligible failure before customization
 or rebuild still gets a receipt: leave `files_changed` empty and both rebuild fields zero,
 rather than dropping the attempt. Successful receipts still require changed-file and
 rebuild evidence. Preserve any product, hashes, build and selfcheck output that exists, the

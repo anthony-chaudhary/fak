@@ -89,6 +89,38 @@ func TestParseKeepsSuccessEvidenceFloorAndRejectsContradictions(t *testing.T) {
 	}
 }
 
+func TestParseRejectsElapsedClockMismatch(t *testing.T) {
+	r := validReceipt()
+	r.ElapsedSeconds--
+	raw, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Parse(raw)
+	if err == nil || !strings.Contains(err.Error(), "elapsed_seconds 299 does not match started_at/stopped_at interval 300") {
+		t.Fatalf("Parse() error = %v, want elapsed clock mismatch", err)
+	}
+}
+
+func TestParseAcceptsFractionalClockInterval(t *testing.T) {
+	r := validReceipt()
+	r.StoppedAt = r.StoppedAt.Add(500 * time.Millisecond)
+	r.ElapsedSeconds = 300.5
+	raw, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if got.ElapsedSeconds != 300.5 {
+		t.Fatalf("elapsed_seconds = %v, want 300.5", got.ElapsedSeconds)
+	}
+}
+
 func TestParseFailsClosedAndWeekendRequiresWitness(t *testing.T) {
 	for name, mutate := range map[string]func(*Receipt){"clock": func(r *Receipt) { r.StoppedAt = r.StartedAt }, "commands": func(r *Receipt) { r.Commands = nil }, "slug": func(r *Receipt) { r.ParticipantID = "Jane Doe" }, "weekend": func(r *Receipt) { r.Track = "weekend" }} {
 		t.Run(name, func(t *testing.T) {
