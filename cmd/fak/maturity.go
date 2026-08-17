@@ -24,6 +24,8 @@ func runMaturity(stdout, stderr io.Writer, argv []string) int {
 			return runMaturityRoute(stdout, stderr, argv[1:])
 		case "baseline":
 			return runMaturityBaseline(stdout, stderr, argv[1:])
+		case "anatomy":
+			return runMaturityAnatomy(stdout, stderr, argv[1:])
 		}
 	}
 	nextSubcommand := false
@@ -178,6 +180,42 @@ func runMaturityRoute(stdout, stderr io.Writer, argv []string) int {
 				return 1
 			}
 		}
+	}
+	return 0
+}
+
+func runMaturityAnatomy(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak maturity anatomy", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
+	asJSON := fs.Bool("json", false, "emit machine-readable anatomy")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if fs.NArg() > 1 {
+		fmt.Fprintln(stderr, "usage: fak maturity anatomy [package-path] [--json] [--workspace PATH]")
+		return 2
+	}
+	root := *workspace
+	if root == "" {
+		root = repoRoot()
+	}
+	target := "internal/maturity"
+	if fs.NArg() == 1 {
+		target = fs.Arg(0)
+	}
+	payload, err := maturity.AnalyzeAnatomy(root, target)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak maturity anatomy: %v\n", err)
+		return 2
+	}
+	if *asJSON {
+		if err := maturity.EncodeAnatomyJSON(stdout, payload); err != nil {
+			fmt.Fprintf(stderr, "fak maturity anatomy: encode json: %v\n", err)
+			return 2
+		}
+	} else {
+		maturity.RenderAnatomyText(stdout, payload)
 	}
 	return 0
 }

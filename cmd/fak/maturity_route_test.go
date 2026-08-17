@@ -158,3 +158,16 @@ func writeRouteFile(t *testing.T, root, rel, body string) {
 		t.Fatal(err)
 	}
 }
+
+func TestMaturityAnatomyRouteEmitsStaticStructure(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runMaturity(&stdout, &stderr, []string{"anatomy", "--workspace", repoRoot(), "internal/maturity"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	for _, want := range []string{"MATURITY ANATOMY", "flow", "outcomes", "contracts", "documentation", "position", "static production-code counts"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("missing %q in %s", want, stdout.String())
+		}
+	}
+}

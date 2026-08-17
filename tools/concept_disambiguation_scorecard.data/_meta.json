@@ -2380,6 +2380,11 @@
           "category": "incidental",
           "reason": "Serialized tool outcome value; reports policy denial and does not define a guard or gate.",
           "token": "guard_refusal"
+        },
+        {
+          "category": "incidental",
+          "reason": "standard early-return syntax metric, not an enforcement guard or gate",
+          "token": "GuardClauses"
         }
       ],
       "exclude": [
@@ -2440,6 +2445,7 @@
         "GateSummary",
         "GatewayBound",
         "GatewaySeat",
+        "GuardClauses",
         "GuardJoined",
         "IsAggregate",
         "LifecycleGate",
@@ -7980,6 +7986,11 @@
           "category": "incidental",
           "reason": "Typed malformed-input refusal for dispatch work-shape pricing; not a support maturity rung.",
           "token": "REFUSE_UNSUPPORTED_WORK_SHAPE"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI handler name only; anatomy is structural analysis, not another support-maturity lifecycle concept",
+          "token": "runMaturityAnatomy"
         }
       ],
       "id": "support-maturity",
@@ -8130,6 +8141,7 @@
         "resolveParityPublication",
         "robustnessTasks",
         "runInfoWorkCoverage",
+        "runMaturityAnatomy",
         "runMaturityBaseline",
         "runMaturityBaselinePromote",
         "runtime_delegation_required",
@@ -8549,6 +8561,11 @@
           "category": "incidental",
           "reason": "Serialized upstream field probe, not a fak decision concept",
           "token": "permissiondecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "standard cyclomatic-complexity metric field, not a policy or adjudication decision",
+          "token": "DecisionPoints"
         }
       ],
       "id": "decision",
@@ -8560,6 +8577,7 @@
         "DecisionBoundary",
         "DecisionDelegate",
         "DecisionMS",
+        "DecisionPoints",
         "DecisionRefuse",
         "DecisionRequest",
         "DecisionSamples",
@@ -8916,6 +8934,11 @@
           "category": "incidental",
           "reason": "CLI formatter for #3880 fleet checkpoint status, not a distinct render/materialization concept.",
           "token": "wipFleetRender"
+        },
+        {
+          "category": "incidental",
+          "reason": "format-specific presentation helper, not a new render/materialize domain concept",
+          "token": "RenderAnatomyText"
         }
       ],
       "id": "render-materialize",
@@ -8925,6 +8948,7 @@
         "MaterializeOwned",
         "MaterializedStateDigest",
         "RenderAging",
+        "RenderAnatomyText",
         "RenderAuditClusterReport",
         "RenderCeilings",
         "RenderCompactTrajectoryRanking",
