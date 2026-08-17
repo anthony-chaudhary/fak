@@ -1314,5 +1314,32 @@ class HookLensTest(unittest.TestCase):
         self.assertIn("| PostToolUse | 2 | 1 | 0 | 1 | 0 | 80 ms | 80 ms |", report)
         self.assertIn("Hook failures/cancellations:** 2", report)
 
+
+class DOSHookLedgerTest(unittest.TestCase):
+    def test_independent_ledger_reconciles_missing_posttool_attachments(self):
+        sa = load()
+        rows = [
+            {"ts": "2026-08-15T00:00:00Z", "verb": "posttool", "outcome": "passthrough",
+             "exit": 0, "latency_ms": 2.5},
+            {"ts": "2026-08-15T00:00:01Z", "verb": "posttool", "outcome": "passthrough",
+             "exit": 0, "latency_ms": 8.5},
+            {"ts": "2026-08-15T00:00:02Z", "verb": "stop", "outcome": "no-claims",
+             "exit": 1, "latency_ms": 4},
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / ".dos" / "metrics" / "observations.jsonl"
+            path.parent.mkdir(parents=True)
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows) + "bad\n",
+                            encoding="utf-8")
+            ledger = sa.load_dos_hook_observations(td, None)
+        self.assertEqual(ledger["verbs"]["posttool"]["count"], 2)
+        self.assertEqual(ledger["verbs"]["posttool"]["duration_ms"]["p90"], 8.5)
+        self.assertEqual(ledger["malformed_rows"], 1)
+        agg = {"hooks": {"events": {}}, "dos_hook_ledger": ledger}
+        report = "\n".join(sa._dos_hook_lens(agg))
+        self.assertIn("independently witnessed 2 `posttool` calls", report)
+        self.assertIn("attachment-observability gap", report)
+        self.assertIn("| stop | 1 | no-claims=1 | 1=1 |", report)
+
 if __name__ == "__main__":
     unittest.main()

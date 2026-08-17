@@ -131,7 +131,7 @@ The report gives you, in order:
    table (≥8 turns with ≥1 reset — cache-create tok, cc-share, resets, floor, est.
    $). These rows are the behavior audit the token lens can't see — each one
    names a session worth a `deep` drill.
-8. **Hook execution lens** — transcript-native hook outcomes, non-blocking failures/cancellations, failure signatures, and p90/max latency by event. Missing events mean no outcome attachment was recorded, not proof the hook never ran.
+8. **Hook execution lens** — transcript-native hook outcomes, non-blocking failures/cancellations, failure signatures, and p90/max latency by event. When the current workspace has `.dos/metrics/observations.jsonl`, reconcile it as an independent execution witness (especially for PostToolUse, whose successful attachments may be absent). Missing transcript events mean no outcome attachment was recorded, not proof the hook never ran.
 9. **Top 15 sessions by output tokens** — the fastest path to the expensive runs.
 
 The `trend` subcommand carries the same detectors per time bucket (`err%` /

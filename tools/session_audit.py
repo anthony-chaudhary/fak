@@ -1416,6 +1416,77 @@ def _cache_burst_tables(beh):
                      f"{r['suffix_resets']} | {fl} | ${r['cost_usd']:.2f} |")
     return L
 
+def load_dos_hook_observations(workspace, since_days):
+    """Read the independent DOS hook ledger when this audit runs in its workspace."""
+    path = os.path.join(workspace, ".dos", "metrics", "observations.jsonl")
+    if not os.path.isfile(path):
+        return None
+    cutoff = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=since_days)
+              if since_days is not None else None)
+    verbs = collections.defaultdict(lambda: {"outcomes": collections.Counter(),
+                                             "latencies_ms": [], "exits": collections.Counter()})
+    malformed = 0
+    try:
+        with open(path, encoding="utf-8") as stream:
+            for line in stream:
+                try:
+                    row = json.loads(line)
+                    ts = datetime.datetime.fromisoformat(str(row["ts"]).replace("Z", "+00:00"))
+                except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+                    malformed += 1
+                    continue
+                if cutoff is not None and ts < cutoff:
+                    continue
+                verb = str(row.get("verb") or "unknown")
+                verbs[verb]["outcomes"][str(row.get("outcome") or "<empty>")] += 1
+                verbs[verb]["exits"][str(row.get("exit", "unknown"))] += 1
+                latency = row.get("latency_ms")
+                if isinstance(latency, (int, float)) and latency >= 0:
+                    verbs[verb]["latencies_ms"].append(float(latency))
+    except OSError as exc:
+        return {"path": path, "error": str(exc)}
+    result = {"path": path, "malformed_rows": malformed, "verbs": {}}
+    for verb, data in verbs.items():
+        values = data["latencies_ms"]
+        result["verbs"][verb] = {
+            "count": sum(data["outcomes"].values()),
+            "outcomes": dict(data["outcomes"].most_common()),
+            "exits": dict(data["exits"].most_common()),
+            "duration_ms": {"median": _pct(values, 50), "p90": _pct(values, 90),
+                            "p99": _pct(values, 99), "max": max(values) if values else None},
+        }
+    return result
+
+
+def _dos_hook_lens(agg):
+    ledger = agg.get("dos_hook_ledger")
+    if not ledger:
+        return []
+    L = ["## DOS hook ledger — independent execution witness\n"]
+    if ledger.get("error"):
+        return L + [f"- Ledger unreadable: `{ledger['error']}`\n"]
+    L += [f"- Source: `{ledger['path']}` (independent of Claude transcript attachments).",
+          "| Verb | Calls | Outcomes | Exit codes | p90 | p99 | Max |",
+          "|---|---:|---|---|---:|---:|---:|"]
+    for verb, row in sorted((ledger.get("verbs") or {}).items()):
+        outcomes = ", ".join(f"{k}={v:,}" for k, v in row.get("outcomes", {}).items())
+        exits = ", ".join(f"{k}={v:,}" for k, v in row.get("exits", {}).items())
+        dur = row.get("duration_ms") or {}
+        ms = lambda value: "—" if value is None else f"{value:,.1f} ms"
+        L.append(f"| {verb} | {row.get('count', 0):,} | {outcomes} | {exits} | "
+                 f"{ms(dur.get('p90'))} | {ms(dur.get('p99'))} | {ms(dur.get('max'))} |")
+    post = (ledger.get("verbs") or {}).get("posttool")
+    transcript_post = (agg.get("hooks", {}).get("events", {}).get("PostToolUse", {})
+                       .get("total", 0))
+    if post and not transcript_post:
+        L.append(f"\n- **PostToolUse reconciliation:** Claude recorded zero outcome attachments, while "
+                 f"the DOS ledger independently witnessed {post['count']:,} `posttool` calls. "
+                 "This is an attachment-observability gap, not evidence that the hook did not run.")
+    if ledger.get("malformed_rows"):
+        L.append(f"- Malformed ledger rows skipped: {ledger['malformed_rows']:,}")
+    return L + [""]
+
+
 def _hook_lens(agg):
     hooks = agg.get("hooks") or {}
     events = hooks.get("events") or {}
@@ -1516,6 +1587,7 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
     L.extend(_distributions(agg))
     L.extend(_tool_mix_table(agg))
     L.extend(_hook_lens(agg))
+    L.extend(_dos_hook_lens(agg))
     L.extend(_behavior_lens(agg))
     L.extend(_top_sessions_table(S))
     return "\n".join(L)
@@ -1586,6 +1658,7 @@ def cmd_audit(a):
     # witness holds by construction: this aggregate == the --top-level-only aggregate
     # plus exactly the subagent delta. _subagent_fold_table renders that reconciliation.
     agg = aggregate(out)
+    agg["dos_hook_ledger"] = load_dos_hook_observations(os.getcwd(), a.since_days)
     excluded_subagents = None
     if top_level_only:
         subagent_records = [s for s in discover(roots, a.since_days, ns_prefix,
