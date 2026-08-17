@@ -1332,7 +1332,7 @@ class DOSHookLedgerTest(unittest.TestCase):
             path.write_text("".join(json.dumps(row) + "\n" for row in rows) + "bad\n",
                             encoding="utf-8")
             ledger = sa.load_dos_hook_observations(
-                td, 999, "2026-08-14T16:59:59-07:00"
+                td, None
             )
         self.assertEqual(ledger["verbs"]["posttool"]["count"], 2)
         self.assertEqual(ledger["verbs"]["posttool"]["duration_ms"]["p90"], 1500)
