@@ -563,7 +563,7 @@
         "ag-ui",
         "openai-codex"
       ],
-      "fak_status": "partial",
+      "fak_status": "present",
       "disposition": "recipe"
     }
   ]
