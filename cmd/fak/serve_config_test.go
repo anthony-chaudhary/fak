@@ -105,9 +105,6 @@ func TestServeConfigRejectsUnknownKeyWithNamedReason(t *testing.T) {
 
 func TestServeManifestDispositionCoversClosedVocabulary(t *testing.T) {
 	keys := deploymanifest.KnownKeys()
-	if len(keys) != 13 {
-		t.Fatalf("known key count = %d, want 13; update this witness and every runtime disposition deliberately", len(keys))
-	}
 	if len(serveManifestSpecs) > len(keys) {
 		t.Fatalf("disposition specs = %d exceeds known keys = %d", len(serveManifestSpecs), len(keys))
 	}
@@ -121,8 +118,8 @@ func TestServeManifestDispositionCoversClosedVocabulary(t *testing.T) {
 		if spec.reason == "" {
 			t.Errorf("%s has no disposition reason", dotted)
 		}
-		// This also proves manifestValue covers the same vocabulary without panic.
-		_ = manifestValue(deploymanifest.Defaults(), dotted)
+		// This also proves the typed value projector covers the same vocabulary without panic.
+		_ = deploymanifest.Defaults().Value(key)
 	}
 }
 

@@ -101,20 +101,30 @@ type serveManifestSpec struct {
 // serveManifestSpecs is intentionally exhaustive over deploymanifest.KnownKeys.
 // The coverage test fails when the manifest vocabulary grows without this
 // runtime deciding whether the new opinion is applied, reserved, or refused.
-var serveManifestSpecs = map[string]serveManifestSpec{
-	"agent_templates.dir":    {reason: "agent templates are started by the all-in-one orchestrator", nextAction: "use fak up when agent-template orchestration ships"},
-	"audit.journal":          {reason: "audit journal lifecycle belongs to the all-in-one orchestrator", nextAction: "use the existing serve audit controls until fak up owns this field"},
-	"audit.retention_days":   {reason: "retention requires the audit lifecycle manager", nextAction: "configure retention through the audit subsystem until fak up owns this field"},
-	"auth.require_key_env":   {flagName: "require-key-env", reason: "mapped directly to serve authentication"},
-	"budgets.default_tokens": {flagName: "context-budget-tokens", reason: "mapped directly to the default session token budget"},
-	"observability.bind":     {flagName: "addr", reason: "mapped directly to the serve listener"},
-	"observability.metrics":  {appliedValue: true, hasAppliedValue: true, reason: "the gateway serves its metrics surface whenever serve is running", nextAction: "use fak up when endpoint enablement becomes topology-selectable"},
-	"policy.floor":           {flagName: "policy", reason: "mapped directly to the capability-floor path"},
-	"policy.inline":          {reason: "serve accepts a policy path, not unmaterialized inline policy", nextAction: "write the policy to a reviewed file and set policy.floor"},
-	"runtimes.agent_runtime": {reason: "serve starts only the gateway process", nextAction: "use fak up when multi-runtime orchestration ships"},
-	"runtimes.gateway":       {appliedValue: true, hasAppliedValue: true, reason: "invoking fak serve necessarily starts the gateway", nextAction: "omit fak serve when gateway=false; use fak up for topology selection"},
-	"runtimes.model":         {reason: "model source selection requires the full backend/provider flag set", nextAction: "use explicit serve backend/provider flags until fak up maps this field"},
-	"tenants.enabled":        {reason: "tenant lifecycle belongs to the all-in-one orchestrator", nextAction: "leave tenants disabled until fak up owns tenant provisioning"},
+var serveManifestSpecs = buildServeManifestSpecs()
+
+func buildServeManifestSpecs() map[string]serveManifestSpec {
+	specs := map[string]serveManifestSpec{
+		"agent_templates.dir":    {reason: "agent templates are started by the all-in-one orchestrator", nextAction: "use fak up when agent-template orchestration ships"},
+		"audit.journal":          {reason: "audit journal lifecycle belongs to the all-in-one orchestrator", nextAction: "use the existing serve audit controls until fak up owns this field"},
+		"audit.retention_days":   {reason: "retention requires the audit lifecycle manager", nextAction: "configure retention through the audit subsystem until fak up owns this field"},
+		"auth.require_key_env":   {flagName: "require-key-env", reason: "mapped directly to serve authentication"},
+		"budgets.default_tokens": {flagName: "context-budget-tokens", reason: "mapped directly to the default session token budget"},
+		"observability.bind":     {flagName: "addr", reason: "mapped directly to the serve listener"},
+		"observability.metrics":  {appliedValue: true, hasAppliedValue: true, reason: "the gateway serves its metrics surface whenever serve is running", nextAction: "use fak up when endpoint enablement becomes topology-selectable"},
+		"policy.floor":           {flagName: "policy", reason: "mapped directly to the capability-floor path"},
+		"policy.inline":          {reason: "serve accepts a policy path, not unmaterialized inline policy", nextAction: "write the policy to a reviewed file and set policy.floor"},
+		"runtimes.agent_runtime": {reason: "serve starts only the gateway process", nextAction: "use fak up when multi-runtime orchestration ships"},
+		"runtimes.gateway":       {appliedValue: true, hasAppliedValue: true, reason: "invoking fak serve necessarily starts the gateway", nextAction: "omit fak serve when gateway=false; use fak up for topology selection"},
+		"runtimes.model":         {reason: "model source selection requires the full backend/provider flag set", nextAction: "use explicit serve backend/provider flags until fak up maps this field"},
+		"tenants.enabled":        {reason: "tenant lifecycle belongs to the all-in-one orchestrator", nextAction: "leave tenants disabled until fak up owns tenant provisioning"},
+	}
+	for _, key := range deploymanifest.KnownKeys() {
+		if strings.HasPrefix(key.Dotted(), "tool_plugins.") {
+			specs[key.Dotted()] = serveManifestSpec{flagName: "tool-plugin-config", reason: "compiled into the gateway tool-plugin host and monotone preference layers"}
+		}
+	}
+	return specs
 }
 
 func compileToolPluginConfig(m deploymanifest.Manifest) ([]toolplugin.Plugin, toolplugin.PreferenceLayers, error) {
@@ -177,12 +187,9 @@ func serveManifestOpinions(m deploymanifest.Manifest) map[string]manifestOpinion
 		dotted := key.Dotted()
 		spec, ok := serveManifestSpecs[dotted]
 		if !ok {
-			if strings.HasPrefix(dotted, "tool_plugins.") {
-				continue
-			}
 			panic("missing serve manifest disposition: " + dotted)
 		}
-		value := manifestValue(m, dotted)
+		value := m.Value(key)
 		opinion := manifestOpinion{
 			Value:      value,
 			Declared:   m.Present(key.Section, key.Name),
@@ -196,7 +203,7 @@ func serveManifestOpinions(m deploymanifest.Manifest) map[string]manifestOpinion
 			opinion.Disposition = "applied"
 		case spec.hasAppliedValue && opinion.Declared:
 			opinion.Disposition = "refused"
-		case opinion.Declared && !reflect.DeepEqual(value, manifestValue(defaults, dotted)):
+		case opinion.Declared && !reflect.DeepEqual(value, defaults.Value(key)):
 			opinion.Disposition = "refused"
 		default:
 			opinion.Disposition = "reserved"
@@ -221,39 +228,6 @@ func validateServeManifestOpinions(m deploymanifest.Manifest) error {
 	}
 	sort.Strings(refused)
 	return fmt.Errorf("CONFIG_OPINION_UNSUPPORTED: %s", strings.Join(refused, "; "))
-}
-
-func manifestValue(m deploymanifest.Manifest, dotted string) any {
-	switch dotted {
-	case "runtimes.gateway":
-		return m.Runtimes.Gateway
-	case "runtimes.agent_runtime":
-		return m.Runtimes.AgentRuntime
-	case "runtimes.model":
-		return m.Runtimes.Model
-	case "policy.floor":
-		return m.Policy.Floor
-	case "policy.inline":
-		return m.Policy.Inline
-	case "auth.require_key_env":
-		return m.Auth.RequireKeyEnv
-	case "budgets.default_tokens":
-		return m.Budgets.DefaultTokens
-	case "audit.journal":
-		return m.Audit.Journal
-	case "audit.retention_days":
-		return m.Audit.RetentionDays
-	case "tenants.enabled":
-		return m.Tenants.Enabled
-	case "agent_templates.dir":
-		return m.AgentTemplates.Dir
-	case "observability.metrics":
-		return m.Observability.Metrics
-	case "observability.bind":
-		return m.Observability.Bind
-	default:
-		panic("unaccounted fak.toml key: " + dotted)
-	}
 }
 
 func applyToolPluginConfig(cfg *gateway.Config, m deploymanifest.Manifest) error {
