@@ -328,7 +328,7 @@ func TestAgenticWidthCorpusAsksModelToChoose(t *testing.T) {
 			break
 		}
 	}
-	if !width.MeasureToolWidth || width.MinParallelToolCalls != 0 {
+	if !width.MeasureToolWidth || width.MinParallelToolCalls != 2 {
 		t.Fatalf("width contract measure_tool_width=%v min_parallel=%d", width.MeasureToolWidth, width.MinParallelToolCalls)
 	}
 	prompt := strings.ToLower(width.Prompt)
