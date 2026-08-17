@@ -3,6 +3,7 @@ package defaultvaluescore
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
@@ -24,7 +25,7 @@ func TestValueFlag_OffWithoutReasonIsDebt(t *testing.T) {
 	if flags[0].defaultOn {
 		t.Error("a 0-default Int value-flag must judge default-OFF")
 	}
-	k := kpiValueFlagDefaultOn(flags)
+	k := kpiValueFlagDefaultOn(flags, time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC))
 	if len(k.Defects) == 0 {
 		t.Error("an OFF value-flag with no allow-list reason must be debt (VALUE_FLAG_OFF)")
 	}
@@ -40,7 +41,7 @@ func TestValueFlag_DefaultOnIsClean(t *testing.T) {
 	if len(flags) != 1 || !flags[0].defaultOn {
 		t.Fatalf("named-constant default must judge default-ON, got %+v", flags)
 	}
-	k := kpiValueFlagDefaultOn(flags)
+	k := kpiValueFlagDefaultOn(flags, time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC))
 	if len(k.Defects) != 0 {
 		t.Errorf("a default-on value-flag is clean, got %v", k.Defects)
 	}
@@ -60,7 +61,7 @@ func TestValueFlag_BoolNamedConstantDefaultIsOn(t *testing.T) {
 	if len(flags) != 1 || !flags[0].defaultOn {
 		t.Fatalf("a Bool value-flag with a named-constant default must judge default-ON, got %+v", flags)
 	}
-	k := kpiValueFlagDefaultOn(flags)
+	k := kpiValueFlagDefaultOn(flags, time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC))
 	if len(k.Defects) != 0 {
 		t.Errorf("a Bool named-constant default-on value-flag is clean, got %v", k.Defects)
 	}
@@ -78,7 +79,7 @@ func TestValueFlag_OffWithAllowlistReasonIsClean(t *testing.T) {
 	if len(flags) != 1 || flags[0].defaultOn {
 		t.Fatalf("empty-string default must judge default-OFF, got %+v", flags)
 	}
-	k := kpiValueFlagDefaultOn(flags)
+	k := kpiValueFlagDefaultOn(flags, time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC))
 	if len(k.Defects) != 0 {
 		t.Errorf("an allow-listed OFF value-flag is honest, got %v", k.Defects)
 	}
@@ -91,6 +92,40 @@ func TestValueFlag_TransportFlagIsOutOfScope(t *testing.T) {
 	flags := ParseFlags(src, "cmd/fak/serve.go")
 	if len(flags) != 0 {
 		t.Errorf("a transport flag whose help mentions cache must be out of scope, got %+v", flags)
+	}
+}
+
+func TestOptInGateReviewDateBoundsOmissionHarm(t *testing.T) {
+	flags := ParseFlags(`fs.Bool("vdso-proxy-fill", false, "value cache speedup")`, FlagSources[0])
+	before := kpiValueFlagDefaultOn(flags, time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC))
+	if len(before.Defects) != 0 {
+		t.Fatalf("current reviewed gate should be inside the window: %v", before.Defects)
+	}
+	after := kpiValueFlagDefaultOn(flags, time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC))
+	if len(after.Defects) != 1 || !strings.Contains(after.Defects[0], "OPT_IN_REVIEW_DUE") {
+		t.Fatalf("stale gate must expose omission harm as typed debt: %v", after.Defects)
+	}
+}
+
+func TestInvalidOptInReviewDateIsDebt(t *testing.T) {
+	if validReviewDate("later", time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC)) {
+		t.Fatal("an unparseable review date must not hold the opt-in gate open")
+	}
+}
+
+func TestBuildAsOfReportsAgenticDefaultWindow(t *testing.T) {
+	p := BuildAsOf("../..", time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC))
+	if p.Schema != Schema {
+		t.Fatalf("schema = %q, want %q", p.Schema, Schema)
+	}
+	if got := p.Corpus["reviewed_opt_in_flags"]; got != len(offWithReason) {
+		t.Fatalf("reviewed_opt_in_flags = %v, want %d", got, len(offWithReason))
+	}
+	if got := p.Corpus["next_default_review"]; got != "2026-10-01" {
+		t.Fatalf("next_default_review = %v, want 2026-10-01", got)
+	}
+	if !strings.Contains(p.Finding, "agentic default window") {
+		t.Fatalf("finding must spell out the monitored boundary, got %q", p.Finding)
 	}
 }
 

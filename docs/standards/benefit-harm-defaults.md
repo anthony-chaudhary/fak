@@ -12,6 +12,19 @@
 
 This standard complements net-true value. Net-true asks whether a claimed gain survives all costs against the right baseline. Benefit–harm asks the prior product question: **should users be exposed by default, at what dose, with which contraindications, monitoring, and withdrawal criteria?**
 
+## The agentic default window
+
+FAK must avoid two symmetric failures:
+
+- **Overexposure harm:** enabling an agentic capability beyond its evidence, authority, reversibility, or surveillance envelope.
+- **Omission harm:** leaving a proven, bounded capability behind opt-in friction, so users repeatedly pay avoidable cost, latency, supervision, inconsistency, or risk because they never discover or configure it.
+
+The **agentic default window** is the set of capabilities that current evidence supports exposing automatically for a named workload and authority envelope. It is deliberately not a cultural popularity poll. The window moves as models, tools, safeguards, operator expectations, and field evidence change. A capability can move into the window when safeguards make default use favorable; it can move out after adverse evidence.
+
+Every opt-in gate therefore needs a reason **and a review date**. “Documented reason” without re-review turns uncertainty at one moment into permanent product inertia. [`fak score default-value`](../DEFAULT-VALUE-SCORECARD.md) monitors this boundary: unreviewed value flags are omission debt, and expired gates return to the work list instead of silently remaining opt-in forever. The review must choose one action: safely default it on, renew the gate with current evidence and a new date, or exclude/retire it.
+
+Great default value is not the fewest defaults. It is the largest evidence-supported set that works without setup while preserving authority, reversibility, and material operator choice.
+
 ## Admission record
 
 Before adding or widening a default, record all nine fields. A prose design note, issue contract, or test table is sufficient if each answer is explicit and witnessed.
@@ -20,11 +33,11 @@ Before adding or widening a default, record all nine fields. A prose design note
 2. **Comparator and non-intervention** — What happens with the current default, including doing nothing? Compare against the strongest practical alternative, not a strawman.
 3. **Benefit** — Which user outcome improves, by how much, for how many workloads, and how soon? Separate measured outcome from mechanism proxy.
 4. **Harms and interactions** — Include correctness loss, hidden work, stale state, authority expansion, privacy leakage, latency/cost tails, lock-in, operator confusion, and interactions with other stacking defaults. Estimate severity, probability, duration, and affected population.
-5. **Uncertainty** — Which populations and tail cases are missing from the evidence? Uncertainty lowers admissible exposure; popularity does not convert missing evidence into safety.
+5. **Uncertainty** — Which populations and tail cases are missing from the evidence? Uncertainty lowers admissible exposure, but it also has an expiry: state what evidence or review date will reconsider an opt-in gate. Popularity does not convert missing evidence into safety, and old uncertainty does not justify permanent inertia.
 6. **Contraindications** — Name conditions where the behavior must remain off or fail closed. Do not make every user discover these through an incident.
 7. **Dose and safeguards** — Choose the narrowest scope, frequency, authority, and resource budget that produces the benefit. Prefer preview, bounded trials, read-only operation, idempotence, isolation, and an observable fallback.
 8. **Consent and control** — State whether the operator can understand the material tradeoff, inspect activation, override it, and return to the prior behavior. Irreversible or authority-expanding behavior requires deliberate opt-in even when average benefit is positive.
-9. **Surveillance and stop rule** — Name the benefit and harm signals collected after release, the review horizon, the threshold that disables or narrows the default, and the tested rollback path. Aggregate success must not hide severe tail harm.
+9. **Surveillance and movement rules** — Name the benefit and harm signals collected after release, the review horizon, the threshold that disables or narrows the default, the tested rollback path, and the threshold that promotes an opt-in capability when omission harm now dominates. Aggregate success must not hide severe tail harm.
 
 ## Verdict
 

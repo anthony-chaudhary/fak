@@ -33,12 +33,13 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 // Schema is the control-pane schema id the fold and any consumer key on.
-const Schema = "fak-default-value-scorecard/1"
+const Schema = "fak-default-value-scorecard/2"
 
 // DebtKey is the headline integer the control-pane folds (scorecard_control_pane reads
 // corpus.default_value_debt).
@@ -98,41 +99,55 @@ var valueFlagTokens = []string{
 // (VALUE_FLAG_OFF). The reason is what a reviewer reads to confirm the gate is genuine,
 // not an excuse for a dead feature -- the same discipline conflationscore's qualifier
 // tables apply to provenance prose. Keyed by the flag name as it appears in fs.<T>("..").
-var offWithReason = map[string]string{
-	// NOTE: --ctx-view-budget is NOT listed here: it ships default-ON at 8000 (the
-	// planned-view lever; enforced for both front doors by cmd/fak/token_defaults_test.go).
-	// A default-ON flag never reaches the offWithReason check in kpiValueFlagDefaultOn (it
-	// continues at the `on++` branch), so an entry here would be dead and misleading. See
-	// cmd/fak/servewiring.go for the authoritative DEFAULT-ON description.
-	// Context-budget seed: a hard budget that returns reset directives is an operator
-	// policy, not a silent default -- forcing it on would surprise an unwitting session.
-	"context-budget-tokens": "seeds a hard context budget that returns reset directives -- an operator policy, not a silent default (0 = off keeps today's path)",
-	// vCache cuda-graph: a measured no-win on small models; witness tok/s before relying.
-	"cuda-graph": "a measured no-win on small-model/L4 decode (launch overhead already small) -- requires a per-node tok/s witness before it pays, so default-off avoids a vacuous claim",
-	// Proxy-filled vDSO changes cross-turn cache residency and is only sound in a
-	// proxy-closed world where the principal is named and writes route through fak.
-	"vdso-proxy-fill": "warms vDSO from admitted inbound proxy tool_result blocks -- opt-in until the principal is named and writes touching the same resource reach fak (proxy-closed world)",
-	// Re-anchoring can intentionally burst the recent provider-cache breakpoint once;
-	// it stays opt-in until a live session-turn horizon proves the burst pays back.
-	"compact-anchor-head": "re-anchors the protected compact-history prefix and can burst the recent provider-cache breakpoint once -- opt-in until a live session-turn horizon proves the burst pays back",
-	// The solvency floor is a TOKEN COUNT that only the launcher can know: it is a
-	// fraction of (model context window - output reserve), and the gateway never sees a
-	// window size -- it sees the bytes of one request. There is no honest default here,
-	// only a guess, and a guessed floor is actively harmful in both directions (too low
-	// forces unprofitable bursts on every turn, too high rings after the wall). So the
-	// zero value means DISARMED and the number arrives from whoever owns the envelope --
-	// `fak dispatch` derives 85% of window-reserve = 142800 and passes it, and an operator
-	// running `fak guard` by hand names their own. This is the same shape as
-	// context-budget-tokens above: an operator policy, not a silent default.
-	"compact-solvency-floor": "a token count only the LAUNCHER can derive (a fraction of model window - output reserve); the gateway never sees a window size, so there is no honest default -- 0 = disarmed keeps pure cache economics byte-for-byte, and `fak dispatch` supplies the derived floor",
-	// Self-hosted serving-engine cache-reset family: every knob needs an external engine +
-	// its control URL/admin key, so none can default on without a configured engine. The
-	// whole family is gated behind --engine-cache-engine being set.
-	"engine-cache-engine":             "needs a configured self-hosted serving engine + admin credential -- cannot default on without external wiring",
-	"engine-cache-base-url":           "the serving-engine control URL -- inert (and undefinable) until --engine-cache-engine names an engine",
-	"engine-cache-admin-key-env":      "names the serving-engine admin-key env var -- a deployment credential, meaningless without --engine-cache-engine",
-	"engine-cache-idle-timeout":       "SGLang /flush_cache idle timeout -- a per-engine tuning knob paired with --engine-cache-engine",
-	"engine-cache-require-exact-span": "fail-closed strictness on remote span eviction -- a deployment policy paired with --engine-cache-engine",
+type optInGate struct {
+	reason   string
+	reviewBy string
+}
+
+// offWithReason is the reviewed gate registry for value flags that legitimately ship
+// default-OFF. A reason alone is not permanent absolution: reviewBy makes omission harm
+// observable as the agentic default window moves. Dates are UTC YYYY-MM-DD.
+var offWithReason = map[string]optInGate{
+	"context-budget-tokens": {
+		reason:   "seeds a hard context budget that returns reset directives -- an operator policy, not a silent default (0 = off keeps today's path)",
+		reviewBy: "2026-11-01",
+	},
+	"cuda-graph": {
+		reason:   "a measured no-win on small-model/L4 decode (launch overhead already small) -- requires a per-node tok/s witness before it pays",
+		reviewBy: "2026-11-01",
+	},
+	"vdso-proxy-fill": {
+		reason:   "changes cross-turn cache residency and requires a named principal plus writes routed through fak",
+		reviewBy: "2026-10-01",
+	},
+	"compact-anchor-head": {
+		reason:   "can burst the recent provider-cache breakpoint once -- needs a live session-turn payback witness",
+		reviewBy: "2026-10-01",
+	},
+	"compact-solvency-floor": {
+		reason:   "only the launcher knows model window minus output reserve; a gateway guess is harmful in both directions",
+		reviewBy: "2026-11-01",
+	},
+	"engine-cache-engine": {
+		reason:   "needs a configured self-hosted serving engine and admin credential",
+		reviewBy: "2026-11-01",
+	},
+	"engine-cache-base-url": {
+		reason:   "the serving-engine control URL is undefined until an engine is configured",
+		reviewBy: "2026-11-01",
+	},
+	"engine-cache-admin-key-env": {
+		reason:   "a deployment credential is meaningless until an engine is configured",
+		reviewBy: "2026-11-01",
+	},
+	"engine-cache-idle-timeout": {
+		reason:   "a per-engine tuning knob paired with engine configuration",
+		reviewBy: "2026-11-01",
+	},
+	"engine-cache-require-exact-span": {
+		reason:   "deployment fail-closed policy paired with engine configuration",
+		reviewBy: "2026-11-01",
+	},
 }
 
 // valueFlag is one parsed value-flag: its name, kind, default literal, whether the parse
@@ -244,11 +259,36 @@ func unescape(s string) string {
 	return s
 }
 
+func validReviewDate(value string, asOf time.Time) bool {
+	review, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return false
+	}
+	return !review.Before(asOf.UTC().Truncate(24 * time.Hour))
+}
+
+func nextGateReview(asOf time.Time) string {
+	var next time.Time
+	for _, gate := range offWithReason {
+		review, err := time.Parse("2006-01-02", gate.reviewBy)
+		if err != nil || review.Before(asOf.UTC().Truncate(24*time.Hour)) {
+			continue
+		}
+		if next.IsZero() || review.Before(next) {
+			next = review
+		}
+	}
+	if next.IsZero() {
+		return "due"
+	}
+	return next.Format("2006-01-02")
+}
+
 // kpiValueFlagDefaultOn (HARD): every VALUE flag ships default-ON unless it is on the
 // offWithReason allow-list. An off value-flag with no documented gating reason is debt --
 // the exact "shipped not-fully-enabled" failure #1089 found. Maps worst-first onto the
 // child issues #1090-#1095 (the off-by-default value features to retire).
-func kpiValueFlagDefaultOn(flags []valueFlag) scorecard.KPI {
+func kpiValueFlagDefaultOn(flags []valueFlag, asOf time.Time) scorecard.KPI {
 	var defects []string
 	total := len(flags)
 	on := 0
@@ -257,12 +297,18 @@ func kpiValueFlagDefaultOn(flags []valueFlag) scorecard.KPI {
 			on++
 			continue
 		}
-		if _, ok := offWithReason[f.name]; ok {
-			continue // gated OFF with a documented reason -- honest, not debt
+		if gate, ok := offWithReason[f.name]; ok && gate.reason != "" && validReviewDate(gate.reviewBy, asOf) {
+			continue // gated OFF with a reason and a bounded re-review -- honest, not debt
+		}
+		class := "VALUE_FLAG_OFF"
+		detail := "no reviewed gate"
+		if gate, ok := offWithReason[f.name]; ok {
+			class = "OPT_IN_REVIEW_DUE"
+			detail = "gate review " + gate.reviewBy + " is missing, invalid, or due"
 		}
 		defects = append(defects, fmt.Sprintf(
-			"%s: value-flag --%s ships default-OFF (default %s) with no allow-list reason -- a value feature shipped not-fully-enabled (VALUE_FLAG_OFF)",
-			lastSegment(f.source), f.name, f.defLit))
+			"%s: value-flag --%s ships default-OFF (default %s); %s -- omission harm may now exceed exposure harm (%s)",
+			lastSegment(f.source), f.name, f.defLit, detail, class))
 	}
 	score := 100.0
 	if total > 0 {
@@ -271,7 +317,7 @@ func kpiValueFlagDefaultOn(flags []valueFlag) scorecard.KPI {
 	return scorecard.KPI{
 		Key: "value_flag_default_on", Group: "value",
 		Score:   score,
-		Detail:  fmt.Sprintf("%d/%d value-flags default-on or gated-with-reason", total-len(defects), total),
+		Detail:  fmt.Sprintf("%d/%d value-flags default-on or gated with reason+review date", total-len(defects), total),
 		Defects: defects,
 	}
 }
@@ -444,6 +490,11 @@ func kpiObservedNotModeledDefault(surfaces map[string]string) scorecard.KPI {
 // Build reads the flag + exit-summary + score surfaces, runs the three KPIs, and folds
 // them into the control-pane payload via the shared kernel. root is the repo root.
 func Build(root string) scorecard.Payload {
+	return BuildAsOf(root, time.Now())
+}
+
+// BuildAsOf is the deterministic scoring seam used by tests and historical audits.
+func BuildAsOf(root string, asOf time.Time) scorecard.Payload {
 	var flags []valueFlag
 	for _, rel := range FlagSources {
 		text := scorecard.SafeRead(filepath.Join(root, filepath.FromSlash(rel)))
@@ -456,7 +507,7 @@ func Build(root string) scorecard.Payload {
 	}
 
 	kpis := []scorecard.KPI{
-		kpiValueFlagDefaultOn(flags),
+		kpiValueFlagDefaultOn(flags, asOf),
 		kpiValueFlagContextParity(flags),
 		kpiNoVacuousCounterFold(ampText, AmplificationSurface),
 		kpiObservedNotModeledDefault(scoreSurfaces),
@@ -472,11 +523,11 @@ func Build(root string) scorecard.Payload {
 		}
 	}
 
-	finding := "every value-flag ships default-on (or gated with a reason), no exit line folds vacuous kernel.Counters on the proxy, and no score surface defaults to a modeled headline"
-	next := "hold -- re-run after a new value-flag or score surface lands"
+	finding := "the agentic default window is balanced: every value lever is on or has a current reviewed opt-in gate, context defaults agree, and reports use observed evidence"
+	next := "hold -- re-run when a value flag lands or an opt-in review date arrives"
 	if debt > 0 {
-		finding = scorecard.CountNoun(debt, "default-value defect") + ": a value feature ships not-fully-enabled, an exit line folds kernel.Counters on the proxy, or a score surface defaults to a modeled headline"
-		next = "retire worst-first (" + worstKPI(kpis) + ") -- maps onto epic #1089's children #1090-#1095"
+		finding = scorecard.CountNoun(debt, "default-window defect") + ": unsafe exposure, stale opt-in gating, context drift, or modeled evidence is outside the reviewed window"
+		next = "review worst-first (" + worstKPI(kpis) + "): default on safely, renew the witnessed gate, or exclude the lever"
 	}
 
 	p := scorecard.Fold(Schema, kpis, DebtKey, nil, scorecard.Messages{
@@ -486,10 +537,12 @@ func Build(root string) scorecard.Payload {
 		NextAction:      next,
 		NextActionClean: next,
 		ExtraCorpus: map[string]any{
-			"value_flags_seen": len(flags),
-			"value_flags_off":  offFlags,
-			"flag_surfaces":    len(FlagSources),
-			"score_surfaces":   len(ScoreSurfaces),
+			"value_flags_seen":      len(flags),
+			"value_flags_off":       offFlags,
+			"reviewed_opt_in_flags": len(offWithReason),
+			"next_default_review":   nextGateReview(asOf),
+			"flag_surfaces":         len(FlagSources),
+			"score_surfaces":        len(ScoreSurfaces),
 		},
 	})
 	p.Workspace = root
