@@ -3,10 +3,32 @@ package main
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/fleetmetrics"
 	"github.com/anthony-chaudhary/fak/internal/superloop"
 )
+
+func stubSuperloopCommitHealth(t *testing.T, metric fleetmetrics.CommitThroughput, active int) {
+	t.Helper()
+	oldMeasure, oldActive := superloopCommitThroughput, superloopActiveWorkers
+	t.Cleanup(func() { superloopCommitThroughput, superloopActiveWorkers = oldMeasure, oldActive })
+	superloopCommitThroughput = func(string, time.Time) fleetmetrics.CommitThroughput { return metric }
+	superloopActiveWorkers = func(string, time.Time) int { return active }
+}
+
+func TestKeepSuperloopAliveRoutesZeroCommitRateBeforeDeclaringDone(t *testing.T) {
+	stubResidualReads(t, nil, dispatchtick.RouterPayload{Coverage: dispatchtick.RouterCoverage{Complete: true}}, nil)
+	stubSuperloopCommitHealth(t, fleetmetrics.CommitThroughput{Measured: true}, 3)
+	got, residual := keepSuperloopAlive(t.TempDir(), cleanDriveDecision())
+	if !got.Enter || got.Satisfied || got.Member.Ref != superloop.CommitRecoveryRef {
+		t.Fatalf("decision=%+v", got)
+	}
+	if residual.CommitHealth.State != "blocked" || residual.ActiveWorkers != 3 {
+		t.Fatalf("residual=%+v", residual)
+	}
+}
 
 func TestKeepSuperloopAlivePrioritizesUntrackedWorkOverActionableIssues(t *testing.T) {
 	stubResidualReads(t, []byte("cmd/fak/new.go\x00docs/new.md\x00"), routerWithQueues(2,
@@ -100,6 +122,7 @@ func TestKeepSuperloopAliveRefusesDoneWhenRouterFailsOrCoverageTruncates(t *test
 
 func stubResidualReads(t *testing.T, gitOut []byte, router dispatchtick.RouterPayload, routerErr error) {
 	t.Helper()
+	stubSuperloopCommitHealth(t, fleetmetrics.CommitThroughput{Measured: true}, 0)
 	oldCommand, oldRouter := superloopResidualCommand, superloopResidualRouter
 	t.Cleanup(func() { superloopResidualCommand, superloopResidualRouter = oldCommand, oldRouter })
 	superloopResidualCommand = func(_ string, name string, _ ...string) ([]byte, error) {

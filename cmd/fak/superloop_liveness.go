@@ -5,8 +5,10 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/fleetmetrics"
 	"github.com/anthony-chaudhary/fak/internal/superloop"
 )
 
@@ -14,6 +16,8 @@ type superloopResidual struct {
 	Checked          bool                             `json:"checked"`
 	UntrackedCount   int                              `json:"untracked_count"`
 	Untracked        []string                         `json:"untracked,omitempty"`
+	UntrackedClass   string                           `json:"untracked_class,omitempty"`
+	UntrackedOwner   string                           `json:"untracked_owner,omitempty"`
 	OpenIssues       int                              `json:"open_issues"`
 	ActionableIssues int                              `json:"actionable_issues"`
 	HeldIssues       int                              `json:"held_issues"`
@@ -22,6 +26,9 @@ type superloopResidual struct {
 	NextQueue        string                           `json:"next_queue,omitempty"`
 	RepairQueues     []dispatchtick.RouterRepairQueue `json:"repair_queues,omitempty"`
 	MeasureError     string                           `json:"measure_error,omitempty"`
+	ActiveWorkers    int                              `json:"active_workers"`
+	CommitThroughput fleetmetrics.CommitThroughput    `json:"commit_throughput"`
+	CommitHealth     fleetmetrics.CommitHealth        `json:"commit_health"`
 }
 
 var superloopResidualCommand = func(root, name string, args ...string) ([]byte, error) {
@@ -34,6 +41,16 @@ var superloopResidualRouter = func(root string) (dispatchtick.RouterPayload, err
 	return dispatchRouteIssuesComplete(root, io.Discard)
 }
 
+var superloopCommitThroughput = fleetmetrics.MeasureCommitThroughput
+var superloopActiveWorkers = func(root string, now time.Time) int {
+	source := fleetMetricsSources{registryPath: defaultSessionRegistryPath(), staleWindow: defaultSessionStaleWindow, maxSessions: defaultFleetMetricsMaxSessions, stderr: io.Discard}
+	inv, _, readable := source.liveInventory(now)
+	if !readable {
+		return 0
+	}
+	return inv.Count
+}
+
 // keepSuperloopAlive prevents a completed member roster from being mistaken for a
 // drained repository. Untracked files are reconciled before fresh issue dispatch;
 // otherwise any open issue keeps the loop in generation so the next cycle can select it.
@@ -42,10 +59,15 @@ func keepSuperloopAlive(root string, decision superloop.DriveDecision) (superloo
 		return decision, superloopResidual{}
 	}
 	r := measureSuperloopResidual(root)
+	decision = superloop.GateCommitThroughput(decision, r.CommitThroughput, r.ActiveWorkers)
+	if decision.Enter || !decision.Satisfied {
+		return decision, r
+	}
 	if r.UntrackedCount > 0 {
 		return residualDriveDecision(decision, "local-untracked-work", "go run ./cmd/fak sweep --json",
 			fmt.Sprintf("repository still has %d untracked path(s); reconcile local work before declaring drain", r.UntrackedCount)), r
 	}
+
 	if !r.IssueMeasured || !r.CoverageComplete {
 		decision.Satisfied = false
 		decision.Reason = "actionable-backlog liveness is unknown; refusing to declare drain until routing has complete coverage"
@@ -79,7 +101,11 @@ func residualDriveDecision(base superloop.DriveDecision, ref, action, reason str
 }
 
 func measureSuperloopResidual(root string) superloopResidual {
+	now := time.Now()
 	r := superloopResidual{Checked: true}
+	r.ActiveWorkers = superloopActiveWorkers(root, now)
+	r.CommitThroughput = superloopCommitThroughput(root, now)
+	r.CommitHealth = r.CommitThroughput.Health(r.ActiveWorkers)
 	if out, err := superloopResidualCommand(root, "git", "ls-files", "--others", "--exclude-standard", "-z"); err != nil {
 		r.MeasureError = "untracked: " + err.Error()
 	} else {

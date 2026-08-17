@@ -9794,6 +9794,16 @@
           "category": "incidental",
           "reason": "private injectable adapter to the canonical dispatch router; not a new loop concept",
           "token": "superloopResidualRouter"
+        },
+        {
+          "category": "incidental",
+          "reason": "test seam for the fleetmetrics measurement dependency, not a distinct loop concept",
+          "token": "superloopCommitThroughput"
+        },
+        {
+          "category": "incidental",
+          "reason": "test seam for durable registry population measurement, not a distinct loop concept",
+          "token": "superloopActiveWorkers"
         }
       ],
       "id": "loop",
@@ -9850,6 +9860,8 @@
         "runSuperloopFleet",
         "runloop",
         "startFleetBusLoop",
+        "superloopActiveWorkers",
+        "superloopCommitThroughput",
         "superloopFleetIntent",
         "superloopFleetNext",
         "superloopFleetReport",
