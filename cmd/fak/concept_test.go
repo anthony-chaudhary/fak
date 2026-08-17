@@ -52,3 +52,57 @@ func TestConceptPositionRejectsTestOnlyGrounding(t *testing.T) {
 		t.Fatalf("code=%d err=%s", code, errb.String())
 	}
 }
+
+func TestConceptGeneratePreservesClassification(t *testing.T) {
+	c, root := conceptCLIFixture(t)
+	tools := filepath.Join(root, "tools")
+	if err := os.MkdirAll(tools, 0755); err != nil {
+		t.Fatal(err)
+	}
+	script := `import argparse, json
+from pathlib import Path
+p=argparse.ArgumentParser()
+p.add_argument("--workspace")
+p.add_argument("--data")
+p.add_argument("--markdown-dir")
+p.add_argument("--json", action="store_true")
+a=p.parse_args()
+meta=json.loads((Path(a.data)/"_meta.json").read_text())
+tokens=[x.get("token") for x in meta["families"][0].get("classifications", [])]
+out=Path(a.markdown_dir); out.mkdir(parents=True, exist_ok=True)
+for name in ("README.md","INDEX.md","DEBT.md","GAPS.md","PAIRS.md","CONCEPTS.md","FAMILIES.md","SOURCES.md","ADR.md"):
+    (out/name).write_text("tokens="+",".join(tokens)+"\n")
+print(json.dumps({"families": [{"id": "cache", "gaps": [], "coverage": 1.0}], "critical": {"unresolved": 0, "low_coverage_families": 0}}))
+`
+	if err := os.WriteFile(filepath.Join(tools, "concept_disambiguation_scorecard.py"), []byte(script), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := runConceptClassify(&out, &errb, c, []string{"--family", "cache", "--token", "cache_probe_token", "--category", "incidental", "--reason", "fixture"}); code != 0 {
+		t.Fatalf("classify code=%d err=%s", code, errb.String())
+	}
+	reloaded, err := conceptcatalog.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errb.Reset()
+	if code := runConceptGenerate(&out, &errb, reloaded, []string{"--json"}); code != 0 {
+		t.Fatalf("generate code=%d err=%s", code, errb.String())
+	}
+	meta, err := os.ReadFile(filepath.Join(root, conceptcatalog.DataRel, "_meta.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(meta, []byte("cache_probe_token")) {
+		t.Fatal("classification disappeared from canonical source after regeneration")
+	}
+	page, err := os.ReadFile(filepath.Join(root, "docs", "concept-disambiguation-scorecard", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(page, []byte("cache_probe_token")) {
+		t.Fatal("generator did not read back the classification written by concept classify")
+	}
+}

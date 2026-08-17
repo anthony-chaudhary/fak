@@ -132,6 +132,34 @@ func runConceptPosition(out, errw io.Writer, c conceptcatalog.Catalog, args []st
 	}
 	return emitConceptPlan(out, errw, p, dry, jsonOut)
 }
+func runConceptGenerate(out, errw io.Writer, c conceptcatalog.Catalog, args []string) int {
+	fs := flag.NewFlagSet("concept generate", flag.ContinueOnError)
+	fs.SetOutput(errw)
+	jsonOut := fs.Bool("json", false, "emit JSON result")
+	if fs.Parse(args) != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(errw, "fak concept generate: unexpected positional arguments")
+		return 2
+	}
+	root := filepath.Dir(filepath.Dir(c.Dir))
+	files, err := conceptcatalog.Regenerate(root)
+	if err != nil {
+		fmt.Fprintln(errw, "fak concept generate:", err)
+		return 1
+	}
+	if *jsonOut {
+		_ = json.NewEncoder(out).Encode(map[string]any{"ok": true, "files": relFiles(files)})
+		return 0
+	}
+	fmt.Fprintln(out, "GENERATED concept scorecard")
+	for _, file := range relFiles(files) {
+		fmt.Fprintln(out, " -", file)
+	}
+	return 0
+}
+
 func runConceptClassify(out, errw io.Writer, c conceptcatalog.Catalog, args []string) int {
 	fs := flag.NewFlagSet("concept classify", flag.ContinueOnError)
 	fs.SetOutput(errw)

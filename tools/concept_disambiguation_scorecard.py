@@ -108,7 +108,7 @@ Run from the repo ROOT::
     python tools/concept_disambiguation_scorecard.py --index         # name -> concept lookup index
     python tools/concept_disambiguation_scorecard.py --lookup "KV cache"  # resolve ONE name a reader met
     python tools/concept_disambiguation_scorecard.py --compare base.json   # prove the debt dropped
-    python tools/concept_disambiguation_scorecard.py --markdown-dir docs/concept-disambiguation-scorecard
+    fak concept generate  # canonical writer; preserves classifications
 """
 from __future__ import annotations
 
@@ -2113,8 +2113,8 @@ def render_doc_index(payload: dict[str, Any], *, stamp: str | None = None) -> st
                "real tree (the grounding token must appear in the production corpus; the glossary anchor "
                "must exist; a `distinct_from` reference must resolve). No verdict is hand-typed.")
     out.append("")
-    out.append("> Regenerate: `python tools/concept_disambiguation_scorecard.py "
-               "--markdown-dir docs/concept-disambiguation-scorecard`.")
+    out.append("> Regenerate: `fak concept generate` (the canonical writer preserves "
+               "classifications while refreshing every generated page).")
     out.append("")
     out.append("## Headline")
     out.append("")

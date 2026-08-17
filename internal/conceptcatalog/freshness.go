@@ -29,7 +29,7 @@ const (
 	// The generator derives its numbers by walking the whole workspace, so run from
 	// the repo root it scores every peer's unsaved edit too - a different tree from
 	// the one CheckGitTree scores, and therefore a different answer.
-	RegenerateCommand = "python tools/concept_disambiguation_scorecard.py --markdown-dir docs/concept-disambiguation-scorecard"
+	RegenerateCommand = "fak concept generate"
 	// RegenerateStagedCommand is the TREE-mode cure, and it is the only one that can
 	// clear a CheckGitTree refusal: it regenerates inside the same clean-room export
 	// of the staged tree that CheckGitTree scored, then writes the artifacts back to
@@ -282,6 +282,21 @@ func extractGitTree(root, treeish, tmp string) error {
 		}
 	}
 	return nil
+}
+
+// Regenerate runs the canonical concept writer and returns every artifact it
+// refreshed. Classifications live in the input catalog, so generation reads and
+// preserves the same source that concept classify updates.
+func Regenerate(root string) ([]string, error) {
+	out := filepath.Join(root, filepath.FromSlash("docs/concept-disambiguation-scorecard"))
+	if err := generate(root, out); err != nil {
+		return nil, err
+	}
+	files := make([]string, 0, len(generatedArtifacts))
+	for _, artifact := range generatedArtifacts {
+		files = append(files, filepath.Join(out, artifact.Name))
+	}
+	return files, nil
 }
 
 func generate(root, out string) error {
