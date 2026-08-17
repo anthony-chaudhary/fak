@@ -124,10 +124,12 @@ func TestEvaluatePrePushBuildLatencyIsAdvisoryNotBlock(t *testing.T) {
 	base := time.Unix(1_700_000_000, 0)
 	prepushNow = func() time.Time {
 		calls++
-		if calls == 1 {
+		switch calls {
+		case 1, 2, 3, 4, 5:
 			return base
+		default:
+			return base.Add(90 * time.Second)
 		}
-		return base.Add(90 * time.Second)
 	}
 	res, code := evaluatePrePushBuild("/repo", "", 60*time.Second, false)
 	if code != 0 || res.Verdict != "GATE_LATENCY_REGRESSION" || !res.OK {
