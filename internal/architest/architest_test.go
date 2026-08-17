@@ -97,6 +97,7 @@ var tier = map[string]int{
 	"harnesscreationreceipt": 1, // stdlib-only participant receipt validation and study-row projection (#6976).
 	"harnesscreationstudy":   1, // deterministic independent-participant denominator and claim eligibility fold (#6937).
 	"harnesscompose":         1, // typed inert asset overlap semantics before dependency solving and launch (#6904).
+	"harnessderive":          2, // verified base-lock deltas producing launchable resolved locks (#7225).
 	"harnessinspect":         2, // product-facing inspection over composed assets and resolved locks (#7213/#7232).
 	"harnessoverride":        2, // bounded override proposals over composed assets and resolved locks (#7223/#7232).
 	"harnessverify":          2, // runtime deviation checks over composed assets and resolved locks (#7222/#7233).
