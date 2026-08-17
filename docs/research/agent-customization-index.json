@@ -546,7 +546,7 @@
         "ag-ui",
         "openhands"
       ],
-      "fak_status": "partial",
+      "fak_status": "present",
       "disposition": "default"
     },
     {
