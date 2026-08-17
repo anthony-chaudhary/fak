@@ -12,7 +12,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/dispatchcache"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
 
@@ -368,5 +370,28 @@ func TestSeedDispatchTickPayloadOmitsDisabledViewProvenance(t *testing.T) {
 		if value, ok := got[key]; ok && value != "" && value != false {
 			t.Fatalf("disabled view %s=%v", key, value)
 		}
+	}
+}
+
+func TestDispatchRouteIssuesCompleteUsesFullCoverageLimit(t *testing.T) {
+	oldView, oldBacklog := dispatchTickView, dispatchFetchBacklogIssues
+	dispatchTickView = ""
+	t.Cleanup(func() { dispatchTickView, dispatchFetchBacklogIssues = oldView, oldBacklog })
+	var gotLimit int
+	dispatchFetchBacklogIssues = func(_ string, limit int) ([]dispatchtick.Issue, error) {
+		gotLimit = limit
+		return nil, nil
+	}
+	dispatchRoutedBacklogCache = dispatchcache.New[dispatchtick.RouterPayload](time.Now)
+
+	payload, err := dispatchRouteIssuesComplete(t.TempDir(), io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotLimit != 100000 {
+		t.Fatalf("issue limit = %d, want complete-coverage limit 100000", gotLimit)
+	}
+	if payload.Coverage.IssueLimit != 100000 || !payload.Coverage.Complete {
+		t.Fatalf("coverage = %+v", payload.Coverage)
 	}
 }

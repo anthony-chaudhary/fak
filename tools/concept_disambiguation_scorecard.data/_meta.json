@@ -7731,6 +7731,11 @@
           "category": "incidental",
           "reason": "Bounded quantobs schema symbol, not a support-maturity concept.",
           "token": "CodeUnsupportedCombination"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON field reporting whether the canonical issue-router fetch covered the whole backlog; not a maturity rung",
+          "token": "coverage_complete"
         }
       ],
       "id": "support-maturity",
@@ -7845,6 +7850,7 @@
         "coveragePath",
         "coverageRatio",
         "coverageThreshold",
+        "coverage_complete",
         "coveragebaseline",
         "coveragediscipline",
         "defaultscoreparitytol",
@@ -9783,6 +9789,11 @@
           "category": "incidental",
           "reason": "private DriveDecision constructor for residual work; not a new drive concept",
           "token": "residualDriveDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "private injectable adapter to the canonical dispatch router; not a new loop concept",
+          "token": "superloopResidualRouter"
         }
       ],
       "id": "loop",
@@ -9848,6 +9859,7 @@
         "superloopFleetWalk",
         "superloopResidual",
         "superloopResidualCommand",
+        "superloopResidualRouter",
         "superloop_fleet",
         "tuiloopreport"
       ],

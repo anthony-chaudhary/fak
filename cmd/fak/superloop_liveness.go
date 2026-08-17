@@ -1,29 +1,37 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
-	"strconv"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/superloop"
 )
 
 type superloopResidual struct {
-	Checked        bool     `json:"checked"`
-	UntrackedCount int      `json:"untracked_count"`
-	Untracked      []string `json:"untracked,omitempty"`
-	OpenIssues     int      `json:"open_issues"`
-	IssueSample    []int    `json:"issue_sample,omitempty"`
-	IssueMeasured  bool     `json:"issue_measured"`
-	MeasureError   string   `json:"measure_error,omitempty"`
+	Checked          bool                             `json:"checked"`
+	UntrackedCount   int                              `json:"untracked_count"`
+	Untracked        []string                         `json:"untracked,omitempty"`
+	OpenIssues       int                              `json:"open_issues"`
+	ActionableIssues int                              `json:"actionable_issues"`
+	HeldIssues       int                              `json:"held_issues"`
+	IssueMeasured    bool                             `json:"issue_measured"`
+	CoverageComplete bool                             `json:"coverage_complete"`
+	NextQueue        string                           `json:"next_queue,omitempty"`
+	RepairQueues     []dispatchtick.RouterRepairQueue `json:"repair_queues,omitempty"`
+	MeasureError     string                           `json:"measure_error,omitempty"`
 }
 
 var superloopResidualCommand = func(root, name string, args ...string) ([]byte, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = root
 	return cmd.Output()
+}
+
+var superloopResidualRouter = func(root string) (dispatchtick.RouterPayload, error) {
+	return dispatchRouteIssuesComplete(root, io.Discard)
 }
 
 // keepSuperloopAlive prevents a completed member roster from being mistaken for a
@@ -38,16 +46,27 @@ func keepSuperloopAlive(root string, decision superloop.DriveDecision) (superloo
 		return residualDriveDecision(decision, "local-untracked-work", "go run ./cmd/fak sweep --json",
 			fmt.Sprintf("repository still has %d untracked path(s); reconcile local work before declaring drain", r.UntrackedCount)), r
 	}
-	if !r.IssueMeasured {
+	if !r.IssueMeasured || !r.CoverageComplete {
 		decision.Satisfied = false
-		decision.Reason = "open-issue liveness is unknown; refusing to declare drain until it is measured"
+		decision.Reason = "actionable-backlog liveness is unknown; refusing to declare drain until routing has complete coverage"
 		return decision, r
 	}
-	if r.OpenIssues > 0 {
-		return residualDriveDecision(decision, "open-issue-backlog", "go run ./cmd/fak dispatch sweep",
-			fmt.Sprintf("repository still has %d open issue(s); dispatch the next actionable unit", r.OpenIssues)), r
+	if r.OpenIssues == 0 {
+		return decision, r
 	}
-	return decision, r
+	queue := firstRepairQueue(r.RepairQueues)
+	switch queue.Kind {
+	case "dispatch":
+		return residualDriveDecision(decision, "actionable-issue-backlog", "go run ./cmd/fak dispatch sweep",
+			fmt.Sprintf("repository still has %d actionable issue(s); dispatch the next routed leaf", queue.Count)), r
+	case "human":
+		decision.Satisfied = false
+		decision.Reason = fmt.Sprintf("repository has %d open issue(s), all currently held by witnessed human blockers", r.OpenIssues)
+		return decision, r
+	default:
+		return residualDriveDecision(decision, "issue-backlog-"+queue.Kind, issueRepairCommand(queue),
+			fmt.Sprintf("repository has no dispatchable leaf, but %d %s issue(s) are repairable: %s", queue.Count, queue.Kind, queue.NextAction)), r
+	}
 }
 
 func residualDriveDecision(base superloop.DriveDecision, ref, action, reason string) superloop.DriveDecision {
@@ -73,33 +92,69 @@ func measureSuperloopResidual(root string) superloopResidual {
 		r.UntrackedCount = len(r.Untracked)
 	}
 
-	out, err := superloopResidualCommand(root, "gh", "issue", "list", "--state", "open", "--limit", "100000", "--json", "number")
+	router, err := superloopResidualRouter(root)
 	if err != nil {
-		if r.MeasureError != "" {
-			r.MeasureError += "; "
-		}
-		r.MeasureError += "open issues: " + err.Error()
-		return r
-	}
-	var rows []struct {
-		Number json.Number `json:"number"`
-	}
-	if err := json.Unmarshal(out, &rows); err != nil {
-		if r.MeasureError != "" {
-			r.MeasureError += "; "
-		}
-		r.MeasureError += "open issues: " + err.Error()
+		appendResidualError(&r, "issue router: "+err.Error())
 		return r
 	}
 	r.IssueMeasured = true
-	r.OpenIssues = len(rows)
-	for _, row := range rows {
-		if len(r.IssueSample) == 5 {
-			break
-		}
-		if n, err := strconv.Atoi(row.Number.String()); err == nil {
-			r.IssueSample = append(r.IssueSample, n)
+	r.CoverageComplete = router.Coverage.Complete
+	r.OpenIssues = router.Coverage.IssuesFetched
+	if r.OpenIssues == 0 && router.Coverage.Complete {
+		// Pure tests and injected callers may omit the coverage count; the router's
+		// partition still preserves the complete open total.
+		r.OpenIssues = router.Counts.Open + router.Counts.SkippedHumanBlocked
+	}
+	r.ActionableIssues = repairQueueCount(router.RepairQueues, "dispatch")
+	r.HeldIssues = r.OpenIssues - r.ActionableIssues
+	if r.HeldIssues < 0 {
+		r.HeldIssues = 0
+	}
+	r.RepairQueues = append([]dispatchtick.RouterRepairQueue(nil), router.RepairQueues...)
+	if !router.Coverage.Complete {
+		appendResidualError(&r, "issue router coverage incomplete: "+router.Reason)
+	}
+	if queue := firstRepairQueue(r.RepairQueues); queue.Kind != "" {
+		r.NextQueue = queue.Kind
+	}
+
+	return r
+}
+
+func firstRepairQueue(queues []dispatchtick.RouterRepairQueue) dispatchtick.RouterRepairQueue {
+	for _, queue := range queues {
+		if queue.Count > 0 {
+			return queue
 		}
 	}
-	return r
+	return dispatchtick.RouterRepairQueue{}
+}
+
+func issueRepairCommand(queue dispatchtick.RouterRepairQueue) string {
+	switch queue.Kind {
+	case "split":
+		return "go run ./cmd/fak-dev issue decompose --json"
+	case "scope", "noise", "private", "other":
+		return "go run ./cmd/fak-dev issue repair --json"
+	case "route", "decide", "duplicate":
+		return "go run ./cmd/fak dispatch route --json"
+	default:
+		return "go run ./cmd/fak dispatch route --json"
+	}
+}
+
+func appendResidualError(r *superloopResidual, msg string) {
+	if r.MeasureError != "" {
+		r.MeasureError += "; "
+	}
+	r.MeasureError += msg
+}
+
+func repairQueueCount(queues []dispatchtick.RouterRepairQueue, kind string) int {
+	for _, queue := range queues {
+		if queue.Kind == kind {
+			return queue.Count
+		}
+	}
+	return 0
 }

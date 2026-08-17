@@ -619,7 +619,17 @@ func dispatchFetchBacklogIncremental(root string, limit int, now time.Time) ([]d
 }
 
 func dispatchRouteIssuesNative(root string, stderr io.Writer) (dispatchtick.RouterPayload, error) {
-	payload, err := dispatchRoutedBeforePrereqHold(root, stderr)
+	return dispatchRouteIssuesNativeLimit(root, stderr, 1000)
+}
+
+// dispatchRouteIssuesComplete is the terminal-liveness read: unlike the hot dispatch
+// path it covers the entire open backlog, because a cap hit is UNKNOWN rather than drain.
+func dispatchRouteIssuesComplete(root string, stderr io.Writer) (dispatchtick.RouterPayload, error) {
+	return dispatchRouteIssuesNativeLimit(root, stderr, 100000)
+}
+
+func dispatchRouteIssuesNativeLimit(root string, stderr io.Writer, issueLimit int) (dispatchtick.RouterPayload, error) {
+	payload, err := dispatchRoutedBeforePrereqHoldLimit(root, stderr, issueLimit)
 	if err != nil {
 		return payload, err
 	}
@@ -655,7 +665,13 @@ func dispatchRouteIssuesNative(root string, stderr io.Writer) (dispatchtick.Rout
 // edges), so a consumer that needs the full dependency graph (fak dispatch graph) reads THIS payload,
 // while the live tick reads dispatchRouteIssuesNative, which folds the hold on top.
 func dispatchRoutedBeforePrereqHold(root string, stderr io.Writer) (dispatchtick.RouterPayload, error) {
-	const issueLimit = 1000
+	return dispatchRoutedBeforePrereqHoldLimit(root, stderr, 1000)
+}
+
+func dispatchRoutedBeforePrereqHoldLimit(root string, stderr io.Writer, issueLimit int) (dispatchtick.RouterPayload, error) {
+	if issueLimit <= 0 {
+		issueLimit = 1000
+	}
 	cacheKey := dispatchcache.Key(root, dispatchTickView, issueLimit)
 	if payload, ok := dispatchRoutedBacklogCache.Get(cacheKey); ok {
 		return payload, nil
