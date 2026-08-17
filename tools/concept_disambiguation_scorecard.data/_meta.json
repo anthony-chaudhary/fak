@@ -6170,6 +6170,21 @@
           "category": "incidental",
           "reason": "Issue #6372 local benchmark policy projection helper, not a runtime policy capability",
           "token": "policyLabels"
+        },
+        {
+          "category": "incidental",
+          "reason": "Launcher-local resolver for the accounts --ultracode auto|on|off knob; not a repository-wide policy capability concept.",
+          "token": "resolveUltracodePosture"
+        },
+        {
+          "category": "incidental",
+          "reason": "Launcher-local display helper for the accounts ultracode posture; not a repository-wide policy capability concept.",
+          "token": "ultracodePostureWord"
+        },
+        {
+          "category": "incidental",
+          "reason": "Launcher-local launchParams field carrying the accounts ultracode posture; not a repository-wide policy capability concept.",
+          "token": "ultracodePosture"
         }
       ],
       "exclude": [
@@ -6285,6 +6300,7 @@
         "postures",
         "printGuardLaunchPostures",
         "referencePolicyForCorpusCell",
+        "resolveUltracodePosture",
         "routingPolicyStat",
         "runCounterfactualAdjudicator",
         "runLiveSemanticMatrix",
@@ -6308,6 +6324,8 @@
         "tailPolicyResult",
         "tailPolicySchema",
         "tool_policy_grammar",
+        "ultracodePosture",
+        "ultracodePostureWord",
         "unnamed_capability",
         "verifyTailPolicyMatrix",
         "windowReceipt",
