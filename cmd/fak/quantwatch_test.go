@@ -40,7 +40,7 @@ func TestMainDispatchIncludesQuantwatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(raw, []byte(`case "quantwatch":`)) || !bytes.Contains(raw, []byte(`cmdQuantwatch(os.Args[2:])`)) {
+	if !bytes.Contains(raw, []byte(`case "quantwatch":`)) || !bytes.Contains(raw, []byte(`cmdQuantwatch(args)`)) {
 		t.Fatal("quantwatch implementation exists but top-level fak dispatch is missing")
 	}
 }
