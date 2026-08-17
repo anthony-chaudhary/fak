@@ -157,6 +157,16 @@ func TestDispatchProbeTreeBuildUnbornRepositoryFailsOpen(t *testing.T) {
 	}
 }
 
+func TestDispatchProbeTreeBuildNonRepositoryFailsOpen(t *testing.T) {
+	old := dispatchTreeBuildCommand
+	dispatchTreeBuildCommand = func(string) (string, error) {
+		return "", errors.New("git archive: fatal: not a git repository (or any of the parent directories): .git")
+	}
+	t.Cleanup(func() { dispatchTreeBuildCommand = old })
+	if got := dispatchProbeTreeBuild(t.TempDir()); got.Poisoned {
+		t.Fatalf("non-repository probe root is missing infrastructure, got=%+v", got)
+	}
+}
 func TestDispatchProbeTreeBuildGitDirNoModuleFailsOpen(t *testing.T) {
 	old := dispatchTreeBuildCommand
 	dispatchTreeBuildCommand = func(string) (string, error) {

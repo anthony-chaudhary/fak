@@ -1181,6 +1181,7 @@ func dispatchProbeTreeBuild(root string) dispatchtick.TreeCheck {
 		strings.Contains(lowered, "go.mod file not found") ||
 		strings.Contains(lowered, "cannot find main module") ||
 		strings.Contains(lowered, "not a valid object name: head") ||
+		strings.Contains(lowered, "not a git repository") ||
 		strings.Contains(lowered, "does not have any commits yet") ||
 		strings.Contains(lowered, "signal: killed") {
 		detail := strings.TrimSpace(out)
