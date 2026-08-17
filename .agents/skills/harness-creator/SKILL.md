@@ -1,6 +1,6 @@
 ---
 name: harness-creator
-description: Generated Codex adapter for the canonical fak project skill harness-creator.
+description: Create or customize a fak-native agent harness from a user's needs. Use when someone asks to make their own harness, agent product, branded/local UI, provider or tool profile, or a "10-minute" / "weekend" harness build. Drives the shipped external generator, preserves generated/user ownership boundaries, rebuilds and selfchecks the result, and routes deeper UI/extension work through public harnesskit contracts.
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/harness-creator/SKILL.md

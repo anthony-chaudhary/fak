@@ -1,6 +1,6 @@
 ---
 name: verify
-description: Generated Codex adapter for the canonical fak project skill verify.
+description: "Bind a done-claim to a GREEN test run of the changed package, not just diff shape. Use after a commit claims a package/feature is done and you want to run that commit's affected tests and report CLAIM_TEST_GREEN / CLAIM_TEST_RED / CLAIM_TEST_UNRUN before folding the claim as true."
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/verify/SKILL.md

@@ -1,6 +1,6 @@
 ---
 name: dos-next-up
-description: Generated Codex adapter for the canonical fak project skill dos-next-up.
+description: "Snapshot the repo's phased-plan portfolio into a dispatch packet: audit candidates with `dos verify`, render who-does-what, and emit a `dos gate` verdict. Use when you need the current next-work view before dispatching agents."
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/dos-next-up/SKILL.md

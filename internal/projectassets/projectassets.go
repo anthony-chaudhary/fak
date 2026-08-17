@@ -148,9 +148,25 @@ func skillName(root, p string) (string, error) {
 func isGeneratedAdapter(body []byte) bool {
 	return strings.Contains(string(body), "generated-by: fak project-assets sync")
 }
-func adapter(name, rel string) string {
-	return fmt.Sprintf("---\nname: %s\ndescription: Generated Codex adapter for the canonical fak project skill %s.\nmetadata:\n  generated-by: fak project-assets sync\n  canonical: %s\n---\n\n# Canonical project skill adapter\n\nLoad and follow [`%s`](%s). This generated discovery adapter contains no maintained workflow body.\n\n## Portability contract\n\n- The linked canonical `SKILL.md` is the single semantic workflow body for Claude, Codex, and fak-native loaders.\n- This adapter changes discovery only; it must not fork, summarize, or translate the workflow.\n- Harness-native invocation, permissions, hooks, model routing, and worker launch remain typed adapters outside the semantic body.\n", name, name, rel, rel, rel)
+func skillDescription(root, path string) (string, error) {
+	body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n") {
+		if strings.HasPrefix(line, "description:") {
+			description := strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+			if description != "" {
+				return description, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("%s has no frontmatter description", path)
 }
+func adapter(name, description, rel string) string {
+	return fmt.Sprintf("---\nname: %s\ndescription: %s\nmetadata:\n  generated-by: fak project-assets sync\n  canonical: %s\n---\n\n# Canonical project skill adapter\n\nLoad and follow [`%s`](%s). This generated discovery adapter contains no maintained workflow body.\n\n## Portability contract\n\n- The linked canonical `SKILL.md` is the single semantic workflow body for Claude, Codex, and fak-native loaders.\n- This adapter changes discovery only; it must not fork, summarize, or translate the workflow.\n- Harness-native invocation, permissions, hooks, model routing, and worker launch remain typed adapters outside the semantic body.\n", name, description, rel, rel, rel)
+}
+
 func classify(root, kind string, p Policy) ([]string, []Excluded, error) {
 	fs, e := flatFiles(root, p.CanonicalRoot)
 	if e != nil {
@@ -198,6 +214,10 @@ func Build(root string, write bool) (Receipt, error) {
 		if !match(p, m.Skills.Include) {
 			return r, fmt.Errorf("unclassified skill %s", p)
 		}
+		description, e := skillDescription(root, p)
+		if e != nil {
+			return r, e
+		}
 		target := filepath.ToSlash(filepath.Join(m.Skills.CodexRoot, n, "SKILL.md"))
 		canon = append(canon, p)
 		imports = append(imports, target)
@@ -211,7 +231,7 @@ func Build(root string, write bool) (Receipt, error) {
 				continue
 			}
 			rel, _ := filepath.Rel(filepath.Dir(abs), filepath.Join(root, filepath.FromSlash(p)))
-			e = os.WriteFile(abs, []byte(adapter(n, filepath.ToSlash(rel))), 0644)
+			e = os.WriteFile(abs, []byte(adapter(n, description, filepath.ToSlash(rel))), 0644)
 			if e != nil {
 				return r, e
 			}
@@ -230,7 +250,8 @@ func Build(root string, write bool) (Receipt, error) {
 		rel, _ := filepath.Rel(filepath.Dir(abs), filepath.Join(root, filepath.FromSlash(source)))
 		b, e := os.ReadFile(abs)
 		n, _ := skillName(root, source)
-		if e != nil || (isGeneratedAdapter(b) && string(b) != adapter(n, filepath.ToSlash(rel))) {
+		description, descriptionErr := skillDescription(root, source)
+		if e != nil || descriptionErr != nil || (isGeneratedAdapter(b) && string(b) != adapter(n, description, filepath.ToSlash(rel))) {
 			stale = append(stale, target)
 		}
 	}

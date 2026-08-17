@@ -1,6 +1,6 @@
 ---
 name: dos-witness-claim
-description: Generated Codex adapter for the canonical fak project skill dos-witness-claim.
+description: "Verify subagent or worker results before folding them into a synthesis. Use when another agent claims it shipped, created, found, or changed something and your next step would otherwise trust its return string."
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/dos-witness-claim/SKILL.md

@@ -1,6 +1,6 @@
 ---
 name: quality-score
-description: Generated Codex adapter for the canonical fak project skill quality-score.
+description: One repeatable RSI pass over CODE quality — the code-side counterpart of refresh-readme. Runs the code-quality scorecard (tools/code_quality_scorecard.py), reads the code-debt work-list, retires debt worst-first using ONLY the safe, genuine classes (gofmt, real tests for untested packages, safe god-function extraction), re-measures to PROVE the number dropped, grounds the ship in DOS (dos commit-audit on the new commit, dos review for the ship_integrity KPI), and commits by explicit path. Use to baseline code quality, drive the code-2x program (halve code-debt, then halve again), or on a /loop cadence to keep the kernel from rotting. The code's checking layer, the way refresh-readme is the README's.
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/quality-score/SKILL.md

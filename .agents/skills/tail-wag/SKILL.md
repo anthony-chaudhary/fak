@@ -1,6 +1,6 @@
 ---
 name: tail-wag
-description: Generated Codex adapter for the canonical fak project skill tail-wag.
+description: Find the most "tail wagging the dog" part of the system — a peripheral or secondary concern that is disproportionately driving core design decisions. Produces a ranked list of inverted-priority findings with evidence and a proposed rebalance. Use when the user asks to find the "tail wagging the dog", inverted priorities, misplaced drivers, mis-layered concerns, or when something small is clearly dictating something big.
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/tail-wag/SKILL.md

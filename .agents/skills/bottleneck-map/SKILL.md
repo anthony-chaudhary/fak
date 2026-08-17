@@ -1,6 +1,6 @@
 ---
 name: bottleneck-map
-description: Generated Codex adapter for the canonical fak project skill bottleneck-map.
+description: Map the current "what is limiting us right now?" state across the running agent fleet and the live GitHub issue backlog. Runs fleet bottleneck detection plus issue triage, records the dominant system bottlenecks, open-work bottlenecks, and the durable process loop to run next. Use when the operator asks for bottlenecks, open-work constraints, fleet health, issue/backlog limits, or a durable ongoing process for keeping both visible.
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/bottleneck-map/SKILL.md

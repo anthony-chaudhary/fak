@@ -61,6 +61,9 @@ func TestBuildSyncsWindowsSafeCodexAdapterAndParity(t *testing.T) {
 	if string(b) == "body\n" {
 		t.Fatal("adapter copied maintained skill body")
 	}
+	if !strings.Contains(string(b), "description: Verify.") {
+		t.Fatalf("adapter lost canonical discovery description:\n%s", b)
+	}
 }
 func TestBuildClassifiesReusableAndEphemeralPrompts(t *testing.T) {
 	r := fixture(t)

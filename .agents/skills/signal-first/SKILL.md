@@ -1,6 +1,6 @@
 ---
 name: signal-first
-description: Generated Codex adapter for the canonical fak project skill signal-first.
+description: Shape an answer for fast scanning with result-first sentences, concrete verbs, compact structure, and selectable compression while preserving every correctness-critical detail. Use when the user asks for Caveman-style output, terse or low-token prose, executive scanning, fewer words, or a concise rewrite whose substance must remain intact.
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/signal-first/SKILL.md

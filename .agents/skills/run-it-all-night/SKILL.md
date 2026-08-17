@@ -1,6 +1,6 @@
 ---
 name: run-it-all-night
-description: Generated Codex adapter for the canonical fak project skill run-it-all-night.
+description: Plan and run one bounded overnight issue worker through fak's guarded dispatch path, with typed capacity admission, lane leases, explicit dry-run/live gates, and independent git/DOS/test reconciliation. Use when the operator asks to let a narrow repo task run unattended overnight.
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/run-it-all-night/SKILL.md

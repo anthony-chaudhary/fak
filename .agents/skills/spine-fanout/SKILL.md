@@ -1,6 +1,6 @@
 ---
 name: spine-fanout
-description: Generated Codex adapter for the canonical fak project skill spine-fanout.
+description: Apply the two new-work defaults — ship the minimal WORKING end-to-end spine first (or file the spine as its own issue), then fan out the 3..50+ follow-on QA/dogfood/productization backlog at creation time via `fak issue fanout`. Use when starting any new feature/leaf/verb/demo, when a spine just shipped, when asked to "fan out", "file follow-ons", "create the e2e spin", or at the end of a super-loop turn that landed new work.
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/spine-fanout/SKILL.md

@@ -1,6 +1,6 @@
 ---
 name: dos-plan-price
-description: Generated Codex adapter for the canonical fak project skill dos-plan-price.
+description: "Price a proposed multi-agent fan-out before launching workers. Use when a packet, goal fleet, or hand-written plan would run several agents over declared file trees and you need DOS to catch collisions before any worker starts."
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/dos-plan-price/SKILL.md

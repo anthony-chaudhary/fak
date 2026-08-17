@@ -1,6 +1,6 @@
 ---
 name: issue-triage
-description: Generated Codex adapter for the canonical fak project skill issue-triage.
+description: One repeatable pass over the open GitHub issue backlog — classify every open issue (needs-priority / needs-kind / needs-area, orphaned P0-P1, stale, dormant question), rank them into a deterministic "do next" order, propose the mechanical gardening moves (mark stale, close dormant questions), and apply them only on operator approval. The helper is read-only; writing labels, comments, or closes is gated. Use when the operator says "triage the issues", "what should I work on next", "garden the backlog", "the issue labels are a mess", "close stale issues", or on a /loop cadence to keep the backlog honest.
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/issue-triage/SKILL.md

@@ -1,6 +1,6 @@
 ---
 name: question-loop
-description: Generated Codex adapter for the canonical fak project skill question-loop.
+description: The super-loop-family member that ASKS instead of ships. It launches detached workers whose only job is to ask 5–10 hard, honest questions about what the repo is doing — the question no other agent has asked, the one everyone's afraid to ask, the one that's opposite what the repo claims, the steelman of the other side — and append them to a durable ledger (docs/questions/asked.jsonl). A SEPARATE next-step loop, in a SEPARATE context window, turns qualifying questions into gh tickets for actual work. Use when the operator says "ask the hard questions", "what aren't we asking", "run a question loop", "start the asking loop", "question what we're doing", or wants a standing cadence of provocations rather than more issue-draining. NOT idea-scout (external feeds), NOT /super-loop (ships fixes), NOT the Go superloop.Super interior node.
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/question-loop/SKILL.md

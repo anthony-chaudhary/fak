@@ -1,6 +1,6 @@
 ---
 name: stale-work-loop
-description: Generated Codex adapter for the canonical fak project skill stale-work-loop.
+description: Turn a fak stale-work packet into dedicated, contract-valid issue units, collision-safe dispatch waves, and witness-only reconciliation. PLAN by default; use when an operator asks to adjudicate stale-work candidates, file the dedicated issues, or launch fresh workers for already-filed stale-work issues.
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/stale-work-loop/SKILL.md

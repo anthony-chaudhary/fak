@@ -1,6 +1,6 @@
 ---
 name: skill-overlap
-description: Generated Codex adapter for the canonical fak project skill skill-overlap.
+description: Flag content-redundant SKILL.md pairs as merge candidates — pairwise body cosine similarity over the skill pack, sorted highest-first. Use when the pack feels bloated or two skills seem to overlap, to find "skills A and B are N% token-similar — consider merging" candidates before a skill-lifecycle archive pass. Proposal only — never merges, edits, or deletes a skill.
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/skill-overlap/SKILL.md
