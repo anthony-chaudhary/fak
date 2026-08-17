@@ -414,7 +414,7 @@ func TestGuardSeatRefreshFoldsAcrossTheFleetExactlyOnce(t *testing.T) {
 		switch {
 		case row.Affected > 0:
 			releasers += row.Affected
-		case strings.Contains(row.Witness, "released by a peer instance first"):
+		case strings.Contains(row.Witness, "released by a peer instance first") || strings.Contains(row.Witness, "already released early by a peer instance"):
 			peers++
 		default:
 			t.Fatalf("%s: witness = %q, want it to say either what it released or that a peer won", row.Instance, row.Witness)
