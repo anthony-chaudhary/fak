@@ -6828,6 +6828,16 @@
           "category": "incidental",
           "reason": "Static Codex hook instruction payload; not a distinct managed-context concept.",
           "token": "codexWorkflowDefaultContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON field for numeric prompt-length bands in one replay report, not a managed-context subsystem",
+          "token": "context_buckets"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local numeric bucketing helper for replay observability, not a managed-context subsystem",
+          "token": "contextBucket"
         }
       ],
       "id": "context-ctx",
@@ -6869,6 +6879,8 @@
         "compactionWitness",
         "compactions",
         "context",
+        "contextBucket",
+        "context_buckets",
         "context_cancelled",
         "context_compaction",
         "context_elision",
@@ -8431,6 +8443,11 @@
           "category": "incidental",
           "reason": "Aggregate report counter; not a decision primitive.",
           "token": "ValidDecisions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed trajectory interpretation label, not a control-decision subsystem or operator action seam",
+          "token": "DerivedDecision"
         }
       ],
       "id": "decision",
@@ -8445,6 +8462,7 @@
         "DecisionRefuse",
         "DecisionRequest",
         "DecisionSamples",
+        "DerivedDecision",
         "EvaluateHeldSchedule",
         "GenerationContentionDecisionContract",
         "InputTokensDeltaPerDecision",

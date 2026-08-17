@@ -15,6 +15,7 @@ func runToolprocReplay(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	trace := fs.String("trace", "", "JSONL trace with independent needed labels")
 	asJSON := fs.Bool("json", false, "emit full machine-readable report")
+	compactJSON := fs.Bool("compact-json", false, "emit aggregates with links to full records")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -34,6 +35,15 @@ func runToolprocReplay(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	report := toolcallcontrol.Replay(rows)
+	if *compactJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report.Compact()); err != nil {
+			fmt.Fprintf(stderr, "fak toolproc replay: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -48,6 +58,14 @@ func runToolprocReplay(stdout, stderr io.Writer, argv []string) int {
 	for _, arm := range report.Arms {
 		m := arm.Metrics
 		fmt.Fprintf(stdout, "%-20s %8d %18d %18d %19d %14s\n", arm.Name, m.CallsExecuted, m.UnneededAvoided, m.NeededSuppressed, m.ReplayUnitsSaved, m.ReplaySquareProxy)
+	}
+	fmt.Fprintln(stdout, "\nLONG-CONTEXT GUARDRAIL BY BUCKET")
+	for _, arm := range report.Arms {
+		for _, bucket := range arm.Buckets {
+			if bucket.NeededSuppressed > 0 || bucket.UnneededAvoided > 0 {
+				fmt.Fprintf(stdout, "%-20s %-10s avoided=%d NEEDED_SUPPRESSED=%d records=full-report.json#/arms/%s/decisions\n", arm.Name, bucket.Name, bucket.UnneededAvoided, bucket.NeededSuppressed, arm.Name)
+			}
+		}
 	}
 	fmt.Fprintln(stdout, "Guardrail: NEEDED SUPPRESSED must remain 0; replay units and replay² are exposure proxies, not measured dollars, latency, FLOPs, or provider-billed tokens.")
 	return 0

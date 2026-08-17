@@ -47,12 +47,38 @@ type ReplayOutcome struct {
 	Reason      string `json:"reason"`
 	Needed      bool   `json:"needed"`
 	PromptUnits int64  `json:"prompt_units"`
+	RecordRef   string `json:"record_ref"`
 }
 
 type ReplayArm struct {
 	Name      string          `json:"name"`
 	Metrics   ReplayMetrics   `json:"metrics"`
+	Buckets   []ReplaySlice   `json:"context_buckets"`
+	Reasons   []ReplaySlice   `json:"reasons"`
 	Decisions []ReplayOutcome `json:"decisions"`
+}
+
+type ReplaySlice struct {
+	Name              string `json:"name"`
+	CallsExecuted     int    `json:"calls_executed"`
+	UnneededAvoided   int    `json:"unneeded_avoided"`
+	NeededSuppressed  int    `json:"needed_suppressed"`
+	ReplayUnitsSaved  int64  `json:"replay_units_saved"`
+	ReplaySquareProxy string `json:"replay_square_proxy"`
+}
+
+type ReplayCompactArm struct {
+	Name    string        `json:"name"`
+	Metrics ReplayMetrics `json:"metrics"`
+	Buckets []ReplaySlice `json:"context_buckets"`
+	Reasons []ReplaySlice `json:"reasons"`
+	Records string        `json:"records"`
+}
+
+type ReplayCompact struct {
+	Schema    string             `json:"schema"`
+	TraceRows int                `json:"trace_rows"`
+	Arms      []ReplayCompactArm `json:"arms"`
 }
 
 type ReplayReport struct {
@@ -139,7 +165,7 @@ func replayArm(name string, rows []ReplayRow) ReplayArm {
 				n := big.NewInt(row.PromptUnits)
 				proxy.Add(proxy, new(big.Int).Mul(n, n))
 			}
-			arm.Decisions = append(arm.Decisions, ReplayOutcome{ID: row.ID, Turn: row.Turn, Action: verdict.Action, Reason: verdict.Reason, Needed: needed, PromptUnits: row.PromptUnits})
+			arm.Decisions = append(arm.Decisions, ReplayOutcome{ID: row.ID, Turn: row.Turn, Action: verdict.Action, Reason: verdict.Reason, Needed: needed, PromptUnits: row.PromptUnits, RecordRef: "decisions#" + row.ID})
 		}
 		for _, row := range turnRows {
 			if row.Succeeded {
@@ -149,6 +175,8 @@ func replayArm(name string, rows []ReplayRow) ReplayArm {
 		i = j
 	}
 	arm.Metrics.ReplaySquareProxy = proxy.String()
+	arm.Buckets = sliceOutcomes(arm.Decisions, func(d ReplayOutcome) string { return contextBucket(d.PromptUnits) })
+	arm.Reasons = sliceOutcomes(arm.Decisions, func(d ReplayOutcome) string { return d.Reason })
 	return arm
 }
 
@@ -195,4 +223,68 @@ func (r ReplayReport) Arm(name string) (ReplayArm, bool) {
 		}
 	}
 	return ReplayArm{}, false
+}
+
+// Compact keeps operator aggregates and a stable link to the full decision array.
+func (r ReplayReport) Compact() ReplayCompact {
+	out := ReplayCompact{Schema: "fak-toolcall-control-replay-summary/1", TraceRows: r.TraceRows}
+	for _, arm := range r.Arms {
+		out.Arms = append(out.Arms, ReplayCompactArm{Name: arm.Name, Metrics: arm.Metrics, Buckets: arm.Buckets, Reasons: arm.Reasons, Records: "full-report.json#/arms/" + arm.Name + "/decisions"})
+	}
+	return out
+}
+
+func contextBucket(units int64) string {
+	switch {
+	case units < 8_000:
+		return "lt-8k"
+	case units < 32_000:
+		return "8k-32k"
+	case units < 64_000:
+		return "32k-64k"
+	case units < 128_000:
+		return "64k-128k"
+	default:
+		return "gte-128k"
+	}
+}
+
+func sliceOutcomes(rows []ReplayOutcome, key func(ReplayOutcome) string) []ReplaySlice {
+	type acc struct {
+		slice  ReplaySlice
+		square *big.Int
+	}
+	m := map[string]*acc{}
+	for _, row := range rows {
+		name := key(row)
+		a := m[name]
+		if a == nil {
+			a = &acc{slice: ReplaySlice{Name: name}, square: new(big.Int)}
+			m[name] = a
+		}
+		if row.Action == Allow {
+			a.slice.CallsExecuted++
+			continue
+		}
+		if row.Needed {
+			a.slice.NeededSuppressed++
+		} else {
+			a.slice.UnneededAvoided++
+		}
+		a.slice.ReplayUnitsSaved += row.PromptUnits
+		n := big.NewInt(row.PromptUnits)
+		a.square.Add(a.square, new(big.Int).Mul(n, n))
+	}
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]ReplaySlice, 0, len(keys))
+	for _, key := range keys {
+		a := m[key]
+		a.slice.ReplaySquareProxy = a.square.String()
+		out = append(out, a.slice)
+	}
+	return out
 }
