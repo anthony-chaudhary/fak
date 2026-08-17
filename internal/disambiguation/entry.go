@@ -222,7 +222,7 @@ func (e Entry) Validate() error {
 	default:
 		return fmt.Errorf("lifecycle.rollout %q is not one of off, shadow, on", e.Lifecycle.Rollout)
 	}
-	return nil
+	return validatePublicSafety(e)
 }
 
 func requireText(field, value string) error {

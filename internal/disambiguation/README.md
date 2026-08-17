@@ -133,6 +133,16 @@ the dependency boundary remains public fak repository/GitHub evidence only.
 Run `fak disambiguation provenance --self-test --json` for the hermetic CLI
 round-trip plus absolute-path, escaping-path, and private-kind rejection witness.
 
+## Public-safety admission
+
+`Entry.Validate` also scans every string field before an entry can reach the
+index. It rejects credential-shaped text, absolute local paths, private
+repository names, private hostnames or RFC 1918 addresses, and terminal control
+bytes with stable `DISAMBIGUATION_PUBLIC_SAFETY_*` codes. Repository-relative
+public locators and ordinary public documentation remain valid. The recursive
+scan covers nested fields and future string fields by default, so adding a field
+cannot silently bypass the publication boundary.
+
 ## Freshness verdict contract
 
 Agents and JSON consumers get exactly four freshness states. Every state has one
