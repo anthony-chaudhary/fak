@@ -48,7 +48,7 @@ var _ = beta.Use
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Summary.Packages != 2 || got.Summary.CLIReachablePackages != 2 {
+	if got.Summary.Packages != 2 || got.Summary.CLIReachablePackages != 2 || got.Summary.ExpectationComments != 1 {
 		t.Fatalf("summary = %+v", got.Summary)
 	}
 	if len(got.Rankings.Complexity) != 1 || got.Rankings.Complexity[0].Package != "internal/alpha" {

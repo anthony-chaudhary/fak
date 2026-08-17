@@ -178,7 +178,7 @@ func TestMaturityAnatomyAllRouteEmitsRelativePortfolio(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
-	for _, want := range []string{"MATURITY ANATOMY PORTFOLIO", "TOP AGGREGATE COMPLEXITY", "TOP COMPLEXITY / FUNCTION", "TOP UNDOCUMENTED EXPORTS", "TOP INTERNAL DEPENDENCIES", "TOP INTERNAL DEPENDENTS", "not quality grades"} {
+	for _, want := range []string{"MATURITY ANATOMY PORTFOLIO", "TOP AGGREGATE COMPLEXITY", "TOP COMPLEXITY / FUNCTION", "TOP UNDOCUMENTED EXPORTS", "TOP INTERNAL DEPENDENCIES", "TOP INTERNAL DEPENDENTS", "TOP TRANSITIVE DEPENDENCIES", "TOP EXPECTATION COMMENTS", "not quality grades"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("missing %q in %s", want, stdout.String())
 		}

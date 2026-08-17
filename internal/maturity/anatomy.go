@@ -52,10 +52,13 @@ type AnatomyOutcomes struct {
 }
 
 type AnatomyContract struct {
-	GuardClauses       int `json:"guard_clauses"`
-	Panics             int `json:"panics"`
-	AssumptionComments int `json:"assumption_comments"`
-	TODOs              int `json:"todos"`
+	GuardClauses        int `json:"guard_clauses"`
+	Panics              int `json:"panics"`
+	AssumptionComments  int `json:"assumption_comments"`
+	ExpectationComments int `json:"expectation_comments"`
+	InvariantComments   int `json:"invariant_comments"`
+	RequirementComments int `json:"requirement_comments"`
+	TODOs               int `json:"todos"`
 }
 
 type AnatomyDocs struct {
@@ -65,9 +68,13 @@ type AnatomyDocs struct {
 }
 
 type AnatomyPosition struct {
-	InternalDependencies []string `json:"internal_dependencies"`
-	InternalDependents   []string `json:"internal_dependents"`
-	CLIReachable         bool     `json:"cli_reachable"`
+	InternalDependencies   []string `json:"internal_dependencies"`
+	InternalDependents     []string `json:"internal_dependents"`
+	TransitiveDependencies int      `json:"transitive_dependencies"`
+	TransitiveDependents   int      `json:"transitive_dependents"`
+	CommandDistance        int      `json:"command_distance"`
+	InDependencyCycle      bool     `json:"in_dependency_cycle"`
+	CLIReachable           bool     `json:"cli_reachable"`
 }
 
 func AnalyzeAnatomy(root, target string) (Anatomy, error) {
@@ -143,11 +150,17 @@ func analyzeAnatomy(absRoot, target string, graph map[string]map[string]struct{}
 		for _, cg := range file.Comments {
 			text := strings.ToLower(cg.Text())
 			a.Contracts.TODOs += strings.Count(text, "todo")
-			for _, word := range []string{"assume", "assumption", "expect", "invariant", "must "} {
-				if strings.Contains(text, word) {
-					a.Contracts.AssumptionComments++
-					break
-				}
+			if containsAny(text, "assume", "assumption") {
+				a.Contracts.AssumptionComments++
+			}
+			if containsAny(text, "expect", "expected") {
+				a.Contracts.ExpectationComments++
+			}
+			if strings.Contains(text, "invariant") {
+				a.Contracts.InvariantComments++
+			}
+			if containsAny(text, "must ", "required", "requires", "requirement") {
+				a.Contracts.RequirementComments++
 			}
 		}
 		for _, decl := range file.Decls {
@@ -188,7 +201,7 @@ func analyzeAnatomy(absRoot, target string, graph map[string]map[string]struct{}
 		a.Position.InternalDependencies = append(a.Position.InternalDependencies, dep)
 	}
 	sort.Strings(a.Position.InternalDependencies)
-	a.Position.InternalDependents, a.Position.CLIReachable = anatomyPositionFromGraph(a.Package, graph, reachable)
+	a.Position = anatomyPositionFromGraph(a.Package, a.Position.InternalDependencies, graph, reachable, absRoot)
 	return a, nil
 }
 
@@ -326,17 +339,92 @@ func classifyReturn(r *ast.ReturnStmt) string {
 func exprText(e ast.Expr) string               { var b strings.Builder; _ = formatNode(&b, e); return b.String() }
 func formatNode(w io.Writer, n ast.Node) error { return printer.Fprint(w, token.NewFileSet(), n) }
 
-func anatomyPositionFromGraph(target string, graph map[string]map[string]struct{}, reachable map[string]struct{}) ([]string, bool) {
+func anatomyPositionFromGraph(target string, directDeps []string, graph map[string]map[string]struct{}, reachable map[string]struct{}, root string) AnatomyPosition {
 	trim := strings.TrimPrefix(target, "internal/")
-	var dependents []string
+	position := AnatomyPosition{InternalDependencies: directDeps, CommandDistance: -1}
 	for from, tos := range graph {
 		if _, ok := tos[trim]; ok {
-			dependents = append(dependents, "internal/"+from)
+			position.InternalDependents = append(position.InternalDependents, "internal/"+from)
 		}
 	}
-	sort.Strings(dependents)
-	_, cli := reachable[trim]
-	return dependents, cli
+	sort.Strings(position.InternalDependents)
+	position.TransitiveDependencies = len(graphClosure(graph, trim))
+	reverse := reverseImportGraph(graph)
+	position.TransitiveDependents = len(graphClosure(reverse, trim))
+	_, position.InDependencyCycle = graphClosure(graph, trim)[trim]
+	position.CommandDistance = commandDistance(root, graph, trim)
+	_, position.CLIReachable = reachable[trim]
+	return position
+}
+
+func graphClosure(graph map[string]map[string]struct{}, start string) map[string]struct{} {
+	seen := map[string]struct{}{}
+	queue := []string{start}
+	for len(queue) > 0 {
+		n := queue[0]
+		queue = queue[1:]
+		for next := range graph[n] {
+			if _, ok := seen[next]; ok {
+				continue
+			}
+			seen[next] = struct{}{}
+			queue = append(queue, next)
+		}
+	}
+	return seen
+}
+
+func reverseImportGraph(graph map[string]map[string]struct{}) map[string]map[string]struct{} {
+	reverse := map[string]map[string]struct{}{}
+	for from, tos := range graph {
+		if reverse[from] == nil {
+			reverse[from] = map[string]struct{}{}
+		}
+		for to := range tos {
+			if reverse[to] == nil {
+				reverse[to] = map[string]struct{}{}
+			}
+			reverse[to][from] = struct{}{}
+		}
+	}
+	return reverse
+}
+
+func commandDistance(root string, graph map[string]map[string]struct{}, target string) int {
+	seeds := importsUnder(filepath.Join(root, "cmd"))
+	for leaf := range importsUnder(filepath.Join(root, "internal", "registrations")) {
+		seeds[leaf] = struct{}{}
+	}
+	distance := map[string]int{}
+	queue := make([]string, 0, len(seeds))
+	for seed := range seeds {
+		distance[seed] = 1
+		queue = append(queue, seed)
+	}
+	for len(queue) > 0 {
+		n := queue[0]
+		queue = queue[1:]
+		if n == target {
+			return distance[n]
+		}
+		for dep := range graph[n] {
+			if _, ok := distance[dep]; ok {
+				continue
+			}
+			distance[dep] = distance[n] + 1
+			queue = append(queue, dep)
+		}
+	}
+	return -1
+}
+
+func containsAny(text string, words ...string) bool {
+	for _, word := range words {
+		if strings.Contains(text, word) {
+			return true
+		}
+	}
+	return false
 }
 
 func RenderAnatomyText(w io.Writer, a Anatomy) {
@@ -344,9 +432,9 @@ func RenderAnatomyText(w io.Writer, a Anatomy) {
 	fmt.Fprintf(w, "shape          files=%d test_files=%d functions=%d statements=%d\n", a.Shape.Files, a.Shape.TestFiles, a.Shape.Functions, a.Shape.Statements)
 	fmt.Fprintf(w, "flow           decisions=%d cyclomatic=%d max_function=%d max_nesting=%d\n", a.Flow.DecisionPoints, a.Flow.CyclomaticComplexity, a.Flow.MaximumFunction, a.Flow.MaximumNesting)
 	fmt.Fprintf(w, "outcomes       returns=%d success=%d error=%d ambiguous=%d error_branches=%d\n", a.Outcomes.ReturnSites, a.Outcomes.SuccessExits, a.Outcomes.ErrorExits, a.Outcomes.AmbiguousExits, a.Outcomes.ErrorHandlingBranches)
-	fmt.Fprintf(w, "contracts      guards=%d panics=%d assumption_comments=%d todos=%d\n", a.Contracts.GuardClauses, a.Contracts.Panics, a.Contracts.AssumptionComments, a.Contracts.TODOs)
+	fmt.Fprintf(w, "contracts      guards=%d panics=%d assumptions=%d expectations=%d invariants=%d requirements=%d todos=%d\n", a.Contracts.GuardClauses, a.Contracts.Panics, a.Contracts.AssumptionComments, a.Contracts.ExpectationComments, a.Contracts.InvariantComments, a.Contracts.RequirementComments, a.Contracts.TODOs)
 	fmt.Fprintf(w, "documentation exported=%d documented=%d package_doc=%t\n", a.Documentation.ExportedSymbols, a.Documentation.DocumentedExports, a.Documentation.PackageDoc)
-	fmt.Fprintf(w, "position       dependencies=%d dependents=%d cli_reachable=%t\n", len(a.Position.InternalDependencies), len(a.Position.InternalDependents), a.Position.CLIReachable)
+	fmt.Fprintf(w, "position       direct_dependencies=%d direct_dependents=%d transitive_dependencies=%d transitive_dependents=%d command_distance=%d cycle=%t cli_reachable=%t\n", len(a.Position.InternalDependencies), len(a.Position.InternalDependents), a.Position.TransitiveDependencies, a.Position.TransitiveDependents, a.Position.CommandDistance, a.Position.InDependencyCycle, a.Position.CLIReachable)
 	fmt.Fprintln(w, "note           static production-code counts; outcomes and assumptions are conservative lexical classifications")
 }
 

@@ -34,20 +34,27 @@ type AnatomyPortfolioSummary struct {
 	SuccessExits         int `json:"success_exits"`
 	AmbiguousExits       int `json:"ambiguous_exits"`
 	AssumptionComments   int `json:"assumption_comments"`
+	ExpectationComments  int `json:"expectation_comments"`
+	InvariantComments    int `json:"invariant_comments"`
+	RequirementComments  int `json:"requirement_comments"`
+	DependencyCycles     int `json:"dependency_cycle_packages"`
 	ExportedSymbols      int `json:"exported_symbols"`
 	DocumentedExports    int `json:"documented_exports"`
 	CLIReachablePackages int `json:"cli_reachable_packages"`
 }
 
 type AnatomyRankings struct {
-	Complexity        []AnatomyRank `json:"aggregate_complexity"`
-	ComplexityDensity []AnatomyRank `json:"complexity_per_function"`
-	MaximumFunction   []AnatomyRank `json:"maximum_function_complexity"`
-	DocumentationGap  []AnatomyRank `json:"undocumented_exports"`
-	Dependencies      []AnatomyRank `json:"internal_dependencies"`
-	Dependents        []AnatomyRank `json:"internal_dependents"`
-	Assumptions       []AnatomyRank `json:"assumption_comments"`
-	ErrorExits        []AnatomyRank `json:"error_exits"`
+	Complexity             []AnatomyRank `json:"aggregate_complexity"`
+	ComplexityDensity      []AnatomyRank `json:"complexity_per_function"`
+	MaximumFunction        []AnatomyRank `json:"maximum_function_complexity"`
+	DocumentationGap       []AnatomyRank `json:"undocumented_exports"`
+	Dependencies           []AnatomyRank `json:"internal_dependencies"`
+	Dependents             []AnatomyRank `json:"internal_dependents"`
+	Assumptions            []AnatomyRank `json:"assumption_comments"`
+	Expectations           []AnatomyRank `json:"expectation_comments"`
+	TransitiveDependencies []AnatomyRank `json:"transitive_dependencies"`
+	TransitiveDependents   []AnatomyRank `json:"transitive_dependents"`
+	ErrorExits             []AnatomyRank `json:"error_exits"`
 }
 
 type AnatomyRank struct {
@@ -121,6 +128,12 @@ func addAnatomySummary(s *AnatomyPortfolioSummary, a Anatomy) {
 	s.SuccessExits += a.Outcomes.SuccessExits
 	s.AmbiguousExits += a.Outcomes.AmbiguousExits
 	s.AssumptionComments += a.Contracts.AssumptionComments
+	s.ExpectationComments += a.Contracts.ExpectationComments
+	s.InvariantComments += a.Contracts.InvariantComments
+	s.RequirementComments += a.Contracts.RequirementComments
+	if a.Position.InDependencyCycle {
+		s.DependencyCycles++
+	}
 	s.ExportedSymbols += a.Documentation.ExportedSymbols
 	s.DocumentedExports += a.Documentation.DocumentedExports
 	if a.Position.CLIReachable {
@@ -160,10 +173,13 @@ func buildAnatomyRankings(packages []Anatomy, limit int) AnatomyRankings {
 		DocumentationGap: rank(func(a Anatomy) float64 {
 			return float64(a.Documentation.ExportedSymbols - a.Documentation.DocumentedExports)
 		}, false),
-		Dependencies: rank(func(a Anatomy) float64 { return float64(len(a.Position.InternalDependencies)) }, false),
-		Dependents:   rank(func(a Anatomy) float64 { return float64(len(a.Position.InternalDependents)) }, false),
-		Assumptions:  rank(func(a Anatomy) float64 { return float64(a.Contracts.AssumptionComments) }, false),
-		ErrorExits:   rank(func(a Anatomy) float64 { return float64(a.Outcomes.ErrorExits) }, false),
+		Dependencies:           rank(func(a Anatomy) float64 { return float64(len(a.Position.InternalDependencies)) }, false),
+		Dependents:             rank(func(a Anatomy) float64 { return float64(len(a.Position.InternalDependents)) }, false),
+		TransitiveDependencies: rank(func(a Anatomy) float64 { return float64(a.Position.TransitiveDependencies) }, false),
+		TransitiveDependents:   rank(func(a Anatomy) float64 { return float64(a.Position.TransitiveDependents) }, false),
+		Assumptions:            rank(func(a Anatomy) float64 { return float64(a.Contracts.AssumptionComments) }, false),
+		Expectations:           rank(func(a Anatomy) float64 { return float64(a.Contracts.ExpectationComments) }, false),
+		ErrorExits:             rank(func(a Anatomy) float64 { return float64(a.Outcomes.ErrorExits) }, false),
 	}
 }
 
@@ -173,7 +189,8 @@ func RenderAnatomyPortfolioText(w io.Writer, p AnatomyPortfolio) {
 	fmt.Fprintf(w, "shape          production_files=%d functions=%d statements=%d\n", s.ProductionFiles, s.Functions, s.Statements)
 	fmt.Fprintf(w, "flow           decisions=%d cyclomatic=%d\n", s.DecisionPoints, s.CyclomaticComplexity)
 	fmt.Fprintf(w, "outcomes       success=%d error=%d ambiguous=%d\n", s.SuccessExits, s.ErrorExits, s.AmbiguousExits)
-	fmt.Fprintf(w, "contracts      assumption_comments=%d\n", s.AssumptionComments)
+	fmt.Fprintf(w, "contracts      assumptions=%d expectations=%d invariants=%d requirements=%d\n", s.AssumptionComments, s.ExpectationComments, s.InvariantComments, s.RequirementComments)
+	fmt.Fprintf(w, "graph          cycle_packages=%d\n", s.DependencyCycles)
 	fmt.Fprintf(w, "documentation exported=%d documented=%d\n", s.ExportedSymbols, s.DocumentedExports)
 	if len(p.MissingPackages) > 0 {
 		fmt.Fprintf(w, "roster_gap      %s\n", strings.Join(p.MissingPackages, ", "))
@@ -190,7 +207,10 @@ func RenderAnatomyPortfolioText(w io.Writer, p AnatomyPortfolio) {
 	renderRanks("TOP UNDOCUMENTED EXPORTS", p.Rankings.DocumentationGap)
 	renderRanks("TOP INTERNAL DEPENDENCIES", p.Rankings.Dependencies)
 	renderRanks("TOP INTERNAL DEPENDENTS", p.Rankings.Dependents)
+	renderRanks("TOP TRANSITIVE DEPENDENCIES", p.Rankings.TransitiveDependencies)
+	renderRanks("TOP TRANSITIVE DEPENDENTS", p.Rankings.TransitiveDependents)
 	renderRanks("TOP ASSUMPTION COMMENTS", p.Rankings.Assumptions)
+	renderRanks("TOP EXPECTATION COMMENTS", p.Rankings.Expectations)
 	renderRanks("TOP ERROR EXITS", p.Rankings.ErrorExits)
 	fmt.Fprintln(w, "\nnote           rankings navigate evidence; they are not quality grades or runtime path counts")
 }

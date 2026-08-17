@@ -18,9 +18,9 @@ fak maturity anatomy --all --limit 10
 | Shape | production files, functions, statements | Size and surface area, not difficulty by itself. |
 | Flow | decision points, aggregate cyclomatic complexity, maximum function complexity, nesting | A McCabe-style syntax approximation. Each function starts at 1; `if`, loops, non-default switch/select arms, and boolean `&&`/`||` add decisions. |
 | Outcomes | return sites, lexical success/error/ambiguous exits, conditions mentioning errors | Orientation for outcome handling. These are not feasible paths or runtime frequencies. |
-| Contracts | terminating guard clauses, panics, assumption/expectation/invariant comments, TODOs | Places likely to encode preconditions or unfinished expectations. The comment count is deliberately lexical. |
+| Contracts | terminating guard clauses, panics, separately counted assumption, expectation, invariant, and requirement comments, TODOs | Places likely to encode preconditions or unfinished expectations. Comment counts are deliberately lexical. |
 | Documentation | exported symbols, documented exports, package comment | The public explanation surface; it does not score correctness or usefulness of prose. |
-| Position | direct internal dependencies, direct internal dependents, CLI reachability | Fan-out, fan-in, and whether the package is transitively reachable from a command. |
+| Position | direct and transitive dependencies/dependents, shortest command distance, cycle membership, CLI reachability | Fan-out, fan-in, layering depth, dependency cycles, and whether the package is transitively reachable from a command. |
 
 The JSON schema is `fak-maturity-anatomy/1`. It preserves ambiguous returns so a
 number that merely looks successful is not presented as a happy path.
@@ -34,8 +34,9 @@ both formats:
 - aggregate and per-function complexity;
 - maximum single-function complexity;
 - undocumented exports;
-- direct dependencies and dependents;
-- assumption-like comments; and
+- direct and transitive dependencies/dependents;
+- dependency-cycle membership and command distance;
+- separately classified assumption and expectation comments; and
 - lexical error exits.
 
 It also reports declared roster entries that have no Go package. Those gaps are

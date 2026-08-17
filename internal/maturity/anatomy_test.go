@@ -50,13 +50,13 @@ var _ = consumer.Use
 	if got.Outcomes.ReturnSites != 3 || got.Outcomes.ErrorExits != 1 || got.Outcomes.SuccessExits != 2 {
 		t.Fatalf("outcomes = %+v", got.Outcomes)
 	}
-	if got.Contracts.GuardClauses != 2 || got.Contracts.AssumptionComments == 0 {
+	if got.Contracts.GuardClauses != 2 || got.Contracts.ExpectationComments != 1 {
 		t.Fatalf("contracts = %+v", got.Contracts)
 	}
 	if !got.Documentation.PackageDoc || got.Documentation.DocumentedExports != 1 {
 		t.Fatalf("documentation = %+v", got.Documentation)
 	}
-	if len(got.Position.InternalDependents) != 1 || got.Position.InternalDependents[0] != "internal/consumer" || !got.Position.CLIReachable {
+	if len(got.Position.InternalDependents) != 1 || got.Position.InternalDependents[0] != "internal/consumer" || got.Position.TransitiveDependents != 1 || got.Position.CommandDistance != 2 || !got.Position.CLIReachable {
 		t.Fatalf("position = %+v", got.Position)
 	}
 	var out bytes.Buffer
@@ -81,5 +81,40 @@ func TestAnalyzeAnatomyKeepsUnclassifiedReturnsVisible(t *testing.T) {
 	}
 	if got.Outcomes.AmbiguousExits != 1 || got.Outcomes.SuccessExits != 0 {
 		t.Fatalf("outcomes = %+v", got.Outcomes)
+	}
+}
+
+func TestAnatomySeparatesContractSignalsAndDetectsCycles(t *testing.T) {
+	root := t.TempDir()
+	write := func(path, body string) {
+		t.Helper()
+		full := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("internal/alpha/alpha.go", `package alpha
+import "github.com/anthony-chaudhary/fak/internal/beta"
+// assume input is normalized
+// invariant: value remains positive
+// callers must serialize access
+func Run() { beta.Run() }
+`)
+	write("internal/beta/beta.go", `package beta
+import "github.com/anthony-chaudhary/fak/internal/alpha"
+func Run() { alpha.Run() }
+`)
+	got, err := AnalyzeAnatomy(root, "internal/alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Contracts.AssumptionComments != 1 || got.Contracts.InvariantComments != 1 || got.Contracts.RequirementComments != 1 {
+		t.Fatalf("contracts = %+v", got.Contracts)
+	}
+	if !got.Position.InDependencyCycle || got.Position.TransitiveDependencies != 2 || got.Position.TransitiveDependents != 2 || got.Position.CommandDistance != -1 {
+		t.Fatalf("position = %+v", got.Position)
 	}
 }
