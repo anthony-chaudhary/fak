@@ -223,7 +223,7 @@ func TestCapturedManageHelpSurfaces(t *testing.T) {
 	var compact bytes.Buffer
 	usageCompact(&compact)
 	root := compact.String()
-	if !strings.Contains(root, "manage + serve:") ||
+	if !strings.Contains(root, "start here:") ||
 		!strings.Contains(root, "  manage") ||
 		!strings.Contains(root, "'fak m'; legacy: guard") {
 		t.Fatalf("captured `fak help` does not lead with canonical manage and its migration spellings:\n%s", root)
