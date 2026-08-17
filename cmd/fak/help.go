@@ -58,6 +58,7 @@ var overviewGroups = []struct {
 		{"capabilities", "query token, turn, cache, routing, and session-control outcomes"},
 	}},
 	{"observe + operate", []overviewEntry{
+		{"progress", "one query for recent commits, local WIP, and GitHub issue movement"},
 		{"ps", "live served-session process table ('fak top' = --watch)"},
 		{"signal", "job control for a running session: pause / resume / stop / steer"},
 		{"doctor", "operator diagnostic: answer-shape witness + kernel admit verdict"},

@@ -332,6 +332,8 @@ func dispatchCoreVerbB(name string, args []string) bool {
 		cmdGuard(args)
 	case "goal-park":
 		cmdGoalPark(args)
+	case "progress":
+		cmdProgress(args)
 	case "info":
 		// The live fak-info overlay: poll a fak guard/serve gateway's /debug/vars and print
 		// one compact line per tick (cache economy + floor safety + liveness). This is the 20%
