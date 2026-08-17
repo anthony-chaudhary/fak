@@ -185,7 +185,7 @@ func TestGardenDispatchApplySpawnsAdmittedOnly(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runGardenDispatch(&stdout, &stderr, []string{
 		"--workspace", root, "--input", fixture, "--json",
-		"--budget", "10", "--apply", "--ledger", ledger,
+		"--backend", "claude", "--budget", "10", "--apply", "--ledger", ledger,
 	})
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
