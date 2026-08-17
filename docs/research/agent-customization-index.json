@@ -528,7 +528,7 @@
         "opencode",
         "claude-code"
       ],
-      "fak_status": "partial",
+      "fak_status": "present",
       "disposition": "optional-module"
     },
     {
