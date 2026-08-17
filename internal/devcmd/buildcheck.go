@@ -51,11 +51,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/buildoverlay"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
+	"github.com/anthony-chaudhary/fak/internal/workdelivery"
 )
 
 var (
@@ -91,6 +94,9 @@ type buildCheckReport struct {
 	Verdict          string   `json:"verdict"`
 	ExitCode         int      `json:"exit_code"`
 	Reason           string   `json:"reason,omitempty"`
+	CompileManifests []string `json:"compile_manifests,omitempty"`
+	AdmittedFiles    []string `json:"admitted_files,omitempty"`
+	ExcludedFiles    []string `json:"excluded_files,omitempty"`
 }
 
 func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
@@ -99,7 +105,9 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 	verbFlagUsage(fs, "buildcheck")
 	isolate := fs.Bool("isolate", true, "generate a go -overlay that hides untracked sibling .go files (except --mine) for a tracked-tree-equivalent compile immune to peers' WIP; --isolate=false builds the live tree as-is")
 	var mine pathList
+	var compileManifests pathList
 	fs.Var(&mine, "mine", "repo-relative untracked .go file to KEEP in the build (your own new file; repeatable)")
+	fs.Var(&compileManifests, "compile-manifest", "work-delivery JSON record declaring admitted/excluded compile artifacts (repeatable)")
 	vet := fs.Bool("vet", false, "run go vet instead of go build (compiles and vets; stricter, slower)")
 	outDir := fs.String("out", "", "directory to write produced binaries into, isolated from the tree (needs a main package); default: discard output via the null device (a pure compile check)")
 	asJSON := fs.Bool("json", false, "print a machine-readable report instead of streaming go output")
@@ -128,6 +136,7 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 	defer os.RemoveAll(scratch)
 
 	var masked, kept, staleMine []string
+	var compileSet workdelivery.CompileSet
 	overlayPath := ""
 	if *isolate {
 		untracked, uerr := buildCheckUntracked(root)
@@ -147,6 +156,23 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 			modifiedDirs = nil
 		}
 		masked, kept, staleMine = buildoverlay.SelectMaskedFiles(untracked, mine, modifiedDirs)
+
+		if len(compileManifests) > 0 {
+			compileSet, err = workdelivery.LoadCompileSet(compileManifests...)
+			if err != nil {
+				if *asJSON {
+					_ = writeIndentedJSONNoEscape(stdout, buildCheckReport{Schema: "fak.buildcheck.v1", Verdict: "COMPILE_ADMISSION_BLOCKED", ExitCode: 1, Mode: mode, Packages: pkgs, Isolate: *isolate, CompileManifests: compileManifests, Reason: err.Error()})
+				} else {
+					fmt.Fprintf(stderr, "fak buildcheck: compile admission: %v\n", err)
+				}
+				return 1
+			}
+			mine = append(mine, compileSet.Admitted...)
+			masked, kept, staleMine = buildoverlay.SelectMaskedFiles(untracked, mine, modifiedDirs)
+			masked = append(masked, compileSet.Excluded...)
+			sort.Strings(masked)
+			masked = slices.Compact(masked)
+		}
 		for _, m := range staleMine {
 			fmt.Fprintf(stderr, "fak buildcheck: --mine %s is not an untracked file; ignoring (it is already in the build)\n", m)
 		}
@@ -260,6 +286,9 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 			Verdict:          verdict,
 			ExitCode:         code,
 			Reason:           reason,
+			CompileManifests: compileManifests,
+			AdmittedFiles:    compileSet.Admitted,
+			ExcludedFiles:    compileSet.Excluded,
 		}
 		if verdict != "OK" {
 			rep.Reason = joinReason(reason, buildCheckTail(buf.String(), 40))

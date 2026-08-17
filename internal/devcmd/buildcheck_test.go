@@ -423,3 +423,91 @@ func TestLoadBearingUntrackedFilesKeepsImportedPackageClosure(t *testing.T) {
 		t.Fatalf("load-bearing files = %#v, want %#v", got, want)
 	}
 }
+
+func TestRunBuildCheckCompileManifestFailsClosed(t *testing.T) {
+	root := t.TempDir()
+	writeBuildcheckFile(t, root, "go.mod", "module example.com/buildcheck\n\ngo 1.26\n")
+	writeBuildcheckFile(t, root, "main.go", "package main\nfunc main() {}\n")
+	manifest := filepath.Join(root, "unit.json")
+	writeBuildcheckFile(t, root, "unit.json", `{"schema":"fak.work-delivery/v1","id":"unit","axes":{"authoring":"recorded","compile_admission":"undeclared","verification":"unverified","integration":"unintegrated","release":"not_ready"},"artifacts":[{"path":"peer.go","kind":"go-source"}]}`)
+
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWD)
+	var out, errOut bytes.Buffer
+	code := RunBuildCheck(&out, &errOut, []string{"--json", "--compile-manifest", manifest, "."})
+	if code == 0 {
+		t.Fatalf("code = 0, out=%s", out.String())
+	}
+	if !strings.Contains(out.String(), "COMPILE_ADMISSION_BLOCKED") || !strings.Contains(out.String(), "MISSING_DECLARATION") {
+		t.Fatalf("out = %s", out.String())
+	}
+}
+
+func TestRunBuildCheckCompileManifestExcludesRecordedSource(t *testing.T) {
+	root := t.TempDir()
+	writeBuildcheckFile(t, root, "go.mod", "module example.com/buildcheck\n\ngo 1.26\n")
+	writeBuildcheckFile(t, root, "main.go", "package main\nfunc main() {}\n")
+	writeBuildcheckFile(t, root, "recorded.go", "package main\nfunc broken( {\n")
+	manifest := filepath.Join(root, "unit.json")
+	writeBuildcheckFile(t, root, "unit.json", `{"schema":"fak.work-delivery/v1","id":"unit","axes":{"authoring":"recorded","compile_admission":"excluded","verification":"unverified","integration":"unintegrated","release":"not_ready"},"artifacts":[{"path":"recorded.go","kind":"go-source"}]}`)
+
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWD)
+	var out, errOut bytes.Buffer
+	code := RunBuildCheck(&out, &errOut, []string{"--json", "--compile-manifest", manifest, "."})
+	if code != 0 {
+		t.Fatalf("code = %d, out=%s err=%s", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), `"excluded_files"`) || !strings.Contains(out.String(), "recorded.go") {
+		t.Fatalf("out = %s", out.String())
+	}
+}
+
+func writeBuildcheckFile(t *testing.T, root, name, contents string) {
+	t.Helper()
+	path := filepath.Join(root, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunBuildCheckCompileManifestIncludesAdmittedSource(t *testing.T) {
+	root := t.TempDir()
+	writeBuildcheckFile(t, root, "go.mod", "module example.com/buildcheck\n\ngo 1.26\n")
+	writeBuildcheckFile(t, root, "main.go", "package main\nfunc main() {}\n")
+	writeBuildcheckFile(t, root, "admitted.go", "package main\nfunc broken( {\n")
+	manifest := filepath.Join(root, "unit.json")
+	writeBuildcheckFile(t, root, "unit.json", `{"schema":"fak.work-delivery/v1","id":"unit","axes":{"authoring":"recorded","compile_admission":"admitted","verification":"unverified","integration":"unintegrated","release":"not_ready"},"artifacts":[{"path":"admitted.go","kind":"go-source"}]}`)
+
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWD)
+	var out, errOut bytes.Buffer
+	code := RunBuildCheck(&out, &errOut, []string{"--json", "--compile-manifest", manifest, "."})
+	if code == 0 {
+		t.Fatalf("admitted broken source was not compiled: out=%s err=%s", out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), `"admitted_files"`) || !strings.Contains(out.String(), "admitted.go") {
+		t.Fatalf("out = %s", out.String())
+	}
+}
