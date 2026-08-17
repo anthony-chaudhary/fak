@@ -123,6 +123,11 @@ regenerate-and-diff is clean. `--check` is read-only and exits nonzero on missin
 or stale output. No repository crawl, network read, private source, or second
 serializer participates in generation.
 
+`fak disambiguation version --json` exposes the entry schema, generated-index
+schema, source revision, entry count, and ordered-content SHA-256 for citations.
+Semantic content changes move both digests; source-order-only changes move
+neither because versioning consumes the same canonical bytes as generation.
+
 ## Strict public provenance
 
 Every `sources[]` entry is immutable provenance returned unchanged by

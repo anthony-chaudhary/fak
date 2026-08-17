@@ -30,6 +30,8 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 		return runDisambiguationSchema(stdout, stderr, args[1:])
 	case "generate":
 		return runDisambiguationGenerate(stdout, stderr, args[1:])
+	case "version":
+		return runDisambiguationVersion(stdout, stderr, args[1:])
 	case "query":
 		return runDisambiguationQuery(stdout, stderr, args[1:])
 	case "ownership":
@@ -108,6 +110,33 @@ func runDisambiguationGenerate(stdout, stderr io.Writer, args []string) int {
 		}
 		fmt.Fprintf(stdout, "%s %s sha256:%s\n", verb, report.Path, report.SHA256)
 	}
+	return 0
+}
+
+func runDisambiguationVersion(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("disambiguation version", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	jsonOutput := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "fak disambiguation version: unexpected positional arguments")
+		return 2
+	}
+	version, err := disambiguation.CurrentIndexVersion()
+	if err != nil {
+		fmt.Fprintf(stderr, "fak disambiguation version: %v\n", err)
+		return 1
+	}
+	if *jsonOutput {
+		if err := json.NewEncoder(stdout).Encode(version); err != nil {
+			fmt.Fprintf(stderr, "fak disambiguation version: encode: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintf(stdout, "%s entries=%d source=%s sha256:%s\n", version.IndexSchema, version.EntryCount, version.SourceRevision, version.ContentSHA256)
 	return 0
 }
 
