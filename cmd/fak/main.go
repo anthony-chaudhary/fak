@@ -630,6 +630,8 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 	case "study-monitor":
 		// Durable source registry for recurring study/scout passes.
 		os.Exit(runStudyMonitor(os.Stdout, os.Stderr, args))
+	case "customization-index":
+		os.Exit(runCustomizationIndex(os.Stdout, os.Stderr, args))
 	case "idea-scout":
 		// The research-to-issue feeder as a verb (cmd/fak/ideascout.go over
 		// internal/ideascout). It shipped with a full Go port of tools/idea_scout.py, a

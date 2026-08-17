@@ -26,6 +26,14 @@ The machine index currently records **21 independent axes**. This table is a com
 | Interpretation | source adapters, semantic events, derived signals, redaction | The current `trajectory.Turn` row is useful but too coarse for typed deltas, causal links, confidence, and policy-aware redaction. |
 | Presentation | audience, selection, visual language, live control, sharing | There is no first-class, declarative view specification over a canonical trajectory. |
 
+## Freshness check
+
+```text
+fak customization-index --as-of 2026-08-17
+fak customization-index --json
+```
+
+The command validates schema shape, unique IDs, source references, status and disposition values, and required axis fields. It also groups axes by layer/status and reports sources older than the declared 30-day review interval. `--as-of` makes tests and historical witnesses deterministic; `--index` checks a candidate registry.
 ## Reproducible queries
 
 PowerShell:
