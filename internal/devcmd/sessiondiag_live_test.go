@@ -117,7 +117,7 @@ func TestOperatorLiveSignalsDefaultFoldsOnlyNonActionRows(t *testing.T) {
 	}
 	got := stdout.String()
 	for _, want := range []string{
-		"watch | no witnessed outcome since lease start 1h ago | move unknown; watch-lane lease heartbeat 20m ago | inspect stalled lease now",
+		"watch | no witnessed outcome since lease start 1h ago | move unknown; watch-lane lease heartbeat 20m ago | inspect holder watcher on watch-lane stalled lease now",
 		"unknown x2 | no checkpoint | 2 live workers | check on next liveness change; workers owe checkpoints; --full lists workers",
 		"unknown x1 | checkpoints without witnessed outcomes | 1 live worker | run declared next checks; --full lists workers",
 		"none x2 | witnessed outcomes present | 2 live workers | bounded next checks; --full lists workers",
@@ -166,6 +166,17 @@ func TestOperatorLiveSignalsUsesGraceAsUnknownNextCheck(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "emit durable checkpoints") {
 		t.Fatalf("worker remediation leaked into operator next check:\n%s", stdout.String())
+	}
+}
+
+func TestStalledLeaseNextIdentifiesHolderAndDegradesHonestly(t *testing.T) {
+	t.Parallel()
+
+	if got, want := stalledLeaseNext(operatorWorkerRow{Lane: "lane-a", Holder: "worker-7"}), "inspect holder worker-7 on lane-a stalled lease now"; got != want {
+		t.Fatalf("holder next = %q, want %q", got, want)
+	}
+	if got, want := stalledLeaseNext(operatorWorkerRow{Lane: "lane-a"}), "inspect lane-a stalled lease now; holder unknown"; got != want {
+		t.Fatalf("missing-holder next = %q, want %q", got, want)
 	}
 }
 

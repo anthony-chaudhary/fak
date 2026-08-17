@@ -196,14 +196,14 @@ func projectLiveSignal(lane operatorWorkerRow, checkpoint devcheckpoint.Record, 
 	chip := strings.ToUpper(lane.Chip)
 	if strings.Contains(chip, "STALLED") {
 		row.Attention = "watch"
-		row.Next = "inspect stalled lease now"
+		row.Next = stalledLeaseNext(lane)
 	}
 	if checkpoint.Actor == "" {
 		if strings.Contains(chip, "STALLED") {
 			row.Attention = "watch"
 			row.Outcome = "no witnessed outcome since lease start " + leaseAge + " ago"
 			row.Move = "move unknown; " + lane.Lane + " lease heartbeat " + moveAge + " ago"
-			row.Next = "inspect stalled lease now"
+			row.Next = stalledLeaseNext(lane)
 		} else if remaining := graceRemainingDuration(lane); remaining > 0 {
 			row.RecheckAfter = remaining
 			row.Next = "check at grace in " + durationText(remaining) + "; worker owes checkpoint"
@@ -280,6 +280,14 @@ func exceptionOrder(attention string) int {
 	default:
 		return 3
 	}
+}
+
+func stalledLeaseNext(lane operatorWorkerRow) string {
+	holder := strings.TrimSpace(lane.Holder)
+	if holder == "" {
+		return fmt.Sprintf("inspect %s stalled lease now; holder unknown", lane.Lane)
+	}
+	return fmt.Sprintf("inspect holder %s on %s stalled lease now", holder, lane.Lane)
 }
 
 func graceRemaining(lane operatorWorkerRow, _ time.Time) string {
