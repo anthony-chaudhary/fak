@@ -1227,7 +1227,7 @@ func TestDispatchTickLiveFailsNonzeroEarlyExitAndPinsClaudeAccountEnv(t *testing
 		dispatchIssueWorkerSpawner = oldSpawner
 	})
 
-	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--live", "--json")
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--backend", "claude", "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--live", "--json")
 	if code != 1 {
 		t.Fatalf("exit = %d, want nonzero early-exit refusal (stderr: %s)\n%s", code, errb, out)
 	}
