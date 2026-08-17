@@ -322,6 +322,7 @@ def _as_int(value: object, default: int) -> int:
 
 
 DEFAULT_CLAUDE_ACCOUNT_SESSION_CAP = 4
+DEFAULT_CODEX_ACCOUNT_SESSION_CAP = 20
 DEFAULT_ACCOUNT_SESSION_CAP = 1
 
 # One-knob-one-way override for the Claude per-account session budget, read the SAME
@@ -352,8 +353,11 @@ def _session_cap(row: dict) -> int:
     trees cannot carry this many sessions. The Claude cap honors the
     FAK_SESSIONS_PER_ACCOUNT override (see _claude_session_cap).
     """
-    if str(row.get("product") or "claude").lower() == "claude":
+    product = str(row.get("product") or "claude").lower()
+    if product == "claude":
         return _claude_session_cap()
+    if product == "codex":
+        return DEFAULT_CODEX_ACCOUNT_SESSION_CAP
     return DEFAULT_ACCOUNT_SESSION_CAP
 
 

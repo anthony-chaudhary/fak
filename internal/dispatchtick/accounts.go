@@ -222,6 +222,8 @@ func AccountSessionCap(row AccountRow) int {
 	switch row.Product {
 	case "claude":
 		return claudeSessionsPerAccount()
+	case "codex":
+		return 20
 	default:
 		return DefaultAccountSessionsPerWorker
 	}

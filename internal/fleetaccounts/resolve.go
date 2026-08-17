@@ -189,7 +189,7 @@ func AccountSessionCap(row Account) int {
 	case "claude":
 		return claudeSessionsPerAccount()
 	case "codex":
-		return 10
+		return 20
 	default:
 		return DefaultAccountSessionsPerWorker
 	}

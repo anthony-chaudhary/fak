@@ -18,6 +18,9 @@ func TestAccountSessionCapEnvKnob(t *testing.T) {
 	if got := AccountSessionCap(claude); got != DefaultClaudeSessionsPerAccount {
 		t.Fatalf("FAK_SESSIONS_PER_ACCOUNT=7 claude cap = %d, want hard default %d", got, DefaultClaudeSessionsPerAccount)
 	}
+	if got := AccountSessionCap(AccountRow{Product: "codex"}); got != 20 {
+		t.Fatalf("codex cap = %d, want 20", got)
+	}
 	if got := AccountSessionCap(AccountRow{Product: "opencode"}); got != DefaultAccountSessionsPerWorker {
 		t.Fatalf("opencode cap = %d, want %d", got, DefaultAccountSessionsPerWorker)
 	}
