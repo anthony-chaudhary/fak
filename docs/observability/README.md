@@ -65,3 +65,7 @@ contract.
 
 For the broader deploy, observe, recover, and upgrade sequence, return to the
 [operator route](../operator/README.md).
+
+## Trajectory interpretation and views
+
+- [Trajectory interpretation and presentation](trajectory-presentation.md) separates canonical evidence, derived semantics, audience projection, rendering, and live controls.
