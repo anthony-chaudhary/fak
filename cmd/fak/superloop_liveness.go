@@ -51,6 +51,8 @@ var superloopActiveWorkers = func(root string, now time.Time) int {
 	return inv.Count
 }
 
+var superloopResidualAttributor = attributeSuperloopResidual
+
 // keepSuperloopAlive prevents a completed member roster from being mistaken for a
 // drained repository. Untracked files are reconciled before fresh issue dispatch;
 // otherwise any open issue keeps the loop in generation so the next cycle can select it.
@@ -64,8 +66,22 @@ func keepSuperloopAlive(root string, decision superloop.DriveDecision) (superloo
 		return decision, r
 	}
 	if r.UntrackedCount > 0 {
-		return residualDriveDecision(decision, "local-untracked-work", "go run ./cmd/fak sweep --json",
-			fmt.Sprintf("repository still has %d untracked path(s); reconcile local work before declaring drain", r.UntrackedCount)), r
+		r.UntrackedClass, r.UntrackedOwner = superloopResidualAttributor(root, r.Untracked)
+		switch r.UntrackedClass {
+		case "OWNED_RECONCILE":
+			return residualDriveDecision(decision, "owned-untracked-work", "go run ./cmd/fak sweep --json",
+				fmt.Sprintf("this session still owns %d untracked path(s); reconcile before fresh dispatch", r.UntrackedCount)), r
+		case "ABANDONED_RECOVER":
+			return residualDriveDecision(decision, "abandoned-untracked-work", "go run ./cmd/fak tree-doctor --json",
+				fmt.Sprintf("%d untracked path(s) have no live owner; inspect and recover or park them", r.UntrackedCount)), r
+		case "SCRATCH_REAP":
+			return residualDriveDecision(decision, "untracked-scratch", "go run ./cmd/fak tree-doctor --sweep-scratch --dry-run --json",
+				fmt.Sprintf("%d residual path(s) are declared scratch; preview their safe reap", r.UntrackedCount)), r
+		default:
+			decision.Satisfied = false
+			decision.Reason = fmt.Sprintf("%d untracked path(s) belong to a live or unknown peer%s; wait rather than steal them", r.UntrackedCount, ownerSuffix(r.UntrackedOwner))
+			return decision, r
+		}
 	}
 
 	if !r.IssueMeasured || !r.CoverageComplete {

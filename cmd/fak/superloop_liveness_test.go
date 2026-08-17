@@ -33,9 +33,12 @@ func TestKeepSuperloopAliveRoutesZeroCommitRateBeforeDeclaringDone(t *testing.T)
 func TestKeepSuperloopAlivePrioritizesUntrackedWorkOverActionableIssues(t *testing.T) {
 	stubResidualReads(t, []byte("cmd/fak/new.go\x00docs/new.md\x00"), routerWithQueues(2,
 		dispatchtick.RouterRepairQueue{Kind: "dispatch", Count: 2, NextAction: "dispatch"}), nil)
+	oldAttributor := superloopResidualAttributor
+	superloopResidualAttributor = func(string, []string) (string, string) { return "OWNED_RECONCILE", "me" }
+	t.Cleanup(func() { superloopResidualAttributor = oldAttributor })
 
 	got, residual := keepSuperloopAlive(t.TempDir(), cleanDriveDecision())
-	if got.Satisfied || !got.Enter || got.Member.Ref != "local-untracked-work" {
+	if got.Satisfied || !got.Enter || got.Member.Ref != "owned-untracked-work" {
 		t.Fatalf("decision = %#v, want an unsatisfied entered reconciliation member", got)
 	}
 	if got.Action != "go run ./cmd/fak sweep --json" {
@@ -43,6 +46,33 @@ func TestKeepSuperloopAlivePrioritizesUntrackedWorkOverActionableIssues(t *testi
 	}
 	if residual.UntrackedCount != 2 || residual.ActionableIssues != 2 {
 		t.Fatalf("residual = %#v", residual)
+	}
+}
+
+func TestKeepSuperloopAliveRoutesUntrackedOwnershipClasses(t *testing.T) {
+	cases := []struct {
+		name, class, owner, ref, action string
+		enter                           bool
+	}{
+		{name: "owned", class: "OWNED_RECONCILE", owner: "me", ref: "owned-untracked-work", action: "go run ./cmd/fak sweep --json", enter: true},
+		{name: "peer", class: "PEER_ACTIVE", owner: "peer", enter: false},
+		{name: "abandoned", class: "ABANDONED_RECOVER", owner: "dead", ref: "abandoned-untracked-work", action: "go run ./cmd/fak tree-doctor --json", enter: true},
+		{name: "scratch", class: "SCRATCH_REAP", ref: "untracked-scratch", action: "go run ./cmd/fak tree-doctor --sweep-scratch --dry-run --json", enter: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stubResidualReads(t, []byte("cmd/fak/new.go\x00"), routerWithQueues(1, dispatchtick.RouterRepairQueue{Kind: "dispatch", Count: 1}), nil)
+			old := superloopResidualAttributor
+			superloopResidualAttributor = func(string, []string) (string, string) { return tc.class, tc.owner }
+			t.Cleanup(func() { superloopResidualAttributor = old })
+			got, residual := keepSuperloopAlive(t.TempDir(), cleanDriveDecision())
+			if got.Satisfied || got.Enter != tc.enter || residual.UntrackedClass != tc.class || residual.UntrackedOwner != tc.owner {
+				t.Fatalf("decision = %#v residual = %#v", got, residual)
+			}
+			if tc.enter && (got.Member.Ref != tc.ref || got.Action != tc.action) {
+				t.Fatalf("decision = %#v, want ref=%s action=%s", got, tc.ref, tc.action)
+			}
+		})
 	}
 }
 

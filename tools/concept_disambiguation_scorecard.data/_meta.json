@@ -9804,6 +9804,21 @@
           "category": "incidental",
           "reason": "test seam for durable registry population measurement, not a distinct loop concept",
           "token": "superloopActiveWorkers"
+        },
+        {
+          "category": "incidental",
+          "reason": "private injectable ownership adapter for residual files; not a loop concept",
+          "token": "superloopResidualAttributor"
+        },
+        {
+          "category": "incidental",
+          "reason": "private lease-and-age attribution helper; not a new loop type",
+          "token": "attributeSuperloopResidual"
+        },
+        {
+          "category": "incidental",
+          "reason": "private pure ownership fold for tests; not a loop concept",
+          "token": "classifySuperloopResidualOwnership"
         }
       ],
       "id": "loop",
@@ -9818,7 +9833,9 @@
         "POLLING_LOOP",
         "TRANSFORM_LOOP",
         "appendlooprunevent",
+        "attributeSuperloopResidual",
         "buildtuiloopreport",
+        "classifySuperloopResidualOwnership",
         "defaultloopledger",
         "defaultloopregistry",
         "dispatch_loop",
@@ -9870,6 +9887,7 @@
         "superloopFleetUsage",
         "superloopFleetWalk",
         "superloopResidual",
+        "superloopResidualAttributor",
         "superloopResidualCommand",
         "superloopResidualRouter",
         "superloop_fleet",
