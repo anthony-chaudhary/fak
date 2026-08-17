@@ -1205,8 +1205,27 @@ func AuditRoot(root string) Report {
 
 func Audit() Report {
 	root, err := os.Getwd()
+	if err == nil {
+		root, err = moduleRoot(root)
+	}
 	if err != nil {
 		return Report{Contracts: All(), Findings: []Finding{{Reason: err.Error()}}}
 	}
 	return AuditRoot(root)
+}
+
+func moduleRoot(start string) (string, error) {
+	root := filepath.Clean(start)
+	for {
+		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+			return root, nil
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			return "", fmt.Errorf("find module root from %s: go.mod not found", start)
+		}
+		root = parent
+	}
 }

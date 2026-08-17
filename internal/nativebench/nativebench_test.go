@@ -72,6 +72,14 @@ func TestDiscoverNativeLeavesAndCoverage(t *testing.T) {
 	}
 }
 
+func TestAuditFindsRepositoryFromNestedWorkingDirectory(t *testing.T) {
+	t.Chdir(filepath.Join("..", "..", "cmd", "fak"))
+	report := Audit()
+	if !report.Coverage.DiscoveryComplete || report.Coverage.NativeLeaves < 100 {
+		t.Fatalf("nested audit did not discover repository root: %+v", report)
+	}
+}
+
 func TestAuditRepositoryDiscoversNativeCoverageDebt(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", ".."))
 	report := AuditRoot(root)
