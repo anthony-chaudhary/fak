@@ -9,7 +9,8 @@
     "parity": {
       "frozen": true,
       "minimum_pairs": 2,
-      "max_median_elapsed_ratio": 1.25
+      "max_median_elapsed_ratio": 1.25,
+      "counterbalanced_order": true
     }
   },
   "baseline": {

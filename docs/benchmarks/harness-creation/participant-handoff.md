@@ -15,12 +15,20 @@ Use this card for #6911 only after the study baseline reports `baseline_ready=tr
    task. Allocate a clean cache and random run slug.
 5. Copy `participant-receipt-template.json` into the external run directory. Choose the
    ten-minute or weekend task in [README.md](README.md); do not change tracks after start.
-6. For a ten-minute comparison, freeze one random `pair_id`, run both `fak` and `baseline`
-   arms in randomized order, and use separate run IDs and receipts. Never drop the second
-   arm after seeing the first result. Weekend receipts use the `fak` arm only.
-6. For a ten-minute comparison, freeze one random `pair_id`, run both `fak` and `baseline`
-   arms in randomized order, and use separate run IDs and receipts. Never drop the second
-   arm after seeing the first result. Weekend receipts use the `fak` arm only.
+6. For a ten-minute comparison, freeze one random `pair_id` and its assigned
+   `pair_order` (`fak-first` or `baseline-first`) before either clock. Use each assignment
+   once across the first two complete pairs. Record `arm_position` 1 or 2, use separate
+   run IDs and receipts, and never drop the second arm after seeing the first result.
+7. Give each arm a fresh external directory and the protocol's declared empty cache. Do
+   not reuse generated files, package/module caches, task answers, or process state across
+   arms; record any unavoidable carryover as friction. Weekend receipts use `fak` only.
+6. For a ten-minute comparison, freeze one random `pair_id` and its assigned
+   `pair_order` (`fak-first` or `baseline-first`) before either clock. Use each assignment
+   once across the first two complete pairs. Record `arm_position` 1 or 2, use separate
+   run IDs and receipts, and never drop the second arm after seeing the first result.
+7. Give each arm a fresh external directory and the protocol's declared empty cache. Do
+   not reuse generated files, package/module caches, task answers, or process state across
+   arms; record any unavoidable carryover as friction. Weekend receipts use `fak` only.
 
 ## During and after
 

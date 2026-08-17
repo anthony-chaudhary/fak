@@ -28,7 +28,7 @@ func TestHarnessStudyCrossoverCLI(t *testing.T) {
 
 func TestHarnessStudyCreationCLIKeepsFailedBuildersInDenominator(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "study.json")
-	raw := `{"schema":"fak.harness-creation-study/v1alpha1","id":"creation-1","protocol":{"frozen":true,"ten_minute_limit_seconds":600,"assistance_policy":"task-card-and-help-only","failures_in_denominator":true,"parity":{"frozen":true,"minimum_pairs":2,"max_median_elapsed_ratio":1.25}},"baseline":{"id":"tuned-alt","runnable":true,"tuned":true,"frozen":true,"evidence":"receipts/baseline.json"},"runs":[{"id":"maintainer","participant_id":"maintainer","track":"ten-minute","participant_class":"maintainer-calibration","independent":false,"outcome":"success","elapsed_seconds":10,"receipt":"receipts/m.json"},{"id":"builder-a","participant_id":"builder-a","track":"ten-minute","participant_class":"unfamiliar-builder","independent":true,"outcome":"timeout","elapsed_seconds":600,"receipt":"receipts/a.json"}]}`
+	raw := `{"schema":"fak.harness-creation-study/v1alpha1","id":"creation-1","protocol":{"frozen":true,"ten_minute_limit_seconds":600,"assistance_policy":"task-card-and-help-only","failures_in_denominator":true,"parity":{"frozen":true,"minimum_pairs":2,"max_median_elapsed_ratio":1.25,"counterbalanced_order":true}},"baseline":{"id":"tuned-alt","runnable":true,"tuned":true,"frozen":true,"evidence":"receipts/baseline.json"},"runs":[{"id":"maintainer","participant_id":"maintainer","track":"ten-minute","participant_class":"maintainer-calibration","independent":false,"outcome":"success","elapsed_seconds":10,"receipt":"receipts/m.json"},{"id":"builder-a","participant_id":"builder-a","track":"ten-minute","participant_class":"unfamiliar-builder","independent":true,"outcome":"timeout","elapsed_seconds":600,"receipt":"receipts/a.json"}]}`
 	if err := os.WriteFile(p, []byte(raw), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestHarnessStudyReceiptRowsFormCompletePair(t *testing.T) {
 		ID:     "paired-e2e",
 		Protocol: harnesscreationstudy.Protocol{
 			Frozen: true, TenMinuteLimitSeconds: 600, AssistancePolicy: "task-card-and-help-only", FailuresInDenominator: true,
-			Parity: harnesscreationstudy.MatchedStudySpec{Frozen: true, MinimumPairs: 1, MaxMedianElapsedRatio: 1.25},
+			Parity: harnesscreationstudy.MatchedStudySpec{Frozen: true, MinimumPairs: 2, MaxMedianElapsedRatio: 1.25, CounterbalancedOrder: true},
 		},
 		Baseline: harnesscreationstudy.Baseline{ID: "tuned-alt", Runnable: true, Tuned: true, Frozen: true, Evidence: "baseline.json"},
 	}
@@ -63,36 +63,42 @@ func TestHarnessStudyReceiptRowsFormCompletePair(t *testing.T) {
 	}
 	writeStudy()
 	start := time.Date(2026, 8, 17, 1, 2, 3, 0, time.UTC)
-	for _, arm := range []string{"fak", "baseline"} {
-		receipt := harnesscreationreceipt.Receipt{
-			Schema: harnesscreationreceipt.Schema, RunID: "run-" + arm, ParticipantID: "person-paired", ParticipantClass: "unfamiliar-builder", PriorFamiliarity: "none",
-			Track: "ten-minute", Arm: arm, PairID: "pair-paired", Independent: true, Artifact: arm + "@v1", ArtifactDigest: "sha256:abc", OS: "linux", CPU: "amd64", Toolchain: "go1.26", NetworkState: "online install; offline selfcheck", CacheState: "empty",
-			StartedAt: start, StoppedAt: start.Add(100 * time.Second), ElapsedSeconds: 100, Commands: []harnesscreationreceipt.Command{{Command: "build", Exit: 0}}, FilesChanged: []string{"product/config.go"}, Rebuilds: 1, RebuildSeconds: 10, Outcome: "success", Transcript: arm + ".txt", Receipt: arm + ".json",
+	for _, pair := range []struct{ id, participant, order string }{{"pair-a", "person-a", "fak-first"}, {"pair-b", "person-b", "baseline-first"}} {
+		for _, arm := range []string{"fak", "baseline"} {
+			position := 2
+			if (pair.order == "fak-first" && arm == "fak") || (pair.order == "baseline-first" && arm == "baseline") {
+				position = 1
+			}
+			receipt := harnesscreationreceipt.Receipt{
+				Schema: harnesscreationreceipt.Schema, RunID: "run-" + pair.id + "-" + arm, ParticipantID: pair.participant, ParticipantClass: "unfamiliar-builder", PriorFamiliarity: "none",
+				Track: "ten-minute", Arm: arm, PairID: pair.id, PairOrder: pair.order, ArmPosition: position, Independent: true, Artifact: arm + "@v1", ArtifactDigest: "sha256:abc", OS: "linux", CPU: "amd64", Toolchain: "go1.26", NetworkState: "online install; offline selfcheck", CacheState: "empty",
+				StartedAt: start, StoppedAt: start.Add(100 * time.Second), ElapsedSeconds: 100, Commands: []harnesscreationreceipt.Command{{Command: "build", Exit: 0}}, FilesChanged: []string{"product/config.go"}, Rebuilds: 1, RebuildSeconds: 10, Outcome: "success", Transcript: arm + ".txt", Receipt: arm + ".json",
+			}
+			receiptPath := filepath.Join(dir, pair.id+"-"+arm+".json")
+			raw, err := json.Marshal(receipt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(receiptPath, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			var out, errb bytes.Buffer
+			if code := runHarness(&out, &errb, []string{"study", "receipt", "--input", receiptPath, "--study", studyPath}); code != 0 {
+				t.Fatalf("arm=%s code=%d err=%s", arm, code, errb.String())
+			}
+			var result harnesscreationreceipt.Result
+			if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			study.Runs = append(study.Runs, harnesscreationstudy.Run{
+				ID: result.Row.ID, ParticipantID: result.Row.ParticipantID, Track: result.Row.Track, Arm: result.Row.Arm, PairID: result.Row.PairID, PairOrder: result.Row.PairOrder, ArmPosition: result.Row.ArmPosition,
+				ParticipantClass: result.Row.ParticipantClass, Independent: result.Row.Independent, Outcome: result.Row.Outcome, ElapsedSeconds: result.Row.ElapsedSeconds, Receipt: result.Row.Receipt,
+			})
+			writeStudy()
 		}
-		receiptPath := filepath.Join(dir, arm+".json")
-		raw, err := json.Marshal(receipt)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(receiptPath, raw, 0600); err != nil {
-			t.Fatal(err)
-		}
-		var out, errb bytes.Buffer
-		if code := runHarness(&out, &errb, []string{"study", "receipt", "--input", receiptPath, "--study", studyPath}); code != 0 {
-			t.Fatalf("arm=%s code=%d err=%s", arm, code, errb.String())
-		}
-		var result harnesscreationreceipt.Result
-		if err := json.Unmarshal(out.Bytes(), &result); err != nil {
-			t.Fatal(err)
-		}
-		study.Runs = append(study.Runs, harnesscreationstudy.Run{
-			ID: result.Row.ID, ParticipantID: result.Row.ParticipantID, Track: result.Row.Track, Arm: result.Row.Arm, PairID: result.Row.PairID,
-			ParticipantClass: result.Row.ParticipantClass, Independent: result.Row.Independent, Outcome: result.Row.Outcome, ElapsedSeconds: result.Row.ElapsedSeconds, Receipt: result.Row.Receipt,
-		})
-		writeStudy()
 	}
 	report := harnesscreationstudy.Evaluate(study)
-	if report.Parity.CompletePairs != 1 || report.Parity.ClaimStatus != "supported" {
+	if report.Parity.CompletePairs != 2 || report.Parity.ClaimStatus != "supported" {
 		t.Fatalf("receipt rows did not form supported pair: %+v", report.Parity)
 	}
 }

@@ -25,7 +25,9 @@ Independent operators begin with the [participant handoff](participant-handoff.m
 The tuned Mastra calibration proves only that the alternative is runnable; it is not a
 parity result. Before independent timing, the study freezes a matched non-inferiority
 question: at least two unfamiliar builders each run both `fak` and `baseline` arms under
-one random `pair_id`, failures remain in the denominator, and fak is supported only when
+one random `pair_id`. The two-pair minimum is counterbalanced: one `fak-first` and one
+`baseline-first`, with fresh directories and empty caches for each arm. Failures remain
+in the denominator, and fak is supported only when
 it has no fewer successful paired arms and the median elapsed-time ratio
 `fak / baseline` is at most **1.25**. Missing arms remain visible as incomplete pairs.
 This small denominator is a bounded creation-workflow witness, not statistical or product-

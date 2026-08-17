@@ -12,7 +12,7 @@ func frozenStudy() Study {
 		ID:     "study-1",
 		Protocol: Protocol{Frozen: true, TenMinuteLimitSeconds: 600,
 			AssistancePolicy: "task-card-and-help-only", FailuresInDenominator: true,
-			Parity: MatchedStudySpec{Frozen: true, MinimumPairs: 2, MaxMedianElapsedRatio: 1.25}},
+			Parity: MatchedStudySpec{Frozen: true, MinimumPairs: 2, MaxMedianElapsedRatio: 1.25, CounterbalancedOrder: true}},
 		Baseline: Baseline{ID: "tuned-alt", Runnable: true, Tuned: true, Frozen: true, Evidence: "receipts/baseline.json"},
 	}
 }
@@ -50,7 +50,7 @@ func TestEvaluateSupportsOnlyCompleteIndependentEnvelopes(t *testing.T) {
 }
 
 func TestParseFailsClosedOnPIIShapedIDsAndMutableProtocol(t *testing.T) {
-	raw := `{"schema":"fak.harness-creation-study/v1alpha1","id":"study","protocol":{"frozen":false,"ten_minute_limit_seconds":600,"assistance_policy":"task-card-and-help-only","failures_in_denominator":true,"parity":{"frozen":true,"minimum_pairs":2,"max_median_elapsed_ratio":1.25}},"baseline":{"id":"alt","runnable":true,"tuned":true,"frozen":true,"evidence":"x"},"runs":[]}`
+	raw := `{"schema":"fak.harness-creation-study/v1alpha1","id":"study","protocol":{"frozen":false,"ten_minute_limit_seconds":600,"assistance_policy":"task-card-and-help-only","failures_in_denominator":true,"parity":{"frozen":true,"minimum_pairs":2,"max_median_elapsed_ratio":1.25,"counterbalanced_order":true}},"baseline":{"id":"alt","runnable":true,"tuned":true,"frozen":true,"evidence":"x"},"runs":[]}`
 	if _, err := Parse([]byte(raw)); err == nil || !strings.Contains(err.Error(), "protocol") {
 		t.Fatalf("mutable protocol accepted: %v", err)
 	}
@@ -64,10 +64,10 @@ func TestParseFailsClosedOnPIIShapedIDsAndMutableProtocol(t *testing.T) {
 func TestEvaluateReportsPairedParityWithoutCountingBaselineAsFak(t *testing.T) {
 	s := frozenStudy()
 	s.Runs = []Run{
-		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a-fak.json"},
-		{ID: "a-base", ParticipantID: "builder-a", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 90, Receipt: "a-base.json"},
-		{ID: "b-fak", ParticipantID: "builder-b", Track: "ten-minute", Arm: "fak", PairID: "pair-b", ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 120, Receipt: "b-fak.json"},
-		{ID: "b-base", ParticipantID: "builder-b", Track: "ten-minute", Arm: "baseline", PairID: "pair-b", ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b-base.json"},
+		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a-fak.json"},
+		{ID: "a-base", ParticipantID: "builder-a", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 90, Receipt: "a-base.json"},
+		{ID: "b-fak", ParticipantID: "builder-b", Track: "ten-minute", Arm: "fak", PairID: "pair-b", PairOrder: "baseline-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 120, Receipt: "b-fak.json"},
+		{ID: "b-base", ParticipantID: "builder-b", Track: "ten-minute", Arm: "baseline", PairID: "pair-b", PairOrder: "baseline-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b-base.json"},
 	}
 	r := Evaluate(s)
 	if r.Parity.ClaimStatus != "supported" || r.Parity.CompletePairs != 2 || r.Parity.FakSuccesses != 2 || r.Parity.BaselineSuccesses != 2 {
@@ -82,9 +82,9 @@ func TestEvaluateParityKeepsMissingAndFailedArmsVisible(t *testing.T) {
 	s := frozenStudy()
 	s.Protocol.Parity.MinimumPairs = 1
 	s.Runs = []Run{
-		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "failure", ElapsedSeconds: 600, Receipt: "a-fak.json"},
-		{ID: "a-base", ParticipantID: "builder-a", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a-base.json"},
-		{ID: "b-fak", ParticipantID: "builder-b", Track: "ten-minute", Arm: "fak", PairID: "pair-b", ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b-fak.json"},
+		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "failure", ElapsedSeconds: 600, Receipt: "a-fak.json"},
+		{ID: "a-base", ParticipantID: "builder-a", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a-base.json"},
+		{ID: "b-fak", ParticipantID: "builder-b", Track: "ten-minute", Arm: "fak", PairID: "pair-b", PairOrder: "baseline-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b-fak.json"},
 	}
 	r := Evaluate(s)
 	if r.Parity.ClaimStatus != "refuted" || r.Parity.CompletePairs != 1 || r.Parity.IncompletePairs != 1 || r.Parity.FakSuccesses != 0 || r.Parity.BaselineSuccesses != 1 {
@@ -96,8 +96,8 @@ func TestEvaluateParityRefutesElapsedRatioOutsideFrozenBound(t *testing.T) {
 	s := frozenStudy()
 	s.Protocol.Parity.MinimumPairs = 1
 	s.Runs = []Run{
-		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 200, Receipt: "a-fak.json"},
-		{ID: "a-base", ParticipantID: "builder-a", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a-base.json"},
+		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 200, Receipt: "a-fak.json"},
+		{ID: "a-base", ParticipantID: "builder-a", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a-base.json"},
 	}
 	r := Evaluate(s)
 	if r.Parity.ClaimStatus != "refuted" || r.Parity.MedianElapsedRatio == nil || *r.Parity.MedianElapsedRatio != 2 {
@@ -108,8 +108,8 @@ func TestEvaluateParityRefutesElapsedRatioOutsideFrozenBound(t *testing.T) {
 func TestParseRejectsDuplicateOrUnknownPairArms(t *testing.T) {
 	s := frozenStudy()
 	s.Runs = []Run{
-		{ID: "a", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a.json"},
-		{ID: "b", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b.json"},
+		{ID: "a", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a.json"},
+		{ID: "b", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b.json"},
 	}
 	raw, err := json.Marshal(s)
 	if err != nil {
@@ -131,8 +131,8 @@ func TestParseRejectsDuplicateOrUnknownPairArms(t *testing.T) {
 func TestParseRejectsPairSpanningParticipants(t *testing.T) {
 	s := frozenStudy()
 	s.Runs = []Run{
-		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a.json"},
-		{ID: "b-base", ParticipantID: "builder-b", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 90, Receipt: "b.json"},
+		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a.json"},
+		{ID: "b-base", ParticipantID: "builder-b", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 90, Receipt: "b.json"},
 	}
 	raw, err := json.Marshal(s)
 	if err != nil {
@@ -140,5 +140,36 @@ func TestParseRejectsPairSpanningParticipants(t *testing.T) {
 	}
 	if _, err = Parse(raw); err == nil || !strings.Contains(err.Error(), "spans participants") {
 		t.Fatalf("cross-participant pair accepted: %v", err)
+	}
+}
+
+func TestEvaluateParityRequiresCounterbalancedCompletePairs(t *testing.T) {
+	s := frozenStudy()
+	s.Runs = []Run{
+		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a-fak.json"},
+		{ID: "a-base", ParticipantID: "builder-a", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a-base.json"},
+		{ID: "b-fak", ParticipantID: "builder-b", Track: "ten-minute", Arm: "fak", PairID: "pair-b", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b-fak.json"},
+		{ID: "b-base", ParticipantID: "builder-b", Track: "ten-minute", Arm: "baseline", PairID: "pair-b", PairOrder: "fak-first", ArmPosition: 2, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b-base.json"},
+	}
+	r := Evaluate(s)
+	if r.Parity.ClaimStatus != "not_yet" || r.Parity.FakFirstPairs != 2 || r.Parity.BaselineFirstPairs != 0 {
+		t.Fatalf("same-order evidence supported parity: %+v", r.Parity)
+	}
+}
+
+func TestParseRejectsInconsistentPairOrderAndPosition(t *testing.T) {
+	s := frozenStudy()
+	s.Runs = []Run{
+		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", PairOrder: "fak-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a.json"},
+		{ID: "a-base", ParticipantID: "builder-a", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", PairOrder: "baseline-first", ArmPosition: 1, ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b.json"},
+	}
+	raw, _ := json.Marshal(s)
+	if _, err := Parse(raw); err == nil || !strings.Contains(err.Error(), "conflicting order") {
+		t.Fatalf("conflicting pair order accepted: %v", err)
+	}
+	s.Runs[1].PairOrder, s.Runs[1].ArmPosition = "fak-first", 1
+	raw, _ = json.Marshal(s)
+	if _, err := Parse(raw); err == nil || !strings.Contains(err.Error(), "arm_position") {
+		t.Fatalf("wrong arm position accepted: %v", err)
 	}
 }

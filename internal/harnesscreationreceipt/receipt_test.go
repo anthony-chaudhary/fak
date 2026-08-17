@@ -9,7 +9,7 @@ import (
 
 func validReceipt() Receipt {
 	start := time.Date(2026, 8, 16, 1, 2, 3, 0, time.UTC)
-	return Receipt{Schema: Schema, RunID: "run-a8f29c", ParticipantID: "person-b7e14d", ParticipantClass: "unfamiliar-builder", PriorFamiliarity: "none", Track: "ten-minute", Arm: "fak", PairID: "pair-a8f29c", Independent: true, Artifact: "fak@v0.44.0", ArtifactDigest: "sha256:abc", OS: "linux-amd64", CPU: "x86_64", Toolchain: "go1.26", NetworkState: "online install; offline selfcheck", CacheState: "empty", StartedAt: start, StoppedAt: start.Add(5 * time.Minute), ElapsedSeconds: 300, Commands: []Command{{Command: "fak harness init", Exit: 0}}, FilesChanged: []string{"product/config.go"}, Rebuilds: 1, RebuildSeconds: 20, Outcome: "success", HelpRequests: 0, Transcript: "receipts/run/transcript.txt", Receipt: "receipts/run/README.md"}
+	return Receipt{Schema: Schema, RunID: "run-a8f29c", ParticipantID: "person-b7e14d", ParticipantClass: "unfamiliar-builder", PriorFamiliarity: "none", Track: "ten-minute", Arm: "fak", PairID: "pair-a8f29c", PairOrder: "fak-first", ArmPosition: 1, Independent: true, Artifact: "fak@v0.44.0", ArtifactDigest: "sha256:abc", OS: "linux-amd64", CPU: "x86_64", Toolchain: "go1.26", NetworkState: "online install; offline selfcheck", CacheState: "empty", StartedAt: start, StoppedAt: start.Add(5 * time.Minute), ElapsedSeconds: 300, Commands: []Command{{Command: "fak harness init", Exit: 0}}, FilesChanged: []string{"product/config.go"}, Rebuilds: 1, RebuildSeconds: 20, Outcome: "success", HelpRequests: 0, Transcript: "receipts/run/transcript.txt", Receipt: "receipts/run/README.md"}
 }
 func TestParseAndEvaluateIndependentReceipt(t *testing.T) {
 	r := validReceipt()
@@ -66,20 +66,35 @@ func TestWeekendWitnessAccepted(t *testing.T) {
 func TestCheckUniqueAdmitsSecondPairedArmAndRejectsDuplicates(t *testing.T) {
 	r := validReceipt()
 	row := Evaluate(r).Row
-	study := `{"runs":[{"id":"run-other","participant_id":"person-b7e14d","track":"ten-minute","arm":"baseline","pair_id":"pair-a8f29c"}]}`
+	study := `{"runs":[{"id":"run-other","participant_id":"person-b7e14d","track":"ten-minute","arm":"baseline","pair_id":"pair-a8f29c","pair_order":"fak-first","arm_position":2}]}`
 	if err := CheckUnique([]byte(study), row); err != nil {
 		t.Fatalf("second paired arm refused: %v", err)
 	}
 	for name, existing := range map[string]string{
-		"run":              `{"id":"run-a8f29c","participant_id":"person-other","track":"ten-minute","arm":"baseline","pair_id":"pair-other"}`,
-		"pair participant": `{"id":"run-other","participant_id":"person-other","track":"ten-minute","arm":"baseline","pair_id":"pair-a8f29c"}`,
-		"attempt":          `{"id":"run-other","participant_id":"person-b7e14d","track":"ten-minute","arm":"fak","pair_id":"pair-other"}`,
-		"pair arm":         `{"id":"run-other","participant_id":"person-other","track":"ten-minute","arm":"fak","pair_id":"pair-a8f29c"}`,
+		"run":              `{"id":"run-a8f29c","participant_id":"person-other","track":"ten-minute","arm":"baseline","pair_id":"pair-other","pair_order":"baseline-first","arm_position":1}`,
+		"pair participant": `{"id":"run-other","participant_id":"person-other","track":"ten-minute","arm":"baseline","pair_id":"pair-a8f29c","pair_order":"fak-first","arm_position":2}`,
+		"attempt":          `{"id":"run-other","participant_id":"person-b7e14d","track":"ten-minute","arm":"fak","pair_id":"pair-other","pair_order":"baseline-first","arm_position":1}`,
+		"pair arm":         `{"id":"run-other","participant_id":"person-other","track":"ten-minute","arm":"fak","pair_id":"pair-a8f29c","pair_order":"fak-first","arm_position":2}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := CheckUnique([]byte(`{"runs":[`+existing+`]}`), row); err == nil {
 				t.Fatal("expected duplicate refusal")
 			}
 		})
+	}
+}
+
+func TestParseRejectsArmOrderMismatch(t *testing.T) {
+	r := validReceipt()
+	r.ArmPosition = 2
+	raw, _ := json.Marshal(r)
+	if _, err := Parse(raw); err == nil || !strings.Contains(err.Error(), "arm_position") {
+		t.Fatalf("wrong arm position accepted: %v", err)
+	}
+	r = validReceipt()
+	r.PairOrder = ""
+	raw, _ = json.Marshal(r)
+	if _, err := Parse(raw); err == nil || !strings.Contains(err.Error(), "pair_order") {
+		t.Fatalf("missing pair order accepted: %v", err)
 	}
 }

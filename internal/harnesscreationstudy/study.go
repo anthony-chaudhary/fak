@@ -34,6 +34,7 @@ type MatchedStudySpec struct {
 	Frozen                bool    `json:"frozen"`
 	MinimumPairs          int     `json:"minimum_pairs"`
 	MaxMedianElapsedRatio float64 `json:"max_median_elapsed_ratio"`
+	CounterbalancedOrder  bool    `json:"counterbalanced_order"`
 }
 
 type Baseline struct {
@@ -50,6 +51,8 @@ type Run struct {
 	Track                 string   `json:"track"`
 	Arm                   string   `json:"arm,omitempty"`
 	PairID                string   `json:"pair_id,omitempty"`
+	PairOrder             string   `json:"pair_order,omitempty"`
+	ArmPosition           int      `json:"arm_position,omitempty"`
 	ParticipantClass      string   `json:"participant_class"`
 	Independent           bool     `json:"independent"`
 	Outcome               string   `json:"outcome"`
@@ -75,6 +78,8 @@ type MatchedStudyResult struct {
 	IncompletePairs    int      `json:"incomplete_pairs"`
 	FakSuccesses       int      `json:"fak_successes"`
 	BaselineSuccesses  int      `json:"baseline_successes"`
+	FakFirstPairs      int      `json:"fak_first_pairs"`
+	BaselineFirstPairs int      `json:"baseline_first_pairs"`
 	MedianElapsedRatio *float64 `json:"median_elapsed_ratio,omitempty"`
 	ClaimStatus        string   `json:"claim_status"`
 	Reasons            []string `json:"reasons,omitempty"`
@@ -108,8 +113,8 @@ func Parse(raw []byte) (Study, error) {
 	if !s.Protocol.Frozen || s.Protocol.TenMinuteLimitSeconds != 600 || s.Protocol.AssistancePolicy != "task-card-and-help-only" || !s.Protocol.FailuresInDenominator {
 		return Study{}, errors.New("protocol must freeze the 600-second limit, task-card-and-help-only assistance, and failures-in-denominator rule")
 	}
-	if !s.Protocol.Parity.Frozen || s.Protocol.Parity.MinimumPairs < 1 || s.Protocol.Parity.MaxMedianElapsedRatio < 1 {
-		return Study{}, errors.New("protocol parity question must be frozen with minimum_pairs >= 1 and max_median_elapsed_ratio >= 1")
+	if !s.Protocol.Parity.Frozen || s.Protocol.Parity.MinimumPairs < 1 || s.Protocol.Parity.MaxMedianElapsedRatio < 1 || !s.Protocol.Parity.CounterbalancedOrder {
+		return Study{}, errors.New("protocol parity question must freeze minimum_pairs >= 1, max_median_elapsed_ratio >= 1, and counterbalanced_order")
 	}
 	if !safeID.MatchString(s.Baseline.ID) || strings.TrimSpace(s.Baseline.Evidence) == "" {
 		return Study{}, errors.New("baseline requires a privacy-safe id and evidence reference")
@@ -117,6 +122,7 @@ func Parse(raw []byte) (Study, error) {
 	seen := map[string]bool{}
 	seenPairArms := map[string]bool{}
 	pairParticipants := map[string]string{}
+	pairOrders := map[string]string{}
 	for i, r := range s.Runs {
 		if !safeID.MatchString(r.ID) || !safeID.MatchString(r.ParticipantID) {
 			return Study{}, fmt.Errorf("run %d requires privacy-safe run and participant slugs", i)
@@ -128,10 +134,26 @@ func Parse(raw []byte) (Study, error) {
 			return Study{}, fmt.Errorf("run %q: arm and pair_id must be supplied together", r.ID)
 		}
 		if r.PairID != "" {
+			if r.PairOrder != "fak-first" && r.PairOrder != "baseline-first" {
+				return Study{}, fmt.Errorf("run %q: pair_order must be fak-first or baseline-first", r.ID)
+			}
+			expectedPosition := 2
+			if (r.PairOrder == "fak-first" && r.Arm == "fak") || (r.PairOrder == "baseline-first" && r.Arm == "baseline") {
+				expectedPosition = 1
+			}
+			if r.ArmPosition != expectedPosition {
+				return Study{}, fmt.Errorf("run %q: arm_position must be %d for %s in %s", r.ID, expectedPosition, r.Arm, r.PairOrder)
+			}
+		}
+		if r.PairID != "" {
 			if participant, ok := pairParticipants[r.PairID]; ok && participant != r.ParticipantID {
 				return Study{}, fmt.Errorf("pair %q spans participants %q and %q", r.PairID, participant, r.ParticipantID)
 			}
 			pairParticipants[r.PairID] = r.ParticipantID
+			if order, ok := pairOrders[r.PairID]; ok && order != r.PairOrder {
+				return Study{}, fmt.Errorf("pair %q has conflicting order %q and %q", r.PairID, order, r.PairOrder)
+			}
+			pairOrders[r.PairID] = r.PairOrder
 			pairKey := r.PairID + "\x00" + r.Arm
 			if seenPairArms[pairKey] {
 				return Study{}, fmt.Errorf("duplicate pair arm %q/%q", r.PairID, r.Arm)
@@ -282,6 +304,11 @@ func evaluateMatchedStudy(s Study) MatchedStudyResult {
 			continue
 		}
 		out.CompletePairs++
+		if pair.fak.PairOrder == "fak-first" {
+			out.FakFirstPairs++
+		} else if pair.fak.PairOrder == "baseline-first" {
+			out.BaselineFirstPairs++
+		}
 		fakOK := pair.fak.Outcome == "success" && pair.fak.ElapsedSeconds <= float64(s.Protocol.TenMinuteLimitSeconds)
 		baselineOK := pair.baseline.Outcome == "success" && pair.baseline.ElapsedSeconds <= float64(s.Protocol.TenMinuteLimitSeconds)
 		if fakOK {
@@ -319,6 +346,10 @@ func evaluateMatchedStudy(s Study) MatchedStudyResult {
 	if *out.MedianElapsedRatio > s.Protocol.Parity.MaxMedianElapsedRatio {
 		out.ClaimStatus = "refuted"
 		out.Reasons = append(out.Reasons, fmt.Sprintf("median elapsed ratio %.3f exceeds frozen bound %.3f", *out.MedianElapsedRatio, s.Protocol.Parity.MaxMedianElapsedRatio))
+		return out
+	}
+	if out.FakFirstPairs == 0 || out.BaselineFirstPairs == 0 {
+		out.Reasons = append(out.Reasons, "need complete pairs in both fak-first and baseline-first order")
 		return out
 	}
 	out.ClaimStatus = "supported"
