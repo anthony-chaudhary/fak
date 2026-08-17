@@ -71,9 +71,10 @@ func TestCheckUniqueAdmitsSecondPairedArmAndRejectsDuplicates(t *testing.T) {
 		t.Fatalf("second paired arm refused: %v", err)
 	}
 	for name, existing := range map[string]string{
-		"run":      `{"id":"run-a8f29c","participant_id":"person-other","track":"ten-minute","arm":"baseline","pair_id":"pair-other"}`,
-		"attempt":  `{"id":"run-other","participant_id":"person-b7e14d","track":"ten-minute","arm":"fak","pair_id":"pair-other"}`,
-		"pair arm": `{"id":"run-other","participant_id":"person-other","track":"ten-minute","arm":"fak","pair_id":"pair-a8f29c"}`,
+		"run":              `{"id":"run-a8f29c","participant_id":"person-other","track":"ten-minute","arm":"baseline","pair_id":"pair-other"}`,
+		"pair participant": `{"id":"run-other","participant_id":"person-other","track":"ten-minute","arm":"baseline","pair_id":"pair-a8f29c"}`,
+		"attempt":          `{"id":"run-other","participant_id":"person-b7e14d","track":"ten-minute","arm":"fak","pair_id":"pair-other"}`,
+		"pair arm":         `{"id":"run-other","participant_id":"person-other","track":"ten-minute","arm":"fak","pair_id":"pair-a8f29c"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := CheckUnique([]byte(`{"runs":[`+existing+`]}`), row); err == nil {

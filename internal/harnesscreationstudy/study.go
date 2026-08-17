@@ -116,6 +116,7 @@ func Parse(raw []byte) (Study, error) {
 	}
 	seen := map[string]bool{}
 	seenPairArms := map[string]bool{}
+	pairParticipants := map[string]string{}
 	for i, r := range s.Runs {
 		if !safeID.MatchString(r.ID) || !safeID.MatchString(r.ParticipantID) {
 			return Study{}, fmt.Errorf("run %d requires privacy-safe run and participant slugs", i)
@@ -127,6 +128,10 @@ func Parse(raw []byte) (Study, error) {
 			return Study{}, fmt.Errorf("run %q: arm and pair_id must be supplied together", r.ID)
 		}
 		if r.PairID != "" {
+			if participant, ok := pairParticipants[r.PairID]; ok && participant != r.ParticipantID {
+				return Study{}, fmt.Errorf("pair %q spans participants %q and %q", r.PairID, participant, r.ParticipantID)
+			}
+			pairParticipants[r.PairID] = r.ParticipantID
 			pairKey := r.PairID + "\x00" + r.Arm
 			if seenPairArms[pairKey] {
 				return Study{}, fmt.Errorf("duplicate pair arm %q/%q", r.PairID, r.Arm)

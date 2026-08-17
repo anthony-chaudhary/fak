@@ -109,7 +109,7 @@ func TestParseRejectsDuplicateOrUnknownPairArms(t *testing.T) {
 	s := frozenStudy()
 	s.Runs = []Run{
 		{ID: "a", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a.json"},
-		{ID: "b", ParticipantID: "builder-b", Track: "ten-minute", Arm: "fak", PairID: "pair-a", ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b.json"},
+		{ID: "b", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "b.json"},
 	}
 	raw, err := json.Marshal(s)
 	if err != nil {
@@ -125,5 +125,20 @@ func TestParseRejectsDuplicateOrUnknownPairArms(t *testing.T) {
 	}
 	if _, err = Parse(raw); err == nil || !strings.Contains(err.Error(), "unknown arm") {
 		t.Fatalf("unknown arm accepted: %v", err)
+	}
+}
+
+func TestParseRejectsPairSpanningParticipants(t *testing.T) {
+	s := frozenStudy()
+	s.Runs = []Run{
+		{ID: "a-fak", ParticipantID: "builder-a", Track: "ten-minute", Arm: "fak", PairID: "pair-a", ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 100, Receipt: "a.json"},
+		{ID: "b-base", ParticipantID: "builder-b", Track: "ten-minute", Arm: "baseline", PairID: "pair-a", ParticipantClass: "unfamiliar-builder", Independent: true, Outcome: "success", ElapsedSeconds: 90, Receipt: "b.json"},
+	}
+	raw, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = Parse(raw); err == nil || !strings.Contains(err.Error(), "spans participants") {
+		t.Fatalf("cross-participant pair accepted: %v", err)
 	}
 }

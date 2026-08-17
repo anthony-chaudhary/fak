@@ -127,6 +127,9 @@ func CheckUnique(studyRaw []byte, row StudyRow) error {
 		if existing.ParticipantID == row.ParticipantID && existing.Track == row.Track && existing.Arm == row.Arm {
 			return fmt.Errorf("participant %q already has a %s/%s attempt", row.ParticipantID, row.Track, row.Arm)
 		}
+		if existing.PairID == row.PairID && existing.ParticipantID != row.ParticipantID {
+			return fmt.Errorf("pair %q belongs to participant %q, not %q", row.PairID, existing.ParticipantID, row.ParticipantID)
+		}
 		if existing.PairID == row.PairID && existing.Arm == row.Arm {
 			return fmt.Errorf("pair %q already has a %s arm", row.PairID, row.Arm)
 		}
