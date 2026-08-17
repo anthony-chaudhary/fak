@@ -99,7 +99,7 @@ var valueFlagTokens = []string{
 // (VALUE_FLAG_OFF). The reason is what a reviewer reads to confirm the gate is genuine,
 // not an excuse for a dead feature -- the same discipline conflationscore's qualifier
 // tables apply to provenance prose. Keyed by the flag name as it appears in fs.<T>("..").
-type optInGate struct {
+type reviewedDefaultDecision struct {
 	reason   string
 	reviewBy string
 }
@@ -107,7 +107,7 @@ type optInGate struct {
 // offWithReason is the reviewed gate registry for value flags that legitimately ship
 // default-OFF. A reason alone is not permanent absolution: reviewBy makes omission harm
 // observable as the agentic default window moves. Dates are UTC YYYY-MM-DD.
-var offWithReason = map[string]optInGate{
+var offWithReason = map[string]reviewedDefaultDecision{
 	"context-budget-tokens": {
 		reason:   "seeds a hard context budget that returns reset directives -- an operator policy, not a silent default (0 = off keeps today's path)",
 		reviewBy: "2026-11-01",
@@ -152,6 +152,19 @@ var offWithReason = map[string]optInGate{
 
 // valueFlag is one parsed value-flag: its name, kind, default literal, whether the parse
 // judged it default-on, the source file, and the help text (for the reason check).
+// onWithReason is the reviewed registry for value flags that ship default-ON. ON is
+// still a product decision: each entry records why automatic exposure is net-beneficial
+// and when that conclusion must be revisited. Shared guard/serve flags use one rationale.
+var onWithReason = map[string]reviewedDefaultDecision{
+	"precompact-hook":        {reason: "shadow-mode lifecycle handoff preserves provider-cache continuity without changing the user task", reviewBy: "2026-11-01"},
+	"ctx-view-budget":        {reason: "bounded context views reduce repeated prompt tokens while retaining the configured working set", reviewBy: "2026-11-01"},
+	"compact-history-budget": {reason: "bounded history compaction reduces stale context cost while preserving recent turns and anchors", reviewBy: "2026-11-01"},
+	"compact-anchor-head":    {reason: "retaining the stable head protects provider-cache reuse across compacted turns", reviewBy: "2026-11-01"},
+	"elide-result-bytes":     {reason: "result elision removes repeated payload bytes while preserving references needed for recall", reviewBy: "2026-11-01"},
+	"elide-stale-reads":      {reason: "stale-read elision suppresses superseded observations while preserving the latest value", reviewBy: "2026-11-01"},
+	"vdso":                   {reason: "the in-process fast path avoids redundant engine calls and retains the policy checkpoint", reviewBy: "2026-11-01"},
+}
+
 type valueFlag struct {
 	name      string
 	kind      string // Int|Bool|String|Int64|Float64|Duration
@@ -269,13 +282,16 @@ func validReviewDate(value string, asOf time.Time) bool {
 
 func nextGateReview(asOf time.Time) string {
 	var next time.Time
-	for _, gate := range offWithReason {
-		review, err := time.Parse("2006-01-02", gate.reviewBy)
-		if err != nil || review.Before(asOf.UTC().Truncate(24*time.Hour)) {
-			continue
-		}
-		if next.IsZero() || review.Before(next) {
-			next = review
+	registries := []map[string]reviewedDefaultDecision{offWithReason, onWithReason}
+	for _, registry := range registries {
+		for _, gate := range registry {
+			review, err := time.Parse("2006-01-02", gate.reviewBy)
+			if err != nil || review.Before(asOf.UTC().Truncate(24*time.Hour)) {
+				continue
+			}
+			if next.IsZero() || review.Before(next) {
+				next = review
+			}
 		}
 	}
 	if next.IsZero() {
@@ -295,10 +311,23 @@ func kpiValueFlagDefaultOn(flags []valueFlag, asOf time.Time) scorecard.KPI {
 	for _, f := range flags {
 		if f.defaultOn {
 			on++
+			gate, ok := onWithReason[f.name]
+			if ok && gate.reason != "" && validReviewDate(gate.reviewBy, asOf) {
+				continue
+			}
+			class := "DEFAULT_ON_UNREVIEWED"
+			detail := "no reviewed benefit/harm gate"
+			if ok {
+				class = "DEFAULT_ON_REVIEW_DUE"
+				detail = "gate review " + gate.reviewBy + " is missing, invalid, or due"
+			}
+			defects = append(defects, fmt.Sprintf(
+				"%s: value-flag --%s ships default-ON (default %s); %s -- exposure harm is unreviewed (%s)",
+				lastSegment(f.source), f.name, f.defLit, detail, class))
 			continue
 		}
 		if gate, ok := offWithReason[f.name]; ok && gate.reason != "" && validReviewDate(gate.reviewBy, asOf) {
-			continue // gated OFF with a reason and a bounded re-review -- honest, not debt
+			continue
 		}
 		class := "VALUE_FLAG_OFF"
 		detail := "no reviewed gate"
@@ -317,7 +346,7 @@ func kpiValueFlagDefaultOn(flags []valueFlag, asOf time.Time) scorecard.KPI {
 	return scorecard.KPI{
 		Key: "value_flag_default_on", Group: "value",
 		Score:   score,
-		Detail:  fmt.Sprintf("%d/%d value-flags default-on or gated with reason+review date", total-len(defects), total),
+		Detail:  fmt.Sprintf("%d/%d value-flags carry a current reason+review date for their ON/OFF default", total-len(defects), total),
 		Defects: defects,
 	}
 }
@@ -523,11 +552,11 @@ func BuildAsOf(root string, asOf time.Time) scorecard.Payload {
 		}
 	}
 
-	finding := "the agentic default window is balanced: every value lever is on or has a current reviewed opt-in gate, context defaults agree, and reports use observed evidence"
-	next := "hold -- re-run when a value flag lands or an opt-in review date arrives"
+	finding := "the agentic default window is balanced: every value lever has a current reviewed reason for its ON/OFF default, context defaults agree, and reports use observed evidence"
+	next := "hold -- re-run when a value flag lands or any default review date arrives"
 	if debt > 0 {
-		finding = scorecard.CountNoun(debt, "default-window defect") + ": unsafe exposure, stale opt-in gating, context drift, or modeled evidence is outside the reviewed window"
-		next = "review worst-first (" + worstKPI(kpis) + "): default on safely, renew the witnessed gate, or exclude the lever"
+		finding = scorecard.CountNoun(debt, "default-window defect") + ": unreviewed exposure, stale ON/OFF gating, context drift, or modeled evidence is outside the reviewed window"
+		next = "review worst-first (" + worstKPI(kpis) + "): choose ON/OFF from evidence, renew the witnessed gate, or exclude the lever"
 	}
 
 	p := scorecard.Fold(Schema, kpis, DebtKey, nil, scorecard.Messages{
@@ -537,12 +566,14 @@ func BuildAsOf(root string, asOf time.Time) scorecard.Payload {
 		NextAction:      next,
 		NextActionClean: next,
 		ExtraCorpus: map[string]any{
-			"value_flags_seen":      len(flags),
-			"value_flags_off":       offFlags,
-			"reviewed_opt_in_flags": len(offWithReason),
-			"next_default_review":   nextGateReview(asOf),
-			"flag_surfaces":         len(FlagSources),
-			"score_surfaces":        len(ScoreSurfaces),
+			"value_flags_seen":          len(flags),
+			"value_flags_off":           offFlags,
+			"reviewed_opt_in_flags":     len(offWithReason),
+			"reviewed_default_on_flags": len(onWithReason),
+			"reviewed_default_flags":    len(offWithReason) + len(onWithReason),
+			"next_default_review":       nextGateReview(asOf),
+			"flag_surfaces":             len(FlagSources),
+			"score_surfaces":            len(ScoreSurfaces),
 		},
 	})
 	p.Workspace = root

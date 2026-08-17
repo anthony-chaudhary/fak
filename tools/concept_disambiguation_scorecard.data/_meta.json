@@ -8566,6 +8566,11 @@
           "category": "incidental",
           "reason": "standard cyclomatic-complexity metric field, not a policy or adjudication decision",
           "token": "DecisionPoints"
+        },
+        {
+          "category": "incidental",
+          "reason": "private scorecard registry row, not a runtime decision-domain concept",
+          "token": "reviewedDefaultDecision"
         }
       ],
       "id": "decision",
@@ -8622,6 +8627,7 @@
         "readLiveLanes",
         "readNativeDecisions",
         "residualDriveDecision",
+        "reviewedDefaultDecision",
         "routeDecisions",
         "routing_defer_decision",
         "scheduleOutcome",

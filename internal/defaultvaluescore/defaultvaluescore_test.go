@@ -15,6 +15,33 @@ import (
 
 // --- Check 1: value-flag default-on / gated-with-reason ----------------------------------
 
+func TestValueFlag_DefaultOnRequiresReviewedReason(t *testing.T) {
+	flags := ParseFlags(`package main
+func x() { fs.Bool("compact-new-path", true, "value saver") }`, "cmd/fak/guard.go")
+	k := kpiValueFlagDefaultOn(flags, time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC))
+	if len(k.Defects) != 1 || !strings.Contains(k.Defects[0], "DEFAULT_ON_UNREVIEWED") {
+		t.Fatalf("default-ON without a reviewed reason must be debt, got %v", k.Defects)
+	}
+}
+
+func TestValueFlag_DefaultOnExpiredReviewIsDebt(t *testing.T) {
+	old, existed := onWithReason["compact-expiring"]
+	onWithReason["compact-expiring"] = reviewedDefaultDecision{reason: "bounded saver", reviewBy: "2026-08-01"}
+	t.Cleanup(func() {
+		if existed {
+			onWithReason["compact-expiring"] = old
+		} else {
+			delete(onWithReason, "compact-expiring")
+		}
+	})
+	flags := ParseFlags(`package main
+func x() { fs.Bool("compact-expiring", true, "value saver") }`, "cmd/fak/guard.go")
+	k := kpiValueFlagDefaultOn(flags, time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC))
+	if len(k.Defects) != 1 || !strings.Contains(k.Defects[0], "DEFAULT_ON_REVIEW_DUE") {
+		t.Fatalf("expired default-ON review must be typed debt, got %v", k.Defects)
+	}
+}
+
 func TestValueFlag_OffWithoutReasonIsDebt(t *testing.T) {
 	// A value-flag (name carries a value token) shipped default-OFF and NOT allow-listed.
 	src := `fs.Int("compact-mystery-budget", 0, "shed old turns to this budget")`
