@@ -387,6 +387,7 @@ var tier = map[string]int{
 	"rehydrate":           2, // horizon-gated re-entry orchestrator (#1181, epic #1178 Phase-2 spine): the CRaC afterRestore analog — a staged Gate that runs strictly more revalidation rungs (COLD_CACHE/STALE_CRED/STALE_RECALL/STALE_LEASE/STALE_PLAN) the longer the image was dormant, refusing admission at the first that does not clear. COMPOSES rungs (the four children supply the checks); imports only dormancy(1)+stdlib, registers nothing, off the hot path. sessionimage.Rehydrate composes a Gate at its boundary.
 	"syspromptmmu":        3, // system-prompt MMU: Rung 1 (#1259) emits fak's ordered base-context plan (SegStable spine + versioned policy floor as []cachemeta.PromptSegment, each content-witnessed); Rung 2 (#1260) is the cache-safe system-block splicer (BuildSystemValue + SpliceSystemOverlay, bytes.Equal(prefix) proven, fail-safe identity). Pure authorship/decision layer: imports cachemeta(1)+promptmmu(1)+stdlib, off the hot path.
 	"devcmd":              5, // fak-dev command implementations; integrates the agent/gateway/selfquery surfaces while staying off the serving/guard graph.
+	"deliverystages":      1, // canonical agent-development stage and bottleneck registry (#7127); stdlib-only, off the hot path.
 	"devindex":            2,
 	"edittx":              2, // transactional multi-file edit core: snapshots touched files, applies a full-file batch, validates, and rolls back on failure; stdlib-only, off the hot path.
 	"workflowlint":        1, // refutes fak-blind ultracode Workflow scripts (#1494/C4 #1502): pure Lint over the self-index/memory/shared-path concept classes; stdlib-only (embed/regexp/sort/strings), imports nothing internal, off the hot path.
@@ -606,6 +607,7 @@ var tier = map[string]int{
 	"orientation":           2, // versioned temporal product-orientation snapshot; imports issue-free stdlib only, off the runtime hot path.
 	"harnessweb":            2, // loopback browser runtime over public harnesskit plus persisted semantic sessions; off kernel hot path (#6980).
 	"committedbuildwitness": 2, // exact-HEAD build receipt; imports windowgate(2) for hidden git probes, off the hot path (#6871).
+	"toolcallcontrol":       1, // stdlib-only deterministic pre-execution call gate and offline ablation accounting.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
