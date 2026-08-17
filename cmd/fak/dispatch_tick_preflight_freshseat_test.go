@@ -67,19 +67,20 @@ func freshSeatPreflightFixture(t *testing.T, live int) dispatchtick.PreflightRes
 // The core #3579 acceptance: with the fresh ceiling below the session-slot cap, the
 // effective launch cap equals the fresh ceiling (no over-admission), and the wave
 // records the ceiling as the binding term. The ceiling itself is derived from a fake
-// seat pool: one fresh account (two session slots) among two walled ones.
+// seat pool: one fresh account among two walled ones. The compatibility session-cap
+// knob cannot widen the one-session Claude OAuth safety bound established by #6775.
 func TestDispatchFreshSeatCeilingBindsWaveCap(t *testing.T) {
 	t.Setenv(fleetaccounts.SessionsPerAccountEnv, "2")
 	ceiling := dispatchFreshSeatCeilingFromRoster(freshSeatFakePool(1, 2), "claude")
-	if ceiling != 2 {
-		t.Fatalf("fresh ceiling = %d, want 2 (one fresh account x two session slots)", ceiling)
+	if ceiling != 1 {
+		t.Fatalf("fresh ceiling = %d, want 1 (one fresh Claude account)", ceiling)
 	}
 	res := dispatchApplyFreshSeatCeiling(freshSeatPreflightFixture(t, 0), ceiling)
 	if !res.OK || res.Verdict != dispatchtick.PreflightOKVerdict {
 		t.Fatalf("downsized wave = %+v, want still SPAWN_OK", res)
 	}
-	if res.Cap != 2 || res.Headroom != 2 || res.CapTerms.EffectiveCap != 2 {
-		t.Fatalf("cap/headroom/effective = %d/%d/%d, want 2/2/2 (cap bound to the fresh ceiling, not the 6 session slots)",
+	if res.Cap != 1 || res.Headroom != 1 || res.CapTerms.EffectiveCap != 1 {
+		t.Fatalf("cap/headroom/effective = %d/%d/%d, want 1/1/1 (cap bound to the fresh ceiling, not the 6 session slots)",
 			res.Cap, res.Headroom, res.CapTerms.EffectiveCap)
 	}
 	if res.CapTerms.Limiting != dispatchFreshSeatLimiting {
