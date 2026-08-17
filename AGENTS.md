@@ -11,6 +11,20 @@
 > command-dense and free of philosophy. For the *why*, read [`README.md`](README.md);
 > for a curated doc map, read [`llms.txt`](llms.txt). Humans: see [`START-HERE.md`](START-HERE.md).
 
+## Default scope when launched from this repo
+
+When an agent is launched with this `fak` repository as its working directory,
+default all broad or underspecified work requests to **FAK work in this
+repository**. Requests such as “finish local WIP,” “work the backlog,” or “run
+agents all night” mean inspect, prioritize, implement, test, and ship FAK work;
+they do not authorize a workspace-wide sweep of sibling repositories.
+
+Use FAK's guarded headless-agent and worker mechanisms for parallel or unattended
+work, following the lane, lease, worktree, landing, and witness rules below.
+Only inspect or modify another repository when the operator explicitly names
+that repository or the FAK task itself has a concrete, evidenced cross-repo
+dependency. If scope is ambiguous, stay in FAK.
+
 ## What this project is
 
 **fak** is an *agent kernel*: one Go binary that sits between an AI agent and the tools
