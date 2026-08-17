@@ -177,11 +177,28 @@ func TestDispatchWorkerEvidenceCarriesExactCanonicalBlocker(t *testing.T) {
 	if ev.Delivery == nil {
 		t.Fatal("missing delivery blocker")
 	}
-	if ev.Delivery.UnitID != "issue-7105" || ev.Delivery.Stage != "runtime-observation" || ev.Delivery.Bottleneck != "capacity-seat" {
+	if ev.Delivery.UnitID != "issue-7105" || ev.Delivery.Stage != "runtime-observation" || ev.Delivery.Bottleneck != "unknown-irreducible" {
 		t.Fatalf("delivery=%+v", ev.Delivery)
 	}
 	rendered := renderWorkerEvidence(dispatchWorkerEvidenceSnapshot{Workers: []workerPartialEvidence{ev}, LiveWorkerCount: 1})
-	if !strings.Contains(rendered, "blocked-unit=issue-7105 stage=runtime-observation bottleneck=capacity-seat") {
+	if !strings.Contains(rendered, "blocked-unit=issue-7105 stage=runtime-observation bottleneck=unknown-irreducible") {
 		t.Fatalf("render=%q", rendered)
+	}
+}
+
+func TestDispatchWorkerEvidenceDoesNotBlockFreshActiveWorker(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "issue-7105.log")
+	if err := os.WriteFile(logPath, []byte("turn=3 tool=go_test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	recent := now.Add(-time.Second)
+	if err := os.Chtimes(logPath, recent, recent); err != nil {
+		t.Fatal(err)
+	}
+	ev := collectWorkerPartialEvidence(dispatchLiveScope{Issue: 7105, Log: logPath}, now)
+	if ev.Delivery != nil {
+		t.Fatalf("fresh worker falsely blocked: %+v", ev.Delivery)
 	}
 }

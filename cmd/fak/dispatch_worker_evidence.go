@@ -51,6 +51,7 @@ import (
 const dispatchWorkerEvidenceSnapshotSchema = "fleet-dispatch-worker-evidence/1"
 const dispatchWorkerEvidenceArtifactSchema = "fak-worker-partial-evidence/1"
 const dispatchWorkerEvidenceSidecarSuffix = ".partial-evidence.json"
+const workerEvidenceStaleAfterSeconds = 120
 
 // dispatchWorkerEvidenceTailBytes bounds the scrubbed transcript tail carried in the
 // artifact: enough partial output to classify the wedge, small enough to attach to an
@@ -203,10 +204,10 @@ func collectWorkerPartialEvidence(scope dispatchLiveScope, now time.Time) worker
 	ev.LastTool = lastTranscriptMarker(raw, transcriptToolRE)
 	ev.RouteHealth = lastTranscriptMarker(raw, transcriptRouteHealthRE)
 	ev.QuotaState = lastTranscriptMarker(raw, transcriptQuotaRE)
-	if ev.InFlightAgeSeconds > 0 {
+	if ev.InFlightAgeSeconds >= workerEvidenceStaleAfterSeconds {
 		unitID := fmt.Sprintf("issue-%d", ev.Issue)
 		next := "inspect the worker transcript and split the failing check"
-		if delivery, deliveryErr := workdelivery.BlockedObservation(workdelivery.AdapterFleet, unitID, "runtime-observation", "capacity-seat", []workdelivery.Evidence{{Kind: "transcript", Reference: ev.TranscriptPath, Witnessed: true}}, next); deliveryErr == nil {
+		if delivery, deliveryErr := workdelivery.BlockedObservation(workdelivery.AdapterFleet, unitID, "runtime-observation", "unknown-irreducible", []workdelivery.Evidence{{Kind: "transcript", Reference: ev.TranscriptPath, Witnessed: true}}, next); deliveryErr == nil {
 			ev.Delivery = &delivery
 		}
 	}
