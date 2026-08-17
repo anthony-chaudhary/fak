@@ -51,6 +51,11 @@ compress the fleet into:
 If a surface cannot answer those five, it is background telemetry, not an
 operator page.
 
+For live workers, use the narrower [minimal long-running-agent signal
+projection](notes/LONG-AGENT-MINIMAL-SIGNALS-2026-08-17.md): attention, latest
+witnessed outcome, current bounded move, and next check. Heartbeats, token motion,
+and transcripts remain drill-down rather than progress evidence.
+
 ## Current Witnesses
 
 - `fak operator brief --collect --json` folds the source reports into the
