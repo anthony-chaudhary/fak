@@ -265,6 +265,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Learning observation lineage](docs/learning-observation.md) — content-addressed source/candidate/witness/verdict records and closed-enum edges; separate from witness-gated admission.
 
 ## Notes & research (`docs/notes/`)
+- [Tool-call control spine — 2026-08-17](docs/notes/TOOL-CALL-CONTROL-SPINE-2026-08-17.md) -- auto-indexed dated note.
 - [Working-reality audit — 2026-08-17](docs/notes/WORKING-REALITY-AUDIT-2026-08-17.md) -- auto-indexed dated note.
 - [Minimal signals for supervising long-running agents](docs/notes/LONG-AGENT-MINIMAL-SIGNALS-2026-08-17.md) -- auto-indexed dated note.
 - [Generation-aware release staleness and readiness contract](docs/notes/GENERATION-RELEASE-READINESS-CONTRACT-2026-08-16.md) -- auto-indexed dated note.
