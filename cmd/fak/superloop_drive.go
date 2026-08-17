@@ -188,6 +188,7 @@ func runSuperloopDrive(stdout, stderr io.Writer, argv []string) int {
 	rep := superloopWalkNow(root, s)
 	decision := superloop.Drive(rep)
 	decision, residual := keepSuperloopAlive(root, decision)
+	decision, residual.NoProgressStreak = applySuperloopNoProgressEscalation(root, decision)
 	report := superloopDriveReport{Schema: superloop.DriveSchema, Intent: s.Name, Decision: decision, Residual: residual}
 
 	if !decision.Enter {
@@ -358,6 +359,7 @@ func runSuperloopDriveBatch(stdout, stderr io.Writer, asJSON bool, root string, 
 	residual := superloopResidual{}
 	if !bdec.Enter && bdec.Satisfied {
 		d, measured := keepSuperloopAlive(root, superloop.DriveDecision{Intent: bdec.Intent, Satisfied: true, Reason: bdec.Reason})
+		d, measured.NoProgressStreak = applySuperloopNoProgressEscalation(root, d)
 		residual = measured
 		if d.Enter {
 			bdec.Enter = true

@@ -29,6 +29,7 @@ type superloopResidual struct {
 	ActiveWorkers    int                              `json:"active_workers"`
 	CommitThroughput fleetmetrics.CommitThroughput    `json:"commit_throughput"`
 	CommitHealth     fleetmetrics.CommitHealth        `json:"commit_health"`
+	NoProgressStreak int                              `json:"no_progress_streak"`
 }
 
 var superloopResidualCommand = func(root, name string, args ...string) ([]byte, error) {

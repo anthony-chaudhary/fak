@@ -9819,6 +9819,26 @@
           "category": "incidental",
           "reason": "private pure ownership fold for tests; not a loop concept",
           "token": "classifySuperloopResidualOwnership"
+        },
+        {
+          "category": "incidental",
+          "reason": "private shell adapter applying the canonical escalation fold; not a new loop concept",
+          "token": "applySuperloopNoProgressEscalation"
+        },
+        {
+          "category": "incidental",
+          "reason": "private injectable loop-ledger reader; not a loop concept",
+          "token": "superloopEscalationEvents"
+        },
+        {
+          "category": "incidental",
+          "reason": "private event-fold helper for consecutive zero-yield cycles; not a loop type",
+          "token": "superloopNoProgressStreak"
+        },
+        {
+          "category": "incidental",
+          "reason": "private witness predicate for reset-on-progress; not a loop concept",
+          "token": "superloopEventProgressed"
         }
       ],
       "id": "loop",
@@ -9833,6 +9853,7 @@
         "POLLING_LOOP",
         "TRANSFORM_LOOP",
         "appendlooprunevent",
+        "applySuperloopNoProgressEscalation",
         "attributeSuperloopResidual",
         "buildtuiloopreport",
         "classifySuperloopResidualOwnership",
@@ -9879,6 +9900,8 @@
         "startFleetBusLoop",
         "superloopActiveWorkers",
         "superloopCommitThroughput",
+        "superloopEscalationEvents",
+        "superloopEventProgressed",
         "superloopFleetIntent",
         "superloopFleetNext",
         "superloopFleetReport",
@@ -9886,6 +9909,7 @@
         "superloopFleetStatusSchema",
         "superloopFleetUsage",
         "superloopFleetWalk",
+        "superloopNoProgressStreak",
         "superloopResidual",
         "superloopResidualAttributor",
         "superloopResidualCommand",
