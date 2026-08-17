@@ -44,7 +44,7 @@ func NewAdapterRegistry(adapters ...Adapter) (*AdapterRegistry, error) {
 }
 
 func DefaultAdapterRegistry() *AdapterRegistry {
-	r, _ := NewAdapterRegistry(CodexJSONLAdapter{}, AGUIJSONLAdapter{})
+	r, _ := NewAdapterRegistry(CodexJSONLAdapter{}, AGUIJSONLAdapter{}, ClaudeCodeJSONLAdapter{}, OpenAIChatExportAdapter{})
 	return r
 }
 

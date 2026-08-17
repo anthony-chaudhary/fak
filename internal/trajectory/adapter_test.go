@@ -2,6 +2,7 @@ package trajectory
 
 import (
 	"bytes"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -69,7 +70,7 @@ func TestAGUIAdapterPreservesStreamingAndStateSemantics(t *testing.T) {
 
 func TestAdapterRegistryRequiresExplicitSource(t *testing.T) {
 	registry := DefaultAdapterRegistry()
-	if got := strings.Join(registry.Sources(), ","); got != "ag-ui-jsonl,codex-jsonl" {
+	if got := strings.Join(registry.Sources(), ","); got != "ag-ui-jsonl,claude-code-jsonl,codex-jsonl,openai-chat-export-jsonl" {
 		t.Fatalf("sources=%q", got)
 	}
 	if _, _, err := registry.Ingest("guess", []byte(`{}`)); err == nil || !strings.Contains(err.Error(), "no trajectory adapter") {
@@ -100,5 +101,68 @@ func TestMissingTimestampsAreVisibleAndDeterministic(t *testing.T) {
 	}
 	if firstReceipt.SyntheticTimes != 1 || len(firstReceipt.Warnings) != 1 || !first[0].Timestamp.Equal(second[0].Timestamp) || firstReceipt.EventDigest != secondReceipt.EventDigest {
 		t.Fatalf("first=%+v receipt=%+v second=%+v", first, firstReceipt, second)
+	}
+}
+
+func TestClaudeAndOpenAIExportAdaptersPreserveSemanticsAndFidelity(t *testing.T) {
+	cases := []struct {
+		source    string
+		input     string
+		wantKinds []EventKind
+	}{
+		{"claude-code-jsonl", strings.Join([]string{
+			`{"type":"user","session_id":"claude-session","id":"u1","timestamp":"2026-08-17T16:00:00Z","message":{"role":"user","content":"hello"}}`,
+			`{"type":"tool_use","session_id":"claude-session","id":"t1","timestamp":"2026-08-17T16:00:01Z","payload":{"name":"search"}}`,
+			`{"type":"future_kind","session_id":"claude-session","id":"x1","timestamp":"2026-08-17T16:00:02Z","payload":{"opaque":true}}`,
+		}, "\n") + "\n", []EventKind{EventMessage, EventTool, EventObservation}},
+		{"openai-chat-export-jsonl", strings.Join([]string{
+			`{"type":"message","conversation_id":"openai-chat","id":"m1","timestamp":"2026-08-17T16:00:00Z","payload":{"role":"assistant","text":"hi"}}`,
+			`{"type":"function_call_output","conversation_id":"openai-chat","id":"o1","timestamp":"2026-08-17T16:00:01Z","payload":{"call_id":"c1","output":"ok"}}`,
+		}, "\n") + "\n", []EventKind{EventMessage, EventTool}},
+	}
+	registry := DefaultAdapterRegistry()
+	if got := strings.Join(registry.Sources(), ","); got != "ag-ui-jsonl,claude-code-jsonl,codex-jsonl,openai-chat-export-jsonl" {
+		t.Fatalf("sources=%q", got)
+	}
+	for _, tc := range cases {
+		t.Run(tc.source, func(t *testing.T) {
+			first, firstReceipt, err := registry.Ingest(tc.source, []byte(tc.input))
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, secondReceipt, err := registry.Ingest(tc.source, []byte(tc.input))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(first, second) || !reflect.DeepEqual(firstReceipt, secondReceipt) {
+				t.Fatal("export ingestion is not deterministic")
+			}
+			for i, want := range tc.wantKinds {
+				if first[i].Kind != want {
+					t.Fatalf("event %d kind=%q, want %q", i, first[i].Kind, want)
+				}
+			}
+			for _, event := range first {
+				if event.Source.RawDigest == "" || event.Source.EventID == "" {
+					t.Fatalf("event lacks source provenance: %#v", event)
+				}
+			}
+			if tc.source == "claude-code-jsonl" {
+				if firstReceipt.UnknownKinds["future_kind"] != 1 || first[2].Loss == nil {
+					t.Fatalf("unknown kind not visible: %#v %#v", firstReceipt, first[2])
+				}
+			}
+		})
+	}
+}
+
+func TestExportAdaptersReturnPartialReceiptOnMalformedRecord(t *testing.T) {
+	input := []byte("{\"type\":\"message\",\"conversation_id\":\"chat\",\"payload\":{}}\n{broken\n")
+	events, receipt, err := DefaultAdapterRegistry().Ingest("openai-chat-export-jsonl", input)
+	if err == nil {
+		t.Fatal("malformed export accepted")
+	}
+	if len(events) != 1 || receipt.MalformedRecord != 1 || receipt.InputRecords != 2 || receipt.EventDigest == "" {
+		t.Fatalf("partial receipt lost: events=%d receipt=%#v", len(events), receipt)
 	}
 }

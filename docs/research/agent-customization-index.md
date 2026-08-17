@@ -23,7 +23,7 @@ The machine index currently records **21 independent axes**. This table is a com
 |---|---|---|
 | Authoring | instructions, routing, tools, skills, memory, delegation | Composition exists; projection into each native harness remains uneven. |
 | Execution | runtime, authority, hooks, persistence, economy, privacy | Session portability and explicit retention/redaction controls are partial. |
-| Interpretation | source adapters, semantic events, derived signals, redaction | Canonical typed events and deterministic confidence-bearing derived signals now ship with source-event and digest receipts. |
+| Interpretation | source adapters, semantic events, derived signals, redaction | Codex, AG-UI, Claude Code, and OpenAI export adapters now feed canonical typed events; deterministic derived signals carry source-event and digest receipts. |
 | Presentation | audience, selection, visual language, live control, sharing | Declarative audience projections, pre-render redaction, control-to-intervention round trips, and content-addressed JSONL sharing bundles now ship; rich renderer integration remains follow-on work. |
 
 ## Freshness check
