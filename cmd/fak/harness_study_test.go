@@ -42,7 +42,7 @@ func TestHarnessStudyCreationCLIKeepsFailedBuildersInDenominator(t *testing.T) {
 func TestHarnessStudyCreationBlocksSupportWithIncompleteEligiblePair(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "study.json")
-	raw := `{"schema":"fak.harness-creation-study/v1alpha1","id":"incomplete-cli","protocol":{"frozen":true,"ten_minute_limit_seconds":600,"assistance_policy":"task-card-and-help-only","failures_in_denominator":true,"task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parity":{"frozen":true,"minimum_pairs":2,"max_median_elapsed_ratio":1.25,"counterbalanced_order":true}},"baseline":{"id":"tuned-alt","runnable":true,"tuned":true,"frozen":true,"evidence":"baseline.json"},"runs":[{"id":"a-fak","participant_id":"person-a","track":"ten-minute","arm":"fak","pair_id":"pair-a","task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","machine_id":"machine-a","pair_order":"fak-first","arm_position":1,"participant_class":"unfamiliar-builder","independent":true,"os":"linux","cpu":"x86","network_state":"online","cache_state":"empty","outcome":"success","elapsed_seconds":100,"receipt":"a-fak.json"},{"id":"a-base","participant_id":"person-a","track":"ten-minute","arm":"baseline","pair_id":"pair-a","task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","machine_id":"machine-a","pair_order":"fak-first","arm_position":2,"participant_class":"unfamiliar-builder","independent":true,"os":"linux","cpu":"x86","network_state":"online","cache_state":"empty","outcome":"success","elapsed_seconds":100,"receipt":"a-base.json"},{"id":"b-base","participant_id":"person-b","track":"ten-minute","arm":"baseline","pair_id":"pair-b","task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","machine_id":"machine-b","pair_order":"baseline-first","arm_position":1,"participant_class":"unfamiliar-builder","independent":true,"os":"linux","cpu":"x86","network_state":"online","cache_state":"empty","outcome":"success","elapsed_seconds":100,"receipt":"b-base.json"},{"id":"b-fak","participant_id":"person-b","track":"ten-minute","arm":"fak","pair_id":"pair-b","task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","machine_id":"machine-b","pair_order":"baseline-first","arm_position":2,"participant_class":"unfamiliar-builder","independent":true,"os":"linux","cpu":"x86","network_state":"online","cache_state":"empty","outcome":"success","elapsed_seconds":100,"receipt":"b-fak.json"},{"id":"c-fak","participant_id":"person-c","track":"ten-minute","arm":"fak","pair_id":"pair-c","task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","machine_id":"machine-c","pair_order":"fak-first","arm_position":1,"participant_class":"unfamiliar-builder","independent":true,"os":"linux","cpu":"x86","network_state":"online","cache_state":"empty","outcome":"success","elapsed_seconds":100,"receipt":"c-fak.json"}]}`
+	raw := `{"schema":"fak.harness-creation-study/v1alpha1","id":"incomplete-cli","protocol":{"frozen":true,"ten_minute_limit_seconds":600,"assistance_policy":"task-card-and-help-only","failures_in_denominator":true,"task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parity":{"frozen":true,"minimum_pairs":2,"max_median_elapsed_ratio":1.25,"counterbalanced_order":true}},"baseline":{"id":"tuned-alt","runnable":true,"tuned":true,"frozen":true,"evidence":"baseline.json"},"runs":[{"id":"a-fak","participant_id":"person-a","track":"ten-minute","arm":"fak","pair_id":"pair-a","task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","machine_id":"machine-a","pair_order":"fak-first","arm_position":1,"participant_class":"unfamiliar-builder","independent":true,"os":"linux","cpu":"x86","network_state":"online","cache_state":"empty","outcome":"success","elapsed_seconds":100,"receipt":"fixture:a-fak.json"},{"id":"a-base","participant_id":"person-a","track":"ten-minute","arm":"baseline","pair_id":"pair-a","task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","machine_id":"machine-a","pair_order":"fak-first","arm_position":2,"participant_class":"unfamiliar-builder","independent":true,"os":"linux","cpu":"x86","network_state":"online","cache_state":"empty","outcome":"success","elapsed_seconds":100,"receipt":"fixture:a-base.json"},{"id":"b-base","participant_id":"person-b","track":"ten-minute","arm":"baseline","pair_id":"pair-b","task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","machine_id":"machine-b","pair_order":"baseline-first","arm_position":1,"participant_class":"unfamiliar-builder","independent":true,"os":"linux","cpu":"x86","network_state":"online","cache_state":"empty","outcome":"success","elapsed_seconds":100,"receipt":"fixture:b-base.json"},{"id":"b-fak","participant_id":"person-b","track":"ten-minute","arm":"fak","pair_id":"pair-b","task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","machine_id":"machine-b","pair_order":"baseline-first","arm_position":2,"participant_class":"unfamiliar-builder","independent":true,"os":"linux","cpu":"x86","network_state":"online","cache_state":"empty","outcome":"success","elapsed_seconds":100,"receipt":"fixture:b-fak.json"},{"id":"c-fak","participant_id":"person-c","track":"ten-minute","arm":"fak","pair_id":"pair-c","task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","machine_id":"machine-c","pair_order":"fak-first","arm_position":1,"participant_class":"unfamiliar-builder","independent":true,"os":"linux","cpu":"x86","network_state":"online","cache_state":"empty","outcome":"success","elapsed_seconds":100,"receipt":"fixture:c-fak.json"}]}`
 	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -52,6 +52,75 @@ func TestHarnessStudyCreationBlocksSupportWithIncompleteEligiblePair(t *testing.
 	}
 	if !strings.Contains(out.String(), `"claim_status": "not_yet"`) || !strings.Contains(out.String(), `"incomplete_pairs": 1`) || !strings.Contains(out.String(), "still incomplete") {
 		t.Fatalf("incomplete pair did not block CLI support: %s", out.String())
+	}
+}
+
+func TestHarnessStudyCreationBindsRowsToArchivedReceipt(t *testing.T) {
+	dir := t.TempDir()
+	studyPath := filepath.Join(dir, "study.json")
+	study := harnesscreationstudy.Study{
+		Schema: harnesscreationstudy.Schema, ID: "source-binding",
+		Protocol: harnesscreationstudy.Protocol{TaskDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Frozen: true, TenMinuteLimitSeconds: 600, AssistancePolicy: "task-card-and-help-only", FailuresInDenominator: true, Parity: harnesscreationstudy.MatchedStudySpec{Frozen: true, MinimumPairs: 2, MaxMedianElapsedRatio: 1.25, CounterbalancedOrder: true}},
+		Baseline: harnesscreationstudy.Baseline{ID: "tuned-alt", Runnable: true, Tuned: true, Frozen: true, Evidence: "baseline.json"},
+	}
+	writeStudy := func() {
+		t.Helper()
+		raw, err := json.Marshal(study)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(studyPath, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeStudy()
+	start := time.Date(2026, 8, 16, 1, 2, 3, 0, time.UTC)
+	receipt := harnesscreationreceipt.Receipt{Schema: harnesscreationreceipt.Schema, RunID: "run-bound", ParticipantID: "person-bound", ParticipantClass: "unfamiliar-builder", PriorFamiliarity: "none", Track: "ten-minute", Arm: "fak", PairID: "pair-bound", TaskDigest: study.Protocol.TaskDigest, MachineID: "machine-bound", PairOrder: "fak-first", ArmPosition: 1, Independent: true, Artifact: "fak@v1", ArtifactDigest: "sha256:abc", OS: "linux", CPU: "x86_64", Toolchain: "go1.26", NetworkState: "online", CacheState: "empty", StartedAt: start, StoppedAt: start.Add(100 * time.Second), ElapsedSeconds: 100, Commands: []harnesscreationreceipt.Command{{Command: "build", Exit: 0}}, FilesChanged: []string{"product/config.go"}, Rebuilds: 1, RebuildSeconds: 10, Outcome: "success", Transcript: "bound.txt", Receipt: "bound.json"}
+	receiptRaw, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptPath := filepath.Join(dir, "receipt.json")
+	if err := os.WriteFile(receiptPath, receiptRaw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var admitted, admissionErr bytes.Buffer
+	if code := runHarness(&admitted, &admissionErr, []string{"study", "receipt", "--input", receiptPath, "--study", studyPath}); code != 0 {
+		t.Fatalf("admission code=%d err=%s", code, admissionErr.String())
+	}
+	var result harnesscreationreceipt.Result
+	if err := json.Unmarshal(admitted.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	study.Runs = []harnesscreationstudy.Run{{ID: result.Row.ID, ParticipantID: result.Row.ParticipantID, Track: result.Row.Track, Arm: result.Row.Arm, PairID: result.Row.PairID, TaskDigest: result.Row.TaskDigest, MachineID: result.Row.MachineID, PairOrder: result.Row.PairOrder, ArmPosition: result.Row.ArmPosition, ParticipantClass: result.Row.ParticipantClass, Independent: result.Row.Independent, OS: result.Row.OS, CPU: result.Row.CPU, NetworkState: result.Row.NetworkState, CacheState: result.Row.CacheState, Outcome: result.Row.Outcome, ElapsedSeconds: result.Row.ElapsedSeconds, Receipt: result.Row.Receipt, SourceReceipt: result.Row.SourceReceipt, SourceDigest: result.Row.SourceDigest}}
+	writeStudy()
+	creation := func() (int, string) {
+		var out, errOut bytes.Buffer
+		code := runHarness(&out, &errOut, []string{"study", "creation", "--input", studyPath})
+		return code, errOut.String()
+	}
+	if code, errText := creation(); code != 0 {
+		t.Fatalf("bound study code=%d err=%s", code, errText)
+	}
+	original := study.Runs[0]
+	study.Runs[0].ElapsedSeconds++
+	writeStudy()
+	if code, errText := creation(); code == 0 || !strings.Contains(errText, "projection") {
+		t.Fatalf("projection tamper code=%d err=%s", code, errText)
+	}
+	study.Runs[0] = original
+	writeStudy()
+	if err := os.WriteFile(receiptPath, append(receiptRaw, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if code, errText := creation(); code == 0 || !strings.Contains(errText, "source_digest") {
+		t.Fatalf("source tamper code=%d err=%s", code, errText)
+	}
+	if err := os.Remove(receiptPath); err != nil {
+		t.Fatal(err)
+	}
+	if code, errText := creation(); code == 0 || !strings.Contains(errText, "source_receipt") {
+		t.Fatalf("missing source code=%d err=%s", code, errText)
 	}
 }
 
@@ -101,7 +170,7 @@ func TestHarnessStudyReceiptKeepsEarlyFailureInPairedDenominator(t *testing.T) {
 	study.Runs = append(study.Runs, harnesscreationstudy.Run{
 		ID: result.Row.ID, ParticipantID: result.Row.ParticipantID, Track: result.Row.Track, Arm: result.Row.Arm, PairID: result.Row.PairID, TaskDigest: result.Row.TaskDigest, MachineID: result.Row.MachineID,
 		PairOrder: result.Row.PairOrder, ArmPosition: result.Row.ArmPosition, ParticipantClass: result.Row.ParticipantClass, Independent: result.Row.Independent, OS: result.Row.OS, CPU: result.Row.CPU,
-		NetworkState: result.Row.NetworkState, CacheState: result.Row.CacheState, Outcome: result.Row.Outcome, ElapsedSeconds: result.Row.ElapsedSeconds, Receipt: result.Row.Receipt,
+		NetworkState: result.Row.NetworkState, CacheState: result.Row.CacheState, Outcome: result.Row.Outcome, ElapsedSeconds: result.Row.ElapsedSeconds, Receipt: result.Row.Receipt, SourceReceipt: result.Row.SourceReceipt, SourceDigest: result.Row.SourceDigest,
 	})
 	report := harnesscreationstudy.Evaluate(study)
 	if report.Parity.IncompletePairs != 1 || report.Parity.FakSuccesses != 0 || report.Parity.ClaimStatus != "not_yet" {
@@ -162,7 +231,7 @@ func TestHarnessStudyReceiptRowsFormCompletePair(t *testing.T) {
 			}
 			study.Runs = append(study.Runs, harnesscreationstudy.Run{
 				ID: result.Row.ID, ParticipantID: result.Row.ParticipantID, Track: result.Row.Track, Arm: result.Row.Arm, PairID: result.Row.PairID, TaskDigest: result.Row.TaskDigest, MachineID: result.Row.MachineID, OS: result.Row.OS, CPU: result.Row.CPU, NetworkState: result.Row.NetworkState, CacheState: result.Row.CacheState, PairOrder: result.Row.PairOrder, ArmPosition: result.Row.ArmPosition,
-				ParticipantClass: result.Row.ParticipantClass, Independent: result.Row.Independent, Outcome: result.Row.Outcome, ElapsedSeconds: result.Row.ElapsedSeconds, Receipt: result.Row.Receipt,
+				ParticipantClass: result.Row.ParticipantClass, Independent: result.Row.Independent, Outcome: result.Row.Outcome, ElapsedSeconds: result.Row.ElapsedSeconds, Receipt: result.Row.Receipt, SourceReceipt: result.Row.SourceReceipt, SourceDigest: result.Row.SourceDigest,
 			})
 			writeStudy()
 		}

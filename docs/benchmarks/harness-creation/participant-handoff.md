@@ -46,7 +46,10 @@ fak harness study receipt --input participant-receipt.json \
 ```
 
 The command fails closed on missing evidence and emits a `study_row` ready to append to
-`study.json`. It does not decide promotional truth; rerun:
+`study.json`. The row includes `source_receipt` relative to the study and `source_digest`
+for the exact admitted JSON bytes. Archive those bytes at that path: creation evaluation
+re-reads them and rejects a missing, edited, or projection-mismatched source. It does not
+decide promotional truth; rerun:
 
 ```text
 fak harness study creation --input docs/benchmarks/harness-creation/study.json

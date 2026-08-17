@@ -67,6 +67,8 @@ type Run struct {
 	ElapsedSeconds        float64  `json:"elapsed_seconds"`
 	HelpRequests          []string `json:"help_requests,omitempty"`
 	Receipt               string   `json:"receipt"`
+	SourceReceipt         string   `json:"source_receipt,omitempty"`
+	SourceDigest          string   `json:"source_digest,omitempty"`
 	IndependentlyAuthored bool     `json:"independently_authored,omitempty"`
 	ConformancePassed     bool     `json:"conformance_passed,omitempty"`
 }

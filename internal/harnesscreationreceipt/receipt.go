@@ -71,6 +71,8 @@ type StudyRow struct {
 	Outcome          string  `json:"outcome"`
 	ElapsedSeconds   float64 `json:"elapsed_seconds"`
 	Receipt          string  `json:"receipt"`
+	SourceReceipt    string  `json:"source_receipt,omitempty"`
+	SourceDigest     string  `json:"source_digest,omitempty"`
 }
 type Result struct {
 	Schema string   `json:"schema"`

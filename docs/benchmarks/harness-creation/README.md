@@ -38,7 +38,9 @@ quality equivalence.
 `fak harness study creation --input study.json` emits the parity denominator, arm
 successes, median ratio when both arms succeed, and `supported`, `not_yet`, or `refuted`.
 The checked-in study intentionally reports `not_yet` until independent paired receipts
-are archived.
+are archived. Every eligible paired row must carry the receipt command's relative
+`source_receipt` and SHA-256 `source_digest`; evaluation re-parses those archived bytes and
+requires their projected row to match. Historical calibration-only rows are exempt.
 
 ## Ten-minute task card
 
