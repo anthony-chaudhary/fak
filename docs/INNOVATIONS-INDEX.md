@@ -136,6 +136,7 @@ Curated to the load-bearing innovations. The full leaf roster is in
 | Provenance + decisions audit log | git-notes readback of adjudication records; WITNESSED vs OBSERVED labels | `provenance`, `journal`, `rungobs` | SHIPPED |
 | Scorecard control pane (folds 18→1 debt) | every score re-derived from disk/toolchain; `--check` CI ratchet | `tools/scorecard_control_pane.py` | SHIPPED |
 | Net-true-value standard | a gain is reported only if it survives the 6-question rubric | [`net-true-value`](standards/net-true-value.md) | SHIPPED (doctrine; `claim-check` verb `not yet`) |
+| Benefit–harm default standard | treats defaults as interventions with indication, contraindications, minimum dose, surveillance, and withdrawal | [`benefit-harm-defaults`](standards/benefit-harm-defaults.md) | SHIPPED (doctrine; automated admission checker `not yet`) |
 | Witness-gated issue-dispatch loop | spawn under cap → ship #N → per-SHA audit → close; `closure_rate = TRUE/(TRUE+CLAIMED)` | `docs/dispatch-loop.md`, `steward`, `harvest` | SHIPPED |
 | Prediction-vs-reality dojo | predict → run → measure → eval → calibrate; never over-claim | `dojo` | SHIPPED (self-improving loop = #1021) |
 | Run-it-all-night collection | "most valuable datum on THIS box now" → durable ledger | `nightrun` | SHIPPED |

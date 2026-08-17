@@ -85,6 +85,10 @@ that path, it belongs in the spine. Exceptions are explicit: a prerequisite
 investigation may lead only when the unknown makes an applied spine impossible,
 but it must end in a checkable spine issue rather than an open-ended comparison.
 
+## Defaults are interventions
+
+When the spine adds or widens behavior users receive without deliberately selecting it, complete the [benefit–harm default admission record](standards/benefit-harm-defaults.md) before calling the spine shipped. Compare against doing nothing and the strongest practical alternative; name side effects, uncertainty, contraindications, minimum effective scope, operator control, surveillance, and a tested stop/rollback rule. Choose `DEFAULT`, `CONDITIONAL DEFAULT`, `OPT-IN`, or `EXCLUDE`. A measured average gain alone does not justify broad exposure, and follow-on monitoring cannot repair a missing rollback path.
+
 ## Default 2 â€” the follow-on backlog is filed at creation time (3..50+)
 
 The moment a spine ships, fan out its hardening backlog **while context is
