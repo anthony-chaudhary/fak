@@ -101,18 +101,19 @@ func TestGCJSONShape(t *testing.T) {
 	}
 }
 
-// TestListJSONShape proves `fak worktree worker list` emits {count, paths} and
-// that an empty listing renders paths as [] (never null), so a JSON consumer can
-// always range it.
+// TestListJSONShape proves `fak worktree worker list` preserves count/paths and
+// includes the lifecycle inventory added by #5994. Empty collections render as []
+// (never null), so JSON consumers can always range both fields.
 func TestListJSONShape(t *testing.T) {
-	b, err := json.Marshal(worktreeWorkerListOut{Count: 0, Paths: []string{}})
+	empty := worktreeWorkerListOut{Count: 0, Paths: []string{}, Inventory: []workerworktree.InventoryRow{}}
+	b, err := json.Marshal(empty)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if string(b) != `{"count":0,"paths":[]}` {
-		t.Fatalf("empty list json = %s, want {\"count\":0,\"paths\":[]}", b)
+	if string(b) != `{"count":0,"paths":[],"inventory":[]}` {
+		t.Fatalf("empty list json = %s, want empty paths and inventory arrays", b)
 	}
-	got := mustKeys(t, worktreeWorkerListOut{Count: 2, Paths: []string{"/a", "/b"}}, "count", "paths")
+	got := mustKeys(t, worktreeWorkerListOut{Count: 2, Paths: []string{"/a", "/b"}, Inventory: []workerworktree.InventoryRow{}}, "count", "paths", "inventory")
 	if got["count"].(float64) != 2 {
 		t.Fatalf("count = %v, want 2", got["count"])
 	}
