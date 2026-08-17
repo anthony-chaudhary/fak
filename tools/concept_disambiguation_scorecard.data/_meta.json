@@ -2370,6 +2370,16 @@
           "category": "incidental",
           "reason": "internal scorecard record for an opt-in review entry; not an authorization guard or execution gate",
           "token": "optInGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed tool outcome label; it reports a refusal and does not define a guard or gate.",
+          "token": "OutcomeGuardRefusal"
+        },
+        {
+          "category": "incidental",
+          "reason": "Serialized tool outcome value; reports policy denial and does not define a guard or gate.",
+          "token": "guard_refusal"
         }
       ],
       "exclude": [
@@ -2435,6 +2445,7 @@
         "LifecycleGate",
         "NewSessionAffinityGateway",
         "OutcomeDelegate",
+        "OutcomeGuardRefusal",
         "PonytailGateInventory",
         "PonytailGateOptions",
         "PonytailGateReport",
@@ -2623,6 +2634,7 @@
         "guard_operator_question",
         "guard_output_style",
         "guard_receipt",
+        "guard_refusal",
         "guard_split_close_test",
         "guardarbitrateflagvalue",
         "guardbudgetrestartevent",
@@ -4051,6 +4063,36 @@
           "category": "incidental",
           "reason": "Typed receipt field listing #7077 lifecycle session IDs; not a new session runtime concept.",
           "token": "ambiguous_sessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for the terminal Codex rollout archive verb; not a distinct operator concept.",
+          "token": "runsessionscodexlooparchive"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for the terminal Codex rollout archive verb; not a distinct operator concept.",
+          "token": "archiveterminalcodexloop"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for the terminal Codex rollout archive verb; not a distinct operator concept.",
+          "token": "findcodexlooparchivemanifest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation helper for validating the terminal Codex rollout archive path; not a distinct operator concept.",
+          "token": "pathwithincodexsessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Data shape for the terminal Codex rollout archive receipt; not a distinct operator concept.",
+          "token": "codexlooparchivemanifest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Test seam for terminal Codex rollout archive timestamps; not a distinct operator concept.",
+          "token": "codexlooparchivenow"
         }
       ],
       "id": "session-runtime",
@@ -4144,6 +4186,7 @@
         "ambiguous_count",
         "ambiguous_session_root",
         "ambiguous_sessions",
+        "archiveterminalcodexloop",
         "attemptHeap",
         "authorizeSessionClient",
         "authorizeSessionClientForSession",
@@ -4152,6 +4195,8 @@
         "boolInt",
         "bumpSessionHandoffBlocks",
         "capability_digest",
+        "codexlooparchivemanifest",
+        "codexlooparchivenow",
         "collectCodexWorkflowDefaultReport",
         "compactThrashSessions",
         "conceptSessions",
@@ -4175,6 +4220,7 @@
         "filterToolSchedulerReport",
         "filterToolSchedulerSchema",
         "filterToolSchedulerTrials",
+        "findcodexlooparchivemanifest",
         "gemma4_session_test",
         "gen_session_effectiveness_svg",
         "guardInfoSessionWorkDoneQuery",
@@ -4211,6 +4257,7 @@
         "observedSessionIDs",
         "observed_session",
         "orderRecords",
+        "pathwithincodexsessions",
         "pumpStdinToSession",
         "readSessionHandoffBlocks",
         "readSessionRows",
@@ -4237,6 +4284,7 @@
         "runSessionOpen",
         "runSessionOpenSelfcheck",
         "runSessionsWorkflowDefaultReport",
+        "runsessionscodexlooparchive",
         "runtuisessions",
         "sanitizeSessionForPath",
         "schedSessionDesktop",
@@ -8490,6 +8538,11 @@
           "category": "incidental",
           "reason": "Typed trajectory interpretation label, not a control-decision subsystem or operator action seam",
           "token": "DerivedDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Serialized upstream field probe, not a fak decision concept",
+          "token": "permissiondecision"
         }
       ],
       "id": "decision",
@@ -8539,6 +8592,7 @@
         "naturalTrafficPolicyRow",
         "observed_decisions",
         "partialretrydecision",
+        "permissiondecision",
         "pluginDecisionFromVerdict",
         "predictHeld",
         "readLiveLanes",
@@ -10134,6 +10188,46 @@
           "category": "incidental",
           "reason": "Implementation symbol for the #7077 Codex admission lifecycle witness; not a new operator-facing loop concept.",
           "token": "diagnoseRecentCodexLoopsForGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for the terminal Codex rollout archive verb; not a distinct operator concept.",
+          "token": "codexlooparchivecommand"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation detail of the terminal Codex rollout archive verb; not a distinct loop concept.",
+          "token": "runsessionscodexlooparchive"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation detail of the terminal Codex rollout archive verb; not a distinct loop concept.",
+          "token": "codexlooparchiveschema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation detail of the terminal Codex rollout archive verb; not a distinct loop concept.",
+          "token": "codexlooparchivemanifest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation detail of the terminal Codex rollout archive verb; not a distinct loop concept.",
+          "token": "codexlooparchivenow"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation detail of the terminal Codex rollout archive verb; not a distinct loop concept.",
+          "token": "codex_loop_archive"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation detail of the terminal Codex rollout archive verb; not a distinct loop concept.",
+          "token": "archiveterminalcodexloop"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation detail of the terminal Codex rollout archive verb; not a distinct loop concept.",
+          "token": "findcodexlooparchivemanifest"
         }
       ],
       "id": "loop",
@@ -10149,6 +10243,7 @@
         "TRANSFORM_LOOP",
         "appendlooprunevent",
         "applySuperloopNoProgressEscalation",
+        "archiveterminalcodexloop",
         "attributeSuperloopResidual",
         "buildtuiloopreport",
         "classifyLoopStates",
@@ -10159,6 +10254,11 @@
         "codexWorkflowDefaultWitness",
         "codexWorkflowDefaultWitnessExists",
         "codexWorkflowDefaultWitnessPath",
+        "codex_loop_archive",
+        "codexlooparchivecommand",
+        "codexlooparchivemanifest",
+        "codexlooparchivenow",
+        "codexlooparchiveschema",
         "defaultloopledger",
         "defaultloopregistry",
         "diagnoseRecentCodexLoopsForGate",
@@ -10167,6 +10267,7 @@
         "fakbgloopup",
         "fakloopledger",
         "faklooprunid",
+        "findcodexlooparchivemanifest",
         "isLoopbackFleetHost",
         "keepSuperloopAlive",
         "loopHealthAlert",
@@ -10207,6 +10308,7 @@
         "residualDriveDecision",
         "runSuperloopFleet",
         "runloop",
+        "runsessionscodexlooparchive",
         "startFleetBusLoop",
         "superloopActiveWorkers",
         "superloopCommitThroughput",

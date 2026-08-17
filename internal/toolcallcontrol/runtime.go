@@ -51,6 +51,193 @@ type RuntimeInput struct {
 	Succeeded   bool
 	ResultRef   string
 	PromptUnits int64
+	Declaration OutcomeDeclaration
+	ExitCode    *int
+	Output      json.RawMessage
+}
+
+// OutcomeClass is the closed outcome vocabulary carried by post-tool receipts.
+// ExpectedNegative is a class only when a caller declared that expectation;
+// text heuristics can refine an unexpected failure but can never make it healthy.
+type OutcomeClass string
+
+const (
+	OutcomeSuccess                  OutcomeClass = "success"
+	OutcomeExpectedNegative         OutcomeClass = "expected_negative"
+	OutcomeGuardRefusal             OutcomeClass = "guard_refusal"
+	OutcomeTestFailure              OutcomeClass = "test_failure"
+	OutcomeTimeoutInterruption      OutcomeClass = "timeout_interruption"
+	OutcomeContractDefect           OutcomeClass = "contract_defect"
+	OutcomeUnexpectedCommandFailure OutcomeClass = "unexpected_command_failure"
+	OutcomeUnknown                  OutcomeClass = "unknown"
+)
+
+// OutcomeProjection is the operator-facing grouping. Only a structural
+// expected-negative declaration enters the non-red expected_negative group.
+type OutcomeProjection string
+
+const (
+	ProjectionSuccess           OutcomeProjection = "success"
+	ProjectionExpectedNegative  OutcomeProjection = "expected_negative"
+	ProjectionUnexpectedFailure OutcomeProjection = "unexpected_failure"
+)
+
+// OutcomeDeclaration is out-of-band call-site intent. ExpectedNegativeSet
+// distinguishes an explicit false from an absent marker so contradictory
+// declarations can fail closed instead of being guessed through.
+type OutcomeDeclaration struct {
+	ExpectedNegative    bool
+	ExpectedNegativeSet bool
+	Class               OutcomeClass
+	Invalid             bool
+}
+
+// RuntimeReceipt records classification without changing the tool's result.
+// ExitCode and Output retain the underlying evidence even when the operator
+// projection moves an expected negative out of the unexpected-failure group.
+type RuntimeReceipt struct {
+	Class            OutcomeClass      `json:"class"`
+	UnderlyingClass  OutcomeClass      `json:"underlying_class,omitempty"`
+	Projection       OutcomeProjection `json:"projection"`
+	ExpectedNegative bool              `json:"expected_negative"`
+	Succeeded        bool              `json:"succeeded"`
+	ExitCode         *int              `json:"exit_code,omitempty"`
+	Output           json.RawMessage   `json:"output,omitempty"`
+	Reason           string            `json:"reason"`
+}
+
+// ClassifyOutcome deterministically projects a completed call into the closed
+// receipt vocabulary. Invalid declarations and ambiguous heuristic evidence
+// remain visible as unknown unexpected failures.
+func ClassifyOutcome(in RuntimeInput) RuntimeReceipt {
+	receipt := RuntimeReceipt{
+		Succeeded:        in.Succeeded,
+		ExpectedNegative: in.Declaration.ExpectedNegative,
+		ExitCode:         cloneInt(in.ExitCode),
+		Output:           append(json.RawMessage(nil), in.Output...),
+	}
+	decl := in.Declaration
+	if decl.Invalid || !validDeclaredOutcome(decl.Class) {
+		return unexpectedReceipt(receipt, OutcomeUnknown, "invalid_outcome_declaration")
+	}
+	if decl.Class == OutcomeExpectedNegative {
+		if decl.ExpectedNegativeSet && !decl.ExpectedNegative {
+			return unexpectedReceipt(receipt, OutcomeUnknown, "contradictory_outcome_declaration")
+		}
+		decl.ExpectedNegative = true
+		decl.ExpectedNegativeSet = true
+	}
+	receipt.ExpectedNegative = decl.ExpectedNegative
+
+	if in.Succeeded {
+		if decl.ExpectedNegative || (decl.Class != "" && decl.Class != OutcomeSuccess) {
+			return unexpectedReceipt(receipt, OutcomeUnknown, "declared_negative_succeeded")
+		}
+		receipt.Class = OutcomeSuccess
+		receipt.Projection = ProjectionSuccess
+		receipt.Reason = "tool_succeeded"
+		return receipt
+	}
+
+	if decl.Class == OutcomeSuccess {
+		return unexpectedReceipt(receipt, OutcomeUnknown, "declared_success_failed")
+	}
+	if decl.ExpectedNegative {
+		underlying, reason := inferredFailure(in)
+		if decl.Class != "" && decl.Class != OutcomeExpectedNegative {
+			underlying, reason = decl.Class, "declared_failure_class"
+		}
+		if underlying == OutcomeUnknown {
+			return unexpectedReceipt(receipt, OutcomeUnknown, reason)
+		}
+		receipt.Class = OutcomeExpectedNegative
+		receipt.UnderlyingClass = underlying
+		receipt.Projection = ProjectionExpectedNegative
+		receipt.Reason = "declared_expected_negative"
+		return receipt
+	}
+	if decl.Class != "" {
+		return unexpectedReceipt(receipt, decl.Class, "declared_failure_class")
+	}
+	class, reason := inferredFailure(in)
+	return unexpectedReceipt(receipt, class, reason)
+}
+
+func validDeclaredOutcome(class OutcomeClass) bool {
+	switch class {
+	case "", OutcomeSuccess, OutcomeExpectedNegative, OutcomeGuardRefusal,
+		OutcomeTestFailure, OutcomeTimeoutInterruption, OutcomeContractDefect,
+		OutcomeUnexpectedCommandFailure:
+		return true
+	default:
+		return false
+	}
+}
+
+func unexpectedReceipt(receipt RuntimeReceipt, class OutcomeClass, reason string) RuntimeReceipt {
+	receipt.Class = class
+	receipt.Projection = ProjectionUnexpectedFailure
+	receipt.Reason = reason
+	return receipt
+}
+
+func inferredFailure(in RuntimeInput) (OutcomeClass, string) {
+	text := strings.ToLower(string(in.Args) + "\n" + string(in.Output))
+	var signals []OutcomeClass
+	add := func(class OutcomeClass, matched bool) {
+		if matched {
+			signals = append(signals, class)
+		}
+	}
+	add(OutcomeGuardRefusal, containsAny(text,
+		"policy_block", "guard_refusal", "guard refusal", `"permissiondecision":"deny"`,
+		"permission decision: deny", "refused by guard", "preview refusal"))
+	add(OutcomeTestFailure, containsAny(text,
+		"go test", "make test", "test.ps1", "pytest", "cargo test", "npm test", "pnpm test", "yarn test",
+		"--- fail:", "\nfail\t"))
+	add(OutcomeTimeoutInterruption, timeoutExitCode(in.ExitCode) || containsAny(text,
+		`"timed_out":true`, `"interrupted":true`, "timed out", "deadline exceeded", "operation canceled",
+		"operation cancelled", "interrupted"))
+	add(OutcomeContractDefect, containsAny(text,
+		"invalid tool arguments", "invalid arguments", "contract defect", "schema validation", "missing required argument"))
+
+	switch len(signals) {
+	case 0:
+		return OutcomeUnexpectedCommandFailure, "unclassified_command_failure"
+	case 1:
+		return signals[0], "typed_failure_evidence"
+	default:
+		return OutcomeUnknown, "ambiguous_failure_evidence"
+	}
+}
+
+func containsAny(text string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func timeoutExitCode(code *int) bool {
+	if code == nil {
+		return false
+	}
+	switch *code {
+	case 124, 130, 137, -1073741510:
+		return true
+	default:
+		return false
+	}
+}
+
+func cloneInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 // RuntimeVerdict is emitted for every shadow/enforce pre-tool evaluation.

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,7 +27,7 @@ func TestToolcallControlShadowRecordsButDoesNotBlock(t *testing.T) {
 		t.Fatalf("shadow blocked execution: %s", out.String())
 	}
 	rows := readDecisionRows(t, filepath.Join(dir, "decisions.jsonl"))
-	if len(rows) != 1 || rows[0].Verdict.Action != toolcallcontrol.Reuse || rows[0].Verdict.Applied || rows[0].Verdict.ReplayUnitsSaved != 128000 || rows[0].Verdict.ReplaySquaredSaved != "16384000000" {
+	if len(rows) != 2 || rows[0].Outcome == nil || rows[0].Outcome.Class != toolcallcontrol.OutcomeSuccess || rows[1].Verdict == nil || rows[1].Verdict.Action != toolcallcontrol.Reuse || rows[1].Verdict.Applied || rows[1].Verdict.ReplayUnitsSaved != 128000 || rows[1].Verdict.ReplaySquaredSaved != "16384000000" {
 		t.Fatalf("rows=%+v", rows)
 	}
 }
@@ -71,6 +72,9 @@ func TestToolcallControlMutationInvalidatesReuse(t *testing.T) {
 		t.Fatalf("stale read reused after mutation: %s", out.String())
 	}
 	rows := readDecisionRows(t, filepath.Join(dir, "decisions.jsonl"))
+	if rows[len(rows)-1].Verdict == nil {
+		t.Fatalf("last row has no verdict: %+v", rows[len(rows)-1])
+	}
 	if got := rows[len(rows)-1].Verdict.Reason; got != "novel_at_epoch" {
 		t.Fatalf("reason=%s", got)
 	}
@@ -130,6 +134,91 @@ func TestRunToolprocHookIOWiresShadowAndEnforce(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestToolcallOutcomeReceiptPreservesExitOutputAndHookSemantics(t *testing.T) {
+	dir := t.TempDir()
+	payloads := []string{
+		`{"session_id":"s1","tool_name":"Grep","tool_use_id":"grep-miss","fak_outcome":{"expected_negative":true},"tool_input":{"pattern":"absent"},"tool_response":{"is_error":true,"exit_code":1,"stderr":"no matches"}}`,
+		`{"session_id":"s1","tool_name":"Bash","tool_use_id":"test-fail","tool_input":{"command":"go test ./internal/widget"},"tool_response":{"is_error":true,"exit_code":1,"stderr":"FAIL widget"}}`,
+	}
+	for _, payload := range payloads {
+		var stdout bytes.Buffer
+		if err := toolcallControlHook(&stdout, strings.NewReader(payload), "post", toolcallcontrol.ModeShadow, dir); err != nil {
+			t.Fatalf("post hook changed error semantics: %v", err)
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("post hook changed stdout semantics: %s", stdout.String())
+		}
+	}
+	rows := readDecisionRows(t, filepath.Join(dir, "decisions.jsonl"))
+	if len(rows) != 2 || rows[0].Outcome == nil || rows[1].Outcome == nil {
+		t.Fatalf("outcome rows=%+v", rows)
+	}
+	expected, failure := rows[0].Outcome, rows[1].Outcome
+	if expected.Class != toolcallcontrol.OutcomeExpectedNegative || expected.Projection != toolcallcontrol.ProjectionExpectedNegative || expected.ExitCode == nil || *expected.ExitCode != 1 || !bytes.Contains(expected.Output, []byte(`"stderr":"no matches"`)) {
+		t.Fatalf("expected-negative receipt lost evidence: %+v", expected)
+	}
+	if failure.Class != toolcallcontrol.OutcomeTestFailure || failure.Projection != toolcallcontrol.ProjectionUnexpectedFailure || failure.ExitCode == nil || *failure.ExitCode != 1 || !bytes.Contains(failure.Output, []byte(`"stderr":"FAIL widget"`)) {
+		t.Fatalf("genuine failure was hidden or lost evidence: %+v", failure)
+	}
+}
+
+func TestToolcallOutcomeDeclarationIsStructuralAndStrippedFromSemanticArgs(t *testing.T) {
+	payload := json.RawMessage(`{"session_id":"s1","fak_outcome":{"expected_negative":true,"class":"guard_refusal"},"tool_input":{"fak_expected_negative":true,"command":"fak commit --preview"}}`)
+	input := json.RawMessage(`{"fak_expected_negative":true,"command":"fak commit --preview"}`)
+	declaration := toolcallOutcomeDeclaration(payload, input)
+	if declaration.Invalid || !declaration.ExpectedNegative || !declaration.ExpectedNegativeSet || declaration.Class != toolcallcontrol.OutcomeGuardRefusal {
+		t.Fatalf("declaration=%+v", declaration)
+	}
+	semantic := toolcallSemanticArgs(input)
+	if bytes.Contains(semantic, []byte("fak_expected_negative")) || !bytes.Contains(semantic, []byte("command")) {
+		t.Fatalf("semantic args=%s", semantic)
+	}
+	if got := toolcallOutcomeDeclaration(json.RawMessage(`{"fak_expected_negative":true}`), json.RawMessage(`{"fak_expected_negative":false}`)); !got.Invalid {
+		t.Fatalf("conflicting declarations must be invalid: %+v", got)
+	}
+}
+
+func TestToolcallOutcomeReplayCaptured24hSample(t *testing.T) {
+	// The issue's frozen active-profile capture contained 81 non-success rows:
+	// 78 exit-1 outcomes and 3 exit-124 outcomes. Replaying explicit intent
+	// separates all 78 known probes while every genuine timeout stays visible.
+	dir := t.TempDir()
+	for i := 0; i < 78; i++ {
+		payload := fmt.Sprintf(`{"session_id":"captured-24h","tool_name":"Grep","tool_use_id":"probe-%02d","fak_outcome":{"expected_negative":true},"tool_input":{"pattern":"absent-%02d"},"tool_response":{"is_error":true,"exit_code":1,"stderr":"no matches"}}`, i, i)
+		if err := toolcallControlHook(&bytes.Buffer{}, strings.NewReader(payload), "post", toolcallcontrol.ModeShadow, dir); err != nil {
+			t.Fatalf("expected probe %d: %v", i, err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		payload := fmt.Sprintf(`{"session_id":"captured-24h","tool_name":"Bash","tool_use_id":"timeout-%02d","tool_input":{"command":"fetch artifact %d"},"tool_response":{"is_error":true,"exit_code":124,"timed_out":true,"stderr":"timed out"}}`, i, i)
+		if err := toolcallControlHook(&bytes.Buffer{}, strings.NewReader(payload), "post", toolcallcontrol.ModeShadow, dir); err != nil {
+			t.Fatalf("timeout %d: %v", i, err)
+		}
+	}
+
+	rows := readDecisionRows(t, filepath.Join(dir, "decisions.jsonl"))
+	var expectedNegative, unexpected, timeout int
+	for _, row := range rows {
+		if row.Outcome == nil {
+			t.Fatalf("replay row missing outcome: %+v", row)
+		}
+		switch row.Outcome.Projection {
+		case toolcallcontrol.ProjectionExpectedNegative:
+			expectedNegative++
+		case toolcallcontrol.ProjectionUnexpectedFailure:
+			unexpected++
+		}
+		if row.Outcome.Class == toolcallcontrol.OutcomeTimeoutInterruption {
+			timeout++
+		}
+	}
+	if len(rows) != 81 || expectedNegative != 78 || unexpected != 3 || timeout != 3 {
+		t.Fatalf("replay total=%d expected_negative=%d unexpected=%d timeout=%d; want 81/78/3/3", len(rows), expectedNegative, unexpected, timeout)
+	}
+	// Red-noise reduction is 78/81 (96.3%); the remaining 3/81 are genuine,
+	// typed failures rather than a coerced success or suppressed output.
 }
 
 func readDecisionRows(t *testing.T, path string) []toolcallTraceRow {
