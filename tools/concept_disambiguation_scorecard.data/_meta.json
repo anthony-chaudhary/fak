@@ -7886,6 +7886,16 @@
           "category": "incidental",
           "reason": "JSON field reporting whether the canonical issue-router fetch covered the whole backlog; not a maturity rung",
           "token": "coverage_complete"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt field reporting input event kinds that this derivation version cannot interpret; it is evidence, not a support maturity state.",
+          "token": "unsupported_event_kinds"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed malformed-input refusal for dispatch work-shape pricing; not a support maturity rung.",
+          "token": "REFUSE_UNSUPPORTED_WORK_SHAPE"
         }
       ],
       "id": "support-maturity",
@@ -7947,6 +7957,7 @@
         "QUANTPROV_UNSUPPORTED_FORMAT",
         "QUANTPROV_UNSUPPORTED_QUANTIZER",
         "QUANTPROV_UNSUPPORTED_VERSION",
+        "REFUSE_UNSUPPORTED_WORK_SHAPE",
         "RUNTIME_NATIVE_PROBE_REQUIRED",
         "ReasonRuntimeDelegation",
         "ReasonSupported",
@@ -8058,6 +8069,7 @@
         "unsupported",
         "unsupported_activation",
         "unsupported_encoding",
+        "unsupported_event_kinds",
         "unsupported_extension",
         "unsupported_packing",
         "unsupported_recipe",

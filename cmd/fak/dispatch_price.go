@@ -52,6 +52,8 @@ type dispatchPriceReport struct {
 	SerializationWasted  int                               `json:"serialization_wasted"`
 	ExpectedRework       int                               `json:"expected_rework"`
 	Candidates           []dispatchPriceCandidate          `json:"candidates"`
+	WorkShape            any                               `json:"work_shape,omitempty"`
+	CapacityReserved     int                               `json:"capacity_reserved,omitempty"`
 }
 
 type dispatchPriceWave struct {
@@ -99,6 +101,7 @@ func runDispatchPrice(stdout, stderr io.Writer, argv []string) int {
 	workspace := fs.String("workspace", "", "workspace root for lane-tree resolution (default: current directory)")
 	inPath := fs.String("in", "", "read proposed fan-out JSON from this file (default: stdin)")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
+	workShapePath := fs.String("work-shape", "", "JSON file containing a typed work_shape contract")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -130,6 +133,21 @@ func runDispatchPrice(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	rep := buildDispatchPriceReport(agents, taxonomy)
+	if shape, err := readDispatchWorkShape(*workShapePath); err != nil {
+		fmt.Fprintf(stderr, "fak dispatch price: work shape: %v\n", err)
+		return 1
+	} else if shape != nil {
+		rep.WorkShape = shape
+		rep.CapacityReserved = shape.TotalCapacity
+		if shape.TotalCapacity > rep.Requested {
+			rep.Requested = shape.TotalCapacity
+		}
+		if strings.HasPrefix(shape.Verdict, "REFUSE_") {
+			rep.OK = false
+			rep.Action = "work_shape_refused"
+			rep.ActionReason = shape.Verdict + ": " + shape.Reason
+		}
+	}
 	if *asJSON {
 		if err := writeIndentedJSONNoEscape(stdout, rep); err != nil {
 			fmt.Fprintf(stderr, "fak dispatch price: encode json: %v\n", err)

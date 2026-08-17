@@ -7,7 +7,7 @@ description: "Inward naming scorecard: each confusable fak concept positioned on
 
 The sibling scorecards grade fak's code, docs, and competitive standing. This one asks the question that bites a reader as the system grows: **of the massive, growing set of similar-sounding names (cache, vCache, KV cache, cachemeta, the provider prompt-cache), is each distinct concept crystal-clear - one canonical name, a written definition, and an explicit line drawn against the siblings it is confused with?** Every number below is re-derived by `tools/concept_disambiguation_scorecard.py` and cross-checked against the real tree (the grounding token must appear in the production corpus; the glossary anchor must exist; a `distinct_from` reference must resolve). No verdict is hand-typed.
 
-> Regenerate: `python tools/concept_disambiguation_scorecard.py --markdown-dir docs/concept-disambiguation-scorecard`.
+> Regenerate: `fak concept generate` (the canonical writer preserves classifications while refreshing every generated page).
 
 ## Headline
 
