@@ -39,6 +39,22 @@ func TestHarnessStudyCreationCLIKeepsFailedBuildersInDenominator(t *testing.T) {
 	}
 }
 
+func TestHarnessStudyCreationBlocksSupportWithIncompleteEligiblePair(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "study.json")
+	raw := `{"schema":"fak.harness-creation-study/v1alpha1","id":"incomplete-cli","protocol":{"frozen":true,"ten_minute_limit_seconds":600,"assistance_policy":"task-card-and-help-only","failures_in_denominator":true,"task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parity":{"frozen":true,"minimum_pairs":2,"max_median_elapsed_ratio":1.25,"counterbalanced_order":true}},"baseline":{"id":"tuned-alt","runnable":true,"tuned":true,"frozen":true,"evidence":"baseline.json"},"runs":[{"id":"a-fak","participant_id":"person-a","track":"ten-minute","arm":"fak","pair_id":"pair-a","task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","machine_id":"machine-a","pair_order":"fak-first","arm_position":1,"participant_class":"unfamiliar-builder","independent":true,"os":"linux","cpu":"x86","network_state":"online","cache_state":"empty","outcome":"success","elapsed_seconds":100,"receipt":"a-fak.json"},{"id":"a-base","participant_id":"person-a","track":"ten-minute","arm":"baseline","pair_id":"pair-a","task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","machine_id":"machine-a","pair_order":"fak-first","arm_position":2,"participant_class":"unfamiliar-builder","independent":true,"os":"linux","cpu":"x86","network_state":"online","cache_state":"empty","outcome":"success","elapsed_seconds":100,"receipt":"a-base.json"},{"id":"b-base","participant_id":"person-b","track":"ten-minute","arm":"baseline","pair_id":"pair-b","task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","machine_id":"machine-b","pair_order":"baseline-first","arm_position":1,"participant_class":"unfamiliar-builder","independent":true,"os":"linux","cpu":"x86","network_state":"online","cache_state":"empty","outcome":"success","elapsed_seconds":100,"receipt":"b-base.json"},{"id":"b-fak","participant_id":"person-b","track":"ten-minute","arm":"fak","pair_id":"pair-b","task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","machine_id":"machine-b","pair_order":"baseline-first","arm_position":2,"participant_class":"unfamiliar-builder","independent":true,"os":"linux","cpu":"x86","network_state":"online","cache_state":"empty","outcome":"success","elapsed_seconds":100,"receipt":"b-fak.json"},{"id":"c-fak","participant_id":"person-c","track":"ten-minute","arm":"fak","pair_id":"pair-c","task_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","machine_id":"machine-c","pair_order":"fak-first","arm_position":1,"participant_class":"unfamiliar-builder","independent":true,"os":"linux","cpu":"x86","network_state":"online","cache_state":"empty","outcome":"success","elapsed_seconds":100,"receipt":"c-fak.json"}]}`
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := runHarness(&out, &errOut, []string{"study", "creation", "--input", path}); code != 0 {
+		t.Fatalf("code=%d err=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), `"claim_status": "not_yet"`) || !strings.Contains(out.String(), `"incomplete_pairs": 1`) || !strings.Contains(out.String(), "still incomplete") {
+		t.Fatalf("incomplete pair did not block CLI support: %s", out.String())
+	}
+}
+
 func TestHarnessStudyReceiptKeepsEarlyFailureInPairedDenominator(t *testing.T) {
 	dir := t.TempDir()
 	studyPath := filepath.Join(dir, "study.json")

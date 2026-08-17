@@ -22,6 +22,7 @@ Use this card for #6911 only after the study baseline reports `baseline_ready=tr
    assigned `pair_order` (`fak-first` or `baseline-first`) before either clock. Use each assignment
    once across the first two complete pairs. Record `arm_position` 1 or 2, use separate
    run IDs and receipts, and never drop the second arm after seeing the first result.
+   Any eligible pair left incomplete blocks a `supported` verdict for the whole study.
 7. Run both arms on that same machine/OS/CPU and declared network condition. Give each
    arm a fresh external directory and the protocol's declared empty cache. Do
    not reuse generated files, package/module caches, task answers, or process state across

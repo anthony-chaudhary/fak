@@ -110,6 +110,33 @@ func TestEvaluateParityKeepsMissingAndFailedArmsVisible(t *testing.T) {
 	}
 }
 
+func TestEvaluateBlocksSupportUntilEveryEligiblePairIsComplete(t *testing.T) {
+	study := frozenStudy()
+	makeRun := func(pair, participant, arm, order string) Run {
+		position := 2
+		if (order == "fak-first" && arm == "fak") || (order == "baseline-first" && arm == "baseline") {
+			position = 1
+		}
+		return Run{ID: pair + "-" + arm, ParticipantID: participant, Track: "ten-minute", Arm: arm, PairID: pair, TaskDigest: study.Protocol.TaskDigest, MachineID: "machine-" + pair, PairOrder: order, ArmPosition: position, ParticipantClass: "unfamiliar-builder", Independent: true, OS: "linux", CPU: "x86_64", NetworkState: "online", CacheState: "empty", Outcome: "success", ElapsedSeconds: 100, Receipt: pair + "-" + arm + ".json"}
+	}
+	study.Runs = []Run{
+		makeRun("pair-a", "person-a", "fak", "fak-first"),
+		makeRun("pair-a", "person-a", "baseline", "fak-first"),
+		makeRun("pair-b", "person-b", "baseline", "baseline-first"),
+		makeRun("pair-b", "person-b", "fak", "baseline-first"),
+		makeRun("pair-c", "person-c", "fak", "fak-first"),
+	}
+	blocked := Evaluate(study).Parity
+	if blocked.ClaimStatus != "not_yet" || blocked.CompletePairs != 2 || blocked.IncompletePairs != 1 || !strings.Contains(strings.Join(blocked.Reasons, " "), "still incomplete") {
+		t.Fatalf("incomplete pair did not block support: %+v", blocked)
+	}
+	study.Runs = append(study.Runs, makeRun("pair-c", "person-c", "baseline", "fak-first"))
+	supported := Evaluate(study).Parity
+	if supported.ClaimStatus != "supported" || supported.IncompletePairs != 0 {
+		t.Fatalf("completed corpus not supported: %+v", supported)
+	}
+}
+
 func TestEvaluateParityRefutesElapsedRatioOutsideFrozenBound(t *testing.T) {
 	s := frozenStudy()
 	s.Protocol.Parity.MinimumPairs = 1

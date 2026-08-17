@@ -362,6 +362,10 @@ func evaluateMatchedStudy(s Study) MatchedStudyResult {
 		out.Reasons = append(out.Reasons, "fak has fewer successful paired arms than baseline")
 		return out
 	}
+	if out.IncompletePairs > 0 {
+		out.Reasons = append(out.Reasons, fmt.Sprintf("%d eligible independent pair(s) still incomplete", out.IncompletePairs))
+		return out
+	}
 	if len(ratios) < minimum {
 		out.Reasons = append(out.Reasons, fmt.Sprintf("need at least %d pair(s) where both arms succeed", minimum))
 		return out

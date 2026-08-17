@@ -28,9 +28,10 @@ question: at least two unfamiliar builders each run both `fak` and `baseline` ar
 one random `pair_id`. The two-pair minimum is counterbalanced: one `fak-first` and one
 `baseline-first`, with one frozen task digest and privacy-safe machine identity per pair,
 and fresh directories and empty caches for each arm. Failures remain
-in the denominator, and fak is supported only when
-it has no fewer successful paired arms and the median elapsed-time ratio
-`fak / baseline` is at most **1.25**. Missing arms remain visible as incomplete pairs.
+in the denominator, and fak is supported only when no eligible pair remains incomplete,
+it has no fewer successful paired arms, and the median elapsed-time ratio
+`fak / baseline` is at most **1.25**. Missing arms remain visible as incomplete pairs and
+block support rather than becoming survivor bias.
 This small denominator is a bounded creation-workflow witness, not statistical or product-
 quality equivalence.
 
