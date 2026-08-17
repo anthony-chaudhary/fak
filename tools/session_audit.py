@@ -43,6 +43,7 @@ import json
 import glob
 import argparse
 import statistics
+import subprocess
 import collections
 import datetime
 
@@ -1534,6 +1535,121 @@ def _dos_hook_lens(agg):
     return L + [""]
 
 
+def _stream_timestamp(row):
+    value = row.get("_captured_at") or row.get("timestamp") or row.get("ts")
+    if not value:
+        return None
+    try:
+        return _parse_iso_instant(str(value))
+    except (ValueError, TypeError):
+        return None
+
+
+def load_hook_streams(paths):
+    """Pair persisted Claude stream-json hook lifecycle rows by hook ID."""
+    if not paths:
+        return None
+    started = {}
+    events = []
+    malformed = 0
+    unmatched_responses = 0
+    for path in paths:
+        try:
+            stream = open(path, encoding="utf-8")
+        except OSError as exc:
+            return {"paths": paths, "error": f"{path}: {exc}"}
+        with stream:
+            for line in stream:
+                try:
+                    row = json.loads(line)
+                except (ValueError, TypeError):
+                    malformed += 1
+                    continue
+                subtype = row.get("subtype")
+                hook_id = row.get("hook_id")
+                if subtype == "hook_started" and hook_id:
+                    started[hook_id] = row
+                    continue
+                if subtype != "hook_response" or not hook_id:
+                    continue
+                begin = started.pop(hook_id, None)
+                if begin is None:
+                    unmatched_responses += 1
+                event = row.get("hook_event") or (begin or {}).get("hook_event") or "Unknown"
+                outcome = str(row.get("outcome") or "unknown").lower()
+                start_ts = _stream_timestamp(begin or {})
+                end_ts = _stream_timestamp(row)
+                duration_ms = ((end_ts - start_ts) * 1000
+                               if start_ts is not None and end_ts is not None else None)
+                events.append({
+                    "hook_id": hook_id,
+                    "session_id": row.get("session_id") or (begin or {}).get("session_id"),
+                    "event": event,
+                    "outcome": outcome,
+                    "exit_code": row.get("exit_code"),
+                    "duration_ms": duration_ms,
+                    "stderr": row.get("stderr") or "",
+                    "source": path,
+                })
+    return {"paths": paths, "events": events, "malformed_rows": malformed,
+            "unmatched_starts": len(started), "unmatched_responses": unmatched_responses}
+
+
+def _reconcile_hook_stream(agg, stream):
+    if not stream or stream.get("error"):
+        return stream
+    transcript = collections.Counter()
+    for session in agg.get("_sessions", []):
+        session_id = session.get("session")
+        for key, count in (session.get("hooks", {}).get("outcomes") or {}).items():
+            event, _, outcome = key.partition("|")
+            transcript[(session_id, event, outcome)] += count
+    kept = []
+    suppressed = 0
+    for row in stream.get("events", []):
+        key = (row.get("session_id"), row.get("event"), row.get("outcome"))
+        if transcript[key]:
+            transcript[key] -= 1
+            suppressed += 1
+        else:
+            kept.append(row)
+    result = dict(stream)
+    result["events"] = kept
+    result["suppressed_transcript_overlaps"] = suppressed
+    return result
+
+
+def _hook_stream_lens(stream):
+    if not stream:
+        return []
+    L = ["## Captured Claude hook stream — persisted lifecycle witness\n"]
+    if stream.get("error"):
+        return L + [f"- Stream unreadable: `{stream['error']}`\n"]
+    events = stream.get("events") or []
+    grouped = collections.defaultdict(list)
+    for row in events:
+        grouped[row["event"]].append(row)
+    L += [f"- Sources: {', '.join(f'`{p}`' for p in stream.get('paths', []))}.",
+          "| Event | Responses | Outcomes | Exit codes | p90 | Max |",
+          "|---|---:|---|---|---:|---:|"]
+    for event, rows in sorted(grouped.items()):
+        outcomes = collections.Counter(row["outcome"] for row in rows)
+        exits = collections.Counter(str(row["exit_code"]) for row in rows)
+        durations = [row["duration_ms"] for row in rows if row.get("duration_ms") is not None]
+        fmt = lambda value: "—" if value is None else f"{value:,.1f} ms"
+        L.append(f"| {event} | {len(rows):,} | "
+                 f"{', '.join(f'{k}={v}' for k, v in outcomes.items())} | "
+                 f"{', '.join(f'{k}={v}' for k, v in exits.items())} | "
+                 f"{fmt(_pct(durations, 90))} | {fmt(max(durations) if durations else None)} |")
+    L.append(f"- Transcript overlaps suppressed: {stream.get('suppressed_transcript_overlaps', 0):,}.")
+    if stream.get("unmatched_starts") or stream.get("unmatched_responses"):
+        L.append(f"- Unmatched lifecycle rows: starts {stream.get('unmatched_starts', 0):,}, "
+                 f"responses {stream.get('unmatched_responses', 0):,}.")
+    if stream.get("malformed_rows"):
+        L.append(f"- Malformed stream rows skipped: {stream['malformed_rows']:,}.")
+    return L + [""]
+
+
 def _hook_lens(agg):
     hooks = agg.get("hooks") or {}
     events = hooks.get("events") or {}
@@ -1634,6 +1750,7 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
     L.extend(_distributions(agg))
     L.extend(_tool_mix_table(agg))
     L.extend(_hook_lens(agg))
+    L.extend(_hook_stream_lens(agg.get("hook_stream")))
     L.extend(_dos_hook_lens(agg))
     L.extend(_behavior_lens(agg))
     L.extend(_top_sessions_table(S))
@@ -1705,6 +1822,8 @@ def cmd_audit(a):
     # witness holds by construction: this aggregate == the --top-level-only aggregate
     # plus exactly the subagent delta. _subagent_fold_table renders that reconciliation.
     agg = aggregate(out)
+    agg["_sessions"] = out
+    agg["hook_stream"] = _reconcile_hook_stream(agg, load_hook_streams(getattr(a, "hook_stream", [])))
     agg["dos_hook_ledger"] = load_dos_hook_observations(
         os.getcwd(), a.since_days, getattr(a, "dos_since", None)
     )
@@ -1718,6 +1837,7 @@ def cmd_audit(a):
     md = report_md(out, agg, ns_prefix=ns_prefix, since_days=a.since_days,
                    top_level_only=top_level_only, max_sessions=a.max,
                    excluded_subagents=excluded_subagents)
+    agg.pop("_sessions", None)
     if a.md:
         open(a.md, "w", encoding="utf-8").write(md)
         print(f"wrote {a.md}", file=sys.stderr)
@@ -1981,6 +2101,36 @@ def cmd_deep(a):
         one = " ".join(txt.split())
         print(f"  [{i:2d}] {ts}  {one[:200]}")
 
+def cmd_capture_hooks(a):
+    """Run a stream-json command and persist receive timestamps on every JSON row."""
+    command = list(a.command or [])
+    if command and command[0] == "--":
+        command = command[1:]
+    if not command:
+        raise SystemExit("capture-hooks requires a command after --")
+    out_path = os.path.abspath(a.out)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w", encoding="utf-8", newline="\n") as capture:
+        proc = subprocess.Popen(command, stdout=subprocess.PIPE, text=True,
+                                encoding="utf-8", errors="replace")
+        assert proc.stdout is not None
+        try:
+            for line in proc.stdout:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                try:
+                    row = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                row["_captured_at"] = datetime.datetime.now(
+                    datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+                capture.write(json.dumps(row, ensure_ascii=False) + "\n")
+                capture.flush()
+        finally:
+            proc.stdout.close()
+        return proc.wait()
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -1989,6 +2139,9 @@ def main():
         pass
     p = argparse.ArgumentParser(description="Audit Claude Code session transcripts.")
     sub = p.add_subparsers(dest="cmd", required=True)
+    capture = sub.add_parser("capture-hooks")
+    capture.add_argument("--out", required=True, metavar="NDJSON")
+    capture.add_argument("command", nargs=argparse.REMAINDER)
     for name in ("discover", "audit"):
         q = sub.add_parser(name)
         q.add_argument("--root", action="append")
@@ -2004,6 +2157,10 @@ def main():
                      "overrides --since-days for that ledger",
             )
             q.add_argument("--max", type=int, default=None)
+            q.add_argument(
+                "--hook-stream", action="append", default=[], metavar="NDJSON",
+                help="captured claude stream-json with --include-hook-events; repeatable",
+            )
             q.add_argument("--json", default=None)
             q.add_argument("--md", default=None)
             # #3226 — folding subagent/workflow transcripts is now the DEFAULT, so the
@@ -2039,8 +2196,9 @@ def main():
     q = sub.add_parser("deep")
     q.add_argument("session")
     a = p.parse_args()
-    {"discover": cmd_discover, "audit": cmd_audit, "trend": cmd_trend,
-     "deep": cmd_deep}[a.cmd](a)
+    handlers = {"discover": cmd_discover, "audit": cmd_audit, "trend": cmd_trend,
+                "deep": cmd_deep, "capture-hooks": cmd_capture_hooks}
+    raise SystemExit(handlers[a.cmd](a) or 0)
 
 if __name__ == "__main__":
     main()

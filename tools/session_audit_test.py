@@ -10,11 +10,13 @@ fix from 2026-06-20 (heaviest session 093ca0fc: 901->455 turns, $634->$323) hold
 """
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import collections
 import contextlib
 import io
 import json
+import sys
 import tempfile
 import pathlib
 import unittest
@@ -1313,6 +1315,86 @@ class HookLensTest(unittest.TestCase):
         self.assertIn("Hook execution lens", report)
         self.assertIn("| PostToolUse | 2 | 1 | 0 | 1 | 0 | 80 ms | 80 ms |", report)
         self.assertIn("Hook failures/cancellations:** 2", report)
+
+
+class HookStreamTest(unittest.TestCase):
+    def test_pairs_hook_events_and_reconciles_transcript_overlap(self):
+        sa = load()
+        rows = [
+            {"type": "system", "subtype": "hook_started", "hook_id": "prompt-1",
+             "hook_event": "UserPromptSubmit", "session_id": "session-a",
+             "timestamp": "2026-08-17T00:00:00.000Z"},
+            {"type": "system", "subtype": "hook_response", "hook_id": "prompt-1",
+             "hook_event": "UserPromptSubmit", "session_id": "session-a",
+             "timestamp": "2026-08-17T00:00:00.320Z", "outcome": "success",
+             "exit_code": 0, "stdout": "", "stderr": ""},
+            {"type": "system", "subtype": "hook_started", "hook_id": "start-1",
+             "hook_event": "SessionStart", "session_id": "session-a",
+             "timestamp": "2026-08-17T00:00:01.000Z"},
+            {"type": "system", "subtype": "hook_response", "hook_id": "start-1",
+             "hook_event": "SessionStart", "session_id": "session-a",
+             "timestamp": "2026-08-17T00:00:01.100Z", "outcome": "success",
+             "exit_code": 0, "stdout": "", "stderr": ""},
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "hooks.jsonl"
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows) + "bad\n",
+                            encoding="utf-8")
+            stream = sa.load_hook_streams([str(path)])
+        self.assertEqual(len(stream["events"]), 2)
+        prompt = stream["events"][0]
+        self.assertEqual(prompt["event"], "UserPromptSubmit")
+        self.assertAlmostEqual(prompt["duration_ms"], 320, places=3)
+        agg = {"_sessions": [{"session": "session-a", "hooks": {
+            "outcomes": {"SessionStart|success": 1}}}]}
+        reconciled = sa._reconcile_hook_stream(agg, stream)
+        self.assertEqual(reconciled["suppressed_transcript_overlaps"], 1)
+        self.assertEqual([row["event"] for row in reconciled["events"]],
+                         ["UserPromptSubmit"])
+        report = "\n".join(sa._hook_stream_lens(reconciled))
+        self.assertIn("| UserPromptSubmit | 1 | success=1 | 0=1 | 320.0 ms | 320.0 ms |", report)
+        self.assertIn("Transcript overlaps suppressed: 1", report)
+        self.assertIn("Malformed stream rows skipped: 1", report)
+
+    def test_capture_hooks_persists_receive_timestamps(self):
+        sa = load()
+        payload = json.dumps({"type": "system", "subtype": "hook_started",
+                              "hook_id": "one", "hook_event": "UserPromptSubmit"})
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "capture.jsonl"
+            args = argparse.Namespace(
+                out=str(out),
+                command=[sys.executable, "-c", f"print({payload!r})"],
+            )
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(sa.cmd_capture_hooks(args), 0)
+            row = json.loads(out.read_text(encoding="utf-8"))
+        self.assertEqual(row["hook_id"], "one")
+        self.assertRegex(row["_captured_at"], r"Z$")
+
+    def test_reports_cancelled_and_unmatched_hook_events(self):
+        sa = load()
+        rows = [
+            {"subtype": "hook_started", "hook_id": "cancel-1",
+             "hook_event": "UserPromptSubmit", "session_id": "session-b",
+             "ts": "2026-08-17T00:00:00Z"},
+            {"subtype": "hook_response", "hook_id": "cancel-1",
+             "hook_event": "UserPromptSubmit", "session_id": "session-b",
+             "ts": "2026-08-17T00:00:30Z", "outcome": "cancelled", "exit_code": None},
+            {"subtype": "hook_started", "hook_id": "orphan",
+             "hook_event": "Stop", "session_id": "session-b"},
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "hooks.jsonl"
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+            stream = sa.load_hook_streams([str(path)])
+        self.assertEqual(stream["unmatched_starts"], 1)
+        self.assertEqual(stream["events"][0]["outcome"], "cancelled")
+        self.assertEqual(stream["events"][0]["duration_ms"], 30000)
+        report = "\n".join(sa._hook_stream_lens(stream))
+        self.assertIn("cancelled=1", report)
+        self.assertIn("30,000.0 ms", report)
+        self.assertIn("starts 1", report)
 
 
 class DOSHookLedgerTest(unittest.TestCase):

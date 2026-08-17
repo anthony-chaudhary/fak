@@ -94,6 +94,19 @@ python tools/session_audit.py discover --since-days 7
 python tools/session_audit.py audit --since-days 7 --md trajectory-audit-$(date +%Y%m%d).md
 ```
 
+Successful lifecycle hooks such as `UserPromptSubmit` may appear only in Claude's live stream, not in the persisted
+session transcript. Capture that stream with receive timestamps, then add it to the audit:
+
+```bash
+python tools/session_audit.py capture-hooks --out hook-stream.jsonl -- \
+  claude -p --output-format stream-json --verbose --include-hook-events "PROMPT"
+python tools/session_audit.py audit --since-days 7 --hook-stream hook-stream.jsonl \
+  --md report.md --json report.json
+```
+
+`--hook-stream` is repeatable. The audit pairs `hook_started`/`hook_response` by hook ID, derives elapsed time from
+capture timestamps, and suppresses matching session/event/outcome records already present in transcript attachments.
+
 For a large window prefer `--json` and skim, rather than rendering a giant table.
 A bare report name lands at the repo root; pass a path under a gitignored dir
 (e.g. `.dos/audits/`) if you don't want it tracked.
