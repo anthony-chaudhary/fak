@@ -15,6 +15,7 @@ const Schema = "fak-agent-customization-index/1"
 type Index struct {
 	Schema      string      `json:"schema"`
 	UpdatedAt   string      `json:"updated_at"`
+	Scope       string      `json:"scope"`
 	Maintenance Maintenance `json:"maintenance"`
 	Layers      []Layer     `json:"layers"`
 	Sources     []Source    `json:"sources"`
@@ -23,24 +24,33 @@ type Index struct {
 
 type Maintenance struct {
 	ReviewIntervalDays int      `json:"review_interval_days"`
+	DedupeKey          string   `json:"dedupe_key"`
+	SourceIdentity     string   `json:"source_identity"`
+	RequiredRefresh    []string `json:"required_refresh_fields"`
 	StatusValues       []string `json:"status_values"`
 	DispositionValues  []string `json:"disposition_values"`
 }
 
 type Layer struct {
-	ID string `json:"id"`
+	ID       string `json:"id"`
+	Question string `json:"question"`
 }
 
 type Source struct {
-	ID              string `json:"id"`
-	ObservedAt      string `json:"observed_at"`
-	CheckedRevision string `json:"checked_revision"`
+	ID              string   `json:"id"`
+	Kind            string   `json:"kind"`
+	URL             string   `json:"url"`
+	ObservedAt      string   `json:"observed_at"`
+	CheckedRevision string   `json:"checked_revision"`
+	License         string   `json:"license"`
+	Evidence        []string `json:"evidence"`
 }
 
 type Axis struct {
 	ID          string   `json:"axis_id"`
 	Layer       string   `json:"layer"`
 	UserNeed    string   `json:"user_need"`
+	Examples    []string `json:"examples"`
 	Evidence    []string `json:"evidence"`
 	Status      string   `json:"fak_status"`
 	Disposition string   `json:"disposition"`

@@ -23,8 +23,8 @@ The machine index currently records **21 independent axes**. This table is a com
 |---|---|---|
 | Authoring | instructions, routing, tools, skills, memory, delegation | Composition exists; projection into each native harness remains uneven. |
 | Execution | runtime, authority, hooks, persistence, economy, privacy | Session portability and explicit retention/redaction controls are partial. |
-| Interpretation | source adapters, semantic events, derived signals, redaction | The current `trajectory.Turn` row is useful but too coarse for typed deltas, causal links, confidence, and policy-aware redaction. |
-| Presentation | audience, selection, visual language, live control, sharing | There is no first-class, declarative view specification over a canonical trajectory. |
+| Interpretation | source adapters, semantic events, derived signals, redaction | Canonical typed events now ship; derived confidence-bearing semantic signals remain partial. |
+| Presentation | audience, selection, visual language, live control, sharing | Declarative operator/end-user projections, pre-render redaction, and receipts now ship; renderer integration and broader audience presets remain follow-on work. |
 
 ## Freshness check
 

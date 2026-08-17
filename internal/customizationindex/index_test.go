@@ -49,6 +49,17 @@ func TestCheckFindsContractFailures(t *testing.T) {
 	}
 }
 
+func TestReadAcceptsAuthoritativeIndexMetadata(t *testing.T) {
+	input := `{"schema":"fak-agent-customization-index/1","updated_at":"2026-08-17","scope":"full field map","maintenance":{"review_interval_days":30,"dedupe_key":"axis_id","source_identity":"repository@revision","required_refresh_fields":["updated_at"],"status_values":["present"],"disposition_values":["default"]},"layers":[{"id":"authoring","question":"what is assembled?"}],"sources":[{"id":"source","kind":"repository","url":"https://example.test/repo","observed_at":"2026-08-17","checked_revision":"abc","license":"MIT","evidence":["settings"]}],"axes":[{"axis_id":"instructions","layer":"authoring","user_need":"configure","examples":["rules"],"evidence":["source"],"fak_status":"present","disposition":"default"}]}`
+	index, err := Read(strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if index.Scope != "full field map" || index.Layers[0].Question == "" || index.Sources[0].URL == "" || len(index.Axes[0].Examples) != 1 {
+		t.Fatalf("metadata lost: %+v", index)
+	}
+}
+
 func TestReadRejectsUnknownShape(t *testing.T) {
 	_, err := Read(strings.NewReader(strings.Replace(fixture, `"updated_at"`, `"surprise"`, 1)))
 	if err == nil || !strings.Contains(err.Error(), "unknown field") {
