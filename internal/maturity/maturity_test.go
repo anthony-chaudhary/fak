@@ -402,6 +402,44 @@ func writeRuntimeProofFixture(t *testing.T, root string, proofs []RuntimeProof) 
 	}
 }
 
+func TestBuildFailsHealthOnceWhenRuntimeProofsCannotVerify(t *testing.T) {
+	caps := []Capability{{Lane: "alpha", Dir: "internal/alpha", HasCode: true, HasTests: true}}
+	p := Build(Options{
+		Root:  "/synthetic",
+		facts: func(string) []Capability { return caps },
+		Witnesses: func(string) (map[string]RuntimeProof, error) {
+			return nil, fmt.Errorf("stale fak artifact")
+		},
+	})
+	if p.OK || p.Verdict != "FAIL" || p.Finding != "runtime_proof_unverified" {
+		t.Fatalf("proof failure did not fail scorecard health: %+v", p)
+	}
+	if p.RuntimeProofOK || p.RuntimeProofCount != 0 || p.RuntimeProofError != "stale fak artifact" {
+		t.Fatalf("proof health = ok:%t count:%d err:%q", p.RuntimeProofOK, p.RuntimeProofCount, p.RuntimeProofError)
+	}
+	if !strings.Contains(p.NextAction, "repair or replace") {
+		t.Fatalf("next action does not prioritize proof repair: %q", p.NextAction)
+	}
+	for _, capability := range p.Caps {
+		if capability.Dogfooded || capability.RuntimeProof != "" {
+			t.Fatalf("failed proof promoted capability: %+v", capability)
+		}
+	}
+}
+
+func TestBuildKeepsEmptyValidRuntimeRegistryHealthy(t *testing.T) {
+	p := Build(Options{
+		Root:  "/synthetic",
+		facts: func(string) []Capability { return []Capability{{Lane: "alpha", HasCode: true, HasTests: true}} },
+		Witnesses: func(string) (map[string]RuntimeProof, error) {
+			return map[string]RuntimeProof{}, nil
+		},
+	})
+	if !p.OK || !p.RuntimeProofOK || p.RuntimeProofCount != 0 || p.RuntimeProofError != "" {
+		t.Fatalf("empty valid registry should remain healthy: %+v", p)
+	}
+}
+
 func TestRuntimeProofRejectsDirtyMatchingArtifact(t *testing.T) {
 	root := initRuntimeProofGitRepo(t)
 	headOutput, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").CombinedOutput()

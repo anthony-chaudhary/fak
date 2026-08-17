@@ -50,6 +50,7 @@ package maturity
 
 import (
 	"bufio"
+	"fmt"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 	"os"
 	"path/filepath"
@@ -97,14 +98,13 @@ type Capability struct {
 	Lane string `json:"lane"` // the dos.toml lane key (== leaf package name)
 	Dir  string `json:"dir"`  // the leaf tree root, e.g. internal/adjudicator
 
-	HasCode           bool   `json:"has_code"`   // a non-test .go file exists
-	HasTests          bool   `json:"has_tests"`  // a *_test.go exists
-	Integrated        bool   `json:"integrated"` // reachable from a production command import graph
-	Dogfooded         bool   `json:"dogfooded"`  // a declared runtime witness passes
-	RuntimeProof      string `json:"runtime_proof,omitempty"`
-	RuntimeProofError string `json:"runtime_proof_error,omitempty"`
-	Benchmarked       bool   `json:"benchmarked"`     // a Benchmark func or a BENCHMARK-AUTHORITY row
-	DefaultSurface    bool   `json:"default_surface"` // a documented verb / named in llms.txt
+	HasCode        bool   `json:"has_code"`   // a non-test .go file exists
+	HasTests       bool   `json:"has_tests"`  // a *_test.go exists
+	Integrated     bool   `json:"integrated"` // reachable from a production command import graph
+	Dogfooded      bool   `json:"dogfooded"`  // a declared runtime witness passes
+	RuntimeProof   string `json:"runtime_proof,omitempty"`
+	Benchmarked    bool   `json:"benchmarked"`     // a Benchmark func or a BENCHMARK-AUTHORITY row
+	DefaultSurface bool   `json:"default_surface"` // a documented verb / named in llms.txt
 
 	// Rung is the monotonic current lifecycle rung: the highest R such that EVERY
 	// promotion predicate up to and including R holds. A gap caps it.
@@ -252,16 +252,19 @@ func (o Options) normalize() Options {
 
 // ScorecardPayload is the uniform control-pane envelope every fak scorecard emits.
 type ScorecardPayload struct {
-	Schema     string         `json:"schema"`
-	OK         bool           `json:"ok"`
-	Verdict    string         `json:"verdict"`
-	Finding    string         `json:"finding"`
-	Reason     string         `json:"reason"`
-	NextAction string         `json:"next_action"`
-	Workspace  string         `json:"workspace"`
-	Corpus     map[string]any `json:"corpus"`
-	Caps       []Capability   `json:"capabilities"`
-	Backlog    []NextWork     `json:"backlog"`
+	Schema            string         `json:"schema"`
+	OK                bool           `json:"ok"`
+	Verdict           string         `json:"verdict"`
+	Finding           string         `json:"finding"`
+	Reason            string         `json:"reason"`
+	NextAction        string         `json:"next_action"`
+	Workspace         string         `json:"workspace"`
+	Corpus            map[string]any `json:"corpus"`
+	Caps              []Capability   `json:"capabilities"`
+	Backlog           []NextWork     `json:"backlog"`
+	RuntimeProofOK    bool           `json:"runtime_proof_ok"`
+	RuntimeProofCount int            `json:"runtime_proof_count"`
+	RuntimeProofError string         `json:"runtime_proof_error,omitempty"`
 }
 
 // Build is the fold: re-derive every capability's facts, adjudicate each, and
@@ -284,12 +287,12 @@ func Build(opts Options) ScorecardPayload {
 	witnesses, proofLoadErr := witnessFn(root)
 	for i := range caps {
 		caps[i].Dogfooded = false
-		if proofLoadErr != nil {
-			caps[i].RuntimeProofError = proofLoadErr.Error()
-		} else if witness, ok := witnesses[caps[i].Lane]; ok {
-			caps[i].Dogfooded = true
-			caps[i].DefaultSurface = witness.DefaultOn
-			caps[i].RuntimeProof = witness.Command
+		if proofLoadErr == nil {
+			if witness, ok := witnesses[caps[i].Lane]; ok {
+				caps[i].Dogfooded = true
+				caps[i].DefaultSurface = witness.DefaultOn
+				caps[i].RuntimeProof = witness.Command
+			}
 		}
 		caps[i] = adjudicate(caps[i])
 	}
@@ -347,28 +350,36 @@ func Build(opts Options) ScorecardPayload {
 	// the whole point. The CI-relevant signal is "no capability appears more mature
 	// than its evidence supports."
 	debt := skips
-	ok := debt == 0
+	runtimeProofOK := proofLoadErr == nil
+	ok := debt == 0 && runtimeProofOK
 
 	verdict, finding, reason, next := "OK", "ladder_honest", "", ""
 	atDefault := dist["default"]
 	belowTested := dist["proposed"] + dist["prototyped"]
-	distLine := distString(dist)
-	if ok {
-		reason = "maturity: " + itoa(n) + " capabilities, index " + itoa(score) + "/100 (" + grade +
-			"); no ladder-skips (every capability is at most as mature as its evidence); " + distLine
+	switch {
+	case proofLoadErr != nil:
+		verdict = "FAIL"
+		finding = "runtime_proof_unverified"
+		reason = "maturity runtime proofs could not be verified: " + proofLoadErr.Error()
+		next = "repair or replace the declared runtime proof artifact, then rerun `fak maturity`"
+	case debt > 0:
+		verdict = "RISKY"
+		finding = "ladder_skip"
+		reason = fmt.Sprintf(
+			"maturity: %d capabilities, index %d/100 (%s); %d ladder-skip(s) where the tree relies on a capability above its completed rung; %s",
+			len(caps), score, grade, debt, distString(dist),
+		)
+		next = fmt.Sprintf("retire the first ladder-skip: %s", backlog[0].Title)
+	default:
+		reason = fmt.Sprintf(
+			"maturity: %d capabilities, index %d/100 (%s); no ladder-skips (every capability is at most as mature as its evidence); %s",
+			len(caps), score, grade, distString(dist),
+		)
 		if len(backlog) > 0 {
-			next = "advance the fleet one rung: `fak maturity next` lists " + itoa(len(backlog)) +
-				" next work item(s); the least-mature capability is the most leverage"
+			next = fmt.Sprintf("advance the fleet one rung: `fak maturity next` lists %d next work item(s); the least-mature capability is the most leverage", len(backlog))
 		} else {
-			next = "every capability is at the top of the ladder; hold the line"
+			next = "all declared capabilities are measured defaults; keep the scorecard green"
 		}
-	} else {
-		verdict, finding = "ACTION", "ladder_skip"
-		reason = "maturity carries " + itoa(debt) + " ladder-skip(s) (capabilities that look more mature " +
-			"than their evidence — e.g. fak runs them but they have no tests); index " + itoa(score) +
-			"/100 (" + grade + "); " + distLine
-		next = "retire the inversions worst-first: `fak maturity next` lists the skipped lower rung for each; " +
-			"fill the missing lower rung (usually: add tests) before claiming the higher one"
 	}
 
 	return ScorecardPayload{
@@ -392,8 +403,11 @@ func Build(opts Options) ScorecardPayload {
 			"distribution":  dist,
 			"ladder":        RungName,
 		},
-		Caps:    caps,
-		Backlog: backlog,
+		Caps:              caps,
+		Backlog:           backlog,
+		RuntimeProofOK:    runtimeProofOK,
+		RuntimeProofCount: len(witnesses),
+		RuntimeProofError: errorString(proofLoadErr),
 	}
 }
 
@@ -417,6 +431,13 @@ var (
 // the dos.toml lane roster, the leaf tree, the running-binary import set, and a
 // few top-level docs. Read-only; a missing source degrades a fact to false (a
 // conservative "not yet"), never a false pass.
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
 func gatherFacts(root string) []Capability {
 	lanes := parseLaneTrees(filepath.Join(root, "dos.toml"))
 	// `integrated` = the leaf is on the running binary's TRANSITIVE
