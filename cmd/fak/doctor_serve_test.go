@@ -195,11 +195,23 @@ func TestRunServeDoctorJSON(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 		t.Fatalf("unmarshal report: %v\noutput=%s", err, out.String())
 	}
-	if len(rep.Rows) != 3 {
-		t.Fatalf("rows = %d, want 3", len(rep.Rows))
+	if len(rep.Rows) != 4 {
+		t.Fatalf("rows = %d, want 4 (three host checks plus durability)", len(rep.Rows))
 	}
 	if rep.Rollup == "" {
 		t.Error("rollup empty")
+	}
+	if rep.Durability == nil {
+		t.Fatal("durability posture missing from serve doctor JSON")
+	}
+	hasDurability := false
+	for _, row := range rep.Rows {
+		if row.Check == "session-durability" {
+			hasDurability = true
+		}
+	}
+	if !hasDurability {
+		t.Fatal("session-durability row missing from serve doctor JSON")
 	}
 	// model-fit must be the "cannot verify" yellow because the live host probe cannot
 	// measure free device VRAM (MemKnown=false).
