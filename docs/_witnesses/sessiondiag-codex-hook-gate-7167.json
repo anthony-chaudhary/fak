@@ -1,0 +1,135 @@
+{
+  "schema": "fak/codex-hook-recurrence-gate/v1",
+  "generated_at": "2026-08-17T23:13:21.6375694Z",
+  "window": "30m0s",
+  "thresholds": {
+    "max_hook_failures": 0,
+    "max_unexpected_outcomes": 0,
+    "max_telemetry_age": "5m"
+  },
+  "census": {
+    "schema": "fak/codex-hook-census/v1",
+    "generated_at": "2026-08-17T23:13:21.6375694Z",
+    "window": "30m0s",
+    "codex_home": "%CODEX_HOME%",
+    "log_store": "%CODEX_HOME%",
+    "observation_store": "C:\\work\\fak\\.dos\\metrics\\observations.jsonl",
+    "profile_match": true,
+    "dispatched_calls": 97,
+    "dispatch_source": "%CODEX_HOME%\\sessions",
+    "pre_tool_use": {
+      "denominator": 97,
+      "attempted": 4,
+      "succeeded": 4,
+      "failed": 0,
+      "skipped": 0,
+      "disabled": 0,
+      "unknown": 93,
+      "source": "C:\\work\\fak\\.dos\\metrics\\observations.jsonl"
+    },
+    "post_tool_use": {
+      "denominator": 97,
+      "attempted": 0,
+      "succeeded": 0,
+      "failed": 0,
+      "skipped": 0,
+      "disabled": 0,
+      "unknown": 97,
+      "source": "C:\\work\\fak\\.dos\\metrics\\observations.jsonl"
+    },
+    "telemetry_fresh": false,
+    "newest_receipt": "2026-08-17T22:51:11Z",
+    "verdict": "UNHEALTHY",
+    "reasons": [
+      "STALE_TELEMETRY",
+      "PRE_TOOL_USE_UNKNOWN",
+      "POST_TOOL_USE_UNKNOWN"
+    ]
+  },
+  "profile": {
+    "schema": "fak/codex-hook-profile/v1",
+    "codex_home": "%CODEX_HOME%",
+    "workspace": "C:\\work\\fak",
+    "config_path": "%CODEX_HOME%\\config.toml",
+    "codex_executable": {
+      "path": "%USERPROFILE%\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe",
+      "sha256": "sha256:935a1911ed2556e4ffcec995f4886ac2ac425863ba26fed264df62e30272ad9d",
+      "exists": true,
+      "role": "codex-app-server"
+    },
+    "hooks": [
+      {
+        "event_name": "post_tool_use",
+        "key": "dos-kernel@dos:hooks/hooks.json:post_tool_use:0:0",
+        "source": "plugin",
+        "source_path": "%CODEX_HOME%\\plugins\\cache\\dos\\dos-kernel\\0.30.0\\hooks\\hooks.json",
+        "plugin_id": "dos-kernel@dos",
+        "display_order": 2,
+        "enabled": true,
+        "managed": false,
+        "current_hash": "sha256:fceecf07ae6a8bf1c32adffb7d91a2072de663c9348cdb16caf929e580c11773",
+        "trust_status": "trusted",
+        "command": "root=\"${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-}}\"; if [ -n \"$root\" ] && [ -f \"$root/bin/dos-hook\" ]; then command -p sh \"$root/bin/dos-hook\" posttool --workspace .; rc=$?; [ \"$rc\" -eq 0 ] && exit 0; fi; python -m dos.cli hook posttool --workspace . 2>/dev/null || python3 -m dos.cli hook posttool --workspace . 2>/dev/null || powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'python -m dos.cli hook posttool --workspace .' 2>/dev/null || { [ -z \"$root\" ] || echo \"dos-hook: warning: no DOS hook backend could run; live DOS enforcement is fail-open. Install dos-kernel or restore claude-plugin/bin/dos-hook.\" >&2; true; }",
+        "matcher": "Read|Bash|Grep|Glob",
+        "timeout_sec": 600,
+        "state": "effective",
+        "identities": [
+          {
+            "path": "%CODEX_HOME%\\plugins\\cache\\dos\\dos-kernel\\0.30.0\\bin\\dos-hook",
+            "sha256": "sha256:917525db42aeb3c70b5cb960bc1fbf38b17196cba01ee36c58b5df61fe276679",
+            "exists": true,
+            "role": "hook-launcher"
+          },
+          {
+            "path": "%CODEX_HOME%\\plugins\\cache\\dos\\dos-kernel\\0.30.0\\bin\\dos-hook-windows-amd64.exe",
+            "sha256": "sha256:e7bcbba3bf90d71814e17f2da9fb33ec42e5f81f64de85fbd98227850a018847",
+            "exists": true,
+            "role": "native-hook-binary"
+          }
+        ]
+      },
+      {
+        "event_name": "pre_tool_use",
+        "key": "dos-kernel@dos:hooks/hooks.json:pre_tool_use:0:0",
+        "source": "plugin",
+        "source_path": "%CODEX_HOME%\\plugins\\cache\\dos\\dos-kernel\\0.30.0\\hooks\\hooks.json",
+        "plugin_id": "dos-kernel@dos",
+        "display_order": 1,
+        "enabled": true,
+        "managed": false,
+        "current_hash": "sha256:316e9d937ecba3249af162b616464181b026ae25f0b3837b98012424b46a3a39",
+        "trust_status": "trusted",
+        "command": "root=\"${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-}}\"; if [ -n \"$root\" ] && [ -f \"$root/bin/dos-hook\" ]; then command -p sh \"$root/bin/dos-hook\" pretool --workspace .; rc=$?; [ \"$rc\" -eq 0 ] && exit 0; fi; python -m dos.cli hook pretool --workspace . 2>/dev/null || python3 -m dos.cli hook pretool --workspace . 2>/dev/null || powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'python -m dos.cli hook pretool --workspace .' 2>/dev/null || { [ -z \"$root\" ] || echo \"dos-hook: warning: no DOS hook backend could run; live DOS enforcement is fail-open. Install dos-kernel or restore claude-plugin/bin/dos-hook.\" >&2; true; }",
+        "timeout_sec": 600,
+        "state": "effective",
+        "identities": [
+          {
+            "path": "%CODEX_HOME%\\plugins\\cache\\dos\\dos-kernel\\0.30.0\\bin\\dos-hook",
+            "sha256": "sha256:917525db42aeb3c70b5cb960bc1fbf38b17196cba01ee36c58b5df61fe276679",
+            "exists": true,
+            "role": "hook-launcher"
+          },
+          {
+            "path": "%CODEX_HOME%\\plugins\\cache\\dos\\dos-kernel\\0.30.0\\bin\\dos-hook-windows-amd64.exe",
+            "sha256": "sha256:e7bcbba3bf90d71814e17f2da9fb33ec42e5f81f64de85fbd98227850a018847",
+            "exists": true,
+            "role": "native-hook-binary"
+          }
+        ]
+      }
+    ],
+    "verdict": "HEALTHY"
+  },
+  "unexpected_numerator": 17,
+  "unexpected_denominator": 97,
+  "top_causes": [
+    "2 shell_command: Exit code: 124",
+    "15 shell_command: Exit code: 1"
+  ],
+  "verdict": "FAIL",
+  "reasons": [
+    "STALE_TELEMETRY",
+    "UNKNOWN_LIFECYCLE_ROWS",
+    "UNEXPECTED_OUTCOME_BUDGET_EXCEEDED"
+  ]
+}
