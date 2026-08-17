@@ -21,7 +21,7 @@ func cmdOrchestration(args []string) {
 
 func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 || args[0] != "plan" {
-		fmt.Fprintln(stderr, "usage: fak orchestration plan --profile off|auto|ultracode (--task FIXTURE | --task-text TEXT) [--json] [--strict] [--selfcheck]")
+		fmt.Fprintln(stderr, "usage: fak orchestration plan --profile off|auto|ultracode (--task FIXTURE | --task-text TEXT) [--json] [--strict] [--launch] [--selfcheck]")
 		return 2
 	}
 	fs := flag.NewFlagSet("orchestration plan", flag.ContinueOnError)
@@ -31,6 +31,7 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	taskText := fs.String("task-text", "", "current task text (converted to a typed task without persisting prompt text)")
 	strict := fs.Bool("strict", false, "reject any capability degradation")
 	jsonOut := fs.Bool("json", false, "emit the stable resolution JSON")
+	launch := fs.Bool("launch", false, "launch resolved ultracode workers or emit a typed direct-decline receipt")
 	selfcheck := fs.Bool("selfcheck", false, "verify stable JSON round-trip without launching work")
 	codexHome := fs.String("codex-home", "", "Codex home used for a session-linked invocation receipt")
 	capset := fs.String("capabilities", "native", "harness fixture: native or unsupported")
@@ -43,8 +44,8 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
-	if (*taskPath == "") == (strings.TrimSpace(*taskText) == "") || fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "fak orchestration plan: exactly one of --task or --task-text is required and positional arguments are not accepted")
+	if (*taskPath == "") == (strings.TrimSpace(*taskText) == "") || fs.NArg() != 0 || (*launch && *selfcheck) {
+		fmt.Fprintln(stderr, "fak orchestration plan: exactly one of --task or --task-text is required, positional arguments are not accepted, and --launch conflicts with --selfcheck")
 		return 2
 	}
 	var task orchestration.TaskSpec
@@ -106,7 +107,8 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 		}
 		fmt.Fprintf(stderr, "SELFCHECK PASS schema=%s offline=true launched=0\n", resolved.Schema)
 	}
-	if sessionID := strings.TrimSpace(os.Getenv("CODEX_THREAD_ID")); sessionID != "" && !*selfcheck {
+	sessionID := strings.TrimSpace(os.Getenv("CODEX_THREAD_ID"))
+	if sessionID != "" && !*selfcheck {
 		if err := writeCodexOrchestrationInvocationReceipt(*codexHome, codexOrchestrationInvocationReceipt{
 			Schema: "fak.codex_orchestration_invocation.v1", SessionID: sessionID,
 			InvokedAt: time.Now().UTC().Format(time.RFC3339Nano), TaskID: task.ID,
@@ -117,7 +119,34 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 			return 1
 		}
 	}
+	var launchReceipt *codexOrchestrationLaunchReceipt
+	if *launch {
+		if sessionID == "" {
+			fmt.Fprintln(stderr, "fak orchestration plan: --launch requires CODEX_THREAD_ID so the launch can join to the guarded first-turn witness")
+			return 2
+		}
+		capabilityProfile := "native"
+		if *capset == "unsupported" {
+			capabilityProfile = "unsupported"
+		}
+		launched, launchErr := launchCodexOrchestrationWorkers(*codexHome, sessionID, *profile, capabilityProfile, *taskText, resolved)
+		if launchErr != nil {
+			fmt.Fprintf(stderr, "fak orchestration plan: %v\n", launchErr)
+			return 1
+		}
+		launchReceipt = &launched
+		if !*jsonOut {
+			fmt.Fprintf(stdout, "launch=%s run_id=%s workers=%d decline=%s\n", launched.Status, launched.RunID, len(launched.Workers), launched.DeclineReason)
+		}
+	}
 	if *jsonOut {
+		if launchReceipt != nil {
+			return encodeJSONOrFail(stdout, stderr, struct {
+				Schema string                          `json:"schema"`
+				Plan   orchestration.Resolution        `json:"plan"`
+				Launch codexOrchestrationLaunchReceipt `json:"launch"`
+			}{Schema: "fak.codex_orchestration_launch_result.v1", Plan: resolved, Launch: *launchReceipt}, "fak orchestration plan")
+		}
 		_, _ = stdout.Write(append(stable, '\n'))
 		return 0
 	}

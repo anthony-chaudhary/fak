@@ -77,3 +77,42 @@ func TestSessionsWorkflowDefaultReportJoinsOrchestrationInvocation(t *testing.T)
 		t.Fatalf("report=%+v; invocation is observed use but not a worker launch", report)
 	}
 }
+
+func TestSessionsWorkflowDefaultReportJoinsWorkerLaunch(t *testing.T) {
+	home := t.TempDir()
+	witness := codexWorkflowDefaultWitness{Schema: "fak.codex_workflow_default.v1", SessionID: "launched", Classification: "consider-workflow", Decision: "inject"}
+	if err := writeCodexWorkflowDefaultWitness(home, witness); err != nil {
+		t.Fatal(err)
+	}
+	if err := persistCodexOrchestrationLaunchReceipt(home, codexOrchestrationLaunchReceipt{
+		Schema: codexOrchestrationLaunchSchema, SessionID: "launched", RunID: "orch-test",
+		Status: "launched", Workers: []codexOrchestrationWorkerLaunch{{RoleID: "worker-1", Status: "started"}, {RoleID: "worker-2", Status: "started"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	report, err := collectCodexWorkflowDefaultReport(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.ObservedUse != 1 || report.WorkerLaunches != 2 || report.UnknownOutcome != 0 || report.DirectDeclines != 0 {
+		t.Fatalf("report=%+v", report)
+	}
+}
+
+func TestSessionsWorkflowDefaultReportJoinsLaunchDecline(t *testing.T) {
+	home := t.TempDir()
+	witness := codexWorkflowDefaultWitness{Schema: "fak.codex_workflow_default.v1", SessionID: "direct", Classification: "likely-direct", Decision: "inject"}
+	if err := writeCodexWorkflowDefaultWitness(home, witness); err != nil {
+		t.Fatal(err)
+	}
+	if err := persistCodexOrchestrationLaunchReceipt(home, codexOrchestrationLaunchReceipt{Schema: codexOrchestrationLaunchSchema, SessionID: "direct", RunID: "orch-direct", Status: "declined", DeclineReason: "resolved-direct"}); err != nil {
+		t.Fatal(err)
+	}
+	report, err := collectCodexWorkflowDefaultReport(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.DirectDeclines != 1 || report.WorkerLaunches != 0 || report.UnknownOutcome != 0 {
+		t.Fatalf("report=%+v", report)
+	}
+}

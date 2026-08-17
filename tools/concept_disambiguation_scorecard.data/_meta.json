@@ -2350,6 +2350,26 @@
           "category": "incidental",
           "reason": "Test seam for the existing Codex loop gate diagnosis; not a new guard or gate concept.",
           "token": "diagnoseRecentCodexLoopsForGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "scorecard corpus key counting reviewed opt-in records; not an authorization guard or execution gate",
+          "token": "opt_in_gates"
+        },
+        {
+          "category": "incidental",
+          "reason": "scorecard scheduling field for the next review date; not an authorization guard or execution gate",
+          "token": "next_gate_review"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private adapter that starts an existing fak guard process; it does not define a new guard or gate concept.",
+          "token": "launchGuardedCodexOrchestrationWorker"
+        },
+        {
+          "category": "incidental",
+          "reason": "internal scorecard record for an opt-in review entry; not an authorization guard or execution gate",
+          "token": "optInGate"
         }
       ],
       "exclude": [
@@ -2625,6 +2645,7 @@
         "guardwireretryhop",
         "installguardmcpregistration",
         "latestGuardCompactionWitness",
+        "launchGuardedCodexOrchestrationWorker",
         "liveAggregate",
         "loadCacheValueGateBaseline",
         "loadGuardSelfTightenOverlay",
@@ -2633,9 +2654,12 @@
         "nativeReasonMessageRoleUnsupported",
         "newGuardCompactionWitness",
         "newguardlaunchnonce",
+        "next_gate_review",
         "nodeGateScript",
         "normalizeGuardOperatorQuestionMode",
         "observer_guard",
+        "optInGate",
+        "opt_in_gates",
         "pairedBaselineGuardTimeout",
         "parseGate",
         "prepareGuardChildRegistration",
@@ -6299,6 +6323,11 @@
           "category": "incidental",
           "reason": "Launcher-local launchParams field carrying the accounts ultracode posture; not a repository-wide policy capability concept.",
           "token": "ultracodePosture"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local receipt field label for the already-resolved harness capability fixture, not a new capability concept.",
+          "token": "capabilityProfile"
         }
       ],
       "exclude": [
@@ -6364,6 +6393,7 @@
         "bundled_capability",
         "byCapability",
         "capabilities",
+        "capabilityProfile",
         "capability_denied",
         "capability_digest",
         "capability_failure",

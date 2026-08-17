@@ -90,7 +90,17 @@ func collectCodexWorkflowDefaultReport(codexHome string) (codexWorkflowDefaultRe
 		if codexGuardWitnessExists(home, witness.SessionID) {
 			report.GuardJoined++
 		}
-		if receipt, ok := readCodexOrchestrationInvocationReceipt(home, witness.SessionID); ok {
+		if launch, ok := readCodexOrchestrationLaunchReceipt(home, witness.SessionID); ok {
+			switch launch.Status {
+			case "launched":
+				report.ObservedUse++
+				report.WorkerLaunches += len(launch.Workers)
+			case "declined":
+				report.DirectDeclines++
+			default:
+				report.UnknownOutcome++
+			}
+		} else if receipt, ok := readCodexOrchestrationInvocationReceipt(home, witness.SessionID); ok {
 			if receipt.Resolved == "off" || (receipt.Resolved == "auto" && receipt.MaxWorkers == 1) {
 				report.DirectDeclines++
 			} else {
