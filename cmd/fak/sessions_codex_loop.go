@@ -190,6 +190,9 @@ type codexOutcomeAccum struct {
 }
 
 func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == "archive" {
+		return runSessionsCodexLoopArchive(stdout, stderr, argv[1:])
+	}
 	fs := flag.NewFlagSet("sessions codex-loop", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	project := addDogfoodProjectFlags(fs)

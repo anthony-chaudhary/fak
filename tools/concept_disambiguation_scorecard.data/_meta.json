@@ -4093,6 +4093,11 @@
           "category": "incidental",
           "reason": "Test seam for terminal Codex rollout archive timestamps; not a distinct operator concept.",
           "token": "codexlooparchivenow"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local path variable for validating the Codex rollout archive boundary; not a distinct session-runtime concept.",
+          "token": "sessionsRoot"
         }
       ],
       "id": "session-runtime",
@@ -4348,6 +4353,7 @@
         "sessionmine",
         "sessionregistry",
         "sessions",
+        "sessionsRoot",
         "sessionsaudited",
         "simulateScheduler",
         "slots",

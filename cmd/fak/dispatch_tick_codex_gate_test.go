@@ -103,7 +103,9 @@ func TestDispatchTickTerminalHistoricalLoopIsVisibleButAdmitted(t *testing.T) {
 	t.Cleanup(func() { readSessionRows = old })
 	opts := dispatchTickOptions{Backend: "codex", Live: false, CodexLoopGate: "loop"}
 	account := dispatchtick.Account{Dir: t.TempDir()}
-	rep := codexLaunchReport(account.Dir, 24, loopDiagnosis("terminal"))
+	diagnosis := loopDiagnosis("terminal")
+	diagnosis.Path = filepath.Join(account.Dir, "sessions", "rollout-terminal.jsonl")
+	rep := codexLaunchReport(account.Dir, 24, diagnosis)
 	oldRecent := diagnoseRecentCodexLoopsForGate
 	diagnoseRecentCodexLoopsForGate = func(string, float64, int) (codexLoopRecentReport, error) { return rep, nil }
 	t.Cleanup(func() { diagnoseRecentCodexLoopsForGate = oldRecent })
@@ -114,6 +116,10 @@ func TestDispatchTickTerminalHistoricalLoopIsVisibleButAdmitted(t *testing.T) {
 	life := mapAt(gate, "lifecycle")
 	if life["terminal_count"] != 1 || life["live_count"] != 0 || dispatchMapString(gate, "verdict") != "OK" {
 		t.Fatalf("terminal lifecycle receipt = %#v", gate)
+	}
+	cleanup := dispatchMapString(gate, "cleanup_command")
+	if !strings.Contains(cleanup, "fak sessions codex-loop archive --path") || !strings.Contains(cleanup, "--dry-run") {
+		t.Fatalf("cleanup_command = %q", cleanup)
 	}
 }
 

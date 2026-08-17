@@ -48,6 +48,9 @@ func dispatchCodexLoopGateForTick(opts dispatchTickOptions, account dispatchtick
 	lifecycle := classifyLoopStates(rep)
 	payload := dispatchCodexLoopGatePayload(rep, threshold)
 	payload["lifecycle"] = loopStatePayload(lifecycle)
+	if len(lifecycle.Terminal) > 0 && len(lifecycle.Live) == 0 && len(lifecycle.Ambiguous) == 0 {
+		payload["cleanup_command"] = codexLoopArchiveCommand(rep, lifecycle.Terminal)
+	}
 	gateCode := 0
 	if len(lifecycle.Live) > 0 {
 		gateCode, _ = codexLoopFailOnExitCode("LOOP", threshold)
@@ -164,4 +167,20 @@ func dispatchCodexLoopCurrentThreadPayload(d codexLoopDiagnosis, threshold strin
 		"tool_outputs":     d.ToolOutputs,
 		"repeated_outputs": d.RepeatedOutcomes,
 	}
+}
+
+func codexLoopArchiveCommand(rep codexLoopRecentReport, terminal []string) string {
+	if len(terminal) == 0 {
+		return ""
+	}
+	wanted := make(map[string]bool, len(terminal))
+	for _, id := range terminal {
+		wanted[id] = true
+	}
+	for _, diagnosis := range rep.Diagnoses {
+		if wanted[diagnosis.SessionID] && diagnosis.Path != "" {
+			return fmt.Sprintf("fak sessions codex-loop archive --path %q --codex-home %q --dry-run", diagnosis.Path, rep.CodexHome)
+		}
+	}
+	return ""
 }

@@ -11,6 +11,7 @@ package main
 //	fak sessions score    [--project SUB] [--root DIR ...] [--max N] [--corpus OUT] [--json]
 //	                                                                          fold + witness + score the corpus
 //	fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json] [--fail-on none|loop|action|unguarded]
+//	fak sessions codex-loop archive --path FILE [--codex-home DIR] [--dry-run] [--json]
 //	                                                                          diagnose Codex JSONL for repeated tool loops
 //	fak sessions codex-loop-hook [--codex-home DIR] [--allow-direct]
 //	fak sessions workflow-default-report [--codex-home DIR] [--json]
@@ -83,6 +84,7 @@ usage:
   fak sessions score    [--project SUB] [--root DIR ...] [--max N] [--corpus OUT] [--json]
   fak sessions learn    [--corpus IN] [--project SUB] [--root DIR ...] [--max N] [--json]
   fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json] [--fail-on none|loop|action|unguarded]
+//	fak sessions codex-loop archive --path FILE [--codex-home DIR] [--dry-run] [--json]
   fak sessions codex-loop-hook [--codex-home DIR] [--allow-direct]
   fak sessions workflow-default-report [--codex-home DIR] [--json]
   fak sessions codex-hook-install [--codex-home DIR] [--dry-run]
