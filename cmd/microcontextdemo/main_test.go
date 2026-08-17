@@ -23,11 +23,27 @@ func TestSpineRunsTenThousandLogicalContexts(t *testing.T) {
 	if r.PeakInFlight < 2 || r.PeakInFlight > 64 {
 		t.Fatalf("peak=%d, want 2..64", r.PeakInFlight)
 	}
+	if r.Resources.LogicalCPUs < 1 || r.Resources.WallMS <= 0 {
+		t.Fatalf("missing resource dimensions: %+v", r.Resources)
+	}
+	if !r.Resources.CPUAvailable || r.Resources.CPUTotalMS <= 0 || r.Resources.CPUCoreEquivalent <= 0 {
+		t.Fatalf("missing CPU accounting: %+v", r.Resources)
+	}
+	if r.Resources.HeapPeakBytes < r.Resources.HeapStartBytes || r.Resources.SysPeakBytes < r.Resources.SysStartBytes {
+		t.Fatalf("invalid memory peaks: %+v", r.Resources)
+	}
+	if r.Resources.TotalAllocBytes == 0 || r.Resources.Mallocs == 0 || r.Resources.GoroutinesPeak < r.Resources.GoroutinesStart || r.Resources.Samples < 2 {
+		t.Fatalf("incomplete runtime accounting: %+v", r.Resources)
+	}
 }
 
 func TestSpineRejectsInvalidDimensions(t *testing.T) {
-	if _, err := run(context.Background(), config{}); err == nil {
+	r, err := run(context.Background(), config{})
+	if err == nil {
 		t.Fatal("expected invalid-dimensions error")
+	}
+	if r.Schema != "" || r.Resources.LogicalCPUs != 0 {
+		t.Fatalf("error path returned partial report: %+v", r)
 	}
 }
 

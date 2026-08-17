@@ -100,6 +100,7 @@ type report struct {
 	HibernatedContexts    int            `json:"hibernated_contexts,omitempty"`
 	RestoredContexts      int            `json:"restored_contexts,omitempty"`
 	LiveInputRecords      []liveWorkUnit `json:"live_input_records,omitempty"`
+	Resources             resourceUsage  `json:"resources"`
 }
 
 type sharedBase struct {
@@ -211,7 +212,14 @@ func percentileMS(values []time.Duration, q float64) float64 {
 	return float64(values[idx].Microseconds()) / 1000
 }
 
-func run(ctx context.Context, cfg config) (report, error) {
+func run(ctx context.Context, cfg config) (result report, err error) {
+	monitor := startResourceMonitor()
+	defer func() {
+		usage := monitor.finish()
+		if result.Schema != "" {
+			result.Resources = usage
+		}
+	}()
 	if cfg.LiveInput != "" && len(cfg.WorkUnits) == 0 {
 		units, err := loadLiveWorkUnits(cfg.LiveInput)
 		if err != nil {
