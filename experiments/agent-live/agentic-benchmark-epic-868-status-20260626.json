@@ -1,18 +1,18 @@
 {
   "lineage": {
     "lineage_schema": "fak-bench-lineage/1",
-    "app_version": "0.40.0",
-    "utc": "2026-07-13T04:04:17Z",
-    "git_commit": "48895a3af9fafef6065e630e3bea4f67c5dfbec9",
-    "go_version": "go1.26.5",
-    "node": "workstation"
+    "app_version": "dev",
+    "utc": "2026-08-17T04:18:01Z",
+    "git_commit": "aa3f90004ee7d915d0475adc6a62edabecd75369",
+    "go_version": "go1.26.6",
+    "node": "DESKTOP-BB3FMHP"
   },
   "benchmark_artifact": {
     "schema": "fak-benchmark-artifact/1",
-    "run_id": "20260713t040417-agenticbench-48895a3af9fa",
-    "timestamp": "2026-07-13T04:04:17Z",
-    "fak_commit": "48895a3af9fafef6065e630e3bea4f67c5dfbec9",
-    "fak_version": "0.40.0",
+    "run_id": "20260817t041801-agenticbench-aa3f90004ee7",
+    "timestamp": "2026-08-17T04:18:01Z",
+    "fak_commit": "aa3f90004ee7d915d0475adc6a62edabecd75369",
+    "fak_version": "dev",
     "harness_version": "1.0.0",
     "harness": {
       "name": "agenticbench",
@@ -20,7 +20,7 @@
       "build_flags": null
     },
     "machine": {
-      "hostname": "workstation",
+      "hostname": "DESKTOP-BB3FMHP",
       "cpu": "AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD",
       "gpu": "unknown",
       "ram_gb": 0,
@@ -37,7 +37,7 @@
     "dependency_versions": {
       "arch": "amd64",
       "cuda": "unknown",
-      "go": "go1.26.5",
+      "go": "go1.26.6",
       "os": "windows"
     },
     "build": {
@@ -52,7 +52,7 @@
     },
     "results": {
       "metrics": {
-        "generated_at": "2026-07-13T04:04:17Z"
+        "generated_at": "2026-08-17T04:18:01Z"
       },
       "units": {
         "generated_at": "fraction"
@@ -68,7 +68,7 @@
       "test_path": "unknown",
       "dos_verify_result": "CLAIM_UNWITNESSED",
       "dos_commit_audit": "not_run",
-      "reproduction_command": "C:\\Users\\USER\\AppData\\Local\\Temp\\fak-nightrun-bin-2355419938\\agenticbench.exe -out experiments/agent-live/agentic-benchmark-epic-868-status-20260626.json -md experiments/agent-live/agentic-benchmark-epic-868-status-20260626.md -external-queue experiments/agent-live/agentic-benchmark-epic-868-external-harness-queue-20260626.json -external-queue-md experiments/agent-live/agentic-benchmark-epic-868-external-harness-queue-20260626.md"
+      "reproduction_command": "C:\\Users\\USER\\AppData\\Local\\Temp\\fak-nightrun-bin-1336519032\\agenticbench.exe -out experiments/agent-live/agentic-benchmark-epic-868-status-20260626.json -md experiments/agent-live/agentic-benchmark-epic-868-status-20260626.md -external-queue experiments/agent-live/agentic-benchmark-epic-868-external-harness-queue-20260626.json -external-queue-md experiments/agent-live/agentic-benchmark-epic-868-external-harness-queue-20260626.md"
     },
     "lineage": {
       "source_artifact": "unknown",
@@ -76,7 +76,7 @@
     }
   },
   "schema": "fak.agentic-benchmark-epic-rollup.v1",
-  "generated_at": "2026-07-13T04:04:17Z",
+  "generated_at": "2026-08-17T04:18:01Z",
   "epic": 868,
   "status": "PENDING_EXTERNAL_HARNESS",
   "result_claim_allowed": false,

@@ -1,6 +1,6 @@
 {
   "schema": "fak.agentic-benchmark-external-harness-queue.v1",
-  "generated_at": "2026-07-13T04:04:17Z",
+  "generated_at": "2026-08-17T04:18:01Z",
   "epic": 868,
   "status": "PENDING_EXTERNAL_HARNESS",
   "result_claim_allowed": false,
