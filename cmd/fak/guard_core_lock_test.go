@@ -146,9 +146,9 @@ func TestGuardCoreLockAllIsPeeledBeforeTheFlagSetParse(t *testing.T) {
 	if setAt < 0 {
 		t.Fatal("cmdGuard peels the flag but never records the posture, so every amendment site reads false (#5423)")
 	}
-	parseAt := bytes.Index(body, []byte("flag.NewFlagSet(\"guard\""))
+	parseAt := bytes.Index(body, []byte("flag.NewFlagSet(commandName"))
 	if parseAt < 0 {
-		t.Fatal("cmdGuard no longer builds its guard FlagSet")
+		t.Fatal("shared manage/guard command no longer builds its FlagSet")
 	}
 	if peelAt > parseAt || setAt > parseAt {
 		t.Fatal("--core-lock-all must be peeled and recorded BEFORE the ExitOnError FlagSet is built, or the launch aborts on an undefined flag")
