@@ -25,13 +25,13 @@ func TestHeadroomCompareNativeAndNoneJSON(t *testing.T) {
 	}
 }
 
-func TestHeadroomCompareReportsMissingLLMLingua(t *testing.T) {
+func TestHeadroomCompareReportsUnavailableLLMLingua(t *testing.T) {
 	var out, errb bytes.Buffer
 	code := runHeadroom(&out, &errb, []string{"compare"})
 	if code != 3 {
 		t.Fatalf("code=%d, want 3; out=%s err=%s", code, out.String(), errb.String())
 	}
-	if !strings.Contains(out.String(), "MISSING lingua") {
+	if !strings.Contains(out.String(), "lingua") || !strings.Contains(out.String(), "status=error") {
 		t.Fatalf("out=%s", out.String())
 	}
 }
