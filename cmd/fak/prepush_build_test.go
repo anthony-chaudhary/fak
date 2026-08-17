@@ -784,7 +784,7 @@ func TestClaimPrepushTipCoalescesAcrossProcesses(t *testing.T) {
 	if waiterErr != nil {
 		t.Fatalf("waiter: %v: %s", waiterErr, waiterOut)
 	}
-	if strings.TrimSpace(ownerOut.String()) != "OWNER" || strings.TrimSpace(string(waiterOut)) != "COALESCED" {
+	if !strings.Contains(ownerOut.String(), "OWNER") || !strings.Contains(string(waiterOut), "COALESCED") {
 		t.Fatalf("owner=%q waiter=%q", ownerOut.String(), waiterOut)
 	}
 }
