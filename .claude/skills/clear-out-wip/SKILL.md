@@ -1,6 +1,6 @@
 ---
 name: clear-out-wip
-description: Clear backed-up local repository work without sweeping up peers — inventory the dirty tree, remove proven generated junk, prioritize coherent slices, ship green partial/enabling work honestly, park or issue the rest, and use stale-work/fleet workflows only after ownership and path contracts are explicit. Use when the operator says "clear out local WIP", "clean up the dirty tree", "get this backlog of changes shipped", "sort out uncommitted work", or asks what can be committed even though the larger feature is not fully enabled.
+description: Clear backed-up local repository work without sweeping up peers - inventory the dirty tree, remove proven generated junk, prioritize coherent slices, ship green partial/enabling work honestly, park or issue the rest, and use stale-work/fleet workflows only after ownership and path contracts are explicit. Use when the operator says "clear out local WIP", "clean up the dirty tree", "get this backlog of changes shipped", "sort out uncommitted work", or asks what can be committed even though the larger feature is not fully enabled.
 allowed-tools: Read, Bash
 ---
 
@@ -103,16 +103,16 @@ unfinished parent.
 
 Assign exactly one next action:
 
-- `SHIP_NOW` — coherent, owned, truthful, and witnessable now.
-- `FINISH_SMALL_GAP` — one bounded repair/test makes the coherent unit shippable in this session.
-- `SHIP_ENABLER` — useful and safe independently, while the larger feature remains openly incomplete.
-- `KEEP_ACTIVE` — current owner/lease and near-term continuation are evidenced.
-- `STALE_ADJUDICATE` — ownerless/old/ambiguous; use `/stale-work-loop`, whose discovery phase does
+- `SHIP_NOW` - coherent, owned, truthful, and witnessable now.
+- `FINISH_SMALL_GAP` - one bounded repair/test makes the coherent unit shippable in this session.
+- `SHIP_ENABLER` - useful and safe independently, while the larger feature remains openly incomplete.
+- `KEEP_ACTIVE` - current owner/lease and near-term continuation are evidenced.
+- `STALE_ADJUDICATE` - ownerless/old/ambiguous; use `/stale-work-loop`, whose discovery phase does
   not edit the candidate.
-- `PARK` — valuable bytes must be preserved but are not active or safely shippable; use the repo's
+- `PARK` - valuable bytes must be preserved but are not active or safely shippable; use the repo's
   witnessed parking/WIP mechanism, never a stash or mystery archive.
-- `DELETE_JUNK` — only the generated-junk proof above permits this.
-- `FILE_FOLLOWUP` — concrete residual work with a done-condition and explicit path tree.
+- `DELETE_JUNK` - only the generated-junk proof above permits this.
+- `FILE_FOLLOWUP` - concrete residual work with a done-condition and explicit path tree.
 
 ## 4. Decide whether incomplete work can ship
 
@@ -152,7 +152,7 @@ For each `SHIP_NOW` or `SHIP_ENABLER` unit:
 Do not batch unrelated maintenance and feature work just because both are ready. Do not repeatedly
 patch the same issue across several commits; finish its coherent acceptance boundary first.
 
-## 6. Fan out only contract-ready residual work
+## 6. Distribute and start contract-ready residual work
 
 Local dirty paths are not worker fuel. First convert residuals into dedicated issues with:
 
@@ -163,14 +163,82 @@ Local dirty paths are not worker fuel. First convert residuals into dedicated is
 - dependency and collision notes; and
 - retain/update/remove authority where stale work is involved.
 
-Use `/stale-work-loop` for candidate adjudication. Once issues exist, price path collisions with
-`/dos-plan-price` or the fleet workflow. Use `/fleet-wave` only when there are multiple disjoint,
-contract-ready issues and the operator requested live fan-out. Keep overlapping units in separate
-waves. Harvest from git, tests, issue state, and DOS witnesses through `/wave-harvest`; worker prose
-is not proof.
+Use `/stale-work-loop` for candidate adjudication. A one-unit or same-path queue is serial work,
+not a fleet wave. For multiple disjoint issues, use `/dos-plan-price` and split overlaps into later
+waves before generating or starting sessions.
 
-A one-unit or same-path queue is serial work, not a fleet wave.
+### Execution intent
 
+Classify the invocation before launch:
+
+- **Plan-only:** "inspect", "triage", "what can ship?", or "plan a clear-out" produces the census,
+  dispositions, issue contracts, and priced wave; it starts no session.
+- **Live clear-out:** "clear out", "work through", "distribute", "start sessions", "run the
+  backlog", or an unattended/deadline request authorizes the native dry-run -> live launch path for
+  contract-ready residual issues. Local `SHIP_NOW` units still land serially first.
+- **Explicit no-fan-out:** "locally", "do not launch", or an equivalent constraint keeps all work
+  serial even if several issues are ready.
+
+When intent is unclear, complete the safe local spine and render the dry-run receipt. Never claim
+that work was distributed merely because issues or a plan were created.
+
+### Generate the guarded wave
+
+Use the installed native dispatcher as the single workflow generator and launcher. Do not handwrite
+child prompts, spawn raw Codex processes, wrap the whole wave in one parent guard, or mix in the
+legacy launcher.
+
+```powershell
+fak dispatch wave --help
+fak fleet-accounts wave --count <N> --work-kind codex --product codex --json
+fak fleet-accounts status --provider codex --json
+fak dispatch wave --count <N> --backend codex --work-kind codex --max-workers <C> `
+  --goal high-priority --workspace . --json
+```
+
+Choose `N` from the number of contract-ready issues, not the number of dirty paths. Choose `C` no
+higher than the collision-safe concurrency and independently observed host/account headroom. Read
+the dry-run receipt and require all of the following before launch:
+
+- selected issue IDs and bounded issue-derived worker fuel;
+- pairwise-safe lane/path leases, with overlaps moved to later waves;
+- distinct admitted account/session slots and a truthful shortfall;
+- guarded worker commands using the Codex backend;
+- implement -> test -> witness -> commit -> push ownership; and
+- typed refusal/downsize reasons for every candidate not started.
+
+A refusal is a recovery input, not permission to retry blindly. Apply the receipt's recovery action,
+re-price once state changes, and preserve the refusal in the run report.
+
+### Start sessions once
+
+For live-clear-out intent and a clean dry run, launch the exact plan once:
+
+```powershell
+fak dispatch wave --count <N> --backend codex --work-kind codex --max-workers <C> `
+  --goal high-priority --workspace . --live --json
+```
+
+Record the wave ID plus each issue, lane, account/session slot, PID, and run/log path. `--count` is
+the total requested session slots over refill time; `--max-workers` is the concurrent process
+ceiling. Do not rerun the launcher to top up. Let the native refill controller use newly available
+capacity; use `fak dispatch auto` only when the installed `/fleet-wave` contract directs it.
+
+### Monitor and harvest
+
+Monitor from outside worker-owned trees and judge progress by independently readable state:
+
+```powershell
+fak dispatch status --runs-dir <RUNS_DIR> --json
+fak dispatch progress --target <N> --json
+fak dispatch closure-audit --workspace . --json
+```
+
+Follow `/fleet-wave` for liveness and account recovery and `/wave-harvest` for reconciliation.
+`SHIPPED` requires git/read-back, focused green acceptance evidence, issue state, and DOS/commit
+witnesses; a process exit, worker log, or final message is insufficient. Release leases and account
+slots after reconciliation, then run another census. Start a later collision wave only from the
+new state and only while live-clear-out intent remains in force.
 ## 7. Exit with a residual proof
 
 Repeat the read-only census and reconcile every original unit plus any newly observed path. Report:
