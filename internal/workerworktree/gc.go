@@ -116,6 +116,36 @@ func OwnerStampPath(wtPath string) string {
 	return filepath.Join(filepath.Dir(clean), ownerStateDir, filepath.Base(clean)+ownerStampExt)
 }
 
+// OwnerProcessLive reports whether the stamped worker process is still alive.
+// The second result is false when the path is not a stamped worker worktree or
+// liveness cannot be established, so generic janitors fail toward keeping it.
+func OwnerProcessLive(wtPath string, processAlive ProcessLiveFn) (bool, bool) {
+	if !IsWorkerWorktree(wtPath) || processAlive == nil {
+		return false, false
+	}
+	stamp, err := readOwnerStamp(wtPath)
+	if err != nil || stamp.PID <= 0 {
+		return false, false
+	}
+	return processAlive(stamp.PID), true
+}
+
+// HandoffOwner replaces the transient preparing process with the stable spawned
+// worker PID. Reapers read this sidecar, so the update must complete before the
+// launcher exposes a successful spawn receipt.
+func HandoffOwner(wtPath string, pid int) error {
+	if pid <= 0 {
+		return fmt.Errorf("worker owner pid must be positive")
+	}
+	stamp, err := readOwnerStamp(wtPath)
+	if err != nil {
+		return fmt.Errorf("read owner stamp: %w", err)
+	}
+	stamp.PID = pid
+	stamp.CreatedAt = time.Now().UTC()
+	return writeOwnerStamp(wtPath, stamp)
+}
+
 func defaultOwnerStamp(lane string) OwnerStamp {
 	leaseID := strings.TrimSpace(os.Getenv("FAK_LEASE_ID"))
 	if leaseID == "" {

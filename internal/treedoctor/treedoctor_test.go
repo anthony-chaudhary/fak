@@ -2,6 +2,7 @@ package treedoctor
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 // fakeGit answers git invocations from a keyed reply table and records every argv. ancestor
@@ -362,5 +365,37 @@ func TestSweepDryRunKeepsLockResidue(t *testing.T) {
 	}
 	if joined := strings.Join(actions, "\n"); !strings.Contains(joined, "would sweep orphan lock residue") {
 		t.Fatalf("dry-run did not plan a sweep: %v", actions)
+	}
+}
+
+func TestDiagnoseKeepsStaleWorkerWorktreeWithLiveOwner(t *testing.T) {
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	root := t.TempDir()
+	wt := filepath.Join(filepath.Dir(root), workerworktree.WorktreeMarker+"-live-owner")
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := now.Add(-2 * DefaultLiveWindow)
+	if err := os.Chtimes(wt, old, old); err != nil {
+		t.Fatal(err)
+	}
+	stamp := workerworktree.OwnerStamp{Schema: "fak-worker-worktree-owner/1", PID: 222, LeaseID: "lease", CreatedAt: old}
+	raw, err := json.Marshal(stamp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(workerworktree.OwnerStampPath(wt)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workerworktree.OwnerStampPath(wt), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if live, known := workerworktree.OwnerProcessLive(wt, func(pid int) bool { return pid == 222 }); !known || !live {
+		t.Fatalf("owner stamp not readable: live=%v known=%v path=%s", live, known, workerworktree.OwnerStampPath(wt))
+	}
+	git := &fakeGit{listOut: listPorcelain([2]string{root, "abc"}, [2]string{wt, "abc"}), ancestor: map[string]bool{wt: true}, dirty: map[string]string{}}
+	report := Diagnose(context.Background(), git.run, Options{RepoRoot: root, Now: now, ProcessAlive: func(pid int) bool { return pid == 222 }})
+	if len(report.Worktrees) != 2 || !report.Worktrees[1].Live || report.Worktrees[1].Keep != "live (owner process)" || report.Worktrees[1].Prunable {
+		t.Fatalf("worker report = %+v, want live owner protection", report.Worktrees)
 	}
 }

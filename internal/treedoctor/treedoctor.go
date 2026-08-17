@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
+	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 // Runner runs a git command in dir and returns combined stdout/stderr, the exit code, and
@@ -67,6 +68,8 @@ type Options struct {
 	// diagnosis and the loose-ref pressure count. Its zero value is the production
 	// configuration (see reflocks.go).
 	RefLock RefLockOptions
+	// ProcessAlive protects owner-stamped worker worktrees across launcher PID handoff.
+	ProcessAlive func(int) bool
 	// LocksOnly narrows Diagnose/Sweep to the LOCK half: the commit lock, the renamed-aside
 	// lock residue, and the ref locks. The worktree classification and the untracked-WIP
 	// inventory are skipped entirely — so Sweep's `git worktree remove` loop has nothing to
@@ -233,7 +236,7 @@ func Diagnose(ctx context.Context, run Runner, opts Options) Report {
 		// keeps Sweep's prune loop from having anything to remove (see Options.LocksOnly).
 		return rep
 	}
-	rep.Worktrees = diagnoseWorktrees(ctx, run, opts.RepoRoot, trunk, window, now)
+	rep.Worktrees = diagnoseWorktrees(ctx, run, opts.RepoRoot, trunk, window, now, opts.ProcessAlive)
 	rep.WIP = diagnoseWIP(ctx, run, opts.RepoRoot, window, now, opts.WIP)
 	return rep
 }
@@ -421,7 +424,7 @@ func diagnoseLockResidue(repoRoot string, threshold time.Duration, now time.Time
 	return out
 }
 
-func diagnoseWorktrees(ctx context.Context, run Runner, repoRoot, trunk string, window time.Duration, now time.Time) []WorktreeState {
+func diagnoseWorktrees(ctx context.Context, run Runner, repoRoot, trunk string, window time.Duration, now time.Time, processAlive func(int) bool) []WorktreeState {
 	out, _, err := run(ctx, repoRoot, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil
@@ -445,16 +448,22 @@ func diagnoseWorktrees(ctx context.Context, run Runner, repoRoot, trunk string, 
 		if porc, _, derr := run(ctx, wt.path, "status", "--porcelain"); derr == nil {
 			s.DirtyN = countLines(porc)
 		}
-		// Live? touched recently => an active session, never prune.
+		// Live? a recent touch or a live stamped owner means an active session.
 		if recentlyTouched(wt.path, window, now) {
 			s.Live = true
+		}
+		if ownerLive, known := workerworktree.OwnerProcessLive(wt.path, processAlive); known && ownerLive {
+			s.Live = true
+			s.Keep = "live (owner process)"
 		}
 		switch {
 		case s.Live:
 			// Touched within the window => an active session (or a live worker),
 			// never pruned even if merged/marker. Checked first so a live worker
 			// worktree is kept exactly like any other live tree.
-			s.Keep = "live (touched within window)"
+			if s.Keep == "" {
+				s.Keep = "live (touched within window)"
+			}
 		case s.IsWorker:
 			// A fak-worker-wt-* worktree is throwaway editing space, but a crashed
 			// worker can leave its only useful diff here. Mark dirty trees for an

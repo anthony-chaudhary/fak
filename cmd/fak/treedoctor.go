@@ -117,7 +117,7 @@ func cmdTreeDoctor(argv []string) {
 		// whole-package compile is not free — the age/owner inventory works without it.
 		wopts.BuildProbe = goBuildProber(repoRoot)
 	}
-	opts := treedoctor.Options{RepoRoot: repoRoot, Trunk: *trunk, WIP: wopts}
+	opts := treedoctor.Options{RepoRoot: repoRoot, Trunk: *trunk, WIP: wopts, ProcessAlive: dispatchPIDAlive}
 	rep, actions := treedoctor.Sweep(context.Background(), gitRunner, opts, *apply)
 	if *asJSON {
 		jsonRep := rep

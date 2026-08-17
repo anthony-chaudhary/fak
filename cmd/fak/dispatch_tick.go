@@ -857,6 +857,16 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		spawned.Startup = writeDispatchStartupBundleSidecar(spawned.Log, bundle)
 	}
 	payload["spawned"] = dispatchSpawnMap(spawned)
+	if err := handoffDispatchWorktreeOwner(payload, spawned.PID); err != nil {
+		payload["ok"] = false
+		payload["action"] = "worktree_owner_handoff_failed"
+		payload["verdict"] = "WORKTREE_OWNER_HANDOFF_FAILED"
+		payload["reason"] = err.Error()
+		payload["pid"] = spawned.PID
+		releaseAbandonedLaneLease(root, lease, payload)
+		recordDispatchPayload(runsDir, opts.Backend, payload)
+		return finish(payload), nil
+	}
 	// Layer 5b: record the pinned model as a .model sidecar so the witness sweep can scrape
 	// it back into WitnessRecord.Model (and Layer-2 downgrade can read what the slot ran on).
 	// Written only when the model was un-blanked — a seat-default worker leaves no sidecar.
@@ -896,6 +906,18 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	payload["reason"] = fmt.Sprintf("spawned %s issue-resolution worker pid %d on #%d (lane %q) under %q", opts.Backend, spawned.PID, target, pick.Lane, account.Tag)
 	recordDispatchPayload(runsDir, opts.Backend, payload)
 	return finish(payload), nil
+}
+
+func handoffDispatchWorktreeOwner(payload map[string]any, pid int) error {
+	workerPath, ok := payload["worker_worktree"].(string)
+	if !ok || strings.TrimSpace(workerPath) == "" {
+		return nil
+	}
+	if err := workerworktree.HandoffOwner(workerPath, pid); err != nil {
+		return err
+	}
+	payload["worker_owner_pid"] = pid
+	return nil
 }
 
 var dispatchRunJSON = dispatchRunPythonJSON
