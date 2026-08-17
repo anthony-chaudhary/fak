@@ -96,7 +96,7 @@ func keepSuperloopAlive(root string, decision superloop.DriveDecision) (superloo
 	queue := firstRepairQueue(r.RepairQueues)
 	switch queue.Kind {
 	case "dispatch":
-		return residualDriveDecision(decision, "actionable-issue-backlog", "go run ./cmd/fak dispatch sweep",
+		return residualDriveDecision(decision, "actionable-issue-backlog", "go run ./cmd/fak dispatch sweep --live",
 			fmt.Sprintf("repository still has %d actionable issue(s); dispatch the next routed leaf", queue.Count)), r
 	case "human":
 		decision.Satisfied = false
@@ -178,7 +178,7 @@ func issueRepairCommand(queue dispatchtick.RouterRepairQueue) string {
 	case "split":
 		return "go run ./cmd/fak-dev issue decompose --json"
 	case "scope", "noise", "private", "other":
-		return "go run ./cmd/fak-dev issue repair --json"
+		return "go run ./cmd/fak-dev issue repair --live --json"
 	case "route", "decide", "duplicate":
 		return "go run ./cmd/fak dispatch route --json"
 	default:

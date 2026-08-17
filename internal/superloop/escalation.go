@@ -13,15 +13,15 @@ type NoProgressStage struct {
 func EscalateNoProgress(streak int) NoProgressStage {
 	switch {
 	case streak <= 0:
-		return NoProgressStage{Name: "dispatch", Command: "go run ./cmd/fak dispatch sweep", Reason: "fresh or reset cycle: dispatch actionable work"}
+		return NoProgressStage{Name: "dispatch", Command: "go run ./cmd/fak dispatch sweep --live", Reason: "fresh or reset cycle: dispatch actionable work"}
 	case streak == 1:
-		return NoProgressStage{Name: "retry", Command: "go run ./cmd/fak dispatch sweep", Reason: "one zero-yield cycle: retry after transient capacity or lease movement"}
+		return NoProgressStage{Name: "retry", Command: "go run ./cmd/fak dispatch sweep --live", Reason: "one zero-yield cycle: retry after transient capacity or lease movement"}
 	case streak == 2:
-		return NoProgressStage{Name: "replan", Command: "dos replan --workspace . --json", Reason: "two zero-yield cycles: refresh the plan portfolio from evidence"}
+		return NoProgressStage{Name: "replan", Command: "dos plan --workspace . --once --json", Reason: "two zero-yield cycles: refresh the canonical plan portfolio from evidence"}
 	case streak == 3:
-		return NoProgressStage{Name: "unblock", Command: "dos promote --workspace . --json", Reason: "three zero-yield cycles: surface typed holds and safe unblock moves"}
+		return NoProgressStage{Name: "unblock", Command: "go run ./cmd/fak-dev issue repair --live --json", Reason: "three zero-yield cycles: apply canonical safe issue-contract repairs"}
 	case streak == 4:
-		return NoProgressStage{Name: "unstick", Command: "dos unstick --workspace . --json", Reason: "four zero-yield cycles: cluster the recurring wedge and propose a structural fix"}
+		return NoProgressStage{Name: "unstick", Command: "go run ./cmd/fak stale-work loop --live-issues --live-launch --json", Reason: "four zero-yield cycles: recover stale work through the guarded issue and launch path"}
 	default:
 		return NoProgressStage{Name: "operator-decision", Command: "dos decisions --workspace . --json", Reason: "recovery ladder exhausted: route a bounded decision instead of spinning or declaring drain"}
 	}

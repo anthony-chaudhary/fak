@@ -84,7 +84,7 @@ func TestKeepSuperloopAliveDispatchesActionableIssues(t *testing.T) {
 	if got.Satisfied || !got.Enter || got.Member.Ref != "actionable-issue-backlog" {
 		t.Fatalf("decision = %#v, want an unsatisfied entered dispatch member", got)
 	}
-	if got.Action != "go run ./cmd/fak dispatch sweep" || residual.NextQueue != "dispatch" {
+	if got.Action != "go run ./cmd/fak dispatch sweep --live" || residual.NextQueue != "dispatch" {
 		t.Fatalf("decision = %#v residual = %#v", got, residual)
 	}
 }
@@ -99,7 +99,7 @@ func TestKeepSuperloopAliveRepairsHeldBacklogInsteadOfSpinningDispatch(t *testin
 	if got.Satisfied || !got.Enter || got.Member.Ref != "issue-backlog-scope" {
 		t.Fatalf("decision = %#v, want scope repair", got)
 	}
-	if got.Action != "go run ./cmd/fak-dev issue repair --json" || residual.NextQueue != "scope" {
+	if got.Action != "go run ./cmd/fak-dev issue repair --live --json" || residual.NextQueue != "scope" {
 		t.Fatalf("decision = %#v residual = %#v", got, residual)
 	}
 }

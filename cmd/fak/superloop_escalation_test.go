@@ -46,3 +46,26 @@ func TestApplySuperloopNoProgressEscalationClimbsAndCaps(t *testing.T) {
 		}
 	}
 }
+
+func TestEscalationCommandsUseExecutableFrontDoors(t *testing.T) {
+	want := map[int]string{
+		0: "go run ./cmd/fak dispatch sweep --live",
+		1: "go run ./cmd/fak dispatch sweep --live",
+		2: "dos plan --workspace . --once --json",
+		3: "go run ./cmd/fak-dev issue repair --live --json",
+		4: "go run ./cmd/fak stale-work loop --live-issues --live-launch --json",
+		5: "dos decisions --workspace . --json",
+	}
+	for streak, command := range want {
+		if got := superloop.EscalateNoProgress(streak).Command; got != command {
+			t.Errorf("streak %d command = %q, want %q", streak, got, command)
+		}
+	}
+}
+
+func TestNoProgressStreakMatchesDriveLedgerLoopID(t *testing.T) {
+	events := []loopmgr.Event{{LoopID: "superloop-night", Kind: loopmgr.EventEnd, Status: loopmgr.StatusFailed}}
+	if got := superloopNoProgressStreak(events, "night"); got != 1 {
+		t.Fatalf("streak = %d, want drive ledger event to count", got)
+	}
+}

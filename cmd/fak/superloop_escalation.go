@@ -35,7 +35,7 @@ func superloopNoProgressStreak(events []loopmgr.Event, intent string) int {
 	streak := 0
 	for i := len(events) - 1; i >= 0; i-- {
 		ev := events[i]
-		if ev.LoopID != intent || ev.Kind != loopmgr.EventEnd {
+		if !superloopEventMatchesIntent(ev, intent) || ev.Kind != loopmgr.EventEnd {
 			continue
 		}
 		if superloopEventProgressed(ev) {
@@ -46,6 +46,10 @@ func superloopNoProgressStreak(events []loopmgr.Event, intent string) int {
 		}
 	}
 	return streak
+}
+
+func superloopEventMatchesIntent(ev loopmgr.Event, intent string) bool {
+	return ev.LoopID == intent || ev.LoopID == "superloop-"+intent
 }
 
 func superloopEventProgressed(ev loopmgr.Event) bool {

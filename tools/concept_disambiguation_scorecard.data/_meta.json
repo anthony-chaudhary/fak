@@ -9839,6 +9839,11 @@
           "category": "incidental",
           "reason": "private witness predicate for reset-on-progress; not a loop concept",
           "token": "superloopEventProgressed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private adapter matching the established superloop drive ledger key; not a new loop concept.",
+          "token": "superloopeventmatchesintent"
         }
       ],
       "id": "loop",
@@ -9915,6 +9920,7 @@
         "superloopResidualCommand",
         "superloopResidualRouter",
         "superloop_fleet",
+        "superloopeventmatchesintent",
         "tuiloopreport"
       ],
       "min_files": 3,
