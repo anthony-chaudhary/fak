@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -50,6 +51,17 @@ func TestCodexContinuationHookInstallPreservesAndIsIdempotent(t *testing.T) {
 	}
 	if bytes.Contains(second, []byte("statusMessage")) {
 		t.Fatalf("continuation hook leaked a per-turn status line: %s", raw)
+	}
+}
+
+func TestCodexContinuationHookWindowsCommandUsesPowerShellSyntax(t *testing.T) {
+	if strings.Contains(codexContinuationHookCommandWindows, "if /i") || strings.Contains(codexContinuationHookCommandWindows, "|| exit /b") {
+		t.Fatalf("Windows command uses cmd.exe syntax: %s", codexContinuationHookCommandWindows)
+	}
+	for _, want := range []string{"$env:" + codexRawRecoveryEnv, "2>$null", "exit 0"} {
+		if !strings.Contains(codexContinuationHookCommandWindows, want) {
+			t.Fatalf("Windows command missing %q: %s", want, codexContinuationHookCommandWindows)
+		}
 	}
 }
 
