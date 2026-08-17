@@ -1773,7 +1773,7 @@ func TestDispatchWaveDryRunAllocatesAccountsAndPlansFirstTick(t *testing.T) {
 	t.Setenv("FLEET_DOGFOOD_GUARD", "0")
 	root := t.TempDir()
 
-	out, errb, code := runDispatchAt("wave", "--workspace", root, "--count", "2", "--no-loop-ledger", "--json")
+	out, errb, code := runDispatchAt("wave", "--workspace", root, "--backend", "claude", "--fresh-start-cap", "2", "--count", "2", "--no-loop-ledger", "--json")
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
 	}
@@ -1834,7 +1834,7 @@ func TestDispatchWaveDryRunHoldStopReasonDoesNotInviteLive(t *testing.T) {
 	t.Cleanup(func() { dispatchRouteIssues = oldRoute })
 	root := t.TempDir()
 
-	out, errb, code := runDispatchAt("wave", "--workspace", root, "--count", "1", "--no-loop-ledger", "--json")
+	out, errb, code := runDispatchAt("wave", "--workspace", root, "--backend", "claude", "--count", "1", "--no-loop-ledger", "--json")
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 for a typed dry-run hold (stderr: %s)", code, errb)
 	}
@@ -1874,7 +1874,7 @@ func TestDispatchWaveDryRunUsesReadySubsetAfterMixedPrelaunchAudit(t *testing.T)
 	t.Cleanup(func() { dispatchRouteIssues = oldRoute })
 	root := t.TempDir()
 
-	out, errb, code := runDispatchAt("wave", "--workspace", root, "--count", "2", "--no-loop-ledger", "--json")
+	out, errb, code := runDispatchAt("wave", "--workspace", root, "--backend", "claude", "--fresh-start-cap", "2", "--count", "2", "--no-loop-ledger", "--json")
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 for a mixed ready/held dry-run (stderr: %s)\n%s", code, errb, out)
 	}
