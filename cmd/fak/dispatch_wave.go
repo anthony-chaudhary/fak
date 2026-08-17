@@ -869,8 +869,9 @@ func dispatchWaveDependency[T any](timeout time.Duration, name string, run func(
 }
 
 func dispatchWaveRouteIssuesBounded(root string, stderr io.Writer, timeout time.Duration) (dispatchtick.RouterPayload, error) {
+	routeIssues := dispatchRouteIssues
 	return dispatchWaveDependency(timeout, "issue-contract discovery", func() (dispatchtick.RouterPayload, error) {
-		return dispatchRouteIssues(root, stderr)
+		return routeIssues(root, stderr)
 	})
 }
 

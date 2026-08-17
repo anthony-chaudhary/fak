@@ -10,6 +10,9 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
 
+// The route seam is deliberately restored as soon as the bounded call returns. A timed-out
+// worker may still be unwinding, so the production wrapper must snapshot the seam before
+// launch rather than reread this package global after the timeout (race witness for #6860).
 func TestDispatchWaveRouteIssuesBoundedReturnsTypedTimeout(t *testing.T) {
 	old := dispatchRouteIssues
 	t.Cleanup(func() { dispatchRouteIssues = old })
