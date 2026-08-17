@@ -181,11 +181,10 @@ func adjudicate(c Capability) Capability {
 			gap = p.rung
 		}
 	}
-	// A ladder-skip is the ONE honest inversion: fak relies on this capability (it
-	// is dogfooded, a default surface, or measured) yet it has NO tests. Appearing
-	// more depended-upon than it is QA'd is the maturity overclaim this refuses.
-	// Mere immaturity (a complete v1 sitting at `prototyped`) is never a skip.
-	c.Skip = !c.HasTests && (c.Dogfooded || c.DefaultSurface || c.Benchmarked)
+	// A ladder-skip is any higher-rung claim sitting above a missing prerequisite.
+	// This catches both an exercised/default capability without tests and a documented
+	// default with no runtime proof. Mere immaturity has no higher claim and is not a skip.
+	c.Skip = c.TopEvidence > c.Rung
 
 	switch {
 	case gap >= 0:
@@ -213,7 +212,7 @@ func nextWorkFor(c Capability, gap Rung) *NextWork {
 		nw.Title = "test " + c.Lane + ": add unit tests covering " + c.Dir
 		nw.Witness = "a *_test.go in " + c.Dir + " (go test ./" + c.Dir + "/... passes)"
 	case RungDogfooded:
-		nw.Title = "dogfood " + c.Lane + ": wire it onto the running binary's path so fak itself runs it"
+		nw.Title = "dogfood " + c.Lane + ": exercise a real runtime path and record its passing command"
 		nw.Witness = "a passing runtime command recorded for " + c.Lane + " in internal/maturity/runtime-proofs.json"
 	case RungDefault:
 		nw.Title = "default " + c.Lane + ": promote it to a documented default surface (a fak verb)"
@@ -223,7 +222,7 @@ func nextWorkFor(c Capability, gap Rung) *NextWork {
 		nw.Witness = "a func Benchmark* in " + c.Dir + " or a BENCHMARK-AUTHORITY.md row naming " + c.Lane
 	}
 	if c.Skip {
-		nw.Title += " (LADDER-SKIP: fak relies on " + c.Lane + " but it has no tests)"
+		nw.Title += " (LADDER-SKIP: higher-rung evidence exists above this missing prerequisite)"
 	}
 	return nw
 }
@@ -280,7 +279,7 @@ func Build(opts Options) ScorecardPayload {
 	caps := factsFn(root)
 	witnessFn := opts.Witnesses
 	if witnessFn == nil {
-		witnessFn = verifyRuntimeProofes
+		witnessFn = verifyRuntimeProofs
 	}
 	witnesses, proofLoadErr := witnessFn(root)
 	for i := range caps {

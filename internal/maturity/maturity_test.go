@@ -173,9 +173,9 @@ func TestIssueItemsRenderRoutableStableMaturityIssues(t *testing.T) {
 	p := Build(Options{Root: "/synthetic", facts: func(string) []Capability {
 		return []Capability{
 			{Lane: "alpha", Dir: "internal/alpha", HasCode: true},
-			{Lane: "bravo", Dir: "internal/bravo", HasCode: true, HasTests: true, Dogfooded: true, DefaultSurface: true},
+			{Lane: "bravo", Dir: "internal/bravo", HasCode: true, HasTests: true},
 		}
-	}})
+	}, Witnesses: func(string) (map[string]RuntimeProof, error) { return map[string]RuntimeProof{}, nil }})
 	items := IssueItems(p, 1, []string{"maturity"})
 	if len(items) != 1 {
 		t.Fatalf("items len = %d, want 1", len(items))
@@ -315,31 +315,53 @@ func TestBuildRuntimeWitnessPromotesDogfooding(t *testing.T) {
 	}
 }
 
-func TestLoadRuntimeProofesRejectsDuplicateAndVerifyRejectsFailure(t *testing.T) {
+func TestLoadRuntimeProofsRejectsDuplicateAndVerifyRejectsFailure(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "internal", "maturity")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	data := `{"schema":"fak-maturity-runtime-proofs/1","witnesses":[{"lane":"x","command":"go version"},{"lane":"x","command":"go env"}]}`
+	data := `{"schema":"fak-maturity-runtime-proofs/1","witnesses":[{"lane":"x","command":"fak version"},{"lane":"x","command":"fak env"}]}`
 	if err := os.WriteFile(filepath.Join(dir, "runtime-proofs.json"), []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadRuntimeProofes(root); err == nil || !strings.Contains(err.Error(), "duplicate") {
+	if _, err := loadRuntimeProofs(root); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("err=%v", err)
 	}
-	data = `{"schema":"fak-maturity-runtime-proofs/1","witnesses":[{"lane":"x","command":"go definitely-not-a-command"}]}`
+	data = `{"schema":"fak-maturity-runtime-proofs/1","witnesses":[{"lane":"x","command":"fak definitely-not-a-command"}]}`
 	if err := os.WriteFile(filepath.Join(dir, "runtime-proofs.json"), []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyRuntimeProofes(root); err == nil || !strings.Contains(err.Error(), "x failed") {
+	if err := VerifyRuntimeProofs(root); err == nil || !strings.Contains(err.Error(), "x failed") {
 		t.Fatalf("err=%v", err)
 	}
 }
 
 func TestRealRuntimeWitnessRegistryPasses(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", ".."))
-	if err := VerifyRuntimeProofes(root); err != nil {
+	if err := VerifyRuntimeProofs(root); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLoadRuntimeProofsRejectsTestAsDogfooding(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "internal", "maturity")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := `{"schema":"fak-maturity-runtime-proofs/1","witnesses":[{"lane":"x","command":"go test ./internal/x"}]}`
+	if err := os.WriteFile(filepath.Join(dir, "runtime-proofs.json"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadRuntimeProofs(root); err == nil || !strings.Contains(err.Error(), "test evidence") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestDocumentedDefaultWithoutRuntimeProofIsLadderSkip(t *testing.T) {
+	got := adjudicate(Capability{Lane: "x", Dir: "internal/x", HasCode: true, HasTests: true, Integrated: true, DefaultSurface: true})
+	if got.Rung != RungTested || got.TopEvidence != RungDefault || !got.Skip || got.Next == nil || got.Next.Gap != RungDogfooded {
+		t.Fatalf("got=%+v", got)
 	}
 }

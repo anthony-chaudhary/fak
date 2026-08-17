@@ -23,7 +23,7 @@ type runtimeProofFile struct {
 	Witnesses []RuntimeProof `json:"witnesses"`
 }
 
-func loadRuntimeProofes(root string) (map[string]RuntimeProof, error) {
+func loadRuntimeProofs(root string) (map[string]RuntimeProof, error) {
 	path := filepath.Join(root, "internal", "maturity", "runtime-proofs.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -43,6 +43,9 @@ func loadRuntimeProofes(root string) (map[string]RuntimeProof, error) {
 		if witness.Lane == "" || witness.Command == "" {
 			return nil, fmt.Errorf("runtime witness requires lane and command")
 		}
+		if err := validateRuntimeCommand(witness.Command); err != nil {
+			return nil, fmt.Errorf("runtime proof for %s: %w", witness.Lane, err)
+		}
 		if _, exists := witnesses[witness.Lane]; exists {
 			return nil, fmt.Errorf("duplicate runtime witness for %s", witness.Lane)
 		}
@@ -51,27 +54,44 @@ func loadRuntimeProofes(root string) (map[string]RuntimeProof, error) {
 	return witnesses, nil
 }
 
-func verifyRuntimeProofes(root string) (map[string]RuntimeProof, error) {
-	witnesses, err := loadRuntimeProofes(root)
+func validateRuntimeCommand(command string) error {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return fmt.Errorf("command is empty")
+	}
+	program := strings.ToLower(filepath.Base(fields[0]))
+	if program == "go" || program == "go.exe" {
+		return fmt.Errorf("go commands are build/test evidence, not dogfooding")
+	}
+	for _, field := range fields[1:] {
+		if field == "test" || strings.HasPrefix(field, "-test.") {
+			return fmt.Errorf("test commands are test evidence, not dogfooding")
+		}
+	}
+	return nil
+}
+
+func verifyRuntimeProofs(root string) (map[string]RuntimeProof, error) {
+	witnesses, err := loadRuntimeProofs(root)
 	if err != nil {
 		return nil, err
 	}
-	if err := runRuntimeProofes(root, witnesses); err != nil {
+	if err := runRuntimeProofs(root, witnesses); err != nil {
 		return nil, err
 	}
 	return witnesses, nil
 }
 
-// VerifyRuntimeProofes runs every declared witness in stable lane order.
-func VerifyRuntimeProofes(root string) error {
-	witnesses, err := loadRuntimeProofes(root)
+// VerifyRuntimeProofs runs every declared witness in stable lane order.
+func VerifyRuntimeProofs(root string) error {
+	witnesses, err := loadRuntimeProofs(root)
 	if err != nil {
 		return err
 	}
-	return runRuntimeProofes(root, witnesses)
+	return runRuntimeProofs(root, witnesses)
 }
 
-func runRuntimeProofes(root string, witnesses map[string]RuntimeProof) error {
+func runRuntimeProofs(root string, witnesses map[string]RuntimeProof) error {
 	lanes := make([]string, 0, len(witnesses))
 	for lane := range witnesses {
 		lanes = append(lanes, lane)
