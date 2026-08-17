@@ -51,11 +51,13 @@ func runToolproc(stdout, stderr io.Writer, argv []string) int {
 		return runToolprocRepeats(stdout, stderr, argv[1:])
 	case "hook":
 		return runToolprocHook(os.Stdin, stderr, argv[1:])
+	case "replay":
+		return runToolprocReplay(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		toolprocUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak toolproc: unknown subcommand %q (ps | leaks | console-faults | host-faults | sample | repeats | hook)\n", argv[0])
+		fmt.Fprintf(stderr, "fak toolproc: unknown subcommand %q (ps | leaks | console-faults | host-faults | sample | repeats | hook | replay)\n", argv[0])
 		toolprocUsage(stderr)
 		return 2
 	}
@@ -591,6 +593,7 @@ func toolprocUsage(w io.Writer) {
                        [--top N] [--poll-min-repeats N]
                        [--poll-max-median-spacing-ms N] [--fresh-ms N]
   fak toolproc hook (pre | post | stop) [--journal FILE]
+  fak toolproc replay --trace TRACE.jsonl [--json]
                     [--deadline-ms N] [--heartbeat-ms N] [--policy FILE]
 
 The adjudicator disposes a tool call at admission; the result floor disposes its
