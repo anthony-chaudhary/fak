@@ -41,6 +41,9 @@ func withDispatchJSONHelper(t *testing.T, fn func(root string, args ...string) (
 	t.Setenv("FAK_HOST_RAM_MB_PER_WORKER", strconv.Itoa(dispatchtick.HostRAMMBPerWorker))
 	t.Setenv("FAK_HOST_THREADS_PER_CORE", strconv.Itoa(dispatchtick.HostThreadsPerCore))
 	t.Setenv("FAK_HOST_THREADS_PER_WORKER", strconv.Itoa(dispatchtick.HostThreadsPerWorker))
+	oldWorkerLoad := dispatchWorkerLoad
+	dispatchWorkerLoad = &dispatchWorkerLoadSignal{}
+	t.Cleanup(func() { dispatchWorkerLoad = oldWorkerLoad })
 	old := dispatchRunJSON
 	oldExternal := dispatchRunExternalJSON
 	oldResources := dispatchProbeHostResources
