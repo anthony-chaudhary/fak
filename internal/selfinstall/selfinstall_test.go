@@ -556,3 +556,69 @@ func TestVersionOutputStamped(t *testing.T) {
 		}
 	}
 }
+
+func TestInstallVerifiedCopyCopiesExactBytesAndSwaps(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "verified-fak")
+	target := filepath.Join(dir, "hot-copy")
+	want := []byte("one gated artifact for every hot copy")
+	if err := os.WriteFile(source, want, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("stale"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var candidate string
+	res := InstallVerifiedCopy(func(tmp, dst string) error {
+		candidate = tmp
+		if dst != target {
+			t.Fatalf("swap target = %q, want %q", dst, target)
+		}
+		got, err := os.ReadFile(tmp)
+		if err != nil {
+			return err
+		}
+		if string(got) != string(want) {
+			t.Fatalf("candidate bytes = %q, want %q", got, want)
+		}
+		return os.Rename(tmp, dst)
+	}, source, target)
+	if !res.Installed || res.Stage != StageSwap {
+		t.Fatalf("result = %+v, want installed swap", res)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("installed bytes = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(candidate); !os.IsNotExist(err) {
+		t.Fatalf("candidate still exists after swap: %v", err)
+	}
+}
+
+func TestInstallVerifiedCopyLeavesTargetOnSwapFailure(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "verified-fak")
+	target := filepath.Join(dir, "hot-copy")
+	if err := os.WriteFile(source, []byte("verified"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("stale but usable"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	res := InstallVerifiedCopy(func(_, _ string) error { return os.ErrPermission }, source, target)
+	if res.Installed || res.Stage != StageSwap {
+		t.Fatalf("result = %+v, want failed swap", res)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "stale but usable" {
+		t.Fatalf("target changed after failed swap: %q", got)
+	}
+}

@@ -25,6 +25,7 @@ package selfinstall
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,6 +47,7 @@ type Stage string
 
 const (
 	StageBuild   Stage = "build"
+	StageCopy    Stage = "copy"
 	StageVet     Stage = "vet"
 	StageSmoke   Stage = "smoke"
 	StageSwap    Stage = "swap"
@@ -125,6 +127,50 @@ func Install(ctx context.Context, run Runner, swap Swapper, opts Options) Result
 		return Result{Stage: StageSwap, Detail: err.Error()}
 	}
 	return Result{Installed: true, Stage: StageSwap, Detail: "installed " + filepath.Base(opts.Target)}
+}
+
+// InstallVerifiedCopy installs an already-gated fak binary at another hot-copy path.
+// Self-update uses this after its first build/vet/smoke ladder succeeds, so converging N
+// host copies pays that expensive ladder once rather than rebuilding identical bytes N times.
+func InstallVerifiedCopy(swap Swapper, source, target string) Result {
+	if strings.TrimSpace(source) == "" || strings.TrimSpace(target) == "" {
+		return Result{Stage: StageCopy, Detail: "source and target are required"}
+	}
+
+	in, err := os.Open(source)
+	if err != nil {
+		return Result{Stage: StageCopy, Detail: "open verified source: " + err.Error()}
+	}
+	defer in.Close()
+
+	info, err := in.Stat()
+	if err != nil {
+		return Result{Stage: StageCopy, Detail: "stat verified source: " + err.Error()}
+	}
+	tmp := fmt.Sprintf("%s.new.%d", target, os.Getpid())
+	_ = os.Remove(tmp)
+	out, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
+	if err != nil {
+		return Result{Stage: StageCopy, Detail: "create candidate copy: " + err.Error()}
+	}
+	_, copyErr := io.Copy(out, in)
+	if copyErr == nil {
+		copyErr = out.Sync()
+	}
+	closeErr := out.Close()
+	if copyErr == nil {
+		copyErr = closeErr
+	}
+	if copyErr != nil {
+		_ = os.Remove(tmp)
+		return Result{Stage: StageCopy, Detail: "copy verified candidate: " + copyErr.Error()}
+	}
+	defer os.Remove(tmp)
+
+	if err := swap(tmp, target); err != nil {
+		return Result{Stage: StageSwap, Detail: err.Error()}
+	}
+	return Result{Installed: true, Stage: StageSwap, Detail: "installed " + filepath.Base(target) + " from verified candidate"}
 }
 
 // PrepareOrigin checks out a PRISTINE detached copy of a ref (e.g. "origin/main") into a

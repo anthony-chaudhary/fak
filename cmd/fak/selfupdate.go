@@ -250,10 +250,10 @@ func cmdSelfUpdate(argv []string) {
 			continue // provably already on origin/main
 		}
 		fmt.Printf("self-update: hot copy %s is not converged by anything else — converging it too …\n", sib)
-		sres := selfinstall.Install(ctx, selfinstall.RealRunner, selfinstall.OSSwap, selfinstall.Options{
-			RepoRoot: buildDir,
-			Target:   sib,
-		})
+		// The primary target above is already the exact gated origin/main artifact. Copy those
+		// verified bytes instead of repeating build/vet/smoke for every host role; on a four-copy
+		// host this removes three cache-warm Go builds from every successful update.
+		sres := selfinstall.InstallVerifiedCopy(selfinstall.OSSwap, installTarget, sib)
 		fmt.Println("self-update: hot copy " + filepath.Base(sib) + " — " + selfinstall.FormatResult(sres))
 		if !sres.Installed {
 			stragglers = append(stragglers, sib+" ("+string(sres.Stage)+": "+sres.Detail+")")
