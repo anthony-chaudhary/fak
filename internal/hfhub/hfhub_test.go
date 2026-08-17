@@ -129,6 +129,27 @@ func TestDownloadVerifiesAndCaches(t *testing.T) {
 	}
 }
 
+func TestDownloadRefusesCorruptedVerifiedCache(t *testing.T) {
+	body := []byte("verified weights")
+	stub := &hubStub{body: body, etag: `"` + sha256hex(body) + `"`}
+	srv := httptest.NewServer(stub.handler())
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), CacheDir: t.TempDir()}
+	ref := Ref{Repo: "owner/repo", Revision: "pinned", File: "model.safetensors"}
+	path, err := c.Download(context.Background(), ref, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("corrupted cache"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.Download(context.Background(), ref, nil)
+	if err == nil || !strings.Contains(err.Error(), "cached sha256 mismatch") {
+		t.Fatalf("error = %v, want cached sha256 mismatch", err)
+	}
+}
+
 func TestDownloadSHA256Mismatch(t *testing.T) {
 	body := []byte("real bytes")
 	wrong := sha256hex([]byte("different bytes"))
@@ -324,6 +345,9 @@ func TestFetchURIShardedSafetensorsFansOut(t *testing.T) {
 		`"model.layers.1.weight":"model-00001-of-00002.safetensors",` +
 		`"model.layers.2.weight":"model-00002-of-00002.safetensors"}}`)
 	files := map[string][]byte{
+		"config.json":                      []byte(`{"model_type":"test"}`),
+		"tokenizer.json":                   []byte(`{"model":{"type":"BPE"}}`),
+		"tokenizer_config.json":            []byte(`{"chat_template":"test"}`),
 		"model.safetensors.index.json":     indexJSON,
 		"model-00001-of-00002.safetensors": shard1,
 		"model-00002-of-00002.safetensors": shard2,

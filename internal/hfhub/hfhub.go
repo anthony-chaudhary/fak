@@ -309,12 +309,21 @@ func (c *Client) CachePath(r Ref) string {
 // non-nil, receives human-readable status lines.
 func (c *Client) Download(ctx context.Context, r Ref, progress io.Writer) (string, error) {
 	dst := c.CachePath(r)
+	resolveURL := r.ResolveURL(c.base())
+	want := c.linkedSHA(ctx, resolveURL) // best-effort; "" when the Hub stamps none
 	if fi, err := os.Stat(dst); err == nil && fi.Size() > 0 {
+		if want != "" {
+			got, err := fileSHA256(dst)
+			if err != nil {
+				return "", fmt.Errorf("hfhub: verify cached %s: %w", r.File, err)
+			}
+			if !strings.EqualFold(want, got) {
+				return "", fmt.Errorf("hfhub: cached sha256 mismatch for %s: hub oid %s, got %s", r.File, want, got)
+			}
+		}
 		logf(progress, "cache hit: %s", dst)
 		return dst, nil
 	}
-	resolveURL := r.ResolveURL(c.base())
-	want := c.linkedSHA(ctx, resolveURL) // best-effort; "" when the Hub stamps none
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, resolveURL, nil)
 	if err != nil {
@@ -364,6 +373,19 @@ func (c *Client) Download(ctx context.Context, r Ref, progress io.Writer) (strin
 		logf(progress, "downloaded %d bytes (no hub oid to verify): %s", n, dst)
 	}
 	return dst, nil
+}
+
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // linkedSHA does a best-effort HEAD to read the Hub's LFS sha256 (X-Linked-Etag)
@@ -477,6 +499,15 @@ func (c *Client) downloadSharded(ctx context.Context, idx Ref, progress io.Write
 		shardRef := Ref{Repo: idx.Repo, Revision: idx.Revision, File: path.Join(dir, shard)}
 		if _, err := c.Download(ctx, shardRef, progress); err != nil {
 			return "", err
+		}
+	}
+	// A sharded checkpoint is not loadable without its architecture config. Fetch it into
+	// the same cache directory so the returned path is a complete loader input rather than
+	// a bag of weight shards whose axes callers would have to guess.
+	for _, required := range []string{"config.json", "tokenizer.json", "tokenizer_config.json"} {
+		artifact := Ref{Repo: idx.Repo, Revision: idx.Revision, File: path.Join(dir, required)}
+		if _, err := c.Download(ctx, artifact, progress); err != nil {
+			return "", fmt.Errorf("hfhub: sharded model %s: %w", required, err)
 		}
 	}
 	localDir := filepath.Dir(idxPath)

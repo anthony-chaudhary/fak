@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
@@ -22,6 +25,24 @@ type serveBackendForwardPreflight struct {
 type serveGGUFHeaderOpener func(string) (*ggufload.WeightSource, error)
 
 func preflightServeBackendForward(path string, be compute.Backend) (serveBackendForwardPreflight, error) {
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		raw, err := os.ReadFile(filepath.Join(path, "config.json"))
+		if err != nil {
+			return serveBackendForwardPreflight{}, err
+		}
+		var cfg fakmodel.Config
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			return serveBackendForwardPreflight{}, fmt.Errorf("safetensors config: %w", err)
+		}
+		if err := fakmodel.ValidateBackendForwardConfig(cfg, be); err != nil {
+			return serveBackendForwardPreflight{}, err
+		}
+		if be == nil || !cfg.IsQwen35Hybrid() {
+			return serveBackendForwardPreflight{}, nil
+		}
+		gdn := be.(fakmodel.Qwen35GDNBackend)
+		return serveBackendForwardPreflight{Backend: be.Name(), Forward: fakmodel.ForwardQwen35GDN, Path: gdn.Qwen35GDNPath()}, nil
+	}
 	return preflightServeBackendForwardWith(path, be, ggufload.OpenWeights)
 }
 
@@ -49,6 +70,7 @@ func preflightServeBackendForwardWith(
 	if closeErr != nil {
 		return serveBackendForwardPreflight{}, fmt.Errorf("gguf: close header-only weight source: %w", closeErr)
 	}
+
 	if err := fakmodel.ValidateBackendForwardConfig(cfg, be); err != nil {
 		return serveBackendForwardPreflight{}, err
 	}

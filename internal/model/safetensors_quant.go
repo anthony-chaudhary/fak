@@ -123,6 +123,43 @@ func loadSafetensorsQuantFile(path string, cfg Config, open safetensorsFileOpene
 	return m, nil
 }
 
+// LoadSafetensorsQuantConfigDir reads config.json and loads the colocated sharded
+// safetensors checkpoint into the memory-bounded Q8 runtime representation. Keeping config
+// and weights in one directory is the Hugging Face artifact contract; callers must not
+// synthesize architecture axes independently of the pinned checkpoint.
+func LoadSafetensorsQuantConfigDir(dir string, opts ...LoadOption) (*Model, error) {
+	configPath := filepath.Join(dir, "config.json")
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("safetensors: read config %s: %w", configPath, err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return nil, fmt.Errorf("safetensors: parse config %s: %w", configPath, err)
+	}
+	if cfg.ModelType == "" || cfg.HiddenSize <= 0 || cfg.NumLayers <= 0 {
+		return nil, fmt.Errorf("safetensors: config %s is missing model_type/hidden_size/num_hidden_layers", configPath)
+	}
+	if cfg.IsQwen35Hybrid() {
+		var envelope struct {
+			Quantization struct {
+				Method          string `json:"quant_method"`
+				Format          string `json:"fmt"`
+				Activation      string `json:"activation_scheme"`
+				WeightBlockSize []int  `json:"weight_block_size"`
+			} `json:"quantization_config"`
+		}
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			return nil, fmt.Errorf("safetensors: parse Qwen3.6 quantization config %s: %w", configPath, err)
+		}
+		q := envelope.Quantization
+		if q.Method != "fp8" || q.Format != "e4m3" || q.Activation != "dynamic" || len(q.WeightBlockSize) != 2 || q.WeightBlockSize[0] != fp8BlockDim || q.WeightBlockSize[1] != fp8BlockDim {
+			return nil, fmt.Errorf("safetensors: unsupported Qwen3.6 quantization geometry method=%q fmt=%q activation=%q weight_block_size=%v; want fp8/e4m3/dynamic/%dx%d", q.Method, q.Format, q.Activation, q.WeightBlockSize, fp8BlockDim, fp8BlockDim)
+		}
+	}
+	return LoadSafetensorsQuantDir(dir, cfg, opts...)
+}
+
 // LoadSafetensorsQuantDir loads a HuggingFace snapshot directory the memory-lean way. If the dir
 // has a model.safetensors.index.json it streams each shard one source tensor at a time, so peak
 // memory is the current tensor decode + the growing Q8 store, not a whole shard or file set.
@@ -158,6 +195,7 @@ func loadSafetensorsQuantDir(dir string, cfg Config, open safetensorsFileOpener,
 	}
 	var raw []byte
 	off := 0
+	seenTensors := make(map[string]string, len(weightMap))
 	for _, sh := range shards {
 		sf, err := open(filepath.Join(dir, sh))
 		if err != nil {
@@ -165,10 +203,31 @@ func loadSafetensorsQuantDir(dir string, cfg Config, open safetensorsFileOpener,
 		}
 		err = func() error {
 			defer sf.Close()
+			for name := range sf.hdr {
+				if name == "__metadata__" {
+					continue
+				}
+				wantShard, indexed := weightMap[name]
+				if !indexed {
+					return fmt.Errorf("safetensors: shard %s contains unindexed tensor %s", sh, name)
+				}
+				if wantShard != sh {
+					return fmt.Errorf("safetensors: tensor %s is in shard %s, index declares %s", name, sh, wantShard)
+				}
+				if prev, duplicate := seenTensors[name]; duplicate {
+					return fmt.Errorf("safetensors: tensor %s appears in both %s and %s", name, prev, sh)
+				}
+				seenTensors[name] = sh
+			}
 			return quantizeFileInto(sf, m, tied, &raw, &off, lo)
 		}()
 		if err != nil {
 			return nil, fmt.Errorf("shard %s: %w", sh, err)
+		}
+	}
+	for name, sh := range weightMap {
+		if _, ok := seenTensors[name]; !ok {
+			return nil, fmt.Errorf("safetensors: index declares tensor %s in %s but it is absent", name, sh)
 		}
 	}
 	m.raw = raw
@@ -297,6 +356,13 @@ func quantizeNamedTensorsInto(names []string, hdr map[string]json.RawMessage, te
 		if handled {
 			continue
 		}
+		handled, err = quantizeFP8BlockScaleTensorInto(name, hdr, tensorBytes, m, tied, raw, off, consumed)
+		if err != nil {
+			return err
+		}
+		if handled {
+			continue
+		}
 		var e stEntry
 		if err := json.Unmarshal(hdr[name], &e); err != nil {
 			return fmt.Errorf("safetensors: entry %s: %w", name, err)
@@ -313,6 +379,59 @@ func quantizeNamedTensorsInto(names []string, hdr map[string]json.RawMessage, te
 		}
 	}
 	return nil
+}
+
+func quantizeFP8BlockScaleTensorInto(
+	name string,
+	hdr map[string]json.RawMessage,
+	tensorBytes func(stEntry) ([]byte, error),
+	m *Model,
+	tied bool,
+	raw *[]byte,
+	off *int,
+	consumed map[string]bool,
+) (bool, error) {
+	if !strings.HasSuffix(name, ".weight") {
+		return false, nil
+	}
+	var weightEntry stEntry
+	if err := json.Unmarshal(hdr[name], &weightEntry); err != nil {
+		return true, fmt.Errorf("safetensors: entry %s: %w", name, err)
+	}
+	if weightEntry.Dtype != "F8_E4M3" {
+		return false, nil
+	}
+	scaleName := name + "_scale_inv"
+	scaleRaw, ok := hdr[scaleName]
+	if !ok {
+		return true, fmt.Errorf("safetensors: FP8 tensor %s is missing companion %s", name, scaleName)
+	}
+	var scaleEntry stEntry
+	if err := json.Unmarshal(scaleRaw, &scaleEntry); err != nil {
+		return true, fmt.Errorf("safetensors: entry %s: %w", scaleName, err)
+	}
+	weightBytes, err := tensorBytes(weightEntry)
+	if err != nil {
+		return true, fmt.Errorf("safetensors: tensor %s: %w", name, err)
+	}
+	scaleBytes, err := tensorBytes(scaleEntry)
+	if err != nil {
+		return true, fmt.Errorf("safetensors: tensor %s: %w", scaleName, err)
+	}
+	scaleF32, err := decodeSafetensorF32(scaleName, scaleEntry, scaleBytes)
+	if err != nil {
+		return true, err
+	}
+	fb, shape, err := decodeFP8BlockScaleTensor(name, weightEntry.Shape, weightBytes, scaleF32)
+	if err != nil {
+		return true, err
+	}
+	if err := quantizeDecodedTensorInto(name, shape, fb, m, tied, raw, off); err != nil {
+		return true, err
+	}
+	consumed[name] = true
+	consumed[scaleName] = true
+	return true, nil
 }
 
 func quantizeMXFP4TensorInto(

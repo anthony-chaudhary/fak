@@ -20,11 +20,21 @@ func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
 	}
 	return []ggufload.Q4KLoadOption{ggufload.WithDenseKQuantResident(false)}
 }
-func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffloadExperts bool, contextBudgetTokens int, expertShard *ggufload.ExpertShard, expertRanks int) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
-	if ggufPath == "" {
+func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloadExperts bool, contextBudgetTokens int, expertShard *ggufload.ExpertShard, expertRanks int) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
+	if modelPath == "" {
 		return nil, false, nil, gateway.StartupPhase{}
 	}
 	tLoad := time.Now()
+	if info, err := os.Stat(modelPath); err == nil && info.IsDir() {
+		m, err := fakmodel.LoadSafetensorsQuantConfigDir(modelPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fak serve: safetensors load:", err)
+			must(err)
+		}
+		fmt.Fprintf(os.Stderr, "fak serve: SAFETENSORS_LOAD_OK model_type=%s layers=%d hidden=%d %s\n", m.Cfg.ModelType, m.Cfg.NumLayers, m.Cfg.HiddenSize, fakmodel.FormatResidentReport(m.ResidentReport()))
+		return m, false, nil, gateway.StartupPhase{Name: "model-load", Dur: time.Since(tLoad)}
+	}
+	ggufPath := modelPath
 	// A sharded expert-parallel rank (expertShard != nil) admits ONLY its routed-expert band into
 	// the resident store — the residency that fits GLM-5.2 across the fleet (#971). It rides ONLY
 	// the resident-Q4_K arms (cpu-offload, device FAK_Q4K, pure-CPU FAK_Q4K): those carry the
@@ -226,6 +236,15 @@ func resolveServeTokenizer(tokPath, ggufPath string) (*tokenizer.Tokenizer, bool
 		return tok, true
 	}
 	if ggufPath != "" {
+		if info, err := os.Stat(ggufPath); err == nil && info.IsDir() {
+			tok, err := tokenizer.LoadJSON(filepath.Join(ggufPath, "tokenizer.json"))
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "fak serve: safetensors directory has no usable tokenizer.json (%v);\n", err)
+				return nil, false
+			}
+			modelengine.SetTokenizer(tok)
+			return tok, true
+		}
 		// No explicit --tokenizer: fall back to the tokenizer EMBEDDED in the GGUF. Virtually
 		// every GGUF carries its full vocab+merges, so `fak serve --gguf X` (no --base-url)
 		// serves real in-kernel chat out of the box instead of silently dropping
