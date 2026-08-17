@@ -2335,6 +2335,11 @@
           "category": "incidental",
           "reason": "Stallscan output annotation helper for #6611, not a separate guard/gate concept.",
           "token": "stallscanSkewGuard"
+        },
+        {
+          "category": "incidental",
+          "reason": "package-local pure composition helper, not a new guard-gate concept or operator surface",
+          "token": "GateCommitThroughput"
         }
       ],
       "exclude": [
@@ -2378,6 +2383,7 @@
         "GateAttested",
         "GateBuild",
         "GateCell",
+        "GateCommitThroughput",
         "GateContract",
         "GateConversionHealth",
         "GateDeadSourceLane",
