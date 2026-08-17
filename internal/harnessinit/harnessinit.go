@@ -134,7 +134,7 @@ func render(module, version string) ([]fileSpec, error) {
 	m := manifest{
 		Schema: "fak-harness-product/v1", Generator: generatorID,
 		FAKModule: "github.com/anthony-chaudhary/fak", FAKVersion: version, ContractVersion: ContractVersion,
-		Ownership: map[string]string{"go.mod": "generated", "go.sum": "generated", "cmd/product/main.go": "generated", "generated/runtime.go": "generated", "product/config.go": "user", "harness.lock.json": "generated", "README.md": "user"},
+		Ownership: map[string]string{"go.mod": "generated", "go.sum": "generated", "cmd/product/main.go": "generated", "generated/runtime.go": "generated", "product/config.go": "user", "product/launch.go": "user", "harness.lock.json": "generated", "README.md": "user"},
 		Build:     "go build -o product-bin ./cmd/product", Run: "go run ./cmd/product --selfcheck", Upgrade: "fak harness init --dir . --module " + module + " --fak-version " + version,
 	}
 	mb, err := json.MarshalIndent(m, "", "  ")
@@ -154,17 +154,30 @@ import (
  "fmt"
  "os"
 
+ product "%s/product"
  runtime "%s/generated"
 )
 
 func main() {
- selfcheck := flag.Bool("selfcheck", false, "run one deterministic offline turn")
+ selfcheck := flag.Bool("selfcheck", false, "run one deterministic offline turn and emit its protocol")
+ launch := flag.Bool("launch", false, "launch one agent with the product launch experience")
+ agentID := flag.String("agent-id", "local-agent", "agent/session identity used by launch observability")
+ dashboardLink := flag.Bool("dashboard-link", false, "print the scoped Grafana URL for --agent-id")
  productLock := flag.String("product-lock", "", "verified fak product lock")
  flag.Parse()
- if !*selfcheck { fmt.Fprintln(os.Stderr, "use --selfcheck"); os.Exit(2) }
- if err := runtime.Selfcheck(context.Background(), os.Stdout, *productLock); err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+ cfg := product.DefaultLaunchConfig()
+ if *dashboardLink { fmt.Fprintln(os.Stdout, runtime.AgentDashboardURL(cfg, *agentID)); return }
+ if *launch {
+  if err := runtime.Launch(context.Background(), os.Stdout, cfg, *productLock); err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+  return
+ }
+ if *selfcheck {
+  if err := runtime.Selfcheck(context.Background(), os.Stdout, *productLock); err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+  return
+ }
+ fmt.Fprintln(os.Stderr, "use --launch, --dashboard-link, or --selfcheck"); os.Exit(2)
 }
-`, generatedMarker, ContractVersion, version, module), true},
+`, generatedMarker, ContractVersion, version, module, module), true},
 		{"generated/runtime.go", fmt.Sprintf(`// %s
 // fak-contract: %s; fak-module: github.com/anthony-chaudhary/fak@%s
 package generated
@@ -238,6 +251,74 @@ func Selfcheck(ctx context.Context, out io.Writer, lockPath string) error {
  return emit("turn.completed", "ok")
 }
 `, generatedMarker, ContractVersion, version, module), true},
+		{"generated/launch.go", fmt.Sprintf(`// %s
+package generated
+
+import (
+ "context"
+ "fmt"
+ "io"
+ "net/url"
+ "path"
+
+ "%s/product"
+)
+
+func AgentDashboardURL(cfg product.LaunchConfig, agentID string) string {
+ if cfg.GrafanaBaseURL == "" { return "" }
+ u, err := url.Parse(cfg.GrafanaBaseURL); if err != nil { return "" }
+ u.Path = path.Join(u.Path, "d", cfg.GrafanaDashboardUID, cfg.GrafanaDashboardSlug)
+ q := u.Query(); q.Set("var-session", agentID); u.RawQuery = q.Encode()
+ return u.String()
+}
+
+// Launch owns the launch experience: product UI renders while protocol chatter stays hidden.
+func Launch(ctx context.Context, out io.Writer, cfg product.LaunchConfig, lockPath string) error {
+ if cfg.UIMode != "progress" { return fmt.Errorf("unsupported launch UI mode %%q", cfg.UIMode) }
+ cfg.Draw(out, product.LaunchProgress{Label: cfg.ProgressLabel, Current: 0, Total: 1})
+ if err := Selfcheck(ctx, io.Discard, lockPath); err != nil { return err }
+ cfg.Draw(out, product.LaunchProgress{Label: cfg.ProgressLabel, Current: 1, Total: 1})
+ return nil
+}
+`, generatedMarker, module), true},
+		{"product/launch.go", `package product
+
+import (
+ "fmt"
+ "io"
+ "strings"
+)
+
+// LaunchConfig is the user-owned launch seam for UI and per-agent observability.
+type LaunchConfig struct {
+ UIMode string
+ ProgressLabel string
+ GrafanaBaseURL string
+ GrafanaDashboardUID string
+ GrafanaDashboardSlug string
+ Draw func(io.Writer, LaunchProgress)
+}
+
+type LaunchProgress struct { Label string; Current, Total int }
+
+// DefaultLaunchConfig is deliberately clean: only progress is rendered during launch.
+func DefaultLaunchConfig() LaunchConfig {
+ return LaunchConfig{
+  UIMode: "progress", ProgressLabel: "Launching agent",
+  GrafanaBaseURL: "http://localhost:3000", GrafanaDashboardUID: "fak-fleet-session",
+  GrafanaDashboardSlug: "fak-fleet-session-drill-down", Draw: DrawLaunchProgress,
+ }
+}
+
+// DrawLaunchProgress is the product-owned TUI customization point.
+func DrawLaunchProgress(out io.Writer, p LaunchProgress) {
+ const width = 20
+ filled := width
+ if p.Total > 0 { filled = p.Current * width / p.Total }
+ fmt.Fprintf(out, "\r[%s%s] %s", strings.Repeat("#", filled), strings.Repeat("-", width-filled), p.Label)
+ if p.Current >= p.Total { fmt.Fprintln(out) }
+}
+`, false},
 		{"product/config.go", `// Package product is user-owned product configuration. fak harness init never overwrites this file.
 package product
 
@@ -269,11 +350,13 @@ func OfflineReply(prompt string) string { return "offline reply: " + prompt }
 Generated by **%s** against public contract **%s** and pinned module **github.com/anthony-chaudhary/fak@%s**.
 
 - Build: `+"`go build -o product-bin ./cmd/product`"+`
-- Run the stock offline turn: `+"`go run ./cmd/product --selfcheck`"+`
+- Launch with the clean progress-only UI: `+"`go run ./cmd/product --launch --agent-id AGENT`"+`
+- Open one agent in Grafana: `+"`go run ./cmd/product --dashboard-link --agent-id AGENT`"+`
+- Run the stock offline protocol witness: `+"`go run ./cmd/product --selfcheck`"+`
 - Run a verified contextual product: `+"`go run ./cmd/product --selfcheck --product-lock product.lock.json`"+`
 - Upgrade generated files: `+"`fak harness init --dir . --module %s --fak-version %s`"+`
-- Customize: edit field values in `+"`product.DefaultConfig`"+` and the body of `+"`product.OfflineReply`"+`; keep their type/function signatures.
-- Ownership: `+"`product/config.go`"+` is user-owned and is never overwritten. Files marked `+"`Code generated`"+` plus `+"`harness.lock.json`"+` are generator-owned.
+- Customize launch/TUI/Grafana in `+"`product.DefaultLaunchConfig`"+` and `+"`product.DrawLaunchProgress`"+`; customize behavior in `+"`product.DefaultConfig`"+` and `+"`product.OfflineReply`"+`.
+- Ownership: `+"`product/config.go`"+` and `+"`product/launch.go`"+` are user-owned and are never overwritten. Files marked `+"`Code generated`"+` plus `+"`harness.lock.json`"+` are generator-owned.
 `, generatorID, ContractVersion, version, module, version), false},
 	}, nil
 }

@@ -71,7 +71,7 @@ func runHarness(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 	} else {
-		fmt.Fprintf(stdout, "created external product at %s\nrun: cd %s && go run ./cmd/product --selfcheck\n", result.Directory, result.Directory)
+		fmt.Fprintf(stdout, "created external product at %s\nrun: cd %s && go run ./cmd/product --launch --agent-id local-agent\n", result.Directory, result.Directory)
 	}
 	return 0
 }

@@ -2,6 +2,7 @@ package harnessinit
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,7 +14,7 @@ func TestInitCreatesIdempotentPublicProductAndPreservesUserFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Created) != 7 {
+	if len(result.Created) != 9 {
 		t.Fatalf("created=%v", result.Created)
 	}
 	mainBody, err := os.ReadFile(filepath.Join(root, "generated", "runtime.go"))
@@ -37,6 +38,61 @@ func TestInitCreatesIdempotentPublicProductAndPreservesUserFiles(t *testing.T) {
 	}
 	if len(second.Created) != 0 || len(second.Updated) != 0 {
 		t.Fatalf("rerun changed generated files: %+v", second)
+	}
+}
+
+func TestGeneratedLaunchIsProgressOnlyAndDashboardIsAgentScoped(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Init(Options{Dir: root, Module: "example.test/product"}); err != nil {
+		t.Fatal(err)
+	}
+	launch := exec.Command("go", "run", "./cmd/product", "--launch", "--agent-id", "agent 42")
+	launch.Dir = root
+	got, err := launch.CombinedOutput()
+	if err != nil {
+		t.Fatalf("launch: %v\n%s", err, got)
+	}
+	text := string(got)
+	for _, forbidden := range []string{"turn.started", "model.response", "tool.requested", "tool.completed", "turn.completed", "harness.locked"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("clean launch leaked %q:\n%s", forbidden, text)
+		}
+	}
+	if !strings.Contains(text, "[--------------------] Launching agent") || !strings.Contains(text, "[####################] Launching agent") {
+		t.Fatalf("captured progress render=%q", text)
+	}
+	link := exec.Command("go", "run", "./cmd/product", "--dashboard-link", "--agent-id", "agent 42")
+	link.Dir = root
+	got, err = link.CombinedOutput()
+	if err != nil {
+		t.Fatalf("dashboard link: %v\n%s", err, got)
+	}
+	want := "http://localhost:3000/d/fak-fleet-session/fak-fleet-session-drill-down?var-session=agent+42"
+	if strings.TrimSpace(string(got)) != want {
+		t.Fatalf("dashboard link=%q want=%q", strings.TrimSpace(string(got)), want)
+	}
+}
+
+func TestInitPreservesUserLaunchCustomization(t *testing.T) {
+	root := t.TempDir()
+	opts := Options{Dir: root, Module: "example.test/product"}
+	if _, err := Init(opts); err != nil {
+		t.Fatal(err)
+	}
+	launchPath := filepath.Join(root, "product", "launch.go")
+	custom := []byte("package product\n\n// my launch UI\n")
+	if err := os.WriteFile(launchPath, custom, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Init(opts); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(launchPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(custom) {
+		t.Fatalf("user launch customization overwritten:\n%s", got)
 	}
 }
 
