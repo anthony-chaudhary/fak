@@ -50,8 +50,9 @@ type superloopDriveReport struct {
 	// Exec, when set, records the `--execute` run of the admitted member's own front
 	// door behind the held lease (nil when --execute was not requested). It is the
 	// difference between admit-and-surface and admit-and-run.
-	Exec   *superloopDriveExec   `json:"exec,omitempty"`
-	Refold *superloop.WalkReport `json:"refold,omitempty"`
+	Exec     *superloopDriveExec   `json:"exec,omitempty"`
+	Refold   *superloop.WalkReport `json:"refold,omitempty"`
+	Residual superloopResidual     `json:"residual"`
 }
 
 // superloopDriveAdmit records how the driven member fared at the shared admission gate.
@@ -186,7 +187,8 @@ func runSuperloopDrive(stdout, stderr io.Writer, argv []string) int {
 	// dispatch ledger exists), so the headline gates the drive, not just decorates it.
 	rep := superloopWalkNow(root, s)
 	decision := superloop.Drive(rep)
-	report := superloopDriveReport{Schema: superloop.DriveSchema, Intent: s.Name, Decision: decision}
+	decision, residual := keepSuperloopAlive(root, decision)
+	report := superloopDriveReport{Schema: superloop.DriveSchema, Intent: s.Name, Decision: decision, Residual: residual}
 
 	if !decision.Enter {
 		// Nothing worst-first to enter — but "enters nothing" is only a CLEAN exit when
@@ -292,6 +294,7 @@ type superloopDriveBatchReport struct {
 	Decision superloop.BatchDriveDecision `json:"decision"`
 	Entries  []superloopDriveBatchEntry   `json:"entries,omitempty"`
 	Refold   *superloop.WalkReport        `json:"refold,omitempty"`
+	Residual superloopResidual            `json:"residual"`
 }
 
 // superloopDriveBatchEntry is one member's outcome within a batch drive: the pure
@@ -352,7 +355,22 @@ func verifyDriveRepositoryTarget(root, expected string) error {
 func runSuperloopDriveBatch(stdout, stderr io.Writer, asJSON bool, root string, s superloop.Super, lane string, tree []string, ledger string, k int, execute bool, execTimeout time.Duration) int {
 	rep := superloopWalkNow(root, s)
 	bdec := superloop.DriveBatch(rep, k)
-	report := superloopDriveBatchReport{Schema: superloop.BatchDriveSchema, Intent: s.Name, Batch: k, Decision: bdec, Offered: len(bdec.Members)}
+	residual := superloopResidual{}
+	if !bdec.Enter && bdec.Satisfied {
+		d, measured := keepSuperloopAlive(root, superloop.DriveDecision{Intent: bdec.Intent, Satisfied: true, Reason: bdec.Reason})
+		residual = measured
+		if d.Enter {
+			bdec.Enter = true
+			bdec.Satisfied = false
+			bdec.Members = []superloop.DriveDecision{d}
+			bdec.Requested = 1
+			bdec.Reason = d.Reason
+		} else if !d.Satisfied {
+			bdec.Satisfied = false
+			bdec.Reason = d.Reason
+		}
+	}
+	report := superloopDriveBatchReport{Schema: superloop.BatchDriveSchema, Intent: s.Name, Batch: k, Decision: bdec, Offered: len(bdec.Members), Residual: residual}
 
 	if !bdec.Enter {
 		// Nothing worst-first to offer — clean ONLY when satisfied; an unsatisfied

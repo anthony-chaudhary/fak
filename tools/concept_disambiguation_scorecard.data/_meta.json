@@ -8271,6 +8271,11 @@
           "category": "incidental",
           "reason": "Issue #6372 research report row, not a new runtime decision mechanism",
           "token": "naturalTrafficPolicyRow"
+        },
+        {
+          "category": "incidental",
+          "reason": "private constructor for an existing superloop DriveDecision; not a new decision concept",
+          "token": "residualDriveDecision"
         }
       ],
       "id": "decision",
@@ -8322,6 +8327,7 @@
         "predictHeld",
         "readLiveLanes",
         "readNativeDecisions",
+        "residualDriveDecision",
         "routeDecisions",
         "routing_defer_decision",
         "scheduleOutcome",
@@ -9746,6 +9752,31 @@
           "category": "incidental",
           "reason": "Formatting helper for #6497 failure output, not a separate loop concept.",
           "token": "loopHealthAlert"
+        },
+        {
+          "category": "incidental",
+          "reason": "private CLI report shape for measured repository residuals; not a new loop concept",
+          "token": "superloopResidual"
+        },
+        {
+          "category": "incidental",
+          "reason": "private CLI stop-gate helper; not a new loop kind or operator surface",
+          "token": "keepSuperloopAlive"
+        },
+        {
+          "category": "incidental",
+          "reason": "private injectable command seam for tests; not a loop concept",
+          "token": "superloopResidualCommand"
+        },
+        {
+          "category": "incidental",
+          "reason": "private repository measurement helper; not a loop type or lifecycle",
+          "token": "measureSuperloopResidual"
+        },
+        {
+          "category": "incidental",
+          "reason": "private DriveDecision constructor for residual work; not a new drive concept",
+          "token": "residualDriveDecision"
         }
       ],
       "id": "loop",
@@ -9769,6 +9800,7 @@
         "fakloopledger",
         "faklooprunid",
         "isLoopbackFleetHost",
+        "keepSuperloopAlive",
         "loopHealthAlert",
         "loopHealthCost",
         "loopRegionDequeue",
@@ -9790,12 +9822,14 @@
         "loopsnapshot",
         "loopsnapshotforid",
         "loopstate",
+        "measureSuperloopResidual",
         "meta_superloop",
         "midflight_no_owned_loop",
         "noloopledger",
         "q8prefillneedstokenloop",
         "recordloop",
         "register_scout_loop",
+        "residualDriveDecision",
         "runSuperloopFleet",
         "runloop",
         "startFleetBusLoop",
@@ -9806,6 +9840,8 @@
         "superloopFleetStatusSchema",
         "superloopFleetUsage",
         "superloopFleetWalk",
+        "superloopResidual",
+        "superloopResidualCommand",
         "superloop_fleet",
         "tuiloopreport"
       ],
