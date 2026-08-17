@@ -610,6 +610,7 @@ var tier = map[string]int{
 	"harnessweb":            2, // loopback browser runtime over public harnesskit plus persisted semantic sessions; off kernel hot path (#6980).
 	"committedbuildwitness": 2, // exact-HEAD build receipt; imports windowgate(2) for hidden git probes, off the hot path (#6871).
 	"toolcallcontrol":       1, // stdlib-only deterministic pre-execution call gate and offline ablation accounting.
+	"devhandoff":            1, // stdlib-only moved-command inventory shared across the runtime/fak-dev process boundary.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
