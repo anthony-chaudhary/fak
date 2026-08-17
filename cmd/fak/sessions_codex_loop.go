@@ -101,11 +101,41 @@ type codexLoopHookInput struct {
 	ConversationID string `json:"conversation_id"`
 	HookEventName  string `json:"hook_event_name"`
 	TurnID         string `json:"turn_id"`
+	Prompt         string `json:"prompt"`
 }
 
 type codexLoopHookBlock struct {
 	Decision string `json:"decision"`
 	Reason   string `json:"reason"`
+}
+
+type codexLoopHookOutput struct {
+	Decision           string                       `json:"decision,omitempty"`
+	Reason             string                       `json:"reason,omitempty"`
+	Continue           *bool                        `json:"continue,omitempty"`
+	SystemMessage      string                       `json:"systemMessage,omitempty"`
+	HookSpecificOutput *codexLoopHookSpecificOutput `json:"hookSpecificOutput,omitempty"`
+}
+
+type codexLoopHookSpecificOutput struct {
+	HookEventName     string `json:"hookEventName"`
+	AdditionalContext string `json:"additionalContext"`
+}
+
+func (o codexLoopHookOutput) additionalContext() string {
+	if o.HookSpecificOutput == nil {
+		return ""
+	}
+	return o.HookSpecificOutput.AdditionalContext
+}
+
+type codexWorkflowDefaultWitness struct {
+	Schema         string `json:"schema"`
+	SessionID      string `json:"session_id"`
+	FirstPromptAt  string `json:"first_prompt_at"`
+	Classification string `json:"classification"`
+	Decision       string `json:"decision"`
+	Reason         string `json:"reason"`
 }
 
 type codexLoopHookBlockWitness struct {
@@ -336,8 +366,11 @@ func sessionsCodexLoopHook(stdout, stderr io.Writer, stdin io.Reader, argv []str
 		if len(result.stdout) == 0 {
 			return 0
 		}
-		var block codexLoopHookBlock
-		if err := json.Unmarshal(result.stdout, &block); err != nil || block.Decision != "block" {
+		var output codexLoopHookOutput
+		if err := json.Unmarshal(result.stdout, &output); err != nil {
+			return 0
+		}
+		if output.Decision != "block" && output.additionalContext() == "" {
 			return 0
 		}
 		if _, err := stdout.Write(result.stdout); err != nil {
@@ -379,6 +412,76 @@ func writeCodexGuardWitness(codexHome, sessionID string) error {
 	}
 	body = append(body, '\n')
 	return os.WriteFile(path, body, 0o600)
+}
+
+func codexWorkflowDefaultWitnessPath(codexHome, sessionID string) (string, error) {
+	home, err := resolvedCodexLoopHome(codexHome)
+	if err != nil {
+		return "", err
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" || filepath.Base(sessionID) != sessionID {
+		return "", errors.New("invalid Codex session id for workflow-default witness")
+	}
+	return filepath.Join(home, "fak-workflow-defaults", sessionID+".json"), nil
+}
+
+func writeCodexWorkflowDefaultWitness(codexHome string, witness codexWorkflowDefaultWitness) error {
+	path, err := codexWorkflowDefaultWitnessPath(codexHome, witness.SessionID)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	body, err := json.Marshal(witness)
+	if err != nil {
+		return err
+	}
+	body = append(body, '\n')
+	return os.WriteFile(path, body, 0o600)
+}
+
+func codexWorkflowDefaultWitnessExists(codexHome, sessionID string) bool {
+	path, err := codexWorkflowDefaultWitnessPath(codexHome, sessionID)
+	if err != nil {
+		return false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var witness codexWorkflowDefaultWitness
+	return json.Unmarshal(raw, &witness) == nil && witness.Schema == "fak.codex_workflow_default.v1" && witness.SessionID == sessionID
+}
+
+const codexWorkflowDefaultContext = `FAK guarded-workflow default: this is the first prompt in the session. After the initial evidence-gathering step, use fak's ultracode-style workflow generation when the work is meaningfully multi-step, parallelizable, or unattended. Start with the smallest working spine, then generate the guarded workflow through fak orchestration/workflow surfaces; keep lane leases, independent witnesses, dogfood telemetry, and observable outcomes. Stay direct for a trivial one-step answer or edit.`
+
+func codexWorkflowDefaultOutput(in codexLoopHookInput, codexHome string) (codexLoopHookOutput, bool) {
+	if strings.TrimSpace(in.SessionID) == "" || strings.TrimSpace(in.Prompt) == "" || codexWorkflowDefaultWitnessExists(codexHome, in.SessionID) {
+		return codexLoopHookOutput{}, false
+	}
+	classification := "consider-workflow"
+	reason := "first guarded prompt; workflow generation is the default for reasonable multi-step work"
+	if len(strings.Fields(in.Prompt)) <= 4 {
+		classification = "likely-direct"
+		reason = "first guarded prompt is short; preserve the direct path unless initial inspection reveals multi-step work"
+	}
+	witness := codexWorkflowDefaultWitness{
+		Schema: "fak.codex_workflow_default.v1", SessionID: in.SessionID,
+		FirstPromptAt: time.Now().UTC().Format(time.RFC3339Nano), Classification: classification,
+		Decision: "inject", Reason: reason,
+	}
+	if err := writeCodexWorkflowDefaultWitness(codexHome, witness); err != nil {
+		return codexLoopHookOutput{}, false
+	}
+	cont := true
+	return codexLoopHookOutput{
+		Continue: &cont, SystemMessage: "fak: guarded workflow default armed (" + classification + ")",
+		HookSpecificOutput: &codexLoopHookSpecificOutput{
+			HookEventName: "UserPromptSubmit", AdditionalContext: codexWorkflowDefaultContext,
+		},
+	}, true
 }
 
 func codexGuardWitnessExists(codexHome, sessionID string) bool {
@@ -499,6 +602,13 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: close %s: %v\n", resolved, closeErr)
 	}
 	if !codexLoopDiagnosisUnguarded(d) {
+		in.SessionID = sessionID
+		if output, ok := codexWorkflowDefaultOutput(in, *codexHome); ok {
+			if err := json.NewEncoder(stdout).Encode(output); err != nil {
+				fmt.Fprintf(stderr, "fak sessions codex-loop-hook: encode workflow default: %v\n", err)
+				return 1
+			}
+		}
 		return 0
 	}
 
@@ -507,7 +617,7 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 		", so fak cannot enforce the guard before the next turn. Relaunch with `fak codex`" +
 		" or `fak guard -- codex`. For an intentional direct session, pass `--allow-direct`" +
 		" to the hook or " + codexLoopHookOverrideInstruction() + " and resubmit."
-	if err := json.NewEncoder(stdout).Encode(codexLoopHookBlock{Decision: "block", Reason: reason}); err != nil {
+	if err := json.NewEncoder(stdout).Encode(codexLoopHookOutput{Decision: "block", Reason: reason}); err != nil {
 		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: encode block: %v (turn not blocked; recovery: relaunch with `fak codex`)\n", err)
 		return 1
 	}

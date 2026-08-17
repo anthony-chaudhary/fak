@@ -4968,6 +4968,31 @@
           "category": "incidental",
           "reason": "Internal package name for the exact-HEAD build receipt shared by existing ci-preflight, pre-push, and dispatch gates; it implements the existing committed-build witness rather than introducing a separate proof concept.",
           "token": "committedbuildwitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Per-session Codex hook telemetry helper; not a distinct proof or witness concept.",
+          "token": "codexWorkflowDefaultWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Per-session Codex hook telemetry helper; not a distinct proof or witness concept.",
+          "token": "codexWorkflowDefaultWitnessPath"
+        },
+        {
+          "category": "incidental",
+          "reason": "Per-session Codex hook telemetry helper; not a distinct proof or witness concept.",
+          "token": "writeCodexWorkflowDefaultWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Per-session Codex hook telemetry helper; not a distinct proof or witness concept.",
+          "token": "codexWorkflowDefaultWitnessExists"
+        },
+        {
+          "category": "incidental",
+          "reason": "Per-session Codex hook telemetry helper; not a distinct proof or witness concept.",
+          "token": "codexWorkflowDefaultOutput"
         }
       ],
       "id": "witness-proof",
@@ -5027,6 +5052,10 @@
         "checkpointWitnessReport",
         "checkpoint_no_tree_witness",
         "closeProxyFillWitnesses",
+        "codexWorkflowDefaultOutput",
+        "codexWorkflowDefaultWitness",
+        "codexWorkflowDefaultWitnessExists",
+        "codexWorkflowDefaultWitnessPath",
         "collectDogfoodKernelValue",
         "committedbuildwitness",
         "compactionWitness",
@@ -5125,6 +5154,7 @@
         "witnesses",
         "witnessing",
         "witnesssametaskids",
+        "writeCodexWorkflowDefaultWitness",
         "wrong_missing_witness"
       ],
       "min_files": 3,
@@ -6709,6 +6739,11 @@
           "category": "incidental",
           "reason": "Bounded quantobs schema symbol, not a context-ctx concept.",
           "token": "SensitiveContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Static Codex hook instruction payload; not a distinct managed-context concept.",
+          "token": "codexWorkflowDefaultContext"
         }
       ],
       "id": "context-ctx",
@@ -6737,6 +6772,7 @@
         "callCtx",
         "cctx",
         "cellContext",
+        "codexWorkflowDefaultContext",
         "collectDogfoodKernelValue",
         "compactionContractFrom",
         "compactionContractInstruction",
@@ -9862,6 +9898,41 @@
           "category": "incidental",
           "reason": "Private adapter matching the established superloop drive ledger key; not a new loop concept.",
           "token": "superloopeventmatchesintent"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local Codex hook implementation symbol; not a user-facing loop concept.",
+          "token": "codexLoopHookOutput"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local Codex hook implementation symbol; not a user-facing loop concept.",
+          "token": "codexLoopHookSpecificOutput"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local Codex hook implementation symbol; not a user-facing loop concept.",
+          "token": "codexWorkflowDefaultWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local Codex hook implementation symbol; not a user-facing loop concept.",
+          "token": "codexWorkflowDefaultWitnessPath"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local Codex hook implementation symbol; not a user-facing loop concept.",
+          "token": "writeCodexWorkflowDefaultWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local Codex hook implementation symbol; not a user-facing loop concept.",
+          "token": "codexWorkflowDefaultWitnessExists"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local Codex hook implementation symbol; not a user-facing loop concept.",
+          "token": "codexWorkflowDefaultOutput"
         }
       ],
       "id": "loop",
@@ -9880,6 +9951,12 @@
         "attributeSuperloopResidual",
         "buildtuiloopreport",
         "classifySuperloopResidualOwnership",
+        "codexLoopHookOutput",
+        "codexLoopHookSpecificOutput",
+        "codexWorkflowDefaultOutput",
+        "codexWorkflowDefaultWitness",
+        "codexWorkflowDefaultWitnessExists",
+        "codexWorkflowDefaultWitnessPath",
         "defaultloopledger",
         "defaultloopregistry",
         "dispatch_loop",
@@ -9939,7 +10016,8 @@
         "superloopResidualRouter",
         "superloop_fleet",
         "superloopeventmatchesintent",
-        "tuiloopreport"
+        "tuiloopreport",
+        "writeCodexWorkflowDefaultWitness"
       ],
       "min_files": 3,
       "name": "Loop family",
