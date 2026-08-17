@@ -388,7 +388,7 @@ func worktreeColdReapReport(repoRoot string, apply bool, ageFloor time.Duration,
 		evenIfUnlanded,
 		worktreeColdProcessLive,
 		func(root, path string) workerworktree.Result {
-			return workerworktree.Reap(root, path, nil)
+			return workerworktree.ForceReap(root, path, nil)
 		},
 	)
 }
