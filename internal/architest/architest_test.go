@@ -373,6 +373,7 @@ var tier = map[string]int{
 	"claimcheck":          1, // pure net-true-value claim grader; stdlib-only, off the hot path.
 	"ideascout":           2, // inbound arXiv/GitHub idea scout and issue planner; stdlib-only shell/network I/O off the hot path.
 	"studymonitor":        2, // stdlib-only external source registry validator and report renderer; off the runtime hot path.
+	"customizationindex":  2, // stdlib-only agent customization registry validator and freshness reporter; off the runtime hot path.
 	"loopindex":           1, // pure S0 agentic-loop scorecard: folds orient->plan->act->verify->ship->learn probes into loop-index + loopindex_debt; stdlib-only, off the hot path.
 	"loopmap":             2, // queryable loop-stage -> tool map over loopindex(1); off the hot path.
 	"superloop":           2, // operator-intent meta-loop: pure registry+Classify(super-vs-normal)+Walk(worst-first worklist) over member loops/scorecards/gardens, plus the C6 model-fit eval (#3043) grading read-only meta decisions; imports modelroute(1) for the single-sourced risk class, off the hot path.
