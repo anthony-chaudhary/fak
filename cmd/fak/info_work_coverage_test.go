@@ -32,15 +32,9 @@ func TestRunInfoWorkCoverageTextAndJSON(t *testing.T) {
 	}
 }
 
-func TestWorkCoverageUnavailableIsNamedNotZero(t *testing.T) {
-	text := workCoverageUnavailableText()
-	for _, want := range []string{"context_elision", "model_routing", "schema_tool_filtering"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("unavailable text missing %q: %s", want, text)
-		}
-	}
-	if strings.Contains(text, "0") {
-		t.Fatalf("unavailable coverage rendered as zero: %s", text)
+func TestWorkCoverageHasNoUnavailableMechanisms(t *testing.T) {
+	if text := workCoverageUnavailableText(); text != "" {
+		t.Fatalf("measurable registry still reports unavailable coverage: %s", text)
 	}
 }
 
@@ -49,7 +43,18 @@ func TestWorkCoverageJSONUsesStableFieldsNotDisplayParsing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(raw, []byte(`"source_id":"provider_cache"`)) || !bytes.Contains(raw, []byte(`"status":"not_yet_measurable"`)) || !bytes.Contains(raw, []byte(`"reason":`)) {
-		t.Fatalf("coverage JSON=%s", raw)
+	for _, want := range [][]byte{
+		[]byte(`"source_id":"provider_cache"`),
+		[]byte(`"id":"context_elision"`),
+		[]byte(`"id":"schema_tool_filtering"`),
+		[]byte(`"status":"overlapping"`),
+		[]byte(`"reason":`),
+	} {
+		if !bytes.Contains(raw, want) {
+			t.Fatalf("coverage JSON missing %s: %s", want, raw)
+		}
+	}
+	if bytes.Contains(raw, []byte(`"status":"not_yet_measurable"`)) {
+		t.Fatalf("coverage JSON retained obsolete unavailable status: %s", raw)
 	}
 }
