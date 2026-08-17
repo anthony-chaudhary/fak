@@ -243,6 +243,7 @@ func guardFlagCount(fs *flag.FlagSet) int {
 func printGuardUsage(w io.Writer, fs *flag.FlagSet, commandName string, all bool) {
 	fmt.Fprintf(w, "usage: fak %s [flags] [--] <agent command...>\n", commandName)
 	if commandName == "guard" {
+		fmt.Fprintln(w, "  deprecated: use fak manage (or fak m); guard remains a compatibility alias")
 	}
 	fmt.Fprintf(w, "  e.g. fak %s claude\n", commandName)
 	fmt.Fprintf(w, "       fak %s --provider openai -- codex\n", commandName)
