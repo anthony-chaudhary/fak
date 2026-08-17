@@ -29,6 +29,28 @@ func TestSelfcheckPasses(t *testing.T) {
 	}
 }
 
+func TestSelfcheckMissingEvidenceWitnessIsStable(t *testing.T) {
+	const want = "arm fak-ctxmmu task task-charlie trial 0: MISSING_RAW_EVIDENCE"
+	for i := 0; i < 5; i++ {
+		res, err := Selfcheck()
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, check := range res.Checks {
+			if check.Name == "failclosed.missing_raw_evidence" {
+				found = true
+				if !strings.Contains(check.Evidence, want) {
+					t.Fatalf("run %d evidence = %q, want stable %q", i, check.Evidence, want)
+				}
+			}
+		}
+		if !found {
+			t.Fatal("missing failclosed.missing_raw_evidence check")
+		}
+	}
+}
+
 // TestSpineRunsAllFourArmKinds covers baseline + upstream treatment + fak
 // passthrough + one isolated fak capability end to end on the fake provider.
 func TestSpineRunsAllFourArmKinds(t *testing.T) {

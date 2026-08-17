@@ -164,8 +164,12 @@ func Selfcheck() (*SelfcheckResult, error) {
 	add("identity.changes_on_environment", envChanged.Identity() != base,
 		"changing the recorded host class moves the immutable-manifest identity", envChanged.Identity())
 
-	// (3) missing raw evidence fails closed.
-	_, err = Execute(ctx, DemoManifest(), corpus, &FakeProvider{OmitRawResponse: "fak-ctxmmu"}, &FakeGrader{}, Options{})
+	// (3) missing raw evidence fails closed. Serialize this refusal probe so the
+	// committed witness names the same first missing trial on every run.
+	failClosed := DemoManifest()
+	failClosed.Trials.Concurrency = 1
+	failClosed.Trials.Count = 1
+	_, err = Execute(ctx, failClosed, corpus, &FakeProvider{OmitRawResponse: "fak-ctxmmu"}, &FakeGrader{}, Options{})
 	add("failclosed.missing_raw_evidence", isReason(err, ReasonMissingRawEvidence),
 		describeRefusal(err, ReasonMissingRawEvidence), errText(err))
 
