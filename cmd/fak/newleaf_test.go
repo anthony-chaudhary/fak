@@ -54,7 +54,7 @@ func TestNewLeafCommandCreatesRegisteredLeaf(t *testing.T) {
 		t.Fatalf("leaf implementation was not written: %v", err)
 	}
 	arch := commandReadNewLeafFile(t, root, "internal/architest/architest_test.go")
-	if !strings.Contains(arch, `"fedtrust": 3,`) {
+	if !strings.Contains(arch, `"fedtrust": 4,`) {
 		t.Fatalf("architest missing fedtrust tier: %s", arch)
 	}
 	reg := commandReadNewLeafFile(t, root, "internal/registrations/registrations.go")
@@ -95,10 +95,10 @@ func TestNewLeafSuggestTierFromImports(t *testing.T) {
 		t.Fatalf("alpha suggested_tier = %q, want primitive (%+v)", s.SuggestedTier, s)
 	}
 
-	// (2) imports a mechanism -> suggests >= mechanism, naming the governing dep.
+	// (2) imports a foundation-composite -> suggests that minimum tier, naming the governing dep.
 	beta := commandRunSuggest(t, root, "beta", "")
-	if beta.SuggestedTier != "mechanism" || beta.GoverningDep != "engine" {
-		t.Fatalf("beta suggestion = %+v, want mechanism governed by engine", beta)
+	if beta.SuggestedTier != "foundation-composite" || beta.GoverningDep != "engine" {
+		t.Fatalf("beta suggestion = %+v, want foundation-composite governed by engine", beta)
 	}
 
 	// (3) over-declared tier -> advisory fires (never blocks; rc already 0 above).
