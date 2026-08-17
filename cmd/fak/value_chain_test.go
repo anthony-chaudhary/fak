@@ -34,7 +34,7 @@ func TestValueChainAgenticPacketAdapter(t *testing.T) {
 	}
 	mustWrite(manifest, `{"schema":"fak-value-chain/1","name":"latest-harness","stages":[{"id":"benchmark","kind":"agentic-benchmark"}],"arms":[{"id":"raw","default":true},{"id":"fak"}],"outcomes":[{"id":"safe_success","unit":"case"}]}`)
 	mustWrite(observations, `{"schema":"fak-value-chain/1","observations":[]}`)
-	mustWrite(packet, `{"schema":"fak.agentic-benchmark-result-packet.v1","status":"PASS_RESULT","result_claim_allowed":true,"value_chain":[{"role":"raw","trace_id":"r","pair_id":"case-1","turns":5,"outcomes":{"safe_success":1},"provenance":"official-grader"},{"role":"fak","trace_id":"f","pair_id":"case-1","turns":3,"cost_usd":0.3,"outcomes":{"safe_success":1},"provenance":"official-grader+bill"}]}`)
+	mustWrite(packet, `{"schema":"fak.agentic-benchmark-result-packet.v1","status":"PASS_RESULT","result_claim_allowed":true,"benchmark_native":true,"same_task_ids":true,"same_model":true,"same_budget":true,"official_grader":{"available":true},"arms":[{"role":"raw"},{"role":"fak"}],"metric_categories":{"task_success":true,"safe_success":true,"cost_or_token_budget":true,"latency":true,"policy_events":true,"evidence_completeness":true},"artifacts":["raw.json","fak.json"],"value_chain":[{"role":"raw","trace_id":"r","pair_id":"case-1","turns":5,"outcomes":{"safe_success":1},"provenance":"official-grader"},{"role":"fak","trace_id":"f","pair_id":"case-1","turns":3,"cost_usd":0.3,"outcomes":{"safe_success":1},"provenance":"official-grader+bill"}]}`)
 	var out, errOut bytes.Buffer
 	if code := runValueChain(&out, &errOut, []string{"audit", "--manifest", manifest, "--observations", observations, "--agentic-packet", packet}); code != 0 {
 		t.Fatalf("code=%d err=%s", code, errOut.String())
@@ -43,5 +43,41 @@ func TestValueChainAgenticPacketAdapter(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("missing %q in %s", want, out.String())
 		}
+	}
+}
+
+func TestValueChainSelfcheckMatchesCapturedWitness(t *testing.T) {
+	root := repoRoot()
+	var out, errOut bytes.Buffer
+	code := runValueChain(&out, &errOut, []string{
+		"audit",
+		"--manifest", filepath.Join(root, "examples", "value-chain", "support-manifest.json"),
+		"--observations", filepath.Join(root, "examples", "value-chain", "support-observations.json"),
+		"--selfcheck",
+		"--expect", filepath.Join(root, "examples", "value-chain", "support-witness.txt"),
+	})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "comparison=baseline->shared design=paired paired=1") {
+		t.Fatalf("captured output missing paired result: %s", out.String())
+	}
+}
+
+func TestValueChainSelfcheckRejectsStaleWitness(t *testing.T) {
+	root := repoRoot()
+	stale := filepath.Join(t.TempDir(), "stale.txt")
+	if err := os.WriteFile(stale, []byte("stale\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	code := runValueChain(&out, &errOut, []string{
+		"audit",
+		"--manifest", filepath.Join(root, "examples", "value-chain", "support-manifest.json"),
+		"--observations", filepath.Join(root, "examples", "value-chain", "support-observations.json"),
+		"--selfcheck", "--expect", stale,
+	})
+	if code != 1 || !strings.Contains(errOut.String(), "selfcheck mismatch") {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
 	}
 }

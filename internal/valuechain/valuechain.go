@@ -181,6 +181,17 @@ func Audit(m Manifest, in Input) (Report, error) {
 		if o.TraceID == "" || o.Provenance == "" {
 			return Report{}, fmt.Errorf("observation %q requires trace_id and provenance", o.ID)
 		}
+		if o.Turns < 0 {
+			return Report{}, fmt.Errorf("observation %q has negative turns", o.ID)
+		}
+		if o.CostUSD != nil && *o.CostUSD < 0 {
+			return Report{}, fmt.Errorf("observation %q has negative cost_usd", o.ID)
+		}
+		for id, value := range o.Outcomes {
+			if value < 0 {
+				return Report{}, fmt.Errorf("observation %q has negative outcome %q", o.ID, id)
+			}
+		}
 		a := acc[o.Arm]
 		if a == nil {
 			a = &accum{traces: map[string]bool{}, sessions: map[string]bool{}, outcomes: map[string]float64{}}
@@ -244,13 +255,16 @@ func Audit(m Manifest, in Input) (Report, error) {
 			if a.costKnown {
 				c := a.cost
 				ar.CostUSD = &c
-				if a.turns > 0 {
+				// A partial billing join is evidence about the observed subtotal, not the
+				// whole arm. Keep derived rates absent until every measured turn has cost
+				// evidence so missing telemetry can never masquerade as zero cost.
+				if a.turns > 0 && a.covered == a.turns {
 					x := c / float64(a.turns)
 					ar.CostPerTurn = &x
-				}
-				for id, v := range a.outcomes {
-					if v > 0 {
-						ar.CostPerOutcome[id] = c / v
+					for id, v := range a.outcomes {
+						if v > 0 {
+							ar.CostPerOutcome[id] = c / v
+						}
 					}
 				}
 			}

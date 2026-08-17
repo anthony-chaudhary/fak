@@ -48,3 +48,40 @@ func TestUnknownCostStaysAbsent(t *testing.T) {
 		t.Fatalf("unknown cost became known: %#v", rep.Arms[0])
 	}
 }
+
+func TestAuditKeepsDerivedRatesUnknownWithPartialBillingEvidence(t *testing.T) {
+	m := Manifest{Schema: Schema, Name: "partial", Stages: []Stage{{ID: "outcome", Kind: "outcome"}}, Arms: []Arm{{ID: "baseline", Default: true}}, Outcomes: []Outcome{{ID: "done", Unit: "task"}}}
+	cost := 1.0
+	in := Input{Schema: Schema, Observations: []Observation{
+		{ID: "billed", TraceID: "trace", StageID: "outcome", Arm: "baseline", Turns: 2, CostUSD: &cost, Outcomes: map[string]float64{"done": 1}, Provenance: "bill+grader"},
+		{ID: "unbilled", TraceID: "trace", StageID: "outcome", Arm: "baseline", Turns: 3, Outcomes: map[string]float64{"done": 1}, Provenance: "grader"},
+	}}
+	rep, err := Audit(m, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arm := rep.Arms[0]
+	if arm.CostUSD == nil || *arm.CostUSD != 1 || arm.BillingEvidence.Covered != 2 || arm.BillingEvidence.Total != 5 {
+		t.Fatalf("partial cost evidence was not preserved: %+v", arm)
+	}
+	if arm.CostPerTurn != nil || arm.CostPerOutcome != nil {
+		t.Fatalf("partial billing produced misleading derived rates: %+v", arm)
+	}
+}
+
+func TestAuditRejectsNegativeMeasurements(t *testing.T) {
+	m := Manifest{Schema: Schema, Name: "negative", Stages: []Stage{{ID: "outcome", Kind: "outcome"}}, Arms: []Arm{{ID: "baseline", Default: true}}, Outcomes: []Outcome{{ID: "done", Unit: "task"}}}
+	negative := -1.0
+	cases := []Observation{
+		{ID: "turns", TraceID: "t", StageID: "outcome", Arm: "baseline", Turns: -1, Provenance: "meter"},
+		{ID: "cost", TraceID: "t", StageID: "outcome", Arm: "baseline", CostUSD: &negative, Provenance: "bill"},
+		{ID: "outcome", TraceID: "t", StageID: "outcome", Arm: "baseline", Outcomes: map[string]float64{"done": -1}, Provenance: "grader"},
+	}
+	for _, observation := range cases {
+		t.Run(observation.ID, func(t *testing.T) {
+			if _, err := Audit(m, Input{Schema: Schema, Observations: []Observation{observation}}); err == nil {
+				t.Fatal("negative measurement was accepted")
+			}
+		})
+	}
+}

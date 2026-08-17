@@ -64,6 +64,7 @@ var verbTiers = map[string]VerbTier{
 	"capabilities": TierFrontdoor,
 	"attest":       TierFrontdoor,
 	"audit":        TierFrontdoor,
+	"value-chain":  TierFrontdoor,
 	"codex":        TierFrontdoor,
 	"doctor":       TierFrontdoor,
 	"egress":       TierFrontdoor,
