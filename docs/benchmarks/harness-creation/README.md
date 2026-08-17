@@ -19,6 +19,23 @@ extensions, and witnesses. Gallery selection does not count as independent autho
 the weekend track; the participant must still implement the selected public-seam extension.
 Independent operators begin with the [participant handoff](participant-handoff.md) and machine-check receipts against [the template](participant-receipt-template.json) before appending any study row.
 
+
+## Paired parity question
+
+The tuned Mastra calibration proves only that the alternative is runnable; it is not a
+parity result. Before independent timing, the study freezes a matched non-inferiority
+question: at least two unfamiliar builders each run both `fak` and `baseline` arms under
+one random `pair_id`, failures remain in the denominator, and fak is supported only when
+it has no fewer successful paired arms and the median elapsed-time ratio
+`fak / baseline` is at most **1.25**. Missing arms remain visible as incomplete pairs.
+This small denominator is a bounded creation-workflow witness, not statistical or product-
+quality equivalence.
+
+`fak harness study creation --input study.json` emits the parity denominator, arm
+successes, median ratio when both arms succeed, and `supported`, `not_yet`, or `refuted`.
+The checked-in study intentionally reports `not_yet` until independent paired receipts
+are archived.
+
 ## Ten-minute task card
 
 Prerequisite environment: a fresh machine or VM with Go installed, working network, no

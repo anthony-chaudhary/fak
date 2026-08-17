@@ -9,7 +9,7 @@ import (
 
 func validReceipt() Receipt {
 	start := time.Date(2026, 8, 16, 1, 2, 3, 0, time.UTC)
-	return Receipt{Schema: Schema, RunID: "run-a8f29c", ParticipantID: "person-b7e14d", ParticipantClass: "unfamiliar-builder", PriorFamiliarity: "none", Track: "ten-minute", Independent: true, Artifact: "fak@v0.44.0", ArtifactDigest: "sha256:abc", OS: "linux-amd64", CPU: "x86_64", Toolchain: "go1.26", NetworkState: "online install; offline selfcheck", CacheState: "empty", StartedAt: start, StoppedAt: start.Add(5 * time.Minute), ElapsedSeconds: 300, Commands: []Command{{Command: "fak harness init", Exit: 0}}, FilesChanged: []string{"product/config.go"}, Rebuilds: 1, RebuildSeconds: 20, Outcome: "success", HelpRequests: 0, Transcript: "receipts/run/transcript.txt", Receipt: "receipts/run/README.md"}
+	return Receipt{Schema: Schema, RunID: "run-a8f29c", ParticipantID: "person-b7e14d", ParticipantClass: "unfamiliar-builder", PriorFamiliarity: "none", Track: "ten-minute", Arm: "fak", PairID: "pair-a8f29c", Independent: true, Artifact: "fak@v0.44.0", ArtifactDigest: "sha256:abc", OS: "linux-amd64", CPU: "x86_64", Toolchain: "go1.26", NetworkState: "online install; offline selfcheck", CacheState: "empty", StartedAt: start, StoppedAt: start.Add(5 * time.Minute), ElapsedSeconds: 300, Commands: []Command{{Command: "fak harness init", Exit: 0}}, FilesChanged: []string{"product/config.go"}, Rebuilds: 1, RebuildSeconds: 20, Outcome: "success", HelpRequests: 0, Transcript: "receipts/run/transcript.txt", Receipt: "receipts/run/README.md"}
 }
 func TestParseAndEvaluateIndependentReceipt(t *testing.T) {
 	r := validReceipt()
@@ -54,6 +54,7 @@ func TestParseFailsClosedAndWeekendRequiresWitness(t *testing.T) {
 func TestWeekendWitnessAccepted(t *testing.T) {
 	r := validReceipt()
 	r.Track = "weekend"
+	r.Arm = "fak"
 	r.IndependentAuthorship = "signed artifact statement"
 	r.Conformance = "receipt/conformance.json"
 	raw, _ := json.Marshal(r)
@@ -75,5 +76,21 @@ func TestCheckUniqueRejectsRunAndParticipantDuplicates(t *testing.T) {
 	}
 	if err := CheckUnique([]byte(`{"runs":[]}`), row); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestParseRequiresFrozenParityIdentity(t *testing.T) {
+	for name, mutate := range map[string]func(*Receipt){
+		"arm":  func(r *Receipt) { r.Arm = "other" },
+		"pair": func(r *Receipt) { r.PairID = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := validReceipt()
+			mutate(&r)
+			raw, _ := json.Marshal(r)
+			if _, err := Parse(raw); err == nil {
+				t.Fatal("expected parity identity refusal")
+			}
+		})
 	}
 }

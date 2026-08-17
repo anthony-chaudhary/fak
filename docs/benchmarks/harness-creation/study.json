@@ -5,7 +5,12 @@
     "frozen": true,
     "ten_minute_limit_seconds": 600,
     "assistance_policy": "task-card-and-help-only",
-    "failures_in_denominator": true
+    "failures_in_denominator": true,
+    "parity": {
+      "frozen": true,
+      "minimum_pairs": 2,
+      "max_median_elapsed_ratio": 1.25
+    }
   },
   "baseline": {
     "id": "create-mastra-1.25.0",

@@ -5,6 +5,8 @@
   "participant_class": "unfamiliar-builder",
   "prior_fak_internals_familiarity": "none",
   "track": "ten-minute",
+  "arm": "fak",
+  "pair_id": "pair-random-slug",
   "independent": true,
   "artifact": "module@version-or-release-asset",
   "artifact_digest": "sha256:replace-me",
@@ -16,8 +18,15 @@
   "started_at": "2026-08-16T00:00:00Z",
   "stopped_at": "2026-08-16T00:05:00Z",
   "elapsed_seconds": 300,
-  "commands": [{"command": "replace-me", "exit": 0}],
-  "files_changed": ["replace-me"],
+  "commands": [
+    {
+      "command": "replace-me",
+      "exit": 0
+    }
+  ],
+  "files_changed": [
+    "replace-me"
+  ],
   "rebuilds": 1,
   "rebuild_seconds": 1,
   "outcome": "success",

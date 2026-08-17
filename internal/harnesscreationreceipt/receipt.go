@@ -23,6 +23,8 @@ type Receipt struct {
 	ParticipantClass      string    `json:"participant_class"`
 	PriorFamiliarity      string    `json:"prior_fak_internals_familiarity"`
 	Track                 string    `json:"track"`
+	Arm                   string    `json:"arm"`
+	PairID                string    `json:"pair_id"`
 	Independent           bool      `json:"independent"`
 	Artifact              string    `json:"artifact"`
 	ArtifactDigest        string    `json:"artifact_digest"`
@@ -49,6 +51,8 @@ type StudyRow struct {
 	ID               string  `json:"id"`
 	ParticipantID    string  `json:"participant_id"`
 	Track            string  `json:"track"`
+	Arm              string  `json:"arm"`
+	PairID           string  `json:"pair_id"`
 	ParticipantClass string  `json:"participant_class"`
 	Independent      bool    `json:"independent"`
 	Outcome          string  `json:"outcome"`
@@ -81,6 +85,15 @@ func Parse(raw []byte) (Receipt, error) {
 	}
 	if r.Track != "ten-minute" && r.Track != "weekend" {
 		return r, errors.New("track must be ten-minute or weekend")
+	}
+	if r.Arm != "fak" && r.Arm != "baseline" {
+		return r, errors.New("arm must be fak or baseline")
+	}
+	if !slug.MatchString(r.PairID) {
+		return r, errors.New("pair_id must be a privacy-safe random slug")
+	}
+	if r.Track == "weekend" && r.Arm != "fak" {
+		return r, errors.New("weekend receipts must use fak arm")
 	}
 	if r.Outcome != "success" && r.Outcome != "failure" {
 		return r, errors.New("outcome must be success or failure")

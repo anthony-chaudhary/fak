@@ -23,10 +23,17 @@ type Study struct {
 }
 
 type Protocol struct {
-	Frozen                bool   `json:"frozen"`
-	TenMinuteLimitSeconds int    `json:"ten_minute_limit_seconds"`
-	AssistancePolicy      string `json:"assistance_policy"`
-	FailuresInDenominator bool   `json:"failures_in_denominator"`
+	Frozen                bool             `json:"frozen"`
+	TenMinuteLimitSeconds int              `json:"ten_minute_limit_seconds"`
+	AssistancePolicy      string           `json:"assistance_policy"`
+	FailuresInDenominator bool             `json:"failures_in_denominator"`
+	Parity                MatchedStudySpec `json:"parity"`
+}
+
+type MatchedStudySpec struct {
+	Frozen                bool    `json:"frozen"`
+	MinimumPairs          int     `json:"minimum_pairs"`
+	MaxMedianElapsedRatio float64 `json:"max_median_elapsed_ratio"`
 }
 
 type Baseline struct {
@@ -41,6 +48,8 @@ type Run struct {
 	ID                    string   `json:"id"`
 	ParticipantID         string   `json:"participant_id"`
 	Track                 string   `json:"track"`
+	Arm                   string   `json:"arm,omitempty"`
+	PairID                string   `json:"pair_id,omitempty"`
 	ParticipantClass      string   `json:"participant_class"`
 	Independent           bool     `json:"independent"`
 	Outcome               string   `json:"outcome"`
@@ -52,12 +61,23 @@ type Run struct {
 }
 
 type Result struct {
-	Schema      string      `json:"schema"`
-	StudyID     string      `json:"study_id"`
-	BaselineOK  bool        `json:"baseline_ready"`
-	Calibration int         `json:"calibration_runs"`
-	TenMinute   TrackResult `json:"ten_minute"`
-	Weekend     TrackResult `json:"weekend"`
+	Schema      string             `json:"schema"`
+	StudyID     string             `json:"study_id"`
+	BaselineOK  bool               `json:"baseline_ready"`
+	Calibration int                `json:"calibration_runs"`
+	TenMinute   TrackResult        `json:"ten_minute"`
+	Weekend     TrackResult        `json:"weekend"`
+	Parity      MatchedStudyResult `json:"parity"`
+}
+
+type MatchedStudyResult struct {
+	CompletePairs      int      `json:"complete_pairs"`
+	IncompletePairs    int      `json:"incomplete_pairs"`
+	FakSuccesses       int      `json:"fak_successes"`
+	BaselineSuccesses  int      `json:"baseline_successes"`
+	MedianElapsedRatio *float64 `json:"median_elapsed_ratio,omitempty"`
+	ClaimStatus        string   `json:"claim_status"`
+	Reasons            []string `json:"reasons,omitempty"`
 }
 
 type TrackResult struct {
@@ -88,17 +108,34 @@ func Parse(raw []byte) (Study, error) {
 	if !s.Protocol.Frozen || s.Protocol.TenMinuteLimitSeconds != 600 || s.Protocol.AssistancePolicy != "task-card-and-help-only" || !s.Protocol.FailuresInDenominator {
 		return Study{}, errors.New("protocol must freeze the 600-second limit, task-card-and-help-only assistance, and failures-in-denominator rule")
 	}
+	if !s.Protocol.Parity.Frozen || s.Protocol.Parity.MinimumPairs < 1 || s.Protocol.Parity.MaxMedianElapsedRatio < 1 {
+		return Study{}, errors.New("protocol parity question must be frozen with minimum_pairs >= 1 and max_median_elapsed_ratio >= 1")
+	}
 	if !safeID.MatchString(s.Baseline.ID) || strings.TrimSpace(s.Baseline.Evidence) == "" {
 		return Study{}, errors.New("baseline requires a privacy-safe id and evidence reference")
 	}
 	seen := map[string]bool{}
+	seenPairArms := map[string]bool{}
 	for i, r := range s.Runs {
 		if !safeID.MatchString(r.ID) || !safeID.MatchString(r.ParticipantID) {
 			return Study{}, fmt.Errorf("run %d requires privacy-safe run and participant slugs", i)
 		}
-		key := r.ParticipantID + "\x00" + r.Track
+		if r.Arm != "" && r.Arm != "fak" && r.Arm != "baseline" {
+			return Study{}, fmt.Errorf("run %q: unknown arm %q", r.ID, r.Arm)
+		}
+		if (r.Arm == "") != (r.PairID == "") {
+			return Study{}, fmt.Errorf("run %q: arm and pair_id must be supplied together", r.ID)
+		}
+		if r.PairID != "" {
+			pairKey := r.PairID + "\x00" + r.Arm
+			if seenPairArms[pairKey] {
+				return Study{}, fmt.Errorf("duplicate pair arm %q/%q", r.PairID, r.Arm)
+			}
+			seenPairArms[pairKey] = true
+		}
+		key := r.ParticipantID + "\x00" + r.Track + "\x00" + r.Arm
 		if seen[key] {
-			return Study{}, fmt.Errorf("participant %q has duplicate %s attempt", r.ParticipantID, r.Track)
+			return Study{}, fmt.Errorf("participant %q has duplicate %s/%s attempt", r.ParticipantID, r.Track, r.Arm)
 		}
 		seen[key] = true
 		if r.Track != "ten-minute" && r.Track != "weekend" {
@@ -125,6 +162,9 @@ func Evaluate(s Study) Result {
 			result.Calibration++
 			continue
 		}
+		if r.Track == "ten-minute" && r.Arm == "baseline" {
+			continue
+		}
 		if r.Track == "ten-minute" {
 			addTenMinute(&result.TenMinute, r, s.Protocol.TenMinuteLimitSeconds)
 		} else {
@@ -145,6 +185,7 @@ func Evaluate(s Study) Result {
 	} else {
 		result.Weekend.ClaimStatus = "not_yet"
 	}
+	result.Parity = evaluateMatchedStudy(s)
 	return result
 }
 
@@ -203,4 +244,78 @@ func claimReasons(t TrackResult, baselineOK bool, required int) []string {
 		reasons = append(reasons, fmt.Sprintf("need at least %d successful eligible run(s)", required))
 	}
 	return reasons
+}
+
+type parityPair struct {
+	fak      *Run
+	baseline *Run
+}
+
+func evaluateMatchedStudy(s Study) MatchedStudyResult {
+	out := MatchedStudyResult{ClaimStatus: "not_yet"}
+	pairs := map[string]*parityPair{}
+	for i := range s.Runs {
+		run := &s.Runs[i]
+		if run.Track != "ten-minute" || run.PairID == "" || run.ParticipantClass != "unfamiliar-builder" || !run.Independent {
+			continue
+		}
+		pair := pairs[run.PairID]
+		if pair == nil {
+			pair = &parityPair{}
+			pairs[run.PairID] = pair
+		}
+		if run.Arm == "fak" {
+			pair.fak = run
+		} else if run.Arm == "baseline" {
+			pair.baseline = run
+		}
+	}
+	ratios := []float64{}
+	for _, pair := range pairs {
+		if pair.fak == nil || pair.baseline == nil {
+			out.IncompletePairs++
+			continue
+		}
+		out.CompletePairs++
+		fakOK := pair.fak.Outcome == "success" && pair.fak.ElapsedSeconds <= float64(s.Protocol.TenMinuteLimitSeconds)
+		baselineOK := pair.baseline.Outcome == "success" && pair.baseline.ElapsedSeconds <= float64(s.Protocol.TenMinuteLimitSeconds)
+		if fakOK {
+			out.FakSuccesses++
+		}
+		if baselineOK {
+			out.BaselineSuccesses++
+		}
+		if fakOK && baselineOK && pair.baseline.ElapsedSeconds > 0 {
+			ratios = append(ratios, pair.fak.ElapsedSeconds/pair.baseline.ElapsedSeconds)
+		}
+	}
+	if len(ratios) > 0 {
+		sort.Float64s(ratios)
+		m := ratios[len(ratios)/2]
+		if len(ratios)%2 == 0 {
+			m = (ratios[len(ratios)/2-1] + ratios[len(ratios)/2]) / 2
+		}
+		out.MedianElapsedRatio = &m
+	}
+	minimum := s.Protocol.Parity.MinimumPairs
+	if out.CompletePairs < minimum {
+		out.Reasons = append(out.Reasons, fmt.Sprintf("need at least %d complete independent pair(s)", minimum))
+		return out
+	}
+	if out.FakSuccesses < out.BaselineSuccesses {
+		out.ClaimStatus = "refuted"
+		out.Reasons = append(out.Reasons, "fak has fewer successful paired arms than baseline")
+		return out
+	}
+	if len(ratios) < minimum {
+		out.Reasons = append(out.Reasons, fmt.Sprintf("need at least %d pair(s) where both arms succeed", minimum))
+		return out
+	}
+	if *out.MedianElapsedRatio > s.Protocol.Parity.MaxMedianElapsedRatio {
+		out.ClaimStatus = "refuted"
+		out.Reasons = append(out.Reasons, fmt.Sprintf("median elapsed ratio %.3f exceeds frozen bound %.3f", *out.MedianElapsedRatio, s.Protocol.Parity.MaxMedianElapsedRatio))
+		return out
+	}
+	out.ClaimStatus = "supported"
+	return out
 }
