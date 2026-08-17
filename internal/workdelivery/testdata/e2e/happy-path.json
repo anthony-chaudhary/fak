@@ -1,0 +1,19 @@
+{
+  "schema": "fak.work-delivery-e2e/v1",
+  "unit": {
+    "schema": "fak.work-delivery/v1",
+    "id": "issue-7106",
+    "artifacts": [{"path":"fixture/active.go","kind":"go-source"}],
+    "axes": {"authoring":"recorded","compile_admission":"admitted","verification":"passed","integration":"integrated","release":"ready"}
+  },
+  "compile_set": {
+    "admitted": ["fixture/active.go"],
+    "excluded": ["fixture/recorded_broken.go"]
+  },
+  "receipts": [
+    {"schema":"fak.work-delivery-adapter/v1","adapter":"commit","unit_id":"issue-7106","stage":"recording","receipt":{"schema":"fak.work-delivery/v1","unit_id":"issue-7106","transition":{"axis":"authoring","from":"draft","to":"recorded"},"gate":"commit","evidence":[{"kind":"commit","reference":"abc123","witnessed":true}],"owner":"fak commit","observed_at":"2026-08-17T18:30:00Z"},"evidence":[{"kind":"commit","reference":"abc123","witnessed":true}],"next_action":"declare compile admission separately"},
+    {"schema":"fak.work-delivery-adapter/v1","adapter":"build","unit_id":"issue-7106","stage":"build","receipt":{"schema":"fak.work-delivery/v1","unit_id":"issue-7106","transition":{"axis":"verification","from":"unverified","to":"passed"},"gate":"affected-tests","evidence":[{"kind":"verification","reference":"test://green","witnessed":true}],"owner":"ci","observed_at":"2026-08-17T18:30:00Z"},"evidence":[{"kind":"verification","reference":"test://green","witnessed":true}],"next_action":"record integration independently"},
+    {"schema":"fak.work-delivery-adapter/v1","adapter":"integration","unit_id":"issue-7106","stage":"integration","receipt":{"schema":"fak.work-delivery/v1","unit_id":"issue-7106","transition":{"axis":"integration","from":"unintegrated","to":"integrated"},"gate":"push","evidence":[{"kind":"integration","reference":"origin/main@abc123","witnessed":true}],"owner":"sync","observed_at":"2026-08-17T18:30:00Z"},"evidence":[{"kind":"integration","reference":"origin/main@abc123","witnessed":true}],"next_action":"evaluate release admission independently"},
+    {"schema":"fak.work-delivery-adapter/v1","adapter":"release","unit_id":"issue-7106","stage":"release-admission","receipt":{"schema":"fak.work-delivery/v1","unit_id":"issue-7106","transition":{"axis":"release","from":"not_ready","to":"ready"},"gate":"release-admission","evidence":[{"kind":"release-readiness","reference":"shipgate://run/9","witnessed":true}],"owner":"release","observed_at":"2026-08-17T18:30:00Z"},"evidence":[{"kind":"release-readiness","reference":"shipgate://run/9","witnessed":true}],"next_action":"release publication may proceed"}
+  ]
+}

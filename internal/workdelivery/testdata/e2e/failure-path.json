@@ -1,0 +1,6 @@
+[
+  {"scope":{"id":"aggregate","units":[{"id":"unit-good","tree":"internal/good","test_group":"unit","independently_checkable":true},{"id":"unit-bad-test","tree":"internal/bad","test_group":"unit","independently_checkable":true},{"id":"unit-bad-build","tree":"internal/bad","test_group":"build","independently_checkable":true}]},"class":"unknown","gate":"full-tests","evidence":[{"kind":"ci-log","reference":"ci://run/7106","witnessed":true}],"check_command":"go test ./..."},
+  {"scope":{"id":"aggregate/1","units":[{"id":"unit-bad-test","tree":"internal/bad","test_group":"unit","independently_checkable":true},{"id":"unit-bad-build","tree":"internal/bad","test_group":"build","independently_checkable":true}]},"class":"unknown","gate":"full-tests","evidence":[{"kind":"ci-log","reference":"ci://run/7106/tree-bad","witnessed":true}],"check_command":"go test ./internal/bad"},
+  {"scope":{"id":"aggregate/1/2","units":[{"id":"unit-bad-test","tree":"internal/bad","test_group":"unit","independently_checkable":true}]},"failed_unit_id":"unit-bad-test","class":"test","gate":"full-tests","evidence":[{"kind":"test-log","reference":"ci://run/7106/unit-bad-test","witnessed":true}],"check_command":"go test ./internal/bad -run TestBad"}
+]
+
