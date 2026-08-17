@@ -93,7 +93,7 @@ func runConceptPosition(out, errw io.Writer, c conceptcatalog.Catalog, args []st
 	fs.SetOutput(errw)
 	var r conceptcatalog.PositionRequest
 	var refs, aliases string
-	var dry, jsonOut bool
+	var dry, jsonOut, stage bool
 	fs.StringVar(&r.ID, "id", "", "stable row ID")
 	fs.StringVar(&r.Canonical, "canonical", "", "canonical name")
 	fs.StringVar(&r.Family, "family", "", "family ID")
@@ -108,6 +108,7 @@ func runConceptPosition(out, errw io.Writer, c conceptcatalog.Catalog, args []st
 	fs.StringVar(&aliases, "aliases", "", "comma-separated aliases")
 	fs.BoolVar(&dry, "dry-run", false, "show plan without writing")
 	fs.BoolVar(&jsonOut, "json", false, "emit JSON plan")
+	fs.BoolVar(&stage, "stage", false, "stage exactly the corpus files written so index-aware admission sees the remedy; use only in an isolated checkout")
 	if fs.Parse(args) != nil {
 		return 2
 	}
@@ -130,7 +131,7 @@ func runConceptPosition(out, errw io.Writer, c conceptcatalog.Catalog, args []st
 		fmt.Fprintf(errw, "fak concept position: grounding %q does not appear in the production corpus (tests/build-tag-only text does not count)\n", r.Grounding)
 		return 1
 	}
-	return emitConceptPlan(out, errw, p, dry, jsonOut)
+	return emitConceptPlan(out, errw, filepath.Dir(filepath.Dir(c.Dir)), p, dry, jsonOut, stage)
 }
 func runConceptGenerate(out, errw io.Writer, c conceptcatalog.Catalog, args []string) int {
 	fs := flag.NewFlagSet("concept generate", flag.ContinueOnError)
@@ -164,13 +165,14 @@ func runConceptClassify(out, errw io.Writer, c conceptcatalog.Catalog, args []st
 	fs := flag.NewFlagSet("concept classify", flag.ContinueOnError)
 	fs.SetOutput(errw)
 	var r conceptcatalog.ClassifyRequest
-	var dry, jsonOut bool
+	var dry, jsonOut, stage bool
 	fs.StringVar(&r.Family, "family", "", "family ID")
 	fs.StringVar(&r.Token, "token", "", "token to classify")
 	fs.StringVar(&r.Category, "category", "", "incidental|false-positive|test-only|build-tag-only")
 	fs.StringVar(&r.Reason, "reason", "", "explicit classification reason")
 	fs.BoolVar(&dry, "dry-run", false, "show plan without writing")
 	fs.BoolVar(&jsonOut, "json", false, "emit JSON plan")
+	fs.BoolVar(&stage, "stage", false, "stage exactly the corpus files written so index-aware admission sees the remedy; use only in an isolated checkout")
 	if fs.Parse(args) != nil {
 		return 2
 	}
@@ -179,17 +181,27 @@ func runConceptClassify(out, errw io.Writer, c conceptcatalog.Catalog, args []st
 		fmt.Fprintln(errw, "fak concept classify:", e)
 		return 1
 	}
-	return emitConceptPlan(out, errw, p, dry, jsonOut)
+	return emitConceptPlan(out, errw, filepath.Dir(filepath.Dir(c.Dir)), p, dry, jsonOut, stage)
 }
-func emitConceptPlan(out, errw io.Writer, p conceptcatalog.Plan, dry, jsonOut bool) int {
+func emitConceptPlan(out, errw io.Writer, root string, p conceptcatalog.Plan, dry, jsonOut, stage bool) int {
+	if dry && stage {
+		fmt.Fprintln(errw, "fak concept: --stage cannot be combined with --dry-run")
+		return 2
+	}
 	if !dry {
 		if e := conceptcatalog.Apply(p); e != nil {
 			fmt.Fprintln(errw, "fak concept:", e)
 			return 1
 		}
 	}
+	if stage {
+		if e := stageConceptFiles(root, p.Files); e != nil {
+			fmt.Fprintln(errw, "fak concept: stage remedy:", e)
+			return 1
+		}
+	}
 	if jsonOut {
-		_ = json.NewEncoder(out).Encode(map[string]any{"ok": true, "dry_run": dry, "mode": p.Mode, "family": p.Family, "before_family_count": p.BeforeFamilyCount, "after_family_count": p.AfterFamilyCount, "files": relFiles(p.Files)})
+		_ = json.NewEncoder(out).Encode(map[string]any{"ok": true, "dry_run": dry, "staged": stage, "mode": p.Mode, "family": p.Family, "before_family_count": p.BeforeFamilyCount, "after_family_count": p.AfterFamilyCount, "files": relFiles(p.Files)})
 		return 0
 	}
 	fmt.Fprintf(out, "%s %s: family %d -> %d\n", map[bool]string{true: "PLAN", false: "APPLIED"}[dry], p.Mode, p.BeforeFamilyCount, p.AfterFamilyCount)
@@ -198,6 +210,27 @@ func emitConceptPlan(out, errw io.Writer, p conceptcatalog.Plan, dry, jsonOut bo
 	}
 	return 0
 }
+func stageConceptFiles(root string, files []string) error {
+	args := []string{"add", "--"}
+	for _, file := range files {
+		rel, err := filepath.Rel(root, file)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			return fmt.Errorf("refuse path outside repository: %s", file)
+		}
+		args = append(args, rel)
+	}
+	if len(args) == 2 {
+		return nil
+	}
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git add: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
 func conceptCSV(s string) []string {
 	var out []string
 	for _, x := range strings.Split(s, ",") {

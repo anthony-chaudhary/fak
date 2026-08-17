@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -105,4 +106,46 @@ print(json.dumps({"families": [{"id": "cache", "gaps": [], "coverage": 1.0}], "c
 	if !bytes.Contains(page, []byte("cache_probe_token")) {
 		t.Fatal("generator did not read back the classification written by concept classify")
 	}
+}
+
+func TestConceptClassifyStageMakesIndexAwareAdmissionSeeRemedy(t *testing.T) {
+	c, root := conceptCLIFixture(t)
+	if out, err := runGitAt(root, "init"); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	if out, err := runGitAt(root, "add", "."); err != nil {
+		t.Fatalf("git add fixture: %v: %s", err, out)
+	}
+	if out, err := runGitAt(root, "-c", "user.name=fak-test", "-c", "user.email=fak@example.invalid", "commit", "-m", "fixture"); err != nil {
+		t.Fatalf("git commit fixture: %v: %s", err, out)
+	}
+
+	var out, errb bytes.Buffer
+	code := runConceptClassify(&out, &errb, c, []string{"--stage", "--family", "cache", "--token", "cache_probe_token", "--category", "incidental", "--reason", "fixture"})
+	if code != 0 {
+		t.Fatalf("classify code=%d err=%s", code, errb.String())
+	}
+	staged, err := runGitAt(root, "diff", "--cached", "--name-only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(staged, filepath.ToSlash(filepath.Join(conceptcatalog.DataRel, "_meta.json"))) {
+		t.Fatalf("canonical source was not staged; index-aware admission cannot see remedy:\n%s", staged)
+	}
+}
+
+func TestConceptStageRejectsDryRun(t *testing.T) {
+	c, _ := conceptCLIFixture(t)
+	var out, errb bytes.Buffer
+	code := runConceptClassify(&out, &errb, c, []string{"--stage", "--dry-run", "--family", "cache", "--token", "cache_probe_token", "--category", "incidental", "--reason", "fixture"})
+	if code != 2 || !strings.Contains(errb.String(), "--stage cannot be combined") {
+		t.Fatalf("code=%d err=%s", code, errb.String())
+	}
+}
+
+func runGitAt(root string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }

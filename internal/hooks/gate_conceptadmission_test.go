@@ -327,6 +327,18 @@ func TestConceptAdmissionStillReportsTestPrefixedSymbolsDeclaredInCode(t *testin
 // write the worktree corpus, this gate reads the index, and `fak commit --path` stages only
 // the paths it is given -- so a remedy that does not name the corpus files leaves the author
 // running the prescribed command and being refused identically (#5534).
+func TestConceptAdmissionPrintedRemedyStagesItsOwnCorpus(t *testing.T) {
+	d := conceptAdmissionFixture(t, "const CacheBurst = 1", "", false)
+	findings, err := gateConceptAdmission(d)
+	if err != nil || len(findings) != 1 {
+		t.Fatalf("got=%+v err=%v", findings, err)
+	}
+	if !strings.Contains(findings[0].Detail, "fak concept position --stage") ||
+		!strings.Contains(findings[0].Detail, "fak concept classify --stage") {
+		t.Fatalf("printed remedy must make index-aware corpus visibility explicit: %s", findings[0].Detail)
+	}
+}
+
 func TestConceptAdmissionRemedyNamesTheCorpusFilesTheCommitMustStage(t *testing.T) {
 	got, err := gateConceptAdmission(conceptAdmissionFixture(t, "const CacheBurst = 1", "", false))
 	if err != nil || len(got) != 1 {

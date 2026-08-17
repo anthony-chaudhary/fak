@@ -318,7 +318,7 @@ func gateConceptAdmission(d *StagedDiff) ([]Finding, error) {
 					// writes into peer-contended files, while a new rows-<leaf>.json is
 					// lane-local and clears this gate on its own (#5104).
 					leaf := admissionLeaf(p)
-					cmd := fmt.Sprintf("fak concept position --id %s --canonical %q --family %s --definition TEXT --distinction TEXT --kind symbol --grounding %s --grounding-kind symbol --row-file rows-%s.json --distinct-from SIBLING_ID", tok, raw, f.id, raw, leaf)
+					cmd := fmt.Sprintf("fak concept position --stage --id %s --canonical %q --family %s --definition TEXT --distinction TEXT --kind symbol --grounding %s --grounding-kind symbol --row-file rows-%s.json --distinct-from SIBLING_ID", tok, raw, f.id, raw, leaf)
 					// Both remedy commands write the corpus in the WORKTREE, and this gate reads
 					// the INDEX (the accessor above resolves the staged blob). `fak commit --path`
 					// stages only the paths it is handed, so running the command and re-committing
@@ -326,7 +326,7 @@ func gateConceptAdmission(d *StagedDiff) ([]Finding, error) {
 					// looks applied and nothing changes. Name the corpus paths the commit has to
 					// carry, in full, so the printed remedy is sufficient on its own (#5534).
 					stage := fmt.Sprintf("--path tools/concept_disambiguation_scorecard.data/_meta.json --path tools/concept_disambiguation_scorecard.data/rows-%s.json", leaf)
-					detail := fmt.Sprintf("family=%s token=%s introduced at %s:%d is neither positioned nor classified; run `%s` (or `fak concept classify --family %s --token %s --category incidental --reason TEXT`), then add `%s` to the SAME `fak commit` -- this gate reads the git index, not the worktree, so a corpus write left unstaged reports this finding unchanged; landing the corpus as its own commit instead trips CONCEPT_FRESHNESS, whose generated markdown has to be regenerated from a clean-room export of the commit rather than from the dirty worktree", f.id, raw, p, line.New, cmd, f.id, raw, stage)
+					detail := fmt.Sprintf("family=%s token=%s introduced at %s:%d is neither positioned nor classified; run `%s` (or `fak concept classify --stage --family %s --token %s --category incidental --reason TEXT`), then add `%s` to the SAME `fak commit` -- this gate reads the git index, not the worktree, so a corpus write left unstaged reports this finding unchanged; landing the corpus as its own commit instead trips CONCEPT_FRESHNESS, whose generated markdown has to be regenerated from a clean-room export of the commit rather than from the dirty worktree", f.id, raw, p, line.New, cmd, f.id, raw, stage)
 					out = append(out, Finding{Gate: "CONCEPT_ADMISSION", File: p, Line: line.New, Detail: detail})
 				}
 			}
