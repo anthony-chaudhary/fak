@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -40,11 +41,18 @@ type progressReport struct {
 	} `json:"baseline"`
 	StallAfterWindows int `json:"stall_after_windows"`
 	WIP               struct {
-		Files     int `json:"files"`
-		Staged    int `json:"staged"`
-		Unstaged  int `json:"unstaged"`
-		Untracked int `json:"untracked"`
-		Conflicts int `json:"conflicts"`
+		Files                 int   `json:"files"`
+		Staged                int   `json:"staged"`
+		Unstaged              int   `json:"unstaged"`
+		Untracked             int   `json:"untracked"`
+		Conflicts             int   `json:"conflicts"`
+		Additions             int64 `json:"additions"`
+		Deletions             int64 `json:"deletions"`
+		BinaryFiles           int   `json:"binary_files"`
+		UntrackedBytes        int64 `json:"untracked_bytes"`
+		OldestExistingMinutes int64 `json:"oldest_existing_minutes"`
+		AgeFilesObserved      int   `json:"age_files_observed"`
+		AgeFilesUnavailable   int   `json:"age_files_unavailable"`
 	} `json:"wip"`
 	GitHub struct {
 		Available      bool   `json:"available"`
@@ -93,7 +101,7 @@ func runProgress(out, errOut io.Writer, args []string) int {
 	fmt.Fprintf(out, "%s — %s\n", r.Verdict, r.Reason)
 	fmt.Fprintf(out, "delivered: commits=%d (%.2f/10m) issues_closed=%d (%.2f/10m) window=%dm\n", r.Commits, r.CommitsPer10M, r.GitHub.RecentlyClosed, r.IssueClosesPer10M, r.WindowMinutes)
 	fmt.Fprintf(out, "baseline: commits=%d (%.2f/10m) issues_closed=%d (%.2f/10m) window=%dm; stall_after=%d windows\n", r.Baseline.Commits, r.Baseline.CommitsPer10M, r.Baseline.IssuesClosed, r.Baseline.IssueClosesPer10M, r.Baseline.WindowMinutes, r.StallAfterWindows)
-	fmt.Fprintf(out, "local WIP: files=%d staged=%d unstaged=%d untracked=%d conflicts=%d\n", r.WIP.Files, r.WIP.Staged, r.WIP.Unstaged, r.WIP.Untracked, r.WIP.Conflicts)
+	fmt.Fprintf(out, "local WIP: files=%d staged=%d unstaged=%d untracked=%d conflicts=%d additions=%d deletions=%d binary=%d untracked_bytes=%d oldest_existing=%dm age_observed=%d/%d\n", r.WIP.Files, r.WIP.Staged, r.WIP.Unstaged, r.WIP.Untracked, r.WIP.Conflicts, r.WIP.Additions, r.WIP.Deletions, r.WIP.BinaryFiles, r.WIP.UntrackedBytes, r.WIP.OldestExistingMinutes, r.WIP.AgeFilesObserved, r.WIP.AgeFilesObserved+r.WIP.AgeFilesUnavailable)
 	if r.GitHub.Available {
 		fmt.Fprintf(out, "GitHub: open=%d recently_closed=%d\n", r.GitHub.OpenTotal, r.GitHub.RecentlyClosed)
 	} else {
@@ -129,11 +137,14 @@ func collectProgress(dir string, window, baseline time.Duration, stallAfter int,
 		return r, fmt.Errorf("parse baseline commits: %w", err)
 	}
 	r.Baseline.CommitsPer10M = progressRate(r.Baseline.Commits, baseline)
-	b, err = progressCommand(dir, "git", "status", "--porcelain=v1", "-z")
+	b, err = progressCommand(dir, "git", "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
 		return r, fmt.Errorf("read local WIP: %w", err)
 	}
-	parseProgressWIP(b, &r)
+	wipPaths := parseProgressWIP(b, &r)
+	if err := collectProgressWIPDetails(dir, wipPaths, now, &r); err != nil {
+		return r, err
+	}
 	closed, e1 := progressCommand(dir, "gh", "issue", "list", "--state", "closed", "--search", "closed:>="+since, "--limit", "10000", "--json", "number")
 	baselineClosed, e2 := progressCommand(dir, "gh", "issue", "list", "--state", "closed", "--search", "closed:"+baselineStart.UTC().Format(time.RFC3339)+".."+since, "--limit", "10000", "--json", "number")
 	open, e3 := progressCommand(dir, "gh", "issue", "list", "--state", "open", "--limit", "10000", "--json", "number")
@@ -180,8 +191,9 @@ func collectProgress(dir string, window, baseline time.Duration, stallAfter int,
 	return r, nil
 }
 
-func parseProgressWIP(status []byte, r *progressReport) {
+func parseProgressWIP(status []byte, r *progressReport) []progressWIPPath {
 	rows := strings.Split(string(status), "\x00")
+	paths := make([]progressWIPPath, 0, len(rows))
 	for i := 0; i < len(rows); i++ {
 		row := rows[i]
 		if len(row) < 3 {
@@ -189,7 +201,10 @@ func parseProgressWIP(status []byte, r *progressReport) {
 		}
 		r.WIP.Files++
 		x, y := row[0], row[1]
-		if x == '?' && y == '?' {
+		path := row[3:]
+		untracked := x == '?' && y == '?'
+		paths = append(paths, progressWIPPath{path: path, untracked: untracked})
+		if untracked {
 			r.WIP.Untracked++
 			continue
 		}
@@ -204,6 +219,68 @@ func parseProgressWIP(status []byte, r *progressReport) {
 		}
 		if x == 'R' || x == 'C' {
 			i++
+		}
+	}
+	return paths
+}
+
+type progressWIPPath struct {
+	path      string
+	untracked bool
+}
+
+func collectProgressWIPDetails(dir string, paths []progressWIPPath, now time.Time, r *progressReport) error {
+	numstat, err := progressCommand(dir, "git", "diff", "--numstat", "-z", "HEAD", "--")
+	if err != nil {
+		return fmt.Errorf("read WIP magnitude: %w", err)
+	}
+	parseProgressNumstat(numstat, r)
+	root, err := filepath.Abs(dir)
+	if err != nil {
+		return fmt.Errorf("resolve repository root: %w", err)
+	}
+	for _, candidate := range paths {
+		full := filepath.Join(root, filepath.FromSlash(candidate.path))
+		rel, relErr := filepath.Rel(root, full)
+		if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			r.WIP.AgeFilesUnavailable++
+			continue
+		}
+		info, statErr := os.Lstat(full)
+		if statErr != nil {
+			r.WIP.AgeFilesUnavailable++
+			continue
+		}
+		r.WIP.AgeFilesObserved++
+		age := now.Sub(info.ModTime())
+		if age > 0 {
+			minutes := int64(age / time.Minute)
+			if minutes > r.WIP.OldestExistingMinutes {
+				r.WIP.OldestExistingMinutes = minutes
+			}
+		}
+		if candidate.untracked && info.Mode().IsRegular() {
+			r.WIP.UntrackedBytes += info.Size()
+		}
+	}
+	return nil
+}
+
+func parseProgressNumstat(data []byte, r *progressReport) {
+	for _, row := range strings.Split(string(data), "\x00") {
+		fields := strings.Split(row, "\t")
+		if len(fields) < 3 {
+			continue
+		}
+		if fields[0] == "-" || fields[1] == "-" {
+			r.WIP.BinaryFiles++
+			continue
+		}
+		additions, addErr := strconv.ParseInt(fields[0], 10, 64)
+		deletions, delErr := strconv.ParseInt(fields[1], 10, 64)
+		if addErr == nil && delErr == nil {
+			r.WIP.Additions += additions
+			r.WIP.Deletions += deletions
 		}
 	}
 }
