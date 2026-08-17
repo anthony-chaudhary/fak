@@ -24,7 +24,7 @@ func cmdDisambiguation(args []string) {
 
 func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak disambiguation schema [--json] [--self-test]\n       fak disambiguation query <canonical-term> [--json]\n       fak disambiguation query --self-test [--json]\n       fak disambiguation stale-symbols-self-test [--json]\n       fak disambiguation coverage-self-test [--json]")
+		fmt.Fprintln(stderr, "usage: fak disambiguation schema [--json] [--self-test]\n       fak disambiguation query <canonical-term> [--json]\n       fak disambiguation query --self-test [--json]\n       fak disambiguation search <term> [--json]\n       fak disambiguation stale-symbols-self-test [--json]\n       fak disambiguation coverage-self-test [--json]")
 		return 2
 	}
 	switch args[0] {
@@ -38,6 +38,8 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 		return runDisambiguationCommittedFreshness(stdout, stderr, args[1:])
 	case "query":
 		return runDisambiguationQuery(stdout, stderr, args[1:])
+	case "search":
+		return runDisambiguationSearch(stdout, stderr, args[1:])
 	case "explain":
 		return runDisambiguationExplain(stdout, stderr, args[1:])
 	case "ownership":
@@ -51,7 +53,7 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 	case "coverage-self-test":
 		return runDisambiguationCoverageSelfTest(stdout, stderr, args[1:])
 	default:
-		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want schema, query, explain, ownership, freshness, provenance, stale-symbols-self-test, or coverage-self-test)\n", args[0])
+		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want schema, query, search, explain, ownership, freshness, provenance, stale-symbols-self-test, or coverage-self-test)\n", args[0])
 		return 2
 	}
 }
@@ -453,6 +455,55 @@ func runDisambiguationQuery(stdout, stderr io.Writer, args []string) int {
 		return encodeDisambiguationJSON(stdout, stderr, response)
 	}
 	fmt.Fprintf(stdout, "%s — %s\n", response.Entry.Identity.CanonicalTerm, response.Entry.Definition)
+	return 0
+}
+
+func runDisambiguationSearch(stdout, stderr io.Writer, args []string) int {
+	var jsonOutput bool
+	var terms []string
+	for _, arg := range args {
+		switch arg {
+		case "--json":
+			jsonOutput = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				fmt.Fprintf(stderr, "fak disambiguation search: unknown option %q\n", arg)
+				return 2
+			}
+			terms = append(terms, arg)
+		}
+	}
+	if len(terms) != 1 {
+		fmt.Fprintln(stderr, "usage: fak disambiguation search <term> [--json]")
+		return 2
+	}
+	response := disambiguation.Search(terms[0])
+	if jsonOutput {
+		if code := encodeDisambiguationJSON(stdout, stderr, response); code != 0 {
+			return code
+		}
+	} else {
+		fmt.Fprintf(stdout, "%s: %s\n", response.Verdict, response.Query)
+		for _, group := range []struct {
+			name    string
+			matches []disambiguation.SearchMatch
+		}{
+			{"exact", response.Groups.Exact},
+			{"alias", response.Groups.Alias},
+			{"prefix", response.Groups.Prefix},
+		} {
+			if len(group.matches) == 0 {
+				continue
+			}
+			fmt.Fprintf(stdout, "%s:\n", group.name)
+			for _, match := range group.matches {
+				fmt.Fprintf(stdout, "- %s -> %s [%s=%s]\n", match.MatchedTerm, match.Entry.Identity.CanonicalTerm, match.Entry.Scope.Kind, match.Entry.Scope.Value)
+			}
+		}
+	}
+	if response.Verdict == disambiguation.SearchVerdictAmbiguous {
+		return 3
+	}
 	return 0
 }
 

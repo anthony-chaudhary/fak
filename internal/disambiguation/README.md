@@ -47,6 +47,21 @@ including meaning (`definition`), scope, contrasts, owner, public sources, and
 freshness. The reader is stdlib-only and read-only; it is not a second index
 writer and has no private source dependency.
 
+## Ranked search and explicit ambiguity
+
+Use `fak disambiguation search <term> --json` when discovery, rather than exact
+resolution, is intended. The `fak-disambiguation-search/1` response keeps exact
+canonical, exact alias, and prefix matches in separate ranked groups. Its typed
+`verdict` is `exact`, `alias`, `prefix`, `ambiguous`, or `not_found`; multiple
+owners produce `ambiguous` instead of silently selecting the first candidate.
+The human form prints the same groups, and exits 3 for ambiguity so automation
+cannot mistake a candidate list for a resolved identity.
+
+```text
+fak disambiguation search "agent" --json
+fak disambiguation search "kernel"
+```
+
 ## Pairwise contrasts and forbidden conflations
 
 Each contrast names another canonical entry, carries a non-empty explanation,
