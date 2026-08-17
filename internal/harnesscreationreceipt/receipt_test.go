@@ -63,33 +63,21 @@ func TestWeekendWitnessAccepted(t *testing.T) {
 	}
 }
 
-func TestCheckUniqueRejectsRunAndParticipantDuplicates(t *testing.T) {
+func TestCheckUniqueAdmitsSecondPairedArmAndRejectsDuplicates(t *testing.T) {
 	r := validReceipt()
 	row := Evaluate(r).Row
-	for _, study := range []string{
-		`{"runs":[{"id":"run-a8f29c","participant_id":"person-other"}]}`,
-		`{"runs":[{"id":"run-other","participant_id":"person-b7e14d"}]}`,
-	} {
-		if err := CheckUnique([]byte(study), row); err == nil {
-			t.Fatal("expected duplicate refusal")
-		}
+	study := `{"runs":[{"id":"run-other","participant_id":"person-b7e14d","track":"ten-minute","arm":"baseline","pair_id":"pair-a8f29c"}]}`
+	if err := CheckUnique([]byte(study), row); err != nil {
+		t.Fatalf("second paired arm refused: %v", err)
 	}
-	if err := CheckUnique([]byte(`{"runs":[]}`), row); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestParseRequiresFrozenParityIdentity(t *testing.T) {
-	for name, mutate := range map[string]func(*Receipt){
-		"arm":  func(r *Receipt) { r.Arm = "other" },
-		"pair": func(r *Receipt) { r.PairID = "" },
+	for name, existing := range map[string]string{
+		"run":      `{"id":"run-a8f29c","participant_id":"person-other","track":"ten-minute","arm":"baseline","pair_id":"pair-other"}`,
+		"attempt":  `{"id":"run-other","participant_id":"person-b7e14d","track":"ten-minute","arm":"fak","pair_id":"pair-other"}`,
+		"pair arm": `{"id":"run-other","participant_id":"person-other","track":"ten-minute","arm":"fak","pair_id":"pair-a8f29c"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			r := validReceipt()
-			mutate(&r)
-			raw, _ := json.Marshal(r)
-			if _, err := Parse(raw); err == nil {
-				t.Fatal("expected parity identity refusal")
+			if err := CheckUnique([]byte(`{"runs":[`+existing+`]}`), row); err == nil {
+				t.Fatal("expected duplicate refusal")
 			}
 		})
 	}

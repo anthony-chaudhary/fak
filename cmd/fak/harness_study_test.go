@@ -2,10 +2,15 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/harnesscreationreceipt"
+	"github.com/anthony-chaudhary/fak/internal/harnesscreationstudy"
 )
 
 func TestHarnessStudyCrossoverCLI(t *testing.T) {
@@ -31,5 +36,63 @@ func TestHarnessStudyCreationCLIKeepsFailedBuildersInDenominator(t *testing.T) {
 	code := runHarness(&out, &errb, []string{"study", "creation", "--input", p})
 	if code != 0 || !strings.Contains(out.String(), `"calibration_runs": 1`) || !strings.Contains(out.String(), `"failures": 1`) || !strings.Contains(out.String(), `"claim_status": "not_yet"`) || !strings.Contains(out.String(), `"complete_pairs": 0`) {
 		t.Fatalf("code=%d out=%s err=%s", code, out.String(), errb.String())
+	}
+}
+
+func TestHarnessStudyReceiptRowsFormCompletePair(t *testing.T) {
+	dir := t.TempDir()
+	studyPath := filepath.Join(dir, "study.json")
+	study := harnesscreationstudy.Study{
+		Schema: harnesscreationstudy.Schema,
+		ID:     "paired-e2e",
+		Protocol: harnesscreationstudy.Protocol{
+			Frozen: true, TenMinuteLimitSeconds: 600, AssistancePolicy: "task-card-and-help-only", FailuresInDenominator: true,
+			Parity: harnesscreationstudy.MatchedStudySpec{Frozen: true, MinimumPairs: 1, MaxMedianElapsedRatio: 1.25},
+		},
+		Baseline: harnesscreationstudy.Baseline{ID: "tuned-alt", Runnable: true, Tuned: true, Frozen: true, Evidence: "baseline.json"},
+	}
+	writeStudy := func() {
+		t.Helper()
+		raw, err := json.Marshal(study)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(studyPath, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeStudy()
+	start := time.Date(2026, 8, 17, 1, 2, 3, 0, time.UTC)
+	for _, arm := range []string{"fak", "baseline"} {
+		receipt := harnesscreationreceipt.Receipt{
+			Schema: harnesscreationreceipt.Schema, RunID: "run-" + arm, ParticipantID: "person-paired", ParticipantClass: "unfamiliar-builder", PriorFamiliarity: "none",
+			Track: "ten-minute", Arm: arm, PairID: "pair-paired", Independent: true, Artifact: arm + "@v1", ArtifactDigest: "sha256:abc", OS: "linux", CPU: "amd64", Toolchain: "go1.26", NetworkState: "online install; offline selfcheck", CacheState: "empty",
+			StartedAt: start, StoppedAt: start.Add(100 * time.Second), ElapsedSeconds: 100, Commands: []harnesscreationreceipt.Command{{Command: "build", Exit: 0}}, FilesChanged: []string{"product/config.go"}, Rebuilds: 1, RebuildSeconds: 10, Outcome: "success", Transcript: arm + ".txt", Receipt: arm + ".json",
+		}
+		receiptPath := filepath.Join(dir, arm+".json")
+		raw, err := json.Marshal(receipt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(receiptPath, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		var out, errb bytes.Buffer
+		if code := runHarness(&out, &errb, []string{"study", "receipt", "--input", receiptPath, "--study", studyPath}); code != 0 {
+			t.Fatalf("arm=%s code=%d err=%s", arm, code, errb.String())
+		}
+		var result harnesscreationreceipt.Result
+		if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		study.Runs = append(study.Runs, harnesscreationstudy.Run{
+			ID: result.Row.ID, ParticipantID: result.Row.ParticipantID, Track: result.Row.Track, Arm: result.Row.Arm, PairID: result.Row.PairID,
+			ParticipantClass: result.Row.ParticipantClass, Independent: result.Row.Independent, Outcome: result.Row.Outcome, ElapsedSeconds: result.Row.ElapsedSeconds, Receipt: result.Row.Receipt,
+		})
+		writeStudy()
+	}
+	report := harnesscreationstudy.Evaluate(study)
+	if report.Parity.CompletePairs != 1 || report.Parity.ClaimStatus != "supported" {
+		t.Fatalf("receipt rows did not form supported pair: %+v", report.Parity)
 	}
 }

@@ -110,7 +110,7 @@ func Parse(raw []byte) (Receipt, error) {
 	return r, nil
 }
 func Evaluate(r Receipt) Result {
-	return Result{Schema: "fak.harness-creation-receipt-result/v1alpha1", Valid: true, Row: StudyRow{ID: r.RunID, ParticipantID: r.ParticipantID, Track: r.Track, ParticipantClass: r.ParticipantClass, Independent: r.Independent, Outcome: r.Outcome, ElapsedSeconds: r.ElapsedSeconds, Receipt: r.Receipt}}
+	return Result{Schema: "fak.harness-creation-receipt-result/v1alpha1", Valid: true, Row: StudyRow{ID: r.RunID, ParticipantID: r.ParticipantID, Track: r.Track, Arm: r.Arm, PairID: r.PairID, ParticipantClass: r.ParticipantClass, Independent: r.Independent, Outcome: r.Outcome, ElapsedSeconds: r.ElapsedSeconds, Receipt: r.Receipt}}
 }
 
 func CheckUnique(studyRaw []byte, row StudyRow) error {
@@ -124,8 +124,11 @@ func CheckUnique(studyRaw []byte, row StudyRow) error {
 		if existing.ID == row.ID {
 			return fmt.Errorf("duplicate run_id %q", row.ID)
 		}
-		if existing.ParticipantID == row.ParticipantID {
-			return fmt.Errorf("duplicate participant_id %q", row.ParticipantID)
+		if existing.ParticipantID == row.ParticipantID && existing.Track == row.Track && existing.Arm == row.Arm {
+			return fmt.Errorf("participant %q already has a %s/%s attempt", row.ParticipantID, row.Track, row.Arm)
+		}
+		if existing.PairID == row.PairID && existing.Arm == row.Arm {
+			return fmt.Errorf("pair %q already has a %s arm", row.PairID, row.Arm)
 		}
 	}
 	return nil
