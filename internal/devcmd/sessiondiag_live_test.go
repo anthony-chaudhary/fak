@@ -190,6 +190,36 @@ func TestOperatorLiveSignalsOrdersExceptionsByOldestEvidence(t *testing.T) {
 	}
 }
 
+func TestProjectLiveSignalIgnoresCheckpointBeforeCurrentLease(t *testing.T) {
+	now := time.Date(2026, 8, 17, 16, 30, 0, 0, time.UTC)
+	heartbeatAge := int64(20_000)
+	lane := operatorWorkerRow{
+		Lane:           "reused-worker",
+		Chip:           "ADVANCING",
+		LoopTS:         now.Add(-5 * time.Minute).Format(time.RFC3339),
+		HeartbeatAgeMS: &heartbeatAge,
+	}
+	old := devcheckpoint.Record{
+		Timestamp: now.Add(-10 * time.Minute),
+		Actor:     "reused-worker",
+		State:     devcheckpoint.StateDone,
+		Summary:   "older run shipped",
+		Evidence:  []string{"commit-old"},
+	}
+	row := projectLiveSignal(lane, old, now)
+	if row.Attention != "unknown" || row.HasCheckpoint || row.Outcome != "no checkpoint for 5m" {
+		t.Fatalf("older run checkpoint leaked into current lease: %+v", row)
+	}
+
+	current := old
+	current.Timestamp = now.Add(-2 * time.Minute)
+	current.Evidence = []string{"commit-current"}
+	row = projectLiveSignal(lane, current, now)
+	if row.Attention != "none" || !row.HasCheckpoint || !strings.Contains(row.Outcome, "commit-current") {
+		t.Fatalf("current-run checkpoint was not joined: %+v", row)
+	}
+}
+
 func TestRunSessionDiagFullRequiresLiveSignals(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runSessionDiagWith(&stdout, &stderr, []string{"--full"}, nil, nil, time.Now)

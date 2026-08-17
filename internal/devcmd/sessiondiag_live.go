@@ -164,7 +164,11 @@ func readLatestDevCheckpoints(path string) (map[string]devcheckpoint.Record, err
 }
 
 func projectLiveSignal(lane operatorWorkerRow, checkpoint devcheckpoint.Record, now time.Time) liveSignalRow {
-	leaseAge := ageSince(parseLiveStamp(lane.LoopTS), now)
+	leaseStart := parseLiveStamp(lane.LoopTS)
+	if checkpoint.Actor != "" && !leaseStart.IsZero() && checkpoint.Timestamp.Before(leaseStart) {
+		checkpoint = devcheckpoint.Record{}
+	}
+	leaseAge := ageSince(leaseStart, now)
 	moveAge := pointerDurationText(lane.HeartbeatAgeMS)
 	row := liveSignalRow{
 		Attention:  "unknown",
