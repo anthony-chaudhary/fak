@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
@@ -15,7 +16,7 @@ func TestDispatchTickLiveCodexAllowsGuardedChildFromUnguardedParent(t *testing.T
 
 	got, spawned, command := runDispatchCodexGateTick(t, root)
 	if !spawned {
-		t.Fatal("guarded Codex child did not reach the live spawner")
+		t.Fatalf("guarded Codex child did not reach the live spawner: %#v", got)
 	}
 	if len(command) < 2 || command[1] != "guard" {
 		t.Fatalf("spawned child command = %#v, want fak guard front", command)
@@ -57,6 +58,35 @@ func TestDispatchTickLiveCodexStillRefusesGenuineLoopWithGuardedChild(t *testing
 		dispatchMapString(gate, "action") != "refused" ||
 		dispatchMapString(gate, "next_action") == "" {
 		t.Fatalf("codex loop gate receipt = %#v", gate)
+	}
+}
+
+func TestDispatchTickDryRunPredictsLiveCodexLoopRefusal(t *testing.T) {
+	root, _ := dispatchCodexGateFixture(t, true)
+
+	dry, drySpawned, _ := runDispatchCodexGateTickMode(t, root, false)
+	if lease, ok := dry["lease"].(map[string]any); ok {
+		if path := dispatchMapString(lease, "path"); path != "" {
+			_ = os.Remove(path)
+		}
+	}
+	live, liveSpawned, _ := runDispatchCodexGateTickMode(t, root, true)
+	if drySpawned || liveSpawned {
+		t.Fatalf("spawned dry=%v live=%v, want refusal before side effects", drySpawned, liveSpawned)
+	}
+	for name, got := range map[string]map[string]any{"dry": dry, "live": live} {
+		if got["action"] != "codex_loop_gate_refused" || got["verdict"] != "CODEX_LOOP_GATE_REFUSED" {
+			t.Fatalf("%s result = action %v verdict %v, want matching typed refusal", name, got["action"], got["verdict"])
+		}
+		gate, _ := got["codex_loop_gate"].(map[string]any)
+		if dispatchMapString(gate, "id") != "codex_loop" || gate["evaluated"] != true || dispatchMapString(gate, "verdict") != "LOOP" {
+			t.Fatalf("%s gate = %#v, want evaluated codex_loop/LOOP", name, gate)
+		}
+		gates, _ := got["launch_checks"].(map[string]any)
+		provider, _ := gates["provider_reachability"].(map[string]any)
+		if dispatchMapString(provider, "id") != "provider_reachability" || provider["evaluated"] != false || !strings.Contains(dispatchMapString(provider, "next_action"), "#7078") {
+			t.Fatalf("%s provider risk = %#v, want explicit not-evaluated handoff", name, provider)
+		}
 	}
 }
 
@@ -127,6 +157,7 @@ func dispatchCodexGateFixture(t *testing.T, loop bool) (string, string) {
 	t.Setenv("CODEX_THREAD_ID", threadID)
 	t.Setenv("FAK_CODEX_OAUTH_SESSIONS", "10")
 	t.Setenv("FLEET_DOGFOOD_GUARD", "1")
+	t.Setenv("FAK_LEASE_OWNER", "codex-gate-"+strings.ReplaceAll(t.Name(), "/", "-"))
 
 	oldRows := dispatchProbeCodexProcessRows
 	dispatchProbeCodexProcessRows = func() ([]dispatchCodexProcessRow, error) { return nil, nil }
@@ -135,6 +166,11 @@ func dispatchCodexGateFixture(t *testing.T, loop bool) (string, string) {
 }
 
 func runDispatchCodexGateTick(t *testing.T, root string) (map[string]any, bool, []string) {
+	t.Helper()
+	return runDispatchCodexGateTickMode(t, root, true)
+}
+
+func runDispatchCodexGateTickMode(t *testing.T, root string, live bool) (map[string]any, bool, []string) {
 	t.Helper()
 	oldBroker := launchSpawnBroker
 	oldSpawner := dispatchIssueWorkerSpawner
@@ -160,7 +196,12 @@ func runDispatchCodexGateTick(t *testing.T, root string) (map[string]any, bool, 
 		dispatchIssueWorkerSpawner = oldSpawner
 	})
 
-	out, errb, code := runDispatchAt("tick", "--workspace", root, "--backend", "codex", "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--live", "--json")
+	args := []string{"tick", "--workspace", root, "--backend", "codex", "--lane", "docs", "--no-refresh", "--no-loop-ledger"}
+	if live {
+		args = append(args, "--live")
+	}
+	args = append(args, "--json")
+	out, errb, code := runDispatchAt(args...)
 	if code != 0 {
 		t.Fatalf("dispatch tick exit = %d, want 0 (stderr: %s)\n%s", code, errb, out)
 	}

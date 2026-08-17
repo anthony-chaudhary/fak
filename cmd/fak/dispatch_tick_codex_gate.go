@@ -10,7 +10,7 @@ import (
 )
 
 func dispatchCodexLoopGateForTick(opts dispatchTickOptions, account dispatchtick.Account, launchSafe ...bool) (map[string]any, bool, error) {
-	if !opts.Live || opts.Backend != "codex" {
+	if opts.Backend != "codex" {
 		return nil, false, nil
 	}
 	threshold := strings.ToLower(strings.TrimSpace(opts.CodexLoopGate))
@@ -109,6 +109,8 @@ func dispatchCodexLoopGateDefaultLimitValue() int {
 
 func dispatchCodexLoopGatePayload(rep codexLoopRecentReport, threshold string) map[string]any {
 	return map[string]any{
+		"id":           "codex_loop",
+		"evaluated":    true,
 		"schema":       rep.Schema,
 		"source":       "recent",
 		"codex_home":   rep.CodexHome,
@@ -129,6 +131,8 @@ func dispatchCodexLoopGatePayload(rep codexLoopRecentReport, threshold string) m
 
 func dispatchCodexLoopCurrentThreadPayload(d codexLoopDiagnosis, threshold string) map[string]any {
 	return map[string]any{
+		"id":               "codex_loop",
+		"evaluated":        true,
 		"schema":           d.Schema,
 		"source":           "current_thread",
 		"fail_on":          "unguarded",

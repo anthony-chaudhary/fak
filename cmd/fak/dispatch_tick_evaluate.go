@@ -418,15 +418,25 @@ func completeDispatchTickEvaluation(root, runsDir string, opts dispatchTickOptio
 		return finish(payload), nil
 	}
 
+	gates := map[string]any{
+		"provider_reachability": map[string]any{
+			"id":          "provider_reachability",
+			"evaluated":   false,
+			"reason":      "no bounded zero-turn provider probe is installed",
+			"next_action": "implement the guarded provider probe tracked by #7078; dry-run does not silently certify this hop",
+		},
+	}
+	payload["launch_checks"] = gates
 	if gate, refused, err := dispatchCodexLoopGateForTick(opts, account, guardedPreview); err != nil {
 		return nil, err
 	} else if gate != nil {
 		payload["codex_loop_gate"] = gate
+		gates["codex_loop"] = gate
 		if refused {
 			payload["ok"] = false
 			payload["action"] = "codex_loop_gate_refused"
 			payload["verdict"] = "CODEX_LOOP_GATE_REFUSED"
-			payload["reason"] = fmt.Sprintf("Codex loop gate refused live dispatch: fail-on=%s verdict=%s reason=%s",
+			payload["reason"] = fmt.Sprintf("Codex loop gate refused dispatch: fail-on=%s verdict=%s reason=%s",
 				dispatchMapString(gate, "fail_on"), dispatchMapString(gate, "verdict"), dispatchMapString(gate, "reason"))
 			return finish(payload), nil
 		}
