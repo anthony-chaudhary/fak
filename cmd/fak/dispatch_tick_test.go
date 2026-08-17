@@ -751,7 +751,7 @@ func TestDispatchTickDryRunHoldsGuardedSelfModifyLane(t *testing.T) {
 	t.Cleanup(func() { dispatchRouteIssues = oldRoute })
 	root := t.TempDir()
 
-	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "adjudicator", "--no-refresh", "--no-loop-ledger", "--json")
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--backend", "claude", "--lane", "adjudicator", "--no-refresh", "--no-loop-ledger", "--json")
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (a self-modify hold is a benign scheduler hold) (stderr: %s)", code, errb)
 	}
@@ -835,7 +835,7 @@ func TestDispatchTickDryRunPlansGuardedWorkerOnShippableLane(t *testing.T) {
 		t.Fatalf("write dirty fixture: %v", err)
 	}
 
-	out, errb, code := runDispatchAt("tick", "--workspace", root, "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--json")
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--backend", "claude", "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--json")
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
 	}
