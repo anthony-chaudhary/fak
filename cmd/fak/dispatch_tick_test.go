@@ -1710,7 +1710,7 @@ func TestDispatchTickGoalScopesLoopLedgerIdentity(t *testing.T) {
 	t.Cleanup(func() { dispatchRouteIssues = oldRoute })
 	root := t.TempDir()
 
-	out, errb, code := runDispatchAt("tick", "--workspace", root, "--goal", "high-priority", "--loop-ledger", "loops.jsonl", "--no-refresh", "--json")
+	out, errb, code := runDispatchAt("tick", "--workspace", root, "--backend", "claude", "--goal", "high-priority", "--loop-ledger", "loops.jsonl", "--no-refresh", "--json")
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
 	}

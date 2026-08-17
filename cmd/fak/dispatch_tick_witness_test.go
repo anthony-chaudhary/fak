@@ -434,7 +434,7 @@ func layer2DowngradeTick(t *testing.T, modelDowngrade bool) (map[string]any, str
 	}
 	t.Cleanup(func() { launchSpawnBroker = oldBroker; dispatchIssueWorkerSpawner = oldSpawner })
 
-	args := []string{"tick", "--workspace", root, "--lane", "docs", "--cooldown-min", "0", "--no-refresh", "--no-loop-ledger", "--live", "--json"}
+	args := []string{"tick", "--workspace", root, "--backend", "claude", "--lane", "docs", "--cooldown-min", "0", "--no-refresh", "--no-loop-ledger", "--live", "--json"}
 	if !modelDowngrade {
 		args = append(args, "--model-downgrade=false")
 	}
