@@ -2525,7 +2525,7 @@ func TestSelfModifyFloorCoversWitnessTrees(t *testing.T) {
 // and denies on a non-empty result. The exact name is the wiring this gate witnesses: a
 // self-edit that deletes the call re-opens the hole, and renaming the function is a visible,
 // reviewable edit that must update this constant too.
-const shellSelfModifyCallee = "commandSelfModify"
+const shellSelfModifyCallee = "commandSelfModifyWithSpecs"
 
 // bodyCallsFunc reports whether the named top-level function/method (matched by name across
 // every non-test file of the package at dir) contains a call to callee somewhere in its body.
