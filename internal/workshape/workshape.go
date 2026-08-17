@@ -47,6 +47,8 @@ type Result struct {
 	TotalCapacity    int        `json:"total_capacity"`
 	ParallelGroups   [][]string `json:"parallel_groups,omitempty"`
 	Serialized       []string   `json:"serialized,omitempty"`
+	SemanticVerdict  string     `json:"semantic_verdict,omitempty"`
+	SemanticReasons  []string   `json:"semantic_reasons,omitempty"`
 	Verdict          string     `json:"verdict"`
 	Reason           string     `json:"reason"`
 }
@@ -83,7 +85,12 @@ func Evaluate(c Contract) Result {
 		}
 		r.ChildCapacity = len(c.Packets)
 		r.TotalCapacity = 1 + r.ChildCapacity
-		r.ParallelGroups, r.Serialized = schedule(c.Packets)
+		r.ParallelGroups, r.Serialized, r.SemanticVerdict, r.SemanticReasons = schedule(c.Packets)
+		if strings.HasPrefix(r.SemanticVerdict, "REFUSE_") {
+			r.Verdict = r.SemanticVerdict
+			r.Reason = strings.Join(r.SemanticReasons, "; ")
+			return r
+		}
 		r.Verdict, r.Reason = "ADMIT_BROAD", "reserve one issue owner plus independently executable child capacity"
 		return r
 	default:
@@ -104,20 +111,106 @@ func hasDependencies(ps []Packet) bool {
 	return false
 }
 
-func schedule(ps []Packet) ([][]string, []string) {
-	var parallel []string
-	var serial []string
+func schedule(ps []Packet) ([][]string, []string, string, []string) {
+	byID := map[string]Packet{}
+	acceptanceOwner := map[string]string{}
+	var reasons []string
 	for _, p := range ps {
-		if len(p.DependsOn) == 0 && len(p.SharedContract) == 0 {
+		if _, exists := byID[p.ID]; exists {
+			reasons = append(reasons, "duplicate packet id "+p.ID)
+		}
+		byID[p.ID] = p
+		for _, item := range p.Acceptance {
+			if owner, exists := acceptanceOwner[item]; exists {
+				reasons = append(reasons, "acceptance item "+item+" claimed by "+owner+" and "+p.ID)
+			} else {
+				acceptanceOwner[item] = p.ID
+			}
+		}
+	}
+	for _, p := range ps {
+		for _, dep := range p.DependsOn {
+			if _, ok := byID[dep]; !ok {
+				reasons = append(reasons, "packet "+p.ID+" depends on unknown packet "+dep)
+			}
+		}
+	}
+	if cycle := dependencyCycle(ps); len(cycle) > 0 {
+		reasons = append(reasons, "dependency cycle: "+strings.Join(cycle, " -> "))
+	}
+	if len(reasons) > 0 {
+		return nil, nil, "REFUSE_SEMANTIC_DEPENDENCY", reasons
+	}
+
+	shared := map[string][]string{}
+	for _, p := range ps {
+		for _, contract := range p.SharedContract {
+			shared[contract] = append(shared[contract], p.ID)
+		}
+	}
+	serialize := map[string]bool{}
+	for contract, owners := range shared {
+		if len(owners) > 1 {
+			for _, id := range owners {
+				serialize[id] = true
+			}
+			reasons = append(reasons, "shared contract "+contract+" serializes "+strings.Join(owners, ","))
+		}
+	}
+	var parallel, serial []string
+	for _, p := range ps {
+		if len(p.DependsOn) == 0 && !serialize[p.ID] {
 			parallel = append(parallel, p.ID)
 		} else {
 			serial = append(serial, p.ID)
 		}
 	}
-	if len(parallel) == 0 {
-		return nil, serial
+	verdict := "SEMANTIC_PARALLEL"
+	if len(serial) > 0 {
+		verdict = "SEMANTIC_SERIALIZED"
 	}
-	return [][]string{parallel}, serial
+	if len(parallel) == 0 {
+		return nil, serial, verdict, reasons
+	}
+	return [][]string{parallel}, serial, verdict, reasons
+}
+
+func dependencyCycle(ps []Packet) []string {
+	graph := map[string][]string{}
+	for _, p := range ps {
+		graph[p.ID] = append([]string(nil), p.DependsOn...)
+	}
+	state := map[string]int{}
+	var stack []string
+	var visit func(string) []string
+	visit = func(id string) []string {
+		if state[id] == 1 {
+			for i, s := range stack {
+				if s == id {
+					return append(append([]string(nil), stack[i:]...), id)
+				}
+			}
+		}
+		if state[id] == 2 {
+			return nil
+		}
+		state[id] = 1
+		stack = append(stack, id)
+		for _, dep := range graph[id] {
+			if cycle := visit(dep); len(cycle) > 0 {
+				return cycle
+			}
+		}
+		stack = stack[:len(stack)-1]
+		state[id] = 2
+		return nil
+	}
+	for id := range graph {
+		if cycle := visit(id); len(cycle) > 0 {
+			return cycle
+		}
+	}
+	return nil
 }
 
 func first(v, fallback string) string {
