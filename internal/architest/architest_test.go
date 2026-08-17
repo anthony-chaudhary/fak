@@ -51,60 +51,61 @@ var tier = map[string]int{
 	"harnessprotocol": 1, // product-neutral headless run protocol and projections; stdlib plus public harnesskit contract only.
 	"usagepreflight":  2, // remaining-quota admission calculation; stdlib-only, off the hot path.
 
-	"envconfiglint":        2, // CONFIG_NOT_ENV ratchet banning new non-secret env reads; imports windowgate(1), off the hot path.
-	"flowcredit":           2, // receiver-granted credit ledger for KV-transfer backpressure; stdlib-only, imports nothing internal, off the hot path.
-	"flowmetrics":          1, // pure flow-metrics fold (#6194): joins issue rows against commit rows into started/closed spans and grades eight Little's-Law KPIs (flow efficiency, queue time, unstarted backlog, aging WIP, atomicity, arrival-vs-service, witnessed progress, local WIP), plus a working-tree WIP census; the twin of growthgate/stallscan — a Classify-shaped fold whose thresholds are fixed constants. Stdlib-only, imports nothing internal, off the hot path.
-	"stallpage":            2, // durable deduped operator page for stallscan reboot high-water; imports stallscan(1)+choicetriage(1)+flock, off the hot path.
-	"agenticbench":         2, // pure #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
-	"ailuminate":           1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
-	"apihostprobe":         1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
-	"accountprobe":         1, // pure account-probe ledger reader (probe_ledger.jsonl): last-probe-by-account + probe recency for the roster fresh-probe fold; stdlib-only, imports nothing internal, off the hot path.
-	"dispatchconservation": 1, // pure worker-unit conservation fold over .dispatch-runs artifacts; stdlib-only, off the hot path.
-	"dispatchdoa":          1, // #5868: pure DOA-spawn detector — grades a worker log into "the dispatcher spawned it, it wrote a stub, it never reached the guard's agent-launch banner" and folds a window into a clear/warn/alarm spawn-health rung; stdlib-only, imports nothing internal, off the hot path.
-	"eveparity":            1, // CI-runnable Eve-eval parity witness (#2605): pure in-repo eval-semantics evaluator (Evaluate/Compare keep the hard/soft gate distinction) proving fak-routed == raw; production code stdlib-only, off the hot path.
-	"eveimport":            1, // read-only Eve run/OTel evidence importer (#2606): pure deterministic fold of saved NDJSON session streams / eve.* spans into session-ledger rows with default body redaction; stdlib-only, imports nothing internal, off the hot path.
-	"benchcatalog":         2, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
-	"buildoverlay":         2, // neutral shared-checkout Go overlay/file-selection helpers; imports windowgate and is shared by runtime and fak-dev.
-	"buildwitness":         1, // structural CI guard (#3217): runs `go build ./cmd/fak` under default tags and reds the trunk (naming the undefined symbol) when uncommitted/tagless WIP breaks the shared build; stdlib-only (os/exec+runtime), imports nothing internal, off the hot path.
-	"clonescan":            1, // pure authoring-time clone QUERY: the forward half of the code-slop clone detector (normalized Go token-window engine) as an importable library — "does a token-similar block already exist?" before the code is written; stdlib-only, no internal import, off the hot path.
-	"sotamatrix":           1, // pure SOTA prior-art registry (op -> reference/route/oracle) read by fak sota, the PRIOR_ART gate, and the coverage scorecard; stdlib-only, off the hot path.
-	"stallscan":            1, // pure churn-signal stall classifier (Classify(Sample,Thresholds)->Verdict) for low-usage machine lockups read by fak stallscan; stdlib-only, imports nothing internal, off the hot path.
-	"assumecheck":          2, // pure assumption-audit kernel (#3819 C1) + name-resolved witness drivers (#3821 C3): closed Level/WitnessKind/Outcome vocabulary, pure Check(Assumption,Evidence)->Verdict, fail-closed GuardAssumption typed error; read by fak assume; the kernel file stays stdlib-only while the driver shell imports windowgate(1)+procguard(1), off the hot path.
-	"growthgate":           1, // pure unbounded-growth classifier (Classify([]Artifact,Budget)->Report) for append-only ledger/log bloat read by fak growthgate; the standing-bloat twin of stallscan; stdlib-only, imports nothing internal, off the hot path.
-	"branchrole":           2, // branch-role contract reader over dos.toml; stdlib-only, off the hot path.
-	"benchloop":            2, // benchmark super-loop manager: folds benchcatalog/benchruns/nightrun status into one command-facing control surface; off the hot path.
-	"macbench":             1, // Mac gateway benchmark probes for nightrun: stdlib HTTP client + JSON artifact fold, off the hot path.
-	"benchruns":            1, // pure benchmark-run catalog reader/renderer over experiments/benchmark artifacts; stdlib-only, off the hot path.
-	"benchckpt":            1, // per-cell write-ahead checkpoint/resume ledger the compute-bench executors write through (#2382); stdlib-only, off the hot path.
-	"devcheckpoint":        2, // append-only developer milestone checkpoint records; imports flock(1)+stdlib, off the hot path.
-	"benchlineagegate":     2, // pure benchmark-emitter lineage hygiene gate; stdlib-only source scanner, off the hot path.
-	"conceptbench":         2, // dos-refereed conceptbench grader (#2732): maps a concept + transcript + fixture to a referee-sourced verdict; imports taskmgr(1)+hooks(1), off the hot path.
-	"cachevalueledger":     2, // durable, append-only cache-value observation ledger for fak sessions; JSONL persistence over cacheobs stats.
-	"cacheprice":           1, // the ONE source of truth for the provider prompt-cache price multipliers (read 0.1x / write 1.25x / 2.0x): a pure leaf gateway(4) and resume(1) read (and the agent(4) fire gate is test-pinned to) so an identical cached token is priced identically (#2798). Imports nothing internal, off the hot path.
-	"gatewayusageledger":   2, // durable, append-only gateway usage-counter ledger (#1610); JSONL persistence over a stdlib-only Counters mirror, no internal/gateway or internal/kernel import.
-	"skillvalue":           2, // durable, append-only per-skill outcome-value ledger (#2873) read by `fak skill value report`; JSONL persistence via jsonlledger(1), imports nothing else internal, off the hot path.
-	"benchcli":             2, // shared helpers the bench-CLI mains (cmd/*bench) had copy-pasted; imports model(1) only, off the hot path.
-	"benchids":             1, // pure deterministic synthetic-token-ID generator for the bench mains (#776); stdlib-only, off the hot path.
-	"benchscore":           2, // pure benchmark score artifact validator/renderer; stdlib-only, off the hot path.
-	"callavoid":            1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
-	"harnessres":           1, // cross-platform, stdlib-only process resource sampler for the fak guard harness (CPU/mem/IO); imports nothing internal, off the hot path (#2045, epic #2044).
-	"harnessinit":          1, // external product scaffold renderer; stdlib-only and outside kernel hot paths (#6788).
-	"harnessrelease":       1, // release-asset checksum/extraction and external-product witness runner (#6957).
-	"harnessgallery":       1, // static user-need blueprints and starter pack renderer (#6961).
-	"harnessdiscover":      1, // provenance-bearing scoped declaration discovery before contextual selection (#6898).
-	"harnessclassify":      1, // deterministic explicit-first domain/task classification before contextual selection (#6900).
-	"harnesscrossover":     1, // pure reproducible net-work comparison for contextual versus tuned native profiles (#6903).
-	"harnesscreationstudy": 1, // deterministic independent-participant denominator and claim eligibility fold (#6937).
-	"harnesscompose":       1, // typed inert asset overlap semantics before dependency solving and launch (#6904).
-	"harnesspreview":       2, // deterministic contextual lock-risk diff over classifier, composition, and resolver facts (#6902).
-	"harnessresolve":       2, // deterministic product lock over typed assets plus stackresolve dependency facts (#6792).
-	"harnessselect":        1, // context-layer selection and explain trace; stdlib-only before product composition.
-	"stackresolve":         1, // stdlib-only generic dependency search and receipts; domain facts enter through Provider (#6891).
-	"supportgraph":         1, // stdlib-only exact-tuple support evidence and freshness query before model/hardware composition (#6895).
-	"workloadfit":          2, // purpose-specific fitness mechanism over stackresolve contracts; keeps soft ranking outside composition gates (#6893).
-	"stackpreflight":       3, // launch integrator joining dependency, workload-fitness, and support-evidence receipts (#6897).
-	"amdgpu":               2, // AMD GPU fact probe and perf-counter JSON fold for Windows harness diagnostics; imports windowgate(1), off the hot path.
-	"accounts":             2, "accountobs": 1, "guardaudit": 2, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 2, "cacheobs": 1, "cachevalue": 2, "canon": 1, "compute": 2, "deletioncert": 1, "demoui": 2, "ggufload": 2, "gpulease": 2, "fleetreap": 2, "hfhub": 2, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 2, "model": 2, "orphanscan": 1, "pathlint": 1, "pathutil": 1, "privatepath": 2, "provenance": 1, "swebench": 2, "urllint": 1, "webbench": 2,
+	"envconfiglint":          2, // CONFIG_NOT_ENV ratchet banning new non-secret env reads; imports windowgate(1), off the hot path.
+	"flowcredit":             2, // receiver-granted credit ledger for KV-transfer backpressure; stdlib-only, imports nothing internal, off the hot path.
+	"flowmetrics":            1, // pure flow-metrics fold (#6194): joins issue rows against commit rows into started/closed spans and grades eight Little's-Law KPIs (flow efficiency, queue time, unstarted backlog, aging WIP, atomicity, arrival-vs-service, witnessed progress, local WIP), plus a working-tree WIP census; the twin of growthgate/stallscan — a Classify-shaped fold whose thresholds are fixed constants. Stdlib-only, imports nothing internal, off the hot path.
+	"stallpage":              2, // durable deduped operator page for stallscan reboot high-water; imports stallscan(1)+choicetriage(1)+flock, off the hot path.
+	"agenticbench":           2, // pure #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
+	"ailuminate":             1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
+	"apihostprobe":           1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
+	"accountprobe":           1, // pure account-probe ledger reader (probe_ledger.jsonl): last-probe-by-account + probe recency for the roster fresh-probe fold; stdlib-only, imports nothing internal, off the hot path.
+	"dispatchconservation":   1, // pure worker-unit conservation fold over .dispatch-runs artifacts; stdlib-only, off the hot path.
+	"dispatchdoa":            1, // #5868: pure DOA-spawn detector — grades a worker log into "the dispatcher spawned it, it wrote a stub, it never reached the guard's agent-launch banner" and folds a window into a clear/warn/alarm spawn-health rung; stdlib-only, imports nothing internal, off the hot path.
+	"eveparity":              1, // CI-runnable Eve-eval parity witness (#2605): pure in-repo eval-semantics evaluator (Evaluate/Compare keep the hard/soft gate distinction) proving fak-routed == raw; production code stdlib-only, off the hot path.
+	"eveimport":              1, // read-only Eve run/OTel evidence importer (#2606): pure deterministic fold of saved NDJSON session streams / eve.* spans into session-ledger rows with default body redaction; stdlib-only, imports nothing internal, off the hot path.
+	"benchcatalog":           2, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
+	"buildoverlay":           2, // neutral shared-checkout Go overlay/file-selection helpers; imports windowgate and is shared by runtime and fak-dev.
+	"buildwitness":           1, // structural CI guard (#3217): runs `go build ./cmd/fak` under default tags and reds the trunk (naming the undefined symbol) when uncommitted/tagless WIP breaks the shared build; stdlib-only (os/exec+runtime), imports nothing internal, off the hot path.
+	"clonescan":              1, // pure authoring-time clone QUERY: the forward half of the code-slop clone detector (normalized Go token-window engine) as an importable library — "does a token-similar block already exist?" before the code is written; stdlib-only, no internal import, off the hot path.
+	"sotamatrix":             1, // pure SOTA prior-art registry (op -> reference/route/oracle) read by fak sota, the PRIOR_ART gate, and the coverage scorecard; stdlib-only, off the hot path.
+	"stallscan":              1, // pure churn-signal stall classifier (Classify(Sample,Thresholds)->Verdict) for low-usage machine lockups read by fak stallscan; stdlib-only, imports nothing internal, off the hot path.
+	"assumecheck":            2, // pure assumption-audit kernel (#3819 C1) + name-resolved witness drivers (#3821 C3): closed Level/WitnessKind/Outcome vocabulary, pure Check(Assumption,Evidence)->Verdict, fail-closed GuardAssumption typed error; read by fak assume; the kernel file stays stdlib-only while the driver shell imports windowgate(1)+procguard(1), off the hot path.
+	"growthgate":             1, // pure unbounded-growth classifier (Classify([]Artifact,Budget)->Report) for append-only ledger/log bloat read by fak growthgate; the standing-bloat twin of stallscan; stdlib-only, imports nothing internal, off the hot path.
+	"branchrole":             2, // branch-role contract reader over dos.toml; stdlib-only, off the hot path.
+	"benchloop":              2, // benchmark super-loop manager: folds benchcatalog/benchruns/nightrun status into one command-facing control surface; off the hot path.
+	"macbench":               1, // Mac gateway benchmark probes for nightrun: stdlib HTTP client + JSON artifact fold, off the hot path.
+	"benchruns":              1, // pure benchmark-run catalog reader/renderer over experiments/benchmark artifacts; stdlib-only, off the hot path.
+	"benchckpt":              1, // per-cell write-ahead checkpoint/resume ledger the compute-bench executors write through (#2382); stdlib-only, off the hot path.
+	"devcheckpoint":          2, // append-only developer milestone checkpoint records; imports flock(1)+stdlib, off the hot path.
+	"benchlineagegate":       2, // pure benchmark-emitter lineage hygiene gate; stdlib-only source scanner, off the hot path.
+	"conceptbench":           2, // dos-refereed conceptbench grader (#2732): maps a concept + transcript + fixture to a referee-sourced verdict; imports taskmgr(1)+hooks(1), off the hot path.
+	"cachevalueledger":       2, // durable, append-only cache-value observation ledger for fak sessions; JSONL persistence over cacheobs stats.
+	"cacheprice":             1, // the ONE source of truth for the provider prompt-cache price multipliers (read 0.1x / write 1.25x / 2.0x): a pure leaf gateway(4) and resume(1) read (and the agent(4) fire gate is test-pinned to) so an identical cached token is priced identically (#2798). Imports nothing internal, off the hot path.
+	"gatewayusageledger":     2, // durable, append-only gateway usage-counter ledger (#1610); JSONL persistence over a stdlib-only Counters mirror, no internal/gateway or internal/kernel import.
+	"skillvalue":             2, // durable, append-only per-skill outcome-value ledger (#2873) read by `fak skill value report`; JSONL persistence via jsonlledger(1), imports nothing else internal, off the hot path.
+	"benchcli":               2, // shared helpers the bench-CLI mains (cmd/*bench) had copy-pasted; imports model(1) only, off the hot path.
+	"benchids":               1, // pure deterministic synthetic-token-ID generator for the bench mains (#776); stdlib-only, off the hot path.
+	"benchscore":             2, // pure benchmark score artifact validator/renderer; stdlib-only, off the hot path.
+	"callavoid":              1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
+	"harnessres":             1, // cross-platform, stdlib-only process resource sampler for the fak guard harness (CPU/mem/IO); imports nothing internal, off the hot path (#2045, epic #2044).
+	"harnessinit":            1, // external product scaffold renderer; stdlib-only and outside kernel hot paths (#6788).
+	"harnessrelease":         1, // release-asset checksum/extraction and external-product witness runner (#6957).
+	"harnessgallery":         1, // static user-need blueprints and starter pack renderer (#6961).
+	"harnessdiscover":        1, // provenance-bearing scoped declaration discovery before contextual selection (#6898).
+	"harnessclassify":        1, // deterministic explicit-first domain/task classification before contextual selection (#6900).
+	"harnesscrossover":       1, // pure reproducible net-work comparison for contextual versus tuned native profiles (#6903).
+	"harnesscreationreceipt": 1, // stdlib-only participant receipt validation and study-row projection (#6976).
+	"harnesscreationstudy":   1, // deterministic independent-participant denominator and claim eligibility fold (#6937).
+	"harnesscompose":         1, // typed inert asset overlap semantics before dependency solving and launch (#6904).
+	"harnesspreview":         2, // deterministic contextual lock-risk diff over classifier, composition, and resolver facts (#6902).
+	"harnessresolve":         2, // deterministic product lock over typed assets plus stackresolve dependency facts (#6792).
+	"harnessselect":          1, // context-layer selection and explain trace; stdlib-only before product composition.
+	"stackresolve":           1, // stdlib-only generic dependency search and receipts; domain facts enter through Provider (#6891).
+	"supportgraph":           1, // stdlib-only exact-tuple support evidence and freshness query before model/hardware composition (#6895).
+	"workloadfit":            2, // purpose-specific fitness mechanism over stackresolve contracts; keeps soft ranking outside composition gates (#6893).
+	"stackpreflight":         3, // launch integrator joining dependency, workload-fitness, and support-evidence receipts (#6897).
+	"amdgpu":                 2, // AMD GPU fact probe and perf-counter JSON fold for Windows harness diagnostics; imports windowgate(1), off the hot path.
+	"accounts":               2, "accountobs": 1, "guardaudit": 2, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 2, "cacheobs": 1, "cachevalue": 2, "canon": 1, "compute": 2, "deletioncert": 1, "demoui": 2, "ggufload": 2, "gpulease": 2, "fleetreap": 2, "hfhub": 2, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 2, "model": 2, "orphanscan": 1, "pathlint": 1, "pathutil": 1, "privatepath": 2, "provenance": 1, "swebench": 2, "urllint": 1, "webbench": 2,
 	// stdlib-only foundation leaves (import nothing internal); off the hot path.
 	"auditpane": 2, "bgloop": 1, "binstamp": 2, "cachewitness": 2, "cmdutil": 1, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "experiments": 2, "fleetaccounts": 2, "fleetbottleneck": 2, "flock": 1, "framevisibility": 1, "ghspam": 1, "issuecontractrepair": 2, "jsonlledger": 1, "kvbudget": 2, "maputil": 1, "mathx": 1, "newleaf": 1, "newmodel": 1, "numfmt": 1, "randhex": 1, "refutil": 2, "selfinstall": 2, "sessionaudit": 2, "strmatch": 1,
 	"sessiondiag":   2,                                                                            // bounded redacted Codex SQLite/log and process-incident classifier (#5992); stdlib-only, off the hot path.
