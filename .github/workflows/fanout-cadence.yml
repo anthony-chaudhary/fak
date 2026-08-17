@@ -90,10 +90,9 @@ jobs:
             --ledger docs/nightrun/fanout-reuse.jsonl 2>&1 | tee fanout-run.log
           echo "fanout-exit=${PIPESTATUS[0]}"
           set -e
-          # Slice the folded trend (the tail of the run log) into a standalone card.
-          sed -n '/fan-out reuse trend/,$p' fanout-run.log > fanout-trend.txt || true
-          test -s fanout-trend.txt || echo "(no trend rendered)" > fanout-trend.txt
-          cat fanout-trend.txt
+          # Render the committed ledger plus this tick through the reusable CLI card.
+          go run ./cmd/fak fanout trend \
+            --ledger docs/nightrun/fanout-reuse.jsonl | tee fanout-trend.txt
 
       - name: Arm ledger commit decision
         id: arm

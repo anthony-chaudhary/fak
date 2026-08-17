@@ -294,6 +294,8 @@ func dispatchCoreVerbB(name string, args []string) bool {
 		cmdInit(args)
 	case "workflow":
 		cmdWorkflow(args)
+	case "fanout":
+		cmdFanout(args)
 	case "slack":
 		cmdSlack(args)
 	case "chatops":
