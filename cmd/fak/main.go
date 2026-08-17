@@ -223,6 +223,8 @@ func dispatchCoreVerbB(name string, args []string) bool {
 		cmdTraj(args)
 	case "quantwatch":
 		cmdQuantwatch(args)
+	case "work-delivery":
+		cmdWorkDelivery(args)
 	case "workpattern":
 		if err := cmdWorkpattern(args); err != nil {
 			fmt.Fprintln(os.Stderr, "fak workpattern:", err)
