@@ -45,6 +45,7 @@ type liveSignalRow struct {
 	Lane          string
 	UrgencyAge    time.Duration
 	HasCheckpoint bool
+	RecheckAfter  time.Duration
 }
 
 var gracePattern = regexp.MustCompile(`grace ([0-9]+) ms`)
@@ -119,7 +120,11 @@ func writeExceptionFirstProjection(stdout io.Writer, rows []liveSignalRow) {
 		}
 	}
 	if len(missingCheckpoint) > 0 {
-		fmt.Fprintf(stdout, "unknown x%d | no checkpoint | %s | emit durable checkpoints; --full lists workers\n", len(missingCheckpoint), liveWorkerText(len(missingCheckpoint)))
+		next := "check on next liveness change; workers owe checkpoints"
+		if after := earliestRecheck(missingCheckpoint); after > 0 {
+			next = "check at earliest grace in " + durationText(after) + "; workers owe checkpoints"
+		}
+		fmt.Fprintf(stdout, "unknown x%d | no checkpoint | %s | %s; --full lists workers\n", len(missingCheckpoint), liveWorkerText(len(missingCheckpoint)), next)
 	}
 	if len(checkpointOnly) > 0 {
 		fmt.Fprintf(stdout, "unknown x%d | checkpoints without witnessed outcomes | %s | run declared next checks; --full lists workers\n", len(checkpointOnly), liveWorkerText(len(checkpointOnly)))
@@ -127,6 +132,16 @@ func writeExceptionFirstProjection(stdout io.Writer, rows []liveSignalRow) {
 	if len(healthy) > 0 {
 		fmt.Fprintf(stdout, "none x%d | witnessed outcomes present | %s | bounded next checks; --full lists workers\n", len(healthy), liveWorkerText(len(healthy)))
 	}
+}
+
+func earliestRecheck(rows []liveSignalRow) time.Duration {
+	var earliest time.Duration
+	for _, row := range rows {
+		if row.RecheckAfter > 0 && (earliest == 0 || row.RecheckAfter < earliest) {
+			earliest = row.RecheckAfter
+		}
+	}
+	return earliest
 }
 
 func liveWorkerText(count int) string {
@@ -188,6 +203,12 @@ func projectLiveSignal(lane operatorWorkerRow, checkpoint devcheckpoint.Record, 
 			row.Attention = "watch"
 			row.Outcome = "no witnessed outcome since lease start " + leaseAge + " ago"
 			row.Move = lane.Lane + " lease heartbeat " + moveAge + " ago"
+			row.Next = "inspect stalled lease now"
+		} else if remaining := graceRemainingDuration(lane); remaining > 0 {
+			row.RecheckAfter = remaining
+			row.Next = "check at grace in " + durationText(remaining) + "; worker owes checkpoint"
+		} else {
+			row.Next = "check on next liveness change; worker owes checkpoint"
 		}
 		return row
 	}
@@ -262,15 +283,23 @@ func exceptionOrder(attention string) int {
 }
 
 func graceRemaining(lane operatorWorkerRow, _ time.Time) string {
+	remaining := graceRemainingDuration(lane)
+	if remaining <= 0 {
+		return ""
+	}
+	return durationText(remaining)
+}
+
+func graceRemainingDuration(lane operatorWorkerRow) time.Duration {
 	match := gracePattern.FindStringSubmatch(lane.LivenessReason)
 	if len(match) != 2 || lane.HeartbeatAgeMS == nil {
-		return ""
+		return 0
 	}
 	graceMS, err := strconv.ParseInt(match[1], 10, 64)
 	if err != nil || graceMS <= *lane.HeartbeatAgeMS {
-		return ""
+		return 0
 	}
-	return durationText(time.Duration(graceMS-*lane.HeartbeatAgeMS) * time.Millisecond)
+	return time.Duration(graceMS-*lane.HeartbeatAgeMS) * time.Millisecond
 }
 
 func parseLiveStamp(raw string) time.Time {

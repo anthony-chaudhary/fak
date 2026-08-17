@@ -54,7 +54,7 @@ func TestOperatorLiveSignalsCapturedProjection(t *testing.T) {
 		"ATTENTION | OUTCOME + AGE | CURRENT MOVE + AGE | NEXT CHECK",
 		"needs-human | checkpoint evidence checkpoint choice-ready 7m ago | decision: waiting for operator 7m ago | choose retry or stop",
 		"watch | checkpoint evidence checkpoint stale 24m ago | stale: repeating tests 24m ago | intervene at retry budget",
-		"unknown | no checkpoint for 1m | unknown lease heartbeat 20s ago | emit a durable checkpoint",
+		"unknown | no checkpoint for 1m | unknown lease heartbeat 20s ago | check on next liveness change; worker owes checkpoint",
 		"none | checkpoint evidence commit abc123 2m ago | healthy: testing 2m ago | check when gate exits",
 	} {
 		if !strings.Contains(got, want) {
@@ -118,7 +118,7 @@ func TestOperatorLiveSignalsDefaultFoldsOnlyNonActionRows(t *testing.T) {
 	got := stdout.String()
 	for _, want := range []string{
 		"watch | no witnessed outcome since lease start 1h ago | watch-lane lease heartbeat 20m ago | inspect stalled lease now",
-		"unknown x2 | no checkpoint | 2 live workers | emit durable checkpoints; --full lists workers",
+		"unknown x2 | no checkpoint | 2 live workers | check on next liveness change; workers owe checkpoints; --full lists workers",
 		"unknown x1 | checkpoints without witnessed outcomes | 1 live worker | run declared next checks; --full lists workers",
 		"none x2 | witnessed outcomes present | 2 live workers | bounded next checks; --full lists workers",
 	} {
@@ -143,6 +143,29 @@ func TestOperatorLiveSignalsDefaultFoldsOnlyNonActionRows(t *testing.T) {
 	wantIntent := "unknown | no witnessed outcome; checkpoint 2m ago | intent-only: bounded move 2m ago | inspect test result"
 	if !strings.Contains(stdout.String(), wantIntent) {
 		t.Fatalf("full projection lost evidence-free intent %q:\n%s", wantIntent, stdout.String())
+	}
+}
+
+func TestOperatorLiveSignalsUsesGraceAsUnknownNextCheck(t *testing.T) {
+	now := time.Date(2026, 8, 17, 16, 30, 0, 0, time.UTC)
+	payload := `{"lanes":[
+		{"lane":"young-a","chip":"ADVANCING","loop_ts":"2026-08-17T16:27:00Z","holder":"young-a","heartbeat_age_ms":180000,"liveness_reason":"alive and only 180000 ms into the run (< grace 1800000 ms)"},
+		{"lane":"young-b","chip":"ADVANCING","loop_ts":"2026-08-17T16:28:00Z","holder":"young-b","heartbeat_age_ms":120000,"liveness_reason":"alive and only 120000 ms into the run (< grace 1800000 ms)"}
+	]}`
+	oldJoin := filepathJoin
+	t.Cleanup(func() { filepathJoin = oldJoin })
+	filepathJoin = func(...string) string { return filepath.Join(t.TempDir(), "missing.jsonl") }
+	command := func(context.Context, string, ...string) ([]byte, error) { return []byte(payload), nil }
+	var stdout, stderr bytes.Buffer
+	if code := runOperatorLiveSignals(&stdout, &stderr, command, now, false); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	want := "unknown x2 | no checkpoint | 2 live workers | check at earliest grace in 27m; workers owe checkpoints; --full lists workers"
+	if !strings.Contains(stdout.String(), want) {
+		t.Fatalf("projection missing %q:\n%s", want, stdout.String())
+	}
+	if strings.Contains(stdout.String(), "emit durable checkpoints") {
+		t.Fatalf("worker remediation leaked into operator next check:\n%s", stdout.String())
 	}
 }
 
