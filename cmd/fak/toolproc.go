@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/hostfault"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/stepbatoncapture"
+	"github.com/anthony-chaudhary/fak/internal/toolcallcontrol"
 	"github.com/anthony-chaudhary/fak/internal/toolproc"
 	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
 )
@@ -65,6 +67,10 @@ func runToolproc(stdout, stderr io.Writer, argv []string) int {
 // same doctrine as the repo-guard hook. The journal it feeds is the same one
 // `fak toolproc ps --events` folds.
 func runToolprocHook(stdin io.Reader, stderr io.Writer, argv []string) int {
+	return runToolprocHookIO(os.Stdout, stdin, stderr, argv)
+}
+
+func runToolprocHookIO(toolprocHookOutputWriter io.Writer, stdin io.Reader, stderr io.Writer, argv []string) int {
 	if len(argv) == 0 {
 		fmt.Fprintln(stderr, "fak toolproc hook: kind required (pre | post | stop)")
 		return 0 // fail-open: a misconfigured hook must not block the harness
@@ -76,6 +82,8 @@ func runToolprocHook(stdin io.Reader, stderr io.Writer, argv []string) int {
 	deadlineMS := fs.Int64("deadline-ms", 0, "runtime deadline granted to a spawned call (0 = unbounded)")
 	heartbeatMS := fs.Int64("heartbeat-ms", 0, "liveness cadence expected of a spawned call (0 = none)")
 	policyPath := fs.String("policy", "", "policy manifest whose tool_runtime block grants per-tool envelopes (a resolved row wins; the flag pair fills when no row matches)")
+	controlMode := fs.String("control-mode", os.Getenv("FAK_TOOLCALL_CONTROL_MODE"), "avoidable-call control: off|shadow|enforce")
+	controlDir := fs.String("control-dir", os.Getenv("FAK_TOOLCALL_CONTROL_DIR"), "per-session avoidable-call state and decision directory")
 	if err := fs.Parse(argv[1:]); err != nil {
 		return 0
 	}
@@ -93,8 +101,18 @@ func runToolprocHook(stdin io.Reader, stderr io.Writer, argv []string) int {
 			}
 		}
 	}
-	if err := toolprocHookRun(stdin, kind, *journalPath, envFor, time.Now().UnixMilli()); err != nil {
+	payload, err := io.ReadAll(io.LimitReader(stdin, 4<<20))
+	if err != nil {
+		fmt.Fprintf(stderr, "fak toolproc hook: read input: %v\n", err)
+		return 0
+	}
+	if err := toolprocHookRun(bytes.NewReader(payload), kind, *journalPath, envFor, time.Now().UnixMilli()); err != nil {
 		fmt.Fprintf(stderr, "fak toolproc hook: %v (fail-open, not blocking the harness)\n", err)
+	}
+	if mode := toolcallcontrol.ParseMode(*controlMode); mode != toolcallcontrol.ModeOff {
+		if err := toolcallControlHook(toolprocHookOutputWriter, bytes.NewReader(payload), kind, mode, *controlDir); err != nil {
+			fmt.Fprintf(stderr, "fak toolproc control: %v\n", err)
+		}
 	}
 	return 0
 }

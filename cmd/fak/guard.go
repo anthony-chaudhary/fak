@@ -35,6 +35,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
+	"github.com/anthony-chaudhary/fak/internal/toolcallcontrol"
 )
 
 func cmdGuard(argv []string) {
@@ -156,6 +157,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	denyAllMax := fs.Int("deny-all-max", guardStopHookDefaultMax, "with --deny-all-continue=enforce: the hard give-up — the maximum number of CONSECUTIVE deny-all turns to auto-continue past (with escalating guidance) before letting the turn end, so a model that keeps re-proposing refused calls cannot loop forever. The give-up is LOGGED so it is not a silent false-stop.")
 	denyAllWarn := fs.Int("deny-all-warn", guardStopHookDefaultWarn, "with --deny-all-continue=enforce: at this many CONSECUTIVE deny-all turns the auto-continue guidance escalates from a gentle nudge to a relevance-decision WARNING (asks the agent whether the remaining work is reachable under the floor, and to declare BLOCKED and stop cleanly if not). Clamped to <= --deny-all-final <= --deny-all-max.")
 	toolprocHooks := fs.String("toolproc-hooks", guardToolprocModeObserve, "Claude Code tool-process observation hooks (off|observe, observe by default): PreToolUse/PostToolUse/SessionEnd append spawn/exit/session_end rows to the workspace toolproc journal (fail-open; `fak toolproc ps --events .fak/toolproc/journal.jsonl` reads the live table). Claude children only.")
+	toolcallControl := fs.String("toolcall-control", "shadow", "avoidable tool-call control: off|shadow|enforce (default shadow)")
 	denyAllFinal := fs.Int("deny-all-final", guardStopHookDefaultFinal, "with --deny-all-continue=enforce: at this many CONSECUTIVE deny-all turns the guidance escalates to a FINAL warning, the last attempts before the hard give-up at --deny-all-max.")
 	denyAllSameStop := fs.Int("same-stop", guardStopHookSameStopFromEnv(), "with --deny-all-continue=enforce (current gateways): the SAME-ISSUE give-up depth — end the session only after this many CONSECUTIVE deny-all turns proposing the IDENTICAL refused action (same tool+reason), default 6. A session hitting a DIFFERENT block each turn (exploring for an allowed path) never reaches it and is never given up; --deny-all-max is the legacy blind bound used only against a gateway that does not emit the same-issue gauge.")
 	taskHandoffMode := fs.String("task-handoff", guardPreCompactModeEnforce, "Claude Code Stop hook completion handoff gate: off|shadow|enforce. ENFORCE by default: on a clean stop, require a valid fak.task-handoff.v1 JSON with witnessed done + current state + 1-2 next steps or no-next-step reason. The path is exposed as FAK_TASK_HANDOFF_FILE.")
@@ -1314,6 +1316,9 @@ func cmdManageCommand(commandName string, argv []string) {
 		abortChildWiring(cancel, "toolproc hook setup", err, 1)
 	}
 	injected = append(injected, toolprocHookEnv...)
+	if mode := toolcallcontrol.ParseMode(*toolcallControl); mode != toolcallcontrol.ModeOff {
+		injected = append(injected, [2]string{"FAK_TOOLCALL_CONTROL_MODE", string(mode)})
+	}
 	// Discoverability affordance (#3092): a SessionStart hook that injects a one-line hint
 	// naming fak's MCP entry verbs into the first turn, so the agent reaches past Claude
 	// Code's deferred-tool wall instead of running as a generic coder. Merged into the SAME
