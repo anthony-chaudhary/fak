@@ -161,3 +161,27 @@ func TestDispatchWorkerEvidenceSealsObfuscatedSecret(t *testing.T) {
 		t.Fatalf("obfuscated secret must seal the tail: scrubbed=%v tail=%q", ev.SecretScrubbed, ev.TranscriptTail)
 	}
 }
+
+func TestDispatchWorkerEvidenceCarriesExactCanonicalBlocker(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "issue-7105.log")
+	if err := os.WriteFile(logPath, []byte("turn=3 tool=go_test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	old := now.Add(-2 * time.Minute)
+	if err := os.Chtimes(logPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+	ev := collectWorkerPartialEvidence(dispatchLiveScope{Issue: 7105, Log: logPath}, now)
+	if ev.Delivery == nil {
+		t.Fatal("missing delivery blocker")
+	}
+	if ev.Delivery.UnitID != "issue-7105" || ev.Delivery.Stage != "runtime-observation" || ev.Delivery.Bottleneck != "capacity-seat" {
+		t.Fatalf("delivery=%+v", ev.Delivery)
+	}
+	rendered := renderWorkerEvidence(dispatchWorkerEvidenceSnapshot{Workers: []workerPartialEvidence{ev}, LiveWorkerCount: 1})
+	if !strings.Contains(rendered, "blocked-unit=issue-7105 stage=runtime-observation bottleneck=capacity-seat") {
+		t.Fatalf("render=%q", rendered)
+	}
+}

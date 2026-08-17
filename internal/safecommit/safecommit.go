@@ -47,6 +47,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/safesync"
 	"github.com/anthony-chaudhary/fak/internal/witness"
+	"github.com/anthony-chaudhary/fak/internal/workdelivery"
 )
 
 // Runner executes a git subcommand in dir and returns (stdout, exitCode, err). It is the
@@ -194,6 +195,9 @@ type Result struct {
 	// it to the result it emits. Absent means the caller ran no gate at all, which is itself
 	// distinguishable from a gate that ran and passed (buildcheck.go).
 	BuildCheck *BuildCheckResult `json:"build_check,omitempty"`
+	// Delivery records only the authoring/recording transition. Compile admission, verification,
+	// integration, and release readiness remain independent receipts.
+	Delivery *workdelivery.AdapterObservation `json:"delivery,omitempty"`
 	// Velocity is the effect-qualified ship-speed reading (#4241): separate local and
 	// push legs, each scored only after the command's authoritative effect fields
 	// qualify it (Committed&&Verified for local, additionally Pushed for push). It is

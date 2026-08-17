@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2183,4 +2184,33 @@ func releaseShipCommandIndex(commands []releaseShipCommand, match func(releaseSh
 		}
 	}
 	return -1
+}
+
+func TestReleaseShipExecuteRequiresExplicitReadinessBeforeCommands(t *testing.T) {
+	oldRun := releaseShipRunCommand
+	t.Cleanup(func() { releaseShipRunCommand = oldRun })
+	called := false
+	releaseShipRunCommand = func(string, string, []string, []string, time.Duration) (int, string) { called = true; return 0, "" }
+	var out, errb bytes.Buffer
+	code := runReleaseShip(&out, &errb, []string{"--execute"})
+	if code != 2 || called || !strings.Contains(errb.String(), "--readiness") {
+		t.Fatalf("code=%d called=%v stderr=%q", code, called, errb.String())
+	}
+}
+
+func TestReleaseShipExecuteRefusesReadyStateWithoutWitnessedReceipt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "readiness.json")
+	data := `{"unit":{"schema":"fak.work-delivery/v1","id":"release-unit","axes":{"authoring":"recorded","compile_admission":"admitted","verification":"passed","integration":"integrated","release":"ready"}},"receipt":{"schema":"fak.work-delivery/v1","unit_id":"release-unit","transition":{"axis":"release","from":"not_ready","to":"ready"},"gate":"release-admission","evidence":[{"kind":"release-readiness","reference":"shipgate://run/9","witnessed":false}],"observed_at":"2026-08-17T18:00:00Z"}}`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldRun := releaseShipRunCommand
+	t.Cleanup(func() { releaseShipRunCommand = oldRun })
+	called := false
+	releaseShipRunCommand = func(string, string, []string, []string, time.Duration) (int, string) { called = true; return 0, "" }
+	var out, errb bytes.Buffer
+	code := runReleaseShip(&out, &errb, []string{"--execute", "--readiness", path})
+	if code != 1 || called || !strings.Contains(errb.String(), "RELEASE_READINESS_REQUIRED") {
+		t.Fatalf("code=%d called=%v stderr=%q", code, called, errb.String())
+	}
 }

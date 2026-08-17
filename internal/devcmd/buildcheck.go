@@ -78,25 +78,26 @@ type goOverlay struct {
 }
 
 type buildCheckReport struct {
-	Schema           string   `json:"schema"`
-	Mode             string   `json:"mode"`
-	Packages         []string `json:"packages"`
-	Isolate          bool     `json:"isolate"`
-	MaskedFiles      []string `json:"masked_files,omitempty"`
-	MaskedCount      int      `json:"masked_count"`
-	KeptFiles        []string `json:"kept_files,omitempty"`
-	KeptCount        int      `json:"kept_count"`
-	LiveCrossChecked bool     `json:"live_cross_checked,omitempty"`
-	OverlayPath      string   `json:"overlay_path,omitempty"`
-	Output           string   `json:"output"`
-	Command          []string `json:"command"`
-	ElapsedMS        int64    `json:"elapsed_ms"`
-	Verdict          string   `json:"verdict"`
-	ExitCode         int      `json:"exit_code"`
-	Reason           string   `json:"reason,omitempty"`
-	CompileManifests []string `json:"compile_manifests,omitempty"`
-	AdmittedFiles    []string `json:"admitted_files,omitempty"`
-	ExcludedFiles    []string `json:"excluded_files,omitempty"`
+	Schema           string                           `json:"schema"`
+	Mode             string                           `json:"mode"`
+	Packages         []string                         `json:"packages"`
+	Isolate          bool                             `json:"isolate"`
+	MaskedFiles      []string                         `json:"masked_files,omitempty"`
+	MaskedCount      int                              `json:"masked_count"`
+	KeptFiles        []string                         `json:"kept_files,omitempty"`
+	KeptCount        int                              `json:"kept_count"`
+	LiveCrossChecked bool                             `json:"live_cross_checked,omitempty"`
+	OverlayPath      string                           `json:"overlay_path,omitempty"`
+	Output           string                           `json:"output"`
+	Command          []string                         `json:"command"`
+	ElapsedMS        int64                            `json:"elapsed_ms"`
+	Verdict          string                           `json:"verdict"`
+	ExitCode         int                              `json:"exit_code"`
+	Reason           string                           `json:"reason,omitempty"`
+	CompileManifests []string                         `json:"compile_manifests,omitempty"`
+	AdmittedFiles    []string                         `json:"admitted_files,omitempty"`
+	ExcludedFiles    []string                         `json:"excluded_files,omitempty"`
+	Delivery         *workdelivery.AdapterObservation `json:"delivery,omitempty"`
 }
 
 func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
@@ -289,6 +290,16 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 			CompileManifests: compileManifests,
 			AdmittedFiles:    compileSet.Admitted,
 			ExcludedFiles:    compileSet.Excluded,
+		}
+		unitID := "buildcheck"
+		if len(compileManifests) == 1 {
+			unitID = compileManifests[0]
+		}
+		unit := workdelivery.WorkUnit{Schema: workdelivery.Schema, ID: unitID, Axes: workdelivery.InitialAxes()}
+		unit.Axes.Authoring = workdelivery.AuthoringRecorded
+		unit.Axes.Admission = workdelivery.AdmissionAdmitted
+		if delivery, deliveryErr := workdelivery.VerificationObservation(unit, verdict == "OK", mode, strings.Join(rep.Command, " "), "fak buildcheck", time.Now()); deliveryErr == nil {
+			rep.Delivery = &delivery
 		}
 		if verdict != "OK" {
 			rep.Reason = joinReason(reason, buildCheckTail(buf.String(), 40))

@@ -16,6 +16,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
+	"github.com/anthony-chaudhary/fak/internal/workdelivery"
 )
 
 // commitFn is the seam the CLI shim calls; it defaults to the real safecommit.Commit and
@@ -228,6 +229,18 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	// Attach the gate's outcome BEFORE scoring: a commit admitted without its prospective tree
 	// ever being compiled must not be graded like one that passed the gate (#6006).
 	res.BuildCheck = &buildCheck
+	if res.Committed {
+		artifacts := make([]workdelivery.Artifact, 0, len(res.Paths))
+		for _, path := range res.Paths {
+			artifacts = append(artifacts, workdelivery.Artifact{Path: path, Kind: "source"})
+		}
+		unit := workdelivery.WorkUnit{Schema: workdelivery.Schema, ID: res.SHA, Revision: res.SHA, Artifacts: artifacts, Axes: workdelivery.InitialAxes()}
+		if delivery, deliveryErr := workdelivery.RecordingObservation(unit, res.SHA, "fak commit", time.Now()); deliveryErr == nil {
+			res.Delivery = &delivery
+		} else {
+			fmt.Fprintf(stderr, "fak commit: record delivery receipt: %v\n", deliveryErr)
+		}
+	}
 	res = safecommit.ScoreResult(res)
 	if res.Committed && buildCheckOutcome == safecommit.BuildCheckPassed {
 		commitRecordTreeReceipt(root, time.Now())

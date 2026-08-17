@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
+	"github.com/anthony-chaudhary/fak/internal/workdelivery"
 )
 
 type releaseShipCommandRunner func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string)
@@ -58,6 +59,7 @@ type releaseShipOptions struct {
 	promotionBranch      string
 	allowDirectPromotion bool
 	pushRetries          int
+	readinessFile        string
 }
 
 type releaseShipResult struct {
@@ -117,6 +119,21 @@ func runReleaseShip(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak release ship: %v\n", err)
 		return 2
 	}
+	if opts.execute {
+		if opts.readinessFile == "" {
+			fmt.Fprintln(stderr, "fak release ship: --execute requires --readiness with explicit witnessed release-ready evidence")
+			return 2
+		}
+		unit, receipt, readErr := readReleaseReadiness(opts.readinessFile)
+		if readErr != nil {
+			fmt.Fprintf(stderr, "fak release ship: release readiness: %v\n", readErr)
+			return 1
+		}
+		if _, readyErr := workdelivery.RequireReleaseReady(unit, &receipt); readyErr != nil {
+			fmt.Fprintf(stderr, "fak release ship: %v\n", readyErr)
+			return 1
+		}
+	}
 	result := executeReleaseShip(opts)
 	if opts.asJSON {
 		enc := json.NewEncoder(stdout)
@@ -154,6 +171,7 @@ func parseReleaseShipOptions(stderr io.Writer, argv []string) (releaseShipOption
 	fs.BoolVar(&opts.waitCI, "wait-ci", opts.waitCI, "watch a pending CI run before tagging")
 	fs.BoolVar(&opts.skipCI, "skip-ci", false, "skip CI folding in release_tag; intended for emergency/operator use")
 	fs.BoolVar(&opts.skipDryRun, "skip-dry-run", opts.skipDryRun, "emergency escape hatch: skip the release-substrate dry-run witness at the cut (default runs it; it is tag-based and passes on a real bump). The tag step always reuses the cut's same-commit verdict.")
+	fs.StringVar(&opts.readinessFile, "readiness", opts.readinessFile, "work-delivery JSON containing ready state and its explicit witnessed release-readiness receipt (required with --execute)")
 	fs.DurationVar(&opts.ciAppearTimeout, "ci-appear-timeout", opts.ciAppearTimeout, "how long to wait for a just-pushed CI run to appear before release_tag folds it")
 	fs.BoolVar(&opts.keepWorktree, "keep-worktree", false, "leave the detached worktree on disk")
 	fs.StringVar(&opts.worktreeDir, "worktree-dir", "", "use this detached worktree path instead of a temp dir")
@@ -1422,4 +1440,22 @@ func cleanupReleaseShipWorktree(root, wt string) map[string]any {
 		payload["prune_tail"] = tail(pruneOut)
 	}
 	return payload
+}
+
+func readReleaseReadiness(path string) (workdelivery.WorkUnit, workdelivery.Receipt, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return workdelivery.WorkUnit{}, workdelivery.Receipt{}, err
+	}
+	var envelope struct {
+		Unit    workdelivery.WorkUnit `json:"unit"`
+		Receipt workdelivery.Receipt  `json:"receipt"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return workdelivery.WorkUnit{}, workdelivery.Receipt{}, err
+	}
+	if err := envelope.Unit.Validate(); err != nil {
+		return workdelivery.WorkUnit{}, workdelivery.Receipt{}, err
+	}
+	return envelope.Unit, envelope.Receipt, nil
 }

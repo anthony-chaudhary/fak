@@ -45,6 +45,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/canon"
+	"github.com/anthony-chaudhary/fak/internal/workdelivery"
 )
 
 const dispatchWorkerEvidenceSnapshotSchema = "fleet-dispatch-worker-evidence/1"
@@ -80,7 +81,8 @@ type workerPartialEvidence struct {
 	TranscriptTail     string `json:"transcript_tail,omitempty"`
 	// ArtifactPath is set only in the snapshot after --materialize wrote the sidecar; it
 	// is never embedded in the on-disk artifact itself (which would be self-referential).
-	ArtifactPath string `json:"artifact_path,omitempty"`
+	ArtifactPath string                           `json:"artifact_path,omitempty"`
+	Delivery     *workdelivery.AdapterObservation `json:"delivery,omitempty"`
 }
 
 // dispatchWorkerEvidenceSnapshot is the fleet-dispatch-worker-evidence/1 payload.
@@ -201,6 +203,13 @@ func collectWorkerPartialEvidence(scope dispatchLiveScope, now time.Time) worker
 	ev.LastTool = lastTranscriptMarker(raw, transcriptToolRE)
 	ev.RouteHealth = lastTranscriptMarker(raw, transcriptRouteHealthRE)
 	ev.QuotaState = lastTranscriptMarker(raw, transcriptQuotaRE)
+	if ev.InFlightAgeSeconds > 0 {
+		unitID := fmt.Sprintf("issue-%d", ev.Issue)
+		next := "inspect the worker transcript and split the failing check"
+		if delivery, deliveryErr := workdelivery.BlockedObservation(workdelivery.AdapterFleet, unitID, "runtime-observation", "capacity-seat", []workdelivery.Evidence{{Kind: "transcript", Reference: ev.TranscriptPath, Witnessed: true}}, next); deliveryErr == nil {
+			ev.Delivery = &delivery
+		}
+	}
 
 	// Scrub a line-aligned tail. Start at a clean line boundary so the cut never splits a
 	// credential mid-token, then mask every raw secret span. If the tail carries an
@@ -311,6 +320,9 @@ func renderWorkerEvidence(snap dispatchWorkerEvidenceSnapshot) string {
 		}
 		if w.QuotaState != "" {
 			fmt.Fprintf(&b, "        quota=%s\n", w.QuotaState)
+		}
+		if w.Delivery != nil {
+			fmt.Fprintf(&b, "        blocked-unit=%s stage=%s bottleneck=%s next=%s\n", w.Delivery.UnitID, w.Delivery.Stage, w.Delivery.Bottleneck, w.Delivery.NextAction)
 		}
 		if !w.SecretScrubbed {
 			fmt.Fprint(&b, "        (transcript tail sealed — obfuscated secret not raw-maskable)\n")

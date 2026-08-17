@@ -228,6 +228,12 @@ func TestRunBuildCheckJSONReport(t *testing.T) {
 	if len(rep.Command) < 2 || rep.Command[0] != "go" || rep.Command[1] != "build" {
 		t.Errorf("report.Command = %v, want it to start with [go build ...]", rep.Command)
 	}
+	if rep.Delivery == nil || rep.Delivery.Receipt == nil || rep.Delivery.Receipt.Transition.Axis != "verification" || rep.Delivery.Receipt.Transition.To != "passed" {
+		t.Errorf("delivery = %+v, want verification-only passed receipt", rep.Delivery)
+	}
+	if rep.Delivery.Receipt.Transition.Axis == "integration" || rep.Delivery.Receipt.Transition.Axis == "release" {
+		t.Fatal("buildcheck inferred a downstream delivery axis")
+	}
 }
 
 func TestLabelUntrackedBuildFailures(t *testing.T) {

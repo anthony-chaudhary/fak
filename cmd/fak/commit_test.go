@@ -844,3 +844,37 @@ func TestRenderCommitResultShowsBuildCheckOutcome(t *testing.T) {
 		t.Fatalf("output omitted build outcome: %q", out.String())
 	}
 }
+
+func TestRunCommitJSONEmitsRecordingOnlyDeliveryReceipt(t *testing.T) {
+	oldBuild := commitBuildCheckGate
+	t.Cleanup(func() { commitBuildCheckGate = oldBuild })
+	commitBuildCheckGate = func(io.Writer, string, []string) (safecommit.BuildCheckOutcome, string) {
+		return safecommit.BuildCheckPassed, ""
+	}
+	withCommitFn(t, func(_ context.Context, opts safecommit.Options) (safecommit.Result, error) {
+		return safecommit.Result{Committed: true, Verified: true, SHA: "abc123", Paths: opts.Paths}, nil
+	})
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{"--json", "--path", "internal/workdelivery/adapters.go", "-m", "feat(workdelivery): record delivery receipt (fak workdelivery)"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errb.String())
+	}
+	var result safecommit.Result
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Delivery == nil || result.Delivery.Receipt == nil {
+		t.Fatalf("missing delivery receipt: %s", out.String())
+	}
+	transition := result.Delivery.Receipt.Transition
+	if transition.Axis != "authoring" || transition.To != "recorded" {
+		t.Fatalf("transition=%+v", transition)
+	}
+	if result.Delivery.Stage != "recording" {
+		t.Fatalf("stage=%q", result.Delivery.Stage)
+	}
+	// The prospective build gate may be green, but commit still records no verification receipt.
+	if result.Delivery.Receipt.Transition.Axis == "verification" {
+		t.Fatal("commit inferred verification")
+	}
+}
