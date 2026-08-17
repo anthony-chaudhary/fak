@@ -46,7 +46,7 @@ func TestOperatorLiveSignalsCapturedProjection(t *testing.T) {
 		return []byte(payload), nil
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runOperatorLiveSignals(&stdout, &stderr, command, now); code != 0 {
+	if code := runOperatorLiveSignals(&stdout, &stderr, command, now, true); code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -71,6 +71,64 @@ func TestOperatorLiveSignalsCapturedProjection(t *testing.T) {
 		if strings.Contains(strings.ToLower(got), forbidden) {
 			t.Fatalf("default projection leaked drill-down %q:\n%s", forbidden, got)
 		}
+	}
+}
+
+func TestOperatorLiveSignalsDefaultFoldsOnlyNonActionRows(t *testing.T) {
+	now := time.Date(2026, 8, 17, 16, 30, 0, 0, time.UTC)
+	payload := `{"lanes":[
+		{"lane":"watch-lane","chip":"STALLED","loop_ts":"2026-08-17T15:30:00Z","holder":"watcher","heartbeat_age_ms":1200000},
+		{"lane":"unknown-a","chip":"ADVANCING","loop_ts":"2026-08-17T16:29:00Z","holder":"unknown-a","heartbeat_age_ms":20000},
+		{"lane":"unknown-b","chip":"ADVANCING","loop_ts":"2026-08-17T16:28:00Z","holder":"unknown-b","heartbeat_age_ms":30000},
+		{"lane":"healthy-a","chip":"ADVANCING","loop_ts":"2026-08-17T16:25:00Z","holder":"healthy-a","heartbeat_age_ms":20000},
+		{"lane":"healthy-b","chip":"ADVANCING","loop_ts":"2026-08-17T16:25:00Z","holder":"healthy-b","heartbeat_age_ms":20000}
+	]}`
+	oldJoin := filepathJoin
+	t.Cleanup(func() { filepathJoin = oldJoin })
+	checkpointPath := filepath.Join(t.TempDir(), "dev-status.jsonl")
+	filepathJoin = func(...string) string { return checkpointPath }
+	for _, actor := range []string{"healthy-a", "healthy-b"} {
+		record := devcheckpoint.Record{Timestamp: now.Add(-time.Minute), Actor: actor, State: devcheckpoint.StateProgress, Summary: "testing", Evidence: []string{"commit abc"}, Next: "wait for gate"}
+		f, err := os.OpenFile(checkpointPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.WriteString(mustJSON(t, record) + "\n"); err != nil {
+			f.Close()
+			t.Fatal(err)
+		}
+		f.Close()
+	}
+	command := func(context.Context, string, ...string) ([]byte, error) { return []byte(payload), nil }
+	var stdout, stderr bytes.Buffer
+	if code := runOperatorLiveSignals(&stdout, &stderr, command, now, false); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	for _, want := range []string{
+		"watch | no witnessed outcome since lease start 1h ago | watch-lane lease heartbeat 20m ago | inspect stalled lease now",
+		"unknown x2 | no witnessed outcome | 2 live workers | emit durable checkpoints; --full lists workers",
+		"none x2 | witnessed outcomes present | 2 live workers | bounded next checks; --full lists workers",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("default projection missing %q:\n%s", want, got)
+		}
+	}
+	for _, hidden := range []string{"unknown-a lease heartbeat", "unknown-b lease heartbeat", "healthy-a: testing", "healthy-b: testing"} {
+		if strings.Contains(got, hidden) {
+			t.Fatalf("default projection did not fold %q:\n%s", hidden, got)
+		}
+	}
+	if strings.Contains(got, "none x4") {
+		t.Fatalf("unknown workers were conflated with healthy workers:\n%s", got)
+	}
+}
+
+func TestRunSessionDiagFullRequiresLiveSignals(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runSessionDiagWith(&stdout, &stderr, []string{"--full"}, nil, nil, time.Now)
+	if code != 2 || !strings.Contains(stderr.String(), "--full requires --live-signals") {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
 	}
 }
 

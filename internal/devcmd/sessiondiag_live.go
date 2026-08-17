@@ -47,7 +47,7 @@ type liveSignalRow struct {
 
 var gracePattern = regexp.MustCompile(`grace ([0-9]+) ms`)
 
-func runOperatorLiveSignals(stdout, stderr io.Writer, command operatorLiveRunner, now time.Time) int {
+func runOperatorLiveSignals(stdout, stderr io.Writer, command operatorLiveRunner, now time.Time, full bool) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	payload, err := command(ctx, "dos", "top", "--json")
@@ -79,8 +79,12 @@ func runOperatorLiveSignals(stdout, stderr io.Writer, command operatorLiveRunner
 		return rows[i].Lane < rows[j].Lane
 	})
 	fmt.Fprintln(stdout, "ATTENTION | OUTCOME + AGE | CURRENT MOVE + AGE | NEXT CHECK")
-	for _, row := range rows {
-		fmt.Fprintf(stdout, "%s | %s | %s | %s\n", row.Attention, row.Outcome, row.Move, row.Next)
+	if full {
+		for _, row := range rows {
+			writeWorkerProjection(stdout, row)
+		}
+	} else {
+		writeExceptionFirstProjection(stdout, rows)
 	}
 	if len(rows) == 0 {
 		fmt.Fprintln(stdout, "none | no live lanes | idle | check on next lease")
@@ -90,6 +94,31 @@ func runOperatorLiveSignals(stdout, stderr io.Writer, command operatorLiveRunner
 
 // filepathJoin is a seam for the fixed repository-local checkpoint log.
 var filepathJoin = func(parts ...string) string { return strings.Join(parts, string(os.PathSeparator)) }
+
+func writeExceptionFirstProjection(stdout io.Writer, rows []liveSignalRow) {
+	unknown := make([]liveSignalRow, 0)
+	healthy := make([]liveSignalRow, 0)
+	for _, row := range rows {
+		switch row.Attention {
+		case "needs-human", "watch":
+			writeWorkerProjection(stdout, row)
+		case "unknown":
+			unknown = append(unknown, row)
+		default:
+			healthy = append(healthy, row)
+		}
+	}
+	if len(unknown) > 0 {
+		fmt.Fprintf(stdout, "unknown x%d | no witnessed outcome | %d live workers | emit durable checkpoints; --full lists workers\n", len(unknown), len(unknown))
+	}
+	if len(healthy) > 0 {
+		fmt.Fprintf(stdout, "none x%d | witnessed outcomes present | %d live workers | bounded next checks; --full lists workers\n", len(healthy), len(healthy))
+	}
+}
+
+func writeWorkerProjection(stdout io.Writer, row liveSignalRow) {
+	fmt.Fprintf(stdout, "%s | %s | %s | %s\n", row.Attention, row.Outcome, row.Move, row.Next)
+}
 
 func readLatestDevCheckpoints(path string) (map[string]devcheckpoint.Record, error) {
 	out := map[string]devcheckpoint.Record{}
