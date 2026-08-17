@@ -9,7 +9,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
 
-func dispatchCodexLoopGateForTick(opts dispatchTickOptions, account dispatchtick.Account) (map[string]any, bool, error) {
+func dispatchCodexLoopGateForTick(opts dispatchTickOptions, account dispatchtick.Account, launchSafe ...bool) (map[string]any, bool, error) {
 	if !opts.Live || opts.Backend != "codex" {
 		return nil, false, nil
 	}
@@ -23,11 +23,15 @@ func dispatchCodexLoopGateForTick(opts dispatchTickOptions, account dispatchtick
 	if _, ok := codexLoopFailOnRank(threshold); !ok {
 		return nil, false, fmt.Errorf("invalid --codex-loop-gate %q (want loop, action, or off)", opts.CodexLoopGate)
 	}
+	childSafetyKnown := len(launchSafe) > 0
+	safeLaunch := childSafetyKnown && launchSafe[0]
+	var current *codexLoopDiagnosis
 	if d, ok, err := diagnoseCurrentCodexLoop(account.Dir); ok {
 		if err != nil {
 			return nil, false, fmt.Errorf("Codex current-thread gate audit failed: %w", err)
 		}
-		if codexLoopDiagnosisUnguarded(d) {
+		current = &d
+		if !childSafetyKnown && codexLoopDiagnosisUnguarded(d) {
 			return dispatchCodexLoopCurrentThreadPayload(d, threshold), true, nil
 		}
 	}
@@ -40,7 +44,41 @@ func dispatchCodexLoopGateForTick(opts dispatchTickOptions, account dispatchtick
 		return nil, false, fmt.Errorf("Codex loop gate audit failed: %w", err)
 	}
 	gateCode, _ := codexLoopFailOnExitCode(rep.Verdict, threshold)
-	return dispatchCodexLoopGatePayload(rep, threshold), gateCode != 0, nil
+	payload := dispatchCodexLoopGatePayload(rep, threshold)
+	if childSafetyKnown {
+		payload["launch"] = map[string]any{"guarded": safeLaunch}
+		if current != nil {
+			payload["parent"] = map[string]any{
+				"source":          "current_thread",
+				"session_id":      current.SessionID,
+				"model_provider":  current.ModelProvider,
+				"guard_witnessed": current.GuardWitnessed,
+			}
+		}
+		if gateCode != 0 {
+			payload["action"] = "refused"
+			payload["next_action"] = firstString(rep.NextAction, "change approach before retrying the prepared child")
+			return payload, true, nil
+		}
+		if !safeLaunch {
+			payload["fail_on"] = "unguarded"
+			payload["verdict"] = "OK"
+			payload["reason"] = "codex_session_bypassed_fak_guard"
+			payload["action"] = "refused"
+			payload["next_action"] = "prepare the child through fak guard before spawning"
+			if current != nil {
+				payload["verdict"] = current.Verdict
+			}
+			return payload, true, nil
+		}
+		payload["action"] = "spawned"
+		if current != nil && codexLoopDiagnosisUnguarded(*current) {
+			payload["next_action"] = "spawn the prepared child through fak guard"
+		} else {
+			payload["next_action"] = "spawn the prepared child"
+		}
+	}
+	return payload, false, nil
 }
 
 func dispatchCodexLoopGateDefaultThreshold() string {

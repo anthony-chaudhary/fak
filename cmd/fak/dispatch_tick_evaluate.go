@@ -418,7 +418,7 @@ func completeDispatchTickEvaluation(root, runsDir string, opts dispatchTickOptio
 		return finish(payload), nil
 	}
 
-	if gate, refused, err := dispatchCodexLoopGateForTick(opts, account); err != nil {
+	if gate, refused, err := dispatchCodexLoopGateForTick(opts, account, guardedPreview); err != nil {
 		return nil, err
 	} else if gate != nil {
 		payload["codex_loop_gate"] = gate
