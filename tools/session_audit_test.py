@@ -1322,7 +1322,7 @@ class DOSHookLedgerTest(unittest.TestCase):
             {"ts": "2026-08-15T00:00:00Z", "verb": "posttool", "outcome": "passthrough",
              "exit": 0, "latency_ms": 2.5},
             {"ts": "2026-08-15T00:00:00Z", "verb": "posttool", "outcome": "passthrough",
-             "exit": 0, "latency_ms": 8.5},
+             "exit": 0, "latency_ms": 1500},
             {"ts": "2026-08-15T00:00:02Z", "verb": "stop", "outcome": "no-claims",
              "exit": 1, "latency_ms": 4},
         ]
@@ -1331,9 +1331,14 @@ class DOSHookLedgerTest(unittest.TestCase):
             path.parent.mkdir(parents=True)
             path.write_text("".join(json.dumps(row) + "\n" for row in rows) + "bad\n",
                             encoding="utf-8")
-            ledger = sa.load_dos_hook_observations(td, None)
+            ledger = sa.load_dos_hook_observations(
+                td, 999, "2026-08-14T16:59:59-07:00"
+            )
         self.assertEqual(ledger["verbs"]["posttool"]["count"], 2)
-        self.assertEqual(ledger["verbs"]["posttool"]["duration_ms"]["p90"], 8.5)
+        self.assertEqual(ledger["verbs"]["posttool"]["duration_ms"]["p90"], 1500)
+        self.assertEqual(ledger["verbs"]["posttool"]["duration_ms"]["over_100ms"], 1)
+        self.assertEqual(ledger["verbs"]["posttool"]["duration_ms"]["over_500ms"], 1)
+        self.assertEqual(ledger["verbs"]["posttool"]["duration_ms"]["over_1000ms"], 1)
         self.assertEqual(ledger["malformed_rows"], 1)
         agg = {"hooks": {"events": {}}, "dos_hook_ledger": ledger,
                "tool_mix": {"Read": 1}}
@@ -1343,6 +1348,25 @@ class DOSHookLedgerTest(unittest.TestCase):
         self.assertIn("2 ledger rows / 1 audited transcript tool calls = 2.00x", report)
         self.assertIn("1 rows are additional calls in an already-occupied one-second bucket", report)
         self.assertIn("| stop | 1 | no-claims=1 | 1=1 |", report)
+        self.assertIn("1,500.0 ms | 1 | 1 | 1 |", report)
+
+    def test_exact_ledger_cutoff_overrides_relative_window(self):
+        sa = load()
+        rows = [
+            {"ts": "2026-08-16T23:59:59Z", "verb": "posttool", "outcome": "passthrough",
+             "exit": 0, "latency_ms": 1},
+            {"ts": "2026-08-17T00:00:00Z", "verb": "posttool", "outcome": "passthrough",
+             "exit": 0, "latency_ms": 2},
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / ".dos" / "metrics" / "observations.jsonl"
+            path.parent.mkdir(parents=True)
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+            ledger = sa.load_dos_hook_observations(td, 0, "2026-08-17T00:00:00Z")
+            with self.assertRaisesRegex(ValueError, "timezone"):
+                sa.load_dos_hook_observations(td, None, "2026-08-17T00:00:00")
+        self.assertEqual(ledger["verbs"]["posttool"]["count"], 1)
+        self.assertEqual(ledger["verbs"]["posttool"]["duration_ms"]["max"], 2)
 
 if __name__ == "__main__":
     unittest.main()

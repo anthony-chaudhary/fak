@@ -1416,13 +1416,26 @@ def _cache_burst_tables(beh):
                      f"{r['suffix_resets']} | {fl} | ${r['cost_usd']:.2f} |")
     return L
 
-def load_dos_hook_observations(workspace, since_days):
+def _parse_iso_instant(value):
+    """Parse an ISO-8601 instant, accepting the common trailing-Z spelling."""
+    parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("timestamp must include a timezone offset")
+    return parsed.timestamp()
+
+
+def load_dos_hook_observations(workspace, since_days, since_instant=None):
     """Read the independent DOS hook ledger when this audit runs in its workspace."""
     path = os.path.join(workspace, ".dos", "metrics", "observations.jsonl")
     if not os.path.isfile(path):
         return None
-    cutoff = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=since_days)
-              if since_days is not None else None)
+    if since_instant is not None:
+        cutoff = datetime.datetime.fromtimestamp(
+            _parse_iso_instant(since_instant), datetime.timezone.utc
+        )
+    else:
+        cutoff = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=since_days)
+                  if since_days is not None else None)
     verbs = collections.defaultdict(lambda: {"outcomes": collections.Counter(),
                                              "latencies_ms": [], "exits": collections.Counter()})
     malformed = 0
@@ -1447,7 +1460,9 @@ def load_dos_hook_observations(workspace, since_days):
                     verbs[verb]["latencies_ms"].append(float(latency))
     except OSError as exc:
         return {"path": path, "error": str(exc)}
-    result = {"path": path, "malformed_rows": malformed, "verbs": {}}
+    result = {"path": path, "malformed_rows": malformed, "verbs": {},
+              "since": cutoff.isoformat().replace("+00:00", "Z") if cutoff else None,
+              "exact_since": since_instant is not None}
     for verb, data in verbs.items():
         values = data["latencies_ms"]
         result["verbs"][verb] = {
@@ -1455,7 +1470,10 @@ def load_dos_hook_observations(workspace, since_days):
             "outcomes": dict(data["outcomes"].most_common()),
             "exits": dict(data["exits"].most_common()),
             "duration_ms": {"median": _pct(values, 50), "p90": _pct(values, 90),
-                            "p99": _pct(values, 99), "max": max(values) if values else None},
+                            "p99": _pct(values, 99), "max": max(values) if values else None,
+                            "over_100ms": sum(value > 100 for value in values),
+                            "over_500ms": sum(value > 500 for value in values),
+                            "over_1000ms": sum(value > 1000 for value in values)},
             "same_second": {
                 "buckets": sum(1 for (v, _), n in timestamp_buckets.items() if v == verb and n > 1),
                 "excess_calls": sum(n - 1 for (v, _), n in timestamp_buckets.items()
@@ -1474,16 +1492,20 @@ def _dos_hook_lens(agg):
     L = ["## DOS hook ledger — independent execution witness\n"]
     if ledger.get("error"):
         return L + [f"- Ledger unreadable: `{ledger['error']}`\n"]
-    L += [f"- Source: `{ledger['path']}` (independent of Claude transcript attachments).",
-          "| Verb | Calls | Outcomes | Exit codes | p90 | p99 | Max |",
-          "|---|---:|---|---|---:|---:|---:|"]
+    L += [f"- Source: `{ledger['path']}` (independent of Claude transcript attachments)."]
+    if ledger.get("since"):
+        L.append(f"- Observation window starts at `{ledger['since']}` (inclusive).")
+    L += ["| Verb | Calls | Outcomes | Exit codes | p90 | p99 | Max | >100ms | >500ms | >1s |",
+          "|---|---:|---|---|---:|---:|---:|---:|---:|---:|"]
     for verb, row in sorted((ledger.get("verbs") or {}).items()):
         outcomes = ", ".join(f"{k}={v:,}" for k, v in row.get("outcomes", {}).items())
         exits = ", ".join(f"{k}={v:,}" for k, v in row.get("exits", {}).items())
         dur = row.get("duration_ms") or {}
         ms = lambda value: "—" if value is None else f"{value:,.1f} ms"
         L.append(f"| {verb} | {row.get('count', 0):,} | {outcomes} | {exits} | "
-                 f"{ms(dur.get('p90'))} | {ms(dur.get('p99'))} | {ms(dur.get('max'))} |")
+                 f"{ms(dur.get('p90'))} | {ms(dur.get('p99'))} | {ms(dur.get('max'))} | "
+                 f"{dur.get('over_100ms', 0)} | {dur.get('over_500ms', 0)} | "
+                 f"{dur.get('over_1000ms', 0)} |")
     post = (ledger.get("verbs") or {}).get("posttool")
     transcript_post = (agg.get("hooks", {}).get("events", {}).get("PostToolUse", {})
                        .get("total", 0))
@@ -1492,16 +1514,21 @@ def _dos_hook_lens(agg):
                  f"the DOS ledger independently witnessed {post['count']:,} `posttool` calls. "
                  "This is an attachment-observability gap, not evidence that the hook did not run.")
     if post:
-        audited_calls = sum((agg.get("tool_mix") or {}).values())
         same_second = post.get("same_second") or {}
-        ratio = post["count"] / audited_calls if audited_calls else None
-        ratio_text = "—" if ratio is None else f"{ratio:.2f}x"
-        L.append(f"- **PostToolUse amplification signal:** {post['count']:,} ledger rows / "
-                 f"{audited_calls:,} audited transcript tool calls = {ratio_text}; "
-                 f"{same_second.get('excess_calls', 0):,} rows are additional calls in an "
-                 f"already-occupied one-second bucket (max {same_second.get('max_calls', 0):,}/s). "
-                 "The sources have different coverage, so this is a collision/duplication lead, "
-                 "not a one-to-one duplicate count.")
+        pressure = (f"{same_second.get('excess_calls', 0):,} rows are additional calls in an "
+                    f"already-occupied one-second bucket (max {same_second.get('max_calls', 0):,}/s).")
+        if ledger.get("exact_since"):
+            L.append(f"- **PostToolUse exact-window pressure:** {post['count']:,} ledger rows; "
+                     f"{pressure} Amplification ratio omitted because the transcript and exact "
+                     "ledger lower bounds differ.")
+        else:
+            audited_calls = sum((agg.get("tool_mix") or {}).values())
+            ratio = post["count"] / audited_calls if audited_calls else None
+            ratio_text = "—" if ratio is None else f"{ratio:.2f}x"
+            L.append(f"- **PostToolUse amplification signal:** {post['count']:,} ledger rows / "
+                     f"{audited_calls:,} audited transcript tool calls = {ratio_text}; {pressure} "
+                     "The sources have different coverage, so this is a collision/duplication lead, "
+                     "not a one-to-one duplicate count.")
     if ledger.get("malformed_rows"):
         L.append(f"- Malformed ledger rows skipped: {ledger['malformed_rows']:,}")
     return L + [""]
@@ -1678,7 +1705,9 @@ def cmd_audit(a):
     # witness holds by construction: this aggregate == the --top-level-only aggregate
     # plus exactly the subagent delta. _subagent_fold_table renders that reconciliation.
     agg = aggregate(out)
-    agg["dos_hook_ledger"] = load_dos_hook_observations(os.getcwd(), a.since_days)
+    agg["dos_hook_ledger"] = load_dos_hook_observations(
+        os.getcwd(), a.since_days, getattr(a, "dos_since", None)
+    )
     excluded_subagents = None
     if top_level_only:
         subagent_records = [s for s in discover(roots, a.since_days, ns_prefix,
@@ -1969,6 +1998,11 @@ def main():
         if name == "discover":
             q.add_argument("--limit", type=int, default=40)
         else:
+            q.add_argument(
+                "--dos-since", default=None, metavar="ISO8601",
+                help="exact timezone-qualified lower bound for the DOS observation ledger; "
+                     "overrides --since-days for that ledger",
+            )
             q.add_argument("--max", type=int, default=None)
             q.add_argument("--json", default=None)
             q.add_argument("--md", default=None)
