@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const runtimeProofSchema = "fak-maturity-runtime-proofs/2"
@@ -149,14 +151,14 @@ var resolveRuntimeFak = func() (string, error) {
 }
 
 func verifyFakArtifact(root, artifact string) error {
-	headCommand := exec.Command("git", "rev-parse", "HEAD")
+	headCommand := windowgate.Command("git", "rev-parse", "HEAD")
 	headCommand.Dir = root
 	headOutput, err := headCommand.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("resolve scored source revision: %w: %s", err, strings.TrimSpace(string(headOutput)))
 	}
 	head := strings.TrimSpace(string(headOutput))
-	versionCommand := exec.Command(artifact, "version")
+	versionCommand := windowgate.Command(artifact, "version")
 	versionCommand.Dir = root
 	versionOutput, err := versionCommand.CombinedOutput()
 	if err != nil {
