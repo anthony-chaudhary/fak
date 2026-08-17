@@ -604,6 +604,11 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                  gh and --fetch-existing verifies against the tracker -- both leave an
                  issues-sync.json receipt beside the report, which dogfood-score's chain
                  axis and the improve-loops super loop read)
+  fak dev idea-scout [--candidates FILE] [--live] [--json]
+                (research-to-issue feeder: score arXiv/GitHub/HN/Reddit candidates,
+                 deduplicate them against the tracker, and render issue plans. Dry-run by
+                 default; --live FILES or updates public GitHub issues, so inspect the plan
+                 first. See docs/idea-scout.md for source and scoring contracts.)
   fak dev gh-spam-comments [--repo owner/repo] [--since 24h|RFC3339] [--apply] [--json]
                 (GitHub issue/PR comment moderation sweeper: scans comments from gh, ignores
                  trusted insiders by author_association (OWNER/COLLABORATOR/MEMBER) plus

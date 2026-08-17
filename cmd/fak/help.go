@@ -283,7 +283,11 @@ func wallHeaderVerb(line string) (string, bool) {
 	if rest == "" {
 		return "", false
 	}
-	tok := strings.Fields(rest)[0]
+	fields := strings.Fields(rest)
+	tok := fields[0]
+	if strings.EqualFold(tok, "dev") && len(fields) > 1 {
+		tok = fields[1]
+	}
 	return strings.ToLower(tok), true
 }
 
