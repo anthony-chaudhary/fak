@@ -19,13 +19,14 @@ func cmdOrchestration(args []string) {
 
 func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 || args[0] != "plan" {
-		fmt.Fprintln(stderr, "usage: fak orchestration plan --profile off|auto|ultracode --task FIXTURE [--json] [--strict] [--selfcheck]")
+		fmt.Fprintln(stderr, "usage: fak orchestration plan --profile off|auto|ultracode (--task FIXTURE | --task-text TEXT) [--json] [--strict] [--selfcheck]")
 		return 2
 	}
 	fs := flag.NewFlagSet("orchestration plan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	profile := fs.String("profile", "auto", "orchestration profile: off, auto, or ultracode")
 	taskPath := fs.String("task", "", "versioned task fixture JSON")
+	taskText := fs.String("task-text", "", "current task text (converted to a typed task without persisting prompt text)")
 	strict := fs.Bool("strict", false, "reject any capability degradation")
 	jsonOut := fs.Bool("json", false, "emit the stable resolution JSON")
 	selfcheck := fs.Bool("selfcheck", false, "verify stable JSON round-trip without launching work")
@@ -39,19 +40,26 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
-	if *taskPath == "" || fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "fak orchestration plan: --task is required and positional arguments are not accepted")
+	if (*taskPath == "") == (strings.TrimSpace(*taskText) == "") || fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "fak orchestration plan: exactly one of --task or --task-text is required and positional arguments are not accepted")
 		return 2
 	}
-	data, err := os.ReadFile(*taskPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak orchestration plan: read task: %v\n", err)
-		return 1
+	var task orchestration.TaskSpec
+	var err error
+	if *taskPath != "" {
+		var data []byte
+		data, err = os.ReadFile(*taskPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak orchestration plan: read task: %v\n", err)
+			return 1
+		}
+		task, err = orchestration.ParseTask(data)
+	} else {
+		task, err = orchestration.TaskFromText(*taskText)
 	}
-	task, err := orchestration.ParseTask(data)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak orchestration plan: %v\n", err)
-		return 1
+		return 2
 	}
 	caps, err := orchestrationCapabilities(*capset)
 	if err != nil {

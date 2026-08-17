@@ -2,6 +2,8 @@ package orchestration
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -133,6 +135,43 @@ type Resolution struct {
 }
 
 var ErrStrictDegradation = errors.New("strict orchestration rejects degradation")
+
+// TaskFromText turns the current operator task into the smallest typed task
+// accepted by the orchestration resolver. It intentionally classifies only the
+// work shape the profile needs; the original text stays outside the receipt.
+func TaskFromText(text string) (TaskSpec, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return TaskSpec{}, errors.New("task text is required")
+	}
+	words := strings.Fields(text)
+	lower := strings.ToLower(text)
+	workClass := WorkDefault
+	trivial := len(words) <= 4 && !containsAny(lower, " and ", " then ", "multi-step", "parallel", "unattended", "overnight", "backlog", "workflow")
+	if trivial {
+		workClass = WorkDefault
+	} else if containsAny(lower, "parallel", "concurrent", "independent", "fan out", "fanout", "fleet", "wave") {
+		workClass = WorkGrind
+	} else if containsAny(lower, "unattended", "overnight", "all night", "backlog", "drain") {
+		workClass = WorkRigor
+	}
+	id := taskTextID(text)
+	return TaskSpec{Schema: "fak-orchestration-task/1", ID: id, WorkClass: workClass}, nil
+}
+
+func containsAny(s string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func taskTextID(text string) string {
+	digest := sha256.Sum256([]byte(text))
+	return "task-" + hex.EncodeToString(digest[:8])
+}
 
 func ParseTask(data []byte) (TaskSpec, error) {
 	var t TaskSpec
