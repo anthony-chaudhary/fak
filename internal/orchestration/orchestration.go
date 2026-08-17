@@ -154,6 +154,8 @@ func TaskFromText(text string) (TaskSpec, error) {
 		workClass = WorkGrind
 	} else if containsAny(lower, "unattended", "overnight", "all night", "backlog", "drain") {
 		workClass = WorkRigor
+	} else if containsAny(lower, "multi-step", "multistep", "multiple steps", " and then ") || strings.Count(lower, " and ") >= 2 {
+		workClass = WorkGrind
 	}
 	id := taskTextID(text)
 	return TaskSpec{Schema: "fak-orchestration-task/1", ID: id, WorkClass: workClass}, nil
