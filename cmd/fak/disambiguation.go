@@ -38,6 +38,8 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 		return runDisambiguationCommittedFreshness(stdout, stderr, args[1:])
 	case "query":
 		return runDisambiguationQuery(stdout, stderr, args[1:])
+	case "explain":
+		return runDisambiguationExplain(stdout, stderr, args[1:])
 	case "ownership":
 		return runDisambiguationOwnership(stdout, stderr, args[1:])
 	case "freshness":
@@ -49,7 +51,7 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 	case "coverage-self-test":
 		return runDisambiguationCoverageSelfTest(stdout, stderr, args[1:])
 	default:
-		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want schema, query, ownership, freshness, provenance, stale-symbols-self-test, or coverage-self-test)\n", args[0])
+		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want schema, query, explain, ownership, freshness, provenance, stale-symbols-self-test, or coverage-self-test)\n", args[0])
 		return 2
 	}
 }
@@ -63,6 +65,33 @@ type disambiguationGenerateReport struct {
 	Bytes   int    `json:"bytes"`
 	Changed bool   `json:"changed"`
 	Check   bool   `json:"check"`
+}
+
+func runDisambiguationExplain(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("disambiguation explain", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	scopeKind := fs.String("scope-kind", "", "scope qualifier kind")
+	scopeValue := fs.String("scope-value", "", "scope qualifier value")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(stderr, "usage: fak disambiguation explain <term> [--scope-kind KIND --scope-value VALUE]")
+		return 2
+	}
+	var result disambiguation.QueryResponse
+	var err error
+	if *scopeKind != "" || *scopeValue != "" {
+		result, err = disambiguation.ResolveScoped(fs.Arg(0), disambiguation.Scope{Kind: *scopeKind, Value: *scopeValue})
+	} else {
+		result, err = disambiguation.Resolve(fs.Arg(0))
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "fak disambiguation explain: %v\n", err)
+		return 1
+	}
+	fmt.Fprint(stdout, disambiguation.Explain(result))
+	return 0
 }
 
 func runDisambiguationGenerate(stdout, stderr io.Writer, args []string) int {
