@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,11 @@ import (
 )
 
 func TestRunProgressReportsDeliveredWIPAndIssues(t *testing.T) {
+	oldInventory := progressInventory
+	t.Cleanup(func() { progressInventory = oldInventory })
+	progressInventory = func(_ string, _ time.Duration, current progressInventorySnapshot) (progressFlow, error) {
+		return progressFlow{Available: true, Closing: current, WIPFilesDelta: -1}, nil
+	}
 	oldCmd, oldNow := progressCommand, progressNow
 	t.Cleanup(func() { progressCommand = oldCmd; progressNow = oldNow })
 	progressNow = func() time.Time { return time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC) }
@@ -44,12 +50,17 @@ func TestRunProgressReportsDeliveredWIPAndIssues(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Verdict != "PROGRESS" || got.Commits != 2 || got.CommitsPer10M != 2 || got.WIP.Files != 3 || got.WIP.Untracked != 1 || got.WIP.Staged != 1 || got.WIP.Unstaged != 1 || !got.GitHub.Available || got.GitHub.RecentlyClosed != 1 || got.GitHub.OpenTotal != 2 || got.Baseline.Commits != 4 || got.Baseline.IssuesClosed != 2 || got.Baseline.CommitsPer10M != 2 || got.Baseline.IssueClosesPer10M != 1 || got.IssueClosesPer10M != 1 {
+	if got.Verdict != "CONVERGING" || got.Commits != 2 || got.CommitsPer10M != 2 || got.WIP.Files != 3 || got.WIP.Untracked != 1 || got.WIP.Staged != 1 || got.WIP.Unstaged != 1 || !got.GitHub.Available || got.GitHub.RecentlyClosed != 1 || got.GitHub.OpenTotal != 2 || got.Baseline.Commits != 4 || got.Baseline.IssuesClosed != 2 || got.Baseline.CommitsPer10M != 2 || got.Baseline.IssueClosesPer10M != 1 || got.IssueClosesPer10M != 1 {
 		t.Fatalf("unexpected report: %+v", got)
 	}
 }
 
 func TestRunProgressDoesNotCallWIPProgressAndFailsSoftWithoutGitHub(t *testing.T) {
+	oldInventory := progressInventory
+	t.Cleanup(func() { progressInventory = oldInventory })
+	progressInventory = func(_ string, _ time.Duration, current progressInventorySnapshot) (progressFlow, error) {
+		return progressFlow{Closing: current, Reason: "GitHub inventory unavailable at one or both boundaries"}, nil
+	}
 	oldCmd := progressCommand
 	t.Cleanup(func() { progressCommand = oldCmd })
 	progressCommand = func(_, name string, args ...string) ([]byte, error) {
@@ -70,7 +81,7 @@ func TestRunProgressDoesNotCallWIPProgressAndFailsSoftWithoutGitHub(t *testing.T
 		t.Fatalf("code=%d err=%s", code, errOut.String())
 	}
 	s := out.String()
-	for _, want := range []string{"WIP_ONLY", "commits=0", "files=1", "GitHub: unavailable"} {
+	for _, want := range []string{"UNKNOWN", "commits=0", "files=1", "GitHub: unavailable"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q in %s", want, s)
 		}
@@ -86,6 +97,11 @@ func TestParseProgressWIPCountsRenameOnce(t *testing.T) {
 }
 
 func TestRunProgressOneQuietWindowDoesNotOverAlert(t *testing.T) {
+	oldInventory := progressInventory
+	t.Cleanup(func() { progressInventory = oldInventory })
+	progressInventory = func(_ string, _ time.Duration, current progressInventorySnapshot) (progressFlow, error) {
+		return progressFlow{Available: true, Closing: current}, nil
+	}
 	oldCmd := progressCommand
 	t.Cleanup(func() { progressCommand = oldCmd })
 	progressCommand = func(_, name string, args ...string) ([]byte, error) {
@@ -110,12 +126,17 @@ func TestRunProgressOneQuietWindowDoesNotOverAlert(t *testing.T) {
 	if code := runProgress(&out, &errOut, []string{"--baseline", "20m"}); code != 0 {
 		t.Fatalf("code=%d err=%s", code, errOut.String())
 	}
-	if !strings.Contains(out.String(), "QUIET") || strings.Contains(out.String(), "STALLED") {
+	if !strings.Contains(out.String(), "FLOW_STALLED") {
 		t.Fatalf("one quiet window over-alerted: %s", out.String())
 	}
 }
 
 func TestRunProgressStalledAfterDeclaredConsecutiveWindows(t *testing.T) {
+	oldInventory := progressInventory
+	t.Cleanup(func() { progressInventory = oldInventory })
+	progressInventory = func(_ string, _ time.Duration, current progressInventorySnapshot) (progressFlow, error) {
+		return progressFlow{Available: true, Closing: current}, nil
+	}
 	oldCmd := progressCommand
 	t.Cleanup(func() { progressCommand = oldCmd })
 	progressCommand = func(_, name string, args ...string) ([]byte, error) {
@@ -142,7 +163,7 @@ func TestRunProgressStalledAfterDeclaredConsecutiveWindows(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Verdict != "STALLED" || got.StallAfterWindows != 3 || got.WIP.Files != 1 {
+	if got.Verdict != "FLOW_STALLED" || got.StallAfterWindows != 3 || got.WIP.Files != 1 {
 		t.Fatalf("unexpected report: %+v", got)
 	}
 }
@@ -190,5 +211,84 @@ func TestCollectProgressWIPDetailsDoesNotReadOutsideRepository(t *testing.T) {
 	}
 	if r.WIP.AgeFilesUnavailable != 1 || r.WIP.AgeFilesObserved != 0 {
 		t.Fatalf("outside path was observed: %+v", r.WIP)
+	}
+}
+
+func TestRunProgressRecentCommitsCannotMaskGrowingInventory(t *testing.T) {
+	oldCmd, oldInventory := progressCommand, progressInventory
+	t.Cleanup(func() { progressCommand, progressInventory = oldCmd, oldInventory })
+	progressCommand = func(_, name string, args ...string) ([]byte, error) {
+		joined := name + " " + strings.Join(args, " ")
+		switch {
+		case strings.Contains(joined, "rev-list --count"):
+			return []byte("2\n"), nil
+		case strings.Contains(joined, "status --porcelain"):
+			return []byte(" M tracked\x00"), nil
+		case strings.Contains(joined, "diff --numstat"):
+			return []byte("4\t2\ttracked\x00"), nil
+		case strings.Contains(joined, "--state closed"):
+			return []byte("[]"), nil
+		case strings.Contains(joined, "--state open"):
+			return []byte("[{\"number\":1},{\"number\":2}]"), nil
+		}
+		return nil, fmt.Errorf("unexpected command %s", joined)
+	}
+	progressInventory = func(_ string, _ time.Duration, current progressInventorySnapshot) (progressFlow, error) {
+		return progressFlow{Available: true, Closing: current, WIPFilesDelta: 1, OpenIssuesDelta: 2}, nil
+	}
+	var out, errOut bytes.Buffer
+	if code := runProgress(&out, &errOut, []string{"--json"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	var got progressReport
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != "DIVERGING" || !strings.Contains(got.NextAction, "before launching") {
+		t.Fatalf("verdict=%q next=%q", got.Verdict, got.NextAction)
+	}
+}
+
+func TestObserveProgressInventoryComparesPersistedOpeningBoundary(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	opening := progressInventorySnapshot{ObservedAt: now.Add(-10 * time.Minute), WIPFiles: 8, WIPLines: 50, UntrackedBytes: 20, OldestWIPMinutes: 40, OpenIssues: 100, GitHubAvailable: true}
+	path, err := progressInventoryPath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeProgressInventoryHistory(path, progressInventoryHistory{Schema: "fak-progress-inventory/1", Snapshots: []progressInventorySnapshot{opening}}); err != nil {
+		t.Fatal(err)
+	}
+	closing := progressInventorySnapshot{ObservedAt: now, WIPFiles: 6, WIPLines: 40, UntrackedBytes: 10, OldestWIPMinutes: 50, OpenIssues: 98, GitHubAvailable: true}
+	flow, err := observeProgressInventory(dir, 10*time.Minute, closing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !flow.Available || flow.WIPFilesDelta != -2 || flow.WIPLinesDelta != -10 || flow.UntrackedBytesDelta != -10 || flow.OldestWIPMinutesDelta != 10 || flow.OpenIssuesDelta != -2 {
+		t.Fatalf("flow=%+v", flow)
+	}
+}
+
+func TestObserveProgressInventoryRequiresBothGitHubBoundaries(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	path, _ := progressInventoryPath(dir)
+	opening := progressInventorySnapshot{ObservedAt: now.Add(-10 * time.Minute), GitHubAvailable: false}
+	if err := writeProgressInventoryHistory(path, progressInventoryHistory{Schema: "fak-progress-inventory/1", Snapshots: []progressInventorySnapshot{opening}}); err != nil {
+		t.Fatal(err)
+	}
+	flow, err := observeProgressInventory(dir, 10*time.Minute, progressInventorySnapshot{ObservedAt: now, GitHubAvailable: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flow.Available || !strings.Contains(flow.Reason, "GitHub") {
+		t.Fatalf("flow=%+v", flow)
 	}
 }

@@ -2,12 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -54,6 +56,7 @@ type progressReport struct {
 		AgeFilesObserved      int   `json:"age_files_observed"`
 		AgeFilesUnavailable   int   `json:"age_files_unavailable"`
 	} `json:"wip"`
+	Flow   progressFlow `json:"flow"`
 	GitHub struct {
 		Available      bool   `json:"available"`
 		RecentlyClosed int    `json:"recently_closed"`
@@ -63,6 +66,36 @@ type progressReport struct {
 	Reason     string `json:"reason"`
 	NextAction string `json:"next_action"`
 }
+
+type progressFlow struct {
+	Available             bool                      `json:"available"`
+	ObservedMinutes       int                       `json:"observed_minutes,omitempty"`
+	Opening               progressInventorySnapshot `json:"opening"`
+	Closing               progressInventorySnapshot `json:"closing"`
+	WIPFilesDelta         int                       `json:"wip_files_delta,omitempty"`
+	WIPLinesDelta         int64                     `json:"wip_lines_delta,omitempty"`
+	UntrackedBytesDelta   int64                     `json:"untracked_bytes_delta,omitempty"`
+	OldestWIPMinutesDelta int64                     `json:"oldest_wip_minutes_delta,omitempty"`
+	OpenIssuesDelta       int                       `json:"open_issues_delta,omitempty"`
+	Reason                string                    `json:"reason,omitempty"`
+}
+
+type progressInventorySnapshot struct {
+	ObservedAt       time.Time `json:"observed_at"`
+	WIPFiles         int       `json:"wip_files"`
+	WIPLines         int64     `json:"wip_lines"`
+	UntrackedBytes   int64     `json:"untracked_bytes"`
+	OldestWIPMinutes int64     `json:"oldest_wip_minutes"`
+	OpenIssues       int       `json:"open_issues"`
+	GitHubAvailable  bool      `json:"github_available"`
+}
+
+type progressInventoryHistory struct {
+	Schema    string                      `json:"schema"`
+	Snapshots []progressInventorySnapshot `json:"snapshots"`
+}
+
+var progressInventory = observeProgressInventory
 
 func cmdProgress(args []string) {
 	os.Exit(runProgress(os.Stdout, os.Stderr, args))
@@ -102,6 +135,11 @@ func runProgress(out, errOut io.Writer, args []string) int {
 	fmt.Fprintf(out, "delivered: commits=%d (%.2f/10m) issues_closed=%d (%.2f/10m) window=%dm\n", r.Commits, r.CommitsPer10M, r.GitHub.RecentlyClosed, r.IssueClosesPer10M, r.WindowMinutes)
 	fmt.Fprintf(out, "baseline: commits=%d (%.2f/10m) issues_closed=%d (%.2f/10m) window=%dm; stall_after=%d windows\n", r.Baseline.Commits, r.Baseline.CommitsPer10M, r.Baseline.IssuesClosed, r.Baseline.IssueClosesPer10M, r.Baseline.WindowMinutes, r.StallAfterWindows)
 	fmt.Fprintf(out, "local WIP: files=%d staged=%d unstaged=%d untracked=%d conflicts=%d additions=%d deletions=%d binary=%d untracked_bytes=%d oldest_existing=%dm age_observed=%d/%d\n", r.WIP.Files, r.WIP.Staged, r.WIP.Unstaged, r.WIP.Untracked, r.WIP.Conflicts, r.WIP.Additions, r.WIP.Deletions, r.WIP.BinaryFiles, r.WIP.UntrackedBytes, r.WIP.OldestExistingMinutes, r.WIP.AgeFilesObserved, r.WIP.AgeFilesObserved+r.WIP.AgeFilesUnavailable)
+	if r.Flow.Available {
+		fmt.Fprintf(out, "flow: observed=%dm wip_files=%+d wip_lines=%+d untracked_bytes=%+d oldest_wip=%+dm open_issues=%+d\n", r.Flow.ObservedMinutes, r.Flow.WIPFilesDelta, r.Flow.WIPLinesDelta, r.Flow.UntrackedBytesDelta, r.Flow.OldestWIPMinutesDelta, r.Flow.OpenIssuesDelta)
+	} else {
+		fmt.Fprintf(out, "flow: unavailable (%s)\n", r.Flow.Reason)
+	}
 	if r.GitHub.Available {
 		fmt.Fprintf(out, "GitHub: open=%d recently_closed=%d\n", r.GitHub.OpenTotal, r.GitHub.RecentlyClosed)
 	} else {
@@ -165,30 +203,155 @@ func collectProgress(dir string, window, baseline time.Duration, stallAfter int,
 	} else {
 		r.GitHub.Error = "gh query failed"
 	}
+	current := progressInventorySnapshot{ObservedAt: now.UTC(), WIPFiles: r.WIP.Files, WIPLines: r.WIP.Additions + r.WIP.Deletions, UntrackedBytes: r.WIP.UntrackedBytes, OldestWIPMinutes: r.WIP.OldestExistingMinutes, OpenIssues: r.GitHub.OpenTotal, GitHubAvailable: r.GitHub.Available}
+	flow, flowErr := progressInventory(dir, window, current)
+	if flowErr != nil {
+		flow = progressFlow{Closing: current, Reason: "inventory state unavailable: " + flowErr.Error()}
+	}
+	r.Flow = flow
 	delivered := r.Commits > 0 || (r.GitHub.Available && r.GitHub.RecentlyClosed > 0)
 	baselineDelivered := r.Baseline.Commits > 0 || (r.GitHub.Available && r.Baseline.IssuesClosed > 0)
 	stallEvidence := baseline >= window*time.Duration(stallAfter-1)
-	if delivered {
-		r.Verdict = "PROGRESS"
-		r.Reason = "delivered-work evidence exists in the lookback window"
-		r.NextAction = "keep shipping; recheck after the next window"
-	} else if !baselineDelivered && stallEvidence {
-		r.Verdict = "STALLED"
-		r.Reason = fmt.Sprintf("no delivered-work evidence across at least %d consecutive windows", stallAfter)
-		r.NextAction = "inspect the active bottleneck and replan before dispatching more work"
-	} else if r.WIP.Files > 0 {
-		r.Verdict = "WIP_ONLY"
-		r.Reason = "local changes exist but no commit or issue closure proves delivery"
-		r.NextAction = "finish, verify, and commit the coherent leaf"
-	} else {
-		r.Verdict = "QUIET"
-		r.Reason = "the current window is quiet, but the baseline does not prove a sustained stall"
-		r.NextAction = "select the next dispatchable issue"
-	}
-	if !r.GitHub.Available {
-		r.Reason += "; GitHub evidence is unavailable"
+	switch {
+	case !flow.Available:
+		r.Verdict, r.Reason, r.NextAction = "UNKNOWN", flow.Reason, "capture another inventory sample after the window; do not infer convergence from activity"
+	case flow.WIPFilesDelta > 0 || flow.WIPLinesDelta > 0 || flow.UntrackedBytesDelta > 0 || flow.OpenIssuesDelta > 0:
+		r.Verdict, r.Reason, r.NextAction = "DIVERGING", "unfinished-work inventory grew across the observation window", "finish or retire inventory before launching more work"
+	case flow.WIPFilesDelta < 0 || flow.WIPLinesDelta < 0 || flow.UntrackedBytesDelta < 0 || flow.OpenIssuesDelta < 0:
+		r.Verdict, r.Reason, r.NextAction = "CONVERGING", "unfinished-work inventory shrank without a countervailing growth signal", "keep retiring inventory and recheck after the next window"
+	case flow.OldestWIPMinutesDelta > 0 || delivered || (!baselineDelivered && stallEvidence):
+		r.Verdict, r.Reason, r.NextAction = "FLOW_STALLED", "inventory did not shrink across the observation window", "finish or retire one existing unit before counting more activity as progress"
+	default:
+		r.Verdict, r.Reason, r.NextAction = "FLOW_STALLED", "no inventory reduction was observed", "finish or retire one existing unit and recheck after the next window"
 	}
 	return r, nil
+}
+
+func observeProgressInventory(dir string, window time.Duration, current progressInventorySnapshot) (progressFlow, error) {
+	path, err := progressInventoryPath(dir)
+	if err != nil {
+		return progressFlow{Closing: current}, err
+	}
+	history, err := readProgressInventoryHistory(path)
+	if err != nil {
+		return progressFlow{Closing: current}, err
+	}
+	opening, ok := selectProgressOpening(history.Snapshots, current.ObservedAt.Add(-window), window/2)
+	history.Schema = "fak-progress-inventory/1"
+	history.Snapshots = append(history.Snapshots, current)
+	cutoff := current.ObservedAt.Add(-7 * 24 * time.Hour)
+	kept := history.Snapshots[:0]
+	for _, x := range history.Snapshots {
+		if !x.ObservedAt.Before(cutoff) {
+			kept = append(kept, x)
+		}
+	}
+	history.Snapshots = kept
+	if err := writeProgressInventoryHistory(path, history); err != nil {
+		return progressFlow{Closing: current}, err
+	}
+	if !ok {
+		return progressFlow{Closing: current, Reason: "no inventory sample near the opening boundary"}, nil
+	}
+	f := progressFlow{Available: true, Opening: opening, Closing: current, ObservedMinutes: int(current.ObservedAt.Sub(opening.ObservedAt).Round(time.Minute) / time.Minute), WIPFilesDelta: current.WIPFiles - opening.WIPFiles, WIPLinesDelta: current.WIPLines - opening.WIPLines, UntrackedBytesDelta: current.UntrackedBytes - opening.UntrackedBytes, OldestWIPMinutesDelta: current.OldestWIPMinutes - opening.OldestWIPMinutes}
+	if !opening.GitHubAvailable || !current.GitHubAvailable {
+		f.Available = false
+		f.Reason = "GitHub inventory unavailable at one or both boundaries"
+		return f, nil
+	}
+	f.OpenIssuesDelta = current.OpenIssues - opening.OpenIssues
+	return f, nil
+}
+
+func progressInventoryPath(dir string) (string, error) {
+	root, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	gp := filepath.Join(root, ".git")
+	info, err := os.Stat(gp)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return filepath.Join(gp, "fak-progress-inventory.json"), nil
+	}
+	data, err := os.ReadFile(gp)
+	if err != nil {
+		return "", err
+	}
+	line := strings.TrimSpace(string(data))
+	const prefix = "gitdir:"
+	if !strings.HasPrefix(strings.ToLower(line), prefix) {
+		return "", errors.New(".git file does not declare gitdir")
+	}
+	gd := strings.TrimSpace(line[len(prefix):])
+	if !filepath.IsAbs(gd) {
+		gd = filepath.Join(root, gd)
+	}
+	return filepath.Join(filepath.Clean(gd), "fak-progress-inventory.json"), nil
+}
+func readProgressInventoryHistory(path string) (progressInventoryHistory, error) {
+	var h progressInventoryHistory
+	b, e := os.ReadFile(path)
+	if errors.Is(e, os.ErrNotExist) {
+		return h, nil
+	}
+	if e != nil {
+		return h, e
+	}
+	if e = json.Unmarshal(b, &h); e != nil {
+		return h, fmt.Errorf("decode inventory: %w", e)
+	}
+	if h.Schema != "" && h.Schema != "fak-progress-inventory/1" {
+		return h, fmt.Errorf("unsupported inventory schema %q", h.Schema)
+	}
+	return h, nil
+}
+func writeProgressInventoryHistory(path string, h progressInventoryHistory) error {
+	b, e := json.MarshalIndent(h, "", "  ")
+	if e != nil {
+		return e
+	}
+	b = append(b, '\n')
+	tmp, e := os.CreateTemp(filepath.Dir(path), ".fak-progress-*.tmp")
+	if e != nil {
+		return e
+	}
+	tp := tmp.Name()
+	defer os.Remove(tp)
+	if _, e = tmp.Write(b); e == nil {
+		e = tmp.Close()
+	} else {
+		_ = tmp.Close()
+	}
+	if e != nil {
+		return e
+	}
+	if e = os.Rename(tp, path); e != nil {
+		if re := os.Remove(path); re != nil && !errors.Is(re, os.ErrNotExist) {
+			return e
+		}
+		return os.Rename(tp, path)
+	}
+	return nil
+}
+func selectProgressOpening(xs []progressInventorySnapshot, boundary time.Time, tolerance time.Duration) (progressInventorySnapshot, bool) {
+	ys := append([]progressInventorySnapshot(nil), xs...)
+	sort.Slice(ys, func(i, j int) bool { return ys[i].ObservedAt.Before(ys[j].ObservedAt) })
+	var best progressInventorySnapshot
+	distance := time.Duration(1<<63 - 1)
+	for _, x := range ys {
+		d := x.ObservedAt.Sub(boundary)
+		if d < 0 {
+			d = -d
+		}
+		if d <= tolerance && d < distance {
+			best = x
+			distance = d
+		}
+	}
+	return best, !best.ObservedAt.IsZero()
 }
 
 func parseProgressWIP(status []byte, r *progressReport) []progressWIPPath {
