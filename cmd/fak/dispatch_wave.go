@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -180,15 +182,15 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	preflightResult, preflightErr := dispatchWaveDependency(3*dispatchWaveDependencyTimeout, "dispatch preflight", func() (dispatchWavePreflightResult, error) {
-		product, allocationCount, shortfall, preflight := dispatchWavePreflightAlloc(root, stderr, *maxWorkers, wk, backendNorm, *count)
-		return dispatchWavePreflightResult{Product: product, AllocationCount: allocationCount, Shortfall: shortfall, Payload: preflight}, nil
+	preflightResult, preflightErr := dispatchWaveDependencyRetry(3*dispatchWaveDependencyTimeout, "dispatch preflight", 2, func(error) bool { return true }, func() (dispatchWavePreflightResult, error) {
+		product, allocationCount, shortfall, preflight, err := dispatchWavePreflightAlloc(root, stderr, *maxWorkers, wk, backendNorm, *count)
+		return dispatchWavePreflightResult{Product: product, AllocationCount: allocationCount, Shortfall: shortfall, Payload: preflight}, err
 	})
 	if preflightErr != nil {
-		rec := newDispatchWaveRecord(root, *live, backendNorm, wk, goalID, profile, *count, 0, map[string]any{"error": preflightErr.Error()})
+		rec := newDispatchWaveRecord(root, *live, backendNorm, wk, goalID, profile, *count, 0, nil)
 		rec["granted"] = 0
 		rec["shortfall"] = *count
-		rec["stop_reason"] = preflightErr.Error()
+		dispatchWaveRecordDependencyError(rec, preflightErr)
 		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 	}
 	product, allocationCount, preflightShortfall, preflight := preflightResult.Product, preflightResult.AllocationCount, preflightResult.Shortfall, preflightResult.Payload
@@ -228,7 +230,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	excludedLanes := splitCommaList(*excludeLane)
 	router, err := dispatchWaveRouteIssuesBounded(root, stderr, dispatchWaveDependencyTimeout)
 	if err != nil {
-		rec["stop_reason"] = "price fan-out: " + err.Error()
+		dispatchWaveRecordDependencyError(rec, err)
 		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 	}
 	heldIssues := map[int]bool{}
@@ -253,7 +255,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 		executionAudit, auditErr := auditDispatchWaveExecutionPlanBounded(root, *maxWorkers, excludedLanes, executionPlan, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit, dispatchWaveDependencyTimeout)
 		if auditErr != nil {
 			rec["execution_plan_audit"] = executionAudit
-			rec["stop_reason"] = auditErr.Error()
+			dispatchWaveRecordDependencyError(rec, auditErr)
 			return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 		}
 		rec["execution_plan_audit"] = executionAudit
@@ -367,22 +369,15 @@ func newDispatchWaveRecord(root string, live bool, backendNorm, wk, goalID, prof
 // reduced) allocation count, the preflight-driven shortfall, and the preflight record (an
 // {"error": …} map when the preflight itself failed — fail-open, matching runDispatchWave's
 // prior inline behavior).
-func dispatchWavePreflightAlloc(root string, stderr io.Writer, maxWorkers int, wk, backendNorm string, count int) (string, int, int, map[string]any) {
+func dispatchWavePreflightAlloc(root string, stderr io.Writer, maxWorkers int, wk, backendNorm string, count int) (string, int, int, map[string]any, error) {
 	product := dispatchtick.ProductForBackend(backendNorm)
-	allocationCount := count
-	preflightShortfall := 0
-	var preflight map[string]any
-	if pf, err := dispatchPreflight(root, stderr, maxWorkers, wk, product); err == nil {
-		preflight = pf
-		allocationCount = dispatchWaveAllocationCount(count, pf)
-		preflightShortfall = count - allocationCount
-		if preflightShortfall < 0 {
-			preflightShortfall = 0
-		}
-	} else {
-		preflight = map[string]any{"error": err.Error()}
+	preflight, err := dispatchPreflight(root, stderr, maxWorkers, wk, product)
+	if err != nil {
+		return product, 0, count, nil, err
 	}
-	return product, allocationCount, preflightShortfall, preflight
+	allocationCount := dispatchWaveAllocationCount(count, preflight)
+	preflightShortfall := max(0, count-allocationCount)
+	return product, allocationCount, preflightShortfall, preflight, nil
 }
 
 func priceDispatchWave(root string, stderr io.Writer, requested, granted int, explicitLane string, excluded []string, cooldownMin int, goalProfile ...string) (dispatchWavePrice, error) {
@@ -851,32 +846,94 @@ type dispatchWavePreflightResult struct {
 	Payload         map[string]any
 }
 
+type dispatchWaveDependencyError struct {
+	Dependency string
+	Kind       string
+	Attempts   int
+	Retryable  bool
+	Timeout    time.Duration
+	Err        error
+}
+
+func (e *dispatchWaveDependencyError) Error() string {
+	if e.Kind == "timeout" {
+		return fmt.Sprintf("%s timed out after %s", e.Dependency, e.Timeout)
+	}
+	return fmt.Sprintf("%s failed: %v", e.Dependency, e.Err)
+}
+
+func (e *dispatchWaveDependencyError) Unwrap() error { return e.Err }
+
 func dispatchWaveDependency[T any](timeout time.Duration, name string, run func() (T, error)) (T, error) {
-	type result struct {
-		value T
-		err   error
+	return dispatchWaveDependencyRetry(timeout, name, 1, nil, run)
+}
+
+func dispatchWaveDependencyRetry[T any](timeout time.Duration, name string, maxAttempts int, retry func(error) bool, run func() (T, error)) (T, error) {
+	if maxAttempts < 1 {
+		maxAttempts = 1
 	}
-	done := make(chan result, 1)
-	go func() {
-		value, err := run()
-		done <- result{value: value, err: err}
-	}()
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case got := <-done:
-		return got.value, got.err
-	case <-timer.C:
-		var zero T
-		return zero, fmt.Errorf("%s timed out after %s", name, timeout)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		type result struct {
+			value T
+			err   error
+		}
+		done := make(chan result, 1)
+		go func() {
+			value, err := run()
+			done <- result{value: value, err: err}
+		}()
+		timer := time.NewTimer(timeout)
+		select {
+		case got := <-done:
+			timer.Stop()
+			if got.err == nil {
+				return got.value, nil
+			}
+			canRetry := retry != nil && retry(got.err)
+			if canRetry && attempt < maxAttempts {
+				continue
+			}
+			var zero T
+			return zero, &dispatchWaveDependencyError{Dependency: name, Kind: "upstream", Attempts: attempt, Retryable: canRetry, Err: got.err}
+		case <-timer.C:
+			// The timed-out call may still be unwinding. Do not overlap it with an automatic
+			// retry unless the dependency accepts cancellation; expose retryability instead.
+			var zero T
+			return zero, &dispatchWaveDependencyError{Dependency: name, Kind: "timeout", Attempts: attempt, Retryable: true, Timeout: timeout, Err: context.DeadlineExceeded}
+		}
 	}
+	panic("unreachable")
 }
 
 func dispatchWaveRouteIssuesBounded(root string, stderr io.Writer, timeout time.Duration) (dispatchtick.RouterPayload, error) {
 	routeIssues := dispatchRouteIssues
-	return dispatchWaveDependency(timeout, "issue-contract discovery", func() (dispatchtick.RouterPayload, error) {
+	return dispatchWaveDependencyRetry(timeout, "issue-contract discovery", 2, func(error) bool { return true }, func() (dispatchtick.RouterPayload, error) {
 		return routeIssues(root, stderr)
 	})
+}
+
+func dispatchWaveRecordDependencyError(rec map[string]any, err error) {
+	var dep *dispatchWaveDependencyError
+	if !errors.As(err, &dep) {
+		rec["stop_reason"] = err.Error()
+		rec["failure_class"] = "internal"
+		rec["retryable"] = false
+		return
+	}
+	rec["stop_reason"] = dep.Error()
+	rec["failure_class"] = dep.Kind
+	rec["dependency"] = dep.Dependency
+	rec["attempts"] = dep.Attempts
+	rec["retryable"] = dep.Retryable
+	if dep.Err != nil && dep.Kind != "timeout" {
+		rec["cause"] = dep.Err.Error()
+	}
+	if dep.Retryable {
+		rec["retry_disposition"] = "safe_to_retry"
+	}
+	if dep.Timeout > 0 {
+		rec["timeout_ms"] = dep.Timeout.Milliseconds()
+	}
 }
 
 func auditDispatchWaveExecutionPlanBounded(root string, maxWorkers int, exclude []string, plan []dispatchWaveExecutionPlan, codexLoopGate string, codexLoopGateSinceHours float64, codexLoopGateLimit int, timeout time.Duration) ([]dispatchWaveExecutionAudit, error) {
@@ -1357,6 +1414,12 @@ func dispatchWaveOutcome(rec map[string]any) (string, string) {
 	}
 	stop := dispatchMapString(rec, "stop_reason")
 	switch {
+	case dispatchMapString(rec, "failure_class") == "timeout":
+		return "WAVE_DEPENDENCY_TIMEOUT", "retryable_error"
+	case dispatchMapString(rec, "failure_class") == "upstream":
+		return "WAVE_DEPENDENCY_ERROR", "error"
+	case dispatchMapString(rec, "failure_class") == "internal":
+		return "WAVE_INTERNAL_ERROR", "error"
 	case stop == "preflight headroom exhausted before account allocation":
 		if pre, ok := rec["preflight"].(map[string]any); ok {
 			if verdict := dispatchMapString(pre, "verdict"); verdict != "" {
