@@ -8,11 +8,9 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
 )
 
-func TestDogfoodIssuesDryRunSkipsUnscopedAggregateRows(t *testing.T) {
+func TestDogfoodIssuesDryRunPlansScopedCodeSlopRow(t *testing.T) {
 	report := filepath.Join(t.TempDir(), "report.json")
 	const raw = `{
 		"schema": "fak.recent-feature-dogfood.v1",
@@ -50,18 +48,15 @@ func TestDogfoodIssuesDryRunSkipsUnscopedAggregateRows(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("bad json: %v\n%s", err, out.String())
 	}
-	if len(got.Planned) != 0 {
-		t.Fatalf("planned = %+v, want no dispatchable aggregate rows", got.Planned)
+	if len(got.Planned) != 1 || got.Planned[0].Key != "recent-feature-dogfood/code-slop-scorecard/code_slop" {
+		t.Fatalf("planned = %+v, want scoped code-slop row", got.Planned)
 	}
-	if len(got.Skipped) != 1 || got.Skipped[0].Key != "recent-feature-dogfood/code-slop-scorecard/code_slop" {
-		t.Fatalf("skipped = %+v, want code-slop aggregate row", got.Skipped)
-	}
-	if got.Skipped[0].Reason != "ISSUE_PROJECT_WORK_MISSING,ISSUE_SCOPE_INCOMPLETE,ISSUE_UNROUTED" {
-		t.Fatalf("skip reason = %q", got.Skipped[0].Reason)
+	if len(got.Skipped) != 0 {
+		t.Fatalf("skipped = %+v, want no rejected rows", got.Skipped)
 	}
 }
 
-func TestDogfoodIssuesStrictScopeRefusesLiveSkippedRows(t *testing.T) {
+func TestDogfoodIssuesLiveAcceptsScopedCodeSlopRow(t *testing.T) {
 	report := writeDogfoodIssuesReport(t, 0)
 	existing := filepath.Join(t.TempDir(), "existing.json")
 	if err := os.WriteFile(existing, []byte("[]\n"), 0o644); err != nil {
@@ -69,26 +64,21 @@ func TestDogfoodIssuesStrictScopeRefusesLiveSkippedRows(t *testing.T) {
 	}
 	var out, errb bytes.Buffer
 	code := runDogfoodIssues(&out, &errb, []string{"--live", "--existing-json", existing, "--json", report})
-	if code == 0 {
-		t.Fatalf("live code = 0, want nonzero strict-scope refusal; stdout=%s", out.String())
+	if code != 0 {
+		t.Fatalf("live code = %d, want scoped sync; stdout=%s stderr=%s", code, out.String(), errb.String())
 	}
 	var got struct {
-		Refused bool   `json:"refused"`
-		Error   string `json:"error"`
-		Synced  []any  `json:"synced"`
-		Skipped []any  `json:"skipped"`
+		Refused bool  `json:"refused"`
+		Synced  []any `json:"synced"`
+		Skipped []any `json:"skipped"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("decode json: %v\n%s", err, out.String())
 	}
-	if !got.Refused || got.Error != dogfoodissues.ErrorStrictScope || len(got.Skipped) != 1 || len(got.Synced) != 0 {
-		t.Fatalf("result = %+v, want refused strict_scope with one skipped and no sync", got)
-	}
-	if !strings.Contains(errb.String(), "live issue sync refused") {
-		t.Fatalf("stderr missing strict-scope refusal: %s", errb.String())
+	if got.Refused || len(got.Synced) != 1 || len(got.Skipped) != 0 {
+		t.Fatalf("scoped live result = %+v", got)
 	}
 }
-
 func TestDogfoodIssuesDryRunReportsFreshnessInJSON(t *testing.T) {
 	report := writeDogfoodIssuesReport(t, 5*time.Minute)
 
@@ -194,8 +184,8 @@ func TestDogfoodIssuesLiveOverrideAllowsStaleReportWithoutGithub(t *testing.T) {
 	if got.Mode != "live" || got.Refused || !got.ReportFreshness.Stale || !got.ReportFreshness.StaleAllowed {
 		t.Fatalf("override json = %+v, want allowed stale live result", got)
 	}
-	if len(got.Synced) != 0 {
-		t.Fatalf("synced = %+v, want no GitHub sync for unscoped fixture", got.Synced)
+	if len(got.Synced) != 1 {
+		t.Fatalf("synced = %+v, want scoped GitHub sync", got.Synced)
 	}
 }
 
