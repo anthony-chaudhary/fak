@@ -169,6 +169,20 @@ func TestDispatchWavePrelaunchGateBacksOffOnAuditError(t *testing.T) {
 	}
 }
 
+func TestDispatchWaveDryRunRepricesBenignPrelaunchHold(t *testing.T) {
+	rows := []dispatchWaveExecutionAudit{{
+		Action: "lane_leased",
+		Target: dispatchLaunchTarget{Issue: 6046},
+	}}
+	got := dispatchWavePrelaunchRetryIssues(rows, false, 0, 8)
+	if len(got) != 1 || got[0] != 6046 {
+		t.Fatalf("retry issues = %v, want [6046] for dry-run planning", got)
+	}
+	if got := dispatchWavePrelaunchRetryIssues(rows, false, 8, 8); len(got) != 0 {
+		t.Fatalf("retry issues at limit = %v, want none", got)
+	}
+}
+
 func TestDispatchWaveRetryableAuditIssuesOnlyBenignHolds(t *testing.T) {
 	rows := []dispatchWaveExecutionAudit{
 		{Rank: 0, Target: dispatchLaunchTarget{ID: "gateway#10", Issue: 10}, OK: false, Action: "self_modify_hold"},

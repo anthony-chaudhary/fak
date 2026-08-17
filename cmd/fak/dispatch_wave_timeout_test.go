@@ -33,6 +33,15 @@ func TestDispatchWaveRouteIssuesBoundedReturnsTypedTimeout(t *testing.T) {
 	}
 }
 
+func TestDispatchWavePreflightBudgetExceedsPlanningBudget(t *testing.T) {
+	preflightBudget := 3 * dispatchWaveDependencyTimeout
+	// The live preflight has supported probes with a 60-second ceiling. The outer wave
+	// budget must not manufacture WAVE_EMPTY before those probes can return.
+	if preflightBudget <= 60*time.Second {
+		t.Fatalf("preflight timeout = %s, must cover supported 60s probes", preflightBudget)
+	}
+}
+
 func TestDispatchWaveBoundedDependencyTimesOut(t *testing.T) {
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })

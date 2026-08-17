@@ -180,7 +180,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	preflightResult, preflightErr := dispatchWaveDependency(dispatchWaveDependencyTimeout, "dispatch preflight", func() (dispatchWavePreflightResult, error) {
+	preflightResult, preflightErr := dispatchWaveDependency(3*dispatchWaveDependencyTimeout, "dispatch preflight", func() (dispatchWavePreflightResult, error) {
 		product, allocationCount, shortfall, preflight := dispatchWavePreflightAlloc(root, stderr, *maxWorkers, wk, backendNorm, *count)
 		return dispatchWavePreflightResult{Product: product, AllocationCount: allocationCount, Shortfall: shortfall, Payload: preflight}, nil
 	})
@@ -264,15 +264,17 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 		if prelaunchGate.OK {
 			executionPlan = readyPlan
 		}
-		if !*live {
-			break
+		if *live {
+			rec["live_execution_plan"] = readyPlan
 		}
-		rec["live_execution_plan"] = readyPlan
 		if prelaunchGate.OK {
 			break
 		}
-		retryIssues := dispatchWaveRetryableAuditIssues(executionAudit)
-		if len(retryIssues) > 0 && attempt < maxPrelaunchReprice {
+		// Dry-runs must reprice benign lease/intent races too. Otherwise the required
+		// approval plan can refuse on its first stale candidate even though another safe
+		// lane is available, while --live would silently use a different plan.
+		retryIssues := dispatchWavePrelaunchRetryIssues(executionAudit, *live, attempt, maxPrelaunchReprice)
+		if len(retryIssues) > 0 {
 			added := false
 			for _, issue := range retryIssues {
 				if !heldIssues[issue] {
@@ -838,6 +840,8 @@ func dispatchTickArgsForLaunchTarget(cand dispatchWaveCandidate) []string {
 	return args
 }
 
+// Preflight uses three times this planning-probe budget: its supported host/account/process
+// probes can exceed 30s, and the old shared deadline manufactured WAVE_EMPTY before pricing.
 const dispatchWaveDependencyTimeout = 30 * time.Second
 
 type dispatchWavePreflightResult struct {
@@ -1039,6 +1043,28 @@ func dispatchWaveReadyExecutionPlan(plan []dispatchWaveExecutionPlan, rows []dis
 		}
 	}
 	return out
+}
+
+func dispatchWavePrelaunchRetryIssues(rows []dispatchWaveExecutionAudit, live bool, attempt, maxAttempts int) []int {
+	if attempt >= maxAttempts {
+		return nil
+	}
+	if live {
+		return dispatchWaveRetryableAuditIssues(rows)
+	}
+	// A dry-run may route around transient ownership races, but structural holds must
+	// remain visible to the operator rather than disappearing behind another candidate.
+	for _, row := range rows {
+		if row.OK || row.Error != "" {
+			continue
+		}
+		switch row.Action {
+		case "lane_busy", "lane_leased", "in_flight_duplicate", "collision_risk":
+		default:
+			return nil
+		}
+	}
+	return dispatchWaveRetryableAuditIssues(rows)
 }
 
 func dispatchWaveRetryableAuditIssues(rows []dispatchWaveExecutionAudit) []int {
