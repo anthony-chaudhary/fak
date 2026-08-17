@@ -128,6 +128,12 @@ schema, source revision, entry count, and ordered-content SHA-256 for citations.
 Semantic content changes move both digests; source-order-only changes move
 neither because versioning consumes the same canonical bytes as generation.
 
+`fak disambiguation committed-freshness --json` archives `HEAD` into an isolated
+temporary checkout, runs the committed generator check there, and compares that
+artifact with generation from the invoking binary. It reports `committed-clean`,
+`own-overlay-drift`, or `unavailable`; a dirty peer file cannot make a committed
+tip look stale, and an unavailable git/toolchain probe never looks clean.
+
 ## Strict public provenance
 
 Every `sources[]` entry is immutable provenance returned unchanged by

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -32,6 +34,8 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 		return runDisambiguationGenerate(stdout, stderr, args[1:])
 	case "version":
 		return runDisambiguationVersion(stdout, stderr, args[1:])
+	case "committed-freshness":
+		return runDisambiguationCommittedFreshness(stdout, stderr, args[1:])
 	case "query":
 		return runDisambiguationQuery(stdout, stderr, args[1:])
 	case "ownership":
@@ -111,6 +115,110 @@ func runDisambiguationGenerate(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stdout, "%s %s sha256:%s\n", verb, report.Path, report.SHA256)
 	}
 	return 0
+}
+
+var committedDisambiguationProbe = probeCommittedDisambiguation
+
+func runDisambiguationCommittedFreshness(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("disambiguation committed-freshness", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	jsonOutput := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "fak disambiguation committed-freshness: unexpected positional arguments")
+		return 2
+	}
+	committed, probeErr := committedDisambiguationProbe()
+	overlay, generationErr := disambiguation.GeneratePublicIndex()
+	if generationErr != nil && probeErr == nil {
+		probeErr = generationErr
+	}
+	report := disambiguation.EvaluateCommittedFreshness(committed, overlay, probeErr)
+	if *jsonOutput {
+		if err := json.NewEncoder(stdout).Encode(report); err != nil {
+			fmt.Fprintf(stderr, "fak disambiguation committed-freshness: encode: %v\n", err)
+			return 1
+		}
+	} else {
+		fmt.Fprintln(stdout, report.Verdict)
+	}
+	if report.Verdict == disambiguation.CommittedFreshnessUnavailable {
+		return 1
+	}
+	return 0
+}
+
+func probeCommittedDisambiguation() ([]byte, error) {
+	temp, err := os.MkdirTemp("", "fak-disambiguation-committed-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(temp)
+	archivePath := filepath.Join(temp, "tip.zip")
+	archive := exec.Command("git", "archive", "--format=zip", "-o", archivePath, "HEAD")
+	configureDispatchHelperCommand(archive)
+	if output, err := archive.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("archive committed tip: %w: %s", err, bytes.TrimSpace(output))
+	}
+	root := filepath.Join(temp, "tip")
+	if err := extractDisambiguationArchive(archivePath, root); err != nil {
+		return nil, err
+	}
+	check := exec.Command("go", "run", "./cmd/fak", "disambiguation", "generate", "--check", "--json")
+	check.Dir = root
+	configureDispatchHelperCommand(check)
+	if output, err := check.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("committed-tip regenerate check: %w: %s", err, bytes.TrimSpace(output))
+	}
+	artifact, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(defaultDisambiguationIndexPath)))
+	if err != nil {
+		return nil, fmt.Errorf("read committed artifact: %w", err)
+	}
+	return artifact, nil
+}
+
+func extractDisambiguationArchive(archivePath, root string) error {
+	reader, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return fmt.Errorf("open committed archive: %w", err)
+	}
+	defer reader.Close()
+	for _, file := range reader.File {
+		target := filepath.Join(root, filepath.FromSlash(file.Name))
+		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(root)+string(os.PathSeparator)) {
+			return fmt.Errorf("archive path escapes root: %s", file.Name)
+		}
+		if file.FileInfo().IsDir() {
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		source, err := file.Open()
+		if err != nil {
+			return err
+		}
+		destination, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, file.Mode())
+		if err != nil {
+			source.Close()
+			return err
+		}
+		_, copyErr := io.Copy(destination, source)
+		closeErr := destination.Close()
+		source.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+	}
+	return nil
 }
 
 func runDisambiguationVersion(stdout, stderr io.Writer, args []string) int {
