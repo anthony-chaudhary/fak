@@ -49,3 +49,16 @@ func TestProductOutcomesDefaultKeepsSecuritySupporting(t *testing.T) {
 		}
 	}
 }
+
+func TestQueryProductOutcomesFindsFleetCommitHealthCheck(t *testing.T) {
+	for _, query := range []string{"commit throughput", "commits per 10 minutes", "fleet self blocking", "zero commits"} {
+		got := QueryProductOutcomes(query, 3)
+		if len(got) == 0 || got[0].ID != "fleet-commit-health" {
+			t.Fatalf("query %q got %#v, want fleet-commit-health first", query, got)
+		}
+		card := got[0]
+		if len(card.Command) != 4 || card.Command[0] != "fak" || card.Command[1] != "fleet" || card.Command[2] != "health" || card.Command[3] != "--json" {
+			t.Fatalf("query %q command=%v", query, card.Command)
+		}
+	}
+}

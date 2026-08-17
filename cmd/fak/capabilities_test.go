@@ -46,3 +46,22 @@ func TestRunCapabilitiesJSONCarriesWitnessAndCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestRunCapabilitiesIndexesOnDemandFleetCommitCheck(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := runCapabilities(&out, &errOut, []string{"--json", "commits per 10 minutes", "--limit", "1"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	var got struct {
+		Outcomes []capindex.ProductOutcome `json:"outcomes"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Outcomes) != 1 || got.Outcomes[0].ID != "fleet-commit-health" {
+		t.Fatalf("response=%#v", got)
+	}
+	if command := strings.Join(got.Outcomes[0].Command, " "); command != "fak fleet health --json" {
+		t.Fatalf("command=%q", command)
+	}
+}
