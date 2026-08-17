@@ -99,6 +99,7 @@ var tier = map[string]int{
 	"harnesscompose":         1, // typed inert asset overlap semantics before dependency solving and launch (#6904).
 	"harnessinspect":         2, // product-facing inspection over composed assets and resolved locks (#7213/#7232).
 	"harnessoverride":        2, // bounded override proposals over composed assets and resolved locks (#7223/#7232).
+	"harnessverify":          2, // runtime deviation checks over composed assets and resolved locks (#7222/#7233).
 	"harnesspreview":         2, // deterministic contextual lock-risk diff over classifier, composition, and resolver facts (#6902).
 	"harnessresolve":         2, // deterministic product lock over typed assets plus stackresolve dependency facts (#6792).
 	"harnessselect":          1, // context-layer selection and explain trace; stdlib-only before product composition.
