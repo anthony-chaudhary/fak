@@ -118,7 +118,8 @@ func TestOperatorLiveSignalsDefaultFoldsOnlyNonActionRows(t *testing.T) {
 	got := stdout.String()
 	for _, want := range []string{
 		"watch | no witnessed outcome since lease start 1h ago | watch-lane lease heartbeat 20m ago | inspect stalled lease now",
-		"unknown x3 | no witnessed outcome | 3 live workers | emit durable checkpoints; --full lists workers",
+		"unknown x2 | no checkpoint | 2 live workers | emit durable checkpoints; --full lists workers",
+		"unknown x1 | checkpoints without witnessed outcomes | 1 live worker | run declared next checks; --full lists workers",
 		"none x2 | witnessed outcomes present | 2 live workers | bounded next checks; --full lists workers",
 	} {
 		if !strings.Contains(got, want) {

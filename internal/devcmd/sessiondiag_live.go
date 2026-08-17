@@ -38,12 +38,13 @@ type operatorWorkerRow struct {
 }
 
 type liveSignalRow struct {
-	Attention  string
-	Outcome    string
-	Move       string
-	Next       string
-	Lane       string
-	UrgencyAge time.Duration
+	Attention     string
+	Outcome       string
+	Move          string
+	Next          string
+	Lane          string
+	UrgencyAge    time.Duration
+	HasCheckpoint bool
 }
 
 var gracePattern = regexp.MustCompile(`grace ([0-9]+) ms`)
@@ -100,24 +101,39 @@ func runOperatorLiveSignals(stdout, stderr io.Writer, command operatorLiveRunner
 var filepathJoin = func(parts ...string) string { return strings.Join(parts, string(os.PathSeparator)) }
 
 func writeExceptionFirstProjection(stdout io.Writer, rows []liveSignalRow) {
-	unknown := make([]liveSignalRow, 0)
+	missingCheckpoint := make([]liveSignalRow, 0)
+	checkpointOnly := make([]liveSignalRow, 0)
 	healthy := make([]liveSignalRow, 0)
 	for _, row := range rows {
 		switch row.Attention {
 		case "needs-human", "watch":
 			writeWorkerProjection(stdout, row)
 		case "unknown":
-			unknown = append(unknown, row)
+			if !row.HasCheckpoint {
+				missingCheckpoint = append(missingCheckpoint, row)
+			} else {
+				checkpointOnly = append(checkpointOnly, row)
+			}
 		default:
 			healthy = append(healthy, row)
 		}
 	}
-	if len(unknown) > 0 {
-		fmt.Fprintf(stdout, "unknown x%d | no witnessed outcome | %d live workers | emit durable checkpoints; --full lists workers\n", len(unknown), len(unknown))
+	if len(missingCheckpoint) > 0 {
+		fmt.Fprintf(stdout, "unknown x%d | no checkpoint | %s | emit durable checkpoints; --full lists workers\n", len(missingCheckpoint), liveWorkerText(len(missingCheckpoint)))
+	}
+	if len(checkpointOnly) > 0 {
+		fmt.Fprintf(stdout, "unknown x%d | checkpoints without witnessed outcomes | %s | run declared next checks; --full lists workers\n", len(checkpointOnly), liveWorkerText(len(checkpointOnly)))
 	}
 	if len(healthy) > 0 {
-		fmt.Fprintf(stdout, "none x%d | witnessed outcomes present | %d live workers | bounded next checks; --full lists workers\n", len(healthy), len(healthy))
+		fmt.Fprintf(stdout, "none x%d | witnessed outcomes present | %s | bounded next checks; --full lists workers\n", len(healthy), liveWorkerText(len(healthy)))
 	}
+}
+
+func liveWorkerText(count int) string {
+	if count == 1 {
+		return "1 live worker"
+	}
+	return fmt.Sprintf("%d live workers", count)
 }
 
 func writeWorkerProjection(stdout io.Writer, row liveSignalRow) {
@@ -171,6 +187,7 @@ func projectLiveSignal(lane operatorWorkerRow, checkpoint devcheckpoint.Record, 
 		}
 		return row
 	}
+	row.HasCheckpoint = true
 	checkpointAge := ageSince(checkpoint.Timestamp, now)
 	if len(checkpoint.Evidence) > 0 {
 		row.Outcome = "checkpoint evidence " + checkpoint.Evidence[0] + " " + checkpointAge + " ago"
