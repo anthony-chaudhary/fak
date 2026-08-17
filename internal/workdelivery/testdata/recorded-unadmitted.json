@@ -1,0 +1,18 @@
+{
+  "schema": "fak.work-delivery/v1",
+  "id": "issue-7101",
+  "revision": "gabc123",
+  "artifacts": [
+    {
+      "path": "internal/workdelivery/workdelivery.go",
+      "kind": "go-source"
+    }
+  ],
+  "axes": {
+    "authoring": "recorded",
+    "compile_admission": "excluded",
+    "verification": "unverified",
+    "integration": "unintegrated",
+    "release": "not_ready"
+  }
+}

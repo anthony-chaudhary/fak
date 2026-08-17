@@ -1,0 +1,12 @@
+{
+  "schema": "fak.work-delivery/v1",
+  "id": "issue-7101",
+  "revision": "gdef456",
+  "axes": {
+    "authoring": "recorded",
+    "compile_admission": "admitted",
+    "verification": "passed",
+    "integration": "integrated",
+    "release": "not_ready"
+  }
+}
