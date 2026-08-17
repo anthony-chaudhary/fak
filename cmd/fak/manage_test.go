@@ -45,10 +45,10 @@ func TestManageDispatchAliasesShareHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := string(sourceBytes)
-	if !strings.Contains(source, `case "manage", "m":`) || !strings.Contains(source, "cmdManage(os.Args[2:])") {
+	if !strings.Contains(source, `case "manage", "m":`) || !strings.Contains(source, "cmdManage(args)") {
 		t.Fatalf("main dispatch does not bind manage and m to cmdManage")
 	}
-	if !strings.Contains(source, `case "guard":`) || !strings.Contains(source, "cmdGuard(os.Args[2:])") {
+	if !strings.Contains(source, `case "guard":`) || !strings.Contains(source, "cmdGuard(args)") {
 		t.Fatalf("legacy guard compatibility dispatch missing")
 	}
 }
