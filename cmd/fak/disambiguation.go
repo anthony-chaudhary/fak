@@ -24,7 +24,7 @@ func cmdDisambiguation(args []string) {
 
 func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak disambiguation schema [--json] [--self-test]\n       fak disambiguation query <canonical-term> [--json]\n       fak disambiguation query --self-test [--json]\n       fak disambiguation search <term> [--json]\n       fak disambiguation stale-symbols-self-test [--json]\n       fak disambiguation coverage-self-test [--json]")
+		fmt.Fprintln(stderr, "usage: fak disambiguation schema [--json] [--self-test]\n       fak disambiguation query <canonical-term> [--json]\n       fak disambiguation query --self-test [--json]\n       fak disambiguation search <term> [--json]\n       fak disambiguation cli-source [--json] [--self-test]\n       fak disambiguation stale-symbols-self-test [--json]\n       fak disambiguation coverage-self-test [--json]")
 		return 2
 	}
 	switch args[0] {
@@ -40,6 +40,8 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 		return runDisambiguationQuery(stdout, stderr, args[1:])
 	case "search":
 		return runDisambiguationSearch(stdout, stderr, args[1:])
+	case "cli-source":
+		return runDisambiguationCLISource(stdout, stderr, args[1:])
 	case "explain":
 		return runDisambiguationExplain(stdout, stderr, args[1:])
 	case "ownership":
@@ -53,7 +55,7 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 	case "coverage-self-test":
 		return runDisambiguationCoverageSelfTest(stdout, stderr, args[1:])
 	default:
-		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want schema, query, search, explain, ownership, freshness, provenance, stale-symbols-self-test, or coverage-self-test)\n", args[0])
+		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want schema, query, search, cli-source, explain, ownership, freshness, provenance, stale-symbols-self-test, or coverage-self-test)\n", args[0])
 		return 2
 	}
 }
@@ -456,6 +458,47 @@ func runDisambiguationQuery(stdout, stderr io.Writer, args []string) int {
 	}
 	fmt.Fprintf(stdout, "%s — %s\n", response.Entry.Identity.CanonicalTerm, response.Entry.Definition)
 	return 0
+}
+
+func runDisambiguationCLISource(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("disambiguation cli-source", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
+	selfTest := fs.Bool("self-test", false, "prove addition and stale-removal detection")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "usage: fak disambiguation cli-source [--json] [--self-test]")
+		return 2
+	}
+	help := usageWallText()
+	var prior []disambiguation.CLITerm
+	if *selfTest {
+		prior = disambiguation.IndexCLISource(help+"  fak removed-fixture --json\n", nil).Terms
+		help += "  fak added-fixture inspect --json\n"
+	}
+	report := disambiguation.IndexCLISource(help, prior)
+	if *selfTest {
+		if !cliSourceHasTerm(report.Terms, "added-fixture") || !cliSourceHasTerm(report.Stale, "removed-fixture") {
+			fmt.Fprintln(stderr, "disambiguation cli-source self-test: FAIL")
+			return 1
+		}
+	}
+	if *jsonOutput {
+		return encodeDisambiguationJSON(stdout, stderr, report)
+	}
+	fmt.Fprintf(stdout, "%s: %d terms, %d stale\n", report.Schema, len(report.Terms), len(report.Stale))
+	return 0
+}
+
+func cliSourceHasTerm(terms []disambiguation.CLITerm, term string) bool {
+	for _, candidate := range terms {
+		if candidate.Term == term {
+			return true
+		}
+	}
+	return false
 }
 
 func runDisambiguationSearch(stdout, stderr io.Writer, args []string) int {

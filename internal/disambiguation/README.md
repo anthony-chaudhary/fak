@@ -62,6 +62,15 @@ fak disambiguation search "agent" --json
 fak disambiguation search "kernel"
 ```
 
+## CLI terminology source
+
+`fak disambiguation cli-source --json` derives command, subcommand, and long-flag
+terms directly from the public runtime help synopsis. Each flag retains its
+invocation context, so shared spellings do not lose ownership. The read-only
+`fak-disambiguation-cli-source/1` report can compare a prior snapshot and lists
+removed terms under `stale`; `--self-test` captures one automatically added CLI
+term and one removed verb. This projection is not a second index writer.
+
 ## Pairwise contrasts and forbidden conflations
 
 Each contrast names another canonical entry, carries a non-empty explanation,
