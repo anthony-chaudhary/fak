@@ -341,6 +341,48 @@ func TestRunHooksAgent_ForwardsChildExitAndStdout(t *testing.T) {
 	}
 }
 
+func TestRunHooksAgent_BlockedChildPersistsIncident(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "tools"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "tools", "dos_hook.py"), []byte("import sys; sys.exit(2)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if rc := runHooksAgent(&out, &errb, strings.NewReader("{}"), []string{"stop", "--root", root}); rc != 2 {
+		t.Fatalf("blocked delegate returned %d, want 2: %s", rc, errb.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(root, ".fak", "hooks-agent-incidents.jsonl"))
+	if err != nil {
+		t.Fatalf("read incident ledger: %v", err)
+	}
+	var got agentHookIncident
+	if err := json.Unmarshal(bytes.TrimSpace(raw), &got); err != nil {
+		t.Fatalf("decode incident: %v (%s)", err, raw)
+	}
+	if got.Schema != agentHookIncidentSchema || got.Event != "stop" || got.Delegate != "dos-hook" || got.Status != "blocked" || got.ExitCode != 2 {
+		t.Fatalf("incident = %+v", got)
+	}
+}
+
+func TestRunHooksAgent_CleanChildDoesNotCreateIncidentLedger(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "tools"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "tools", "dos_hook.py"), []byte("import sys; sys.exit(0)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if rc := runHooksAgent(&out, &errb, strings.NewReader("{}"), []string{"stop", "--root", root}); rc != 0 {
+		t.Fatalf("clean delegate returned %d: %s", rc, errb.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, ".fak", "hooks-agent-incidents.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("clean delegate must not create incident ledger; stat err=%v", err)
+	}
+}
+
 // TestRunHooksAgent_CleanChildExitsZeroQuietly keeps the working path working: a delegate that
 // runs and allows must exit 0 and stay quiet, because this fires on every single tool call.
 func TestRunHooksAgent_CleanChildExitsZeroQuietly(t *testing.T) {

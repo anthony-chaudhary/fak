@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // cmd/fak/hooks_agent.go — `fak hooks agent <pretool|posttool|stop>`: run ONE agent-lifecycle
@@ -226,8 +228,9 @@ func runHooksAgent(stdout, stderr io.Writer, stdin io.Reader, argv []string) int
 
 	child, ok := d.Argv(r)
 	if !ok {
-		return agentHookReport(stdout, stderr, *asJSON, d, -1, "could-not-run",
-			"delegate command is not present under "+r, 1)
+		detail := "delegate command is not present under " + r
+		appendAgentHookIncident(r, d, -1, "could-not-run", detail)
+		return agentHookReport(stdout, stderr, *asJSON, d, -1, "could-not-run", detail, 1)
 	}
 
 	var payload []byte
@@ -256,7 +259,45 @@ func runHooksAgent(stdout, stderr io.Writer, stdin io.Reader, argv []string) int
 		}
 	}
 	status, exit := agentHookOutcome(ran, rc)
+	if status != "ran" {
+		appendAgentHookIncident(r, d, rc, status, detail)
+	}
 	return agentHookReport(stdout, stderr, *asJSON, d, rc, status, detail, exit)
+}
+
+const agentHookIncidentSchema = "fak.hooks-agent-incident/v1"
+
+type agentHookIncident struct {
+	Schema   string `json:"schema"`
+	Ts       string `json:"ts"`
+	Event    string `json:"event"`
+	Delegate string `json:"delegate"`
+	Status   string `json:"status"`
+	ExitCode int    `json:"exit_code"`
+	Detail   string `json:"detail,omitempty"`
+}
+
+// appendAgentHookIncident preserves lifecycle transport failures after transient
+// hook stderr disappears. It is fail-open and records only non-clean outcomes,
+// keeping the every-tool-call path quiet and small.
+func appendAgentHookIncident(root string, d agentHookDelegate, rc int, status, detail string) {
+	row, err := json.Marshal(agentHookIncident{
+		Schema: agentHookIncidentSchema, Ts: time.Now().UTC().Format(time.RFC3339Nano),
+		Event: d.Event, Delegate: d.Name, Status: status, ExitCode: rc, Detail: detail,
+	})
+	if err != nil {
+		return
+	}
+	path := filepath.Join(root, ".fak", "hooks-agent-incidents.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.Write(append(row, '\n'))
 }
 
 // agentHookReport writes the run ledger. The skip keys mirror `fak hooks pre-commit --json` and
