@@ -23,6 +23,8 @@ type codexWorkflowDefaultReport struct {
 	Classifications map[string]int `json:"classifications"`
 	Decisions       map[string]int `json:"decisions"`
 	ObservedUse     int            `json:"observed_workflow_use"`
+	DirectDeclines  int            `json:"observed_direct_declines"`
+	WorkerLaunches  int            `json:"observed_worker_launches"`
 	UnknownOutcome  int            `json:"unknown_outcome"`
 	EvidenceNote    string         `json:"evidence_note"`
 }
@@ -88,7 +90,15 @@ func collectCodexWorkflowDefaultReport(codexHome string) (codexWorkflowDefaultRe
 		if codexGuardWitnessExists(home, witness.SessionID) {
 			report.GuardJoined++
 		}
-		report.UnknownOutcome++
+		if receipt, ok := readCodexOrchestrationInvocationReceipt(home, witness.SessionID); ok {
+			if receipt.Resolved == "off" || (receipt.Resolved == "auto" && receipt.MaxWorkers == 1) {
+				report.DirectDeclines++
+			} else {
+				report.ObservedUse++
+			}
+		} else {
+			report.UnknownOutcome++
+		}
 	}
 	return report, nil
 }

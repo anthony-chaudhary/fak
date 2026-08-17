@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/orchestration"
 )
@@ -30,6 +32,7 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	strict := fs.Bool("strict", false, "reject any capability degradation")
 	jsonOut := fs.Bool("json", false, "emit the stable resolution JSON")
 	selfcheck := fs.Bool("selfcheck", false, "verify stable JSON round-trip without launching work")
+	codexHome := fs.String("codex-home", "", "Codex home used for a session-linked invocation receipt")
 	capset := fs.String("capabilities", "native", "harness fixture: native or unsupported")
 	maxWorkers := orchestrationOptionalInt{}
 	maxTokens := orchestrationOptionalInt64{}
@@ -103,6 +106,17 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 		}
 		fmt.Fprintf(stderr, "SELFCHECK PASS schema=%s offline=true launched=0\n", resolved.Schema)
 	}
+	if sessionID := strings.TrimSpace(os.Getenv("CODEX_THREAD_ID")); sessionID != "" && !*selfcheck {
+		if err := writeCodexOrchestrationInvocationReceipt(*codexHome, codexOrchestrationInvocationReceipt{
+			Schema: "fak.codex_orchestration_invocation.v1", SessionID: sessionID,
+			InvokedAt: time.Now().UTC().Format(time.RFC3339Nano), TaskID: task.ID,
+			Requested: resolved.Requested.Name, Resolved: resolved.Resolved.Profile,
+			WorkClass: resolved.Resolved.WorkClass, MaxWorkers: resolved.Resolved.Budget.MaxWorkers,
+		}); err != nil {
+			fmt.Fprintf(stderr, "fak orchestration plan: persist Codex invocation receipt: %v\n", err)
+			return 1
+		}
+	}
 	if *jsonOut {
 		_, _ = stdout.Write(append(stable, '\n'))
 		return 0
@@ -112,6 +126,58 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stdout, "DEGRADED %s: required=%s available=%s reason=%s\n", d.Capability, d.Required, d.Available, d.Reason)
 	}
 	return 0
+}
+
+type codexOrchestrationInvocationReceipt struct {
+	Schema     string                  `json:"schema"`
+	SessionID  string                  `json:"session_id"`
+	InvokedAt  string                  `json:"invoked_at"`
+	TaskID     string                  `json:"task_id"`
+	Requested  orchestration.Profile   `json:"requested_profile"`
+	Resolved   orchestration.Profile   `json:"resolved_profile"`
+	WorkClass  orchestration.WorkClass `json:"work_class"`
+	MaxWorkers int                     `json:"max_workers"`
+}
+
+func codexOrchestrationInvocationReceiptPath(codexHome, sessionID string) (string, error) {
+	home, err := resolvedCodexLoopHome(codexHome)
+	if err != nil {
+		return "", err
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" || filepath.Base(sessionID) != sessionID {
+		return "", errors.New("invalid Codex session id for orchestration receipt")
+	}
+	return filepath.Join(home, "fak-orchestration-invocations", sessionID+".json"), nil
+}
+
+func writeCodexOrchestrationInvocationReceipt(codexHome string, receipt codexOrchestrationInvocationReceipt) error {
+	path, err := codexOrchestrationInvocationReceiptPath(codexHome, receipt.SessionID)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	body, err := json.Marshal(receipt)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(body, '\n'), 0o600)
+}
+
+func readCodexOrchestrationInvocationReceipt(codexHome, sessionID string) (codexOrchestrationInvocationReceipt, bool) {
+	path, err := codexOrchestrationInvocationReceiptPath(codexHome, sessionID)
+	if err != nil {
+		return codexOrchestrationInvocationReceipt{}, false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return codexOrchestrationInvocationReceipt{}, false
+	}
+	var receipt codexOrchestrationInvocationReceipt
+	ok := json.Unmarshal(raw, &receipt) == nil && receipt.Schema == "fak.codex_orchestration_invocation.v1" && receipt.SessionID == sessionID
+	return receipt, ok
 }
 
 func orchestrationCapabilities(name string) (orchestration.HarnessCapabilities, error) {

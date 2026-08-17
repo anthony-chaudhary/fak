@@ -57,3 +57,23 @@ func TestSessionsWorkflowDefaultReportHandlesNoWitnessDirectory(t *testing.T) {
 		t.Fatalf("report=%+v", report)
 	}
 }
+
+func TestSessionsWorkflowDefaultReportJoinsOrchestrationInvocation(t *testing.T) {
+	home := t.TempDir()
+	witness := codexWorkflowDefaultWitness{Schema: "fak.codex_workflow_default.v1", SessionID: "joined", Classification: "consider-workflow", Decision: "inject"}
+	if err := writeCodexWorkflowDefaultWitness(home, witness); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCodexOrchestrationInvocationReceipt(home, codexOrchestrationInvocationReceipt{
+		Schema: "fak.codex_orchestration_invocation.v1", SessionID: "joined", Resolved: "ultracode", MaxWorkers: 4,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	report, err := collectCodexWorkflowDefaultReport(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.ObservedUse != 1 || report.UnknownOutcome != 0 || report.WorkerLaunches != 0 {
+		t.Fatalf("report=%+v; invocation is observed use but not a worker launch", report)
+	}
+}
