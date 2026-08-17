@@ -72,7 +72,7 @@ const (
 	RungPrototyped             // 1 — v1 code exists in the leaf (legitimately "complete")
 	RungTested                 // 2 — the leaf carries unit tests (the QA rung)
 	RungDogfooded              // 3 — fak ITSELF runs it: it is on the running binary's import path
-	RungDefault                // 4 — it is a documented default surface: a fak verb in cli-reference
+	RungDefault                // 4 — a passing runtime proof declares the capability active without opt-in
 )
 
 // MaxRung is the top of the monotonic ladder.
@@ -142,7 +142,7 @@ type predicate struct {
 // ladder is the closed promotion sequence above `prototyped`. `proposed` and
 // `prototyped` are decided by HasCode alone (no predicate); everything from
 // `tested` up is gated by evidence. These four rungs ARE naturally ordered: a
-// documented default surface presupposes fak runs it, which presupposes it is
+// witnessed default-on behavior presupposes fak runs it, which presupposes it is
 // tested, which presupposes it has code. (Measurement is a separate badge.)
 var ladder = []predicate{
 	{RungTested, func(c Capability) bool { return c.HasTests }},
@@ -190,11 +190,11 @@ func adjudicate(c Capability) Capability {
 	case gap >= 0:
 		c.Next = nextWorkFor(c, gap)
 	case !c.Benchmarked:
-		// At the top of the ladder (a documented default surface) but never measured
+		// At the top of the ladder (witnessed default-on behavior) but never measured
 		// — the natural next step is to prove it with a number.
 		c.Next = nextWorkFor(c, rungBenchmark)
 	default:
-		c.Next = nil // fully matured: default surface AND measured
+		c.Next = nil // fully matured: witnessed default-on behavior AND measured
 	}
 	return c
 }
@@ -215,8 +215,8 @@ func nextWorkFor(c Capability, gap Rung) *NextWork {
 		nw.Title = "dogfood " + c.Lane + ": exercise a real runtime path and record its passing command"
 		nw.Witness = "a passing runtime command recorded for " + c.Lane + " in internal/maturity/runtime-proofs.json"
 	case RungDefault:
-		nw.Title = "default " + c.Lane + ": promote it to a documented default surface (a fak verb)"
-		nw.Witness = c.Lane + " documented in docs/cli-reference.md"
+		nw.Title = "default " + c.Lane + ": prove it runs without an opt-in action"
+		nw.Witness = "a passing runtime proof for " + c.Lane + " with default_on=true and a concrete default_reason"
 	case rungBenchmark:
 		nw.Title = "benchmark " + c.Lane + ": prove the default surface with a measured number"
 		nw.Witness = "a func Benchmark* in " + c.Dir + " or a BENCHMARK-AUTHORITY.md row naming " + c.Lane
@@ -288,6 +288,7 @@ func Build(opts Options) ScorecardPayload {
 			caps[i].RuntimeProofError = proofLoadErr.Error()
 		} else if witness, ok := witnesses[caps[i].Lane]; ok {
 			caps[i].Dogfooded = true
+			caps[i].DefaultSurface = witness.DefaultOn
 			caps[i].RuntimeProof = witness.Command
 		}
 		caps[i] = adjudicate(caps[i])
@@ -425,12 +426,6 @@ func gatherFacts(root string) []Capability {
 	// a leaf reachable from nothing but its own tests is not integrated.
 	runImports := scanReachable(root)
 	benchDoc := lowerFileWords(filepath.Join(root, "BENCHMARK-AUTHORITY.md"))
-	// `default surface` = a documented fak verb. cli-reference.md is the verb
-	// catalog; being named there (and being dogfooded, enforced by the ladder) is
-	// the "promoted to the standard surface" signal. llms.txt is the doc MAP — it
-	// names internal concepts that are not verbs, so it is deliberately NOT used here.
-	surfaceDoc := lowerFileWords(filepath.Join(root, "docs", "cli-reference.md"))
-
 	caps := make([]Capability, 0, len(lanes))
 	for _, lane := range lanes {
 		dir := "internal/" + lane
@@ -438,15 +433,13 @@ func gatherFacts(root string) []Capability {
 		hasCode, hasTests, hasBench := scanLeaf(abs)
 		_, integrated := runImports[lane]
 		_, namedInBench := benchDoc[strings.ToLower(lane)]
-		_, namedInSurface := surfaceDoc[strings.ToLower(lane)]
 		caps = append(caps, Capability{
-			Lane:           lane,
-			Dir:            dir,
-			HasCode:        hasCode,
-			HasTests:       hasTests,
-			Integrated:     integrated,
-			Benchmarked:    hasBench || namedInBench,
-			DefaultSurface: namedInSurface,
+			Lane:        lane,
+			Dir:         dir,
+			HasCode:     hasCode,
+			HasTests:    hasTests,
+			Integrated:  integrated,
+			Benchmarked: hasBench || namedInBench,
 		})
 	}
 	return caps

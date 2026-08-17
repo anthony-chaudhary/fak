@@ -14,8 +14,10 @@ const runtimeProofSchema = "fak-maturity-runtime-proofs/1"
 
 // RuntimeProof is a reproducible runtime invocation that proves fak executes a capability.
 type RuntimeProof struct {
-	Lane    string `json:"lane"`
-	Command string `json:"command"`
+	Lane          string `json:"lane"`
+	Command       string `json:"command"`
+	DefaultOn     bool   `json:"default_on,omitempty"`
+	DefaultReason string `json:"default_reason,omitempty"`
 }
 
 type runtimeProofFile struct {
@@ -43,8 +45,15 @@ func loadRuntimeProofs(root string) (map[string]RuntimeProof, error) {
 		if witness.Lane == "" || witness.Command == "" {
 			return nil, fmt.Errorf("runtime witness requires lane and command")
 		}
+		witness.DefaultReason = strings.TrimSpace(witness.DefaultReason)
 		if err := validateRuntimeCommand(witness.Command); err != nil {
 			return nil, fmt.Errorf("runtime proof for %s: %w", witness.Lane, err)
+		}
+		if witness.DefaultOn && witness.DefaultReason == "" {
+			return nil, fmt.Errorf("runtime proof for %s: default_on requires default_reason", witness.Lane)
+		}
+		if !witness.DefaultOn && witness.DefaultReason != "" {
+			return nil, fmt.Errorf("runtime proof for %s: default_reason requires default_on", witness.Lane)
 		}
 		if _, exists := witnesses[witness.Lane]; exists {
 			return nil, fmt.Errorf("duplicate runtime witness for %s", witness.Lane)

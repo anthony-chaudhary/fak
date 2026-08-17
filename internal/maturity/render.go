@@ -108,7 +108,7 @@ func Markdown(p ScorecardPayload) string {
 	b.WriteString("| 1 | `prototyped` | a non-test `.go` file exists in the leaf — a complete v1 |\n")
 	b.WriteString("| 2 | `tested` | the leaf carries a `*_test.go` (the QA rung) |\n")
 	b.WriteString("| 3 | `dogfooded` | the leaf is on the running binary's transitive import graph — **fak itself runs it** |\n")
-	b.WriteString("| 4 | `default` | the capability is a documented `fak` verb (`docs/cli-reference.md`) — the default surface |\n")
+	b.WriteString("| 4 | `default` | a passing runtime proof declares the capability active without an opt-in action (`default_on=true`) |\n")
 	b.WriteString("| · | `benchmarked` (badge) | a `func Benchmark*` in the leaf or a `BENCHMARK-AUTHORITY.md` row — the natural step after `default` |\n\n")
 
 	b.WriteString("## Distribution\n\n")

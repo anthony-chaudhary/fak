@@ -1,6 +1,7 @@
 package maturity
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,7 +86,7 @@ func TestBuildFold(t *testing.T) {
 		{Lane: "delta", HasCode: true, Dogfooded: true},                                                          // SKIP: dogfooded but untested -> capped at prototyped
 	}
 	p := Build(Options{Root: "/synthetic", facts: func(string) []Capability { return corpus }, Witnesses: func(string) (map[string]RuntimeProof, error) {
-		return map[string]RuntimeProof{"alpha": {Lane: "alpha", Command: "ok"}, "delta": {Lane: "delta", Command: "ok"}}, nil
+		return map[string]RuntimeProof{"alpha": {Lane: "alpha", Command: "ok", DefaultOn: true, DefaultReason: "fixture default"}, "delta": {Lane: "delta", Command: "ok"}}, nil
 	}})
 
 	if p.OK {
@@ -160,7 +161,7 @@ docs  = ["docs/**"]
 	if !ok {
 		t.Fatalf("alpha missing")
 	}
-	if !alpha.HasCode || !alpha.HasTests || !alpha.Benchmarked || !alpha.Integrated || alpha.Dogfooded || !alpha.DefaultSurface {
+	if !alpha.HasCode || !alpha.HasTests || !alpha.Benchmarked || !alpha.Integrated || alpha.Dogfooded || alpha.DefaultSurface {
 		t.Fatalf("alpha facts wrong: %+v", alpha)
 	}
 	bravo := byLane["bravo"]
@@ -363,5 +364,71 @@ func TestDocumentedDefaultWithoutRuntimeProofIsLadderSkip(t *testing.T) {
 	got := adjudicate(Capability{Lane: "x", Dir: "internal/x", HasCode: true, HasTests: true, Integrated: true, DefaultSurface: true})
 	if got.Rung != RungTested || got.TopEvidence != RungDefault || !got.Skip || got.Next == nil || got.Next.Gap != RungDogfooded {
 		t.Fatalf("got=%+v", got)
+	}
+}
+
+func writeRuntimeProofFixture(t *testing.T, root string, proofs []RuntimeProof) {
+	t.Helper()
+	path := filepath.Join(root, "internal", "maturity")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(runtimeProofFile{Schema: runtimeProofSchema, Witnesses: proofs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "runtime-proofs.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGatherFactsDefaultRequiresExplicitRuntimeProof(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "internal", "alpha"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "internal", "alpha", "alpha.go"), []byte("package alpha\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "dos.toml"), []byte("[lanes.trees]\nalpha = [\"internal/alpha/**\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "cli-reference.md"), []byte("# alpha documented command\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeRuntimeProofFixture(t, root, nil)
+	facts := gatherFacts(root)
+	if len(facts) != 1 || facts[0].DefaultSurface {
+		t.Fatalf("documentation promoted default surface: %+v", facts)
+	}
+
+	writeRuntimeProofFixture(t, root, []RuntimeProof{{
+		Lane: "alpha", Command: "git --version", DefaultOn: true,
+		DefaultReason: "the command exercises alpha without an opt-in flag",
+	}})
+	payload := Build(Options{Root: root})
+	if len(payload.Caps) != 1 || !payload.Caps[0].Dogfooded || !payload.Caps[0].DefaultSurface {
+		t.Fatalf("explicit passing default proof did not promote alpha: %+v", payload.Caps)
+	}
+}
+
+func TestRuntimeProofDefaultMetadataFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		proof RuntimeProof
+	}{
+		{name: "missing reason", proof: RuntimeProof{Lane: "alpha", Command: "git --version", DefaultOn: true}},
+		{name: "reason without declaration", proof: RuntimeProof{Lane: "alpha", Command: "git --version", DefaultReason: "default somehow"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeRuntimeProofFixture(t, root, []RuntimeProof{tc.proof})
+			if _, err := verifyRuntimeProofs(root); err == nil {
+				t.Fatal("verifyRuntimeProofs accepted malformed default metadata")
+			}
+		})
 	}
 }

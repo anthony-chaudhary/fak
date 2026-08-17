@@ -195,7 +195,7 @@ func issueTitle(w NextWork) string {
 	case RungDogfooded:
 		return fmt.Sprintf("maturity(%s): dogfood the capability in fak", w.Lane)
 	case RungDefault:
-		return fmt.Sprintf("maturity(%s): promote the capability to a documented default", w.Lane)
+		return fmt.Sprintf("maturity(%s): prove the capability runs without opt-in", w.Lane)
 	case rungBenchmark:
 		return fmt.Sprintf("maturity(%s): benchmark the default surface", w.Lane)
 	default:
