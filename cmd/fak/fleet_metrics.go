@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/fleetmetrics"
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -153,6 +154,7 @@ func (s fleetMetricsSources) render(now time.Time) string {
 
 	inv, byID, readable := s.liveInventory(now)
 	renderFleetLiveExposition(w, inv, byID, s.maxSessions)
+	writeFleetCommitThroughputMetrics(w, fleetmetrics.MeasureCommitThroughput(repoRoot(), now), inv.Count)
 
 	// Dedupe BEFORE folding: a retried exit flush (or a periodic and an exit flush of one
 	// snapshot landing in the same millisecond) writes the same row key twice, and a
