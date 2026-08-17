@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 )
 
 func TestDispatchTickLiveCodexAllowsGuardedChildFromUnguardedParent(t *testing.T) {
@@ -17,6 +18,7 @@ func TestDispatchTickLiveCodexAllowsGuardedChildFromUnguardedParent(t *testing.T
 	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", healthyDispatchProvider(t)+"/v1")
 
 	got, spawned, command := runDispatchCodexGateTick(t, root)
+	t.Cleanup(func() { releaseInProcessLaneLease(root, mapAt(got, "lease")) })
 	if !spawned {
 		t.Fatalf("guarded Codex child did not reach the live spawner: %#v", got)
 	}
@@ -90,6 +92,43 @@ func TestDispatchTickDryRunPredictsLiveCodexLoopRefusal(t *testing.T) {
 		if dispatchMapString(provider, "id") != "provider_reachability" || provider["evaluated"] != true || provider["ok"] != true {
 			t.Fatalf("%s provider check = %#v, want evaluated healthy route", name, provider)
 		}
+	}
+}
+
+func TestDispatchTickTerminalHistoricalLoopIsVisibleButAdmitted(t *testing.T) {
+	old := readSessionRows
+	readSessionRows = func() ([]sessionregistry.Record, error) {
+		return []sessionregistry.Record{{State: sessionregistry.StateFailed, Identity: sessionregistry.Identity{Runtime: "codex", SessionID: "terminal"}}}, nil
+	}
+	t.Cleanup(func() { readSessionRows = old })
+	opts := dispatchTickOptions{Backend: "codex", Live: false, CodexLoopGate: "loop"}
+	account := dispatchtick.Account{Dir: t.TempDir()}
+	rep := codexLaunchReport(account.Dir, 24, loopDiagnosis("terminal"))
+	oldRecent := diagnoseRecentCodexLoopsForGate
+	diagnoseRecentCodexLoopsForGate = func(string, float64, int) (codexLoopRecentReport, error) { return rep, nil }
+	t.Cleanup(func() { diagnoseRecentCodexLoopsForGate = oldRecent })
+	gate, refused, err := dispatchCodexLoopGateForTick(opts, account, true)
+	if err != nil || refused {
+		t.Fatalf("terminal history refused=%v err=%v gate=%#v", refused, err, gate)
+	}
+	life := mapAt(gate, "lifecycle")
+	if life["terminal_count"] != 1 || life["live_count"] != 0 || dispatchMapString(gate, "verdict") != "OK" {
+		t.Fatalf("terminal lifecycle receipt = %#v", gate)
+	}
+}
+
+func TestDispatchTickAmbiguousLoopFailsSafeWithCleanupAction(t *testing.T) {
+	root, _ := dispatchCodexGateFixture(t, true)
+	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", healthyDispatchProvider(t)+"/v1")
+	readSessionRows = func() ([]sessionregistry.Record, error) { return nil, nil }
+	got, spawned, _ := runDispatchCodexGateTick(t, root)
+	if spawned || got["action"] != "codex_loop_gate_refused" {
+		t.Fatalf("ambiguous lifecycle did not fail safe: spawned=%v receipt=%#v", spawned, got)
+	}
+	gate := mapAt(got, "codex_loop_gate")
+	life := mapAt(gate, "lifecycle")
+	if life["ambiguous_count"] != float64(1) || dispatchMapString(gate, "verdict") != "AMBIGUOUS" || dispatchMapString(gate, "next_action") == "" {
+		t.Fatalf("ambiguous lifecycle receipt = %#v", gate)
 	}
 }
 
@@ -174,7 +213,18 @@ func dispatchCodexGateFixture(t *testing.T, loop bool) (string, string) {
 
 	oldRows := dispatchProbeCodexProcessRows
 	dispatchProbeCodexProcessRows = func() ([]dispatchCodexProcessRow, error) { return nil, nil }
-	t.Cleanup(func() { dispatchProbeCodexProcessRows = oldRows })
+	oldRegistry := readSessionRows
+	readSessionRows = func() ([]sessionregistry.Record, error) {
+		state := sessionregistry.StateCompleted
+		if loop {
+			state = sessionregistry.StateActive
+		}
+		return []sessionregistry.Record{{State: state, Identity: sessionregistry.Identity{Runtime: "codex", SessionID: threadID}}}, nil
+	}
+	t.Cleanup(func() {
+		dispatchProbeCodexProcessRows = oldRows
+		readSessionRows = oldRegistry
+	})
 	return root, threadID
 }
 

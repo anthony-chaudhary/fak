@@ -2345,6 +2345,11 @@
           "category": "incidental",
           "reason": "Aggregate join counter over guard witnesses; not a guard or gate.",
           "token": "GuardJoined"
+        },
+        {
+          "category": "incidental",
+          "reason": "Test seam for the existing Codex loop gate diagnosis; not a new guard or gate concept.",
+          "token": "diagnoseRecentCodexLoopsForGate"
         }
       ],
       "exclude": [
@@ -2440,6 +2445,7 @@
         "cooldownGateBlindWarning",
         "coreLockLandGate",
         "demoteReservedGuardBanner",
+        "diagnoseRecentCodexLoopsForGate",
         "dispatchGateProvenance",
         "dispatchProcInfoFromProcguard",
         "enqueueGuardOperatorQuestionEscalationFailOpen",
@@ -3981,6 +3987,46 @@
           "category": "incidental",
           "reason": "Session report collector; not a distinct session-runtime concept.",
           "token": "collectCodexWorkflowDefaultReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol joining #7077 loop evidence to the existing independent session registry; not a new runtime concept.",
+          "token": "readSessionRows"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol joining #7077 loop evidence to the existing independent session registry; not a new runtime concept.",
+          "token": "loopStateForSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed receipt field for #7077 lifecycle counts; not a new session runtime concept.",
+          "token": "live_count"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed receipt field for #7077 lifecycle counts; not a new session runtime concept.",
+          "token": "terminal_count"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed receipt field for #7077 lifecycle counts; not a new session runtime concept.",
+          "token": "ambiguous_count"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed receipt field listing #7077 lifecycle session IDs; not a new session runtime concept.",
+          "token": "live_sessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed receipt field listing #7077 lifecycle session IDs; not a new session runtime concept.",
+          "token": "terminal_sessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed receipt field listing #7077 lifecycle session IDs; not a new session runtime concept.",
+          "token": "ambiguous_sessions"
         }
       ],
       "id": "session-runtime",
@@ -4071,7 +4117,9 @@
         "WorkSessionOpened",
         "WorkSessionView",
         "adaptive-selective-hedge",
+        "ambiguous_count",
         "ambiguous_session_root",
+        "ambiguous_sessions",
         "attemptHeap",
         "authorizeSessionClient",
         "authorizeSessionClientForSession",
@@ -4126,7 +4174,10 @@
         "kernelSession",
         "ledgerSettledSessions",
         "live-tool",
+        "live_count",
+        "live_sessions",
         "loadSchedulerRecords",
+        "loopStateForSession",
         "matchedSessions",
         "materializeSessionMoveCheckpoint",
         "member_sessions",
@@ -4138,6 +4189,7 @@
         "orderRecords",
         "pumpStdinToSession",
         "readSessionHandoffBlocks",
+        "readSessionRows",
         "refusalSafeSessionID",
         "renderSessionOpen",
         "repairMalformedLooseSessionRef",
@@ -4236,6 +4288,8 @@
         "tailTrial",
         "taskQuality",
         "taskSufficient",
+        "terminal_count",
+        "terminal_sessions",
         "thrashSessions",
         "topsessions",
         "totalslots",
@@ -9650,16 +9704,22 @@
           "category": "incidental",
           "reason": "OCI image-layout deserialization function local to the artifact profile; it does not define a product UI or repository layout concept.",
           "token": "ImportLayout"
+        },
+        {
+          "category": "incidental",
+          "reason": "Per-call replay record type local to tool-call-control ablation output, not a cross-repository layout concept",
+          "token": "ReplayOutcome"
         }
       ],
       "id": "layout",
       "ignore": [
+        "ExportLayout",
+        "ImportLayout",
+        "ReplayOutcome",
         "archusesmlamoelayout",
         "defaultlayout",
-        "ExportLayout",
         "gitDailyDayLayout",
         "imageLayoutVersion",
-        "ImportLayout",
         "layouts",
         "usesmlamoelayout"
       ],
@@ -9969,6 +10029,51 @@
           "category": "incidental",
           "reason": "Local Codex hook implementation symbol; not a user-facing loop concept.",
           "token": "codexWorkflowDefaultOutput"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for the #7077 Codex admission lifecycle witness; not a new operator-facing loop concept.",
+          "token": "loopStateLive"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for the #7077 Codex admission lifecycle witness; not a new operator-facing loop concept.",
+          "token": "loopStateTerminal"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for the #7077 Codex admission lifecycle witness; not a new operator-facing loop concept.",
+          "token": "loopStateUnknown"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for the #7077 Codex admission lifecycle witness; not a new operator-facing loop concept.",
+          "token": "loopStateSummary"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for the #7077 Codex admission lifecycle witness; not a new operator-facing loop concept.",
+          "token": "readSessionRows"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for the #7077 Codex admission lifecycle witness; not a new operator-facing loop concept.",
+          "token": "classifyLoopStates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for the #7077 Codex admission lifecycle witness; not a new operator-facing loop concept.",
+          "token": "loopStateForSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for the #7077 Codex admission lifecycle witness; not a new operator-facing loop concept.",
+          "token": "loopStatePayload"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for the #7077 Codex admission lifecycle witness; not a new operator-facing loop concept.",
+          "token": "diagnoseRecentCodexLoopsForGate"
         }
       ],
       "id": "loop",
@@ -9986,6 +10091,7 @@
         "applySuperloopNoProgressEscalation",
         "attributeSuperloopResidual",
         "buildtuiloopreport",
+        "classifyLoopStates",
         "classifySuperloopResidualOwnership",
         "codexLoopHookOutput",
         "codexLoopHookSpecificOutput",
@@ -9995,6 +10101,7 @@
         "codexWorkflowDefaultWitnessPath",
         "defaultloopledger",
         "defaultloopregistry",
+        "diagnoseRecentCodexLoopsForGate",
         "dispatch_loop",
         "doomloop_test",
         "fakbgloopup",
@@ -10009,6 +10116,12 @@
         "loopRegionHolders",
         "loopRegionQueueReport",
         "loopRegionTicket",
+        "loopStateForSession",
+        "loopStateLive",
+        "loopStatePayload",
+        "loopStateSummary",
+        "loopStateTerminal",
+        "loopStateUnknown",
         "loop_region",
         "loopconsumes",
         "loopdoneunwitnessed",
@@ -10028,6 +10141,7 @@
         "midflight_no_owned_loop",
         "noloopledger",
         "q8prefillneedstokenloop",
+        "readSessionRows",
         "recordloop",
         "register_scout_loop",
         "residualDriveDecision",

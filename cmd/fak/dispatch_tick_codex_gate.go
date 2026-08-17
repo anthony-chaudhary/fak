@@ -9,6 +9,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
 
+var diagnoseRecentCodexLoopsForGate = diagnoseRecentCodexLoops
+
 func dispatchCodexLoopGateForTick(opts dispatchTickOptions, account dispatchtick.Account, launchSafe ...bool) (map[string]any, bool, error) {
 	if opts.Backend != "codex" {
 		return nil, false, nil
@@ -39,12 +41,28 @@ func dispatchCodexLoopGateForTick(opts dispatchTickOptions, account dispatchtick
 	if limit <= 0 {
 		limit = dispatchCodexLoopGateDefaultLimitValue()
 	}
-	rep, err := diagnoseRecentCodexLoops(account.Dir, opts.CodexLoopGateSinceHours, limit)
+	rep, err := diagnoseRecentCodexLoopsForGate(account.Dir, opts.CodexLoopGateSinceHours, limit)
 	if err != nil {
 		return nil, false, fmt.Errorf("Codex loop gate audit failed: %w", err)
 	}
-	gateCode, _ := codexLoopFailOnExitCode(rep.Verdict, threshold)
+	lifecycle := classifyLoopStates(rep)
 	payload := dispatchCodexLoopGatePayload(rep, threshold)
+	payload["lifecycle"] = loopStatePayload(lifecycle)
+	gateCode := 0
+	if len(lifecycle.Live) > 0 {
+		gateCode, _ = codexLoopFailOnExitCode("LOOP", threshold)
+	}
+	if len(lifecycle.Ambiguous) > 0 {
+		gateCode = 1
+		payload["verdict"] = "AMBIGUOUS"
+		payload["reason"] = "loop session liveness is ambiguous"
+		payload["next_action"] = "run fak sessions codex-loop --recent --json, then reconcile or clean terminal session registrations before retrying"
+	}
+	if rep.LoopCount > 0 && len(lifecycle.Terminal) == rep.LoopCount {
+		payload["verdict"] = "OK"
+		payload["reason"] = "historical terminal loops remain visible but do not block a fresh guarded child"
+		payload["next_action"] = "spawn the prepared child through fak guard"
+	}
 	if childSafetyKnown {
 		payload["launch"] = map[string]any{"guarded": safeLaunch}
 		if current != nil {
