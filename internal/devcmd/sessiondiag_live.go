@@ -170,7 +170,7 @@ func projectLiveSignal(lane operatorWorkerRow, checkpoint devcheckpoint.Record, 
 	if len(checkpoint.Evidence) > 0 {
 		row.Outcome = "checkpoint evidence " + checkpoint.Evidence[0] + " " + checkpointAge + " ago"
 	} else {
-		row.Outcome = "checkpoint only " + checkpointAge + " ago"
+		row.Outcome = "no witnessed outcome; checkpoint " + checkpointAge + " ago"
 	}
 	move := ""
 	if checkpoint.Stage != nil {
@@ -197,14 +197,14 @@ func projectLiveSignal(lane operatorWorkerRow, checkpoint devcheckpoint.Record, 
 		} else {
 			row.Attention = "watch"
 		}
-	case devcheckpoint.StateDone:
-		row.Attention = "none"
 	default:
-		// A checkpoint newer than the last lease heartbeat is stronger liveness
-		// evidence than the stale lease chip, without inventing a global idle timeout.
+		// A checkpoint identifies the move, but only evidence proves an outcome.
+		// Keep evidence-free intent out of the healthy fold.
 		lastHeartbeat := now.Add(-time.Duration(valueOrZero(lane.HeartbeatAgeMS)) * time.Millisecond)
 		if strings.Contains(chip, "STALLED") && !checkpoint.Timestamp.After(lastHeartbeat) {
 			row.Attention = "watch"
+		} else if len(checkpoint.Evidence) == 0 {
+			row.Attention = "unknown"
 		} else {
 			row.Attention = "none"
 		}

@@ -81,7 +81,8 @@ func TestOperatorLiveSignalsDefaultFoldsOnlyNonActionRows(t *testing.T) {
 		{"lane":"unknown-a","chip":"ADVANCING","loop_ts":"2026-08-17T16:29:00Z","holder":"unknown-a","heartbeat_age_ms":20000},
 		{"lane":"unknown-b","chip":"ADVANCING","loop_ts":"2026-08-17T16:28:00Z","holder":"unknown-b","heartbeat_age_ms":30000},
 		{"lane":"healthy-a","chip":"ADVANCING","loop_ts":"2026-08-17T16:25:00Z","holder":"healthy-a","heartbeat_age_ms":20000},
-		{"lane":"healthy-b","chip":"ADVANCING","loop_ts":"2026-08-17T16:25:00Z","holder":"healthy-b","heartbeat_age_ms":20000}
+		{"lane":"healthy-b","chip":"ADVANCING","loop_ts":"2026-08-17T16:25:00Z","holder":"healthy-b","heartbeat_age_ms":20000},
+		{"lane":"intent-only","chip":"ADVANCING","loop_ts":"2026-08-17T16:26:00Z","holder":"intent-only","heartbeat_age_ms":20000}
 	]}`
 	oldJoin := filepathJoin
 	t.Cleanup(func() { filepathJoin = oldJoin })
@@ -99,6 +100,16 @@ func TestOperatorLiveSignalsDefaultFoldsOnlyNonActionRows(t *testing.T) {
 		}
 		f.Close()
 	}
+	intent := devcheckpoint.Record{Timestamp: now.Add(-2 * time.Minute), Actor: "intent-only", State: devcheckpoint.StateProgress, Stage: &devcheckpoint.Stage{Current: 1, Total: 3, Name: "bounded move", Percent: 33}, Summary: "work identified", Next: "inspect test result"}
+	f, err := os.OpenFile(checkpointPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(mustJSON(t, intent) + "\n"); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	f.Close()
 	command := func(context.Context, string, ...string) ([]byte, error) { return []byte(payload), nil }
 	var stdout, stderr bytes.Buffer
 	if code := runOperatorLiveSignals(&stdout, &stderr, command, now, false); code != 0 {
@@ -107,7 +118,7 @@ func TestOperatorLiveSignalsDefaultFoldsOnlyNonActionRows(t *testing.T) {
 	got := stdout.String()
 	for _, want := range []string{
 		"watch | no witnessed outcome since lease start 1h ago | watch-lane lease heartbeat 20m ago | inspect stalled lease now",
-		"unknown x2 | no witnessed outcome | 2 live workers | emit durable checkpoints; --full lists workers",
+		"unknown x3 | no witnessed outcome | 3 live workers | emit durable checkpoints; --full lists workers",
 		"none x2 | witnessed outcomes present | 2 live workers | bounded next checks; --full lists workers",
 	} {
 		if !strings.Contains(got, want) {
@@ -119,8 +130,18 @@ func TestOperatorLiveSignalsDefaultFoldsOnlyNonActionRows(t *testing.T) {
 			t.Fatalf("default projection did not fold %q:\n%s", hidden, got)
 		}
 	}
-	if strings.Contains(got, "none x4") {
-		t.Fatalf("unknown workers were conflated with healthy workers:\n%s", got)
+	if strings.Contains(got, "none x3") {
+		t.Fatalf("evidence-free checkpoint was conflated with a witnessed outcome:\n%s", got)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := runOperatorLiveSignals(&stdout, &stderr, command, now, true); code != 0 {
+		t.Fatalf("full code=%d stderr=%s", code, stderr.String())
+	}
+	wantIntent := "unknown | no witnessed outcome; checkpoint 2m ago | intent-only: bounded move 2m ago | inspect test result"
+	if !strings.Contains(stdout.String(), wantIntent) {
+		t.Fatalf("full projection lost evidence-free intent %q:\n%s", wantIntent, stdout.String())
 	}
 }
 
