@@ -23,7 +23,7 @@ func TestRunToolprocReplayCapturedSummary(t *testing.T) {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
 	got := out.String()
-	for _, want := range []string{"identical trace in every arm", "exact-reuse", "NEEDED SUPPRESSED", "exposure proxies, not measured dollars"} {
+	for _, want := range []string{"identical trace in every arm", "exact-reuse", "NEEDED SUPPRESSED", "Net replay value = gross saved", "not measured dollars"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("render missing %q:\n%s", want, got)
 		}

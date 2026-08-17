@@ -14,40 +14,50 @@ import (
 // ReplayRow is one independently labeled proposed call. Rows are replayed in
 // sequence; calls sharing a turn may inspect peer proposals but never peer outcomes.
 type ReplayRow struct {
-	ID                 string          `json:"id"`
-	Turn               int             `json:"turn"`
-	Tool               string          `json:"tool"`
-	Args               json.RawMessage `json:"args"`
-	Rationale          string          `json:"rationale,omitempty"`
-	EvidenceGap        string          `json:"evidence_gap,omitempty"`
-	EffectIfNew        string          `json:"effect_if_new,omitempty"`
-	ExpectedInfoGainBP int             `json:"expected_info_gain_bp,omitempty"`
-	BatchKey           string          `json:"batch_key,omitempty"`
-	ReadOnly           bool            `json:"read_only"`
-	StateEpoch         string          `json:"state_epoch"`
-	PromptUnits        int64           `json:"prompt_units"`
-	Needed             *bool           `json:"needed"`
-	ResultID           string          `json:"result_id,omitempty"`
-	Succeeded          bool            `json:"succeeded"`
+	ID                 string           `json:"id"`
+	Turn               int              `json:"turn"`
+	Tool               string           `json:"tool"`
+	Args               json.RawMessage  `json:"args"`
+	Rationale          string           `json:"rationale,omitempty"`
+	EvidenceGap        string           `json:"evidence_gap,omitempty"`
+	EffectIfNew        string           `json:"effect_if_new,omitempty"`
+	ExpectedInfoGainBP int              `json:"expected_info_gain_bp,omitempty"`
+	BatchKey           string           `json:"batch_key,omitempty"`
+	ReadOnly           bool             `json:"read_only"`
+	StateEpoch         string           `json:"state_epoch"`
+	PromptUnits        int64            `json:"prompt_units"`
+	Needed             *bool            `json:"needed"`
+	ResultID           string           `json:"result_id,omitempty"`
+	Succeeded          bool             `json:"succeeded"`
+	ControllerUnits    map[string]int64 `json:"controller_units_by_arm,omitempty"`
+	RecoveryUnits      int64            `json:"false_suppression_recovery_units,omitempty"`
+	CostBasis          string           `json:"cost_basis,omitempty"`
 }
 
 type ReplayMetrics struct {
-	Proposed          int    `json:"proposed"`
-	CallsExecuted     int    `json:"calls_executed"`
-	UnneededAvoided   int    `json:"unneeded_avoided"`
-	NeededSuppressed  int    `json:"needed_suppressed"`
-	ReplayUnitsSaved  int64  `json:"replay_units_saved"`
-	ReplaySquareProxy string `json:"replay_square_proxy"`
+	Proposed                      int    `json:"proposed"`
+	CallsExecuted                 int    `json:"calls_executed"`
+	UnneededAvoided               int    `json:"unneeded_avoided"`
+	NeededSuppressed              int    `json:"needed_suppressed"`
+	ReplayUnitsSaved              int64  `json:"replay_units_saved"`
+	ReplaySquareProxy             string `json:"replay_square_proxy"`
+	ControllerUnits               int64  `json:"controller_units"`
+	FalseSuppressionRecoveryUnits int64  `json:"false_suppression_recovery_units"`
+	NetReplayValue                int64  `json:"net_replay_value"`
+	BreakEven                     bool   `json:"break_even"`
+	CostBasis                     string `json:"cost_basis"`
 }
 
 type ReplayOutcome struct {
-	ID          string `json:"id"`
-	Turn        int    `json:"turn"`
-	Action      Action `json:"action"`
-	Reason      string `json:"reason"`
-	Needed      bool   `json:"needed"`
-	PromptUnits int64  `json:"prompt_units"`
-	RecordRef   string `json:"record_ref"`
+	ID              string `json:"id"`
+	Turn            int    `json:"turn"`
+	Action          Action `json:"action"`
+	Reason          string `json:"reason"`
+	Needed          bool   `json:"needed"`
+	PromptUnits     int64  `json:"prompt_units"`
+	RecordRef       string `json:"record_ref"`
+	ControllerUnits int64  `json:"controller_units"`
+	RecoveryUnits   int64  `json:"false_suppression_recovery_units"`
 }
 
 type ReplayArm struct {
@@ -59,12 +69,16 @@ type ReplayArm struct {
 }
 
 type ReplaySlice struct {
-	Name              string `json:"name"`
-	CallsExecuted     int    `json:"calls_executed"`
-	UnneededAvoided   int    `json:"unneeded_avoided"`
-	NeededSuppressed  int    `json:"needed_suppressed"`
-	ReplayUnitsSaved  int64  `json:"replay_units_saved"`
-	ReplaySquareProxy string `json:"replay_square_proxy"`
+	Name                          string `json:"name"`
+	CallsExecuted                 int    `json:"calls_executed"`
+	UnneededAvoided               int    `json:"unneeded_avoided"`
+	NeededSuppressed              int    `json:"needed_suppressed"`
+	ReplayUnitsSaved              int64  `json:"replay_units_saved"`
+	ReplaySquareProxy             string `json:"replay_square_proxy"`
+	ControllerUnits               int64  `json:"controller_units"`
+	FalseSuppressionRecoveryUnits int64  `json:"false_suppression_recovery_units"`
+	NetReplayValue                int64  `json:"net_replay_value"`
+	BreakEven                     bool   `json:"break_even"`
 }
 
 type ReplayCompactArm struct {
@@ -103,8 +117,16 @@ func DecodeReplay(r io.Reader) ([]ReplayRow, error) {
 		if row.ID == "" || row.Tool == "" || row.Needed == nil {
 			return nil, fmt.Errorf("line %d: id, tool, and independent needed label are required", line)
 		}
-		if row.PromptUnits < 0 {
-			return nil, fmt.Errorf("line %d: prompt_units must be non-negative", line)
+		if row.PromptUnits < 0 || row.RecoveryUnits < 0 {
+			return nil, fmt.Errorf("line %d: prompt_units and recovery units must be non-negative", line)
+		}
+		for arm, units := range row.ControllerUnits {
+			if units < 0 {
+				return nil, fmt.Errorf("line %d: controller units for %s must be non-negative", line, arm)
+			}
+		}
+		if row.CostBasis != "" && row.CostBasis != "observed" && row.CostBasis != "scenario" {
+			return nil, fmt.Errorf("line %d: cost_basis must be observed or scenario", line)
 		}
 		rows = append(rows, row)
 	}
@@ -153,11 +175,14 @@ func replayArm(name string, rows []ReplayRow) ReplayArm {
 			}
 			needed := *row.Needed
 			arm.Metrics.Proposed++
+			arm.Metrics.ControllerUnits += row.ControllerUnits[name]
+			arm.Metrics.CostBasis = mergeCostBasis(arm.Metrics.CostBasis, row.CostBasis)
 			if executed {
 				arm.Metrics.CallsExecuted++
 			} else {
 				if needed {
 					arm.Metrics.NeededSuppressed++
+					arm.Metrics.FalseSuppressionRecoveryUnits += row.RecoveryUnits
 				} else {
 					arm.Metrics.UnneededAvoided++
 				}
@@ -165,7 +190,7 @@ func replayArm(name string, rows []ReplayRow) ReplayArm {
 				n := big.NewInt(row.PromptUnits)
 				proxy.Add(proxy, new(big.Int).Mul(n, n))
 			}
-			arm.Decisions = append(arm.Decisions, ReplayOutcome{ID: row.ID, Turn: row.Turn, Action: verdict.Action, Reason: verdict.Reason, Needed: needed, PromptUnits: row.PromptUnits, RecordRef: "decisions#" + row.ID})
+			arm.Decisions = append(arm.Decisions, ReplayOutcome{ID: row.ID, Turn: row.Turn, Action: verdict.Action, Reason: verdict.Reason, Needed: needed, PromptUnits: row.PromptUnits, RecordRef: "decisions#" + row.ID, ControllerUnits: row.ControllerUnits[name], RecoveryUnits: row.RecoveryUnits})
 		}
 		for _, row := range turnRows {
 			if row.Succeeded {
@@ -175,6 +200,8 @@ func replayArm(name string, rows []ReplayRow) ReplayArm {
 		i = j
 	}
 	arm.Metrics.ReplaySquareProxy = proxy.String()
+	arm.Metrics.NetReplayValue = arm.Metrics.ReplayUnitsSaved - arm.Metrics.ControllerUnits - arm.Metrics.FalseSuppressionRecoveryUnits
+	arm.Metrics.BreakEven = arm.Metrics.NetReplayValue >= 0
 	arm.Buckets = sliceOutcomes(arm.Decisions, func(d ReplayOutcome) string { return contextBucket(d.PromptUnits) })
 	arm.Reasons = sliceOutcomes(arm.Decisions, func(d ReplayOutcome) string { return d.Reason })
 	return arm
@@ -262,12 +289,14 @@ func sliceOutcomes(rows []ReplayOutcome, key func(ReplayOutcome) string) []Repla
 			a = &acc{slice: ReplaySlice{Name: name}, square: new(big.Int)}
 			m[name] = a
 		}
+		a.slice.ControllerUnits += row.ControllerUnits
 		if row.Action == Allow {
 			a.slice.CallsExecuted++
 			continue
 		}
 		if row.Needed {
 			a.slice.NeededSuppressed++
+			a.slice.FalseSuppressionRecoveryUnits += row.RecoveryUnits
 		} else {
 			a.slice.UnneededAvoided++
 		}
@@ -284,7 +313,19 @@ func sliceOutcomes(rows []ReplayOutcome, key func(ReplayOutcome) string) []Repla
 	for _, key := range keys {
 		a := m[key]
 		a.slice.ReplaySquareProxy = a.square.String()
+		a.slice.NetReplayValue = a.slice.ReplayUnitsSaved - a.slice.ControllerUnits - a.slice.FalseSuppressionRecoveryUnits
+		a.slice.BreakEven = a.slice.NetReplayValue >= 0
 		out = append(out, a.slice)
 	}
 	return out
+}
+
+func mergeCostBasis(current, next string) string {
+	if next == "" {
+		return current
+	}
+	if current == "" || current == next {
+		return next
+	}
+	return "mixed"
 }

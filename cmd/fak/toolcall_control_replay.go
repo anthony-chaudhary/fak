@@ -54,10 +54,10 @@ func runToolprocReplay(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	fmt.Fprintf(stdout, "TOOL-CALL CONTROL REPLAY — %d labeled proposals, identical trace in every arm\n", report.TraceRows)
-	fmt.Fprintln(stdout, "ARM                 EXECUTED  UNNEEDED AVOIDED  NEEDED SUPPRESSED  REPLAY UNITS SAVED  REPLAY² PROXY")
+	fmt.Fprintln(stdout, "ARM                 EXECUTED  UNNEEDED AVOIDED  NEEDED SUPPRESSED  GROSS SAVED  CONTROL COST  RECOVERY COST  NET VALUE  BREAK-EVEN  REPLAY2 PROXY")
 	for _, arm := range report.Arms {
 		m := arm.Metrics
-		fmt.Fprintf(stdout, "%-20s %8d %18d %18d %19d %14s\n", arm.Name, m.CallsExecuted, m.UnneededAvoided, m.NeededSuppressed, m.ReplayUnitsSaved, m.ReplaySquareProxy)
+		fmt.Fprintf(stdout, "%-20s %8d %18d %18d %11d %13d %14d %10d %11t %14s\n", arm.Name, m.CallsExecuted, m.UnneededAvoided, m.NeededSuppressed, m.ReplayUnitsSaved, m.ControllerUnits, m.FalseSuppressionRecoveryUnits, m.NetReplayValue, m.BreakEven, m.ReplaySquareProxy)
 	}
 	fmt.Fprintln(stdout, "\nLONG-CONTEXT GUARDRAIL BY BUCKET")
 	for _, arm := range report.Arms {
@@ -67,6 +67,6 @@ func runToolprocReplay(stdout, stderr io.Writer, argv []string) int {
 			}
 		}
 	}
-	fmt.Fprintln(stdout, "Guardrail: NEEDED SUPPRESSED must remain 0; replay units and replay² are exposure proxies, not measured dollars, latency, FLOPs, or provider-billed tokens.")
+	fmt.Fprintln(stdout, "Guardrail: NEEDED SUPPRESSED must remain 0. Net replay value = gross saved - controller units - false-suppression recovery. cost_basis says observed or scenario; replay units and replay2 are not measured dollars, latency, FLOPs, or provider billing.")
 	return 0
 }
