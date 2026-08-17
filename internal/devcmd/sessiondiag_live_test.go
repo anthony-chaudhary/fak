@@ -145,6 +145,50 @@ func TestOperatorLiveSignalsDefaultFoldsOnlyNonActionRows(t *testing.T) {
 	}
 }
 
+func TestOperatorLiveSignalsOrdersExceptionsByOldestEvidence(t *testing.T) {
+	now := time.Date(2026, 8, 17, 16, 30, 0, 0, time.UTC)
+	payload := `{"lanes":[
+		{"lane":"a-watch-newer","chip":"STALLED","loop_ts":"2026-08-17T16:00:00Z","holder":"a-watch-newer","heartbeat_age_ms":1200000},
+		{"lane":"z-watch-older","chip":"STALLED","loop_ts":"2026-08-17T15:00:00Z","holder":"z-watch-older","heartbeat_age_ms":3600000},
+		{"lane":"a-human-newer","chip":"ADVANCING","loop_ts":"2026-08-17T16:00:00Z","holder":"a-human-newer","heartbeat_age_ms":20000},
+		{"lane":"z-human-older","chip":"ADVANCING","loop_ts":"2026-08-17T15:00:00Z","holder":"z-human-older","heartbeat_age_ms":20000}
+	]}`
+	oldJoin := filepathJoin
+	t.Cleanup(func() { filepathJoin = oldJoin })
+	checkpointPath := filepath.Join(t.TempDir(), "dev-status.jsonl")
+	filepathJoin = func(...string) string { return checkpointPath }
+	f, err := os.OpenFile(checkpointPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range []devcheckpoint.Record{
+		{Timestamp: now.Add(-10 * time.Minute), Actor: "a-human-newer", State: devcheckpoint.StateBlocked, Summary: "newer decision", Blockers: []string{"operator: choose"}, Next: "choose"},
+		{Timestamp: now.Add(-40 * time.Minute), Actor: "z-human-older", State: devcheckpoint.StateBlocked, Summary: "older decision", Blockers: []string{"operator: choose"}, Next: "choose"},
+	} {
+		if _, err := f.WriteString(mustJSON(t, record) + "\n"); err != nil {
+			f.Close()
+			t.Fatal(err)
+		}
+	}
+	f.Close()
+	command := func(context.Context, string, ...string) ([]byte, error) { return []byte(payload), nil }
+	var stdout, stderr bytes.Buffer
+	if code := runOperatorLiveSignals(&stdout, &stderr, command, now, false); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	for _, pair := range [][2]string{
+		{"z-human-older: older decision 40m ago", "a-human-newer: newer decision 10m ago"},
+		{"z-watch-older lease heartbeat 1h ago", "a-watch-newer lease heartbeat 20m ago"},
+	} {
+		older := strings.Index(got, pair[0])
+		newer := strings.Index(got, pair[1])
+		if older < 0 || newer < 0 || older > newer {
+			t.Fatalf("oldest exception %q was not before %q:\n%s", pair[0], pair[1], got)
+		}
+	}
+}
+
 func TestRunSessionDiagFullRequiresLiveSignals(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runSessionDiagWith(&stdout, &stderr, []string{"--full"}, nil, nil, time.Now)

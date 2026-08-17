@@ -38,11 +38,12 @@ type operatorWorkerRow struct {
 }
 
 type liveSignalRow struct {
-	Attention string
-	Outcome   string
-	Move      string
-	Next      string
-	Lane      string
+	Attention  string
+	Outcome    string
+	Move       string
+	Next       string
+	Lane       string
+	UrgencyAge time.Duration
 }
 
 var gracePattern = regexp.MustCompile(`grace ([0-9]+) ms`)
@@ -75,6 +76,9 @@ func runOperatorLiveSignals(stdout, stderr io.Writer, command operatorLiveRunner
 	sort.SliceStable(rows, func(i, j int) bool {
 		if exceptionOrder(rows[i].Attention) != exceptionOrder(rows[j].Attention) {
 			return exceptionOrder(rows[i].Attention) < exceptionOrder(rows[j].Attention)
+		}
+		if exceptionOrder(rows[i].Attention) < exceptionOrder("unknown") && rows[i].UrgencyAge != rows[j].UrgencyAge {
+			return rows[i].UrgencyAge > rows[j].UrgencyAge
 		}
 		return rows[i].Lane < rows[j].Lane
 	})
@@ -147,11 +151,12 @@ func projectLiveSignal(lane operatorWorkerRow, checkpoint devcheckpoint.Record, 
 	leaseAge := ageSince(parseLiveStamp(lane.LoopTS), now)
 	moveAge := pointerDurationText(lane.HeartbeatAgeMS)
 	row := liveSignalRow{
-		Attention: "unknown",
-		Outcome:   "no checkpoint for " + leaseAge,
-		Move:      lane.Lane + " lease heartbeat " + moveAge + " ago",
-		Next:      "emit a durable checkpoint",
-		Lane:      lane.Lane,
+		Attention:  "unknown",
+		Outcome:    "no checkpoint for " + leaseAge,
+		Move:       lane.Lane + " lease heartbeat " + moveAge + " ago",
+		Next:       "emit a durable checkpoint",
+		Lane:       lane.Lane,
+		UrgencyAge: time.Duration(valueOrZero(lane.HeartbeatAgeMS)) * time.Millisecond,
 	}
 	chip := strings.ToUpper(lane.Chip)
 	if strings.Contains(chip, "STALLED") {
@@ -192,6 +197,7 @@ func projectLiveSignal(lane operatorWorkerRow, checkpoint devcheckpoint.Record, 
 	}
 	switch checkpoint.State {
 	case devcheckpoint.StateBlocked:
+		row.UrgencyAge = now.Sub(checkpoint.Timestamp)
 		if checkpointNeedsHuman(checkpoint) {
 			row.Attention = "needs-human"
 		} else {
