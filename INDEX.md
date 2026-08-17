@@ -265,6 +265,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Learning observation lineage](docs/learning-observation.md) — content-addressed source/candidate/witness/verdict records and closed-enum edges; separate from witness-gated admission.
 
 ## Notes & research (`docs/notes/`)
+- [Guarded Codex workflow-default uptake: first paired-study snapshot (2026-08-17)](docs/notes/WORKFLOW-DEFAULT-UPTAKE-DOGFOOD-2026-08-17.md) -- auto-indexed dated note.
 - [From $/GPU to $/token to $/witnessed progress](docs/notes/CONCEPT-GPU-TOKEN-WITNESSED-PROGRESS-ECONOMICS-2026-08-17.md) -- auto-indexed dated note.
 - [Work-delivery adapter migration — 2026-08-17](docs/notes/WORK-DELIVERY-ADAPTER-MIGRATION-2026-08-17.md) -- auto-indexed dated note.
 - [Codex post-tool error recurrence — 2026-08-17](docs/notes/CODEX-POST-TOOL-ERRORS-2026-08-17.md) -- auto-indexed dated note.
