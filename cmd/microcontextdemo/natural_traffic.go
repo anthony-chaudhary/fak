@@ -202,7 +202,11 @@ func callNaturalTrafficChat(ctx context.Context, endpoint, key, model, prompt st
 	}
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Content-Type", "application/json")
-	resp, e := http.DefaultClient.Do(req)
+	client := http.Client{Transport: http.DefaultTransport, Timeout: 2 * time.Minute}
+	if http.DefaultClient.Transport != nil { //boundarylint:ignore MISSING_HTTP_TIMEOUT copy only the injected transport into the bounded client
+		client.Transport = http.DefaultClient.Transport //boundarylint:ignore MISSING_HTTP_TIMEOUT bounded client retains the injected transport
+	}
+	resp, e := client.Do(req)
 	if e != nil {
 		return "", naturalTrafficUsage{}, e
 	}

@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -82,5 +86,33 @@ func TestNaturalTrafficReportVerifierRequiresWinningAndFalsifyingRegimes(t *test
 	writeJSONFile(p, r)
 	if e := verifyNaturalTraffic(cp, p); e != nil {
 		t.Fatal(e)
+	}
+}
+
+func TestNaturalTrafficChatHonorsInjectedTransport(t *testing.T) {
+	old := http.DefaultClient
+	defer func() { http.DefaultClient = old }()
+
+	called := false
+	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		called = true
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"ok"}}],"usage":{"prompt_tokens":3,"completion_tokens":1}}`)),
+			Request:    r,
+		}, nil
+	})}
+
+	got, usage, err := callNaturalTrafficChat(context.Background(), "https://model.invalid/v1", "key", "model", "prompt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("injected default transport was bypassed")
+	}
+	if got != "ok" || usage.PromptTokens != 3 || usage.CompletionTokens != 1 {
+		t.Fatalf("response = %q %+v", got, usage)
 	}
 }

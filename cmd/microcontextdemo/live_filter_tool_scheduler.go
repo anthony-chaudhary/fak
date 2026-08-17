@@ -101,8 +101,10 @@ func fetchIssueReceiptWithin(ctx context.Context, r semanticRecord, timeout time
 		return "", "", e
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	client := *http.DefaultClient
-	client.Timeout = timeout
+	client := http.Client{Transport: http.DefaultTransport, Timeout: timeout}
+	if http.DefaultClient.Transport != nil { //boundarylint:ignore MISSING_HTTP_TIMEOUT copy only the injected transport into the bounded client
+		client.Transport = http.DefaultClient.Transport //boundarylint:ignore MISSING_HTTP_TIMEOUT bounded client retains the injected transport
+	}
 	resp, e := client.Do(req)
 	if e != nil {
 		return "", req.URL.String(), e
