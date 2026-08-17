@@ -25,6 +25,9 @@ func TestSSHRemotePayloadDoesNotNameLocalWriteTargets(t *testing.T) {
 		{"env wrapper", "env ssh node 'cp x internal/abi/x.go'", guarded},
 		{"absolute executable", "/usr/bin/ssh node 'mv x dos.toml'", guarded},
 		{"windows executable", "ssh.exe node 'echo x > .env'", credential},
+		{"tailscale hostname", "tailscale ssh anthony@100.68.66.42 'hostname; test -f ~/.profile'", credential},
+		{"tailscale utc date", "tailscale.exe ssh anthony@100.68.66.42 'hostname; date -u; test -e /etc/hosts'", credential},
+		{"absolute tailscale executable", "/usr/bin/tailscale ssh node 'test -e .git/config'", credential},
 		{"powershell probe", "Test-NetConnection node -Port 22", guarded},
 		{"socket probe", "nc -z node 22", guarded},
 		{"http head mention", "curl --head https://example.invalid/.git/", credential},
@@ -53,6 +56,8 @@ func TestSSHLocalExecutionSurfacesRemainGuarded(t *testing.T) {
 		{"local nested shell", "sh -c 'cp x internal/abi/x.go'", "internal/abi/"},
 		{"plain local copy", "cp x internal/abi/x.go", "internal/abi/"},
 		{"preceding local mutation", "sed -i s/a/b/ internal/abi/x.go && ssh host echo done", "internal/abi/"},
+		{"tailscale outer redirect", "tailscale ssh node 'hostname' > dos.toml", "dos.toml"},
+		{"tailscale preceding local mutation", "cp x internal/abi/x.go && tailscale ssh node hostname", "internal/abi/"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -69,6 +74,8 @@ func TestSSHRemotePayloadBoundaryParsing(t *testing.T) {
 		"ssh -oProxyCommand=none node 'cp x internal/abi/x.go'",
 		"ssh -p22 node 'mv x dos.toml'",
 		"ssh -vv node 'echo x > internal/abi/x.go'",
+		"tailscale ssh node 'test -e .git/config'",
+		"tailscale.exe ssh node 'test -e /etc/hosts'",
 	}
 	for _, cmd := range allowed {
 		if got := commandSelfModify(map[string]any{"command": cmd}, DefaultPolicy().SelfModifyGlobs); got != "" {
