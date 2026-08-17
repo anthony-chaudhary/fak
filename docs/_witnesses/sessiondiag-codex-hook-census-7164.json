@@ -1,0 +1,38 @@
+{
+  "schema": "fak/codex-hook-census/v1",
+  "generated_at": "2026-08-17T23:13:19.3828382Z",
+  "window": "24h0m0s",
+  "codex_home": "%CODEX_HOME%",
+  "log_store": "%CODEX_HOME%",
+  "observation_store": "C:\\work\\fak\\.dos\\metrics\\observations.jsonl",
+  "profile_match": true,
+  "dispatched_calls": 165,
+  "dispatch_source": "%CODEX_HOME%\\sessions",
+  "pre_tool_use": {
+    "denominator": 165,
+    "attempted": 14,
+    "succeeded": 14,
+    "failed": 0,
+    "skipped": 0,
+    "disabled": 0,
+    "unknown": 151,
+    "source": "C:\\work\\fak\\.dos\\metrics\\observations.jsonl"
+  },
+  "post_tool_use": {
+    "denominator": 165,
+    "attempted": 5861,
+    "succeeded": 5861,
+    "failed": 0,
+    "skipped": 0,
+    "disabled": 0,
+    "unknown": 0,
+    "source": "C:\\work\\fak\\.dos\\metrics\\observations.jsonl"
+  },
+  "telemetry_fresh": false,
+  "newest_receipt": "2026-08-17T22:51:11Z",
+  "verdict": "UNHEALTHY",
+  "reasons": [
+    "STALE_TELEMETRY",
+    "PRE_TOOL_USE_UNKNOWN"
+  ]
+}
