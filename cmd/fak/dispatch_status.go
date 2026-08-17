@@ -89,6 +89,7 @@ type dispatchStatusSnapshot struct {
 	Focus           *dispatchStatusFocus       `json:"focus,omitempty"`
 	SpawnHealth     *dispatchStatusSpawnHealth `json:"spawn_health,omitempty"`
 	Trajectory      *trajctl.Status            `json:"trajectory,omitempty"`
+	Progress        *dispatchProgressSummary   `json:"progress,omitempty"`
 }
 
 func runDispatchStatus(stdout, stderr io.Writer, argv []string) int {
@@ -115,6 +116,7 @@ func runDispatchStatus(stdout, stderr io.Writer, argv []string) int {
 		root = repoRoot()
 	}
 	snap := dispatchStatusScan(*runsDir, root)
+	snap.Progress = dispatchProgressFold(root)
 
 	if *asJSON {
 		return encodeJSONOrFail(stdout, stderr, snap, "fak dispatch status")
@@ -280,6 +282,9 @@ func renderDispatchStatus(snap dispatchStatusSnapshot) string {
 	if line := dispatchStatusFocusLine(snap.Focus); line != "" {
 		fmt.Fprintf(&b, "%s\n", line)
 	}
+	if line := dispatchProgressLine(snap.Progress); line != "" {
+		b.WriteString(line + "\n")
+	}
 	if snap.Trajectory != nil {
 		for _, line := range snap.Trajectory.Lines() {
 			fmt.Fprintln(&b, line)
@@ -308,6 +313,9 @@ func renderDispatchStatusMarkdown(snap dispatchStatusSnapshot) string {
 		fmt.Fprintf(&b, "- %s\n", line)
 	}
 	if line := dispatchStatusFocusLine(snap.Focus); line != "" {
+		fmt.Fprintf(&b, "- %s\n", line)
+	}
+	if line := dispatchProgressLine(snap.Progress); line != "" {
 		fmt.Fprintf(&b, "- %s\n", line)
 	}
 	if snap.Trajectory != nil {
