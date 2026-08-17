@@ -1,4 +1,10 @@
 {
   "schema": "fak-maturity-runtime-proofs/2",
-  "witnesses": []
+  "witnesses": [
+    {
+      "lane": "policy",
+      "command": "fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args {}",
+      "output_contains": "policy.json"
+    }
+  ]
 }
