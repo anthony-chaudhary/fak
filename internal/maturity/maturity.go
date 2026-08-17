@@ -97,11 +97,14 @@ type Capability struct {
 	Lane string `json:"lane"` // the dos.toml lane key (== leaf package name)
 	Dir  string `json:"dir"`  // the leaf tree root, e.g. internal/adjudicator
 
-	HasCode        bool `json:"has_code"`        // a non-test .go file exists
-	HasTests       bool `json:"has_tests"`       // a *_test.go exists
-	Dogfooded      bool `json:"dogfooded"`       // imported by a cmd/ package — fak runs it
-	Benchmarked    bool `json:"benchmarked"`     // a Benchmark func or a BENCHMARK-AUTHORITY row
-	DefaultSurface bool `json:"default_surface"` // a documented verb / named in llms.txt
+	HasCode           bool   `json:"has_code"`   // a non-test .go file exists
+	HasTests          bool   `json:"has_tests"`  // a *_test.go exists
+	Integrated        bool   `json:"integrated"` // reachable from a production command import graph
+	Dogfooded         bool   `json:"dogfooded"`  // a declared runtime witness passes
+	RuntimeProof      string `json:"runtime_proof,omitempty"`
+	RuntimeProofError string `json:"runtime_proof_error,omitempty"`
+	Benchmarked       bool   `json:"benchmarked"`     // a Benchmark func or a BENCHMARK-AUTHORITY row
+	DefaultSurface    bool   `json:"default_surface"` // a documented verb / named in llms.txt
 
 	// Rung is the monotonic current lifecycle rung: the highest R such that EVERY
 	// promotion predicate up to and including R holds. A gap caps it.
@@ -211,7 +214,7 @@ func nextWorkFor(c Capability, gap Rung) *NextWork {
 		nw.Witness = "a *_test.go in " + c.Dir + " (go test ./" + c.Dir + "/... passes)"
 	case RungDogfooded:
 		nw.Title = "dogfood " + c.Lane + ": wire it onto the running binary's path so fak itself runs it"
-		nw.Witness = importPath(c.Lane) + " imported by cmd/, internal/registrations, or internal/kernel"
+		nw.Witness = "a passing runtime command recorded for " + c.Lane + " in internal/maturity/runtime-proofs.json"
 	case RungDefault:
 		nw.Title = "default " + c.Lane + ": promote it to a documented default surface (a fak verb)"
 		nw.Witness = c.Lane + " documented in docs/cli-reference.md"
@@ -237,6 +240,8 @@ type Options struct {
 	Root string
 	// facts overrides the disk read for tests; nil means re-derive from Root.
 	facts func(root string) []Capability
+	// Witnesses overrides runtime witness loading for deterministic callers and tests.
+	Witnesses func(root string) (map[string]RuntimeProof, error)
 }
 
 func (o Options) normalize() Options {
@@ -273,7 +278,19 @@ func Build(opts Options) ScorecardPayload {
 		factsFn = gatherFacts
 	}
 	caps := factsFn(root)
+	witnessFn := opts.Witnesses
+	if witnessFn == nil {
+		witnessFn = verifyRuntimeProofes
+	}
+	witnesses, proofLoadErr := witnessFn(root)
 	for i := range caps {
+		caps[i].Dogfooded = false
+		if proofLoadErr != nil {
+			caps[i].RuntimeProofError = proofLoadErr.Error()
+		} else if witness, ok := witnesses[caps[i].Lane]; ok {
+			caps[i].Dogfooded = true
+			caps[i].RuntimeProof = witness.Command
+		}
 		caps[i] = adjudicate(caps[i])
 	}
 	sort.SliceStable(caps, func(i, j int) bool { return caps[i].Lane < caps[j].Lane })
@@ -402,11 +419,11 @@ var (
 // conservative "not yet"), never a false pass.
 func gatherFacts(root string) []Capability {
 	lanes := parseLaneTrees(filepath.Join(root, "dos.toml"))
-	// `dogfooded` = fak ITSELF runs it: the leaf is on the running binary's TRANSITIVE
+	// `integrated` = the leaf is on the running binary's TRANSITIVE
 	// import graph, seeded from the cmd/ packages and the registrations blank-imports
 	// and closed over internal→internal edges. A leaf reachable from the binary is one
 	// fak runs (even deep behind the kernel, like the canonicalizer behind a screen);
-	// a leaf reachable from nothing but its own tests is genuinely not dogfooded yet.
+	// a leaf reachable from nothing but its own tests is not integrated.
 	runImports := scanReachable(root)
 	benchDoc := lowerFileWords(filepath.Join(root, "BENCHMARK-AUTHORITY.md"))
 	// `default surface` = a documented fak verb. cli-reference.md is the verb
@@ -420,7 +437,7 @@ func gatherFacts(root string) []Capability {
 		dir := "internal/" + lane
 		abs := filepath.Join(root, "internal", lane)
 		hasCode, hasTests, hasBench := scanLeaf(abs)
-		_, dogfooded := runImports[lane]
+		_, integrated := runImports[lane]
 		_, namedInBench := benchDoc[strings.ToLower(lane)]
 		_, namedInSurface := surfaceDoc[strings.ToLower(lane)]
 		caps = append(caps, Capability{
@@ -428,7 +445,7 @@ func gatherFacts(root string) []Capability {
 			Dir:            dir,
 			HasCode:        hasCode,
 			HasTests:       hasTests,
-			Dogfooded:      dogfooded,
+			Integrated:     integrated,
 			Benchmarked:    hasBench || namedInBench,
 			DefaultSurface: namedInSurface,
 		})

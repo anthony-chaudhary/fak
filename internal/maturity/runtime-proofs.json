@@ -1,0 +1,9 @@
+{
+  "schema": "fak-maturity-runtime-proofs/1",
+  "witnesses": [
+    {
+      "lane": "maturity",
+      "command": "go test ./internal/maturity -run TestAdjudicateLadder -count=1"
+    }
+  ]
+}

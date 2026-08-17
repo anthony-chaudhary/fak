@@ -84,7 +84,9 @@ func TestBuildFold(t *testing.T) {
 		{Lane: "charlie", HasCode: true},                                                                         // prototyped
 		{Lane: "delta", HasCode: true, Dogfooded: true},                                                          // SKIP: dogfooded but untested -> capped at prototyped
 	}
-	p := Build(Options{Root: "/synthetic", facts: func(string) []Capability { return corpus }})
+	p := Build(Options{Root: "/synthetic", facts: func(string) []Capability { return corpus }, Witnesses: func(string) (map[string]RuntimeProof, error) {
+		return map[string]RuntimeProof{"alpha": {Lane: "alpha", Command: "ok"}, "delta": {Lane: "delta", Command: "ok"}}, nil
+	}})
 
 	if p.OK {
 		t.Fatalf("expected OK=false: there is a ladder-skip")
@@ -111,7 +113,9 @@ func TestAllMaturePassesGate(t *testing.T) {
 		{Lane: "a", HasCode: true, HasTests: true, Dogfooded: true},
 		{Lane: "b", HasCode: true, HasTests: true},
 	}
-	p := Build(Options{Root: "/x", facts: func(string) []Capability { return corpus }})
+	p := Build(Options{Root: "/x", facts: func(string) []Capability { return corpus }, Witnesses: func(string) (map[string]RuntimeProof, error) {
+		return map[string]RuntimeProof{"a": {Lane: "a", Command: "ok"}}, nil
+	}})
 	if !p.OK {
 		t.Fatalf("expected OK=true with no skips, got reason %q", p.Reason)
 	}
@@ -156,11 +160,11 @@ docs  = ["docs/**"]
 	if !ok {
 		t.Fatalf("alpha missing")
 	}
-	if !alpha.HasCode || !alpha.HasTests || !alpha.Benchmarked || !alpha.Dogfooded || !alpha.DefaultSurface {
+	if !alpha.HasCode || !alpha.HasTests || !alpha.Benchmarked || !alpha.Integrated || alpha.Dogfooded || !alpha.DefaultSurface {
 		t.Fatalf("alpha facts wrong: %+v", alpha)
 	}
 	bravo := byLane["bravo"]
-	if !bravo.HasCode || bravo.HasTests || bravo.Dogfooded {
+	if !bravo.HasCode || bravo.HasTests || bravo.Integrated || bravo.Dogfooded {
 		t.Fatalf("bravo facts wrong: %+v", bravo)
 	}
 }
@@ -281,6 +285,61 @@ func writeFile(t *testing.T, root, rel, content string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBuildImportIsIntegratedButNotDogfoodedWithoutRuntimeWitness(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "dos.toml", "[lanes.trees]\nalpha = [\"internal/alpha/**\"]\n")
+	writeFile(t, root, "internal/alpha/alpha.go", "package alpha\n")
+	writeFile(t, root, "internal/alpha/alpha_test.go", "package alpha\n")
+	writeFile(t, root, "cmd/fak/main.go", "package main\nimport _ \"github.com/anthony-chaudhary/fak/internal/alpha\"\nfunc main() {}\n")
+	got := Build(Options{Root: root, Witnesses: func(string) (map[string]RuntimeProof, error) { return map[string]RuntimeProof{}, nil }})
+	alpha := got.Caps[0]
+	if !alpha.Integrated || alpha.Dogfooded || alpha.Rung != RungTested || alpha.Next == nil || alpha.Next.Gap != RungDogfooded {
+		t.Fatalf("alpha=%+v", alpha)
+	}
+}
+
+func TestBuildRuntimeWitnessPromotesDogfooding(t *testing.T) {
+	facts := func(string) []Capability {
+		return []Capability{{Lane: "alpha", Dir: "internal/alpha", HasCode: true, HasTests: true, Integrated: true}}
+	}
+	got := Build(Options{facts: facts, Witnesses: func(string) (map[string]RuntimeProof, error) {
+		return map[string]RuntimeProof{"alpha": {Lane: "alpha", Command: "fak alpha --selfcheck"}}, nil
+	}})
+	alpha := got.Caps[0]
+	if !alpha.Dogfooded || alpha.Rung != RungDogfooded || alpha.RuntimeProof != "fak alpha --selfcheck" {
+		t.Fatalf("alpha=%+v", alpha)
+	}
+}
+
+func TestLoadRuntimeProofesRejectsDuplicateAndVerifyRejectsFailure(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "internal", "maturity")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := `{"schema":"fak-maturity-runtime-proofs/1","witnesses":[{"lane":"x","command":"go version"},{"lane":"x","command":"go env"}]}`
+	if err := os.WriteFile(filepath.Join(dir, "runtime-proofs.json"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadRuntimeProofes(root); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("err=%v", err)
+	}
+	data = `{"schema":"fak-maturity-runtime-proofs/1","witnesses":[{"lane":"x","command":"go definitely-not-a-command"}]}`
+	if err := os.WriteFile(filepath.Join(dir, "runtime-proofs.json"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyRuntimeProofes(root); err == nil || !strings.Contains(err.Error(), "x failed") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestRealRuntimeWitnessRegistryPasses(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	if err := VerifyRuntimeProofes(root); err != nil {
 		t.Fatal(err)
 	}
 }
