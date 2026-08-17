@@ -23,7 +23,7 @@ The machine index currently records **21 independent axes**. This table is a com
 |---|---|---|
 | Authoring | instructions, routing, tools, skills, memory, delegation | Composition exists; projection into each native harness remains uneven. |
 | Execution | runtime, authority, hooks, persistence, economy, privacy | Session portability and explicit retention/redaction controls are partial. |
-| Interpretation | source adapters, semantic events, derived signals, redaction | Canonical typed events now ship; derived confidence-bearing semantic signals remain partial. |
+| Interpretation | source adapters, semantic events, derived signals, redaction | Canonical typed events and deterministic confidence-bearing derived signals now ship with source-event and digest receipts. |
 | Presentation | audience, selection, visual language, live control, sharing | Declarative operator/end-user projections, pre-render redaction, and receipts now ship; renderer integration and broader audience presets remain follow-on work. |
 
 ## Freshness check
@@ -80,3 +80,4 @@ This is a **capability taxonomy**, not a claim that every cited product implemen
 - **Today:** fak has strong harness composition and trajectory recording, but no single maintained map connecting those surfaces and no explicit trajectory-view contract.
 - **Better because:** one queryable taxonomy reveals which layer owns a request and prevents UI choices from contaminating evidence semantics.
 - **Witness:** parse the JSON, enumerate all four layers, and query the absent presentation axes with the commands above.
+

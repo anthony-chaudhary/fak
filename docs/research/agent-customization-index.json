@@ -456,7 +456,7 @@
         "langgraph",
         "ag-ui"
       ],
-      "fak_status": "partial",
+      "fak_status": "present",
       "disposition": "optional-module"
     },
     {
