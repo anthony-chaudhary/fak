@@ -53,7 +53,7 @@ func TestOperatorLiveSignalsCapturedProjection(t *testing.T) {
 	for _, want := range []string{
 		"ATTENTION | OUTCOME + AGE | CURRENT MOVE + AGE | NEXT CHECK",
 		"needs-human | checkpoint evidence checkpoint choice-ready 7m ago | decision: waiting for operator 7m ago | choose retry or stop",
-		"watch | checkpoint evidence checkpoint stale 24m ago | stale: repeating tests 24m ago | intervene at retry budget",
+		"watch | checkpoint evidence checkpoint stale 24m ago | stale: repeating tests 24m ago | inspect holder worker-stale on stale stalled lease now",
 		"unknown | no checkpoint for 1m | move unknown; unknown lease heartbeat 20s ago | check on next liveness change; worker owes checkpoint",
 		"none | checkpoint evidence commit abc123 2m ago | healthy: testing 2m ago | check when gate exits",
 	} {
@@ -221,6 +221,38 @@ func TestOperatorLiveSignalsOrdersExceptionsByOldestEvidence(t *testing.T) {
 		if older < 0 || newer < 0 || older > newer {
 			t.Fatalf("oldest exception %q was not before %q:\n%s", pair[0], pair[1], got)
 		}
+	}
+}
+
+func TestProjectLiveSignalStalledCheckpointNextPrecedence(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 17, 16, 30, 0, 0, time.UTC)
+	heartbeatAge := int64((20 * time.Minute) / time.Millisecond)
+	lane := operatorWorkerRow{
+		Lane:           "stalled-lane",
+		Chip:           "STALLED",
+		Holder:         "worker-9",
+		LoopTS:         now.Add(-time.Hour).Format(time.RFC3339),
+		HeartbeatAgeMS: &heartbeatAge,
+	}
+	checkpoint := devcheckpoint.Record{
+		Actor:     lane.Holder,
+		State:     devcheckpoint.StateProgress,
+		Timestamp: now.Add(-30 * time.Minute),
+		Summary:   "old bounded move",
+		Evidence:  []string{"old-proof"},
+		Next:      "wait for tomorrow's batch",
+	}
+
+	stale := projectLiveSignal(lane, checkpoint, now)
+	if stale.Attention != "watch" || stale.Next != "inspect holder worker-9 on stalled-lane stalled lease now" {
+		t.Fatalf("stale checkpoint projection = attention %q, next %q", stale.Attention, stale.Next)
+	}
+
+	checkpoint.Timestamp = now.Add(-10 * time.Minute)
+	fresh := projectLiveSignal(lane, checkpoint, now)
+	if fresh.Attention != "none" || fresh.Next != "wait for tomorrow's batch" {
+		t.Fatalf("fresh checkpoint projection = attention %q, next %q", fresh.Attention, fresh.Next)
 	}
 }
 

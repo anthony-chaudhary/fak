@@ -251,6 +251,7 @@ func projectLiveSignal(lane operatorWorkerRow, checkpoint devcheckpoint.Record, 
 		lastHeartbeat := now.Add(-time.Duration(valueOrZero(lane.HeartbeatAgeMS)) * time.Millisecond)
 		if strings.Contains(chip, "STALLED") && !checkpoint.Timestamp.After(lastHeartbeat) {
 			row.Attention = "watch"
+			row.Next = stalledLeaseNext(lane)
 		} else if len(checkpoint.Evidence) == 0 {
 			row.Attention = "unknown"
 		} else {
