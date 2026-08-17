@@ -554,6 +554,13 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 		if err := writeCodexGuardWitness(*codexHome, sessionID); err != nil {
 			fmt.Fprintf(stderr, "fak sessions codex-loop-hook: persist guard witness: %v (allowing turn)\n", err)
 		}
+		in.SessionID = sessionID
+		if output, ok := codexWorkflowDefaultOutput(in, *codexHome); ok {
+			if err := json.NewEncoder(stdout).Encode(output); err != nil {
+				fmt.Fprintf(stderr, "fak sessions codex-loop-hook: encode workflow default: %v\n", err)
+				return 1
+			}
+		}
 		return 0
 	}
 	if sessionID == "" {

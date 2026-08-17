@@ -53,6 +53,28 @@ func TestSessionsCodexLoopHookInjectsWorkflowDefaultOnceForGuardedSession(t *tes
 	}
 }
 
+func TestSessionsCodexLoopHookInjectsWorkflowDefaultOnActiveGuardFastPath(t *testing.T) {
+	home := t.TempDir()
+	sessionID := "active-guard-workflow-default"
+	t.Setenv(guardActiveEnv, "1")
+	input := `{"hook_event_name":"UserPromptSubmit","session_id":"` + sessionID + `","prompt":"implement the multi-step feature and verify it"}`
+
+	var stdout, stderr bytes.Buffer
+	if code := sessionsCodexLoopHook(&stdout, &stderr, strings.NewReader(input), []string{"--codex-home", home}); code != 0 {
+		t.Fatalf("hook code=%d stderr=%q", code, stderr.String())
+	}
+	var output codexLoopHookOutput
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		t.Fatalf("decode output %q: %v", stdout.String(), err)
+	}
+	if output.additionalContext() == "" {
+		t.Fatal("active fak guard fast path did not inject workflow default")
+	}
+	if !codexGuardWitnessExists(home, sessionID) || !codexWorkflowDefaultWitnessExists(home, sessionID) {
+		t.Fatal("active guard fast path did not persist both guard and workflow witnesses")
+	}
+}
+
 func TestCodexWorkflowDefaultClassifiesShortPromptAsLikelyDirect(t *testing.T) {
 	home := t.TempDir()
 	output, ok := codexWorkflowDefaultOutput(codexLoopHookInput{SessionID: "short-prompt", Prompt: "fix typo"}, home)
