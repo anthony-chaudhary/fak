@@ -58,6 +58,8 @@ jobs:
       contents: write
     env:
       GOTOOLCHAIN: auto
+      FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
+      FAK_FANOUT_CHANNEL: ${{ vars.FAK_FANOUT_CHANNEL || vars.FAK_CICD_REPORT_CHANNEL || 'C0BGQ411TCJ' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -142,6 +144,14 @@ jobs:
               echo "_Dry-run: the ledger was extended locally but not committed._"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: post trend to #scoreboard
+        if: ${{ env.FAK_SCOREBOARD_TOKEN != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        run: go run ./cmd/fak slack send --channel "$FAK_FANOUT_CHANNEL" --text - < fanout-trend.txt
+
+      - name: note when posting was skipped
+        if: ${{ env.FAK_SCOREBOARD_TOKEN == '' }}
+        run: echo "FAK_SCOREBOARD_TOKEN not set - rendered the trend in dry-run; nothing posted." >> "$GITHUB_STEP_SUMMARY"
 
       - name: upload cadence artifacts
         if: always()
