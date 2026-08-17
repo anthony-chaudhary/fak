@@ -54,7 +54,7 @@ func TestOperatorLiveSignalsCapturedProjection(t *testing.T) {
 		"ATTENTION | OUTCOME + AGE | CURRENT MOVE + AGE | NEXT CHECK",
 		"needs-human | checkpoint evidence checkpoint choice-ready 7m ago | decision: waiting for operator 7m ago | choose retry or stop",
 		"watch | checkpoint evidence checkpoint stale 24m ago | stale: repeating tests 24m ago | intervene at retry budget",
-		"unknown | no checkpoint for 1m | unknown lease heartbeat 20s ago | check on next liveness change; worker owes checkpoint",
+		"unknown | no checkpoint for 1m | move unknown; unknown lease heartbeat 20s ago | check on next liveness change; worker owes checkpoint",
 		"none | checkpoint evidence commit abc123 2m ago | healthy: testing 2m ago | check when gate exits",
 	} {
 		if !strings.Contains(got, want) {
@@ -117,7 +117,7 @@ func TestOperatorLiveSignalsDefaultFoldsOnlyNonActionRows(t *testing.T) {
 	}
 	got := stdout.String()
 	for _, want := range []string{
-		"watch | no witnessed outcome since lease start 1h ago | watch-lane lease heartbeat 20m ago | inspect stalled lease now",
+		"watch | no witnessed outcome since lease start 1h ago | move unknown; watch-lane lease heartbeat 20m ago | inspect stalled lease now",
 		"unknown x2 | no checkpoint | 2 live workers | check on next liveness change; workers owe checkpoints; --full lists workers",
 		"unknown x1 | checkpoints without witnessed outcomes | 1 live worker | run declared next checks; --full lists workers",
 		"none x2 | witnessed outcomes present | 2 live workers | bounded next checks; --full lists workers",
@@ -203,7 +203,7 @@ func TestOperatorLiveSignalsOrdersExceptionsByOldestEvidence(t *testing.T) {
 	got := stdout.String()
 	for _, pair := range [][2]string{
 		{"z-human-older: older decision 40m ago", "a-human-newer: newer decision 10m ago"},
-		{"z-watch-older lease heartbeat 1h ago", "a-watch-newer lease heartbeat 20m ago"},
+		{"move unknown; z-watch-older lease heartbeat 1h ago", "move unknown; a-watch-newer lease heartbeat 20m ago"},
 	} {
 		older := strings.Index(got, pair[0])
 		newer := strings.Index(got, pair[1])

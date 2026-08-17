@@ -188,7 +188,7 @@ func projectLiveSignal(lane operatorWorkerRow, checkpoint devcheckpoint.Record, 
 	row := liveSignalRow{
 		Attention:  "unknown",
 		Outcome:    "no checkpoint for " + leaseAge,
-		Move:       lane.Lane + " lease heartbeat " + moveAge + " ago",
+		Move:       "move unknown; " + lane.Lane + " lease heartbeat " + moveAge + " ago",
 		Next:       "emit a durable checkpoint",
 		Lane:       lane.Lane,
 		UrgencyAge: time.Duration(valueOrZero(lane.HeartbeatAgeMS)) * time.Millisecond,
@@ -202,7 +202,7 @@ func projectLiveSignal(lane operatorWorkerRow, checkpoint devcheckpoint.Record, 
 		if strings.Contains(chip, "STALLED") {
 			row.Attention = "watch"
 			row.Outcome = "no witnessed outcome since lease start " + leaseAge + " ago"
-			row.Move = lane.Lane + " lease heartbeat " + moveAge + " ago"
+			row.Move = "move unknown; " + lane.Lane + " lease heartbeat " + moveAge + " ago"
 			row.Next = "inspect stalled lease now"
 		} else if remaining := graceRemainingDuration(lane); remaining > 0 {
 			row.RecheckAfter = remaining
