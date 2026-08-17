@@ -3,6 +3,7 @@ package maturity
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -86,7 +87,7 @@ func TestBuildFold(t *testing.T) {
 		{Lane: "delta", HasCode: true, Dogfooded: true},                                                          // SKIP: dogfooded but untested -> capped at prototyped
 	}
 	p := Build(Options{Root: "/synthetic", facts: func(string) []Capability { return corpus }, Witnesses: func(string) (map[string]RuntimeProof, error) {
-		return map[string]RuntimeProof{"alpha": {Lane: "alpha", Command: "ok", DefaultOn: true, DefaultReason: "fixture default"}, "delta": {Lane: "delta", Command: "ok"}}, nil
+		return map[string]RuntimeProof{"alpha": {Lane: "alpha", Command: "ok", OutputContains: "ok", DefaultOn: true, DefaultReason: "fixture default"}, "delta": {Lane: "delta", Command: "ok", OutputContains: "ok"}}, nil
 	}})
 
 	if p.OK {
@@ -322,14 +323,14 @@ func TestLoadRuntimeProofsRejectsDuplicateAndVerifyRejectsFailure(t *testing.T) 
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	data := `{"schema":"fak-maturity-runtime-proofs/1","witnesses":[{"lane":"x","command":"fak version"},{"lane":"x","command":"fak env"}]}`
+	data := `{"schema":"fak-maturity-runtime-proofs/2","witnesses":[{"lane":"x","command":"fak version","output_contains":"x version"},{"lane":"x","command":"fak env","output_contains":"x env"}]}`
 	if err := os.WriteFile(filepath.Join(dir, "runtime-proofs.json"), []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := loadRuntimeProofs(root); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("err=%v", err)
 	}
-	data = `{"schema":"fak-maturity-runtime-proofs/1","witnesses":[{"lane":"x","command":"fak definitely-not-a-command"}]}`
+	data = `{"schema":"fak-maturity-runtime-proofs/2","witnesses":[{"lane":"x","command":"fak definitely-not-a-command","output_contains":"x never"}]}`
 	if err := os.WriteFile(filepath.Join(dir, "runtime-proofs.json"), []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +352,7 @@ func TestLoadRuntimeProofsRejectsTestAsDogfooding(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	data := `{"schema":"fak-maturity-runtime-proofs/1","witnesses":[{"lane":"x","command":"go test ./internal/x"}]}`
+	data := `{"schema":"fak-maturity-runtime-proofs/2","witnesses":[{"lane":"x","command":"go test ./internal/x","output_contains":"x ok"}]}`
 	if err := os.WriteFile(filepath.Join(dir, "runtime-proofs.json"), []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -367,6 +368,15 @@ func TestDocumentedDefaultWithoutRuntimeProofIsLadderSkip(t *testing.T) {
 	}
 }
 
+func configureRuntimeAlias(t *testing.T, root, lane string) {
+	t.Helper()
+	for _, args := range [][]string{{"init", root}, {"-C", root, "config", "alias." + lane, "!echo " + lane + " capability ran"}} {
+		if output, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("configure git runtime alias: %v: %s", err, output)
+		}
+	}
+}
+
 func writeRuntimeProofFixture(t *testing.T, root string, proofs []RuntimeProof) {
 	t.Helper()
 	path := filepath.Join(root, "internal", "maturity")
@@ -379,6 +389,34 @@ func writeRuntimeProofFixture(t *testing.T, root string, proofs []RuntimeProof) 
 	}
 	if err := os.WriteFile(filepath.Join(path, "runtime-proofs.json"), data, 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRuntimeProofRequiresMatchingCapabilityOutput(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		proof  RuntimeProof
+		wantOK bool
+	}{
+		{name: "missing assertion", proof: RuntimeProof{Lane: "alpha", Command: "git --version"}},
+		{name: "assertion omits lane", proof: RuntimeProof{Lane: "alpha", Command: "git --version", OutputContains: "git version"}},
+		{name: "unrelated successful command", proof: RuntimeProof{Lane: "alpha", Command: "git --version", OutputContains: "alpha capability ran"}},
+		{name: "matching assertion", proof: RuntimeProof{Lane: "alpha", Command: "git alpha", OutputContains: "alpha capability ran"}, wantOK: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if tc.wantOK {
+				configureRuntimeAlias(t, root, "alpha")
+			}
+			writeRuntimeProofFixture(t, root, []RuntimeProof{tc.proof})
+			err := VerifyRuntimeProofs(root)
+			if tc.wantOK && err != nil {
+				t.Fatalf("VerifyRuntimeProofs rejected matching output: %v", err)
+			}
+			if !tc.wantOK && err == nil {
+				t.Fatal("VerifyRuntimeProofs accepted an unbound runtime proof")
+			}
+		})
 	}
 }
 
@@ -405,8 +443,9 @@ func TestGatherFactsDefaultRequiresExplicitRuntimeProof(t *testing.T) {
 		t.Fatalf("documentation promoted default surface: %+v", facts)
 	}
 
+	configureRuntimeAlias(t, root, "alpha")
 	writeRuntimeProofFixture(t, root, []RuntimeProof{{
-		Lane: "alpha", Command: "git --version", DefaultOn: true,
+		Lane: "alpha", Command: "git alpha", OutputContains: "alpha capability ran", DefaultOn: true,
 		DefaultReason: "the command exercises alpha without an opt-in flag",
 	}})
 	payload := Build(Options{Root: root})
@@ -420,8 +459,8 @@ func TestRuntimeProofDefaultMetadataFailsClosed(t *testing.T) {
 		name  string
 		proof RuntimeProof
 	}{
-		{name: "missing reason", proof: RuntimeProof{Lane: "alpha", Command: "git --version", DefaultOn: true}},
-		{name: "reason without declaration", proof: RuntimeProof{Lane: "alpha", Command: "git --version", DefaultReason: "default somehow"}},
+		{name: "missing reason", proof: RuntimeProof{Lane: "alpha", Command: "git --version", OutputContains: "alpha capability ran", DefaultOn: true}},
+		{name: "reason without declaration", proof: RuntimeProof{Lane: "alpha", Command: "git --version", OutputContains: "alpha capability ran", DefaultReason: "default somehow"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()

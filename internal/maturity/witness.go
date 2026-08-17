@@ -10,14 +10,15 @@ import (
 	"strings"
 )
 
-const runtimeProofSchema = "fak-maturity-runtime-proofs/1"
+const runtimeProofSchema = "fak-maturity-runtime-proofs/2"
 
 // RuntimeProof is a reproducible runtime invocation that proves fak executes a capability.
 type RuntimeProof struct {
-	Lane          string `json:"lane"`
-	Command       string `json:"command"`
-	DefaultOn     bool   `json:"default_on,omitempty"`
-	DefaultReason string `json:"default_reason,omitempty"`
+	Lane           string `json:"lane"`
+	Command        string `json:"command"`
+	OutputContains string `json:"output_contains"`
+	DefaultOn      bool   `json:"default_on,omitempty"`
+	DefaultReason  string `json:"default_reason,omitempty"`
 }
 
 type runtimeProofFile struct {
@@ -42,8 +43,12 @@ func loadRuntimeProofs(root string) (map[string]RuntimeProof, error) {
 	for _, witness := range file.Witnesses {
 		witness.Lane = strings.TrimSpace(witness.Lane)
 		witness.Command = strings.TrimSpace(witness.Command)
-		if witness.Lane == "" || witness.Command == "" {
-			return nil, fmt.Errorf("runtime witness requires lane and command")
+		witness.OutputContains = strings.TrimSpace(witness.OutputContains)
+		if witness.Lane == "" || witness.Command == "" || witness.OutputContains == "" {
+			return nil, fmt.Errorf("runtime witness requires lane, command, and output_contains")
+		}
+		if !strings.Contains(strings.ToLower(witness.OutputContains), strings.ToLower(witness.Lane)) {
+			return nil, fmt.Errorf("runtime proof for %s: output_contains must identify the lane", witness.Lane)
 		}
 		witness.DefaultReason = strings.TrimSpace(witness.DefaultReason)
 		if err := validateRuntimeCommand(witness.Command); err != nil {
@@ -114,8 +119,12 @@ func runRuntimeProofs(root string, witnesses map[string]RuntimeProof) error {
 		}
 		command := exec.Command(fields[0], fields[1:]...)
 		command.Dir = root
-		if output, err := command.CombinedOutput(); err != nil {
+		output, err := command.CombinedOutput()
+		if err != nil {
 			return fmt.Errorf("runtime witness for %s failed: %w: %s", lane, err, strings.TrimSpace(string(output)))
+		}
+		if !strings.Contains(string(output), witness.OutputContains) {
+			return fmt.Errorf("runtime witness for %s did not emit required output %q: %s", lane, witness.OutputContains, strings.TrimSpace(string(output)))
 		}
 	}
 	return nil
