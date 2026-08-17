@@ -10,7 +10,7 @@ fak is an all-in-one agent boundary: one Go binary for model routing, context re
 
 The current project boundary and capability classification are recorded in [Project orientation: the agent-kernel center](docs/project-orientation.md). It distinguishes Core kernel outcomes from Enabling substrates, Stewardship obligations, and Peripheral expansion without turning centrality into a priority score.
 
-> **Start here:** install fak, then run `fak guard -- claude` to wrap the agent you already use with one drop-in command. It forwards your existing subscription credential—no separate API key—and places fak's managed-context decisions plus default-deny policy floor in front of every turn. The deterministic no-key proof remains below.
+> **Pick your path:** run `fak guard -- claude` to manage the agent you already use, or run `fak harness init` to generate a small agent product you own. Both use the same managed-context, model, tool-policy, journal, and recovery boundary. The existing-agent path forwards your subscription credential; the build-your-own selfcheck needs no API key, model, or GPU (`go run ./cmd/product --selfcheck` → `{"type":"turn.completed","detail":"ok"}`).
 
 [![Watch the 40-second fak value walk: save tokens and turns first, then see pre-execution policy](visuals/fak-homepage-hero.gif)](visuals/fak-homepage-hero.mp4)
 
@@ -18,9 +18,9 @@ The current project boundary and capability classification are recorded in [Proj
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Go Reference](https://pkg.go.dev/badge/github.com/anthony-chaudhary/fak.svg)](https://pkg.go.dev/github.com/anthony-chaudhary/fak) [![Release](https://img.shields.io/github/v/release/anthony-chaudhary/fak?color=blue&label=release&sort=semver)](https://github.com/anthony-chaudhary/fak/releases/latest) [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8.svg)](go.mod) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/anthony-chaudhary/fak)
 
-<!-- readme-verified: 2026-08-15 vs VERSION 0.43.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
+<!-- readme-verified: 2026-08-17 vs VERSION 0.43.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
 
-**Current focus: spend fewer tokens and turns.** See the [performance-first capability map](docs/CAPABILITIES.md) for the shipped turn-tax controls, stable-prefix reuse, managed context, per-call model routing, cache-value accounting, and out-of-band session controls. The security floor remains shipped and indexed, but it supports this efficiency story rather than leading it.
+**Current direction: one kernel, two ways in.** Adopt fak around Claude Code, Codex, or OpenCode today, or use its public harness contracts to build a focused agent product without forking the kernel. Performance remains the center: the [capability map](docs/CAPABILITIES.md) covers shipped turn-tax controls, stable-prefix reuse, managed context, per-call model routing, cache-value accounting, and out-of-band session controls. The security floor rides on the same checkpoint.
 
 ## Install and run
 
@@ -72,15 +72,30 @@ is **not yet a shipped capability**.
 
 ## Use the whole harness—or make your own
 
-`fak manage` is the all-in-one default: launch an existing coding agent and let fak own the boundary. `fak serve` is the composable default: write any loop or UI you want against a familiar OpenAI-compatible endpoint while fak keeps routing, context, policy, and evidence in one place.
+`fak manage` is the all-in-one default for an existing agent. `fak harness init` is the product-builder default: generate a standalone module you own, backed by fak's public harness contract. `fak serve` remains the lower-level option when you already have a loop or UI.
 
 | Goal | Command | Details |
 |---|---|---|
 | All-in-one managed agent | `fak manage claude` (or `fak m claude`) | Least-friction launch; model traffic and tool calls cross one observable boundary. [Claude](docs/integrations/claude.md) · [Codex](docs/integrations/openai-codex.md) · [all hosts](docs/supported/README.md) |
-| Make your own harness | `fak serve --base-url http://localhost:11434/v1 --model qwen3.5:4b` | Your client owns the loop; fak supplies OpenAI, Anthropic, and MCP endpoints plus the tool checkpoint. [Server quickstart](docs/fak/server-quickstart.md) |
+| Build your own agent product | `fak harness init --dir ./my-harness --module example.com/my-harness` | Generates a standalone Go module with user-owned product config and a deterministic offline selfcheck. [Generator guide](docs/harness-init.md) · [starter gallery](docs/harness-pack-gallery.md) |
+| Bring your own loop or UI | `fak serve --base-url http://localhost:11434/v1 --model qwen3.5:4b` | Your client owns the loop; fak supplies OpenAI, Anthropic, and MCP endpoints plus the tool checkpoint. [Server quickstart](docs/fak/server-quickstart.md) |
 | Prove behavior offline | `fak agent --offline` | Deterministically demonstrates repair, reuse, policy denial, and result quarantine; writes `agent-report.json`. [Walkthrough](GETTING-STARTED.md#2-tier-0--try-the-kernel-zero-downloads-2-min) |
 | Run many bounded agents | `go run ./cmd/microfleetdemo -selfcheck` | Proves 24 agents in one process, four resident at once, with shared base/model state, fair scheduling, hibernation, policy, and egress control. [Concept](docs/concepts/micro-agents.md) · [measured demo](cmd/microfleetdemo/README.md) |
 | Use a Mac's local model from Claude Code | `fak mac` | Targets an existing `fak serve` gateway without replacing Claude's UI. [Setup and expectations](docs/fak/mac-agent-ui.md) |
+
+### Build a working harness first
+
+```bash
+fak harness init --dir ./my-harness --module example.com/my-harness
+cd my-harness
+# Edit product/config.go: product ID, profile, instructions, tools, and reply behavior.
+go build ./cmd/product
+go run ./cmd/product --selfcheck
+```
+
+The generated product imports `pkg/harnesskit`; it does not copy fak internals. Regeneration preserves the product-owned `product/config.go`, so upgrades do not erase your choices. The selfcheck uses a deterministic offline model and tool, making the first working run possible with no API key or GPU. The generated launch seam can then hand control to your model/tool adapter while keeping semantic events stable.
+
+Use `fak harness gallery list` to explore starters for read-only support, coding workspaces, cited research, and incident operations. Use `fak harness web --selfcheck` to see the same contract in a local browser UI. The [generator and ownership guide](docs/harness-init.md) explains the file boundary, upgrade loop, and public extension seams.
 
 ### Local model defaults that fit real devices
 
@@ -117,7 +132,8 @@ After trying `guard`, `fak launch install --provider all --default claude` can i
 
 ## Next steps
 
-- **Use:** [complete first run](GETTING-STARTED.md) · [tutorial](docs/fak/tutorial.md) · [examples](examples/README.md) · [showcase](docs/showcase.html) · [integration guides](docs/integrations/)
+- **Use an existing agent:** [complete first run](GETTING-STARTED.md) · [tutorial](docs/fak/tutorial.md) · [examples](examples/README.md) · [showcase](docs/showcase.html)
+- **Build an agent product:** [harness generator](docs/harness-init.md) · [starter gallery](docs/harness-pack-gallery.md) · [public contract](docs/harness-kit-contract.md) · [web UI](docs/harness-web-demo.md)
 - **Operate:** [serving](docs/serving/README.md) · [configuration](docs/fak/configuration.md) · [observability](docs/fak/observability.md) · [deployment](docs/fak/deployment-guide.md)
 - **Understand:** [performance](docs/performance.md) · [architecture](docs/architecture.md) · [concepts](docs/concepts-and-story.md) · [glossary](docs/glossary.md)
 - **Verify:** [benchmark methodology](docs/benchmark-methodology.md) · [reproduction packet](docs/repro-packet.md) · [claims](CLAIMS.md)
