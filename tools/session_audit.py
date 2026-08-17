@@ -1426,6 +1426,7 @@ def load_dos_hook_observations(workspace, since_days):
     verbs = collections.defaultdict(lambda: {"outcomes": collections.Counter(),
                                              "latencies_ms": [], "exits": collections.Counter()})
     malformed = 0
+    timestamp_buckets = collections.Counter()
     try:
         with open(path, encoding="utf-8") as stream:
             for line in stream:
@@ -1438,6 +1439,7 @@ def load_dos_hook_observations(workspace, since_days):
                 if cutoff is not None and ts < cutoff:
                     continue
                 verb = str(row.get("verb") or "unknown")
+                timestamp_buckets[(verb, str(row["ts"])[:19])] += 1
                 verbs[verb]["outcomes"][str(row.get("outcome") or "<empty>")] += 1
                 verbs[verb]["exits"][str(row.get("exit", "unknown"))] += 1
                 latency = row.get("latency_ms")
@@ -1454,6 +1456,13 @@ def load_dos_hook_observations(workspace, since_days):
             "exits": dict(data["exits"].most_common()),
             "duration_ms": {"median": _pct(values, 50), "p90": _pct(values, 90),
                             "p99": _pct(values, 99), "max": max(values) if values else None},
+            "same_second": {
+                "buckets": sum(1 for (v, _), n in timestamp_buckets.items() if v == verb and n > 1),
+                "excess_calls": sum(n - 1 for (v, _), n in timestamp_buckets.items()
+                                    if v == verb and n > 1),
+                "max_calls": max((n for (v, _), n in timestamp_buckets.items() if v == verb),
+                                 default=0),
+            },
         }
     return result
 
@@ -1482,6 +1491,17 @@ def _dos_hook_lens(agg):
         L.append(f"\n- **PostToolUse reconciliation:** Claude recorded zero outcome attachments, while "
                  f"the DOS ledger independently witnessed {post['count']:,} `posttool` calls. "
                  "This is an attachment-observability gap, not evidence that the hook did not run.")
+    if post:
+        audited_calls = sum((agg.get("tool_mix") or {}).values())
+        same_second = post.get("same_second") or {}
+        ratio = post["count"] / audited_calls if audited_calls else None
+        ratio_text = "—" if ratio is None else f"{ratio:.2f}x"
+        L.append(f"- **PostToolUse amplification signal:** {post['count']:,} ledger rows / "
+                 f"{audited_calls:,} audited transcript tool calls = {ratio_text}; "
+                 f"{same_second.get('excess_calls', 0):,} rows are additional calls in an "
+                 f"already-occupied one-second bucket (max {same_second.get('max_calls', 0):,}/s). "
+                 "The sources have different coverage, so this is a collision/duplication lead, "
+                 "not a one-to-one duplicate count.")
     if ledger.get("malformed_rows"):
         L.append(f"- Malformed ledger rows skipped: {ledger['malformed_rows']:,}")
     return L + [""]

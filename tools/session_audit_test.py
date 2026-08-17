@@ -1321,7 +1321,7 @@ class DOSHookLedgerTest(unittest.TestCase):
         rows = [
             {"ts": "2026-08-15T00:00:00Z", "verb": "posttool", "outcome": "passthrough",
              "exit": 0, "latency_ms": 2.5},
-            {"ts": "2026-08-15T00:00:01Z", "verb": "posttool", "outcome": "passthrough",
+            {"ts": "2026-08-15T00:00:00Z", "verb": "posttool", "outcome": "passthrough",
              "exit": 0, "latency_ms": 8.5},
             {"ts": "2026-08-15T00:00:02Z", "verb": "stop", "outcome": "no-claims",
              "exit": 1, "latency_ms": 4},
@@ -1335,10 +1335,13 @@ class DOSHookLedgerTest(unittest.TestCase):
         self.assertEqual(ledger["verbs"]["posttool"]["count"], 2)
         self.assertEqual(ledger["verbs"]["posttool"]["duration_ms"]["p90"], 8.5)
         self.assertEqual(ledger["malformed_rows"], 1)
-        agg = {"hooks": {"events": {}}, "dos_hook_ledger": ledger}
+        agg = {"hooks": {"events": {}}, "dos_hook_ledger": ledger,
+               "tool_mix": {"Read": 1}}
         report = "\n".join(sa._dos_hook_lens(agg))
         self.assertIn("independently witnessed 2 `posttool` calls", report)
         self.assertIn("attachment-observability gap", report)
+        self.assertIn("2 ledger rows / 1 audited transcript tool calls = 2.00x", report)
+        self.assertIn("1 rows are additional calls in an already-occupied one-second bucket", report)
         self.assertIn("| stop | 1 | no-claims=1 | 1=1 |", report)
 
 if __name__ == "__main__":
