@@ -83,6 +83,20 @@ func TestPathShadowRecommendationSingleBinaryOK(t *testing.T) {
 	}
 }
 
+func TestBinaryNewerDoesNotOrderEqualCleanCommitsByMtime(t *testing.T) {
+	olderFile := PathBinary{Stamped: true, Commit: "abc123", ModTime: "2026-07-01T00:00:00Z"}
+	newerFile := PathBinary{Stamped: true, Commit: "abc123", ModTime: "2026-07-09T00:00:00Z"}
+	if binaryNewer(newerFile, olderFile) || binaryNewer(olderFile, newerFile) {
+		t.Fatal("equal clean commit identities must not be ordered by file mtime")
+	}
+
+	dirty := newerFile
+	dirty.Dirty = true
+	if !binaryNewer(dirty, olderFile) {
+		t.Fatal("dirty and clean copies must not be collapsed to equal identity")
+	}
+}
+
 func TestBinaryNewerPrefersCommitTimeThenMtime(t *testing.T) {
 	// Both stamped: commit time decides even if mtime disagrees.
 	a := PathBinary{Stamped: true, CommitTime: "2026-07-08T00:00:00Z", ModTime: "2020-01-01T00:00:00Z"}

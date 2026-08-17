@@ -174,6 +174,9 @@ func newestShadowedNewerThan(winner PathBinary, shadowed []PathBinary) (PathBina
 // When neither ordering is decidable it returns false — the doctor never invents
 // an age it cannot witness.
 func binaryNewer(a, b PathBinary) bool {
+	if a.Stamped && b.Stamped && !a.Dirty && !b.Dirty && a.Commit != "" && a.Commit == b.Commit {
+		return false
+	}
 	if a.Stamped && b.Stamped {
 		at, aok := parseStampTime(a.CommitTime)
 		bt, bok := parseStampTime(b.CommitTime)
