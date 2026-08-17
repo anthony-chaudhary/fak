@@ -155,7 +155,7 @@ func TestGuardMCPRegistrationReachesLiveGatewayMCPEndpoint(t *testing.T) {
 	for _, tool := range rpc.Result.Tools {
 		names[tool.Name] = true
 	}
-	for _, want := range []string{"fak_memory_run", "fak_capabilities", "fak_tools_search"} {
+	for _, want := range []string{"fak_adjudicate", "fak_read", "fak_tools_search"} {
 		if !names[want] {
 			t.Fatalf("tools/list at %s missing %s: got %+v", install.URL, want, names)
 		}
