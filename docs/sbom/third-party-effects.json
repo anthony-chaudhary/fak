@@ -394,6 +394,18 @@
     },
     {
       "class": "subprocess_tool",
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "reference": "codex",
+      "consumer_domains": [
+        "cmd"
+      ]
+    },
+    {
+      "class": "subprocess_tool",
       "reference": "curl.exe",
       "consumer_domains": [
         "cmd"
@@ -474,7 +486,7 @@
       "consumer_domains": [
         "cmd"
       ],
-      "status": "used",
+      "status": "prospective",
       "pin": "host_provided",
       "digest": "",
       "license_record": "none",
@@ -594,7 +606,6 @@
       "class": "subprocess_tool",
       "reference": "ps",
       "consumer_domains": [
-        "cmd",
         "internal"
       ],
       "status": "used",
@@ -669,7 +680,6 @@
       "class": "subprocess_tool",
       "reference": "taskkill",
       "consumer_domains": [
-        "cmd",
         "internal"
       ],
       "status": "used",
@@ -677,6 +687,30 @@
       "digest": "",
       "license_record": "none",
       "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "reference": "taskkill.exe",
+      "consumer_domains": [
+        "internal"
+      ]
+    },
+    {
+      "class": "subprocess_tool",
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)",
+      "reference": "tasklist",
+      "consumer_domains": [
+        "internal"
+      ]
     },
     {
       "class": "subprocess_tool",
