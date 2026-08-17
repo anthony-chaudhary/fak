@@ -416,6 +416,7 @@ var tier = map[string]int{
 	"fleetcap":            1, // Little's-law fleet-capacity calculator: required concurrent workers from target issue-rate + median session; stdlib-only, off the hot path.
 	"fleetcompare":        1, // pure fleet sweep slice builder that decomposes shared vs isolated/cross-cache gains; stdlib-only, off the hot path.
 	"fleettrend":          2, // fleet status JSONL history and sparkline trend fold; stdlib-only, off the hot path.
+	"workdelivery":        1, // independent record/admission/verification/integration/release contract (#7101); stdlib-only, off the hot path.
 	"workflowaudit":       2, // classifies every branch/tag ref in .github/workflows/*.yml against the branch-role contract (#1697/#1701): development/release-front-door/tag/legacy/unclassified, with an embedded allowlist + a committed audit report; imports only branchrole(1)+stdlib, off the hot path.
 	"fleetsim":            2, // synthetic 400-issues/hour dry-run replay fixture: deterministic ledger generator + closes/hour fold; stdlib-only, off the hot path.
 	"fleetmetrics":        1, // pure worker-session duration percentiles (p50/p95) over a ledger; stdlib-only, off the hot path.
