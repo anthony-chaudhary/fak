@@ -16,6 +16,7 @@ import contextlib
 import io
 import json
 import tempfile
+import pathlib
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -1279,6 +1280,39 @@ class CacheBurstTest(unittest.TestCase):
             buckets, _ = sa.trend_scan([d], "", "day", False)
         self.assertEqual(buckets["2026-06-20"]["beh"]["suffix_resets"], 1)
 
+
+
+class HookLensTest(unittest.TestCase):
+    def test_attachment_outcomes_failures_and_latency_are_aggregated(self):
+        sa = load()
+        rows = [
+            {"type": "attachment", "timestamp": "2026-08-16T00:00:00Z",
+             "attachment": {"type": "hook_success", "hookEvent": "PostToolUse",
+                            "durationMs": 12, "stdout": "", "stderr": ""}},
+            {"type": "attachment", "timestamp": "2026-08-16T00:00:01Z",
+             "attachment": {"type": "hook_non_blocking_error", "hookEvent": "PostToolUse",
+                            "durationMs": 80, "stderr": "helper exited 7"}},
+            {"type": "attachment", "timestamp": "2026-08-16T00:00:02Z",
+             "attachment": {"type": "hook_cancelled", "hookEvent": "UserPromptSubmit",
+                            "durationMs": 30000, "stderr": ""}},
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            path = pathlib.Path(td) / "hooks.jsonl"
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+            session = sa.analyze(str(path))
+        agg = sa.aggregate([session])
+        self.assertEqual(agg["hooks"]["failure_total"], 2)
+        self.assertEqual(agg["hooks"]["events"]["PostToolUse"]["outcomes"],
+                         {"success": 1, "non_blocking_error": 1})
+        self.assertEqual(agg["hooks"]["events"]["PostToolUse"]["duration_ms"]["p90"], 80)
+        failure = agg["hooks"]["failures"][0]
+        self.assertEqual((failure["event"], failure["outcome"], failure["count"], failure["sessions"]),
+                         ("PostToolUse", "non_blocking_error", 1, 1))
+        self.assertIn("helper exited 7", failure["signature"])
+        report = "\n".join(sa._hook_lens(agg))
+        self.assertIn("Hook execution lens", report)
+        self.assertIn("| PostToolUse | 2 | 1 | 0 | 1 | 0 | 80 ms | 80 ms |", report)
+        self.assertIn("Hook failures/cancellations:** 2", report)
 
 if __name__ == "__main__":
     unittest.main()

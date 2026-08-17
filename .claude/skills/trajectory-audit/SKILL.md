@@ -1,6 +1,6 @@
 ---
 name: trajectory-audit
-description: Sweep recent Claude Code session transcripts (.jsonl) for token-weighted cost/efficiency problems visible only across runs — machine-wide input:output ratio, prompt-cache / KV reuse, the cache-CREATE burst / suffix-cache-thrash lens (#3069) that a flattering read-share hides, per-session distributions (tool calls, I:O, cache-hit, read-only fraction), the global tool mix, and the heaviest sessions by output tokens — plus the behavioral stuck/churn lens (#2365): per-tool error rates, shell timeout kills, foreground sleep-polls, Edit/Write read-discipline churn, repeated identical failure signatures, and per-file mutation churn. Wraps the project's auditor `tools/session_audit.py` (EXACT token accounting from the transcript usage records). Use when the operator says "audit recent claude trajectories/chats/sessions", "where is the token/cost going", "what are the heaviest sessions", "which sessions are stuck/looping/churning", or wants cross-session efficiency or behavior numbers. Read-only — emits a dated report, never edits code.
+description: Sweep recent Claude Code session transcripts (.jsonl) for token-weighted cost/efficiency problems visible only across runs — machine-wide input:output ratio, prompt-cache / KV reuse, the cache-CREATE burst / suffix-cache-thrash lens (#3069) that a flattering read-share hides, per-session distributions (tool calls, I:O, cache-hit, read-only fraction), the global tool mix, and the heaviest sessions by output tokens — plus the behavioral stuck/churn lens (#2365): per-tool error rates, shell timeout kills, foreground sleep-polls, Edit/Write read-discipline churn, repeated identical failure signatures, per-file mutation churn, and transcript-native hook outcomes/latency (including non-blocking errors and cancellations). Wraps the project's auditor `tools/session_audit.py` (EXACT token accounting from the transcript usage records). Use when the operator says "audit recent claude trajectories/chats/sessions", "where is the token/cost going", "what are the heaviest sessions", "which sessions are stuck/looping/churning", or wants cross-session efficiency or behavior numbers. Read-only — emits a dated report, never edits code.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep, Glob, Bash
@@ -131,7 +131,8 @@ The report gives you, in order:
    table (≥8 turns with ≥1 reset — cache-create tok, cc-share, resets, floor, est.
    $). These rows are the behavior audit the token lens can't see — each one
    names a session worth a `deep` drill.
-8. **Top 15 sessions by output tokens** — the fastest path to the expensive runs.
+8. **Hook execution lens** — transcript-native hook outcomes, non-blocking failures/cancellations, failure signatures, and p90/max latency by event. Missing events mean no outcome attachment was recorded, not proof the hook never ran.
+9. **Top 15 sessions by output tokens** — the fastest path to the expensive runs.
 
 The `trend` subcommand carries the same detectors per time bucket (`err%` /
 `t/o` / `hang` / `slp` / `chrn` columns, plus a `behavior` object in `--json` rows), so a

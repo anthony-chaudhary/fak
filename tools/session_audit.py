@@ -662,6 +662,9 @@ def analyze(path):
     # repeat the FULL content array on every duplicate line.
     seen_blocks = set()
     lens = BehaviorLens()
+    hook_outcomes = collections.Counter()
+    hook_durations = collections.defaultdict(list)
+    hook_failures = collections.Counter()
     tooluse_names = {}   # tool_use id -> tool name, to attribute tool_results
     tooluse_args = {}    # tool_use id -> args digest, for verbatim-retry keying
     tooluse_paths = {}   # tool_use id -> target file path, for not_read sub-class (#2375 d1)
@@ -703,6 +706,18 @@ def analyze(path):
                     if gap >= STALL_GAP_S:
                         stall_gaps += 1   # zero-record dead time (harness stall)
                 prev_dt = dt
+
+        attachment = r.get("attachment") if t == "attachment" else None
+        if isinstance(attachment, dict) and str(attachment.get("type", "")).startswith("hook_"):
+            outcome = str(attachment.get("type"))[5:] or "unknown"
+            event = str(attachment.get("hookEvent") or "unknown")
+            hook_outcomes[(event, outcome)] += 1
+            duration = attachment.get("durationMs")
+            if isinstance(duration, (int, float)) and duration >= 0:
+                hook_durations[event].append(int(duration))
+            if outcome in {"non_blocking_error", "cancelled"}:
+                detail = attachment.get("stderr") or attachment.get("stdout") or "no diagnostic output"
+                hook_failures[(event, outcome, _norm_head(str(detail), 200))] += 1
 
         if t == "assistant":
             msg = r.get("message", {}) or {}
@@ -816,6 +831,10 @@ def analyze(path):
         "io_ratio": io_ratio, "cache_hit_frac": cache_hit, "cc_share": cc_share,
         "cost_usd": cost, "ts_min": ts_min, "ts_max": ts_max, "wall_s": wall,
         "behavior": behavior,
+        "hooks": {"outcomes": {"|".join(k): v for k, v in hook_outcomes.items()},
+                  "durations_ms": {k: v for k, v in hook_durations.items()},
+                  "failures": [{"event": k[0], "outcome": k[1], "signature": k[2], "count": n}
+                               for k, n in hook_failures.most_common()]},
     }
 
 def _pct(xs, p):
@@ -895,8 +914,19 @@ def aggregate(sessions):
     max_gap_s = 0.0
     repeat_rows, filechurn_rows, mass_rows, successloop_rows = [], [], [], []
     never_read_rows = []   # #3942: sessions with a genuine never-read defect
+    hook_outcomes = collections.Counter()
+    hook_durations = collections.defaultdict(list)
+    hook_failures = collections.Counter()
+    hook_failure_sessions = collections.defaultdict(set)
     for s in S:
         b = s.get("behavior") or {}
+        h = s.get("hooks") or {}
+        hook_outcomes.update(h.get("outcomes") or {})
+        for event, values in (h.get("durations_ms") or {}).items(): hook_durations[event].extend(values)
+        for failure in h.get("failures") or []:
+            key = (failure.get("event", "unknown"), failure.get("outcome", "unknown"), failure.get("signature", ""))
+            hook_failures[key] += failure.get("count", 0)
+            hook_failure_sessions[key].add(_attributed_session(s))
         beh_errors.update(b.get("tool_errors", {}))
         beh_churn.update(b.get("edit_churn", {}))
         beh_not_read.update(b.get("not_read_classes", {}))
@@ -966,6 +996,19 @@ def aggregate(sessions):
         "genuine_errors": shell_err_genuine,
         "genuine_rate": round(shell_err_genuine / shell_calls, 3) if shell_calls else None,
     }
+    hook_events = {}
+    for event in sorted(set(hook_durations) | {k.split("|", 1)[0] for k in hook_outcomes}):
+        values = hook_durations.get(event, [])
+        outcomes = {k.split("|", 1)[1]: n for k, n in hook_outcomes.items() if k.startswith(event + "|")}
+        hook_events[event] = {"outcomes": outcomes, "total": sum(outcomes.values()),
+                              "duration_ms": {"median": _pct(values, 50), "p90": _pct(values, 90),
+                                              "max": max(values) if values else None}}
+    hooks = {"events": hook_events,
+             "failures": [{"event": k[0], "outcome": k[1], "signature": k[2], "count": n,
+                           "sessions": len(hook_failure_sessions[k])} for k, n in hook_failures.most_common(15)],
+             "failure_total": sum(n for k, n in hook_outcomes.items()
+                                  if k.split("|", 1)[-1] in {"non_blocking_error", "cancelled"})}
+
     behavior = {
         "per_tool": per_tool_beh,
         "timeout_kills": beh_timeouts,
@@ -991,6 +1034,7 @@ def aggregate(sessions):
     return {
         "n_sessions": len(S), "totals": dict(tot), "total_cost_usd": tot_cost,
         "behavior": behavior,
+        "hooks": hooks,
         "tool_mix": dict(tot_tools.most_common()),
         "per_namespace": {k: dict(v) for k, v in ns_roll.items()},
         "per_namespace_cost": dict(ns_cost),
@@ -1364,13 +1408,34 @@ def _cache_burst_tables(beh):
     if bs:
         L.append("")
         L.append("| Session | NS | Turns | Cache-create tok | cc-share | Resets | Reset floor | Est.$ |")
-        L.append("|---|---|---:|---:|---:|---:|---:|---:|")
+        L.append("|---|---|---:|---:|---:|---:|---:|---:|---:|")
         for r in bs:
             fl = fmt_int(r["reset_floor"]) if r.get("reset_floor") is not None else "—"
             L.append(f"| {r['session'][:8]} | {r['ns']} | {r['turns']} | "
                      f"{fmt_int(r['cache_create'])} | {fmt_pct(r.get('cc_share'))} | "
                      f"{r['suffix_resets']} | {fl} | ${r['cost_usd']:.2f} |")
     return L
+
+def _hook_lens(agg):
+    hooks = agg.get("hooks") or {}
+    events = hooks.get("events") or {}
+    L = ["## Hook execution lens — outcomes and latency\n"]
+    if not events: return L + ["- No transcript-native hook outcome attachments were observed.\n"]
+    L += ["| Event | Records | Success | Context | Non-blocking error | Cancelled | p90 | Max |",
+          "|---|---:|---:|---:|---:|---:|---:|"]
+    for event, row in sorted(events.items()):
+        outcomes = row.get("outcomes") or {}
+        dur = row.get("duration_ms") or {}
+        ms = lambda v: "—" if v is None else f"{v:,} ms"
+        L.append(f"| {event} | {row.get('total', 0):,} | {outcomes.get('success', 0):,} | {outcomes.get('additional_context', 0):,} | {outcomes.get('non_blocking_error', 0):,} | {outcomes.get('cancelled', 0):,} | {ms(dur.get('p90'))} | {ms(dur.get('max'))} |")
+    L += ["", f"- **Hook failures/cancellations:** {hooks.get('failure_total', 0):,}"]
+    if hooks.get("failures"):
+        L += ["", "| Event | Outcome | × | Sessions | Failure signature |", "|---|---|---:|---:|---|"]
+        for row in hooks["failures"][:10]:
+            sig = str(row.get("signature", "")).replace("|", "\\|")
+            L.append(f"| {row.get('event')} | {row.get('outcome')} | {row.get('count', 0):,} | {row.get('sessions', 0):,} | {sig} |")
+    return L + [""]
+
 
 def _behavior_lens(agg):
     """The stuck/churn half of the picture the token lens cannot see (#2365)."""
@@ -1450,6 +1515,7 @@ def report_md(sessions, agg, ns_prefix=NS_INCLUDE_PREFIX, since_days=None,
     L.extend(_namespace_rollup(agg))
     L.extend(_distributions(agg))
     L.extend(_tool_mix_table(agg))
+    L.extend(_hook_lens(agg))
     L.extend(_behavior_lens(agg))
     L.extend(_top_sessions_table(S))
     return "\n".join(L)
