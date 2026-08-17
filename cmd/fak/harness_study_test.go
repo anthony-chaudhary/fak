@@ -39,6 +39,60 @@ func TestHarnessStudyCreationCLIKeepsFailedBuildersInDenominator(t *testing.T) {
 	}
 }
 
+func TestHarnessStudyReceiptKeepsEarlyFailureInPairedDenominator(t *testing.T) {
+	dir := t.TempDir()
+	studyPath := filepath.Join(dir, "study.json")
+	study := harnesscreationstudy.Study{
+		Schema: harnesscreationstudy.Schema,
+		ID:     "early-failure-e2e",
+		Protocol: harnesscreationstudy.Protocol{
+			TaskDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Frozen: true, TenMinuteLimitSeconds: 600, AssistancePolicy: "task-card-and-help-only", FailuresInDenominator: true,
+			Parity: harnesscreationstudy.MatchedStudySpec{Frozen: true, MinimumPairs: 2, MaxMedianElapsedRatio: 1.25, CounterbalancedOrder: true},
+		},
+		Baseline: harnesscreationstudy.Baseline{ID: "tuned-alt", Runnable: true, Tuned: true, Frozen: true, Evidence: "baseline.json"},
+	}
+	studyRaw, err := json.Marshal(study)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(studyPath, studyRaw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 8, 16, 1, 2, 3, 0, time.UTC)
+	receipt := harnesscreationreceipt.Receipt{
+		Schema: harnesscreationreceipt.Schema, RunID: "run-early-failure", ParticipantID: "person-early", ParticipantClass: "unfamiliar-builder", PriorFamiliarity: "none",
+		Track: "ten-minute", Arm: "fak", PairID: "pair-early", TaskDigest: study.Protocol.TaskDigest, MachineID: "machine-early", PairOrder: "fak-first", ArmPosition: 1, Independent: true,
+		Artifact: "fak@v1", ArtifactDigest: "sha256:abc", OS: "linux", CPU: "x86_64", Toolchain: "go1.26", NetworkState: "online", CacheState: "empty",
+		StartedAt: start, StoppedAt: start.Add(9 * time.Second), ElapsedSeconds: 9, Commands: []harnesscreationreceipt.Command{{Command: "retrieve fak", Exit: 1}},
+		Outcome: "failure", Transcript: "early.txt", Receipt: "early.json",
+	}
+	receiptRaw, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptPath := filepath.Join(dir, "receipt.json")
+	if err := os.WriteFile(receiptPath, receiptRaw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := runHarness(&out, &errOut, []string{"study", "receipt", "--input", receiptPath, "--study", studyPath}); code != 0 {
+		t.Fatalf("early failure code=%d err=%s", code, errOut.String())
+	}
+	var result harnesscreationreceipt.Result
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	study.Runs = append(study.Runs, harnesscreationstudy.Run{
+		ID: result.Row.ID, ParticipantID: result.Row.ParticipantID, Track: result.Row.Track, Arm: result.Row.Arm, PairID: result.Row.PairID, TaskDigest: result.Row.TaskDigest, MachineID: result.Row.MachineID,
+		PairOrder: result.Row.PairOrder, ArmPosition: result.Row.ArmPosition, ParticipantClass: result.Row.ParticipantClass, Independent: result.Row.Independent, OS: result.Row.OS, CPU: result.Row.CPU,
+		NetworkState: result.Row.NetworkState, CacheState: result.Row.CacheState, Outcome: result.Row.Outcome, ElapsedSeconds: result.Row.ElapsedSeconds, Receipt: result.Row.Receipt,
+	})
+	report := harnesscreationstudy.Evaluate(study)
+	if report.Parity.IncompletePairs != 1 || report.Parity.FakSuccesses != 0 || report.Parity.ClaimStatus != "not_yet" {
+		t.Fatalf("early failure missing from denominator: %+v", report.Parity)
+	}
+}
+
 func TestHarnessStudyReceiptRowsFormCompletePair(t *testing.T) {
 	dir := t.TempDir()
 	studyPath := filepath.Join(dir, "study.json")

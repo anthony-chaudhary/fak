@@ -35,6 +35,60 @@ func TestFailureRemainsEligibleRow(t *testing.T) {
 		t.Fatal("failure was dropped")
 	}
 }
+
+func TestParseAdmitsEarlyFailureWithoutProductMutation(t *testing.T) {
+	r := validReceipt()
+	r.Outcome = "failure"
+	r.FilesChanged = nil
+	r.Rebuilds = 0
+	r.RebuildSeconds = 0
+	r.Commands = []Command{{Command: "retrieve artifact", Exit: 1}}
+	raw, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("early failure refused: %v", err)
+	}
+	if got.Outcome != "failure" || len(got.FilesChanged) != 0 || got.Rebuilds != 0 {
+		t.Fatalf("early failure changed: %+v", got)
+	}
+}
+
+func TestParseKeepsSuccessEvidenceFloorAndRejectsContradictions(t *testing.T) {
+	tests := map[string]Receipt{}
+	missing := validReceipt()
+	missing.FilesChanged = nil
+	missing.Rebuilds = 0
+	missing.RebuildSeconds = 0
+	tests["success missing product evidence"] = missing
+
+	negative := validReceipt()
+	negative.Outcome = "failure"
+	negative.Rebuilds = -1
+	tests["negative rebuild"] = negative
+
+	partial := validReceipt()
+	partial.Outcome = "failure"
+	partial.FilesChanged = nil
+	partial.Rebuilds = 0
+	partial.RebuildSeconds = 3
+	tests["duration without rebuild"] = partial
+
+	for name, receipt := range tests {
+		t.Run(name, func(t *testing.T) {
+			raw, err := json.Marshal(receipt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Parse(raw); err == nil {
+				t.Fatal("contradictory receipt accepted")
+			}
+		})
+	}
+}
+
 func TestParseFailsClosedAndWeekendRequiresWitness(t *testing.T) {
 	for name, mutate := range map[string]func(*Receipt){"clock": func(r *Receipt) { r.StoppedAt = r.StartedAt }, "commands": func(r *Receipt) { r.Commands = nil }, "slug": func(r *Receipt) { r.ParticipantID = "Jane Doe" }, "weekend": func(r *Receipt) { r.Track = "weekend" }} {
 		t.Run(name, func(t *testing.T) {

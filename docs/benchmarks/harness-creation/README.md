@@ -83,6 +83,8 @@ prior fak-internals familiarity; track; artifact and checksum/commit identity; O
 Go version, network and cache state; monotonic start/stop and elapsed seconds; exact
 commands and exits; files changed; rebuild count and duration; outcome; help requests;
 privacy-safe transcript path; and, for weekend runs, independent authorship and conformance.
+An early failed attempt records an empty changed-file list and zero rebuild fields; these
+zeros preserve the failure in the denominator rather than pretending product evidence exists.
 
 The baseline must be runnable, tuned, selected, and frozen before participant timing. The
 frozen next-best alternative is [`create-mastra@1.25.0`](baselines/create-mastra-1.25.0/README.md);

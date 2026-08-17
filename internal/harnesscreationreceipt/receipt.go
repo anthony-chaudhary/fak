@@ -130,8 +130,14 @@ func Parse(raw []byte) (Receipt, error) {
 	if r.StartedAt.IsZero() || r.StoppedAt.IsZero() || !r.StoppedAt.After(r.StartedAt) || r.ElapsedSeconds <= 0 {
 		return r, errors.New("valid clock fields are required")
 	}
-	if len(r.Commands) == 0 || len(r.FilesChanged) == 0 || r.Rebuilds < 1 || r.RebuildSeconds <= 0 || r.HelpRequests < 0 {
-		return r, errors.New("commands, changed files, rebuild, and help evidence are required")
+	if len(r.Commands) == 0 || r.Rebuilds < 0 || r.RebuildSeconds < 0 || r.HelpRequests < 0 {
+		return r, errors.New("commands and nonnegative rebuild/help evidence are required")
+	}
+	if (r.Rebuilds == 0) != (r.RebuildSeconds == 0) {
+		return r, errors.New("rebuild count and duration must both be zero or both be positive")
+	}
+	if r.Outcome == "success" && (len(r.FilesChanged) == 0 || r.Rebuilds < 1) {
+		return r, errors.New("successful receipt requires changed files and rebuild evidence")
 	}
 	if r.Track == "weekend" && (r.IndependentAuthorship == "" || r.Conformance == "") {
 		return r, errors.New("weekend receipt requires independent_authorship and conformance")
