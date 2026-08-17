@@ -265,6 +265,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Learning observation lineage](docs/learning-observation.md) — content-addressed source/candidate/witness/verdict records and closed-enum edges; separate from witness-gated admission.
 
 ## Notes & research (`docs/notes/`)
+- [Generation-aware release staleness and readiness contract](docs/notes/GENERATION-RELEASE-READINESS-CONTRACT-2026-08-16.md) -- auto-indexed dated note.
 - [Live-session update control plane — research and ticket map (2026-08-16)](docs/notes/LIVE-SESSION-UPDATE-CONTROL-PLANE-2026-08-16.md) -- auto-indexed dated note.
 - [Harness domain boundary audit — 2026-08-15](docs/notes/HARNESS-DOMAIN-PRODUCTION-BOUNDARY-AUDIT-2026-08-15.md) -- auto-indexed dated note.
 - [Concept study: C2C / Rosetta](docs/notes/CONCEPT-STUDY-C2C-2026-08-08.md) — pinned cache-to-cache research study, acquisition caveat, and clean-room borrow ledger
