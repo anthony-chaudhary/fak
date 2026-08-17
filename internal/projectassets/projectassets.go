@@ -10,7 +10,10 @@ import (
 	"strings"
 )
 
-const ManifestPath = ".claude/project-assets.json"
+const (
+	ManifestPath             = ".claude/project-assets.json"
+	maxSkillDescriptionChars = 1024
+)
 
 type Exclusion struct {
 	Pattern string `json:"pattern"`
@@ -163,7 +166,25 @@ func skillDescription(root, path string) (string, error) {
 	}
 	return "", fmt.Errorf("%s has no frontmatter description", path)
 }
+func adapterDescription(description string) string {
+	runes := []rune(strings.TrimSpace(description))
+	if len(runes) <= maxSkillDescriptionChars {
+		return string(runes)
+	}
+
+	// Agent Skills caps discovery descriptions at 1024 characters. Keep the
+	// canonical trigger intact while generating a host-compatible projection.
+	const suffix = "..."
+	limit := maxSkillDescriptionChars - len([]rune(suffix))
+	cut := strings.TrimSpace(string(runes[:limit]))
+	if boundary := strings.LastIndexAny(cut, " \t\r\n"); boundary > limit/2 {
+		cut = strings.TrimSpace(cut[:boundary])
+	}
+	return cut + suffix
+}
+
 func adapter(name, description, rel string) string {
+	description = adapterDescription(description)
 	return fmt.Sprintf("---\nname: %s\ndescription: %s\nmetadata:\n  generated-by: fak project-assets sync\n  canonical: %s\n---\n\n# Canonical project skill adapter\n\nLoad and follow [`%s`](%s). This generated discovery adapter contains no maintained workflow body.\n\n## Portability contract\n\n- The linked canonical `SKILL.md` is the single semantic workflow body for Claude, Codex, and fak-native loaders.\n- This adapter changes discovery only; it must not fork, summarize, or translate the workflow.\n- Harness-native invocation, permissions, hooks, model routing, and worker launch remain typed adapters outside the semantic body.\n", name, description, rel, rel, rel)
 }
 

@@ -231,3 +231,21 @@ func TestSyncPreservesDeliberateNativeCodexAdapter(t *testing.T) {
 		t.Fatalf("native adapter was overwritten:\n%s", body)
 	}
 }
+
+func TestAdapterDescriptionHonorsAgentSkillsLimit(t *testing.T) {
+	long := strings.Repeat("discovery trigger ", 100)
+	got := adapterDescription(long)
+	if chars := len([]rune(got)); chars > maxSkillDescriptionChars {
+		t.Fatalf("description has %d characters, want at most %d", chars, maxSkillDescriptionChars)
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("truncated description = %q, want ellipsis", got)
+	}
+	if got != adapterDescription(long) {
+		t.Fatal("description projection is not deterministic")
+	}
+	short := "Use when a project needs portable skill discovery."
+	if got := adapterDescription(short); got != short {
+		t.Fatalf("short description = %q, want %q", got, short)
+	}
+}
