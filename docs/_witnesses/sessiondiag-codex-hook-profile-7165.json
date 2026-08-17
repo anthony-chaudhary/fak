@@ -1,0 +1,350 @@
+{
+  "schema": "fak.codex_hook_profile.v1",
+  "observed_at": "2026-08-17T23:13:14.0066494Z",
+  "verdict": "ACTION",
+  "active_codex_home": "%CODEX_HOME%",
+  "profile": {
+    "declared_codex_home": "%CODEX_HOME%",
+    "app_server_codex_home": "%CODEX_HOME%",
+    "working_directory": "C:\\work\\fak",
+    "app_server_user_agent": "fak-sessiondiag/0.147.0 (Windows 10.0.26200; x86_64) WindowsTerminal (fak-sessiondiag; 1)",
+    "codex_executable": {
+      "name": "codex.exe",
+      "path": "%USERPROFILE%\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe",
+      "exists": true,
+      "sha256": "sha256:935a1911ed2556e4ffcec995f4886ac2ac425863ba26fed264df62e30272ad9d",
+      "version": "codex-cli 0.147.0",
+      "stale": false
+    },
+    "trunk_head": "b8cc1725e6f4c18741474a909d302dda4918eae8",
+    "matches": true
+  },
+  "log_store": {
+    "requested_path": "%CODEX_HOME%\\logs_2.sqlite",
+    "active_path": "%CODEX_HOME%\\logs_2.sqlite",
+    "exists": true,
+    "profile_match": true
+  },
+  "config_precedence_high_to_low": [
+    "session flags and command-line overrides",
+    "workspace/project config, closest directory first",
+    "selected profile config",
+    "active CODEX_HOME user config",
+    "system config",
+    "built-in defaults"
+  ],
+  "hook_merge_semantics": "effective hooks are additive across loaded config and plugin sources; display_order is runtime execution order, not replacement precedence",
+  "homes": [
+    {
+      "path": "%CODEX_HOME%",
+      "exists": true,
+      "active": true,
+      "has_config": true,
+      "has_log_db": true,
+      "status": "ready"
+    },
+    {
+      "path": "%USERPROFILE%\\.codex",
+      "exists": false,
+      "active": false,
+      "has_config": false,
+      "has_log_db": false,
+      "status": "unknown"
+    },
+    {
+      "path": "%CODEX_HOME%",
+      "exists": true,
+      "active": false,
+      "has_config": true,
+      "has_log_db": true,
+      "status": "shadowed"
+    }
+  ],
+  "hooks": [
+    {
+      "key": "C:\\work\\fak\\.codex\\hooks.json:user_prompt_submit:0:0",
+      "event_name": "userPromptSubmit",
+      "handler_type": "command",
+      "command": "if ($env:FAK_CODEX_RAW_RECOVERY -eq 'break-glass') { [Console]::Error.WriteLine('fak codex guard: BREAK-GLASS raw Codex recovery active; fak capability floor and guard audit are not running') } else { fak sessions codex-loop-hook 2>$null; exit 0 }",
+      "source_path": "C:\\work\\fak\\.codex\\hooks.json",
+      "source": "project",
+      "display_order": 0,
+      "precedence": "display_order=0; additive",
+      "layer": "workspace",
+      "enabled": true,
+      "managed": false,
+      "trust_hash": "sha256:b78d679310e77a013329fb854afa59ee0c3b515b272ccd8898b3b28a418df33b",
+      "trust_status": "trusted",
+      "status": "stale-binary",
+      "executables": [
+        {
+          "name": "fak",
+          "path": "%USERPROFILE%\\bin\\fak.exe",
+          "exists": true,
+          "sha256": "sha256:4fc7be14b19f5df5eb621de9d1d8f110897fdf6d07c66cade26dc42728898d15",
+          "version": "0.43.0",
+          "build": "bb5089042542",
+          "stale": true
+        }
+      ]
+    },
+    {
+      "key": "dos-kernel@dos:hooks/hooks.json:pre_tool_use:0:0",
+      "event_name": "preToolUse",
+      "handler_type": "command",
+      "command": "root=\"${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-}}\"; if [ -n \"$root\" ] && [ -f \"$root/bin/dos-hook\" ]; then command -p sh \"$root/bin/dos-hook\" pretool --workspace .; rc=$?; [ \"$rc\" -eq 0 ] && exit 0; fi; python -m dos.cli hook pretool --workspace . 2>/dev/null || python3 -m dos.cli hook pretool --workspace . 2>/dev/null || powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'python -m dos.cli hook pretool --workspace .' 2>/dev/null || { [ -z \"$root\" ] || echo \"dos-hook: warning: no DOS hook backend could run; live DOS enforcement is fail-open. Install dos-kernel or restore claude-plugin/bin/dos-hook.\" >&2; true; }",
+      "source_path": "%CODEX_HOME%\\plugins\\cache\\dos\\dos-kernel\\0.30.0\\hooks\\hooks.json",
+      "source": "plugin",
+      "plugin_id": "dos-kernel@dos",
+      "display_order": 1,
+      "precedence": "display_order=1; additive",
+      "layer": "plugin",
+      "enabled": true,
+      "managed": false,
+      "trust_hash": "sha256:316e9d937ecba3249af162b616464181b026ae25f0b3837b98012424b46a3a39",
+      "trust_status": "trusted",
+      "status": "ready",
+      "executables": [
+        {
+          "name": "dos-hook",
+          "path": "%CODEX_HOME%\\plugins\\cache\\dos\\dos-kernel\\0.30.0\\bin\\dos-hook",
+          "exists": true,
+          "sha256": "sha256:917525db42aeb3c70b5cb960bc1fbf38b17196cba01ee36c58b5df61fe276679",
+          "stale": false
+        }
+      ]
+    },
+    {
+      "key": "dos-kernel@dos:hooks/hooks.json:post_tool_use:0:0",
+      "event_name": "postToolUse",
+      "handler_type": "command",
+      "matcher": "Read|Bash|Grep|Glob",
+      "command": "root=\"${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-}}\"; if [ -n \"$root\" ] && [ -f \"$root/bin/dos-hook\" ]; then command -p sh \"$root/bin/dos-hook\" posttool --workspace .; rc=$?; [ \"$rc\" -eq 0 ] && exit 0; fi; python -m dos.cli hook posttool --workspace . 2>/dev/null || python3 -m dos.cli hook posttool --workspace . 2>/dev/null || powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'python -m dos.cli hook posttool --workspace .' 2>/dev/null || { [ -z \"$root\" ] || echo \"dos-hook: warning: no DOS hook backend could run; live DOS enforcement is fail-open. Install dos-kernel or restore claude-plugin/bin/dos-hook.\" >&2; true; }",
+      "source_path": "%CODEX_HOME%\\plugins\\cache\\dos\\dos-kernel\\0.30.0\\hooks\\hooks.json",
+      "source": "plugin",
+      "plugin_id": "dos-kernel@dos",
+      "display_order": 2,
+      "precedence": "display_order=2; additive",
+      "layer": "plugin",
+      "enabled": true,
+      "managed": false,
+      "trust_hash": "sha256:fceecf07ae6a8bf1c32adffb7d91a2072de663c9348cdb16caf929e580c11773",
+      "trust_status": "trusted",
+      "status": "ready",
+      "executables": [
+        {
+          "name": "dos-hook",
+          "path": "%CODEX_HOME%\\plugins\\cache\\dos\\dos-kernel\\0.30.0\\bin\\dos-hook",
+          "exists": true,
+          "sha256": "sha256:917525db42aeb3c70b5cb960bc1fbf38b17196cba01ee36c58b5df61fe276679",
+          "stale": false
+        }
+      ]
+    },
+    {
+      "key": "dos-kernel@dos:hooks/hooks.json:session_start:0:0",
+      "event_name": "sessionStart",
+      "handler_type": "command",
+      "command": "dos hook session-start --workspace . 2>$null; if ($LASTEXITCODE -eq 0) { exit 0 }; python -m dos.cli hook session-start --workspace . 2>$null; if ($LASTEXITCODE -eq 0) { exit 0 }; py -3 -m dos.cli hook session-start --workspace . 2>$null; if ($LASTEXITCODE -eq 0) { exit 0 }; [Console]::Error.WriteLine('dos-hook: warning: no DOS hook backend could run; live DOS enforcement is fail-open. Install dos-kernel or restore claude-plugin/bin/dos-hook.'); exit 0",
+      "source_path": "%CODEX_HOME%\\plugins\\cache\\dos\\dos-kernel\\0.30.0\\hooks\\hooks.json",
+      "source": "plugin",
+      "plugin_id": "dos-kernel@dos",
+      "display_order": 3,
+      "precedence": "display_order=3; additive",
+      "layer": "plugin",
+      "enabled": true,
+      "managed": false,
+      "trust_hash": "sha256:b111536fb9d4f136f65301550910f4440f8e9d58bcddcb5452bbbc40925cae5a",
+      "trust_status": "trusted",
+      "status": "ready",
+      "executables": [
+        {
+          "name": "dos",
+          "path": "%USERPROFILE%\\AppData\\Roaming\\Python\\Python313\\Scripts\\dos.exe",
+          "exists": true,
+          "sha256": "sha256:05e9c91af3ef56d0fb30285435ec70ee0e743ec97d68970be1f109efc18386c6",
+          "stale": false
+        }
+      ]
+    },
+    {
+      "key": "dos-kernel@dos:hooks/hooks.json:user_prompt_submit:0:0",
+      "event_name": "userPromptSubmit",
+      "handler_type": "command",
+      "command": "dos hook marker --reset --workspace . 2>$null; if ($LASTEXITCODE -ne 0) { python -m dos.cli hook marker --reset --workspace . 2>$null }; if ($LASTEXITCODE -ne 0) { py -3 -m dos.cli hook marker --reset --workspace . 2>$null }; exit 0",
+      "source_path": "%CODEX_HOME%\\plugins\\cache\\dos\\dos-kernel\\0.30.0\\hooks\\hooks.json",
+      "source": "plugin",
+      "plugin_id": "dos-kernel@dos",
+      "display_order": 4,
+      "precedence": "display_order=4; additive",
+      "layer": "plugin",
+      "enabled": true,
+      "managed": false,
+      "trust_hash": "sha256:3d7d3b3a2449e12e25af28ada00d3af74fab9ff5259d38372e6b379eb999a133",
+      "trust_status": "trusted",
+      "status": "ready",
+      "executables": [
+        {
+          "name": "dos",
+          "path": "%USERPROFILE%\\AppData\\Roaming\\Python\\Python313\\Scripts\\dos.exe",
+          "exists": true,
+          "sha256": "sha256:05e9c91af3ef56d0fb30285435ec70ee0e743ec97d68970be1f109efc18386c6",
+          "stale": false
+        }
+      ]
+    },
+    {
+      "key": "dos-kernel@dos:hooks/hooks.json:subagent_stop:0:0",
+      "event_name": "subagentStop",
+      "handler_type": "command",
+      "command": "root=\"${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-}}\"; if [ -n \"$root\" ] && [ -f \"$root/bin/dos-hook\" ]; then command -p sh \"$root/bin/dos-hook\" stop --workspace .; rc=$?; [ \"$rc\" -eq 0 ] && exit 0; fi; python -m dos.cli hook stop --workspace . 2>/dev/null || python3 -m dos.cli hook stop --workspace . 2>/dev/null || powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'python -m dos.cli hook stop --workspace .' 2>/dev/null || { [ -z \"$root\" ] || echo \"dos-hook: warning: no DOS hook backend could run; live DOS enforcement is fail-open. Install dos-kernel or restore claude-plugin/bin/dos-hook.\" >&2; true; }",
+      "source_path": "%CODEX_HOME%\\plugins\\cache\\dos\\dos-kernel\\0.30.0\\hooks\\hooks.json",
+      "source": "plugin",
+      "plugin_id": "dos-kernel@dos",
+      "display_order": 5,
+      "precedence": "display_order=5; additive",
+      "layer": "plugin",
+      "enabled": true,
+      "managed": false,
+      "trust_hash": "sha256:1fb157cc5cd617af3ba26501980e2718b61d5d6e3b521813a57a40dc379dec18",
+      "trust_status": "trusted",
+      "status": "ready",
+      "executables": [
+        {
+          "name": "dos-hook",
+          "path": "%CODEX_HOME%\\plugins\\cache\\dos\\dos-kernel\\0.30.0\\bin\\dos-hook",
+          "exists": true,
+          "sha256": "sha256:917525db42aeb3c70b5cb960bc1fbf38b17196cba01ee36c58b5df61fe276679",
+          "stale": false
+        }
+      ]
+    },
+    {
+      "key": "dos-kernel@dos:hooks/hooks.json:stop:0:0",
+      "event_name": "stop",
+      "handler_type": "command",
+      "command": "root=\"${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-}}\"; if [ -n \"$root\" ] && [ -f \"$root/bin/dos-hook\" ]; then command -p sh \"$root/bin/dos-hook\" stop --workspace .; rc=$?; [ \"$rc\" -eq 0 ] && exit 0; fi; python -m dos.cli hook stop --workspace . 2>/dev/null || python3 -m dos.cli hook stop --workspace . 2>/dev/null || powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'python -m dos.cli hook stop --workspace .' 2>/dev/null || { [ -z \"$root\" ] || echo \"dos-hook: warning: no DOS hook backend could run; live DOS enforcement is fail-open. Install dos-kernel or restore claude-plugin/bin/dos-hook.\" >&2; true; }",
+      "source_path": "%CODEX_HOME%\\plugins\\cache\\dos\\dos-kernel\\0.30.0\\hooks\\hooks.json",
+      "source": "plugin",
+      "plugin_id": "dos-kernel@dos",
+      "display_order": 6,
+      "precedence": "display_order=6; additive",
+      "layer": "plugin",
+      "enabled": true,
+      "managed": false,
+      "trust_hash": "sha256:e44c298e93b788bcc443b1320c71834e9428b4ddb63896d7eef4e2eabafb8e3e",
+      "trust_status": "trusted",
+      "status": "ready",
+      "executables": [
+        {
+          "name": "dos-hook",
+          "path": "%CODEX_HOME%\\plugins\\cache\\dos\\dos-kernel\\0.30.0\\bin\\dos-hook",
+          "exists": true,
+          "sha256": "sha256:917525db42aeb3c70b5cb960bc1fbf38b17196cba01ee36c58b5df61fe276679",
+          "stale": false
+        }
+      ]
+    },
+    {
+      "key": "dos-kernel@dos:hooks/hooks.json:stop:0:1",
+      "event_name": "stop",
+      "handler_type": "command",
+      "command": "python -m dos.cli hook stop-failure --success --workspace . 2>/dev/null || python3 -m dos.cli hook stop-failure --success --workspace . 2>/dev/null || powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'python -m dos.cli hook stop-failure --success --workspace .' 2>/dev/null || true",
+      "source_path": "%CODEX_HOME%\\plugins\\cache\\dos\\dos-kernel\\0.30.0\\hooks\\hooks.json",
+      "source": "plugin",
+      "plugin_id": "dos-kernel@dos",
+      "display_order": 7,
+      "precedence": "display_order=7; additive",
+      "layer": "plugin",
+      "enabled": true,
+      "managed": false,
+      "trust_hash": "sha256:10948dad2a6e7cc410ec1a8d1164294dec9de48c9814fa1b9e3e0d78405ebbd1",
+      "trust_status": "trusted",
+      "status": "ready",
+      "executables": [
+        {
+          "name": "python3",
+          "path": "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\\python3.exe",
+          "exists": true,
+          "stale": false
+        },
+        {
+          "name": "python",
+          "path": "C:\\Program Files\\Python313\\python.exe",
+          "exists": true,
+          "sha256": "sha256:d932e5e2f324d57f392e8fd063dcf6d0185be8a664c57c6d24e7762ed02c28ca",
+          "stale": false
+        },
+        {
+          "name": "powershell.exe",
+          "path": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "exists": true,
+          "sha256": "sha256:7600ffe12da441fe89d035b13801e8e91d064bc544a27b19a5cf49f6ab8b18f5",
+          "stale": false
+        }
+      ]
+    },
+    {
+      "key": "dos-kernel@dos:hooks/hooks.json:stop:0:2",
+      "event_name": "stop",
+      "handler_type": "command",
+      "command": "python -m dos.cli hook live-rotate --workspace . 2>/dev/null || python3 -m dos.cli hook live-rotate --workspace . 2>/dev/null || powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'python -m dos.cli hook live-rotate --workspace .' 2>/dev/null || true",
+      "source_path": "%CODEX_HOME%\\plugins\\cache\\dos\\dos-kernel\\0.30.0\\hooks\\hooks.json",
+      "source": "plugin",
+      "plugin_id": "dos-kernel@dos",
+      "display_order": 8,
+      "precedence": "display_order=8; additive",
+      "layer": "plugin",
+      "enabled": true,
+      "managed": false,
+      "trust_hash": "sha256:08ce77a0b41b6ad32e0ec3f2e6507ca0751d89210d42c9dc5e45ca75a52f42ae",
+      "trust_status": "trusted",
+      "status": "ready",
+      "executables": [
+        {
+          "name": "python3",
+          "path": "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps\\python3.exe",
+          "exists": true,
+          "stale": false
+        },
+        {
+          "name": "python",
+          "path": "C:\\Program Files\\Python313\\python.exe",
+          "exists": true,
+          "sha256": "sha256:d932e5e2f324d57f392e8fd063dcf6d0185be8a664c57c6d24e7762ed02c28ca",
+          "stale": false
+        },
+        {
+          "name": "powershell.exe",
+          "path": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "exists": true,
+          "sha256": "sha256:7600ffe12da441fe89d035b13801e8e91d064bc544a27b19a5cf49f6ab8b18f5",
+          "stale": false
+        }
+      ]
+    }
+  ],
+  "diagnoses": [
+    {
+      "type": "shadowed",
+      "subject": "%CODEX_HOME%",
+      "message": "Codex home exists but was not selected by the app-server initialized under the current environment",
+      "remediation": "launch Codex with the intended CODEX_HOME, or migrate/remove the inactive home after preserving credentials and state"
+    },
+    {
+      "type": "stale-binary",
+      "subject": "C:\\work\\fak\\.codex\\hooks.json:user_prompt_submit:0:0",
+      "message": "the hook resolves a fak executable whose embedded build does not match the repository tip",
+      "remediation": "rebuild/install fak from the intended trunk and verify PATH before restarting Codex"
+    }
+  ],
+  "recent_tool_failures": {
+    "log_path": "%CODEX_HOME%\\logs_2.sqlite",
+    "row_window": 20000,
+    "router_errors": 7,
+    "refusal_signals": 2,
+    "parser_errors": 0,
+    "timeouts": 0,
+    "interpretation": "router ERROR rows are failed tool calls, not proof that a PreToolUse hook refused them; refusal_signals counts only explicit deny/refuse markers"
+  }
+}

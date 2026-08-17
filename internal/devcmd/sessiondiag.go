@@ -45,6 +45,10 @@ func runSessionDiagWith(stdout, stderr io.Writer, args []string, query sessionDi
 	staleAfter := fs.Duration("stale-after", 10*time.Minute, "writer-lock/current-state staleness threshold")
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	inventory := fs.Bool("inventory", false, "join current Codex threads, turns, writer locks, processes, guard launch receipts, and spawn edges")
+	hookProfile := fs.Bool("hook-profile", false, "diagnose the effective Codex hook profile through app-server hooks/list")
+	codexBin := fs.String("codex-bin", "", "Codex executable for --hook-profile (auto-detected by default)")
+	repoRoot := fs.String("repo", ".", "repository whose HEAD identifies the expected fak hook build")
+	recentLogRows := fs.Int("recent-log-rows", 20_000, "bounded trailing Codex log rows inspected by --hook-profile")
 	liveSignals := fs.Bool("live-signals", false, "render the minimal operator projection for live DOS lanes (attention, outcome, move, next check)")
 	fullLiveSignals := fs.Bool("full", false, "with --live-signals, expand unknown and healthy workers instead of folding them")
 	registryPath := fs.String("registry", sessionregistry.DefaultPath(), "child registration JSONL path (missing is allowed)")
@@ -58,13 +62,36 @@ func runSessionDiagWith(stdout, stderr io.Writer, args []string, query sessionDi
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if fs.NArg() != 0 || *since <= 0 || *staleAfter <= 0 {
-		fmt.Fprintln(stderr, "usage: fak dev sessiondiag [--inventory] [--registry FILE] [--codex-home DIR] [--db PATH] [--since 24h] [--stale-after 10m] [--json]")
+	if fs.NArg() != 0 || *since <= 0 || *staleAfter <= 0 || *recentLogRows <= 0 {
+		fmt.Fprintln(stderr, "usage: fak dev sessiondiag [--inventory|--hook-profile] [--registry FILE] [--codex-home DIR] [--codex-bin FILE] [--db PATH] [--since 24h] [--stale-after 10m] [--json]")
 		return 2
 	}
 	if *fullLiveSignals && !*liveSignals {
 		fmt.Fprintln(stderr, "fak sessiondiag: --full requires --live-signals")
 		return 2
+	}
+	if *hookProfile {
+		if *inventory || *liveSignals || *incidentOut != "" {
+			fmt.Fprintln(stderr, "fak sessiondiag: --hook-profile cannot be combined with --inventory, --live-signals, or --incident-out")
+			return 2
+		}
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(stderr, "fak sessiondiag: working directory unavailable")
+			return 2
+		}
+		if !flagWasSet(fs, "db") && strings.TrimSpace(*codexHome) != "" {
+			*db = filepath.Join(*codexHome, "logs_2.sqlite")
+		}
+		return runCodexHookProfileWith(stdout, stderr, codexHookProfileQueryInput{
+			CodexHome:        *codexHome,
+			CodexBin:         *codexBin,
+			WorkingDirectory: cwd,
+			LogDBPath:        *db,
+			RepoRoot:         *repoRoot,
+			RecentLogRows:    *recentLogRows,
+			ObservedAt:       now().UTC(),
+		}, *jsonOut, queryCodexHookProfile)
 	}
 	if *liveSignals {
 		if *jsonOut || *inventory || *incidentOut != "" {
@@ -431,10 +458,23 @@ func unixFlexible(value int64) time.Time {
 }
 
 func defaultCodexLogDB() string {
+	if h := strings.TrimSpace(os.Getenv("CODEX_HOME")); h != "" {
+		return filepath.Join(h, "logs_2.sqlite")
+	}
 	if h, err := os.UserHomeDir(); err == nil {
 		return filepath.Join(h, ".codex", "logs_2.sqlite")
 	}
 	return "logs_2.sqlite"
+}
+
+func flagWasSet(fs *flag.FlagSet, name string) bool {
+	found := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
 }
 
 func queryCodexLogReadOnly(path string, since time.Duration) (sessiondiag.Evidence, error) {
