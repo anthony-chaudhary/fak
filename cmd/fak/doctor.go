@@ -62,6 +62,9 @@ func cmdDoctor(argv []string) {
 // runDoctor is the testable core of `fak doctor`: it returns the exit code and
 // takes explicit streams.
 func runDoctor(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == "binary" {
+		argv = append([]string{"--binary"}, argv[1:]...)
+	}
 	if len(argv) > 0 && argv[0] == "codex-mcp-warning" {
 		return runDoctorCodexMCPWarning(stdout, stderr, argv[1:])
 	}
@@ -89,6 +92,10 @@ func runDoctor(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit the doctor report as JSON")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "fak doctor: unexpected argument %q\n", fs.Arg(0))
+		return 2
 	}
 
 	if *binary {

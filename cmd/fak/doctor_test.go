@@ -169,3 +169,32 @@ func TestStampFreshnessRecommendation(t *testing.T) {
 		})
 	}
 }
+
+func TestDoctorBinaryPositionalAliasReachesBinaryDiagnosis(t *testing.T) {
+	var positionalOut, flagOut bytes.Buffer
+	positionalRC := runDoctor(strings.NewReader(""), &positionalOut, &bytes.Buffer{}, []string{"binary", "--json"})
+	flagRC := runDoctor(strings.NewReader(""), &flagOut, &bytes.Buffer{}, []string{"--binary", "--json"})
+	if positionalRC != flagRC {
+		t.Fatalf("positional rc=%d, flag rc=%d", positionalRC, flagRC)
+	}
+	var positional, flag appversion.BinaryReport
+	if err := json.Unmarshal(positionalOut.Bytes(), &positional); err != nil {
+		t.Fatalf("positional output is not binary report JSON: %v\n%s", err, positionalOut.String())
+	}
+	if err := json.Unmarshal(flagOut.Bytes(), &flag); err != nil {
+		t.Fatalf("flag output is not binary report JSON: %v\n%s", err, flagOut.String())
+	}
+	if positional.Executable != flag.Executable || positional.Findings != flag.Findings {
+		t.Fatalf("positional alias drifted: positional=%+v flag=%+v", positional, flag)
+	}
+}
+
+func TestDoctorRejectsUnknownPositionalArgument(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if rc := runDoctor(strings.NewReader(""), &stdout, &stderr, []string{"binarry"}); rc != 2 {
+		t.Fatalf("rc=%d, want usage error 2; stdout=%q stderr=%q", rc, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "unexpected argument") {
+		t.Fatalf("missing positional rejection: %q", stderr.String())
+	}
+}
