@@ -189,16 +189,34 @@ func runMaturityAnatomy(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	asJSON := fs.Bool("json", false, "emit machine-readable anatomy")
+	all := fs.Bool("all", false, "compare every first-class internal leaf")
+	limit := fs.Int("limit", 10, "ranking rows in --all mode")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
-	if fs.NArg() > 1 {
-		fmt.Fprintln(stderr, "usage: fak maturity anatomy [package-path] [--json] [--workspace PATH]")
+	if fs.NArg() > 1 || (*all && fs.NArg() != 0) {
+		fmt.Fprintln(stderr, "usage: fak maturity anatomy [package-path] [--all] [--limit N] [--json] [--workspace PATH]")
 		return 2
 	}
 	root := *workspace
 	if root == "" {
 		root = repoRoot()
+	}
+	if *all {
+		payload, err := maturity.AnalyzeAnatomyPortfolio(root, *limit)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak maturity anatomy: %v\n", err)
+			return 2
+		}
+		if *asJSON {
+			if err := maturity.EncodeAnatomyPortfolioJSON(stdout, payload); err != nil {
+				fmt.Fprintf(stderr, "fak maturity anatomy: encode json: %v\n", err)
+				return 2
+			}
+		} else {
+			maturity.RenderAnatomyPortfolioText(stdout, payload)
+		}
+		return 0
 	}
 	target := "internal/maturity"
 	if fs.NArg() == 1 {

@@ -541,7 +541,10 @@ func scanLeaf(dir string) (hasCode, hasTests, hasBench bool) {
 // test importing a leaf does not mean the binary runs it). A leaf in the result
 // is one fak itself runs; one outside it self-tests but is not yet dogfooded.
 func scanReachable(root string) map[string]struct{} {
-	graph := internalImportGraph(filepath.Join(root, "internal"))
+	return scanReachableWithGraph(root, internalImportGraph(filepath.Join(root, "internal")))
+}
+
+func scanReachableWithGraph(root string, graph map[string]map[string]struct{}) map[string]struct{} {
 	seeds := importsUnder(filepath.Join(root, "cmd"))
 	for leaf := range importsUnder(filepath.Join(root, "internal", "registrations")) {
 		seeds[leaf] = struct{}{}

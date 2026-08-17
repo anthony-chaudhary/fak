@@ -2385,6 +2385,11 @@
           "category": "incidental",
           "reason": "standard early-return syntax metric, not an enforcement guard or gate",
           "token": "GuardClauses"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON metric name for summed cyclomatic complexity, not an enforcement guard or gate",
+          "token": "aggregate_complexity"
         }
       ],
       "exclude": [
@@ -2468,6 +2473,7 @@
         "admitGuardShrinkLevers",
         "aggregateLive",
         "aggregateTail",
+        "aggregate_complexity",
         "appendGuardCompactionWitnessTo",
         "armbenchPonytailGates",
         "bindGuardRegistration",
@@ -8945,6 +8951,16 @@
           "category": "incidental",
           "reason": "format-specific presentation helper, not a new render/materialize domain concept",
           "token": "RenderAnatomyText"
+        },
+        {
+          "category": "incidental",
+          "reason": "format-specific static-analysis portfolio presenter, not a render/materialization domain concept",
+          "token": "RenderAnatomyPortfolioText"
+        },
+        {
+          "category": "incidental",
+          "reason": "local formatting closure for anatomy ranking rows, not a render/materialization domain concept",
+          "token": "renderRanks"
         }
       ],
       "id": "render-materialize",
@@ -8954,6 +8970,7 @@
         "MaterializeOwned",
         "MaterializedStateDigest",
         "RenderAging",
+        "RenderAnatomyPortfolioText",
         "RenderAnatomyText",
         "RenderAuditClusterReport",
         "RenderCeilings",
@@ -8992,6 +9009,7 @@
         "renderGitSpawnDelta",
         "renderGitSpawnReport",
         "renderREADME",
+        "renderRanks",
         "renderResumeDedup",
         "renderRunaway",
         "renderSchedLauncherTable",

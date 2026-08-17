@@ -78,6 +78,11 @@ func AnalyzeAnatomy(root, target string) (Anatomy, error) {
 	if err != nil {
 		return Anatomy{}, err
 	}
+	graph := internalImportGraph(filepath.Join(absRoot, "internal"))
+	return analyzeAnatomy(absRoot, target, graph, scanReachableWithGraph(absRoot, graph))
+}
+
+func analyzeAnatomy(absRoot, target string, graph map[string]map[string]struct{}, reachable map[string]struct{}) (Anatomy, error) {
 	dir := target
 	if dir == "" {
 		dir = "internal/maturity"
@@ -85,7 +90,7 @@ func AnalyzeAnatomy(root, target string) (Anatomy, error) {
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(absRoot, filepath.FromSlash(dir))
 	}
-	dir, err = filepath.Abs(dir)
+	dir, err := filepath.Abs(dir)
 	if err != nil {
 		return Anatomy{}, err
 	}
@@ -161,11 +166,11 @@ func AnalyzeAnatomy(root, target string) (Anatomy, error) {
 			case *ast.GenDecl:
 				for _, spec := range d.Specs {
 					var ids []*ast.Ident
-					switch s := spec.(type) {
+					switch spec := spec.(type) {
 					case *ast.TypeSpec:
-						ids = []*ast.Ident{s.Name}
+						ids = []*ast.Ident{spec.Name}
 					case *ast.ValueSpec:
-						ids = s.Names
+						ids = spec.Names
 					}
 					for _, id := range ids {
 						if id.IsExported() {
@@ -183,7 +188,7 @@ func AnalyzeAnatomy(root, target string) (Anatomy, error) {
 		a.Position.InternalDependencies = append(a.Position.InternalDependencies, dep)
 	}
 	sort.Strings(a.Position.InternalDependencies)
-	a.Position.InternalDependents, a.Position.CLIReachable = anatomyPosition(absRoot, a.Package)
+	a.Position.InternalDependents, a.Position.CLIReachable = anatomyPositionFromGraph(a.Package, graph, reachable)
 	return a, nil
 }
 
@@ -321,8 +326,7 @@ func classifyReturn(r *ast.ReturnStmt) string {
 func exprText(e ast.Expr) string               { var b strings.Builder; _ = formatNode(&b, e); return b.String() }
 func formatNode(w io.Writer, n ast.Node) error { return printer.Fprint(w, token.NewFileSet(), n) }
 
-func anatomyPosition(root, target string) ([]string, bool) {
-	graph := internalImportGraph(filepath.Join(root, "internal"))
+func anatomyPositionFromGraph(target string, graph map[string]map[string]struct{}, reachable map[string]struct{}) ([]string, bool) {
 	trim := strings.TrimPrefix(target, "internal/")
 	var dependents []string
 	for from, tos := range graph {
@@ -331,7 +335,6 @@ func anatomyPosition(root, target string) ([]string, bool) {
 		}
 	}
 	sort.Strings(dependents)
-	reachable := scanReachable(root)
 	_, cli := reachable[trim]
 	return dependents, cli
 }

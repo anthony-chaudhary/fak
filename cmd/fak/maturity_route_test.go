@@ -171,3 +171,16 @@ func TestMaturityAnatomyRouteEmitsStaticStructure(t *testing.T) {
 		}
 	}
 }
+
+func TestMaturityAnatomyAllRouteEmitsRelativePortfolio(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runMaturity(&stdout, &stderr, []string{"anatomy", "--workspace", repoRoot(), "--all", "--limit", "2"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	for _, want := range []string{"MATURITY ANATOMY PORTFOLIO", "TOP AGGREGATE COMPLEXITY", "TOP COMPLEXITY / FUNCTION", "TOP UNDOCUMENTED EXPORTS", "TOP INTERNAL DEPENDENCIES", "TOP INTERNAL DEPENDENTS", "not quality grades"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("missing %q in %s", want, stdout.String())
+		}
+	}
+}
