@@ -265,6 +265,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Learning observation lineage](docs/learning-observation.md) — content-addressed source/candidate/witness/verdict records and closed-enum edges; separate from witness-gated admission.
 
 ## Notes & research (`docs/notes/`)
+- [Five whys: why desktop-window spam kept returning (2026-08-17)](docs/notes/WINDOW-SPAM-FIVE-WHYS-2026-08-17.md) -- auto-indexed dated note.
 - [Guarded Codex workflow-default dogfood — 2026-08-17](docs/notes/CODEX-WORKFLOW-DEFAULT-DOGFOOD-2026-08-17.md) -- auto-indexed dated note.
 - [Messaging experiment: from token cost to agent work](docs/notes/EXPERIMENT-TOKEN-TURN-TASK-MESSAGING-2026-08-17.md) -- auto-indexed dated note.
 - [Guarded Codex workflow-default uptake: first paired-study snapshot (2026-08-17)](docs/notes/WORKFLOW-DEFAULT-UPTAKE-DOGFOOD-2026-08-17.md) -- auto-indexed dated note.

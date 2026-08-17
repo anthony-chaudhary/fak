@@ -17,14 +17,14 @@ REQUIRES AN ELEVATED SHELL for -Apply: setting an S4U principal is refused non-e
 ("Access is denied"). Right-click PowerShell -> Run as administrator.
 
   .\migrate_fleet_tasks_to_s4u.ps1                 # DRY-RUN: list Interactive fleet tasks + plan
-  .\migrate_fleet_tasks_to_s4u.ps1 -Apply          # migrate the currently-failing (0x800710E0) ones
-  .\migrate_fleet_tasks_to_s4u.ps1 -Apply -All     # migrate ALL Interactive fleet tasks (not just failing)
+  .\migrate_fleet_tasks_to_s4u.ps1 -Apply          # migrate ALL Interactive fleet tasks (the safe default)
+  .\migrate_fleet_tasks_to_s4u.ps1 -Apply -FailingOnly # legacy incident-only scope
   .\migrate_fleet_tasks_to_s4u.ps1 -Apply -VerifyRun   # after migrating, force-run each and report LastResult
 #>
 [CmdletBinding()]
 param(
   [switch]$Apply,
-  [switch]$All,        # include Interactive tasks that are not currently failing
+  [switch]$FailingOnly, # legacy incident mode: migrate only currently failing/required tasks
   [switch]$VerifyRun,  # force-run each migrated task and report its LastTaskResult
   [string]$NamePattern = 'Fleet|Fak|Resume|Dispatch|Supervisor|Watchdog|Guard|Seat|Owner|Slack|Logvault|Push|Scout|Stale|Janitor|Reaper|Pane'
 )
@@ -61,18 +61,23 @@ $cands = Get-ScheduledTask |
 $cands = @($cands)
 if ($cands.Count -eq 0) { Write-Output "no Interactive-logon fleet tasks found - nothing to migrate."; return }
 
-if ($All) { $targets = $cands } else { $targets = @($cands | Where-Object { $_.Failing -or $RequiredS4UTasks -contains $_.Task }) }
+if ($FailingOnly) {
+  Write-Warning '-FailingOnly preserves desktop-visible Interactive tasks and is intended only for legacy incident triage.'
+  $targets = @($cands | Where-Object { $_.Failing -or $RequiredS4UTasks -contains $_.Task })
+} else {
+  $targets = $cands
+}
 
 Write-Output "=== Interactive-logon fleet tasks ==="
 foreach ($c in ($cands | Sort-Object Task)) {
   Write-Output ("  {0,-26} {1,-8} last={2,-12} failing={3}" -f $c.Task, $c.RunLevel, $c.LastResult, $c.Failing)
 }
-Write-Output ("candidates: {0} Interactive | selected to migrate: {1} ({2})" -f $cands.Count, @($targets).Count, $(if ($All) { 'all Interactive' } else { 'currently failing 0x800710E0' }))
+Write-Output ("candidates: {0} Interactive | selected to migrate: {1} ({2})" -f $cands.Count, @($targets).Count, $(if ($FailingOnly) { 'currently failing 0x800710E0 / required compatibility set' } else { 'all Interactive' }))
 
 if (-not $Apply) {
   Write-Output ""
   Write-Output "DRY-RUN - nothing changed. Re-run from an ELEVATED shell with -Apply to migrate the selected tasks to S4U."
-  Write-Output "  (add -All to include non-failing Interactive tasks; add -VerifyRun to force-run each after.)"
+  Write-Output "  (all Interactive tasks are selected by default; add -FailingOnly only for legacy incident triage.)"
   return
 }
 
