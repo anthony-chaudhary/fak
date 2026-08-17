@@ -45,6 +45,7 @@ func runSessionDiagWith(stdout, stderr io.Writer, args []string, query sessionDi
 	staleAfter := fs.Duration("stale-after", 10*time.Minute, "writer-lock/current-state staleness threshold")
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	inventory := fs.Bool("inventory", false, "join current Codex threads, turns, writer locks, processes, guard launch receipts, and spawn edges")
+	liveSignals := fs.Bool("live-signals", false, "render the minimal operator projection for live DOS lanes (attention, outcome, move, next check)")
 	registryPath := fs.String("registry", sessionregistry.DefaultPath(), "child registration JSONL path (missing is allowed)")
 	incidentOut := fs.String("incident-out", "", "write one redacted incident envelope (requires --process-id)")
 	processID := fs.Int("process-id", 0, "observed Codex process id")
@@ -59,6 +60,13 @@ func runSessionDiagWith(stdout, stderr io.Writer, args []string, query sessionDi
 	if fs.NArg() != 0 || *since <= 0 || *staleAfter <= 0 {
 		fmt.Fprintln(stderr, "usage: fak dev sessiondiag [--inventory] [--registry FILE] [--codex-home DIR] [--db PATH] [--since 24h] [--stale-after 10m] [--json]")
 		return 2
+	}
+	if *liveSignals {
+		if *jsonOut || *inventory || *incidentOut != "" {
+			fmt.Fprintln(stderr, "fak sessiondiag: --live-signals cannot be combined with --json, --inventory, or --incident-out")
+			return 2
+		}
+		return runOperatorLiveSignals(stdout, stderr, operatorLiveCommand, now())
 	}
 	if *inventory {
 		if *incidentOut != "" {
