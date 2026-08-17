@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/disambiguation"
@@ -24,6 +28,8 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 	switch args[0] {
 	case "schema":
 		return runDisambiguationSchema(stdout, stderr, args[1:])
+	case "generate":
+		return runDisambiguationGenerate(stdout, stderr, args[1:])
 	case "query":
 		return runDisambiguationQuery(stdout, stderr, args[1:])
 	case "ownership":
@@ -40,6 +46,69 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want schema, query, ownership, freshness, provenance, stale-symbols-self-test, or coverage-self-test)\n", args[0])
 		return 2
 	}
+}
+
+const defaultDisambiguationIndexPath = "docs/generated/disambiguation-index.json"
+
+type disambiguationGenerateReport struct {
+	Schema  string `json:"schema"`
+	Path    string `json:"path"`
+	SHA256  string `json:"sha256"`
+	Bytes   int    `json:"bytes"`
+	Changed bool   `json:"changed"`
+	Check   bool   `json:"check"`
+}
+
+func runDisambiguationGenerate(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("disambiguation generate", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	outputPath := fs.String("output", defaultDisambiguationIndexPath, "generated index path")
+	check := fs.Bool("check", false, "fail when the tracked artifact differs")
+	jsonOutput := fs.Bool("json", false, "emit JSON report")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "fak disambiguation generate: unexpected positional arguments")
+		return 2
+	}
+	generated, err := disambiguation.GeneratePublicIndex()
+	if err != nil {
+		fmt.Fprintf(stderr, "fak disambiguation generate: %v\n", err)
+		return 1
+	}
+	existing, readErr := os.ReadFile(*outputPath)
+	changed := readErr != nil || !bytes.Equal(existing, generated)
+	if *check {
+		if changed {
+			fmt.Fprintf(stderr, "fak disambiguation generate: stale artifact %s; rerun without --check\n", *outputPath)
+			return 1
+		}
+	} else if changed {
+		if err := os.MkdirAll(filepath.Dir(*outputPath), 0o755); err != nil {
+			fmt.Fprintf(stderr, "fak disambiguation generate: create output directory: %v\n", err)
+			return 1
+		}
+		if err := os.WriteFile(*outputPath, generated, 0o644); err != nil {
+			fmt.Fprintf(stderr, "fak disambiguation generate: write %s: %v\n", *outputPath, err)
+			return 1
+		}
+	}
+	digest := sha256.Sum256(generated)
+	report := disambiguationGenerateReport{Schema: "fak-disambiguation-generate/1", Path: filepath.ToSlash(*outputPath), SHA256: hex.EncodeToString(digest[:]), Bytes: len(generated), Changed: changed, Check: *check}
+	if *jsonOutput {
+		if err := json.NewEncoder(stdout).Encode(report); err != nil {
+			fmt.Fprintf(stderr, "fak disambiguation generate: encode report: %v\n", err)
+			return 1
+		}
+	} else {
+		verb := "unchanged"
+		if changed && !*check {
+			verb = "wrote"
+		}
+		fmt.Fprintf(stdout, "%s %s sha256:%s\n", verb, report.Path, report.SHA256)
+	}
+	return 0
 }
 
 func runDisambiguationSchema(stdout, stderr io.Writer, args []string) int {

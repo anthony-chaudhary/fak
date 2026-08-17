@@ -14,11 +14,12 @@ values, and non-public source locators. `identity.aliases` must be present as an
 array but may be empty (`[]`). Adding, removing, renaming, or changing the type
 of a field requires a new schema version.
 
-The package is deliberately read/validation-only: it performs no filesystem or
-network writes and imports no private source. A later index generator remains
-the sole writer. `testdata/entry-v1.json` is a complete public-source fixture;
-`RunSelfTest` accepts it in equivalent typed form and independently removes and
-rejects every required JSON path declared by the schema descriptor.
+The package performs no filesystem or network writes and imports no private
+source. `GeneratePublicIndex` is the sole byte writer for the tracked public
+artifact; `cmd/fak` only routes those bytes to disk. `testdata/entry-v1.json` is
+a complete public-source fixture; `RunSelfTest` accepts it in equivalent typed
+form and independently removes and rejects every required JSON path declared by
+the schema descriptor.
 
 ## Canonical and declared-alias query
 
@@ -110,6 +111,17 @@ fak disambiguation query kernel --scope-kind package --scope-value internal/disa
 
 The index remains a single public-source writer. Scope does not broaden source admission or permit private repository, host, credential, or local-path material.
 
+
+## Deterministic generated index
+
+`fak disambiguation generate` validates the declared public entries, sorts entries,
+aliases, contrasts, and source witnesses into canonical order, and writes
+`docs/generated/disambiguation-index.json`. The artifact records the source-set
+SHA-256 as `source_revision`; the command report records the final byte digest.
+Run `fak disambiguation generate --check --json` at a committed tip to prove
+regenerate-and-diff is clean. `--check` is read-only and exits nonzero on missing
+or stale output. No repository crawl, network read, private source, or second
+serializer participates in generation.
 
 ## Strict public provenance
 

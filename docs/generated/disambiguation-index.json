@@ -1,0 +1,267 @@
+{
+  "schema": "fak-disambiguation-index/1",
+  "source_revision": "sha256:e7c3b3e5cdbe812768ef64890551ede4455a01cc17e2bee51ec052e74ff63a84",
+  "entry_count": 6,
+  "entries": [
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "agent kernel",
+        "aliases": [
+          "fused agent kernel"
+        ]
+      },
+      "definition": "The fak management boundary that governs model traffic, tool effects, context, and recovery.",
+      "contrasts": [
+        {
+          "canonical_term": "compute kernel",
+          "explanation": "An arithmetic routine executed by a processor; it does not govern an agent's tool effects.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "product",
+        "value": "fak"
+      },
+      "owner": {
+        "leaf": "kernel",
+        "lane": "kernel"
+      },
+      "sources": [
+        {
+          "kind": "document",
+          "locator": "README.md#how-it-works",
+          "revision": "692e4b57d0",
+          "checked_at": "2026-08-11T00:00:00Z",
+          "probe": "fak-disambiguation-seed"
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-11T00:00:00Z",
+        "probe": "public-seed/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "compute kernel",
+        "aliases": []
+      },
+      "definition": "An arithmetic routine executed by a processor.",
+      "contrasts": [
+        {
+          "canonical_term": "agent kernel",
+          "explanation": "The fak management boundary governs agent behavior; it is not a processor arithmetic routine.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "computing",
+        "value": "processor"
+      },
+      "owner": {
+        "leaf": "kernel",
+        "lane": "kernel"
+      },
+      "sources": [
+        {
+          "kind": "document",
+          "locator": "README.md#how-it-works",
+          "revision": "692e4b57d0",
+          "checked_at": "2026-08-11T00:00:00Z",
+          "probe": "fak-disambiguation-seed"
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-11T00:00:00Z",
+        "probe": "public-seed/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "disambiguation package",
+        "aliases": []
+      },
+      "definition": "The internal/disambiguation package, named as a contrast target for the CLI-scoped kernel entry.",
+      "contrasts": [
+        {
+          "canonical_term": "kernel",
+          "explanation": "The package and CLI-scoped kernel are distinct.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "package",
+        "value": "internal/disambiguation"
+      },
+      "owner": {
+        "leaf": "disambiguation",
+        "lane": "canon"
+      },
+      "sources": [
+        {
+          "kind": "document",
+          "locator": "internal/disambiguation/README.md",
+          "revision": "public-seed/1",
+          "checked_at": "2026-08-11T00:00:00Z",
+          "probe": "fak-disambiguation-seed"
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-11T00:00:00Z",
+        "probe": "public-seed/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "fak CLI kernel",
+        "aliases": []
+      },
+      "definition": "The fak command-line product surface, named as a contrast target for the package-scoped kernel entry.",
+      "contrasts": [
+        {
+          "canonical_term": "kernel",
+          "explanation": "The CLI surface and package-scoped kernel are distinct.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "cli",
+        "value": "fak"
+      },
+      "owner": {
+        "leaf": "disambiguation",
+        "lane": "canon"
+      },
+      "sources": [
+        {
+          "kind": "document",
+          "locator": "README.md#how-it-works",
+          "revision": "public-seed/1",
+          "checked_at": "2026-08-11T00:00:00Z",
+          "probe": "fak-disambiguation-seed"
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-11T00:00:00Z",
+        "probe": "public-seed/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "kernel",
+        "aliases": []
+      },
+      "definition": "The fak command-line product surface for operating the agent kernel.",
+      "contrasts": [
+        {
+          "canonical_term": "disambiguation package",
+          "explanation": "The command-line product surface is not the internal Go package API.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "cli",
+        "value": "fak"
+      },
+      "owner": {
+        "leaf": "disambiguation",
+        "lane": "canon"
+      },
+      "sources": [
+        {
+          "kind": "document",
+          "locator": "README.md#how-it-works",
+          "revision": "public-seed/1",
+          "checked_at": "2026-08-11T00:00:00Z",
+          "probe": "fak-disambiguation-seed"
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-11T00:00:00Z",
+        "probe": "public-seed/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "kernel",
+        "aliases": []
+      },
+      "definition": "The internal/disambiguation Go package that validates and queries public terminology records.",
+      "contrasts": [
+        {
+          "canonical_term": "fak CLI kernel",
+          "explanation": "The package API is not the fak command-line product surface.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "package",
+        "value": "internal/disambiguation"
+      },
+      "owner": {
+        "leaf": "disambiguation",
+        "lane": "canon"
+      },
+      "sources": [
+        {
+          "kind": "document",
+          "locator": "internal/disambiguation/README.md",
+          "revision": "public-seed/1",
+          "checked_at": "2026-08-11T00:00:00Z",
+          "probe": "fak-disambiguation-seed"
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-11T00:00:00Z",
+        "probe": "public-seed/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    }
+  ]
+}
