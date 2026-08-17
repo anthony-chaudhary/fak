@@ -117,7 +117,18 @@ func runRuntimeProofs(root string, witnesses map[string]RuntimeProof) error {
 		if len(fields) == 0 {
 			return fmt.Errorf("runtime witness for %s is empty", lane)
 		}
-		command := exec.Command(fields[0], fields[1:]...)
+		program := fields[0]
+		if isFakProgram(program) {
+			resolved, err := resolveRuntimeFak()
+			if err != nil {
+				return fmt.Errorf("runtime witness for %s cannot resolve fak artifact: %w", lane, err)
+			}
+			if err := verifyFakArtifact(root, resolved); err != nil {
+				return fmt.Errorf("runtime witness for %s: %w", lane, err)
+			}
+			program = resolved
+		}
+		command := exec.Command(program, fields[1:]...)
 		command.Dir = root
 		output, err := command.CombinedOutput()
 		if err != nil {
@@ -128,4 +139,57 @@ func runRuntimeProofs(root string, witnesses map[string]RuntimeProof) error {
 		}
 	}
 	return nil
+}
+
+var resolveRuntimeFak = func() (string, error) {
+	if executable, err := os.Executable(); err == nil && isFakProgram(executable) {
+		return executable, nil
+	}
+	return exec.LookPath("fak")
+}
+
+func verifyFakArtifact(root, artifact string) error {
+	headCommand := exec.Command("git", "rev-parse", "HEAD")
+	headCommand.Dir = root
+	headOutput, err := headCommand.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("resolve scored source revision: %w: %s", err, strings.TrimSpace(string(headOutput)))
+	}
+	head := strings.TrimSpace(string(headOutput))
+	versionCommand := exec.Command(artifact, "version")
+	versionCommand.Dir = root
+	versionOutput, err := versionCommand.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("inspect fak artifact identity: %w: %s", err, strings.TrimSpace(string(versionOutput)))
+	}
+	build := ""
+	for _, line := range strings.Split(string(versionOutput), "\n") {
+		if value, ok := strings.CutPrefix(strings.TrimSpace(line), "build:"); ok {
+			build = strings.TrimSpace(value)
+			break
+		}
+	}
+	if build == "" || strings.Contains(build, "no VCS stamp") {
+		return fmt.Errorf("fak artifact has no VCS revision for scored source %s", shortRevision(head))
+	}
+	fields := strings.Fields(build)
+	if len(fields) == 0 || !strings.HasPrefix(head, fields[0]) {
+		return fmt.Errorf("fak artifact revision %s does not match scored source %s", build, shortRevision(head))
+	}
+	if len(fields) > 1 && fields[1] == "dirty" {
+		return fmt.Errorf("fak artifact revision %s is dirty; runtime evidence must name an immutable source", build)
+	}
+	return nil
+}
+
+func isFakProgram(program string) bool {
+	base := strings.ToLower(filepath.Base(program))
+	return base == "fak" || base == "fak.exe"
+}
+
+func shortRevision(revision string) string {
+	if len(revision) > 12 {
+		return revision[:12]
+	}
+	return revision
 }

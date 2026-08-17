@@ -2,9 +2,11 @@ package maturity
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -330,7 +332,7 @@ func TestLoadRuntimeProofsRejectsDuplicateAndVerifyRejectsFailure(t *testing.T) 
 	if _, err := loadRuntimeProofs(root); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("err=%v", err)
 	}
-	data = `{"schema":"fak-maturity-runtime-proofs/2","witnesses":[{"lane":"x","command":"fak definitely-not-a-command","output_contains":"x never"}]}`
+	data = `{"schema":"fak-maturity-runtime-proofs/2","witnesses":[{"lane":"x","command":"git definitely-not-a-command","output_contains":"x never"}]}`
 	if err := os.WriteFile(filepath.Join(dir, "runtime-proofs.json"), []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -341,6 +343,14 @@ func TestLoadRuntimeProofsRejectsDuplicateAndVerifyRejectsFailure(t *testing.T) 
 
 func TestRealRuntimeWitnessRegistryPasses(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", ".."))
+	headOutput, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Fatalf("resolve fixture HEAD: %v: %s", err, headOutput)
+	}
+	artifact := buildRuntimeFakFixture(t, strings.TrimSpace(string(headOutput)), "fak: loaded capability floor from examples/customer-support-readonly-policy.json")
+	oldResolver := resolveRuntimeFak
+	resolveRuntimeFak = func() (string, error) { return artifact, nil }
+	t.Cleanup(func() { resolveRuntimeFak = oldResolver })
 	if err := VerifyRuntimeProofs(root); err != nil {
 		t.Fatal(err)
 	}
@@ -390,6 +400,91 @@ func writeRuntimeProofFixture(t *testing.T, root string, proofs []RuntimeProof) 
 	if err := os.WriteFile(filepath.Join(path, "runtime-proofs.json"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestRuntimeProofRejectsDirtyMatchingArtifact(t *testing.T) {
+	root := initRuntimeProofGitRepo(t)
+	headOutput, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Fatalf("resolve fixture HEAD: %v: %s", err, headOutput)
+	}
+	writeRuntimeProofFixture(t, root, []RuntimeProof{{
+		Lane: "alpha", Command: "fak", OutputContains: "alpha capability ran",
+	}})
+	artifact := buildRuntimeFakFixture(t, strings.TrimSpace(string(headOutput))+" dirty", "alpha capability ran")
+	oldResolver := resolveRuntimeFak
+	resolveRuntimeFak = func() (string, error) { return artifact, nil }
+	t.Cleanup(func() { resolveRuntimeFak = oldResolver })
+
+	err = VerifyRuntimeProofs(root)
+	if err == nil || !strings.Contains(err.Error(), "is dirty") {
+		t.Fatalf("VerifyRuntimeProofs accepted dirty fak artifact: %v", err)
+	}
+}
+
+func TestRuntimeProofRejectsStalePathArtifact(t *testing.T) {
+	root := initRuntimeProofGitRepo(t)
+	writeRuntimeProofFixture(t, root, []RuntimeProof{{
+		Lane: "alpha", Command: "fak", OutputContains: "alpha capability ran",
+	}})
+	artifact := buildRuntimeFakFixture(t, "deadbeefdead", "alpha capability ran")
+	oldResolver := resolveRuntimeFak
+	resolveRuntimeFak = func() (string, error) { return artifact, nil }
+	t.Cleanup(func() { resolveRuntimeFak = oldResolver })
+
+	err := VerifyRuntimeProofs(root)
+	if err == nil || !strings.Contains(err.Error(), "does not match scored source") {
+		t.Fatalf("VerifyRuntimeProofs accepted stale fak artifact: %v", err)
+	}
+}
+
+func buildRuntimeFakFixture(t *testing.T, revision, output string) string {
+	t.Helper()
+	dir := t.TempDir()
+	source := fmt.Sprintf(`package main
+import (
+    "fmt"
+    "os"
+)
+func main() {
+    if len(os.Args) > 1 && os.Args[1] == "version" {
+        fmt.Println("0.43.0")
+        fmt.Println("build: %s")
+        fmt.Println("go: fixture")
+        return
+    }
+    fmt.Println(%q)
+}
+`, revision, output)
+	sourcePath := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	artifact := filepath.Join(dir, "fak")
+	if runtime.GOOS == "windows" {
+		artifact += ".exe"
+	}
+	if buildOutput, err := exec.Command("go", "build", "-o", artifact, sourcePath).CombinedOutput(); err != nil {
+		t.Fatalf("build runtime fak fixture: %v: %s", err, buildOutput)
+	}
+	return artifact
+}
+
+func initRuntimeProofGitRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	commands := [][]string{
+		{"init", root},
+		{"-C", root, "config", "user.email", "fixture@example.invalid"},
+		{"-C", root, "config", "user.name", "fixture"},
+		{"-C", root, "commit", "--allow-empty", "-m", "fixture"},
+	}
+	for _, args := range commands {
+		if output, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("initialize runtime proof repo: git %v: %v: %s", args, err, output)
+		}
+	}
+	return root
 }
 
 func TestRuntimeProofRequiresMatchingCapabilityOutput(t *testing.T) {
