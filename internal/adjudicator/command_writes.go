@@ -471,10 +471,22 @@ type shellWord struct {
 // negative result means the command is not a structurally understood ssh
 // invocation, so callers conservatively inspect every nested program string.
 func remoteExecPayloadStart(words []shellWord, start int) int {
-	if start < 0 || start >= len(words) || !isSSHExecutable(words[start].text) {
+	if start < 0 || start >= len(words) {
 		return -1
 	}
-	for i := start + 1; i < len(words); i++ {
+	ssh := start
+	if isTailscaleExecutable(words[start].text) {
+		// `tailscale ssh` has the same destination + remote-command boundary as
+		// OpenSSH. Treat only the explicit ssh subcommand this way: other
+		// tailscale operations remain ordinary local commands.
+		if start+1 >= len(words) || !strings.EqualFold(words[start+1].text, "ssh") {
+			return -1
+		}
+		ssh++
+	} else if !isSSHExecutable(words[start].text) {
+		return -1
+	}
+	for i := ssh + 1; i < len(words); i++ {
 		word := words[i].text
 		if word == "--" {
 			if i+1 < len(words) {
@@ -514,6 +526,14 @@ func isSSHExecutable(head string) bool {
 		head = head[slash+1:]
 	}
 	return head == "ssh" || head == "ssh.exe"
+}
+
+func isTailscaleExecutable(head string) bool {
+	head = strings.TrimPrefix(strings.ToLower(head), "./")
+	if slash := strings.LastIndexAny(head, "/\\"); slash >= 0 {
+		head = head[slash+1:]
+	}
+	return head == "tailscale" || head == "tailscale.exe"
 }
 
 func sshOptionTakesValue(option byte) bool {
