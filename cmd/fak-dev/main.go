@@ -49,6 +49,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunCodexMemory(stdout, stderr, argv[1:])
 	case "sessiondiag":
 		return devcmd.RunSessionDiag(stdout, stderr, argv[1:], nil)
+	case "codex-tool-errors":
+		return devcmd.RunCodexToolErrors(stdout, stderr, argv[1:])
 	case "refactor-verify":
 		return devcmd.RunRefactorVerify(stdout, stderr, argv[1:])
 	case "tool-coverage-audit":
