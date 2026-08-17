@@ -390,6 +390,8 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 	switch name {
 	case "audit":
 		cmdAudit(args)
+	case "value-chain":
+		cmdValueChain(args)
 	case "usage":
 		cmdUsage(args)
 	case "headroom":

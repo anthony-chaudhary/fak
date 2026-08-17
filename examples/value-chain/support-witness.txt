@@ -1,0 +1,9 @@
+VALUE CHAIN support-shared-context
+arm=baseline traces=1 sessions=1 turns=10 billing_evidence=10/10 $/turn=0.200000 $/ticket_resolved=2.000000
+arm=shared traces=1 sessions=2 turns=10 billing_evidence=10/10 $/turn=0.120000 $/ticket_resolved=0.600000
+stage=gpu kind=hardware status=ABSENT observations=0
+stage=harness kind=harness status=ABSENT observations=0
+stage=serve kind=serving status=ABSENT observations=0
+stage=shared_context kind=context status=PRESENT observations=1
+stage=ticket kind=outcome status=PRESENT observations=3
+comparison=baseline->shared design=paired paired=1

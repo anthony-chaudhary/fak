@@ -612,6 +612,7 @@ var tier = map[string]int{
 	"toolcallcontrol":       1, // stdlib-only deterministic pre-execution call gate and offline ablation accounting.
 	"devhandoff":            1, // stdlib-only moved-command inventory shared across the runtime/fak-dev process boundary.
 	"workshape":             1, // stdlib-only dispatch execution-shape contract and capacity pricing.
+	"valuechain":            2, // deterministic offline audit over declared stack and outcome evidence; stdlib-only, off the hot path.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
