@@ -170,6 +170,12 @@ func wideningChanges(old, next harnessresolve.Lock) []Change {
 		case "workflow":
 			if existed && o.Mandatory && !n.Mandatory {
 				changes = append(changes, risk(n, "workflow:"+n.ID+":mandatory", "makes a mandatory workflow optional"))
+			} else if existed && assetBehaviorChanged(o, n) {
+				changes = append(changes, behaviorChange(n))
+			}
+		case "instruction", "memory", "route", "ui":
+			if existed && assetBehaviorChanged(o, n) {
+				changes = append(changes, behaviorChange(n))
 			}
 		}
 	}
@@ -187,6 +193,17 @@ func wideningChanges(old, next harnessresolve.Lock) []Change {
 	return changes
 }
 
+func behaviorChange(a harnesscompose.EffectiveAsset) Change {
+	layer := a.Source
+	if layer == "" {
+		layer = "unknown"
+	}
+	return Change{Reason: "behavior-change", Layer: layer, Capability: a.Kind + ":" + a.ID, Consequence: "changes effective " + a.Kind + " behavior", ReversibleChoice: "keep the current lock"}
+}
+
+func assetBehaviorChanged(current, candidate harnesscompose.EffectiveAsset) bool {
+	return current.Value != candidate.Value || current.Ref != candidate.Ref || current.Boundary != candidate.Boundary
+}
 func risk(a harnesscompose.EffectiveAsset, capability, consequence string) Change {
 	layer := a.Source
 	if layer == "" {

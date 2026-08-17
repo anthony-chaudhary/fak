@@ -27,7 +27,7 @@ fak harness inspect --lock product.lock.json --json
 
 Inspection is read-only. To change an existing harness:
 
-1. edit the product manifest or selected contextual layers;
+1. run `fak harness override` for a bounded changeable capability, or edit the product manifest or selected contextual layers directly;
 2. run `fak harness resolve` to produce a candidate lock;
 3. run `fak harness preview --current product.lock.json --candidate candidate.lock.json` to review only consequential changes; and
 4. run `fak harness inspect --lock candidate.lock.json` to verify the whole resulting harness, not just the diff.
