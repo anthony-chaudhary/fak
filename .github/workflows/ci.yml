@@ -240,6 +240,9 @@ jobs:
           go vet ./...
           go run .
 
+      - name: disambiguation generated-index check
+        run: go run ./cmd/fak disambiguation generate --check --json
+
       - name: claims-lint (every "- [" line in CLAIMS.md carries exactly one tag + a declared exposure state)
         run: |
           go test -count=1 -v -run 'TestCLAIMSLedger' ./internal/claimcheck/

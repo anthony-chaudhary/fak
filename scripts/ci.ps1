@@ -7,6 +7,10 @@ Write-Host "== go build =="
 go build ./...
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
+Write-Host "== disambiguation generated-index check =="
+go run ./cmd/fak disambiguation generate --check --json
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
 Write-Host "== go vet =="
 go vet ./...
 if ($LASTEXITCODE -ne 0) { exit 1 }

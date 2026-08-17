@@ -162,3 +162,55 @@ func TestCIPreflight_committedBuildBreak_fails(t *testing.T) {
 		t.Fatalf("expected a build failure with detail; got %+v", res.Failures)
 	}
 }
+
+func TestCIPreflightRejectsStaleCommittedDisambiguationArtifact(t *testing.T) {
+	repo, git := seedCIPreflightRepo(t)
+	commitFiles(t, repo, git, "disambiguation fixture", map[string]string{
+		"go.mod":          "module example.test/ci\n\ngo 1.26\n",
+		"cmd/fak/main.go": disambiguationFixtureMain,
+		"docs/generated/disambiguation-index.json": "stale\n",
+	})
+	res, code := runPreflightJSON(t, []string{"--root", repo, "--skip-build", "--json"})
+	if code != 1 || res.OK {
+		t.Fatalf("code=%d result=%+v", code, res)
+	}
+	for _, failure := range res.Failures {
+		if failure.Step == "disambiguation-generated" {
+			return
+		}
+	}
+	t.Fatalf("missing disambiguation-generated failure: %+v", res.Failures)
+}
+
+func TestCIPreflightAcceptsFreshCommittedDisambiguationArtifact(t *testing.T) {
+	repo, git := seedCIPreflightRepo(t)
+	commitFiles(t, repo, git, "disambiguation fixture", map[string]string{
+		"go.mod":          "module example.test/ci\n\ngo 1.26\n",
+		"cmd/fak/main.go": disambiguationFixtureMain,
+		"docs/generated/disambiguation-index.json": "fresh\n",
+	})
+	res, code := runPreflightJSON(t, []string{"--root", repo, "--skip-build", "--json"})
+	if code != 0 || !res.OK {
+		t.Fatalf("code=%d result=%+v", code, res)
+	}
+}
+
+const disambiguationFixtureMain = `package main
+
+import (
+	"bytes"
+	"flag"
+	"os"
+)
+
+func main() {
+	fs := flag.NewFlagSet("generate", flag.ExitOnError)
+	check := fs.Bool("check", false, "")
+	_ = fs.Bool("json", false, "")
+	_ = fs.Parse(os.Args[3:])
+	got, _ := os.ReadFile("docs/generated/disambiguation-index.json")
+	if *check && !bytes.Equal(got, []byte("fresh\n")) {
+		os.Exit(1)
+	}
+}
+`

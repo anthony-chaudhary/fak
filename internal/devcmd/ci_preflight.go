@@ -2,6 +2,7 @@ package devcmd
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -97,6 +98,15 @@ func RunCIPreflight(stdout, stderr io.Writer, argv []string) int {
 		res.Failures = append(res.Failures, ciPreflightFailure{Step: "gofmt", Files: files})
 	}
 
+	// Generated disambiguation index: invoke the committed public writer inside
+	// the extracted tip so neither this binary nor peer-dirty files can mask drift.
+	if detail, checked, ok := checkDisambiguationGenerated(dir); !checked {
+		res.Skipped = append(res.Skipped, "disambiguation-generated")
+	} else if !ok {
+		res.OK = false
+		res.Failures = append(res.Failures, ciPreflightFailure{Step: "disambiguation-generated", Detail: detail})
+	}
+
 	// build: `go build ./...` — catches the partial-commit `undefined: X` red.
 	if *skipBuild {
 		res.Skipped = append(res.Skipped, "build")
@@ -141,6 +151,23 @@ func gofmtList(dir string) ([]string, error) {
 	return files, nil
 }
 
+func checkDisambiguationGenerated(dir string) (detail string, checked, ok bool) {
+	artifact := filepath.Join(dir, "docs", "generated", "disambiguation-index.json")
+	if _, err := os.Stat(artifact); errors.Is(err, os.ErrNotExist) {
+		return "", false, true
+	} else if err != nil {
+		return err.Error(), true, false
+	}
+	cmd := windowgate.Command("go", "run", "./cmd/fak", "disambiguation", "generate", "--check", "--json")
+	cmd.Dir = dir
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return strings.TrimSpace(string(out)), true, false
+	}
+	return "", true, true
+}
+
 // goBuildAll runs `go build ./...` in dir. Returns (detail, ok); on failure detail is the trimmed
 // compiler output so an agent sees the exact `undefined: X` without re-running anything.
 func goBuildAll(dir string) (string, bool) {
@@ -170,6 +197,11 @@ func renderCIPreflight(w io.Writer, res ciPreflightResult) {
 			fmt.Fprintf(w, "  [gofmt-check] %d file(s) not formatted (run `gofmt -w`):\n", len(f.Files))
 			for _, file := range f.Files {
 				fmt.Fprintf(w, "    %s\n", file)
+			}
+		case "disambiguation-generated":
+			fmt.Fprintln(w, "  [disambiguation-generated] tracked index is stale (run `fak disambiguation generate`):")
+			for _, ln := range strings.Split(f.Detail, "\n") {
+				fmt.Fprintf(w, "    %s\n", ln)
 			}
 		case "build":
 			fmt.Fprintln(w, "  [build] `go build ./...` failed:")

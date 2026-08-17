@@ -134,6 +134,12 @@ artifact with generation from the invoking binary. It reports `committed-clean`,
 `own-overlay-drift`, or `unavailable`; a dirty peer file cannot make a committed
 tip look stale, and an unavailable git/toolchain probe never looks clean.
 
+The regenerate-and-diff check is a hard gate in all canonical CI entry points:
+`make ci`, `scripts/ci.ps1`, the unchanged `build · vet · test · claims-lint`
+GitHub job, and `fak-dev ci-preflight` over its isolated committed archive. The
+workflow job/check name is unchanged; only a step was added. Rollback removes
+that step/target/preflight call together and leaves the generator artifact intact.
+
 ## Strict public provenance
 
 Every `sources[]` entry is immutable provenance returned unchanged by

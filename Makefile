@@ -23,7 +23,7 @@ ARCHITEST_GATE_RE ?= ^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRoot
 # runs the model-free terminal witnesses from run-the-demos.md.
 # cuda-check is the GPU-free CUDA ABI/header preflight — deterministic, no CUDA toolkit,
 # so it joins the local gate the same way (the cuda-build.yml `static` job is its CI mirror).
-ci: build cross-build-harnessres gofmt-check vet test claims-lint cache-headline-lint cachedoc-numbers-lint cache-default-readiness gitdaily-score salience dos-lint index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet cache-proving demo-smoke demo-headless-smoke gated-tests cuda-check
+ci: build cross-build-harnessres gofmt-check disambiguation-generated-check vet test claims-lint cache-headline-lint cachedoc-numbers-lint cache-default-readiness gitdaily-score salience dos-lint index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet cache-proving demo-smoke demo-headless-smoke gated-tests cuda-check
 	@echo "CI OK"
 
 build:
@@ -380,6 +380,9 @@ index-sync:
 # The body lives in scripts/gofmt-check.sh so the gate is runnable and testable on its own
 # (witnessed by internal/hooks/gofmt_check_script_test.go), the way `build:` delegates to
 # scripts/build.sh.
+disambiguation-generated-check:
+	go run ./cmd/fak disambiguation generate --check --json
+
 gofmt-check:
 	@sh scripts/gofmt-check.sh
 
