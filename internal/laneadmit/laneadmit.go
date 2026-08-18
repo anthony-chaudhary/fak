@@ -7,6 +7,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
 
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
@@ -379,8 +380,8 @@ func decodeLaneWire(s string) string {
 			b.WriteString(laneWireSep)
 			i++
 		case s[i] == laneWireEsc[0] && i+3 < len(s) && s[i+1] == 'x':
-			hi, okHi := unhex(s[i+2])
-			lo, okLo := unhex(s[i+3])
+			hi, okHi := mathx.HexNibble(s[i+2])
+			lo, okLo := mathx.HexNibble(s[i+3])
 			if !okHi || !okLo {
 				b.WriteByte(s[i])
 				continue
@@ -426,19 +427,6 @@ func escapeLaneSegment(s string) string {
 }
 
 // unhex decodes one lowercase-or-upper hex digit, returning ok=false for a non-hex byte so a
-// hand-typed or corrupted id degrades to a literal rather than a silently wrong lane.
-func unhex(c byte) (byte, bool) {
-	switch {
-	case c >= '0' && c <= '9':
-		return c - '0', true
-	case c >= 'a' && c <= 'f':
-		return c - 'a' + 10, true
-	case c >= 'A' && c <= 'F':
-		return c - 'A' + 10, true
-	}
-	return 0, false
-}
-
 func cleanToken(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	var b strings.Builder

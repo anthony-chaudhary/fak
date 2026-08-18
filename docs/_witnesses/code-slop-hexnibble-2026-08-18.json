@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T08:12:19.867439Z",
+  "issue": 6951,
+  "family": "ASCII hexadecimal nibble decoding",
+  "paths": [
+    "internal/mathx/hex.go",
+    "internal/mathx/hex_test.go",
+    "internal/laneadmit/laneadmit.go",
+    "internal/quality/unicode_decode.go"
+  ],
+  "test": "go test ./internal/mathx ./internal/laneadmit ./internal/quality; fak-dev buildcheck --mine internal/mathx/hex.go --vet",
+  "test_result": "PASS",
+  "before": {
+    "score": -79.0,
+    "grade": "F",
+    "slop_debt": 342,
+    "duplication": 342,
+    "weighted_duplication": 218.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -78.5,
+    "grade": "F",
+    "slop_debt": 341,
+    "duplication": 341,
+    "weighted_duplication": 217.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

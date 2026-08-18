@@ -5,6 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
@@ -147,28 +148,15 @@ func uniFallbackByte(tok string) (byte, bool) {
 	if len(tok) != 6 || !strings.HasPrefix(tok, "<0x") || tok[5] != '>' {
 		return 0, false
 	}
-	hi, ok := uniHexNibble(tok[3])
+	hi, ok := mathx.HexNibble(tok[3])
 	if !ok {
 		return 0, false
 	}
-	lo, ok := uniHexNibble(tok[4])
+	lo, ok := mathx.HexNibble(tok[4])
 	if !ok {
 		return 0, false
 	}
 	return hi<<4 | lo, true
-}
-
-// uniHexNibble decodes one hex digit, either case.
-func uniHexNibble(c byte) (byte, bool) {
-	switch {
-	case c >= '0' && c <= '9':
-		return c - '0', true
-	case c >= 'a' && c <= 'f':
-		return c - 'a' + 10, true
-	case c >= 'A' && c <= 'F':
-		return c - 'A' + 10, true
-	}
-	return 0, false
 }
 
 // uniCommonPrefixLen returns the byte length of the longest common prefix — the offset
