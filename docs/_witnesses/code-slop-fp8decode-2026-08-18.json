@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T08:07:46.836738Z",
+  "issue": 6952,
+  "family": "E4M3 floating-point decoding",
+  "paths": [
+    "internal/mathx/fp8.go",
+    "internal/mathx/fp8_test.go",
+    "internal/compute/fp8.go",
+    "internal/model/fp8_blockscale.go"
+  ],
+  "test": "go test ./internal/mathx ./internal/compute -run 'TestDecode|TestE4|TestE5' -count=1; go test ./internal/model -run 'Test.*FP8' -count=1; fak-dev buildcheck --mine internal/mathx/fp8.go --vet",
+  "test_result": "PASS; broad internal/compute suite separately hit unrelated peer internal/harnessartifact unused imports",
+  "before": {
+    "score": -79.6,
+    "grade": "F",
+    "slop_debt": 343,
+    "duplication": 343,
+    "weighted_duplication": 218.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -79.0,
+    "grade": "F",
+    "slop_debt": 342,
+    "duplication": 342,
+    "weighted_duplication": 218.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

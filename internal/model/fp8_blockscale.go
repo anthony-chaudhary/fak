@@ -1,6 +1,8 @@
 package model
 
 import (
+	"github.com/anthony-chaudhary/fak/internal/mathx"
+
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -29,31 +31,7 @@ import (
 // fp8BlockDim x fp8BlockDim tile of the weight.
 const fp8BlockDim = 128
 
-// fp8E4M3ToF32 decodes one OCP float8_e4m3fn byte to f32. E4M3FN (the variant torch
-// and DeepSeek-V4 use for attention/expert/router weights) is 1 sign / 4 exponent
-// (bias 7) / 3 mantissa bits with NO infinities: the sole NaN pattern is S.1111.111
-// (0x7F / 0xFF), the max finite magnitude is 448, and exponent field 0 is subnormal
-// (value = ±2^-6 * man/8, so 0x00/0x80 are ±0). The decode is exact into f32 — every
-// e4m3 value is representable — so its golden test asserts bitwise equality.
-func fp8E4M3ToF32(b byte) float32 {
-	sign := 1.0
-	if b&0x80 != 0 {
-		sign = -1.0
-	}
-	exp := int(b>>3) & 0x0f
-	man := int(b) & 0x07
-	switch {
-	case exp == 0x0f && man == 0x07:
-		// S.1111.111 — the single NaN pattern (no infinities in e4m3fn).
-		return float32(math.NaN())
-	case exp == 0:
-		// Subnormal: 2^(1-bias) * man/8, bias=7. man==0 gives signed zero.
-		return float32(sign * math.Ldexp(float64(man)/8, 1-7))
-	default:
-		// Normal: 2^(exp-bias) * (1 + man/8), bias=7.
-		return float32(sign * math.Ldexp(1+float64(man)/8, exp-7))
-	}
-}
+func fp8E4M3ToF32(b byte) float32 { return mathx.DecodeE4M3(b) }
 
 // decodeFP8BlockScale dequantizes a row-major [O,I] float8_e4m3fn weight stored with
 // 128x128 2-D block scales to a flat row-major [O,I] f32 slice. scaleInv holds one f32
