@@ -171,6 +171,18 @@ gain vs tuned warm-cache stack.) The vDSO hit-rate and token savings are reporte
 as **soft UPSIDE secondaries**, never the gate. See `STATUS.md` §2 and `CLAIMS.md`
 (unit 82).
 
+## `fak orchestration status`
+
+`fak orchestration status` joins the newest local orchestration launch receipt, worker process liveness, and JSONL turn progress into one read-only fleet view. Select an older launch with `--session ID`; use `--home DIR` when runtime artifacts live outside the current directory.
+
+```bash
+fak orchestration status
+fak orchestration status --session 01a015da-c527-7ed0-b8e8-3e0d9b7da5ed
+fak orchestration status --json
+```
+
+Human output leads with the run verdict and running/completed/exited counts. `--json` emits `fak.codex_orchestration_status.v1` with the same per-worker PID, process, log freshness, last-event, and turn-count evidence. The command observes workers; it does not stop, replace, or mutate them.
+
 ## `fak agent` response profiles
 
 `fak agent --output-style <selection>` opts the owned agent loop into a named response shape. The default is `full` (no shaping). Run `fak agent profiles` or `fak agent profiles --json` to list shipped, reserved, and not-yet selections. The recommended concise compatibility setting is `caveman:medium`; it canonicalizes to the fak-authored `caveman:native:medium`. See [Response profiles](response-profiles.md) for intensity guidance, native-versus-original provenance, preservation rules, and the current harness boundary.
