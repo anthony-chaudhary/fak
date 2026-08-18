@@ -9,6 +9,7 @@ import (
 )
 
 func TestDispatchPriceBroadWorkShapeReservesParentAndChildren(t *testing.T) {
+	withDispatchPriceTaxonomy(t)
 	dir := t.TempDir()
 	agents := filepath.Join(dir, "agents.json")
 	shape := filepath.Join(dir, "shape.json")
@@ -34,6 +35,7 @@ func TestDispatchPriceBroadWorkShapeReservesParentAndChildren(t *testing.T) {
 }
 
 func TestDispatchPriceSerializesSemanticCollisionOnDisjointTrees(t *testing.T) {
+	withDispatchPriceTaxonomy(t)
 	dir := t.TempDir()
 	agents := filepath.Join(dir, "agents.json")
 	shape := filepath.Join(dir, "shape.json")
