@@ -221,12 +221,7 @@ func DenyRate(minRate float64, minTurns int) CorpusScorer {
 		byTrace := map[string]*acc{}
 		order := []string{}
 		for _, t := range corpus {
-			a, ok := byTrace[t.TraceID]
-			if !ok {
-				a = &acc{}
-				byTrace[t.TraceID] = a
-				order = append(order, t.TraceID)
-			}
+			a := traceAccumulator(byTrace, &order, t, func() *acc { return &acc{} })
 			a.total++
 			if t.Verdict == "DENY" || t.Verdict == "QUARANTINE" {
 				a.denied++

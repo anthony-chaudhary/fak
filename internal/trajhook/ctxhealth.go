@@ -85,12 +85,7 @@ func ContextHealth(cfg ContextHealthConfig) CorpusScorer {
 		byTrace := map[string]*traceAcc{}
 		order := []string{}
 		for _, t := range corpus {
-			a, ok := byTrace[t.TraceID]
-			if !ok {
-				a = &traceAcc{loops: map[string]int{}}
-				byTrace[t.TraceID] = a
-				order = append(order, t.TraceID)
-			}
+			a := traceAccumulator(byTrace, &order, t, func() *traceAcc { return &traceAcc{loops: map[string]int{}} })
 			a.turns++
 			if t.Verdict == "DENY" || t.Verdict == "QUARANTINE" {
 				continue // refused turns are the deny fold's evidence, not loop activity
