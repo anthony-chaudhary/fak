@@ -26,7 +26,7 @@ func TestProductLockVerifiesAndProjectsLaunchReceipt(t *testing.T) {
 }
 
 func TestProductLockRejectsTamperAndInlineSecret(t *testing.T) {
-	lock := ProductLock{Schema: ProductLockSchema, Components: []LockedComponent{{ID: "p", Version: "1.0.0", Digest: "sha256:p", Source: "r"}}, Assets: []LockedAsset{{Kind: "instruction", ID: "i", Value: "one", Source: "legal"}}}
+	lock := ProductLock{Schema: ProductLockSchema, Components: []LockedComponent{{ID: "p", Version: "1.0.0", Digest: "sha256:p", Source: "r", Reason: "selected", Provider: "x"}}, Assets: []LockedAsset{{Kind: "instruction", ID: "i", Value: "one", Source: "legal"}}}
 	lock.ID = lockDigest(t, lock)
 	raw, _ := json.Marshal(lock)
 	raw = []byte(strings.Replace(string(raw), `"value":"one"`, `"value":"two"`, 1))
@@ -58,7 +58,7 @@ func sha256Sum(raw []byte) string {
 }
 
 func TestMixableRefusesLegacyAndMissingEvidence(t *testing.T) {
-	base := ProductLock{Schema: LegacyProductLockSchema, Components: []LockedComponent{{ID: "x", Version: "1.0.0", Digest: "sha256:x", Source: "r"}}}
+	base := ProductLock{Schema: LegacyProductLockSchema, Components: []LockedComponent{{ID: "x", Version: "1.0.0", Digest: "sha256:x", Source: "r", Reason: "selected", Provider: "x"}}}
 	if err := base.Mixable(); err == nil || !strings.Contains(err.Error(), "launchable but not mixable") {
 		t.Fatalf("legacy err=%v", err)
 	}

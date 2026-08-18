@@ -169,7 +169,7 @@ func TestResolveRetainsMixSafetyEvidence(t *testing.T) {
 }
 
 func TestMixableRefusesLegacyAndMissingEvidence(t *testing.T) {
-	lock := Lock{Schema: LegacyLockSchema, Components: []LockedComponent{{ID: "x", Version: "1.0.0", Digest: "sha256:x", Source: "r"}}}
+	lock := Lock{Schema: LegacyLockSchema, Components: []LockedComponent{{ID: "x", Version: "1.0.0", Digest: "sha256:x", Source: "r", Reason: "selected", Provider: "x"}}}
 	if err := ReidentifyLock(&lock); err != nil {
 		t.Fatal(err)
 	}

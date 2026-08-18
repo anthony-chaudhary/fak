@@ -555,6 +555,9 @@ func Mixable(lock Lock) error {
 		return fmt.Errorf("legacy product lock %q is launchable but not mixable; rebuild it from source as %q", lock.Schema, LockSchema)
 	}
 	for _, component := range lock.Components {
+		if component.Reason == "" || component.Provider == "" {
+			return fmt.Errorf("component %q has incomplete selection provenance", component.ID)
+		}
 		if component.Compatibility.Contract == "" {
 			return fmt.Errorf("component %q has no compatibility contract", component.ID)
 		}

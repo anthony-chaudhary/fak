@@ -58,7 +58,7 @@ func TestMixRefusesSixConflictClasses(t *testing.T) {
 }
 
 func component(id, digest string, provides []string, cost harnessresolve.Budget, adapters []string) harnessresolve.LockedComponent {
-	return harnessresolve.LockedComponent{ID: id, Version: "1.0.0", Digest: digest, Source: "registry/" + id, Provides: provides, Compatibility: harnessresolve.Compatibility{OS: []string{"linux"}, Arch: []string{"amd64"}, Contract: "v1"}, Cost: cost, Adapters: adapters}
+	return harnessresolve.LockedComponent{ID: id, Version: "1.0.0", Digest: digest, Source: "registry/" + id, Reason: "selected import", Provider: id, Provides: provides, Compatibility: harnessresolve.Compatibility{OS: []string{"linux"}, Arch: []string{"amd64"}, Contract: "v1"}, Cost: cost, Adapters: adapters}
 }
 func lock(t *testing.T, name string, cs []harnessresolve.LockedComponent, assets []harnesscompose.EffectiveAsset) harnessresolve.Lock {
 	t.Helper()
