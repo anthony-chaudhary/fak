@@ -3,6 +3,8 @@ package compute
 import (
 	"encoding/binary"
 	"math"
+
+	"github.com/anthony-chaudhary/fak/internal/kquantbits"
 )
 
 // quant_q4k.go — Q4_K host-data entry + the cpu-ref Q4_K matmul reference.
@@ -93,8 +95,8 @@ func dequantQ5K(dst []float32, b []byte) {
 	qi, is := 0, 0
 	u1, u2 := byte(1), byte(2)
 	for j := 0; j < 256; j += 64 {
-		s1, m1 := q4kGetScaleMin(is, sc)
-		s2, m2 := q4kGetScaleMin(is+1, sc)
+		s1, m1 := kquantbits.ScaleMinK4(is, sc)
+		s2, m2 := kquantbits.ScaleMinK4(is+1, sc)
 		for l := 0; l < 32; l++ {
 			hi := byte(0)
 			if qh[l]&u1 != 0 {
@@ -145,15 +147,6 @@ func i8AsBytes(s []int8) []byte {
 	return b
 }
 
-// q4kGetScaleMin unpacks the j-th (scale, min) 6-bit pair from the 12-byte scales field — byte-for-byte
-// model.getScaleMinK4 / ggufload.getScaleMinK4 (the 6-bit packing the k-quants share).
-func q4kGetScaleMin(j int, q []byte) (scale, min uint8) {
-	if j < 4 {
-		return q[j] & 63, q[j+4] & 63
-	}
-	return (q[j+4] & 0x0f) | ((q[j-4] >> 6) << 4), (q[j+4] >> 4) | ((q[j] >> 6) << 4)
-}
-
 // q4kDequantBlock writes the 256 weights of one 144-byte super-block into dst (len >= 256) — the
 // exact arithmetic of model.q4kDequantSuperBlock.
 func q4kDequantBlock(dst []float32, blk []byte) {
@@ -163,9 +156,9 @@ func q4kDequantBlock(dst []float32, blk []byte) {
 	q := blk[4+12 : q4kSuperBlock]
 	qi, is := 0, 0
 	for j := 0; j < q4kSuper; j += 64 {
-		sc, m := q4kGetScaleMin(is, scales)
+		sc, m := kquantbits.ScaleMinK4(is, scales)
 		d1, m1 := d*float32(sc), dmin*float32(m)
-		sc, m = q4kGetScaleMin(is+1, scales)
+		sc, m = kquantbits.ScaleMinK4(is+1, scales)
 		d2, m2 := d*float32(sc), dmin*float32(m)
 		for l := 0; l < 32; l++ {
 			dst[j+l] = d1*float32(q[qi+l]&0x0f) - m1

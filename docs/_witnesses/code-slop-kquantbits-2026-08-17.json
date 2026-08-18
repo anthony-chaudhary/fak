@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T06:40:32.485367Z",
+  "issue": 6986,
+  "family": "k-quant scale/minimum bit decoding",
+  "paths": [
+    "internal/kquantbits/scalemin.go",
+    "internal/kquantbits/scalemin_test.go",
+    "internal/compute/quant_q4k.go",
+    "internal/model/quantbits.go"
+  ],
+  "test": "go test ./internal/kquantbits ./internal/model; go test ./internal/compute -run TestQ4K|Test.*Quant -count=1; go test ./internal/architest -run Test.*Tier|TestArchitecture -count=1; fak-dev buildcheck --vet --mine internal/kquantbits/scalemin.go --mine internal/kquantbits/scalemin_test.go",
+  "test_result": "PASS targeted and buildcheck; broad compute package hit unrelated peer harnessartifact unused imports",
+  "before": {
+    "score": -85.3,
+    "grade": "F",
+    "slop_debt": 354,
+    "duplication": 354,
+    "weighted_duplication": 224.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -84.8,
+    "grade": "F",
+    "slop_debt": 353,
+    "duplication": 353,
+    "weighted_duplication": 223.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

@@ -1,5 +1,7 @@
 package model
 
+import "github.com/anthony-chaudhary/fak/internal/kquantbits"
+
 // quantbits.go is the shared home for the low-level numeric bit-twiddling that the
 // k-quant (Q4_K/Q5_K/…) dequant paths depend on. These helpers MUST be bit-exact:
 // the resident decode path here and the ggufload reference loader both call them, so any
@@ -39,9 +41,4 @@ func F16BitsToF32Bits(h uint16) uint32 {
 // k-quant super-block. The 8 pairs are packed across 12 bytes: pairs 0..3 take their low 6
 // bits straight from q[j]/q[j+4], while pairs 4..7 splice the high 2 bits of the lower bytes
 // into the top of q[j+4]. This is the 6-bit packing every k-quant variant shares.
-func GetScaleMinK4(j int, q []byte) (scale, min uint8) {
-	if j < 4 {
-		return q[j] & 63, q[j+4] & 63
-	}
-	return (q[j+4] & 0x0f) | ((q[j-4] >> 6) << 4), (q[j+4] >> 4) | ((q[j] >> 6) << 4)
-}
+func GetScaleMinK4(j int, q []byte) (scale, min uint8) { return kquantbits.ScaleMinK4(j, q) }
