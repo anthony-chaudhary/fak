@@ -227,9 +227,12 @@ func runHarnessControlStudy(stdout, stderr io.Writer, argv []string) int {
 }
 
 func runHarnessControlPacket(stdout, stderr io.Writer, argv []string) int {
-	if len(argv) == 0 || (argv[0] != "create" && argv[0] != "verify") {
-		fmt.Fprintln(stderr, "usage: fak harness study control packet <create|verify>")
+	if len(argv) == 0 || (argv[0] != "create" && argv[0] != "verify" && argv[0] != "receipt") {
+		fmt.Fprintln(stderr, "usage: fak harness study control packet <create|verify|receipt>")
 		return 2
+	}
+	if argv[0] == "receipt" {
+		return runHarnessControlPacketReceipt(stdout, stderr, argv[1:])
 	}
 	if argv[0] == "verify" {
 		fs := flag.NewFlagSet("harness study control packet verify", flag.ContinueOnError)
@@ -281,4 +284,59 @@ func runHarnessControlPacket(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintf(stdout, "HARNESS CONTROL PACKET | CREATED\narm: %s\nsource: %s\noutput: %s\nfiles: %d\nnext: fak harness study control packet verify --dir %s\n", manifest.Arm, manifest.SourceCommit, *output, len(manifest.Files), *output)
 	return 0
+}
+
+func runHarnessControlPacketReceipt(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) == 0 {
+		fmt.Fprintln(stderr, "usage: fak harness study control packet receipt <start|finalize>")
+		return 2
+	}
+	switch argv[0] {
+	case "start":
+		fs := flag.NewFlagSet("harness study control packet receipt start", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		dir := fs.String("dir", ".", "assigned packet directory")
+		participant := fs.String("participant-id", "", "anonymous participant ID")
+		pair := fs.String("pair-id", "", "anonymous pair ID")
+		order := fs.String("pair-order", "", "default-first or scratch-first")
+		if err := fs.Parse(argv[1:]); err != nil || fs.NArg() != 0 {
+			return 2
+		}
+		r, err := harnesscontrolpacket.StartReceipt(harnesscontrolpacket.ReceiptStartOptions{Dir: *dir, ParticipantID: *participant, PairID: *pair, PairOrder: *order})
+		if err != nil {
+			fmt.Fprintf(stderr, "fak harness study control packet receipt start: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "HARNESS CONTROL RECEIPT | STARTED\narm: %s\nposition: %d\nstarted: %s\nreceipt: %s\n", r.Arm, r.ArmPosition, r.StartedAt, filepath.Join(*dir, "receipt.json"))
+		return 0
+	case "finalize":
+		fs := flag.NewFlagSet("harness study control packet receipt finalize", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		dir := fs.String("dir", ".", "assigned packet directory")
+		artifact := fs.String("artifact", "", "final artifact to digest")
+		commands := fs.String("commands", "", "newline-delimited command transcript")
+		errorsPath := fs.String("errors", "", "optional newline-delimited errors")
+		succeeded := fs.Bool("succeeded", false, "task outcomes succeeded")
+		verified := fs.Bool("verified", false, "independent verification succeeded")
+		help := fs.Int("help-requests", 0, "facilitator help requests")
+		confidence := fs.Int("confidence", 0, "confidence from 1 to 5")
+		inspect := fs.Bool("inspect-captured", false, "inspect evidence captured")
+		preview := fs.Bool("preview-captured", false, "preview evidence captured")
+		runtime := fs.Bool("runtime-verify-captured", false, "runtime verification evidence captured")
+		preference := fs.String("preference", "", "second-arm preference: default-control, scratch, or none")
+		reason := fs.String("preference-reason", "", "second-arm preference reason")
+		if err := fs.Parse(argv[1:]); err != nil || fs.NArg() != 0 {
+			return 2
+		}
+		r, err := harnesscontrolpacket.FinalizeReceipt(harnesscontrolpacket.ReceiptFinalizeOptions{Dir: *dir, ArtifactPath: *artifact, CommandsPath: *commands, ErrorsPath: *errorsPath, Succeeded: *succeeded, Verified: *verified, HelpRequests: *help, Confidence: *confidence, InspectCaptured: *inspect, PreviewCaptured: *preview, RuntimeVerifyCaptured: *runtime, Preference: *preference, PreferenceReason: *reason})
+		if err != nil {
+			fmt.Fprintf(stderr, "fak harness study control packet receipt finalize: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "HARNESS CONTROL RECEIPT | FINALIZED\narm: %s\nelapsed_seconds: %.3f\nartifact: %s\nreceipt: %s\n", r.Arm, r.ElapsedSeconds, r.ArtifactDigest, filepath.Join(*dir, "receipt.json"))
+		return 0
+	default:
+		fmt.Fprintln(stderr, "usage: fak harness study control packet receipt <start|finalize>")
+		return 2
+	}
 }

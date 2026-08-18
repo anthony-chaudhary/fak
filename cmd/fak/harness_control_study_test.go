@@ -58,3 +58,35 @@ func TestHarnessControlPacketCLIRejectsCrossArmLeakAndVerifies(t *testing.T) {
 		t.Fatalf("scratch packet leaked product: %v", err)
 	}
 }
+
+func TestHarnessControlPacketReceiptCLIStartsAndFinalizes(t *testing.T) {
+	root := t.TempDir()
+	materials := filepath.Join(root, "scratch")
+	if err := os.MkdirAll(materials, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"arm-card.md": "scratch", "task-card.md": "task"} {
+		os.WriteFile(filepath.Join(materials, name), []byte(body), 0o644)
+	}
+	binary, receipt := filepath.Join(root, "fak"), filepath.Join(root, "receipt.json")
+	os.WriteFile(binary, []byte("binary"), 0o755)
+	os.WriteFile(receipt, []byte(`{"schema":"fak-harness-control-receipt/1","study_id":"study","participant_id":"person-random","artifact_digest":"sha256:REPLACE"}`), 0o644)
+	packet := filepath.Join(root, "packet")
+	var out, errb bytes.Buffer
+	if code := runHarness(&out, &errb, []string{"study", "control", "packet", "create", "--arm", "scratch", "--materials", materials, "--binary", binary, "--receipt", receipt, "--output", packet, "--source-commit", strings.Repeat("a", 40), "--binary-version", "study"}); code != 0 {
+		t.Fatalf("create=%d %s", code, errb.String())
+	}
+	out.Reset()
+	errb.Reset()
+	if code := runHarness(&out, &errb, []string{"study", "control", "packet", "receipt", "start", "--dir", packet, "--participant-id", "person-a", "--pair-id", "pair-a", "--pair-order", "scratch-first"}); code != 0 || !strings.Contains(out.String(), "STARTED") {
+		t.Fatalf("start=%d out=%s err=%s", code, out.String(), errb.String())
+	}
+	commands, artifact := filepath.Join(packet, "commands.txt"), filepath.Join(packet, "artifact.json")
+	os.WriteFile(commands, []byte("./fak harness resolve\n"), 0o600)
+	os.WriteFile(artifact, []byte("ok"), 0o600)
+	out.Reset()
+	errb.Reset()
+	if code := runHarness(&out, &errb, []string{"study", "control", "packet", "receipt", "finalize", "--dir", packet, "--artifact", artifact, "--commands", commands, "--confidence", "4", "--succeeded", "--verified"}); code != 0 || !strings.Contains(out.String(), "FINALIZED") {
+		t.Fatalf("finalize=%d out=%s err=%s", code, out.String(), errb.String())
+	}
+}
