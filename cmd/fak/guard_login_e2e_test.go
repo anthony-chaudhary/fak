@@ -226,6 +226,10 @@ func TestGuardDefaultLaunchDoesNotSpawnGit(t *testing.T) {
 	binDir, logPath := writeGuardE2EFakeGit(t)
 	child := writeGuardE2ENoopChild(t, false)
 	registryPath := filepath.Join(t.TempDir(), "session-registry.json")
+	if err := os.WriteFile(registryPath, []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(sessionRegistryEnv, registryPath)
 	env := guardE2EGitEnv(binDir, logPath, registryPath)
 	// Keep default-on crash recovery enabled: progress probes belong at an actual restart,
 	// not on the successful child-launch critical path.
@@ -253,6 +257,10 @@ func TestGuardDurableLaunchStillPublishes(t *testing.T) {
 	binDir, logPath := writeGuardE2EFakeGit(t)
 	child := writeGuardE2ENoopChild(t, true)
 	registryPath := filepath.Join(t.TempDir(), "session-registry.json")
+	if err := os.WriteFile(registryPath, []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(sessionRegistryEnv, registryPath)
 	env := guardE2EGitEnv(binDir, logPath, registryPath)
 
 	code, out, timedOut := runGuardE2E(t,
