@@ -39,6 +39,40 @@ func newInKernelPrefixPressureBridge(source agent.KVPrefixPressureSource) *inKer
 	return &inKernelPrefixPressureBridge{source: source}
 }
 
+// nativePrefixStageBreakEvenPrefillNanos supplies the least non-zero recompute
+// cost that makes the generic capacity planner prefer a DRAM stage over a bare
+// eviction. Native complete-prefix owners deliberately refuse to evict their sole
+// copy, so treating an absent measurement as free recompute creates an impossible
+// move: ActionEvict skips StageSpan, then EvictDigest correctly returns zero.
+//
+// This is a capability floor, not a measured speed claim. A future measured
+// PerTokenPrefillNanos value can replace it; until then, stage-before-evict is the
+// only executable pressure-relief action and the radix tree's host byte budget
+// remains the final admission gate.
+func nativePrefixStageBreakEvenPrefillNanos(sizeBytes int64, tokens int) int64 {
+	if sizeBytes <= 0 || tokens <= 0 {
+		return 0
+	}
+	profile, ok := cachemeta.DefaultTierProfiles()[cachemeta.TierDRAM]
+	if !ok || profile.BandwidthMBPerSec <= 0 {
+		return 0
+	}
+	const maxInt64 = int64(^uint64(0) >> 1)
+	if sizeBytes > maxInt64/1000 {
+		return maxInt64 / int64(tokens)
+	}
+	transferNanos := sizeBytes * 1000 / profile.BandwidthMBPerSec
+	if transferNanos > maxInt64-profile.ReadLatencyNanos {
+		return maxInt64 / int64(tokens)
+	}
+	stageNanos := profile.ReadLatencyNanos + transferNanos
+	perToken := stageNanos/int64(tokens) + 1 // planner comparison is strict: stage < recompute.
+	if perToken <= 0 {
+		return 1
+	}
+	return perToken
+}
+
 func (b *inKernelPrefixPressureBridge) PressuredCandidates() (int64, []gateway.KVPressureCandidate) {
 	if b == nil || b.source == nil {
 		return 0, nil
@@ -53,6 +87,10 @@ func (b *inKernelPrefixPressureBridge) PressuredCandidates() (int64, []gateway.K
 			ModelID:    candidate.ModelID,
 			SizeBytes:  candidate.SizeBytes,
 			Tokens:     candidate.Tokens,
+			PerTokenPrefillNanos: nativePrefixStageBreakEvenPrefillNanos(
+				candidate.SizeBytes,
+				candidate.Tokens,
+			),
 		})
 	}
 	return resident, out

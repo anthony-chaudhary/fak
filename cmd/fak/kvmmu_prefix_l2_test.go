@@ -35,6 +35,9 @@ func (f *fakeNativePrefixSource) RestoreKVPrefixFromHost(_ context.Context, dige
 }
 
 func (f *fakeNativePrefixSource) EvictHotKVPrefix(digest string) int {
+	if f.stages == 0 {
+		return 0 // match radixkv: never drop the sole complete prefix copy.
+	}
 	f.evicted = digest
 	return f.cands[0].Tokens
 }
@@ -54,12 +57,28 @@ func TestNativePrefixPressureBridgeStagesOnlyToHostDRAM(t *testing.T) {
 	if resident != source.resident || len(candidates) != 1 || candidates[0].SpanDigest != "native-prefix" {
 		t.Fatalf("provider projection resident=%d candidates=%+v", resident, candidates)
 	}
+	if candidates[0].PerTokenPrefillNanos <= 0 {
+		t.Fatalf("native candidate retained an unknown/free recompute cost: %+v", candidates[0])
+	}
+	profiles := cachemeta.DefaultTierProfiles()
+	decision := cachemeta.PlanPlacement(cachemeta.PlacementRequest{
+		Lifecycle: cachemeta.NewLifecycle(cachemeta.TierHBM, 0).MarkResident(profiles, 0),
+		SizeBytes: candidates[0].SizeBytes,
+		Tokens:    int64(candidates[0].Tokens),
+		Profiles:  profiles,
+		Pressure: cachemeta.TierPressure{
+			cachemeta.TierHBM: 1,
+		},
+		Policy:               cachemeta.LifecyclePolicy{DemoteOnExpiry: true},
+		PerTokenPrefillNanos: candidates[0].PerTokenPrefillNanos,
+	})
+	if decision.Action != cachemeta.ActionDemote || decision.ToTier != cachemeta.TierDRAM {
+		t.Fatalf("native pressure candidate planned an unexecutable move %s->%s (%s)",
+			decision.Action, decision.ToTier, decision.Reason)
+	}
 	adp := &engine.CapacityAdapter{KV: bridge}
 	res, err := adp.Execute(context.Background(), engine.PlacementMove{
-		Decision: cachemeta.PlacementDecision{
-			Action: cachemeta.ActionDemote, FromTier: cachemeta.TierHBM, ToTier: cachemeta.TierDRAM,
-			Directive: cachemeta.KVOffload, EstMoveBytes: 1,
-		},
+		Decision:   decision,
 		SpanDigest: "native-prefix", N: 128,
 	})
 	if err != nil || !res.Applied || res.Evicted != 128 {
