@@ -22,7 +22,7 @@ const ghRunnerTimeout = 60 * time.Second
 // IssueSchema is the machine-readable envelope for the maturity backlog ->
 // GitHub issue bridge. It turns the ranked `fak maturity next` backlog into the
 // work surface the issue-dispatch loop already consumes.
-const IssueSchema = "fak-maturity-issues/1"
+const IssueSchema = "fak-maturity-issues/2"
 
 var maturityIssueMarkerRE = regexp.MustCompile(`<!--\s*fak-maturity-work-key:\s*([^>\s]+)\s*-->`)
 var maturityTriageLabels = []string{"needs-triage", "triage-only"}
@@ -257,6 +257,9 @@ func BuildIssuePlan(items []IssueItem, existing []ExistingIssue) []IssuePlanRow 
 		}
 		if found, ok := byKey[item.Key]; ok {
 			row.Action = "update"
+			if strings.EqualFold(found.State, "closed") {
+				row.Action = "reopen"
+			}
 			row.State = found.State
 			n := found.Number
 			row.Number = &n
@@ -292,7 +295,7 @@ func defaultIssueRunner(args []string) (string, string, bool) {
 // FetchExistingIssues queries gh for all issues that may carry maturity markers.
 func FetchExistingIssues(repo string, limit int) ([]ExistingIssue, error) {
 	if limit <= 0 {
-		limit = 300
+		limit = 1000
 	}
 	args := []string{"issue", "list", "--state", "all", "--limit", strconv.Itoa(limit), "--json", "number,title,body,state,url"}
 	if repo != "" {
@@ -321,8 +324,24 @@ func SyncIssuePlan(plan []IssuePlanRow, repo string, labels []string, runner Iss
 	}
 	rows := make([]IssueSyncRow, 0, len(plan))
 	for _, row := range plan {
+		if row.Action == "reopen" {
+			num := ""
+			if row.Number != nil {
+				num = strconv.Itoa(*row.Number)
+			}
+			args := []string{"issue", "reopen", num}
+			if repo != "" {
+				args = append(args, "--repo", repo)
+			}
+			_, stderr, ok := run(args)
+			if !ok {
+				rows = append(rows, IssueSyncRow{Key: row.Key, Action: row.Action, OK: false, Stderr: strings.TrimSpace(stderr)})
+				continue
+			}
+		}
+
 		var args []string
-		if row.Action == "update" {
+		if row.Action == "update" || row.Action == "reopen" {
 			num := ""
 			if row.Number != nil {
 				num = strconv.Itoa(*row.Number)
@@ -396,7 +415,7 @@ func RenderIssueResult(r IssueResult) string {
 			row.Action, target, row.Lane, row.Gap, skip, row.Title))
 	}
 	if r.Mode == "dry-run" {
-		lines = append(lines, "  dry-run: pass --live to create/update GitHub issues")
+		lines = append(lines, "  dry-run: omit --dry-run to create/update/reopen GitHub issues")
 	}
 	return strings.Join(lines, "\n")
 }

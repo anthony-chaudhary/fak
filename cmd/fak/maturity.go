@@ -98,10 +98,11 @@ func runMaturityRoute(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	repo := fs.String("repo", "", "owner/repo for gh; default is current repo")
-	limit := fs.Int("limit", 3, "number of ranked maturity backlog items to route (0 = all)")
+	limit := fs.Int("limit", 0, "number of ranked maturity backlog items to route (0 = all)")
 	existingJSON := fs.String("existing-json", "", "fixture/list of existing gh issues for dry-run tests")
 	fetchExisting := fs.Bool("fetch-existing", false, "dry-run but query gh to classify create vs update")
-	live := fs.Bool("live", false, "create/update GitHub issues with gh")
+	live := fs.Bool("live", true, "create/update/reopen GitHub issues with gh")
+	dryRun := fs.Bool("dry-run", false, "render the continuity plan without changing GitHub")
 	asJSON := fs.Bool("json", false, "emit machine-readable plan/result")
 	var labels stringList
 	fs.Var(&labels, "label", "label to add to newly-created issues; repeatable")
@@ -120,6 +121,9 @@ func runMaturityRoute(stdout, stderr io.Writer, argv []string) int {
 	payload := maturity.Build(maturity.Options{Root: root})
 	projection := maturity.ProjectIssueItems(payload, *limit, []string(labels))
 	items := projection.Items
+	if *dryRun {
+		*live = false
+	}
 
 	var existing []maturity.ExistingIssue
 	var err error
@@ -135,7 +139,7 @@ func runMaturityRoute(stdout, stderr io.Writer, argv []string) int {
 			return 2
 		}
 	case *live || *fetchExisting:
-		existing, err = maturity.FetchExistingIssues(*repo, 300)
+		existing, err = maturity.FetchExistingIssues(*repo, 1000)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak maturity route: %v\n", err)
 			return 2
@@ -147,6 +151,7 @@ func runMaturityRoute(stdout, stderr io.Writer, argv []string) int {
 	if *live {
 		mode = "live"
 	}
+
 	result := maturity.IssueResult{
 		Schema:    maturity.IssueSchema,
 		Mode:      mode,

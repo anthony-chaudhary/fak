@@ -252,6 +252,38 @@ func TestBuildIssuePlanUpdatesExistingMaturityIssue(t *testing.T) {
 	}
 }
 
+func TestBuildIssuePlanReopensClosedMaturitySuccessor(t *testing.T) {
+	item := IssueItem{
+		Key: "gateway:tested", Lane: "gateway", Title: "maturity(gateway): add tests",
+		Body: "<!-- fak-maturity-work-key: gateway:tested -->\n",
+	}
+	plan := BuildIssuePlan([]IssueItem{item}, []ExistingIssue{{
+		Number: 7, State: "CLOSED", Body: item.Body,
+	}})
+	if len(plan) != 1 || plan[0].Action != "reopen" || plan[0].Number == nil || *plan[0].Number != 7 {
+		t.Fatalf("closed successor must be reopened, got %#v", plan)
+	}
+}
+
+func TestSyncIssuePlanReopensBeforeRefreshingClosedSuccessor(t *testing.T) {
+	n := 7
+	plan := []IssuePlanRow{{Action: "reopen", Key: "gateway:tested", Number: &n, Title: "next", Body: "body"}}
+	var calls [][]string
+	rows := SyncIssuePlan(plan, "owner/repo", nil, func(args []string) (string, string, bool) {
+		calls = append(calls, append([]string(nil), args...))
+		return "ok", "", true
+	})
+	if len(rows) != 1 || !rows[0].OK || len(calls) != 2 {
+		t.Fatalf("unexpected reopen sync: rows=%#v calls=%#v", rows, calls)
+	}
+	if got := strings.Join(calls[0], " "); got != "issue reopen 7 --repo owner/repo" {
+		t.Fatalf("first call = %q", got)
+	}
+	if got := strings.Join(calls[1], " "); !strings.HasPrefix(got, "issue edit 7 --title next --body body") {
+		t.Fatalf("second call = %q", got)
+	}
+}
+
 func TestSyncIssuePlanUsesInjectedRunner(t *testing.T) {
 	plan := []IssuePlanRow{
 		{Action: "create", Key: "maturity/a/tested", Lane: "a", Title: "maturity(a): add tests", Body: "body"},

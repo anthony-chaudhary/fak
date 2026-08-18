@@ -1,0 +1,88 @@
+name: maturity continuity
+
+# Every non-terminal capability in `fak maturity next` should have an OPEN,
+# stable-keyed GitHub successor. This scheduled cycle is default-on: it creates,
+# refreshes, or reopens those issues. Set FAK_MATURITY_CONTINUITY=0 for the
+# emergency kill switch; manual dispatch defaults to a non-mutating preview.
+on:
+  schedule:
+    - cron: "11 10 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Preview the maturity successor plan without changing issues"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: maturity-continuity
+  cancel-in-progress: false
+
+jobs:
+  maturity-continuity:
+    name: keep one open successor per non-terminal capability
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GOTOOLCHAIN: auto
+      GH_TOKEN: ${{ github.token }}
+      FAK_MATURITY_CONTINUITY: ${{ vars.FAK_MATURITY_CONTINUITY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: maturity continuity self-test
+        run: go test ./internal/maturity
+
+      - name: decide live or preview
+        id: arm
+        shell: bash
+        run: |
+          set -euo pipefail
+          live=false
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "${FAK_MATURITY_CONTINUITY:-}" != "0" ]; then
+            live=true
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "false" ]; then
+            live=true
+          fi
+          echo "live=$live" >> "$GITHUB_OUTPUT"
+
+      - name: enforce open maturity successors
+        if: steps.arm.outputs.live == 'true'
+        run: go run ./cmd/fak maturity route --repo "${{ github.repository }}" --label gen/now --json | tee maturity-continuity.json
+
+      - name: preview maturity successors
+        if: steps.arm.outputs.live != 'true'
+        run: go run ./cmd/fak maturity route --repo "${{ github.repository }}" --label gen/now --dry-run --fetch-existing --json | tee maturity-continuity.json
+
+      - name: summarize continuity cycle
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Maturity continuity"
+            echo ""
+            echo "live=${{ steps.arm.outputs.live }} · default-on schedule kill switch FAK_MATURITY_CONTINUITY=${FAK_MATURITY_CONTINUITY:-unset(=on)}"
+            echo '```json'
+            cat maturity-continuity.json 2>/dev/null || echo '{"ok":false,"error":"no result"}'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload continuity artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maturity-continuity
+          path: maturity-continuity.json
+          if-no-files-found: ignore

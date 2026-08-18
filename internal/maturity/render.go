@@ -153,7 +153,7 @@ func Markdown(p ScorecardPayload) string {
 	b.WriteString("go run ./cmd/fak maturity --json        # machine payload (control-pane / dispatch loop)\n")
 	b.WriteString("go test ./internal/maturity/...        # prove the ladder + skip detection + next-work fold\n")
 	b.WriteString("```\n\n")
-	b.WriteString("`maturity route` keeps private-boundary lanes visible in `maturity next`, but reports them as skipped instead of filing public issues.\n\n")
+	b.WriteString("`maturity route` keeps private-boundary lanes visible in `maturity next`, but reports them as skipped instead of filing public issues. The default-on `maturity-continuity` cycle runs the same full-portfolio invariant weekly.\n\n")
 	b.WriteString("**Next:** " + p.NextAction + "\n")
 	return b.String()
 }
