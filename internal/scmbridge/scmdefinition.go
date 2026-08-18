@@ -42,6 +42,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/linefmt"
 	"github.com/anthony-chaudhary/fak/internal/servicespec"
 )
 
@@ -322,7 +323,7 @@ func winQuote(a string) string {
 // reconciler's decision and desired-stopped keeps the service installed.
 func scmConfigText(d *Definition) string {
 	var b strings.Builder
-	w := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }
+	w := linefmt.Writer(&b)
 	// binPath= is a quoted argument whose value embeds our own quoting; only
 	// quotes introduced by winQuote can appear (input quotes were refused), so
 	// escaping them as \" is unambiguous.

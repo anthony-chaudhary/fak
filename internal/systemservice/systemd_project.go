@@ -29,6 +29,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/linefmt"
 	"github.com/anthony-chaudhary/fak/internal/servicespec"
 )
 
@@ -243,7 +244,7 @@ func notifyWiring(s *servicespec.Spec, in SystemdInput) NotifyWiring {
 // value either passed the control-character refusals above or is quoted.
 func unitFileText(s *servicespec.Spec, in SystemdInput, n NotifyWiring) string {
 	var b strings.Builder
-	w := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }
+	w := linefmt.Writer(&b)
 
 	w("[Unit]")
 	w("Description=fak workload %s (service %s) on node %s", s.Identity.Workload, s.Identity.Service, s.Identity.Node)

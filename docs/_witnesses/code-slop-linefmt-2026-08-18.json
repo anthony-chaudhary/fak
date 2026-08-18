@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T07:14:29.697581Z",
+  "issue": 6970,
+  "family": "newline-terminated formatted text writers",
+  "paths": [
+    "internal/linefmt/linefmt.go",
+    "internal/linefmt/linefmt_test.go",
+    "internal/scmbridge/scmdefinition.go",
+    "internal/systemservice/systemd_project.go"
+  ],
+  "test": "go test ./internal/linefmt ./internal/scmbridge ./internal/systemservice; go test ./internal/architest -run Test.*Tier|TestArchitecture -count=1; fak-dev buildcheck --vet --mine internal/linefmt/linefmt.go --mine internal/linefmt/linefmt_test.go",
+  "test_result": "PASS",
+  "before": {
+    "score": -82.7,
+    "grade": "F",
+    "slop_debt": 349,
+    "duplication": 349,
+    "weighted_duplication": 221.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -82.2,
+    "grade": "F",
+    "slop_debt": 348,
+    "duplication": 348,
+    "weighted_duplication": 221.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}
