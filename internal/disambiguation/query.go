@@ -530,6 +530,71 @@ var publicEntries = []Entry{
 		Scope:      Scope{Kind: "policy", Value: "model-mediated"}, Owner: Owner{Leaf: "fak", Lane: "cmd"},
 		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "cmd/fak/main.go", Revision: "policy-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-policy-source", Reference: &PublicReference{Kind: ReferenceKindCLIVerb, Name: "preflight"}}},
 		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "policy-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	}, {
+		Schema: EntrySchemaVersion, Identity: Identity{CanonicalTerm: "naive baseline", Aliases: []string{"strawman baseline"}},
+		Definition: "A comparison arm representing the untuned or resend-everything floor; useful context, but never the decision-grade headline alternative.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "tuned baseline", Explanation: "The naive arm is a floor; the tuned arm is the credible next-best option an operator would actually choose.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "fak measurement arm", Explanation: "A baseline is an alternative being compared; the fak arm is the measured treatment whose gain is claimed.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "claims", Value: "naive-baseline"}, Owner: Owner{Leaf: "claimcheck", Lane: "claims"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/claimcheck/claimcheck.go", Revision: "claims-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-claims-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "BaselineStrawman"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "claims-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema: EntrySchemaVersion, Identity: Identity{CanonicalTerm: "tuned baseline", Aliases: []string{"real baseline"}},
+		Definition: "The best-practice alternative an operator would actually run, required as the decision-grade comparator for a performance headline.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "naive baseline", Explanation: "The tuned baseline reflects credible optimization; the naive baseline is only an untuned floor.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "fak measurement arm", Explanation: "The tuned baseline is the next-best alternative; the fak arm is the treatment being evaluated against it.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "claims", Value: "tuned-baseline"}, Owner: Owner{Leaf: "claimcheck", Lane: "claims"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/claimcheck/claimcheck.go", Revision: "claims-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-claims-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "BaselineReal"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "claims-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema: EntrySchemaVersion, Identity: Identity{CanonicalTerm: "fak measurement arm", Aliases: []string{"fak baseline"}},
+		Definition: "The fak-enabled treatment measured against a declared alternative; calling it a baseline obscures which arm is the comparator.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "tuned baseline", Explanation: "The fak arm is the treatment; the tuned baseline is the credible comparator.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "naive baseline", Explanation: "The fak arm is the treatment; the naive baseline is only contextual floor evidence.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "claims", Value: "fak-arm"}, Owner: Owner{Leaf: "claimcheck", Lane: "claims"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/claimcheck/claimcheck.go", Revision: "claims-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-claims-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "Claim"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "claims-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema: EntrySchemaVersion, Identity: Identity{CanonicalTerm: "witness provenance", Aliases: []string{"provenance"}},
+		Definition: "The closed label stating how a reported value was obtained: witnessed, observed, modeled, or simulated; it does not replace a reproduction witness.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "simulated evidence", Explanation: "Provenance is the classification carried by evidence; simulated evidence is one explicitly labeled provenance class.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "net-true claim", Explanation: "Provenance answers how a number was obtained; net-true grading also requires baseline, net cost, scope, witness, and realization.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "claims", Value: "provenance"}, Owner: Owner{Leaf: "claimcheck", Lane: "claims"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/claimcheck/claimcheck.go", Revision: "claims-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-claims-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "Provenance"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "claims-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema: EntrySchemaVersion, Identity: Identity{CanonicalTerm: "simulated evidence", Aliases: []string{"SIMULATED"}},
+		Definition: "Stand-in data explicitly labeled SIMULATED; it can test a path but cannot be narrated as a witnessed real-world measurement.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "witness provenance", Explanation: "SIMULATED is one provenance value; witness provenance is the full closed classification field.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "net-true claim", Explanation: "Simulation status says how evidence was produced; net-true status grades the entire scoped claim.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "claims", Value: "simulated"}, Owner: Owner{Leaf: "claimcheck", Lane: "claims"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/claimcheck/claimcheck.go", Revision: "claims-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-claims-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "Simulated"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "claims-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema: EntrySchemaVersion, Identity: Identity{CanonicalTerm: "net-true claim", Aliases: []string{"net-true gain"}},
+		Definition: "A scoped value statement graded against the real tuned alternative and stated net of introduced costs, with provenance, reproduction witness, and realization status.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "tuned baseline", Explanation: "The tuned baseline answers only what the claim is compared against; net-true grading requires all six claim dimensions.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "witness provenance", Explanation: "Provenance answers only how the value was obtained; a net-true claim also names baseline, net cost, scope, witness, and realization.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "claims", Value: "net-true"}, Owner: Owner{Leaf: "claimcheck", Lane: "claims"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/claimcheck/claimcheck.go", Revision: "claims-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-claims-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "Claim"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "claims-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
 	},
 }
 

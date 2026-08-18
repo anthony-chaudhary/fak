@@ -20,6 +20,7 @@
 | [dispatch wave](#dispatch-wave-dispatch-wave) | `dispatch:wave` | An indexed, bounded batch of dispatch members with a shared step budget and explicit lease regions or whole-lane claims. | `fak disambiguation query "dispatch wave"` |
 | [dispatch worker](#dispatch-worker-dispatch-worker) | `dispatch:worker` | One executing worker record with structured issue, lane, backend, and witnessed-result fields; its free-form output is untrusted narration. | `fak disambiguation query "dispatch worker"` |
 | [fak CLI kernel](#fak-cli-kernel-cli-fak) | `cli:fak` | The fak command-line product surface, named as a contrast target for the package-scoped kernel entry. | `fak disambiguation query "fak CLI kernel"` |
+| [fak measurement arm](#fak-measurement-arm-claims-fak-arm) | `claims:fak-arm` | The fak-enabled treatment measured against a declared alternative; calling it a baseline obscures which arm is the comparator. | `fak disambiguation query "fak measurement arm"` |
 | [fleet supervisor](#fleet-supervisor-dispatch-supervisor) | `dispatch:supervisor` | A decision layer whose input is witnessed liveness, worker verdicts, escalations, and leases; missing witnesses cause escalation rather than inference. | `fak disambiguation query "fleet supervisor"` |
 | [hook gate class](#hook-gate-class-vocabulary-hook-gate-class) | `vocabulary:hook-gate-class` | A hook-runner classification declaring whether a gate mutates the index/worktree, intentionally uses a worktree, or is a tree-twin checker. | `fak disambiguation query "hook gate class"` |
 | [kernel](#kernel-cli-fak) | `cli:fak` | The fak command-line product surface for operating the agent kernel. | `fak disambiguation query --scope-kind cli --scope-value fak "kernel"` |
@@ -27,6 +28,8 @@
 | [lane lease](#lane-lease-dispatch-lease) | `dispatch:lease` | A live ownership claim carrying lease ID, lane or tree, holder identity, and read-only posture for collision admission. | `fak disambiguation query "lane lease"` |
 | [model KV cache](#model-kv-cache-cache-model-attention) | `cache:model-attention` | Kernel-owned per-layer attention key/value tensors indexed by token position and invalidated or rewritten when the model sequence changes. | `fak disambiguation query "model KV cache"` |
 | [model-mediated check](#model-mediated-check-policy-model-mediated) | `policy:model-mediated` | A semantic assessment whose result depends on a model interpreting content or intent; it is distinct from fak's deterministic structural preflight and is not part of the preflight command's local fold. | `fak disambiguation query "model-mediated check"` |
+| [naive baseline](#naive-baseline-claims-naive-baseline) | `claims:naive-baseline` | A comparison arm representing the untuned or resend-everything floor; useful context, but never the decision-grade headline alternative. | `fak disambiguation query "naive baseline"` |
+| [net-true claim](#net-true-claim-claims-net-true) | `claims:net-true` | A scoped value statement graded against the real tuned alternative and stated net of introduced costs, with provenance, reproduction witness, and realization status. | `fak disambiguation query "net-true claim"` |
 | [policy declaration](#policy-declaration-policy-declaration) | `policy:declaration` | A declarative set of tool, argument, network, and resource rules loaded by the adjudicator; it states configured constraints but is not itself a decision for one call. | `fak disambiguation query "policy declaration"` |
 | [policy posture verdict](#policy-posture-verdict-vocabulary-policy-verdict) | `vocabulary:policy-verdict` | The ALLOW or DENY result of folding compiled, environment, and organization authority over a policy amendment. | `fak disambiguation query "policy posture verdict"` |
 | [provider prompt cache](#provider-prompt-cache-cache-provider-prompt-prefix) | `cache:provider-prompt-prefix` | An upstream provider-owned prompt-prefix reuse service observed as cache-read and cache-creation token accounting with provider TTL and pricing rules. | `fak disambiguation query "provider prompt cache"` |
@@ -39,8 +42,11 @@
 | [runtime](#runtime-runtime-worker-execution) | `runtime:worker-execution` | The dispatch worker process that selects a backend, optionally wraps it with fak guard, and executes one lane-scoped work packet. | `fak disambiguation query --scope-kind runtime --scope-value worker-execution "runtime"` |
 | [session recovery](#session-recovery-runtime-internal-session) | `runtime:internal/session` | A bounded repair or reroute response when persisted or cumulative session state cannot safely continue unchanged. | `fak disambiguation query "session recovery"` |
 | [session resume](#session-resume-runtime-internal-session) | `runtime:internal/session` | The paused-to-running boundary that re-admits an existing session using warm KV when available or a safe cold re-prefill. | `fak disambiguation query "session resume"` |
+| [simulated evidence](#simulated-evidence-claims-simulated) | `claims:simulated` | Stand-in data explicitly labeled SIMULATED; it can test a path but cannot be narrated as a witnessed real-world measurement. | `fak disambiguation query "simulated evidence"` |
 | [structural preflight](#structural-preflight-policy-structural-preflight) | `policy:structural-preflight` | The local pre-dispatch fold over grammar and adjudicator rungs for one tool call, producing a verdict without executing the tool or asking a model to interpret intent. | `fak disambiguation query "structural preflight"` |
 | [tool-result cache](#tool-result-cache-cache-tool-results) | `cache:tool-results` | A fak-owned cache of completed tool-call results keyed by tool, argument hash, principal when isolated, and world-version epochs. | `fak disambiguation query "tool-result cache"` |
+| [tuned baseline](#tuned-baseline-claims-tuned-baseline) | `claims:tuned-baseline` | The best-practice alternative an operator would actually run, required as the decision-grade comparator for a performance headline. | `fak disambiguation query "tuned baseline"` |
+| [witness provenance](#witness-provenance-claims-provenance) | `claims:provenance` | The closed label stating how a reported value was obtained: witnessed, observed, modeled, or simulated; it does not replace a reproduction witness. | `fak disambiguation query "witness provenance"` |
 
 <a id="abi-refusal-reason-vocabulary-abi-reason"></a>
 ## ABI refusal reason — `vocabulary:abi-reason`
@@ -270,6 +276,21 @@ The fak command-line product surface, named as a contrast target for the package
 - **Do not conflate with:**
   - [kernel](contrast-index.md#kernel) — The CLI surface and package-scoped kernel are distinct.
 
+<a id="fak-measurement-arm-claims-fak-arm"></a>
+## fak measurement arm — `claims:fak-arm`
+
+The fak-enabled treatment measured against a declared alternative; calling it a baseline obscures which arm is the comparator.
+
+- **Query:** `fak disambiguation query "fak measurement arm"`
+- **Owner:** leaf `claimcheck`, lane `claims`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `fak baseline`
+- **Sources:**
+  - `internal/claimcheck/claimcheck.go` — `go-source` at `claims-source/1`
+- **Do not conflate with:**
+  - [naive baseline](contrast-index.md#naive-baseline) — The fak arm is the treatment; the naive baseline is only contextual floor evidence.
+  - [tuned baseline](contrast-index.md#tuned-baseline) — The fak arm is the treatment; the tuned baseline is the credible comparator.
+
 <a id="fleet-supervisor-dispatch-supervisor"></a>
 ## fleet supervisor — `dispatch:supervisor`
 
@@ -369,6 +390,36 @@ A semantic assessment whose result depends on a model interpreting content or in
   - `cmd/fak/main.go` — `go-source` at `policy-source/1`
 - **Do not conflate with:**
   - [structural preflight](contrast-index.md#structural-preflight) — A model-mediated check depends on model inference; structural preflight reaches its verdict from local grammar and adjudicator rules with no model in the loop.
+
+<a id="naive-baseline-claims-naive-baseline"></a>
+## naive baseline — `claims:naive-baseline`
+
+A comparison arm representing the untuned or resend-everything floor; useful context, but never the decision-grade headline alternative.
+
+- **Query:** `fak disambiguation query "naive baseline"`
+- **Owner:** leaf `claimcheck`, lane `claims`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `strawman baseline`
+- **Sources:**
+  - `internal/claimcheck/claimcheck.go` — `go-source` at `claims-source/1`
+- **Do not conflate with:**
+  - [fak measurement arm](contrast-index.md#fak-measurement-arm) — A baseline is an alternative being compared; the fak arm is the measured treatment whose gain is claimed.
+  - [tuned baseline](contrast-index.md#tuned-baseline) — The naive arm is a floor; the tuned arm is the credible next-best option an operator would actually choose.
+
+<a id="net-true-claim-claims-net-true"></a>
+## net-true claim — `claims:net-true`
+
+A scoped value statement graded against the real tuned alternative and stated net of introduced costs, with provenance, reproduction witness, and realization status.
+
+- **Query:** `fak disambiguation query "net-true claim"`
+- **Owner:** leaf `claimcheck`, lane `claims`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `net-true gain`
+- **Sources:**
+  - `internal/claimcheck/claimcheck.go` — `go-source` at `claims-source/1`
+- **Do not conflate with:**
+  - [tuned baseline](contrast-index.md#tuned-baseline) — The tuned baseline answers only what the claim is compared against; net-true grading requires all six claim dimensions.
+  - [witness provenance](contrast-index.md#witness-provenance) — Provenance answers only how the value was obtained; a net-true claim also names baseline, net cost, scope, witness, and realization.
 
 <a id="policy-declaration-policy-declaration"></a>
 ## policy declaration — `policy:declaration`
@@ -548,6 +599,21 @@ The paused-to-running boundary that re-admits an existing session using warm KV 
   - [agent session](contrast-index.md#agent-session) — Resume changes the run state of an existing session; it is not the session identity or transcript.
   - [session recovery](contrast-index.md#session-recovery) — Resume continues a valid paused session; recovery repairs or reroutes state that cannot safely continue as-is.
 
+<a id="simulated-evidence-claims-simulated"></a>
+## simulated evidence — `claims:simulated`
+
+Stand-in data explicitly labeled SIMULATED; it can test a path but cannot be narrated as a witnessed real-world measurement.
+
+- **Query:** `fak disambiguation query "simulated evidence"`
+- **Owner:** leaf `claimcheck`, lane `claims`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `SIMULATED`
+- **Sources:**
+  - `internal/claimcheck/claimcheck.go` — `go-source` at `claims-source/1`
+- **Do not conflate with:**
+  - [net-true claim](contrast-index.md#net-true-claim) — Simulation status says how evidence was produced; net-true status grades the entire scoped claim.
+  - [witness provenance](contrast-index.md#witness-provenance) — SIMULATED is one provenance value; witness provenance is the full closed classification field.
+
 <a id="structural-preflight-policy-structural-preflight"></a>
 ## structural preflight — `policy:structural-preflight`
 
@@ -578,3 +644,33 @@ A fak-owned cache of completed tool-call results keyed by tool, argument hash, p
   - [model KV cache](contrast-index.md#model-kv-cache) — The tool-result cache stores tool outputs and invalidates on modeled world changes; the KV cache stores per-token attention tensors.
   - [provider prompt cache](contrast-index.md#provider-prompt-cache) — The tool-result cache is kernel-owned and directly invalidated by fak epochs; provider prompt-cache entries are externally owned and observed through usage accounting.
   - [radix prefix cache](contrast-index.md#radix-prefix-cache) — The tool-result cache looks up effect-safe tool calls; the radix cache longest-prefix-matches token sequences to reusable model snapshots.
+
+<a id="tuned-baseline-claims-tuned-baseline"></a>
+## tuned baseline — `claims:tuned-baseline`
+
+The best-practice alternative an operator would actually run, required as the decision-grade comparator for a performance headline.
+
+- **Query:** `fak disambiguation query "tuned baseline"`
+- **Owner:** leaf `claimcheck`, lane `claims`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `real baseline`
+- **Sources:**
+  - `internal/claimcheck/claimcheck.go` — `go-source` at `claims-source/1`
+- **Do not conflate with:**
+  - [fak measurement arm](contrast-index.md#fak-measurement-arm) — The tuned baseline is the next-best alternative; the fak arm is the treatment being evaluated against it.
+  - [naive baseline](contrast-index.md#naive-baseline) — The tuned baseline reflects credible optimization; the naive baseline is only an untuned floor.
+
+<a id="witness-provenance-claims-provenance"></a>
+## witness provenance — `claims:provenance`
+
+The closed label stating how a reported value was obtained: witnessed, observed, modeled, or simulated; it does not replace a reproduction witness.
+
+- **Query:** `fak disambiguation query "witness provenance"`
+- **Owner:** leaf `claimcheck`, lane `claims`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `provenance`
+- **Sources:**
+  - `internal/claimcheck/claimcheck.go` — `go-source` at `claims-source/1`
+- **Do not conflate with:**
+  - [net-true claim](contrast-index.md#net-true-claim) — Provenance answers how a number was obtained; net-true grading also requires baseline, net cost, scope, witness, and realization.
+  - [simulated evidence](contrast-index.md#simulated-evidence) — Provenance is the classification carried by evidence; simulated evidence is one explicitly labeled provenance class.

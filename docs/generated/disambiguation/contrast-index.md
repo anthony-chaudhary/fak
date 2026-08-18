@@ -121,6 +121,14 @@
 - **Contrasts:**
   - **kernel:** The CLI surface and package-scoped kernel are distinct.
 
+<a id="fak-measurement-arm"></a>
+## fak measurement arm
+
+- **Identity:** [fak measurement arm — `claims:fak-arm`](canonical-terms.md#fak-measurement-arm-claims-fak-arm); query with `fak disambiguation query "fak measurement arm"`
+- **Contrasts:**
+  - **naive baseline:** The fak arm is the treatment; the naive baseline is only contextual floor evidence.
+  - **tuned baseline:** The fak arm is the treatment; the tuned baseline is the credible comparator.
+
 <a id="fleet-supervisor"></a>
 ## fleet supervisor
 
@@ -168,6 +176,22 @@
 - **Identity:** [model-mediated check — `policy:model-mediated`](canonical-terms.md#model-mediated-check-policy-model-mediated); query with `fak disambiguation query "model-mediated check"`
 - **Contrasts:**
   - **structural preflight:** A model-mediated check depends on model inference; structural preflight reaches its verdict from local grammar and adjudicator rules with no model in the loop.
+
+<a id="naive-baseline"></a>
+## naive baseline
+
+- **Identity:** [naive baseline — `claims:naive-baseline`](canonical-terms.md#naive-baseline-claims-naive-baseline); query with `fak disambiguation query "naive baseline"`
+- **Contrasts:**
+  - **fak measurement arm:** A baseline is an alternative being compared; the fak arm is the measured treatment whose gain is claimed.
+  - **tuned baseline:** The naive arm is a floor; the tuned arm is the credible next-best option an operator would actually choose.
+
+<a id="net-true-claim"></a>
+## net-true claim
+
+- **Identity:** [net-true claim — `claims:net-true`](canonical-terms.md#net-true-claim-claims-net-true); query with `fak disambiguation query "net-true claim"`
+- **Contrasts:**
+  - **tuned baseline:** The tuned baseline answers only what the claim is compared against; net-true grading requires all six claim dimensions.
+  - **witness provenance:** Provenance answers only how the value was obtained; a net-true claim also names baseline, net cost, scope, witness, and realization.
 
 <a id="policy-declaration"></a>
 ## policy declaration
@@ -243,6 +267,14 @@
   - **agent session:** Resume changes the run state of an existing session; it is not the session identity or transcript.
   - **session recovery:** Resume continues a valid paused session; recovery repairs or reroutes state that cannot safely continue as-is.
 
+<a id="simulated-evidence"></a>
+## simulated evidence
+
+- **Identity:** [simulated evidence — `claims:simulated`](canonical-terms.md#simulated-evidence-claims-simulated); query with `fak disambiguation query "simulated evidence"`
+- **Contrasts:**
+  - **net-true claim:** Simulation status says how evidence was produced; net-true status grades the entire scoped claim.
+  - **witness provenance:** SIMULATED is one provenance value; witness provenance is the full closed classification field.
+
 <a id="structural-preflight"></a>
 ## structural preflight
 
@@ -259,3 +291,19 @@
   - **model KV cache:** The tool-result cache stores tool outputs and invalidates on modeled world changes; the KV cache stores per-token attention tensors.
   - **provider prompt cache:** The tool-result cache is kernel-owned and directly invalidated by fak epochs; provider prompt-cache entries are externally owned and observed through usage accounting.
   - **radix prefix cache:** The tool-result cache looks up effect-safe tool calls; the radix cache longest-prefix-matches token sequences to reusable model snapshots.
+
+<a id="tuned-baseline"></a>
+## tuned baseline
+
+- **Identity:** [tuned baseline — `claims:tuned-baseline`](canonical-terms.md#tuned-baseline-claims-tuned-baseline); query with `fak disambiguation query "tuned baseline"`
+- **Contrasts:**
+  - **fak measurement arm:** The tuned baseline is the next-best alternative; the fak arm is the treatment being evaluated against it.
+  - **naive baseline:** The tuned baseline reflects credible optimization; the naive baseline is only an untuned floor.
+
+<a id="witness-provenance"></a>
+## witness provenance
+
+- **Identity:** [witness provenance — `claims:provenance`](canonical-terms.md#witness-provenance-claims-provenance); query with `fak disambiguation query "witness provenance"`
+- **Contrasts:**
+  - **net-true claim:** Provenance answers how a number was obtained; net-true grading also requires baseline, net cost, scope, witness, and realization.
+  - **simulated evidence:** Provenance is the classification carried by evidence; simulated evidence is one explicitly labeled provenance class.

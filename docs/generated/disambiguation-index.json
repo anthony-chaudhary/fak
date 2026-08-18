@@ -1,7 +1,7 @@
 {
   "schema": "fak-disambiguation-index/1",
-  "source_revision": "sha256:9de4be8d67c5b81c3e5c6c74d339bcf404717ad19bc13f1e4c743da2f947b7f5",
-  "entry_count": 37,
+  "source_revision": "sha256:8eb9a1994585e0e4d226d376aa0426f4476efedae3eae0da2bf37c6366827c80",
+  "entry_count": 43,
   "entries": [
     {
       "schema": "fak-disambiguation-entry/1",
@@ -819,6 +819,61 @@
     {
       "schema": "fak-disambiguation-entry/1",
       "identity": {
+        "canonical_term": "fak measurement arm",
+        "aliases": [
+          "fak baseline"
+        ]
+      },
+      "definition": "The fak-enabled treatment measured against a declared alternative; calling it a baseline obscures which arm is the comparator.",
+      "contrasts": [
+        {
+          "canonical_term": "naive baseline",
+          "explanation": "The fak arm is the treatment; the naive baseline is only contextual floor evidence.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "tuned baseline",
+          "explanation": "The fak arm is the treatment; the tuned baseline is the credible comparator.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "claims",
+        "value": "fak-arm"
+      },
+      "owner": {
+        "leaf": "claimcheck",
+        "lane": "claims"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/claimcheck/claimcheck.go",
+          "revision": "claims-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-claims-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "Claim"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "claims-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
         "canonical_term": "fleet supervisor",
         "aliases": [
           "supervisor"
@@ -1166,6 +1221,116 @@
         "reason_code": "SOURCE_CURRENT",
         "checked_at": "2026-08-17T00:00:00Z",
         "probe": "policy-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "naive baseline",
+        "aliases": [
+          "strawman baseline"
+        ]
+      },
+      "definition": "A comparison arm representing the untuned or resend-everything floor; useful context, but never the decision-grade headline alternative.",
+      "contrasts": [
+        {
+          "canonical_term": "fak measurement arm",
+          "explanation": "A baseline is an alternative being compared; the fak arm is the measured treatment whose gain is claimed.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "tuned baseline",
+          "explanation": "The naive arm is a floor; the tuned arm is the credible next-best option an operator would actually choose.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "claims",
+        "value": "naive-baseline"
+      },
+      "owner": {
+        "leaf": "claimcheck",
+        "lane": "claims"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/claimcheck/claimcheck.go",
+          "revision": "claims-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-claims-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "BaselineStrawman"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "claims-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "net-true claim",
+        "aliases": [
+          "net-true gain"
+        ]
+      },
+      "definition": "A scoped value statement graded against the real tuned alternative and stated net of introduced costs, with provenance, reproduction witness, and realization status.",
+      "contrasts": [
+        {
+          "canonical_term": "tuned baseline",
+          "explanation": "The tuned baseline answers only what the claim is compared against; net-true grading requires all six claim dimensions.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "witness provenance",
+          "explanation": "Provenance answers only how the value was obtained; a net-true claim also names baseline, net cost, scope, witness, and realization.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "claims",
+        "value": "net-true"
+      },
+      "owner": {
+        "leaf": "claimcheck",
+        "lane": "claims"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/claimcheck/claimcheck.go",
+          "revision": "claims-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-claims-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "Claim"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "claims-source/1"
       },
       "lifecycle": {
         "class": "current",
@@ -1825,6 +1990,61 @@
     {
       "schema": "fak-disambiguation-entry/1",
       "identity": {
+        "canonical_term": "simulated evidence",
+        "aliases": [
+          "SIMULATED"
+        ]
+      },
+      "definition": "Stand-in data explicitly labeled SIMULATED; it can test a path but cannot be narrated as a witnessed real-world measurement.",
+      "contrasts": [
+        {
+          "canonical_term": "net-true claim",
+          "explanation": "Simulation status says how evidence was produced; net-true status grades the entire scoped claim.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "witness provenance",
+          "explanation": "SIMULATED is one provenance value; witness provenance is the full closed classification field.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "claims",
+        "value": "simulated"
+      },
+      "owner": {
+        "leaf": "claimcheck",
+        "lane": "claims"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/claimcheck/claimcheck.go",
+          "revision": "claims-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-claims-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "Simulated"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "claims-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
         "canonical_term": "structural preflight",
         "aliases": [
           "preflight"
@@ -1932,6 +2152,116 @@
         "reason_code": "SOURCE_CURRENT",
         "checked_at": "2026-08-17T00:00:00Z",
         "probe": "cache-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "tuned baseline",
+        "aliases": [
+          "real baseline"
+        ]
+      },
+      "definition": "The best-practice alternative an operator would actually run, required as the decision-grade comparator for a performance headline.",
+      "contrasts": [
+        {
+          "canonical_term": "fak measurement arm",
+          "explanation": "The tuned baseline is the next-best alternative; the fak arm is the treatment being evaluated against it.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "naive baseline",
+          "explanation": "The tuned baseline reflects credible optimization; the naive baseline is only an untuned floor.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "claims",
+        "value": "tuned-baseline"
+      },
+      "owner": {
+        "leaf": "claimcheck",
+        "lane": "claims"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/claimcheck/claimcheck.go",
+          "revision": "claims-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-claims-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "BaselineReal"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "claims-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "witness provenance",
+        "aliases": [
+          "provenance"
+        ]
+      },
+      "definition": "The closed label stating how a reported value was obtained: witnessed, observed, modeled, or simulated; it does not replace a reproduction witness.",
+      "contrasts": [
+        {
+          "canonical_term": "net-true claim",
+          "explanation": "Provenance answers how a number was obtained; net-true grading also requires baseline, net cost, scope, witness, and realization.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "simulated evidence",
+          "explanation": "Provenance is the classification carried by evidence; simulated evidence is one explicitly labeled provenance class.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "claims",
+        "value": "provenance"
+      },
+      "owner": {
+        "leaf": "claimcheck",
+        "lane": "claims"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/claimcheck/claimcheck.go",
+          "revision": "claims-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-claims-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "Provenance"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "claims-source/1"
       },
       "lifecycle": {
         "class": "current",

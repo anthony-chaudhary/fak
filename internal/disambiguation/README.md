@@ -458,3 +458,9 @@ The public index keeps five policy-adjacent concepts separate:
 - **model-mediated check** depends on model interpretation and is explicitly outside that deterministic preflight fold.
 
 Run `fak disambiguation policy-source-self-test --json` to resolve each term to its public source, prove the structural/model and capability/verdict boundaries, and reject an incompatible reuse of `POLICY_BLOCK` through the shared vocabulary validator. The fixture reads the same public index and reason-code validation seam as consumers; it introduces no second writer or private source.
+
+## Benchmark and claim terminology (#6319)
+
+The index distinguishes the **naive baseline** (untuned floor), **tuned baseline** (credible next-best alternative), and **fak measurement arm** (the treatment, not another baseline). It separately names **witness provenance** as the closed `WITNESSED` / `OBSERVED` / `MODELED` / `SIMULATED` classification, **simulated evidence** as one honestly labeled provenance class, and a **net-true claim** as the full six-question value statement.
+
+Run `fak disambiguation claims-source-self-test --json` to resolve the six terms and prove a claim fixture without baseline, provenance, or scope is rejected. The source is the public `internal/claimcheck` contract; benchmark numbers remain owned by the benchmark authority rather than copied into this index.
