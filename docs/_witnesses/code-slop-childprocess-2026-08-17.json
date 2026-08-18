@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T04:45:02.556453Z",
+  "issue": 7063,
+  "family": "subprocess exit-status normalization",
+  "paths": [
+    "internal/childprocess",
+    "cmd/fak/codex_launcher.go",
+    "cmd/fak/node.go",
+    "cmd/fakc/main.go"
+  ],
+  "test": "go test ./internal/childprocess ./cmd/fakc; fak-dev buildcheck --mine internal/childprocess/childprocess.go",
+  "test_result": "PASS",
+  "before": {
+    "score": -93.6,
+    "grade": "F",
+    "slop_debt": 370,
+    "duplication": 370,
+    "weighted_duplication": 236.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -93.1,
+    "grade": "F",
+    "slop_debt": 369,
+    "duplication": 369,
+    "weighted_duplication": 235.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

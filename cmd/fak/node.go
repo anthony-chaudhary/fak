@@ -38,6 +38,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/childprocess"
 	"io"
 	"net/http"
 	"net/url"
@@ -555,15 +556,11 @@ func nodeRun(stdout, stderr io.Writer, argv []string) int {
 	fmt.Fprintf(stderr, "[fak node] → %s%s\n", cfg.URL, keyNote)
 
 	if err := child.Run(); err != nil {
-		// Propagate the child's own exit code when it ran but failed; otherwise the
-		// command could not be launched (not found, not executable) — report and 127,
-		// the conventional "command not found" status.
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			return ee.ExitCode()
+		code := childprocess.ExitCode(err, 127)
+		if code == 127 {
+			fmt.Fprintf(stderr, "fak node run: %v\n", err)
 		}
-		fmt.Fprintf(stderr, "fak node run: %v\n", err)
-		return 127
+		return code
 	}
 	return 0
 }

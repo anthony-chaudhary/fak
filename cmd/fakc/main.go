@@ -7,8 +7,8 @@
 package main
 
 import (
-	"errors"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/childprocess"
 	"io"
 	"os"
 	"os/exec"
@@ -139,12 +139,11 @@ func execFakc(stdout, stderr io.Writer, argv, env []string) int {
 	cmd.Env = env
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
 	if err := cmd.Run(); err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			return ee.ExitCode()
+		code := childprocess.ExitCode(err, 1)
+		if code == 1 {
+			fmt.Fprintf(stderr, "fakc: %v\n", err)
 		}
-		fmt.Fprintf(stderr, "fakc: %v\n", err)
-		return 1
+		return code
 	}
 	return 0
 }
