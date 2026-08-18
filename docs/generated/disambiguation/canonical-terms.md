@@ -7,8 +7,10 @@
 | [ABI refusal reason](#abi-refusal-reason-vocabulary-abi-reason) | `vocabulary:abi-reason` | A closed trainable ReasonCode explaining why an adjudication refused a call; POLICY_BLOCK means an explicit policy rule denied it. | `fak disambiguation query "ABI refusal reason"` |
 | [DOS decision kind](#dos-decision-kind-vocabulary-dos-decision-kind) | `vocabulary:dos-decision-kind` | A persistent DOS row category identifying arbitration refusal work whose resolution depends on the current lane-lease state. | `fak disambiguation query "DOS decision kind"` |
 | [account seat](#account-seat-dispatch-account-seat) | `dispatch:account-seat` | A provider account-capacity slot with availability, session cap, leased slots, free slots, and bound worker IDs. | `fak disambiguation query "account seat"` |
+| [adjudication verdict](#adjudication-verdict-policy-decision) | `policy:decision` | The typed per-call result emitted by the adjudication fold: allow, deny, transform, quarantine, require-witness, defer, or indeterminate, with a reason and deciding rung. | `fak disambiguation query "adjudication verdict"` |
 | [agent kernel](#agent-kernel-product-fak) | `product:fak` | The fak management boundary that governs model traffic, tool effects, context, and recovery. | `fak disambiguation query "agent kernel"` |
 | [agent session](#agent-session-runtime-internal-session) | `runtime:internal/session` | A durable, addressable agent execution record carrying drive state and pointers without storing the provider transcript. | `fak disambiguation query "agent session"` |
+| [capability floor](#capability-floor-policy-authority) | `policy:authority` | The minimum authority boundary represented by negotiated capability tokens and policy constraints; it limits what may proceed but does not describe the outcome of a particular call. | `fak disambiguation query "capability floor"` |
 | [compute fleet](#compute-fleet-dispatch-fleet) | `dispatch:fleet` | A transport-agnostic roster of uniquely identified controllable machines whose live reports are folded by the public fleet core. | `fak disambiguation query "compute fleet"` |
 | [compute kernel](#compute-kernel-computing-processor) | `computing:processor` | An arithmetic routine executed by a processor. | `fak disambiguation query "compute kernel"` |
 | [context compaction](#context-compaction-runtime-codex-context) | `runtime:codex-context` | A context-window event that replaces prior history so resident input falls while cumulative usage and transcript bytes may continue rising. | `fak disambiguation query "context compaction"` |
@@ -24,6 +26,8 @@
 | [kernel](#kernel-package-internal-disambiguation) | `package:internal/disambiguation` | The internal/disambiguation Go package that validates and queries public terminology records. | `fak disambiguation query --scope-kind package --scope-value internal/disambiguation "kernel"` |
 | [lane lease](#lane-lease-dispatch-lease) | `dispatch:lease` | A live ownership claim carrying lease ID, lane or tree, holder identity, and read-only posture for collision admission. | `fak disambiguation query "lane lease"` |
 | [model KV cache](#model-kv-cache-cache-model-attention) | `cache:model-attention` | Kernel-owned per-layer attention key/value tensors indexed by token position and invalidated or rewritten when the model sequence changes. | `fak disambiguation query "model KV cache"` |
+| [model-mediated check](#model-mediated-check-policy-model-mediated) | `policy:model-mediated` | A semantic assessment whose result depends on a model interpreting content or intent; it is distinct from fak's deterministic structural preflight and is not part of the preflight command's local fold. | `fak disambiguation query "model-mediated check"` |
+| [policy declaration](#policy-declaration-policy-declaration) | `policy:declaration` | A declarative set of tool, argument, network, and resource rules loaded by the adjudicator; it states configured constraints but is not itself a decision for one call. | `fak disambiguation query "policy declaration"` |
 | [policy posture verdict](#policy-posture-verdict-vocabulary-policy-verdict) | `vocabulary:policy-verdict` | The ALLOW or DENY result of folding compiled, environment, and organization authority over a policy amendment. | `fak disambiguation query "policy posture verdict"` |
 | [provider prompt cache](#provider-prompt-cache-cache-provider-prompt-prefix) | `cache:provider-prompt-prefix` | An upstream provider-owned prompt-prefix reuse service observed as cache-read and cache-creation token accounting with provider TTL and pricing rules. | `fak disambiguation query "provider prompt cache"` |
 | [radix prefix cache](#radix-prefix-cache-cache-radix-prefix-snapshots) | `cache:radix-prefix-snapshots` | A fak-owned radix tree that longest-prefix-matches namespaced token sequences to reusable KV snapshots under token and byte budgets. | `fak disambiguation query "radix prefix cache"` |
@@ -35,6 +39,7 @@
 | [runtime](#runtime-runtime-worker-execution) | `runtime:worker-execution` | The dispatch worker process that selects a backend, optionally wraps it with fak guard, and executes one lane-scoped work packet. | `fak disambiguation query --scope-kind runtime --scope-value worker-execution "runtime"` |
 | [session recovery](#session-recovery-runtime-internal-session) | `runtime:internal/session` | A bounded repair or reroute response when persisted or cumulative session state cannot safely continue unchanged. | `fak disambiguation query "session recovery"` |
 | [session resume](#session-resume-runtime-internal-session) | `runtime:internal/session` | The paused-to-running boundary that re-admits an existing session using warm KV when available or a safe cold re-prefill. | `fak disambiguation query "session resume"` |
+| [structural preflight](#structural-preflight-policy-structural-preflight) | `policy:structural-preflight` | The local pre-dispatch fold over grammar and adjudicator rungs for one tool call, producing a verdict without executing the tool or asking a model to interpret intent. | `fak disambiguation query "structural preflight"` |
 | [tool-result cache](#tool-result-cache-cache-tool-results) | `cache:tool-results` | A fak-owned cache of completed tool-call results keyed by tool, argument hash, principal when isolated, and world-version epochs. | `fak disambiguation query "tool-result cache"` |
 
 <a id="abi-refusal-reason-vocabulary-abi-reason"></a>
@@ -83,6 +88,22 @@ A provider account-capacity slot with availability, session cap, leased slots, f
 - **Do not conflate with:**
   - [dispatch worker](contrast-index.md#dispatch-worker) — A seat supplies bounded account capacity; it is not the worker process consuming one slot.
 
+<a id="adjudication-verdict-policy-decision"></a>
+## adjudication verdict — `policy:decision`
+
+The typed per-call result emitted by the adjudication fold: allow, deny, transform, quarantine, require-witness, defer, or indeterminate, with a reason and deciding rung.
+
+- **Query:** `fak disambiguation query "adjudication verdict"`
+- **Owner:** leaf `abi`, lane `abi`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `adjudication decision`
+- **Sources:**
+  - `internal/abi/types.go` — `go-source` at `policy-source/1`
+- **Do not conflate with:**
+  - [ABI refusal reason](contrast-index.md#abi-refusal-reason) — The verdict states what happens; the reason code explains why that outcome was selected.
+  - [capability floor](contrast-index.md#capability-floor) — A verdict records the result for one call; the capability floor bounds authority before that decision is made.
+  - [policy declaration](contrast-index.md#policy-declaration) — A verdict is produced for one call; a declaration is reusable configuration consulted while producing it.
+
 <a id="agent-kernel-product-fak"></a>
 ## agent kernel — `product:fak`
 
@@ -110,6 +131,21 @@ A durable, addressable agent execution record carrying drive state and pointers 
   - `internal/session/descriptor.go` — `go-source` at `session-source/1`
 - **Do not conflate with:**
   - [session resume](contrast-index.md#session-resume) — The session is the durable execution identity; resume is one transition that re-admits a paused session.
+
+<a id="capability-floor-policy-authority"></a>
+## capability floor — `policy:authority`
+
+The minimum authority boundary represented by negotiated capability tokens and policy constraints; it limits what may proceed but does not describe the outcome of a particular call.
+
+- **Query:** `fak disambiguation query "capability floor"`
+- **Owner:** leaf `abi`, lane `abi`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `capability`
+- **Sources:**
+  - `internal/abi/types.go` — `go-source` at `policy-source/1`
+- **Do not conflate with:**
+  - [adjudication verdict](contrast-index.md#adjudication-verdict) — A capability is authority advertised or granted ahead of a call; a verdict is the call-specific result after checks run.
+  - [policy declaration](contrast-index.md#policy-declaration) — The floor is the effective authority boundary; a declaration is one configured input used to establish it.
 
 <a id="compute-fleet-dispatch-fleet"></a>
 ## compute fleet — `dispatch:fleet`
@@ -320,6 +356,35 @@ Kernel-owned per-layer attention key/value tensors indexed by token position and
   - [radix prefix cache](contrast-index.md#radix-prefix-cache) — A KV cache is one sequence's live attention state; the radix cache indexes token prefixes and references reusable snapshots across requests.
   - [tool-result cache](contrast-index.md#tool-result-cache) — The KV cache contains model attention state, not completed tool outputs or world-versioned effects.
 
+<a id="model-mediated-check-policy-model-mediated"></a>
+## model-mediated check — `policy:model-mediated`
+
+A semantic assessment whose result depends on a model interpreting content or intent; it is distinct from fak's deterministic structural preflight and is not part of the preflight command's local fold.
+
+- **Query:** `fak disambiguation query "model-mediated check"`
+- **Owner:** leaf `fak`, lane `cmd`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `model check`
+- **Sources:**
+  - `cmd/fak/main.go` — `go-source` at `policy-source/1`
+- **Do not conflate with:**
+  - [structural preflight](contrast-index.md#structural-preflight) — A model-mediated check depends on model inference; structural preflight reaches its verdict from local grammar and adjudicator rules with no model in the loop.
+
+<a id="policy-declaration-policy-declaration"></a>
+## policy declaration — `policy:declaration`
+
+A declarative set of tool, argument, network, and resource rules loaded by the adjudicator; it states configured constraints but is not itself a decision for one call.
+
+- **Query:** `fak disambiguation query "policy declaration"`
+- **Owner:** leaf `adjudicator`, lane `adjudicator`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `policy manifest`
+- **Sources:**
+  - `internal/adjudicator/decide.go` — `go-source` at `policy-source/1`
+- **Do not conflate with:**
+  - [adjudication verdict](contrast-index.md#adjudication-verdict) — A declaration is input to adjudication; a verdict is the typed result for one tool call.
+  - [capability floor](contrast-index.md#capability-floor) — A policy declaration supplies configured rules; the capability floor is the minimum authority those rules allow a caller to exercise.
+
 <a id="policy-posture-verdict-vocabulary-policy-verdict"></a>
 ## policy posture verdict — `vocabulary:policy-verdict`
 
@@ -482,6 +547,21 @@ The paused-to-running boundary that re-admits an existing session using warm KV 
 - **Do not conflate with:**
   - [agent session](contrast-index.md#agent-session) — Resume changes the run state of an existing session; it is not the session identity or transcript.
   - [session recovery](contrast-index.md#session-recovery) — Resume continues a valid paused session; recovery repairs or reroutes state that cannot safely continue as-is.
+
+<a id="structural-preflight-policy-structural-preflight"></a>
+## structural preflight — `policy:structural-preflight`
+
+The local pre-dispatch fold over grammar and adjudicator rungs for one tool call, producing a verdict without executing the tool or asking a model to interpret intent.
+
+- **Query:** `fak disambiguation query "structural preflight"`
+- **Owner:** leaf `fak`, lane `cmd`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `preflight`
+- **Sources:**
+  - `cmd/fak/main.go` — `go-source` at `policy-source/1`
+- **Do not conflate with:**
+  - [adjudication verdict](contrast-index.md#adjudication-verdict) — Preflight is the checking operation; the adjudication verdict is its typed output.
+  - [model-mediated check](contrast-index.md#model-mediated-check) — Structural preflight applies deterministic local rules before dispatch; a model-mediated check asks a model to classify meaning or intent.
 
 <a id="tool-result-cache-cache-tool-results"></a>
 ## tool-result cache — `cache:tool-results`

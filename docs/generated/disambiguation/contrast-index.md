@@ -27,6 +27,15 @@
 - **Contrasts:**
   - **dispatch worker:** A seat supplies bounded account capacity; it is not the worker process consuming one slot.
 
+<a id="adjudication-verdict"></a>
+## adjudication verdict
+
+- **Identity:** [adjudication verdict — `policy:decision`](canonical-terms.md#adjudication-verdict-policy-decision); query with `fak disambiguation query "adjudication verdict"`
+- **Contrasts:**
+  - **ABI refusal reason:** The verdict states what happens; the reason code explains why that outcome was selected.
+  - **capability floor:** A verdict records the result for one call; the capability floor bounds authority before that decision is made.
+  - **policy declaration:** A verdict is produced for one call; a declaration is reusable configuration consulted while producing it.
+
 <a id="agent-kernel"></a>
 ## agent kernel
 
@@ -40,6 +49,14 @@
 - **Identity:** [agent session — `runtime:internal/session`](canonical-terms.md#agent-session-runtime-internal-session); query with `fak disambiguation query "agent session"`
 - **Contrasts:**
   - **session resume:** The session is the durable execution identity; resume is one transition that re-admits a paused session.
+
+<a id="capability-floor"></a>
+## capability floor
+
+- **Identity:** [capability floor — `policy:authority`](canonical-terms.md#capability-floor-policy-authority); query with `fak disambiguation query "capability floor"`
+- **Contrasts:**
+  - **adjudication verdict:** A capability is authority advertised or granted ahead of a call; a verdict is the call-specific result after checks run.
+  - **policy declaration:** The floor is the effective authority boundary; a declaration is one configured input used to establish it.
 
 <a id="compute-fleet"></a>
 ## compute fleet
@@ -145,6 +162,21 @@
   - **radix prefix cache:** A KV cache is one sequence's live attention state; the radix cache indexes token prefixes and references reusable snapshots across requests.
   - **tool-result cache:** The KV cache contains model attention state, not completed tool outputs or world-versioned effects.
 
+<a id="model-mediated-check"></a>
+## model-mediated check
+
+- **Identity:** [model-mediated check — `policy:model-mediated`](canonical-terms.md#model-mediated-check-policy-model-mediated); query with `fak disambiguation query "model-mediated check"`
+- **Contrasts:**
+  - **structural preflight:** A model-mediated check depends on model inference; structural preflight reaches its verdict from local grammar and adjudicator rules with no model in the loop.
+
+<a id="policy-declaration"></a>
+## policy declaration
+
+- **Identity:** [policy declaration — `policy:declaration`](canonical-terms.md#policy-declaration-policy-declaration); query with `fak disambiguation query "policy declaration"`
+- **Contrasts:**
+  - **adjudication verdict:** A declaration is input to adjudication; a verdict is the typed result for one tool call.
+  - **capability floor:** A policy declaration supplies configured rules; the capability floor is the minimum authority those rules allow a caller to exercise.
+
 <a id="policy-posture-verdict"></a>
 ## policy posture verdict
 
@@ -210,6 +242,14 @@
 - **Contrasts:**
   - **agent session:** Resume changes the run state of an existing session; it is not the session identity or transcript.
   - **session recovery:** Resume continues a valid paused session; recovery repairs or reroutes state that cannot safely continue as-is.
+
+<a id="structural-preflight"></a>
+## structural preflight
+
+- **Identity:** [structural preflight — `policy:structural-preflight`](canonical-terms.md#structural-preflight-policy-structural-preflight); query with `fak disambiguation query "structural preflight"`
+- **Contrasts:**
+  - **adjudication verdict:** Preflight is the checking operation; the adjudication verdict is its typed output.
+  - **model-mediated check:** Structural preflight applies deterministic local rules before dispatch; a model-mediated check asks a model to classify meaning or intent.
 
 <a id="tool-result-cache"></a>
 ## tool-result cache

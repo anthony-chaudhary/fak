@@ -473,6 +473,64 @@ var publicEntries = []Entry{
 		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/supervisoragent/input.go", Revision: "fleet-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-fleet-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "SupervisorInput"}}},
 		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fleet-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
 	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "policy declaration", Aliases: []string{"policy manifest"}},
+		Definition: "A declarative set of tool, argument, network, and resource rules loaded by the adjudicator; it states configured constraints but is not itself a decision for one call.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "capability floor", Explanation: "A policy declaration supplies configured rules; the capability floor is the minimum authority those rules allow a caller to exercise.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "adjudication verdict", Explanation: "A declaration is input to adjudication; a verdict is the typed result for one tool call.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "policy", Value: "declaration"}, Owner: Owner{Leaf: "adjudicator", Lane: "adjudicator"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/adjudicator/decide.go", Revision: "policy-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-policy-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "Policy"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "policy-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "capability floor", Aliases: []string{"capability"}},
+		Definition: "The minimum authority boundary represented by negotiated capability tokens and policy constraints; it limits what may proceed but does not describe the outcome of a particular call.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "policy declaration", Explanation: "The floor is the effective authority boundary; a declaration is one configured input used to establish it.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "adjudication verdict", Explanation: "A capability is authority advertised or granted ahead of a call; a verdict is the call-specific result after checks run.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "policy", Value: "authority"}, Owner: Owner{Leaf: "abi", Lane: "abi"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/abi/types.go", Revision: "policy-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-policy-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "Capability"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "policy-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "adjudication verdict", Aliases: []string{"adjudication decision"}},
+		Definition: "The typed per-call result emitted by the adjudication fold: allow, deny, transform, quarantine, require-witness, defer, or indeterminate, with a reason and deciding rung.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "policy declaration", Explanation: "A verdict is produced for one call; a declaration is reusable configuration consulted while producing it.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "capability floor", Explanation: "A verdict records the result for one call; the capability floor bounds authority before that decision is made.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "ABI refusal reason", Explanation: "The verdict states what happens; the reason code explains why that outcome was selected.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "policy", Value: "decision"}, Owner: Owner{Leaf: "abi", Lane: "abi"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/abi/types.go", Revision: "policy-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-policy-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "Verdict"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "policy-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "structural preflight", Aliases: []string{"preflight"}},
+		Definition: "The local pre-dispatch fold over grammar and adjudicator rungs for one tool call, producing a verdict without executing the tool or asking a model to interpret intent.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "model-mediated check", Explanation: "Structural preflight applies deterministic local rules before dispatch; a model-mediated check asks a model to classify meaning or intent.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "adjudication verdict", Explanation: "Preflight is the checking operation; the adjudication verdict is its typed output.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "policy", Value: "structural-preflight"}, Owner: Owner{Leaf: "fak", Lane: "cmd"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "cmd/fak/main.go", Revision: "policy-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-policy-source", Reference: &PublicReference{Kind: ReferenceKindCLIVerb, Name: "preflight"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "policy-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "model-mediated check", Aliases: []string{"model check"}},
+		Definition: "A semantic assessment whose result depends on a model interpreting content or intent; it is distinct from fak's deterministic structural preflight and is not part of the preflight command's local fold.",
+		Contrasts:  []Contrast{{CanonicalTerm: "structural preflight", Explanation: "A model-mediated check depends on model inference; structural preflight reaches its verdict from local grammar and adjudicator rules with no model in the loop.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)}},
+		Scope:      Scope{Kind: "policy", Value: "model-mediated"}, Owner: Owner{Leaf: "fak", Lane: "cmd"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "cmd/fak/main.go", Revision: "policy-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-policy-source", Reference: &PublicReference{Kind: ReferenceKindCLIVerb, Name: "preflight"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "policy-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
 }
 
 var publicIndex = mustNewIndex(publicEntries)

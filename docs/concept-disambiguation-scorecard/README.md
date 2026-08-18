@@ -15,20 +15,20 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **275** (clarity 15 + coverage 260) |
+| **Disambiguation-debt (drive to 0)** | **276** (clarity 16 + coverage 260) |
 | **Crystal-clear concepts (and climbing)** | **458** crystal of 2171 positioned |
 | **Confusable tokens positioned (covered / discovered)** | **2323 / 2583** (89.9% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 192 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **61** of 2849 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 87.1/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 86.5/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2171 concepts - score 87.1/100 (grade B) - disambiguation-debt 275
+concept-disambiguation chart - 2171 concepts - score 86.5/100 (grade B) - disambiguation-debt 276
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #######..................... 458
@@ -2441,8 +2441,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
+| grounded | `grounded` | 4 | 6 | 6 ungrounded concept(s) |
 | separation | `reference_resolves` | 16 | 6 | 6 dangling distinct_from reference(s) |
-| grounded | `grounded` | 20 | 5 | 5 ungrounded concept(s) |
 | honesty | `clarity_consistent` | 64 | 2 | 2 verdict overclaim(s) |
 | indexed | `index_resolves` | 82 | 1 | 1 unresolvable shared lookup name(s) |
 | separation | `pair_mutual` | 90 | 1 | 1 one-sided boundary on a confusable pair |

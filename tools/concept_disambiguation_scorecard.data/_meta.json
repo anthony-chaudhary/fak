@@ -6496,6 +6496,46 @@
           "category": "incidental",
           "reason": "Local receipt field label for the already-resolved harness capability fixture, not a new capability concept.",
           "token": "capabilityProfile"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier for the canonical policy terminology self-test; the indexed concepts carry the semantic distinction.",
+          "token": "rundisambiguationpolicysourceselftest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier for the canonical policy terminology self-test; the indexed concepts carry the semantic distinction.",
+          "token": "runpolicysourceselftest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier for the canonical policy terminology self-test; the indexed concepts carry the semantic distinction.",
+          "token": "policysourceselftestreport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier for the canonical policy terminology self-test; the indexed concepts carry the semantic distinction.",
+          "token": "policysourceresolution"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier for the canonical policy terminology self-test; the indexed concepts carry the semantic distinction.",
+          "token": "policysourceselftestschemaversion"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier for the canonical policy terminology self-test; the indexed concepts carry the semantic distinction.",
+          "token": "structuralbeforemodel"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation field for the canonical capability-floor versus adjudication-verdict distinction, not a separate capability concept.",
+          "token": "capabilitynotverdict"
+        },
+        {
+          "category": "incidental",
+          "reason": "Deliberately conflicting fixture symbol used only to prove incompatible POLICY_BLOCK reuse is rejected.",
+          "token": "VerdictPolicyBlock"
         }
       ],
       "exclude": [
@@ -6552,6 +6592,7 @@
         "StageAdjudicate",
         "StrengthToolPolicyGrammar",
         "ToolPolicyVersion",
+        "VerdictPolicyBlock",
         "adjudicate",
         "adjudicated",
         "adjudicates",
@@ -6566,6 +6607,7 @@
         "capability_digest",
         "capability_failure",
         "capability_lines",
+        "capabilitynotverdict",
         "ciPreflightArchiveTimeout",
         "config_posture_budget",
         "contractByCapability",
@@ -6609,6 +6651,9 @@
         "policy_changed",
         "policyblocks",
         "policylabel",
+        "policysourceresolution",
+        "policysourceselftestreport",
+        "policysourceselftestschemaversion",
         "postures",
         "printGuardLaunchPostures",
         "referencePolicyForCorpusCell",
@@ -6620,6 +6665,8 @@
         "runSemanticAdjudicator",
         "runTailPolicyMatrix",
         "runWindow",
+        "rundisambiguationpolicysourceselftest",
+        "runpolicysourceselftest",
         "schedLauncherPosture",
         "schedulerPolicyResult",
         "semanticAdjudicator",
@@ -6632,6 +6679,7 @@
         "sessionCapabilityDefinition",
         "stackpreflight",
         "stackpreflightdemo",
+        "structuralbeforemodel",
         "tailPolicyReport",
         "tailPolicyResult",
         "tailPolicySchema",

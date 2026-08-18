@@ -1,7 +1,7 @@
 {
   "schema": "fak-disambiguation-index/1",
-  "source_revision": "sha256:6b36a4df5f42937ad9707d38e4c5fa73a45c1326947f7e2d079f6b83f132ee56",
-  "entry_count": 32,
+  "source_revision": "sha256:9de4be8d67c5b81c3e5c6c74d339bcf404717ad19bc13f1e4c743da2f947b7f5",
+  "entry_count": 37,
   "entries": [
     {
       "schema": "fak-disambiguation-entry/1",
@@ -178,6 +178,67 @@
     {
       "schema": "fak-disambiguation-entry/1",
       "identity": {
+        "canonical_term": "adjudication verdict",
+        "aliases": [
+          "adjudication decision"
+        ]
+      },
+      "definition": "The typed per-call result emitted by the adjudication fold: allow, deny, transform, quarantine, require-witness, defer, or indeterminate, with a reason and deciding rung.",
+      "contrasts": [
+        {
+          "canonical_term": "ABI refusal reason",
+          "explanation": "The verdict states what happens; the reason code explains why that outcome was selected.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "capability floor",
+          "explanation": "A verdict records the result for one call; the capability floor bounds authority before that decision is made.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "policy declaration",
+          "explanation": "A verdict is produced for one call; a declaration is reusable configuration consulted while producing it.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "policy",
+        "value": "decision"
+      },
+      "owner": {
+        "leaf": "abi",
+        "lane": "abi"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/abi/types.go",
+          "revision": "policy-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-policy-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "Verdict"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "policy-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
         "canonical_term": "agent kernel",
         "aliases": [
           "fused agent kernel"
@@ -263,6 +324,61 @@
         "reason_code": "SOURCE_CURRENT",
         "checked_at": "2026-08-17T00:00:00Z",
         "probe": "session-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "capability floor",
+        "aliases": [
+          "capability"
+        ]
+      },
+      "definition": "The minimum authority boundary represented by negotiated capability tokens and policy constraints; it limits what may proceed but does not describe the outcome of a particular call.",
+      "contrasts": [
+        {
+          "canonical_term": "adjudication verdict",
+          "explanation": "A capability is authority advertised or granted ahead of a call; a verdict is the call-specific result after checks run.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "policy declaration",
+          "explanation": "The floor is the effective authority boundary; a declaration is one configured input used to establish it.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "policy",
+        "value": "authority"
+      },
+      "owner": {
+        "leaf": "abi",
+        "lane": "abi"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/abi/types.go",
+          "revision": "policy-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-policy-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "Capability"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "policy-source/1"
       },
       "lifecycle": {
         "class": "current",
@@ -1010,6 +1126,110 @@
     {
       "schema": "fak-disambiguation-entry/1",
       "identity": {
+        "canonical_term": "model-mediated check",
+        "aliases": [
+          "model check"
+        ]
+      },
+      "definition": "A semantic assessment whose result depends on a model interpreting content or intent; it is distinct from fak's deterministic structural preflight and is not part of the preflight command's local fold.",
+      "contrasts": [
+        {
+          "canonical_term": "structural preflight",
+          "explanation": "A model-mediated check depends on model inference; structural preflight reaches its verdict from local grammar and adjudicator rules with no model in the loop.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "policy",
+        "value": "model-mediated"
+      },
+      "owner": {
+        "leaf": "fak",
+        "lane": "cmd"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "cmd/fak/main.go",
+          "revision": "policy-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-policy-source",
+          "reference": {
+            "kind": "cli-verb",
+            "name": "preflight"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "policy-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "policy declaration",
+        "aliases": [
+          "policy manifest"
+        ]
+      },
+      "definition": "A declarative set of tool, argument, network, and resource rules loaded by the adjudicator; it states configured constraints but is not itself a decision for one call.",
+      "contrasts": [
+        {
+          "canonical_term": "adjudication verdict",
+          "explanation": "A declaration is input to adjudication; a verdict is the typed result for one tool call.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "capability floor",
+          "explanation": "A policy declaration supplies configured rules; the capability floor is the minimum authority those rules allow a caller to exercise.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "policy",
+        "value": "declaration"
+      },
+      "owner": {
+        "leaf": "adjudicator",
+        "lane": "adjudicator"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/adjudicator/decide.go",
+          "revision": "policy-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-policy-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "Policy"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "policy-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
         "canonical_term": "policy posture verdict",
         "aliases": [
           "organization amendment verdict"
@@ -1596,6 +1816,61 @@
         "reason_code": "SOURCE_CURRENT",
         "checked_at": "2026-08-17T00:00:00Z",
         "probe": "session-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "structural preflight",
+        "aliases": [
+          "preflight"
+        ]
+      },
+      "definition": "The local pre-dispatch fold over grammar and adjudicator rungs for one tool call, producing a verdict without executing the tool or asking a model to interpret intent.",
+      "contrasts": [
+        {
+          "canonical_term": "adjudication verdict",
+          "explanation": "Preflight is the checking operation; the adjudication verdict is its typed output.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "model-mediated check",
+          "explanation": "Structural preflight applies deterministic local rules before dispatch; a model-mediated check asks a model to classify meaning or intent.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "policy",
+        "value": "structural-preflight"
+      },
+      "owner": {
+        "leaf": "fak",
+        "lane": "cmd"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "cmd/fak/main.go",
+          "revision": "policy-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-policy-source",
+          "reference": {
+            "kind": "cli-verb",
+            "name": "preflight"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "policy-source/1"
       },
       "lifecycle": {
         "class": "current",

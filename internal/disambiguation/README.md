@@ -446,3 +446,15 @@ fak disambiguation query lease
 ```
 
 The selfcheck resolves all eight public concepts, rejects narration-only identity, and proves structured identity survives adversarial prose unchanged.
+
+## Policy and adjudication terminology (#6318)
+
+The public index keeps five policy-adjacent concepts separate:
+
+- **policy declaration** is reusable configuration (`adjudicator.Policy`), not a result for one call;
+- **capability floor** is the minimum authority boundary (`abi.Capability`), not a verdict;
+- **adjudication verdict** is the typed per-call outcome (`abi.Verdict`), while an **ABI refusal reason** explains why;
+- **structural preflight** is the local grammar/adjudicator fold exposed by `fak preflight` and does not execute the tool; and
+- **model-mediated check** depends on model interpretation and is explicitly outside that deterministic preflight fold.
+
+Run `fak disambiguation policy-source-self-test --json` to resolve each term to its public source, prove the structural/model and capability/verdict boundaries, and reject an incompatible reuse of `POLICY_BLOCK` through the shared vocabulary validator. The fixture reads the same public index and reason-code validation seam as consumers; it introduces no second writer or private source.
