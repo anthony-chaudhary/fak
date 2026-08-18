@@ -1,0 +1,17 @@
+{
+  "schema": "fak-component-contract/1",
+  "component": {
+    "id": "kernel.paged-attention@2",
+    "kind": "kernel",
+    "version": "2.1.0",
+    "provides": ["kernel.paged-attention"],
+    "relations": [
+      {
+        "kind": "requires",
+        "target": "runtime.cuda.12",
+        "evidence": {"authority": "kernel-author", "source": "kernel release 2.1 device witness", "tier": "witnessed"}
+      }
+    ],
+    "evidence": {"authority": "kernel-author", "source": "kernel release 2.1.0", "tier": "published"}
+  }
+}

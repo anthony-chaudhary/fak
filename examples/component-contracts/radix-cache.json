@@ -1,0 +1,22 @@
+{
+  "schema": "fak-component-contract/1",
+  "component": {
+    "id": "cache.kv.radix@1",
+    "kind": "cache",
+    "version": "1.0.0",
+    "provides": ["cache.kv.radix"],
+    "relations": [
+      {
+        "kind": "requires",
+        "target": "kernel.paged-attention",
+        "evidence": {"authority": "cache-author", "source": "cache release 1.0.0 compatibility suite", "tier": "witnessed"}
+      },
+      {
+        "kind": "recommends",
+        "target": "runtime.cuda.graphs",
+        "evidence": {"authority": "cache-author", "source": "cache benchmark 42", "tier": "measured"}
+      }
+    ],
+    "evidence": {"authority": "cache-author", "source": "cache release 1.0.0", "tier": "published"}
+  }
+}

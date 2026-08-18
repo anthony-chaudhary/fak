@@ -1,0 +1,10 @@
+{
+  "schema": "fak-component-contract/1",
+  "component": {
+    "id": "runtime.cuda@12.9",
+    "kind": "runtime",
+    "version": "12.9",
+    "provides": ["runtime.cuda.12"],
+    "evidence": {"authority": "runtime-author", "source": "CUDA runtime 12.9 installation receipt", "tier": "observed"}
+  }
+}

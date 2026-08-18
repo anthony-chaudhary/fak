@@ -500,6 +500,8 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 		cmdSupportMaturityScorecard(args)
 	case "support":
 		cmdSupport(args)
+	case "component":
+		cmdComponent(args)
 	case "dojo":
 		cmdDojo(args)
 	case "dojo-rsi":
