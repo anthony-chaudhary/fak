@@ -22,7 +22,7 @@ const ghRunnerTimeout = 60 * time.Second
 // IssueSchema is the machine-readable envelope for the maturity backlog ->
 // GitHub issue bridge. It turns the ranked `fak maturity next` backlog into the
 // work surface the issue-dispatch loop already consumes.
-const IssueSchema = "fak-maturity-issues/2"
+const IssueSchema = "fak-maturity-issues/3"
 
 var maturityIssueMarkerRE = regexp.MustCompile(`<!--\s*fak-maturity-work-key:\s*([^>\s]+)\s*-->`)
 var maturityTriageLabels = []string{"needs-triage", "triage-only"}
@@ -234,41 +234,95 @@ func MarkerKey(body string) string {
 	return strings.TrimSpace(m[1])
 }
 
-// BuildIssuePlan decides whether each maturity item creates a new issue or updates
-// the issue that already carries the stable marker key.
+// BuildIssuePlan ensures each requested maturity item has one canonical open
+// successor and closes duplicate open issues carrying the same stable key.
 func BuildIssuePlan(items []IssueItem, existing []ExistingIssue) []IssuePlanRow {
-	byKey := map[string]ExistingIssue{}
+	return buildIssuePlan(items, existing, false)
+}
+
+// ReconcileIssues additionally closes open managed issues whose keys are
+// absent from the complete current portfolio. Callers must not use it with a
+// deliberately limited projection.
+func ReconcileIssues(items []IssueItem, existing []ExistingIssue) []IssuePlanRow {
+	return buildIssuePlan(items, existing, true)
+}
+
+func buildIssuePlan(items []IssueItem, existing []ExistingIssue, closeObsolete bool) []IssuePlanRow {
+	byKey := map[string][]ExistingIssue{}
 	for _, issue := range existing {
 		if key := MarkerKey(issue.Body); key != "" {
-			byKey[key] = issue
+			byKey[key] = append(byKey[key], issue)
 		}
 	}
+	current := make(map[string]bool, len(items))
 	plan := make([]IssuePlanRow, 0, len(items))
 	for _, item := range items {
+		current[item.Key] = true
+		matches := byKey[item.Key]
+		canonical, found := canonicalIssue(item, matches)
 		row := IssuePlanRow{
-			Action:  "create",
-			Key:     item.Key,
-			Lane:    item.Lane,
-			Title:   item.Title,
-			Body:    item.Body,
-			Gap:     item.Gap,
-			Witness: item.Witness,
-			Skip:    item.Skip,
+			Action: "create", Key: item.Key, Lane: item.Lane, Title: item.Title,
+			Body: item.Body, Gap: item.Gap, Witness: item.Witness, Skip: item.Skip,
 		}
-		if found, ok := byKey[item.Key]; ok {
+		if found {
 			row.Action = "update"
-			if strings.EqualFold(found.State, "closed") {
+			if strings.EqualFold(canonical.State, "closed") {
 				row.Action = "reopen"
-			} else if found.Title == item.Title && found.Body == item.Body {
+			} else if canonical.Title == item.Title && canonical.Body == item.Body {
 				row.Action = "keep"
 			}
-			row.State = found.State
-			n := found.Number
+			row.State = canonical.State
+			n := canonical.Number
 			row.Number = &n
 		}
 		plan = append(plan, row)
+		for _, issue := range matches {
+			if found && issue.Number == canonical.Number || !strings.EqualFold(issue.State, "open") {
+				continue
+			}
+			n := issue.Number
+			plan = append(plan, IssuePlanRow{
+				Action: "close-duplicate", Key: item.Key, Number: &n, State: issue.State,
+				Lane: item.Lane, Title: issue.Title, Gap: item.Gap,
+			})
+		}
+	}
+	if closeObsolete {
+		for key, matches := range byKey {
+			if current[key] {
+				continue
+			}
+			for _, issue := range matches {
+				if !strings.EqualFold(issue.State, "open") {
+					continue
+				}
+				n := issue.Number
+				plan = append(plan, IssuePlanRow{
+					Action: "close-obsolete", Key: key, Number: &n, State: issue.State,
+					Title: issue.Title,
+				})
+			}
+		}
 	}
 	return plan
+}
+
+func canonicalIssue(item IssueItem, matches []ExistingIssue) (ExistingIssue, bool) {
+	var best ExistingIssue
+	bestRank := -1
+	for _, issue := range matches {
+		rank := 0
+		if strings.EqualFold(issue.State, "open") {
+			rank += 2
+		}
+		if issue.Title == item.Title && issue.Body == item.Body {
+			rank++
+		}
+		if rank > bestRank || rank == bestRank && issue.Number > best.Number {
+			best, bestRank = issue, rank
+		}
+	}
+	return best, bestRank >= 0
 }
 
 // IssueRunner is injectable so tests never shell out to gh.
@@ -299,7 +353,7 @@ func FetchExistingIssues(repo string, limit int) ([]ExistingIssue, error) {
 	if limit <= 0 {
 		limit = 1000
 	}
-	args := []string{"issue", "list", "--state", "all", "--limit", strconv.Itoa(limit), "--json", "number,title,body,state,url"}
+	args := []string{"issue", "list", "--state", "all", "--search", "\"fak-maturity-work-key\" in:body", "--limit", strconv.Itoa(limit), "--json", "number,title,body,state,url"}
 	if repo != "" {
 		args = append(args, "--repo", repo)
 	}
@@ -314,6 +368,9 @@ func FetchExistingIssues(repo string, limit int) ([]ExistingIssue, error) {
 	if err := json.Unmarshal([]byte(stdout), &issues); err != nil {
 		return nil, err
 	}
+	if len(issues) >= limit {
+		return nil, fmt.Errorf("managed maturity issue query reached limit %d; refusing incomplete reconciliation", limit)
+	}
 	return issues, nil
 }
 
@@ -326,6 +383,19 @@ func SyncIssuePlan(plan []IssuePlanRow, repo string, labels []string, runner Iss
 	}
 	rows := make([]IssueSyncRow, 0, len(plan))
 	for _, row := range plan {
+		if row.Action == "close-duplicate" || row.Action == "close-obsolete" {
+			num := ""
+			if row.Number != nil {
+				num = strconv.Itoa(*row.Number)
+			}
+			args := []string{"issue", "close", num}
+			if repo != "" {
+				args = append(args, "--repo", repo)
+			}
+			stdout, stderr, ok := run(args)
+			rows = append(rows, IssueSyncRow{Key: row.Key, Action: row.Action, OK: ok, Stdout: strings.TrimSpace(stdout), Stderr: strings.TrimSpace(stderr)})
+			continue
+		}
 		if row.Action == "keep" {
 			rows = append(rows, IssueSyncRow{Key: row.Key, Action: row.Action, OK: true})
 			continue

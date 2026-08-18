@@ -252,6 +252,57 @@ func TestBuildIssuePlanUpdatesExistingMaturityIssue(t *testing.T) {
 	}
 }
 
+func TestReconcileIssuesClosesDuplicateAndObsoleteOpenIssues(t *testing.T) {
+	item := IssueItem{
+		Key: "gateway:tested", Lane: "gateway", Title: "maturity(gateway): add tests",
+		Body: "<!-- fak-maturity-work-key: gateway:tested -->\n",
+	}
+	existing := []ExistingIssue{
+		{Number: 7, State: "OPEN", Title: item.Title, Body: item.Body},
+		{Number: 8, State: "OPEN", Title: item.Title, Body: item.Body},
+		{Number: 9, State: "OPEN", Title: "old gap", Body: "<!-- fak-maturity-work-key: gateway:prototyped -->\n"},
+		{Number: 10, State: "CLOSED", Title: "old closed gap", Body: "<!-- fak-maturity-work-key: gateway:dogfooded -->\n"},
+	}
+	plan := ReconcileIssues([]IssueItem{item}, existing)
+	var actions []string
+	for _, row := range plan {
+		n := 0
+		if row.Number != nil {
+			n = *row.Number
+		}
+		actions = append(actions, fmt.Sprintf("%s:%d", row.Action, n))
+	}
+	got := strings.Join(actions, ",")
+	if got != "keep:8,close-duplicate:7,close-obsolete:9" {
+		t.Fatalf("reconcile plan = %q", got)
+	}
+}
+
+func TestBuildIssuePlanLimitedDoesNotCloseObsoleteKeys(t *testing.T) {
+	item := IssueItem{Key: "gateway:tested", Lane: "gateway", Title: "next", Body: "<!-- fak-maturity-work-key: gateway:tested -->\n"}
+	existing := []ExistingIssue{{Number: 9, State: "OPEN", Body: "<!-- fak-maturity-work-key: other:tested -->\n"}}
+	plan := BuildIssuePlan([]IssueItem{item}, existing)
+	if len(plan) != 1 || plan[0].Action != "create" {
+		t.Fatalf("limited plan must not close unseen keys: %#v", plan)
+	}
+}
+
+func TestSyncIssuePlanClosesManagedIssue(t *testing.T) {
+	n := 9
+	plan := []IssuePlanRow{{Action: "close-obsolete", Key: "old:tested", Number: &n}}
+	var calls [][]string
+	rows := SyncIssuePlan(plan, "owner/repo", nil, func(args []string) (string, string, bool) {
+		calls = append(calls, append([]string(nil), args...))
+		return "closed", "", true
+	})
+	if len(rows) != 1 || !rows[0].OK || len(calls) != 1 {
+		t.Fatalf("unexpected close sync: rows=%#v calls=%#v", rows, calls)
+	}
+	if got := strings.Join(calls[0], " "); got != "issue close 9 --repo owner/repo" {
+		t.Fatalf("close call = %q", got)
+	}
+}
+
 func TestBuildIssuePlanKeepsUnchangedOpenSuccessor(t *testing.T) {
 	item := IssueItem{
 		Key: "gateway:tested", Lane: "gateway", Title: "maturity(gateway): add tests",

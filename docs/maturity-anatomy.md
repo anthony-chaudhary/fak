@@ -58,10 +58,11 @@ caveats in JSON.
 ## Open-successor continuity
 
 Every capability below the terminal `default + benchmark` point has one derived next-work row.
-That row is keyed as `<lane>:<gap>` and must have an **open** GitHub issue: `fak maturity route`
-creates a missing issue, refreshes an open one, and reopens a closed one while that same gap
-remains current. Once evidence advances the capability, the key advances to the next rung; terminal
-capabilities emit no row and need no successor ticket. Private-boundary rows remain visible but are
+That row is keyed as `<lane>:<gap>` and must have **exactly one open** GitHub issue: `fak maturity route`
+creates a missing issue, refreshes or keeps the canonical open one, reopens a closed one while that
+same gap remains current, and closes duplicate managed issues. Once evidence advances the capability,
+the full-portfolio route closes the obsolete key and opens the next rung; terminal capabilities emit
+no row, and their obsolete managed successor is closed. Private-boundary rows remain visible but are
 never filed publicly.
 
 The command is live by default and covers the whole portfolio; use `--dry-run` to preview or

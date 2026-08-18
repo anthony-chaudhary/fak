@@ -147,6 +147,9 @@ func runMaturityRoute(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	plan := maturity.BuildIssuePlan(items, existing)
+	if *limit == 0 {
+		plan = maturity.ReconcileIssues(items, existing)
+	}
 	mode := "dry-run"
 	if *live {
 		mode = "live"
