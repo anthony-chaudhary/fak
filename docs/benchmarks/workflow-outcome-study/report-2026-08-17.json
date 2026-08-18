@@ -1,0 +1,39 @@
+{
+  "schema": "fak-workflow-outcome-report/1",
+  "study_id": "workflow-default-equivalent-outcomes-2026-08",
+  "task_digest": "sha256:8fa83ad0b7dff981d571b1b8184142ae4f78c12a3bff3fbfe029ddfe753d009a",
+  "task_count": 5,
+  "equivalent_pairs": 5,
+  "complete_pairs": 5,
+  "blind_grades": 10,
+  "arms": {
+    "direct": {
+      "completed": 5,
+      "failed": 0,
+      "elapsed_ms": 1018704,
+      "usage": {
+        "input_tokens": 10508974,
+        "cached_input_tokens": 9761408,
+        "output_tokens": 24536
+      },
+      "correctness": 11,
+      "usefulness": 11,
+      "grades": 5
+    },
+    "workflow": {
+      "completed": 5,
+      "failed": 0,
+      "elapsed_ms": 1786692,
+      "usage": {
+        "input_tokens": 10067130,
+        "cached_input_tokens": 9358592,
+        "output_tokens": 46486
+      },
+      "correctness": 20,
+      "usefulness": 20,
+      "grades": 5
+    }
+  },
+  "gain_claim_ready": true,
+  "evidence_note": "gain claims require every frozen task to have equivalent completed arms and blind grades; provider usage is observed, not FAK-authored"
+}
