@@ -127,6 +127,23 @@ func TestGatewaySamplerRetainsFinishReasonAndReasoningOnly(t *testing.T) {
 	}
 }
 
+func TestGatewaySamplerSendsPinnedTraceID(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("X-Trace-Id")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`))
+	}))
+	defer srv.Close()
+	sample := gatewaySampler(srv.Client(), livecodebench.RawArmConfig{Endpoint: srv.URL, Model: "m"}, 8, "  lcb-run-42  ")
+	if _, _, err := sample(context.Background(), livecodebench.Problem{QuestionID: "q", Prompt: "p"}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got != "lcb-run-42" {
+		t.Fatalf("X-Trace-Id = %q, want pinned run id", got)
+	}
+}
+
 func TestRawArmSummarySurfacesTerminationCounts(t *testing.T) {
 	report := livecodebench.RawArmReport{Model: "m", Endpoint: "e", N: 2, Problems: make([]livecodebench.RawArmProblem, 3), Usage: livecodebench.RawArmUsage{CachedPromptTokens: 7, Truncated: 2, ReasoningOnly: 1}}
 	got := rawArmSummary(report)

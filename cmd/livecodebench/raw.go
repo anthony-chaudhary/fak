@@ -34,6 +34,7 @@ func runRaw(argv []string) int {
 	sampling := livecodebench.DefaultSampling()
 	sampling.RegisterFlags(fs)
 	maxTokens := fs.Int("max-tokens", 2048, "max_tokens sent on each completion request")
+	traceID := fs.String("trace-id", "", "X-Trace-Id sent on each request (use a fresh value for a stateful fak gateway)")
 	timeout := fs.Duration("timeout", 120*time.Second, "per-request HTTP timeout")
 	out := fs.String("out", "", "write the raw-arm report JSON to this path (default: stdout)")
 	// lcb_runner cache/resume parity (#2108).
@@ -104,7 +105,7 @@ func runRaw(argv []string) int {
 
 	cfg := sampling.ArmConfig(*model, *endpoint)
 	client := &http.Client{Timeout: *timeout}
-	sampler := gatewaySampler(client, cfg, *maxTokens)
+	sampler := gatewaySampler(client, cfg, *maxTokens, *traceID)
 
 	res, err := livecodebench.RunRawArmCached(context.Background(), cfg, suite.ReleaseVersion, suite.Problems, sampler, cache, prior)
 	if err != nil {
@@ -167,7 +168,7 @@ func bearerFromEnv() string {
 // provider-relayed usage, normalized here through agent.Usage.CachedPromptTokens()
 // into livecodebench.RawSampleUsage (the agent import stays on this cmd side so
 // internal/livecodebench keeps its foundation tier).
-func gatewaySampler(client *http.Client, cfg livecodebench.RawArmConfig, maxTokens int) livecodebench.RawArmSampler {
+func gatewaySampler(client *http.Client, cfg livecodebench.RawArmConfig, maxTokens int, traceID ...string) livecodebench.RawArmSampler {
 	url := strings.TrimRight(cfg.Endpoint, "/") + "/chat/completions"
 	return func(ctx context.Context, p livecodebench.Problem, _ int) (string, livecodebench.RawSampleUsage, error) {
 		reqBody := chatCompletionsRequest{
@@ -186,6 +187,9 @@ func gatewaySampler(client *http.Client, cfg livecodebench.RawArmConfig, maxToke
 			return "", livecodebench.RawSampleUsage{}, err
 		}
 		req.Header.Set("Content-Type", "application/json")
+		if len(traceID) > 0 && strings.TrimSpace(traceID[0]) != "" {
+			req.Header.Set("X-Trace-Id", strings.TrimSpace(traceID[0]))
+		}
 		if key := bearerFromEnv(); key != "" {
 			req.Header.Set("Authorization", "Bearer "+key)
 		}

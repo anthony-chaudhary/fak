@@ -1,0 +1,200 @@
+{
+  "schema": "fak.livecodebench-suite.v1",
+  "benchmark": "livecodebench",
+  "release_version": "release_v6",
+  "provenance": {
+    "dataset_id": "livecodebench/code_generation_lite",
+    "revision": "release_v6",
+    "split": "test",
+    "problem_count": 8,
+    "contest_date_from": "2025-01-04",
+    "contest_date_to": "2025-04-05"
+  },
+  "problems": [
+    {
+      "question_id": "abc398_a",
+      "scenario": "codegeneration",
+      "platform": "atcoder",
+      "difficulty": "easy",
+      "contest_date": "2025-03-22",
+      "prompt": "Find a length-N string that satisfies all of the following conditions:\n\n- Each character is - or =.\n- It is a palindrome.\n- It contains exactly one or exactly two =s. If it contains two =s, they are adjacent.\n\nSuch a string is unique.\n\nInput\n\nThe input is given from Standard Input in the following format:\nN\n\nOutput\n\nPrint the answer.\n\nConstraints\n\n\n- 1 \\leq N \\leq 100\n- N is an integer.\n\nSample Input 1\n\n4\n\nSample Output 1\n\n-==-\n\nSample Input 2\n\n7\n\nSample Output 2\n\n---=---",
+      "public_test_cases": [
+        {
+          "input": "4",
+          "output": "-==-",
+          "testtype": "stdin"
+        },
+        {
+          "input": "7",
+          "output": "---=---",
+          "testtype": "stdin"
+        }
+      ]
+    },
+    {
+      "question_id": "abc389_b",
+      "scenario": "codegeneration",
+      "platform": "atcoder",
+      "difficulty": "easy",
+      "contest_date": "2025-01-18",
+      "prompt": "You are given an integer X not less than 2.\nFind the positive integer N such that N! = X.\nHere, N! denotes the factorial of N, and it is guaranteed that there is exactly one such N.\n\nInput\n\nThe input is given from Standard Input in the following format:\nX\n\nOutput\n\nPrint the answer.\n\nConstraints\n\n\n- 2 \\leq X \\leq 3 \\times 10^{18}\n- There is exactly one positive integer N such that N!=X.\n- All input values are integers.\n\nSample Input 1\n\n6\n\nSample Output 1\n\n3\r\n\nFrom 3!=3\\times2\\times1=6, print 3.\n\nSample Input 2\n\n2432902008176640000\n\nSample Output 2\n\n20\r\n\nFrom 20!=2432902008176640000, print 20.",
+      "public_test_cases": [
+        {
+          "input": "6",
+          "output": "3",
+          "testtype": "stdin"
+        },
+        {
+          "input": "2432902008176640000",
+          "output": "20",
+          "testtype": "stdin"
+        }
+      ]
+    },
+    {
+      "question_id": "abc391_a",
+      "scenario": "codegeneration",
+      "platform": "atcoder",
+      "difficulty": "easy",
+      "contest_date": "2025-02-01",
+      "prompt": "You are given a string D representing one of the eight directions (north, east, west, south, northeast, northwest, southeast, southwest). The correspondence between the directions and their representing strings is as follows.\n\n- North: N\n- East: E\n- West: W\n- South: S\n- Northeast: NE\n- Northwest: NW\n- Southeast: SE\n- Southwest: SW\n\nPrint the string representing the direction opposite to the direction denoted by D.\n\nInput\n\nThe input is given from Standard Input in the following format:\nD\n\nOutput\n\nPrint the answer.\n\nConstraints\n\n\n- D is one of N, E, W, S, NE, NW, SE, SW.\n\nSample Input 1\n\nN\n\nSample Output 1\n\nS\r\n\nPrint S, which represents south, the direction opposite to north.\n\nSample Input 2\n\nSE\n\nSample Output 2\n\nNW\r\n\nPrint NW, which represents northwest, the direction opposite to southeast.",
+      "public_test_cases": [
+        {
+          "input": "N",
+          "output": "S",
+          "testtype": "stdin"
+        },
+        {
+          "input": "SE",
+          "output": "NW",
+          "testtype": "stdin"
+        }
+      ]
+    },
+    {
+      "question_id": "abc400_a",
+      "scenario": "codegeneration",
+      "platform": "atcoder",
+      "difficulty": "easy",
+      "contest_date": "2025-04-05",
+      "prompt": "In the ceremony commemorating ABC400, we want to arrange 400 people in a rectangular formation of A rows and B columns without any gaps.\nYou are given a positive integer A. Print the value of a positive integer B for which such an arrangement is possible. If there is no such positive integer B, print -1.\n\nInput\n\nThe input is given from Standard Input in the following format:\nA\n\nOutput\n\nPrint the value of B or -1 as specified by the problem statement.\n\nConstraints\n\n\n- A is an integer between 1 and 400, inclusive.\n\nSample Input 1\n\n10\n\nSample Output 1\n\n40\r\n\nWe can arrange 400 people in 10 rows and 40 columns.\n\nSample Input 2\n\n11\n\nSample Output 2\n\n-1\n\nSample Input 3\n\n400\n\nSample Output 3\n\n1",
+      "public_test_cases": [
+        {
+          "input": "10",
+          "output": "40",
+          "testtype": "stdin"
+        },
+        {
+          "input": "11",
+          "output": "-1",
+          "testtype": "stdin"
+        },
+        {
+          "input": "400",
+          "output": "1",
+          "testtype": "stdin"
+        }
+      ]
+    },
+    {
+      "question_id": "abc392_a",
+      "scenario": "codegeneration",
+      "platform": "atcoder",
+      "difficulty": "easy",
+      "contest_date": "2025-02-08",
+      "prompt": "You are given a sequence of integers A = (A_1, A_2, A_3).\r\nLet B = (B_1, B_2, B_3) be any permutation of A.\r\nDetermine whether it is possible that B_1 \\times B_2 = B_3.\n\nInput\n\nThe input is given from Standard Input in the following format:\nA_1 A_2 A_3\n\nOutput\n\nIf it is possible that B_1 \\times B_2 = B_3, print Yes; otherwise, print No.\n\nConstraints\n\n\n- All input values are integers.\n- 1 \\le A_1, A_2, A_3 \\le 100\n\nSample Input 1\n\n3 15 5\n\nSample Output 1\n\nYes\r\n\nHere, A=(3,15,5).\r\nBy rearranging it as B=(3,5,15), we can satisfy B_1 \\times B_2 = B_3.\n\nSample Input 2\n\n5 3 2\n\nSample Output 2\n\nNo\r\n\nNo permutation of B satisfies B_1 \\times B_2 = B_3.",
+      "public_test_cases": [
+        {
+          "input": "3 15 5",
+          "output": "Yes",
+          "testtype": "stdin"
+        },
+        {
+          "input": "5 3 2",
+          "output": "No",
+          "testtype": "stdin"
+        }
+      ]
+    },
+    {
+      "question_id": "abc387_a",
+      "scenario": "codegeneration",
+      "platform": "atcoder",
+      "difficulty": "easy",
+      "contest_date": "2025-01-04",
+      "prompt": "You are given two positive integers A and B.\nOutput the square of A + B.\n\nInput\n\nThe input is given from Standard Input in the following format:\nA B\n\nOutput\n\nPrint the answer.\n\nConstraints\n\n\n- 1 \\leq A,B \\leq 2025\n- All input values are integers.\n\nSample Input 1\n\n20 25\n\nSample Output 1\n\n2025\r\n\n(20+25)^2=2025.\n\nSample Input 2\n\n30 25\n\nSample Output 2\n\n3025\n\nSample Input 3\n\n45 11\n\nSample Output 3\n\n3136\n\nSample Input 4\n\n2025 1111\n\nSample Output 4\n\n9834496",
+      "public_test_cases": [
+        {
+          "input": "20 25",
+          "output": "2025",
+          "testtype": "stdin"
+        },
+        {
+          "input": "30 25",
+          "output": "3025",
+          "testtype": "stdin"
+        },
+        {
+          "input": "45 11",
+          "output": "3136",
+          "testtype": "stdin"
+        },
+        {
+          "input": "2025 1111",
+          "output": "9834496",
+          "testtype": "stdin"
+        }
+      ]
+    },
+    {
+      "question_id": "abc400_b",
+      "scenario": "codegeneration",
+      "platform": "atcoder",
+      "difficulty": "easy",
+      "contest_date": "2025-04-05",
+      "prompt": "You are given two positive integers N and M.\nLet X = \\displaystyle\\sum_{i = 0}^{M} N^i. If X \\leq 10^9, print the value of X. If X \u003e 10^9, print inf.\n\nInput\n\nThe input is given from Standard Input in the following format:\nN M\n\nOutput\n\nPrint the value of X or inf as specified by the problem statement.\n\nConstraints\n\n\n- 1 \\leq N \\leq 10^9\n- 1 \\leq M \\leq 100\n- All input values are integers.\n\nSample Input 1\n\n7 3\n\nSample Output 1\n\n400\r\n\nX = 1 + 7 + 49 + 343 = 400. Since 400 \\leq 10^9, print 400.\n\nSample Input 2\n\n1000000 2\n\nSample Output 2\n\ninf\r\n\nX = 1000001000001 \u003e 10^9, so print inf.\n\nSample Input 3\n\n999999999 1\n\nSample Output 3\n\n1000000000\n\nSample Input 4\n\n998244353 99\n\nSample Output 4\n\ninf",
+      "public_test_cases": [
+        {
+          "input": "7 3",
+          "output": "400",
+          "testtype": "stdin"
+        },
+        {
+          "input": "1000000 2",
+          "output": "inf",
+          "testtype": "stdin"
+        },
+        {
+          "input": "999999999 1",
+          "output": "1000000000",
+          "testtype": "stdin"
+        },
+        {
+          "input": "998244353 99",
+          "output": "inf",
+          "testtype": "stdin"
+        }
+      ]
+    },
+    {
+      "question_id": "abc393_a",
+      "scenario": "codegeneration",
+      "platform": "atcoder",
+      "difficulty": "easy",
+      "contest_date": "2025-02-15",
+      "prompt": "There are four types of oysters, labeled 1, 2, 3, and 4. Exactly one of these types causes stomach trouble if eaten. The other types do not cause stomach trouble when eaten.\nTakahashi ate oysters 1 and 2, and Aoki ate oysters 1 and 3. The information on whether each person got sick is given as two strings S_1 and S_2. Specifically, S_1 = sick means Takahashi got sick, and S_1 = fine means Takahashi did not get sick. Likewise, S_2 = sick means Aoki got sick, and S_2 = fine means Aoki did not get sick.\nBased on the given information, find which type of oyster causes stomach trouble.\n\nInput\n\nThe input is given from Standard Input in the following format:\nS_1 S_2\n\nOutput\n\nPrint the label of the oyster that causes stomach trouble if eaten.\n\nConstraints\n\n\n- Each of S_1 and S_2 is sick or fine.\n\nSample Input 1\n\nsick fine\n\nSample Output 1\n\n2\r\n\nTakahashi (who ate oysters 1 and 2) got sick, and Aoki (who ate oysters 1 and 3) did not get sick, so it can be concluded that oyster 2 causes stomach trouble.\n\nSample Input 2\n\nfine fine\n\nSample Output 2\n\n4\r\n\nNeither Takahashi (who ate oysters 1 and 2) nor Aoki (who ate oysters 1 and 3) got sick, so it can be concluded that oyster 4 causes stomach trouble.",
+      "public_test_cases": [
+        {
+          "input": "sick fine",
+          "output": "2",
+          "testtype": "stdin"
+        },
+        {
+          "input": "fine fine",
+          "output": "4",
+          "testtype": "stdin"
+        }
+      ]
+    }
+  ]
+}

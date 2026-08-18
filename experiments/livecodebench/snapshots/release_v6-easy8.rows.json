@@ -1,0 +1,143 @@
+{
+  "snapshot_schema": "fak.livecodebench.offline-rows.v1",
+  "source": {
+    "dataset_id": "livecodebench/code_generation_lite",
+    "repository_revision": "0fe84c3912ea0c4d4a78037083943e8f0c4dd505",
+    "source_file": "test6.jsonl",
+    "source_file_sha256": "bb4c364f71921c4495a6ad15abe1a927350b720009f4933e2e71f8af0f6fd1f5",
+    "release": "release_v6",
+    "selection": "first eight shortest easy problems by source-row byte length; ties by question_id",
+    "question_ids": [
+      "abc398_a",
+      "abc389_b",
+      "abc391_a",
+      "abc400_a",
+      "abc392_a",
+      "abc387_a",
+      "abc400_b",
+      "abc393_a"
+    ]
+  },
+  "rows": [
+    {
+      "row": {
+        "question_title": "Doors in the Center",
+        "question_content": "Find a length-N string that satisfies all of the following conditions:\n\n- Each character is - or =.\n- It is a palindrome.\n- It contains exactly one or exactly two =s. If it contains two =s, they are adjacent.\n\nSuch a string is unique.\n\nInput\n\nThe input is given from Standard Input in the following format:\nN\n\nOutput\n\nPrint the answer.\n\nConstraints\n\n\n- 1 \\leq N \\leq 100\n- N is an integer.\n\nSample Input 1\n\n4\n\nSample Output 1\n\n-==-\n\nSample Input 2\n\n7\n\nSample Output 2\n\n---=---",
+        "platform": "atcoder",
+        "question_id": "abc398_a",
+        "contest_id": "abc398",
+        "contest_date": "2025-03-22T00:00:00",
+        "starter_code": "",
+        "difficulty": "easy",
+        "public_test_cases": "[{\"input\": \"4\", \"output\": \"-==-\", \"testtype\": \"stdin\"}, {\"input\": \"7\", \"output\": \"---=---\", \"testtype\": \"stdin\"}]",
+        "private_test_cases": "eJy9VTsOgkAQtbDzEmRrMCwuKCZ7DxO1k4IGSVwKY0w8hFZ2nlQgFro/ZnciUxB+b2fmvfncpo/XbNLb5tnebC+krOpGkHVAEhIG5NiIzyPnu6p7I4qTEOe66N6dxKGsyDUMvmCrX1gURZy3Fxg4TRW0ybjlG8xZJvvqAoVBaazG2ac5Fl7SBoZa5IPs6lgFHi6dzYE4psigVdsgN8yHJm8HspWaBJfJUu0FsFfGALwYaPl3Xv5I1HTwLbFMBtrNNlng7GK092tvjEdfalF6JmrEJhWAPSNnAU2DxpqB7GSmAYWuI8SW8tzgjA5zoc12nN3nLTKmPzLQlnIpB2B/2VpkIASHf8dodr9ipLpi5A5B43Z/7qi7rIHrVDBGtb/P36pnHrA=",
+        "metadata": "{}"
+      }
+    },
+    {
+      "row": {
+        "question_title": "tcaF",
+        "question_content": "You are given an integer X not less than 2.\nFind the positive integer N such that N! = X.\nHere, N! denotes the factorial of N, and it is guaranteed that there is exactly one such N.\n\nInput\n\nThe input is given from Standard Input in the following format:\nX\n\nOutput\n\nPrint the answer.\n\nConstraints\n\n\n- 2 \\leq X \\leq 3 \\times 10^{18}\n- There is exactly one positive integer N such that N!=X.\n- All input values are integers.\n\nSample Input 1\n\n6\n\nSample Output 1\n\n3\r\n\nFrom 3!=3\\times2\\times1=6, print 3.\n\nSample Input 2\n\n2432902008176640000\n\nSample Output 2\n\n20\r\n\nFrom 20!=2432902008176640000, print 20.",
+        "platform": "atcoder",
+        "question_id": "abc389_b",
+        "contest_id": "abc389",
+        "contest_date": "2025-01-18T00:00:00",
+        "starter_code": "",
+        "difficulty": "easy",
+        "public_test_cases": "[{\"input\": \"6\", \"output\": \"3\", \"testtype\": \"stdin\"}, {\"input\": \"2432902008176640000\", \"output\": \"20\", \"testtype\": \"stdin\"}]",
+        "private_test_cases": "eJzNlbEOwiAQhh1cfIuGuNmY48Dj8ElM1E2HLtVEOhhj4kPo+9qqg6UOhNqmTATy3R0/P9xt/JhNRq+xmpaT9UVk+bFwYpkIBIto2DIzAIg0EYfCffYkbfJqxe1Pzp2P+2rt5HZZLq5p8h2jjmEYZdBLF5rtHxX/IQaVEQCBG7wK46V//kW3ulGdCqwSdR3ToZhCW6oDLA2RhobKCGGBFCE3JQ6Eez3yArRXpun2QmMN1LMRojBlraTmvctBfkiRyvRaZCz3fn911IahGpSflLt1dnxGNtIw2jKxb7lufR73FqUCQ0Yr+tG9BtlFWv3isW5o04O29/kT/nOv/w==",
+        "metadata": "{}"
+      }
+    },
+    {
+      "row": {
+        "question_title": "Lucky Direction",
+        "question_content": "You are given a string D representing one of the eight directions (north, east, west, south, northeast, northwest, southeast, southwest). The correspondence between the directions and their representing strings is as follows.\n\n- North: N\n- East: E\n- West: W\n- South: S\n- Northeast: NE\n- Northwest: NW\n- Southeast: SE\n- Southwest: SW\n\nPrint the string representing the direction opposite to the direction denoted by D.\n\nInput\n\nThe input is given from Standard Input in the following format:\nD\n\nOutput\n\nPrint the answer.\n\nConstraints\n\n\n- D is one of N, E, W, S, NE, NW, SE, SW.\n\nSample Input 1\n\nN\n\nSample Output 1\n\nS\r\n\nPrint S, which represents south, the direction opposite to north.\n\nSample Input 2\n\nSE\n\nSample Output 2\n\nNW\r\n\nPrint NW, which represents northwest, the direction opposite to southeast.",
+        "platform": "atcoder",
+        "question_id": "abc391_a",
+        "contest_id": "abc391",
+        "contest_date": "2025-02-01T00:00:00",
+        "starter_code": "",
+        "difficulty": "easy",
+        "public_test_cases": "[{\"input\": \"N\", \"output\": \"S\", \"testtype\": \"stdin\"}, {\"input\": \"SE\", \"output\": \"NW\", \"testtype\": \"stdin\"}]",
+        "private_test_cases": "eJxrYJk6n4MBDCJmABnR1UqZeQWlJUpWCkrBSjoKSvmlJVCuX0weSKAktbikpLIgFSRUXJKSmadUq6OApMsPVVcwkbrC0bS50tQ2VzRt4cTpC0ZzpR+xrqSr74LRfOdHrO/Iim80rxHpM/J0kR3+ZIUjeW4kM87ICnv6hge5uYbc1E+u78hN/2SXCnS2D00bsbbRtSwhOyzpWAaRm77oWS7QtzYlL2WRnUaId2XsFD0AQUOh4g==",
+        "metadata": "{}"
+      }
+    },
+    {
+      "row": {
+        "question_title": "ABC400 Party",
+        "question_content": "In the ceremony commemorating ABC400, we want to arrange 400 people in a rectangular formation of A rows and B columns without any gaps.\nYou are given a positive integer A. Print the value of a positive integer B for which such an arrangement is possible. If there is no such positive integer B, print -1.\n\nInput\n\nThe input is given from Standard Input in the following format:\nA\n\nOutput\n\nPrint the value of B or -1 as specified by the problem statement.\n\nConstraints\n\n\n- A is an integer between 1 and 400, inclusive.\n\nSample Input 1\n\n10\n\nSample Output 1\n\n40\r\n\nWe can arrange 400 people in 10 rows and 40 columns.\n\nSample Input 2\n\n11\n\nSample Output 2\n\n-1\n\nSample Input 3\n\n400\n\nSample Output 3\n\n1",
+        "platform": "atcoder",
+        "question_id": "abc400_a",
+        "contest_id": "abc400",
+        "contest_date": "2025-04-05T00:00:00",
+        "starter_code": "",
+        "difficulty": "easy",
+        "public_test_cases": "[{\"input\": \"10\", \"output\": \"40\", \"testtype\": \"stdin\"}, {\"input\": \"11\", \"output\": \"-1\", \"testtype\": \"stdin\"}, {\"input\": \"400\", \"output\": \"1\", \"testtype\": \"stdin\"}]",
+        "private_test_cases": "eJy9lD0OwjAMhRkYOEaVuSDbSfrDSZCAjQ5dQqWmA0JIHAIOxcaRoIiBZrLeQKbI0qcX+734Or8/F7PP2Tzel+3ZtKEbollnRqrC5Jk5DvFbWPIujJXY9DGeumas9fHQBnPJs1+QppyQkkP1/JTjQse5P+sJMSZoyYIvFQcqVh4DHSXmazkB9Uq0QVAv6Y6U2eZ0Lk6ph0YGzLYtQSPQpCX9Oe1AwR/hQY7RvNSgHoE+WDAwXIOgQyfKYERTTrx2i2J64IZh1AjUeNAHK2iD6UbTrkJ0xbD+ofvb6gWBb528",
+        "metadata": "{}"
+      }
+    },
+    {
+      "row": {
+        "question_title": "Shuffled Equation",
+        "question_content": "You are given a sequence of integers A = (A_1, A_2, A_3).\r\nLet B = (B_1, B_2, B_3) be any permutation of A.\r\nDetermine whether it is possible that B_1 \\times B_2 = B_3.\n\nInput\n\nThe input is given from Standard Input in the following format:\nA_1 A_2 A_3\n\nOutput\n\nIf it is possible that B_1 \\times B_2 = B_3, print Yes; otherwise, print No.\n\nConstraints\n\n\n- All input values are integers.\n- 1 \\le A_1, A_2, A_3 \\le 100\n\nSample Input 1\n\n3 15 5\n\nSample Output 1\n\nYes\r\n\nHere, A=(3,15,5).\r\nBy rearranging it as B=(3,5,15), we can satisfy B_1 \\times B_2 = B_3.\n\nSample Input 2\n\n5 3 2\n\nSample Output 2\n\nNo\r\n\nNo permutation of B satisfies B_1 \\times B_2 = B_3.",
+        "platform": "atcoder",
+        "question_id": "abc392_a",
+        "contest_id": "abc392",
+        "contest_date": "2025-02-08T00:00:00",
+        "starter_code": "",
+        "difficulty": "easy",
+        "public_test_cases": "[{\"input\": \"3 15 5\", \"output\": \"Yes\", \"testtype\": \"stdin\"}, {\"input\": \"5 3 2\", \"output\": \"No\", \"testtype\": \"stdin\"}]",
+        "private_test_cases": "eJyllr1OBDEMhCloeItR6hNaO3F+eAhqENCxxTV7J12uOCEkHoAOeF+cFQWigmGrVaSRJ5/H3n05/3i7OFufm1d/uXsK22V/7OEKQSEZLWwQdsf+dXa9u1/GSZ8PvZ/28zg79MftEp43+Ka1BlWkzKkTDJI4rUAKhLRdC8qEVjm1NkRDEtJ4gnsnibkSytd1YhNNrAoqz7s6b/7SfE4SFEpeWhrcOF13ommXhJpQSNpOa9Rm8+muIWzIHBjZKEP2PpP5qiNfNZKmFfGn69v58MtWQSI9zt4mQyG1a2ES2GjyiOdE3tonw/cJybsafCFkMp8OXOlwm8EqEjmWqUAjlBzL6DFrSOR4tPGtZJNi/+q1jg+WkmpbY0oC99VND+bQkgHN/ntQkcnNL4L2h8oP75efBcHOkQ==",
+        "metadata": "{}"
+      }
+    },
+    {
+      "row": {
+        "question_title": "Happy New Year 2025",
+        "question_content": "You are given two positive integers A and B.\nOutput the square of A + B.\n\nInput\n\nThe input is given from Standard Input in the following format:\nA B\n\nOutput\n\nPrint the answer.\n\nConstraints\n\n\n- 1 \\leq A,B \\leq 2025\n- All input values are integers.\n\nSample Input 1\n\n20 25\n\nSample Output 1\n\n2025\r\n\n(20+25)^2=2025.\n\nSample Input 2\n\n30 25\n\nSample Output 2\n\n3025\n\nSample Input 3\n\n45 11\n\nSample Output 3\n\n3136\n\nSample Input 4\n\n2025 1111\n\nSample Output 4\n\n9834496",
+        "platform": "atcoder",
+        "question_id": "abc387_a",
+        "contest_id": "abc387",
+        "contest_date": "2025-01-04T00:00:00",
+        "starter_code": "",
+        "difficulty": "easy",
+        "public_test_cases": "[{\"input\": \"20 25\", \"output\": \"2025\", \"testtype\": \"stdin\"}, {\"input\": \"30 25\", \"output\": \"3025\", \"testtype\": \"stdin\"}, {\"input\": \"45 11\", \"output\": \"3136\", \"testtype\": \"stdin\"}, {\"input\": \"2025 1111\", \"output\": \"9834496\", \"testtype\": \"stdin\"}]",
+        "private_test_cases": "eJydVktqHFEMzCKb3EL02gT9nvReThJwsosX3kwMbi9MCOQQyR298xWiNglkZBMKzzTD8EDVUqmqun+8/fX47s3T5+ND/bn8tl2fbu727QNtQrJd0Pb1bv9z4J9Ox8F+dbvv9zdXx9Ht/uX6tH2/oH/qlMlapQYLVux1Vz8vNtaBFZuSRiu2ANuWlUEirucAK1WWghghQrba8MLsdYHk6XPyJi+UeR10/LQGwuuMGZyBnXSsc4h0zwC7kKgZOoCmuIMakNoDn5dHBiiBoGzTTwcb96jltbkV1Z6MNUgs293nNM0JO+fYXzOd8ExFqX9h+wXgMH3ChdAMgApnkDfnqqO2L3EUedbID3jwGYsiZru9RV0gQsgg87b+pfUFqcusEXJ28sJQ6yd5E48uQfcWgys4V0u/NVcaiqFG1tq3Cj+wgeqAZLJ2+bPxRNUrcx4Uro4ROmAHZGVPjx44fIO8MTgENW+lVt+fLVR9f5O7GUjClsMm0pr9ld49aGu1+BPDctLqs0uOEWh46su5hQefFXtNNs6ocw/en73r1FMbbl84SrijM1ipOxRdnmUhvFa4x4tPc95/s+Pzz/e/AWfw1rQ=",
+        "metadata": "{}"
+      }
+    },
+    {
+      "row": {
+        "question_title": "Sum of Geometric Series",
+        "question_content": "You are given two positive integers N and M.\nLet X = \\displaystyle\\sum_{i = 0}^{M} N^i. If X \\leq 10^9, print the value of X. If X > 10^9, print inf.\n\nInput\n\nThe input is given from Standard Input in the following format:\nN M\n\nOutput\n\nPrint the value of X or inf as specified by the problem statement.\n\nConstraints\n\n\n- 1 \\leq N \\leq 10^9\n- 1 \\leq M \\leq 100\n- All input values are integers.\n\nSample Input 1\n\n7 3\n\nSample Output 1\n\n400\r\n\nX = 1 + 7 + 49 + 343 = 400. Since 400 \\leq 10^9, print 400.\n\nSample Input 2\n\n1000000 2\n\nSample Output 2\n\ninf\r\n\nX = 1000001000001 > 10^9, so print inf.\n\nSample Input 3\n\n999999999 1\n\nSample Output 3\n\n1000000000\n\nSample Input 4\n\n998244353 99\n\nSample Output 4\n\ninf",
+        "platform": "atcoder",
+        "question_id": "abc400_b",
+        "contest_id": "abc400",
+        "contest_date": "2025-04-05T00:00:00",
+        "starter_code": "",
+        "difficulty": "easy",
+        "public_test_cases": "[{\"input\": \"7 3\", \"output\": \"400\", \"testtype\": \"stdin\"}, {\"input\": \"1000000 2\", \"output\": \"inf\", \"testtype\": \"stdin\"}, {\"input\": \"999999999 1\", \"output\": \"1000000000\", \"testtype\": \"stdin\"}, {\"input\": \"998244353 99\", \"output\": \"inf\", \"testtype\": \"stdin\"}]",
+        "private_test_cases": "eJyllU1OAzEMhVmw4RbWrCvk3zjmJEjAjiJ1M1TqdIEQEoeAq7HjLmQqKtFZBderKNKzk7zPzvvl5/fVxSFuv9ri7nXYjNv9NNzAUMSAYljB8Lyffvc249P9OG9N6900vWzX8+ZuetyMw9sK/ogjMC8mDYsKXLLFDUFOtdUqe1WjvgzmrtxuINkbCHIr6QiezOBSgChbHg8BnNQX1OpRgqBYMoWpAGUNZOAsO01aT6UmpRkR1Gk9QXu90wyEnVoJBc0a7qLN8zRxPN8yT2wUh+ybN68VI9+vhK7a+j3LWqgtUa8h4Z2uuTue0WxxDKAlNsfoS6Tm6XFBmHbP28kXr1ckuJf5cGG0IAHLol8L58EVq/lBE9QqZ7FTcq7IZGDpaUWwqK5cq2DpPUEbstkhz9yIxWzLN3UhrQqS7Rs/+3+bv7hsCit6hvPzvMjSLtXJzEv7XLPl/0f8w8f1D/9658w=",
+        "metadata": "{}"
+      }
+    },
+    {
+      "row": {
+        "question_title": "Poisonous Oyster",
+        "question_content": "There are four types of oysters, labeled 1, 2, 3, and 4. Exactly one of these types causes stomach trouble if eaten. The other types do not cause stomach trouble when eaten.\nTakahashi ate oysters 1 and 2, and Aoki ate oysters 1 and 3. The information on whether each person got sick is given as two strings S_1 and S_2. Specifically, S_1 = sick means Takahashi got sick, and S_1 = fine means Takahashi did not get sick. Likewise, S_2 = sick means Aoki got sick, and S_2 = fine means Aoki did not get sick.\nBased on the given information, find which type of oyster causes stomach trouble.\n\nInput\n\nThe input is given from Standard Input in the following format:\nS_1 S_2\n\nOutput\n\nPrint the label of the oyster that causes stomach trouble if eaten.\n\nConstraints\n\n\n- Each of S_1 and S_2 is sick or fine.\n\nSample Input 1\n\nsick fine\n\nSample Output 1\n\n2\r\n\nTakahashi (who ate oysters 1 and 2) got sick, and Aoki (who ate oysters 1 and 3) did not get sick, so it can be concluded that oyster 2 causes stomach trouble.\n\nSample Input 2\n\nfine fine\n\nSample Output 2\n\n4\r\n\nNeither Takahashi (who ate oysters 1 and 2) nor Aoki (who ate oysters 1 and 3) got sick, so it can be concluded that oyster 4 causes stomach trouble.",
+        "platform": "atcoder",
+        "question_id": "abc393_a",
+        "contest_id": "abc393",
+        "contest_date": "2025-02-15T00:00:00",
+        "starter_code": "",
+        "difficulty": "easy",
+        "public_test_cases": "[{\"input\": \"sick fine\", \"output\": \"2\", \"testtype\": \"stdin\"}, {\"input\": \"fine fine\", \"output\": \"4\", \"testtype\": \"stdin\"}]",
+        "private_test_cases": "eJxrYJm6nZMBDCI2ABnR1UqZeQWlJUpWCkrFmcnZCmmZealKOgpK+aUlUGGjmDyQQElqcUlJZUEqWGVJSmaeUq2OwrDQDdKIRbcJCbpBDkDVbUw3f2PabUg33ZSFOdmhRoUwH8hQG7q6ByilUiG1UJa/h6TugcyhAxnfQ7dkGuLxPUA18ECWinSOsdgpegADCA3E",
+        "metadata": "{}"
+      }
+    }
+  ]
+}

@@ -1,0 +1,175 @@
+{
+  "extraction": "lcb_runner.utils.extraction_utils.extract_code(LMStyle.OpenAIChat)",
+  "harness": "lcb_runner.evaluation.compute_code_generation_metrics.codegen_metrics",
+  "harness_revision": "28fef95ea8c9f7a547c8329f2cd3d32b92c1fa24",
+  "metadata": [
+    [
+      "{\"error_code\": -4, \"error_message\": \"Error during testing: expected an indented block after 'else' statement on line 15 (<string>, line 20)\"}"
+    ],
+    [
+      "{\"error_code\": -4, \"error_message\": \"Error during testing: expected an indented block after function definition on line 38 (<string>, line 38)\"}"
+    ],
+    [
+      "{\"output\": \"N\\n\", \"inputs\": \"N\", \"expected\": \"S\", \"error_code\": -2, \"error_message\": \"Wrong answer at output_line_idx=0: N != S\"}"
+    ],
+    [
+      "{\"execution time\": 0.05818939208984375}"
+    ],
+    [
+      "{\"error_code\": -4, \"error_message\": \"Error during testing: '(' was never closed (<string>, line 2)\"}"
+    ],
+    [
+      "{\"execution time\": 0.05017662048339844}"
+    ],
+    [
+      "{\"output\": \"106\\n\", \"inputs\": \"7 3\", \"expected\": \"400\", \"error_code\": -2, \"error_message\": \"Wrong answer at output_line_idx=0: 106 != 400\"}"
+    ],
+    [
+      "{\"error_code\": -4, \"error_message\": \"Error during testing: expected an indented block after function definition on line 38 (<string>, line 38)\"}"
+    ]
+  ],
+  "metrics": {
+    "detail": {
+      "pass@1": {
+        "0": 0.0,
+        "1": 0.0,
+        "2": 0.0,
+        "3": 1.0,
+        "4": 0.0,
+        "5": 1.0,
+        "6": 0.0,
+        "7": 0.0
+      }
+    },
+    "pass@1": 0.25
+  },
+  "release": "release_v6",
+  "results": {
+    "0": [
+      [
+        -4
+      ]
+    ],
+    "1": [
+      [
+        -4
+      ]
+    ],
+    "2": [
+      [
+        -2
+      ]
+    ],
+    "3": [
+      [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    ],
+    "4": [
+      [
+        -4
+      ]
+    ],
+    "5": [
+      [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ]
+    ],
+    "6": [
+      [
+        -2
+      ]
+    ],
+    "7": [
+      [
+        -4
+      ]
+    ]
+  },
+  "schema": "fak.livecodebench-official-grade.v1"
+}

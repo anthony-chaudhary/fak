@@ -1,0 +1,50 @@
+[
+  {
+    "question_id": "abc398_a",
+    "code_list": [
+      "N = int(input())\nif N == 1:\n    print(\"-\")\nelse:\n    # If the string is a palindrome and has exactly one or two '='s,\n    # and if it has exactly two adjacent, then they must be adjacent.\n    # Let's think about the structure.\n    # If N is odd, the palindrome has one center.\n    # If N is even, it has two adjacent adjacent..\n    # If N is even, the length is even.\n    # If N is even, the first half is the same as the second half.\n    # If N is even, the first half is the same as the first half.\n    if N == 1:\n        print(\"-\")\n    else:\n        # The first half contains exactly one '-' and the other half is the same.\n        # So the first half has one '=' and the other half has one.\n    # If the length is even, the first half is the same as the second half.\n    # If N is even, the first length is the same.\n    if N % 2 == 0:\n        print(\"-\" * N)\nelse:\n    print(\"-\" * N)"
+    ]
+  },
+  {
+    "question_id": "abc389_b",
+    "code_list": [
+      ""
+    ]
+  },
+  {
+    "question_id": "abc391_a",
+    "code_list": [
+      "s = input()\nopposite = {'N': 'S', 'S': 'S', 'W': 'N', 'S': 'S', 'N': 'S', 'NW': 'N', 'E': 'N', 'S': 'N'}\nprint(s)"
+    ]
+  },
+  {
+    "question_id": "abc400_a",
+    "code_list": [
+      "A = int(input())\nfor B in range(1, 401):\n    if A * B == 400:\n        print(B)\n        break\nelse:\n    print(-1)"
+    ]
+  },
+  {
+    "question_id": "abc392_a",
+    "code_list": [
+      "a = list(map(int, input().split()))\nprint(\"Yes\" if any(x[0] * x[1] == a[2] for x in [(3, 1, 2), (3, 2, 1), (1, 2, 2), (2, 0, 0), (0, 0, 1), (0, 1, 1, 0)])"
+    ]
+  },
+  {
+    "question_id": "abc387_a",
+    "code_list": [
+      "A, B = map(int, input().split())\nprint((A + B) ** 2)"
+    ]
+  },
+  {
+    "question_id": "abc400_b",
+    "code_list": [
+      "N, M = map(int, input().split())\nif M > 30:\n    print(\"inf\")\nelse:\n    print(1 + N + N**2 + N**2)"
+    ]
+  },
+  {
+    "question_id": "abc393_a",
+    "code_list": [
+      ""
+    ]
+  }
+]

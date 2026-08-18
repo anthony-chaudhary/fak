@@ -1,19 +1,32 @@
 ---
-title: "LiveCodeBench results scaffold"
-description: "An authority placeholder for fak's LiveCodeBench results: it records the intended result shape and stays pending until a scored run is published."
+title: "LiveCodeBench results"
+description: "Provenance-bound LiveCodeBench results through fak, with explicit workload and evidence boundaries."
 ---
 
-# LiveCodeBench Results Scaffold
+# LiveCodeBench Results
 
-Status: **pending run**. This page is an authority placeholder only; it records the
-fields a real LiveCodeBench result must carry, but it does not report any pass rate.
+Status: **bounded official-workload result published**. The full-window matched-arm
+leaderboard campaign remains pending; the result below closes the narrower real-model
+→ exact-generation → official-evaluator spine.
 
 Upstream: [LiveCodeBench](https://github.com/livecodebench/livecodebench) (official
 `lcb_runner` harness). Repo epic: [#2085](https://github.com/anthony-chaudhary/fak/issues/2085).
 Runbook: [LIVECODEBENCH-RUNBOOK.md](LIVECODEBENCH-RUNBOOK.md).
 Submission gate: [LIVECODEBENCH-SUBMISSION-PACKET.md](LIVECODEBENCH-SUBMISSION-PACKET.md).
 
-## Result Ledger
+## Proper Official-Workload Spine (2026-08-18)
+
+| Model / backend | Official workload | Sampling | Official pass@1 | Evidence |
+|---|---|---:|---:|---|
+| Qwen3.6-27B-Q4_K_M / fak in-kernel CUDA on A100 40 GB | deterministic 8-problem `release_v6` easy subset | n=1, temperature=0, seed=42 | **0.25 (2/8)** | [`RESULT.md`](../../experiments/livecodebench/runs/qwen36-release_v6-easy8-2026-08-18/RESULT.md) |
+
+These solutions came from a real model over pinned official LiveCodeBench problems;
+the exact saved generations were graded by the official evaluator (`28fef95…`). This
+is a bounded subset result, not a full-release leaderboard score. Four outputs hit the
+512-token cap and remained failures; no repair or selection was applied. The recovered 2026-08-17 device campaign is a **LiveCodeBench-shaped device workload**, not an official
+LCB score, and is intentionally absent from this result table.
+
+## Full-Window Result Ledger
 
 | Field | Value |
 |---|---|
@@ -91,3 +104,4 @@ produces one from the official evaluator.
 - Runbook child: [#2118](https://github.com/anthony-chaudhary/fak/issues/2118)
 - Submission packet child: [#2115](https://github.com/anthony-chaudhary/fak/issues/2115)
 - Upstream harness: [LiveCodeBench](https://github.com/livecodebench/livecodebench)
+
