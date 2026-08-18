@@ -20,6 +20,7 @@ func runSessionHistory(stdout, stderr io.Writer, args []string) int {
 	minErrors := fs.Int("min-errors", 0, "minimum tool errors")
 	limit := fs.Int("limit", 25, "maximum ranked sessions")
 	sessionID := fs.String("session", "", "drill into one session ID")
+	tool := fs.String("tool", "", "filter by exact normalized trajectory step")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -27,7 +28,7 @@ func runSessionHistory(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, "session-history: --index is required; --min-errors must be >= 0; --limit must be >= 1")
 		return 2
 	}
-	report, err := sessionmine.ExploreIndex(*index, sessionmine.HistoryOptions{Provider: *provider, MinErrors: *minErrors, Limit: *limit, SessionID: *sessionID})
+	report, err := sessionmine.ExploreIndex(*index, sessionmine.HistoryOptions{Provider: *provider, MinErrors: *minErrors, Limit: *limit, SessionID: *sessionID, Tool: *tool})
 	if err != nil {
 		fmt.Fprintf(stderr, "session-history: %v\n", err)
 		return 1

@@ -13,6 +13,7 @@ type HistoryOptions struct {
 	MinErrors int
 	Limit     int
 	SessionID string
+	Tool      string
 }
 
 type HistoryReport struct {
@@ -37,6 +38,9 @@ func ExploreIndex(path string, opts HistoryOptions) (HistoryReport, error) {
 			continue
 		}
 		if s.ToolErrors < opts.MinErrors {
+			continue
+		}
+		if opts.Tool != "" && !trajectoryContains(s.Trajectory, opts.Tool) {
 			continue
 		}
 		sessions = append(sessions, s)
@@ -69,6 +73,15 @@ func ExploreIndex(path string, opts HistoryOptions) (HistoryReport, error) {
 	}
 	report.Sessions = sessions[:limit]
 	return report, nil
+}
+
+func trajectoryContains(trajectory []string, step string) bool {
+	for _, candidate := range trajectory {
+		if candidate == step {
+			return true
+		}
+	}
+	return false
 }
 
 func historyMetrics(sessions []Session) Metrics {

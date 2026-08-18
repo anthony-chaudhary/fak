@@ -108,7 +108,7 @@ func vcacheUsage(w io.Writer) {
   fak vcache session-mine [--codex-root DIR] [--claude-root DIR] [--days N]
                    [--min-support N] [--limit N] [--index FILE]
   fak vcache session-history --index FILE [--provider NAME] [--min-errors N]
-                   [--limit N] [--session ID]
+                   [--limit N] [--session ID] [--tool STEP]
   fak vcache session-history refresh [--index FILE] [--once|--interval DURATION]
                    [--max-runs N] [--days N]
   fak vcache context-witness [--json] [--snapshot FILE] [--fixture FILE]

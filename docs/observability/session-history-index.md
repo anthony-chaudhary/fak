@@ -20,10 +20,11 @@ Read the index without touching provider transcripts:
 ```bash
 fak vcache session-history --index ~/.fak/session-mine/index.json
 fak vcache session-history --index ~/.fak/session-mine/index.json --provider codex --min-errors 1
+fak vcache session-history --index ~/.fak/session-mine/index.json --tool view_image
 fak vcache session-history --index ~/.fak/session-mine/index.json --session codex-0123456789ab
 ```
 
-`indexed_at` is the newest normalized session-end timestamp represented by the index (or `all` when empty), not the wall-clock time a scan happened. `indexed_at` is the newest normalized session-end timestamp represented by the index (or `all` when empty), not the wall-clock time a scan happened. The first view returns corpus metrics and sessions ranked by tool errors, recency, then stable ID. Filters recalculate the aggregate over the selected slice. `--session` returns one normalized record and its bounded anonymous trajectory, providing a direct drill-down without reopening or exposing the raw transcript.
+`indexed_at` is the newest normalized session-end timestamp represented by the index (or `all` when empty), not the wall-clock time a scan happened. `indexed_at` is the newest normalized session-end timestamp represented by the index (or `all` when empty), not the wall-clock time a scan happened. The first view returns corpus metrics and sessions ranked by tool errors, recency, then stable ID. Provider, minimum-error, and exact normalized `--tool STEP` filters recalculate the aggregate over the selected slice. The tool filter gives a direct aggregate to matching sessions to ID drill-down path without full-text transcript search. `--session` returns one normalized record and its bounded anonymous trajectory, providing a direct drill-down without reopening or exposing the raw transcript.
 
 
 ## Keep the index current

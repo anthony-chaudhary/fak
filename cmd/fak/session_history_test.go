@@ -60,3 +60,30 @@ func TestRunSessionHistoryRequiresIndex(t *testing.T) {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
 	}
 }
+
+func TestRunSessionHistoryFiltersByToolStep(t *testing.T) {
+	root := t.TempDir()
+	codex := filepath.Join(root, "codex")
+	if err := os.MkdirAll(codex, 0755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"type":"response_item","payload":{"type":"function_call","name":"view_image"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(codex, "a.jsonl"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	index := filepath.Join(root, "index.json")
+	if _, err := sessionmine.MineIndexed(sessionmine.Options{CodexRoot: codex, MinSupport: 1}, index); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := runSessionHistory(&out, &errOut, []string{"--index", index, "--tool", "view_image"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	var report sessionmine.HistoryReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Metrics.Sessions != 1 || len(report.Sessions) != 1 {
+		t.Fatalf("report=%+v", report)
+	}
+}

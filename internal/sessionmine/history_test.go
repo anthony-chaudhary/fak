@@ -62,3 +62,29 @@ func TestExploreIndexRejectsUnknownSessionAndSchema(t *testing.T) {
 		t.Fatal("expected schema rejection")
 	}
 }
+
+func TestExploreIndexFiltersByTrajectoryStep(t *testing.T) {
+	root := t.TempDir()
+	index := filepath.Join(root, "index.json")
+	state := IndexState{Schema: indexSchema, Files: map[string]IndexedFile{
+		"a": {Provider: "codex", Session: Session{ID: "a", Provider: "codex", ToolCalls: 2, Trajectory: []string{"git_status", "view_image"}}},
+		"b": {Provider: "claude", Session: Session{ID: "b", Provider: "claude", ToolCalls: 3, Trajectory: []string{"read_file", "edit_file"}}},
+	}, Seen: map[string]bool{}}
+	if err := writeIndexAtomic(index, state); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ExploreIndex(index, HistoryOptions{Tool: "view_image"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Metrics.Sessions != 1 || got.Metrics.ToolCalls != 2 || len(got.Sessions) != 1 || got.Sessions[0].ID != "a" {
+		t.Fatalf("filtered=%+v", got)
+	}
+	missing, err := ExploreIndex(index, HistoryOptions{Tool: "View_Image"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missing.Metrics.Sessions != 0 || len(missing.Sessions) != 0 {
+		t.Fatalf("exact filter=%+v", missing)
+	}
+}
