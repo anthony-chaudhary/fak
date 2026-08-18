@@ -23,6 +23,16 @@ func TestHelpIdentifiesIndependentDevelopmentArtifact(t *testing.T) {
 	}
 }
 
+func TestVersionEmitsMachineReadableBuildStamp(t *testing.T) {
+	var out bytes.Buffer
+	if code := run(&out, &bytes.Buffer{}, []string{"version"}); code != 0 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "\nbuild: ") {
+		t.Fatalf("version output lacks self-update provenance line:\n%s", out.String())
+	}
+}
+
 func TestOwnershipCommandUsesInventory(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := run(&out, &errOut, []string{"index", "ownership", "--json", "--root", devindex.FindRoot(".")}); code != 0 {

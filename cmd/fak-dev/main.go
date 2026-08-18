@@ -145,5 +145,6 @@ func runVersion(w io.Writer, argv []string) int {
 		}
 	}
 	fmt.Fprintf(w, "fak-dev %s (%s)\n", version, revision)
+	fmt.Fprintf(w, "build: %s\n", revision)
 	return 0
 }

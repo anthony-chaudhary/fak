@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -118,8 +119,11 @@ func cmdSelfUpdate(argv []string) {
 		emitSelfUpdateOutcome(outcomeCheckOnly, installTargetOr(*target), fmt.Sprintf("%s/%s", verdict, skew.Verdict))
 		return
 	}
-	// Decide whether to build (see selfUpdateShouldBuild for the SELF/FLEET asymmetry).
-	proceed := selfUpdateShouldBuild(*force, fleetTarget, verdict, skew.Verdict)
+	// Decide whether to build (see selfUpdateShouldBuild for the SELF/FLEET asymmetry). An
+	// already-current fak must still run the cycle when its installed fak-dev companion lags.
+	companionPaths := selfUpdateFakDevTargets(repoRoot, installTargetOr(*target))
+	companionStale := selfUpdateFakDevNeedsConverge(companionPaths, headRev, selfUpdateProbe)
+	proceed := selfUpdateShouldBuild(*force, fleetTarget, verdict, skew.Verdict) || companionStale
 	if !proceed {
 		emitSelfUpdateOutcome(selfUpdateSkipOutcome(fleetTarget, skew.Verdict), installTargetOr(*target), fmt.Sprintf("%s", skew.Verdict))
 		switch {
@@ -218,6 +222,17 @@ func cmdSelfUpdate(argv []string) {
 	}
 	defer cleanup()
 
+	companionBinary, companionPaths, companionErr := prepareFakDevUpdate(ctx, buildDir, companionPaths, headRev)
+	if companionErr != nil {
+		fmt.Fprintln(os.Stderr, "self-update:", companionErr)
+		emitSelfUpdateOutcome(outcomeGateFailed, installTarget, companionErr.Error())
+		cleanup() // os.Exit skips deferred functions; source cleanup must run first.
+		os.Exit(1)
+	}
+	if companionBinary != "" {
+		defer os.Remove(companionBinary)
+	}
+
 	fmt.Printf("self-update: building origin/main + gating, then swapping %s …\n", installTarget)
 	res := selfinstall.Install(ctx, selfinstall.RealRunner, selfinstall.OSSwap, selfinstall.Options{
 		RepoRoot: buildDir,
@@ -257,6 +272,14 @@ func cmdSelfUpdate(argv []string) {
 		fmt.Println("self-update: hot copy " + filepath.Base(sib) + " — " + selfinstall.FormatResult(sres))
 		if !sres.Installed {
 			stragglers = append(stragglers, sib+" ("+string(sres.Stage)+": "+sres.Detail+")")
+		}
+	}
+	for _, target := range companionPaths {
+		fmt.Printf("self-update: companion %s is installed beside fak - converging it too ...\n", target)
+		dres := selfinstall.InstallVerifiedCopy(selfinstall.OSSwap, companionBinary, target)
+		fmt.Println("self-update: companion " + filepath.Base(target) + " - " + selfinstall.FormatResult(dres))
+		if !dres.Installed {
+			stragglers = append(stragglers, target+" ("+string(dres.Stage)+": "+dres.Detail+")")
 		}
 	}
 	if len(stragglers) > 0 {
@@ -347,6 +370,61 @@ func printHotCopyAudit(a selfinstall.Audit) {
 // twice.
 func selfUpdateSiblings(repoRoot, target string) []string {
 	return selfinstall.ConvergeTargets(selfinstall.Roles(selfUpdateHost(repoRoot)), target)
+}
+
+// selfUpdateFakDevTargets returns existing fak-dev companions beside converged fak copies.
+// Absence is intentional: self-update maintains an installed dev artifact but never creates one
+// on product-only hosts.
+func selfUpdateFakDevTargets(repoRoot, target string) []string {
+	name := "fak-dev"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	seen := map[string]bool{}
+	out := []string{}
+	for _, fakPath := range append([]string{target}, selfUpdateSiblings(repoRoot, target)...) {
+		candidate := filepath.Join(filepath.Dir(fakPath), name)
+		key := strings.ToLower(filepath.Clean(candidate))
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			out = append(out, candidate)
+		}
+	}
+	return out
+}
+
+func selfUpdateFakDevNeedsConverge(targets []string, headRev string, probe selfinstall.StampProbe) bool {
+	for _, target := range targets {
+		revision, dirty, attested := probe(target)
+		if !attested || dirty || !strings.EqualFold(strings.TrimSpace(revision), strings.TrimSpace(headRev)) {
+			return true
+		}
+	}
+	return false
+}
+
+// prepareFakDevUpdate builds and smokes the dev companion before the primary fak swap. This
+// keeps the update fail-closed: a broken fak-dev build cannot leave fak current while the
+// already-installed repository tool remains on an older local revision.
+func prepareFakDevUpdate(ctx context.Context, buildDir string, targets []string, headRev string) (string, []string, error) {
+	if len(targets) == 0 {
+		return "", nil, nil
+	}
+	candidate := filepath.Join(os.TempDir(), fmt.Sprintf("fak-dev-selfupdate-%d%s", os.Getpid(), filepath.Ext(targets[0])))
+	_ = os.Remove(candidate)
+	stamp := "-X github.com/anthony-chaudhary/fak/internal/appversion.BuildCommit=" + headRev
+	if out, ok := selfinstall.RealRunner(ctx, buildDir, "go", "build", "-trimpath", "-buildvcs=true", "-ldflags", stamp, "-o", candidate, "./cmd/fak-dev"); !ok {
+		return "", nil, fmt.Errorf("build fak-dev companion: %s", strings.TrimSpace(out))
+	}
+	out, ok := selfinstall.RealRunner(ctx, buildDir, candidate, "version")
+	if !ok || !strings.Contains(out, "build: "+headRev) {
+		_ = os.Remove(candidate)
+		return "", nil, fmt.Errorf("smoke fak-dev companion: expected build %s, got %q", headRev, strings.TrimSpace(out))
+	}
+	return candidate, targets, nil
 }
 
 // selfUpdateOutcome is the closed vocabulary of self-update tick outcomes.

@@ -105,6 +105,55 @@ func TestSelfUpdateSiblingsSkipsMissingPaths(t *testing.T) {
 	}
 }
 
+func TestSelfUpdateFakDevNeedsConvergeTriggersWhenPrimaryIsCurrent(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	probe := func(path string) (string, bool, bool) {
+		if strings.Contains(path, "stale") {
+			return strings.Repeat("b", 40), false, true
+		}
+		return head, false, true
+	}
+	if !selfUpdateFakDevNeedsConverge([]string{"fak-dev-stale"}, head, probe) {
+		t.Fatal("stale fak-dev must force an update even when fak itself is current")
+	}
+	if selfUpdateFakDevNeedsConverge([]string{"fak-dev-current"}, head, probe) {
+		t.Fatal("current fak-dev should not force a rebuild")
+	}
+}
+
+// TestSelfUpdateFakDevTargetsFindsOnlyInstalledCompanions proves product-only hosts stay
+// product-only while a side-by-side developer install joins the same convergence cycle.
+func TestSelfUpdateFakDevTargetsFindsOnlyInstalledCompanions(t *testing.T) {
+	root := t.TempDir()
+	binDir := filepath.Join(root, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakPath := filepath.Join(binDir, "fak"+exeSuffix())
+	if err := os.WriteFile(fakPath, []byte("fak"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	devPath := filepath.Join(binDir, "fak-dev"+exeSuffix())
+	for _, got := range selfUpdateFakDevTargets(root, fakPath) {
+		if strings.EqualFold(got, devPath) {
+			t.Fatalf("missing companion should not be created: %v", got)
+		}
+	}
+	if err := os.WriteFile(devPath, []byte("stale"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got := selfUpdateFakDevTargets(root, fakPath)
+	found := false
+	for _, candidate := range got {
+		if strings.EqualFold(candidate, devPath) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("targets=%v; want it to include %s", got, devPath)
+	}
+}
+
 // convergeSiblings — the old "is the INVOKER provably fresh?" guard on the sibling swap — is
 // gone (#6508). It both over- and under-shot: it re-swapped siblings that were already current
 // and never looked at the PATH / Go-bin copies at all. The decision is now per-copy, from the
