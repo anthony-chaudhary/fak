@@ -8,6 +8,7 @@ package cadencereport
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/numbermap"
 	"sort"
 	"strings"
 
@@ -273,7 +274,7 @@ func MaturityFromScorecard(payload maturityscore.ScorecardPayload) Maturity {
 		Capabilities: asInt(c["capabilities"]),
 		LadderSkips:  asInt(c["ladder_skips"]),
 		Backlog:      asInt(c["backlog"]),
-		Distribution: asIntMap(c["distribution"]),
+		Distribution: numbermap.Ints(c["distribution"], asInt),
 		OK:           payload.OK,
 	}
 	if len(payload.Backlog) > 0 {
@@ -832,19 +833,4 @@ func clampInt(n, lo, hi int) int {
 
 func formatBP(bp int) string {
 	return fmt.Sprintf("%.1f%%", float64(bp)/100)
-}
-
-func asIntMap(v any) map[string]int {
-	out := map[string]int{}
-	switch m := v.(type) {
-	case map[string]int:
-		for k, n := range m {
-			out[k] = n
-		}
-	case map[string]any:
-		for k, n := range m {
-			out[k] = asInt(n)
-		}
-	}
-	return out
 }

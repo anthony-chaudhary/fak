@@ -2,6 +2,7 @@ package agentreadinessscore
 
 import (
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/numbermap"
 	"sort"
 	"strconv"
 	"strings"
@@ -56,22 +57,6 @@ func asFloat(v any) float64 {
 	return 0
 }
 
-// intMap reads a map-of-int corpus value tolerant of a JSON baseline (float64 values).
-func intMap(v any) map[string]int {
-	out := map[string]int{}
-	switch m := v.(type) {
-	case map[string]int:
-		for k, x := range m {
-			out[k] = x
-		}
-	case map[string]any:
-		for k, x := range m {
-			out[k] = asInt(x)
-		}
-	}
-	return out
-}
-
 // floatMap reads a map-of-float corpus value tolerant of a JSON baseline.
 func floatMap(v any) map[string]float64 {
 	out := map[string]float64{}
@@ -117,8 +102,8 @@ func breakdownRows(v any) []breakdownRow {
 func Render(p Payload) string {
 	c := p.Corpus
 	gs := floatMap(c["group_scores"])
-	fbt := intMap(c["frontier_by_term"])
-	debtByGroup := intMap(c["debt_by_group"])
+	fbt := numbermap.Ints(c["frontier_by_term"], asInt)
+	debtByGroup := numbermap.Ints(c["debt_by_group"], asInt)
 
 	var terms []string
 	for _, dim := range frontierDims {
@@ -241,8 +226,8 @@ func Markdown(p Payload, stamp string) string {
 		"",
 	)
 
-	fbt := intMap(c["frontier_by_term"])
-	funits := intMap(c["frontier_units"])
+	fbt := numbermap.Ints(c["frontier_by_term"], asInt)
+	funits := numbermap.Ints(c["frontier_units"], asInt)
 	var frontierTermParts []string
 	for _, dim := range frontierDims {
 		if _, ok := funits[dim]; !ok {
@@ -267,7 +252,7 @@ func Markdown(p Payload, stamp string) string {
 		"| Baseline coverage score | "+ftoa(corpusFloat(c, "score"))+"/100 (grade "+corpusStr(c, "grade")+") |",
 		"| Agent journey | discover "+fmt0(gs["discover"])+" · adopt "+fmt0(gs["adopt"])+" · build "+fmt0(gs["build"])+" |",
 		"| Advisory (soft) signals | "+strconv.Itoa(corpusInt(c, "soft_signals"))+" |",
-		"| Debt by step | discover:"+strconv.Itoa(intMap(c["debt_by_group"])["discover"])+" · adopt:"+strconv.Itoa(intMap(c["debt_by_group"])["adopt"])+" · build:"+strconv.Itoa(intMap(c["debt_by_group"])["build"])+" |",
+		"| Debt by step | discover:"+strconv.Itoa(numbermap.Ints(c["debt_by_group"], asInt)["discover"])+" · adopt:"+strconv.Itoa(numbermap.Ints(c["debt_by_group"], asInt)["adopt"])+" · build:"+strconv.Itoa(numbermap.Ints(c["debt_by_group"], asInt)["build"])+" |",
 		"",
 		"### The two questions (why two headline numbers)",
 		"",
@@ -375,16 +360,16 @@ func Compare(cur Payload, baseline map[string]any) string {
 		"friction-debt:       " + strconv.Itoa(bd) + " -> " + strconv.Itoa(cd) + "   (" + ratio + " fewer defects)",
 		"baseline score:      " + ftoa(bo) + "/100 -> " + ftoa(co) + "/100   (" + fmt.Sprintf("%+.1f", co-bo) + ")",
 	}
-	bbt := intMap(b["frontier_by_term"])
-	cbt := intMap(c["frontier_by_term"])
+	bbt := numbermap.Ints(b["frontier_by_term"], asInt)
+	cbt := numbermap.Ints(c["frontier_by_term"], asInt)
 	for _, dim := range frontierDims {
 		ov, nv := bbt[dim], cbt[dim]
 		if ov != 0 || nv != 0 {
 			lines = append(lines, fmt.Sprintf("  frontier:%-22s %d -> %d", dim, ov, nv))
 		}
 	}
-	gb := intMap(b["debt_by_group"])
-	gc := intMap(c["debt_by_group"])
+	gb := numbermap.Ints(b["debt_by_group"], asInt)
+	gc := numbermap.Ints(c["debt_by_group"], asInt)
 	for _, gp := range groups {
 		lines = append(lines, fmt.Sprintf("  debt:%-10s %d -> %d", gp, gb[gp], gc[gp]))
 	}

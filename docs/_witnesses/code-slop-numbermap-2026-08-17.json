@@ -1,0 +1,32 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T04:56:24.797330Z",
+  "issue": 7059,
+  "family": "JSON numeric-map normalization",
+  "paths": [
+    "internal/numbermap",
+    "internal/agentreadinessscore/render.go",
+    "internal/cadencereport/cadencereport.go"
+  ],
+  "test": "go test ./internal/numbermap ./internal/cadencereport; agentreadinessscore compiles but its broad package test has an unrelated non-repo fixture failure",
+  "test_result": "PASS targeted; unrelated package-fixture failure disclosed",
+  "before": {
+    "score": -92.6,
+    "grade": "F",
+    "slop_debt": 368,
+    "duplication": 368,
+    "weighted_duplication": 234.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -92.0,
+    "grade": "F",
+    "slop_debt": 367,
+    "duplication": 367,
+    "weighted_duplication": 233.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}
