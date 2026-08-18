@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T07:05:42.902011Z",
+  "issue": 6972,
+  "family": "human-facing decimal rendering",
+  "paths": [
+    "internal/numfmt/decimal.go",
+    "internal/numfmt/decimal_test.go",
+    "internal/roofline/roofline.go",
+    "internal/scorecardpane/hygiene.go"
+  ],
+  "test": "go test ./internal/numfmt ./internal/roofline; go test ./internal/scorecardpane (compiled; unrelated gather/parity tests failed); go test ./internal/architest -run Test.*Tier|TestArchitecture -count=1; fak-dev buildcheck --vet --mine internal/numfmt/decimal.go --mine internal/numfmt/decimal_test.go",
+  "test_result": "PASS targeted and buildcheck; unrelated scorecardpane live-tree tests disclosed",
+  "before": {
+    "score": -83.7,
+    "grade": "F",
+    "slop_debt": 351,
+    "duplication": 351,
+    "weighted_duplication": 222.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -83.2,
+    "grade": "F",
+    "slop_debt": 350,
+    "duplication": 350,
+    "weighted_duplication": 222.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

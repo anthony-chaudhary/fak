@@ -34,6 +34,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/maputil"
+
+	"github.com/anthony-chaudhary/fak/internal/numfmt"
 )
 
 // Repo-relative locations the generator reads and writes.
@@ -477,16 +479,9 @@ func frontMatterTitle(doc string) string {
 
 func rng(lo, hi float64) string {
 	if lo == hi {
-		return fnum(lo)
+		return numfmt.UpToOneDecimal(lo)
 	}
-	return fnum(lo) + "–" + fnum(hi)
-}
-
-func fnum(f float64) string {
-	if f == math.Trunc(f) {
-		return fmt.Sprintf("%.0f", f)
-	}
-	return fmt.Sprintf("%.1f", f)
+	return numfmt.UpToOneDecimal(lo) + "–" + numfmt.UpToOneDecimal(hi)
 }
 
 func measList(ms []Measurement) string {

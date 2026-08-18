@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/numfmt"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
@@ -398,7 +399,7 @@ func KPIOrphans(orphans []string, nReader int) HygieneKPI {
 		denom = 1
 	}
 	pct := round1(100 * float64(indexed) / float64(denom))
-	detail := fmt.Sprintf("%d/%d reader-facing docs reachable from an index (%s%%)", indexed, nReader, fmtFloat(pct))
+	detail := fmt.Sprintf("%d/%d reader-facing docs reachable from an index (%s%%)", indexed, nReader, numfmt.OneDecimal(pct))
 	return kpiResult("orphans", "indexing", clampScore(pct), detail, defects, nil)
 }
 
@@ -473,7 +474,7 @@ func KPIJargon(naked []string, nReader int) HygieneKPI {
 	rate := float64(len(naked)) / float64(denom)
 	detail := "first-screen terms carry plain glosses"
 	if len(naked) > 0 {
-		detail = fmt.Sprintf("%d naked first-screen jargon term(s) (%s/doc)", len(naked), fmtFloat(round1(rate)))
+		detail = fmt.Sprintf("%d naked first-screen jargon term(s) (%s/doc)", len(naked), numfmt.OneDecimal(round1(rate)))
 	}
 	score := clampScore(100 - math.Min(60, float64(roundInt(45*rate))))
 	return kpiResult("jargon", "accessibility", score, detail, nil, soft)
@@ -577,13 +578,13 @@ func BuildHygienePayload(workspace string, kpis []HygieneKPI, worktreeClutter []
 	if hygieneDebt == 0 {
 		ok, verdict, finding = true, "OK", "repo_clean"
 		reason = fmt.Sprintf("repo clean: value %.3f (grade %s, legacy score %s), zero hygiene-debt across %d KPIs (%d advisory signal(s))",
-			value, grade, fmtFloat(score), len(kpis), nSoft)
+			value, grade, numfmt.OneDecimal(score), len(kpis), nSoft)
 		nextAction = "no required edit; re-run after the next structural change"
 	} else {
 		ok, verdict, finding = false, "ACTION", "hygiene_debt"
 		worst := breakdown[0]
 		reason = fmt.Sprintf("%d unit(s) of hygiene-debt; value %.3f (grade %s, legacy score %s); heaviest: %s (%d defect(s))",
-			hygieneDebt, value, grade, fmtFloat(score), worst.KPI, worst.Debt)
+			hygieneDebt, value, grade, numfmt.OneDecimal(score), worst.KPI, worst.Debt)
 		nextAction = "retire hygiene-debt worst-first (see corpus.breakdown + per-KPI defects): " +
 			"consolidate duplicates, split/trim oversized docs, clear root clutter, " +
 			"move dated docs to docs/notes/, index orphans, cut AI-tell phrases; " +
@@ -692,14 +693,4 @@ func detailOrDebt(clean, debtFmt string, nDefects int) string {
 	return clean
 }
 
-// fmtFloat renders a float like Python: an integral value as "N.0"? Python prints a
-// trailing .0 for floats (e.g. 96.9, 100.0). Go's %g drops the .0; use a 1-decimal
-// format when fractional and a plain decimal otherwise to match the JSON numbers
-// Python emits — JSON encoders normalize 96.0 and 96 identically for consumers, so
-// this only affects the human render. We keep one-decimal for human strings.
-func fmtFloat(f float64) string {
-	if f == math.Trunc(f) {
-		return fmt.Sprintf("%.1f", f)
-	}
-	return fmt.Sprintf("%.1f", f)
-}
+func fmtFloat(value float64) string { return numfmt.OneDecimal(value) }
