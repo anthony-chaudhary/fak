@@ -118,15 +118,12 @@ func dequantQ2G128Tensor(qt *q2Tensor) []float32 {
 // non-eligible names (returns nil without storing) so the loader can call it
 // unconditionally on Q2_0 tensors — the exact AddResidentQ4K contract.
 func (b *QuantBuilder) AddResidentQ2(canon string, shape []int, raw []byte) error {
-	name, ok, err := b.residentQuantTarget(canon, shape)
-	if !ok || err != nil {
-		return err
-	}
-	if b.m.q2w == nil {
-		b.m.q2w = map[string]*q2Tensor{}
-	}
-	b.m.q2w[name] = wrapQ2G128FromRaw(raw, shape[0], shape[1])
-	return nil
+	return b.addResidentQuant(canon, shape, func(name string) {
+		if b.m.q2w == nil {
+			b.m.q2w = map[string]*q2Tensor{}
+		}
+		b.m.q2w[name] = wrapQ2G128FromRaw(raw, shape[0], shape[1])
+	})
 }
 
 // Q2Count returns how many tensors hold a resident ternary Q2_0 copy (loader diagnostic,

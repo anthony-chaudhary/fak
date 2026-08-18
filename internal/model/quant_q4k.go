@@ -600,13 +600,19 @@ func (b *QuantBuilder) residentQuantTarget(canon string, shape []int) (name stri
 // model [out, in] convention (in a multiple of 256). Idempotent for non-eligible names
 // (returns nil without storing) so the loader can call it unconditionally on Q4_K tensors.
 func (b *QuantBuilder) AddResidentQ4K(canon string, shape []int, raw []byte) error {
+	return b.addResidentQuant(canon, shape, func(name string) {
+		if b.m.q4kw == nil {
+			b.m.q4kw = map[string]*q4kTensor{}
+		}
+		b.m.q4kw[name] = quantizeQ4KFromRaw(raw, shape[0], shape[1])
+	})
+}
+
+func (b *QuantBuilder) addResidentQuant(canon string, shape []int, store func(name string)) error {
 	name, ok, err := b.residentQuantTarget(canon, shape)
 	if !ok || err != nil {
 		return err
 	}
-	if b.m.q4kw == nil {
-		b.m.q4kw = map[string]*q4kTensor{}
-	}
-	b.m.q4kw[name] = quantizeQ4KFromRaw(raw, shape[0], shape[1])
+	store(name)
 	return nil
 }
