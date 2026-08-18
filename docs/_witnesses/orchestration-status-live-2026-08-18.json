@@ -1,0 +1,51 @@
+{
+  "schema": "fak.codex_orchestration_status.v1",
+  "session_id": "01a0172e-8a0e-7582-aa68-28e22ede14c4",
+  "run_id": "orch-7e1363718ca528754fa99506",
+  "launched_at": "2026-08-18T23:30:28.4815397Z",
+  "requested_profile": "ultracode",
+  "resolved_profile": "ultracode",
+  "work_class": "grind",
+  "state": "running",
+  "running": 1,
+  "completed": 2,
+  "exited": 0,
+  "workers": [
+    {
+      "role_id": "worker-1",
+      "pid": 17096,
+      "state": "completed",
+      "process_alive": false,
+      "log_path": "fak-orchestration-runs\\orch-7e1363718ca528754fa99506\\worker-1.jsonl",
+      "log_bytes": 3094276,
+      "updated_at": "2026-08-18T23:38:36.740624Z",
+      "turns_started": 1,
+      "turns_completed": 1,
+      "last_event": "turn.completed"
+    },
+    {
+      "role_id": "worker-2",
+      "pid": 54832,
+      "state": "completed",
+      "process_alive": false,
+      "log_path": "fak-orchestration-runs\\orch-7e1363718ca528754fa99506\\worker-2.jsonl",
+      "log_bytes": 1148240,
+      "updated_at": "2026-08-18T23:36:00.9345974Z",
+      "turns_started": 1,
+      "turns_completed": 1,
+      "last_event": "turn.completed"
+    },
+    {
+      "role_id": "worker-3",
+      "pid": 45036,
+      "state": "running",
+      "process_alive": true,
+      "log_path": "fak-orchestration-runs\\orch-7e1363718ca528754fa99506\\worker-3.jsonl",
+      "log_bytes": 4307197,
+      "updated_at": "2026-08-18T23:38:03.5605496Z",
+      "turns_started": 1,
+      "turns_completed": 0,
+      "last_event": "item.updated"
+    }
+  ]
+}

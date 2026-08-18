@@ -1,0 +1,6 @@
+Orchestration orch-7e1363718ca528754fa99506 - running
+  1 running | 2 completed | 0 exited | launched 2026-08-18 16:30:28
+  worker-1   completed pid=17096   3.0M | turn.completed | turns 1/1
+  worker-2   completed pid=54832   1.1M | turn.completed | turns 1/1
+  worker-3   running   pid=45036   4.1M | item.updated | turns 0/1
+  machine: fak orchestration status --session 01a0172e-8a0e-7582-aa68-28e22ede14c4 --json
