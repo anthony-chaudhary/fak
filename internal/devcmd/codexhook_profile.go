@@ -145,7 +145,7 @@ func inspectCodexHookProfile(home, workspace, binary string) (hookProfileReport,
 	r.Errors = entry.Errors
 	for _, h := range entry.Hooks {
 		event := normalizeHookEvent(h.EventName)
-		if event != "pre_tool_use" && event != "post_tool_use" {
+		if !isObservedHookEvent(event) {
 			continue
 		}
 		x := effectiveHook{EventName: event, Key: h.Key, Source: h.Source, SourcePath: h.SourcePath, PluginID: h.PluginID, DisplayOrder: h.DisplayOrder, Enabled: h.Enabled, Managed: h.IsManaged, CurrentHash: h.CurrentHash, TrustStatus: h.TrustStatus, Command: h.Command, Matcher: h.Matcher, TimeoutSec: h.TimeoutSec}
@@ -161,7 +161,7 @@ func inspectCodexHookProfile(home, workspace, binary string) (hookProfileReport,
 		}
 		return r.Hooks[i].EventName < r.Hooks[j].EventName
 	})
-	for _, event := range []string{"pre_tool_use", "post_tool_use"} {
+	for _, event := range []string{"pre_tool_use", "post_tool_use", "stop", "subagent_stop"} {
 		found := false
 		for _, h := range r.Hooks {
 			found = found || h.EventName == event
@@ -176,6 +176,15 @@ func inspectCodexHookProfile(home, workspace, binary string) (hookProfileReport,
 	}
 	return r, nil
 }
+func isObservedHookEvent(event string) bool {
+	switch event {
+	case "pre_tool_use", "post_tool_use", "stop", "subagent_stop", "stop_failure":
+		return true
+	default:
+		return false
+	}
+}
+
 func normalizeHookEvent(s string) string {
 	s = strings.ReplaceAll(s, "-", "_")
 	var b strings.Builder

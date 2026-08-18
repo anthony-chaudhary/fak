@@ -39,9 +39,20 @@ func exeSuffix() string {
 	return ""
 }
 func TestNormalizeHookEvent(t *testing.T) {
-	for in, want := range map[string]string{"PreToolUse": "pre_tool_use", "post_tool_use": "post_tool_use"} {
+	for in, want := range map[string]string{"PreToolUse": "pre_tool_use", "post_tool_use": "post_tool_use", "SubagentStop": "subagent_stop", "StopFailure": "stop_failure"} {
 		if got := normalizeHookEvent(in); got != want {
 			t.Fatalf("%s => %s", in, got)
 		}
+	}
+}
+
+func TestObservedHookEventsIncludeStopFamily(t *testing.T) {
+	for _, event := range []string{"pre_tool_use", "post_tool_use", "stop", "subagent_stop", "stop_failure"} {
+		if !isObservedHookEvent(event) {
+			t.Fatalf("%s was not observed", event)
+		}
+	}
+	if isObservedHookEvent("session_start") {
+		t.Fatal("unrelated lifecycle event entered tool/Stop profile")
 	}
 }
