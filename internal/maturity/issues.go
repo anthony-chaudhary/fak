@@ -259,6 +259,8 @@ func BuildIssuePlan(items []IssueItem, existing []ExistingIssue) []IssuePlanRow 
 			row.Action = "update"
 			if strings.EqualFold(found.State, "closed") {
 				row.Action = "reopen"
+			} else if found.Title == item.Title && found.Body == item.Body {
+				row.Action = "keep"
 			}
 			row.State = found.State
 			n := found.Number
@@ -324,6 +326,10 @@ func SyncIssuePlan(plan []IssuePlanRow, repo string, labels []string, runner Iss
 	}
 	rows := make([]IssueSyncRow, 0, len(plan))
 	for _, row := range plan {
+		if row.Action == "keep" {
+			rows = append(rows, IssueSyncRow{Key: row.Key, Action: row.Action, OK: true})
+			continue
+		}
 		if row.Action == "reopen" {
 			num := ""
 			if row.Number != nil {

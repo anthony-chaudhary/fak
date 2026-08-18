@@ -252,6 +252,27 @@ func TestBuildIssuePlanUpdatesExistingMaturityIssue(t *testing.T) {
 	}
 }
 
+func TestBuildIssuePlanKeepsUnchangedOpenSuccessor(t *testing.T) {
+	item := IssueItem{
+		Key: "gateway:tested", Lane: "gateway", Title: "maturity(gateway): add tests",
+		Body: "<!-- fak-maturity-work-key: gateway:tested -->\n",
+	}
+	plan := BuildIssuePlan([]IssueItem{item}, []ExistingIssue{{
+		Number: 7, State: "OPEN", Title: item.Title, Body: item.Body,
+	}})
+	if len(plan) != 1 || plan[0].Action != "keep" {
+		t.Fatalf("unchanged open successor must be a no-op, got %#v", plan)
+	}
+	calls := 0
+	rows := SyncIssuePlan(plan, "owner/repo", nil, func(args []string) (string, string, bool) {
+		calls++
+		return "", "", true
+	})
+	if calls != 0 || len(rows) != 1 || !rows[0].OK {
+		t.Fatalf("keep must not call gh: calls=%d rows=%#v", calls, rows)
+	}
+}
+
 func TestBuildIssuePlanReopensClosedMaturitySuccessor(t *testing.T) {
 	item := IssueItem{
 		Key: "gateway:tested", Lane: "gateway", Title: "maturity(gateway): add tests",

@@ -26,7 +26,7 @@ jobs:
     name: keep one open successor per non-terminal capability
     if: github.ref_name == 'main' || github.ref_name == 'master'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     permissions:
       contents: read
       issues: write
