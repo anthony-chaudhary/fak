@@ -1,0 +1,32 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T05:11:36.997086Z",
+  "issue": 7056,
+  "family": "source-location sort keys",
+  "paths": [
+    "internal/sortkeys",
+    "internal/ctxknobs/ctxknobs.go",
+    "internal/knobcensus/knobcensus.go"
+  ],
+  "test": "go test ./internal/sortkeys ./internal/ctxknobs ./internal/knobcensus",
+  "test_result": "PASS",
+  "before": {
+    "score": -91.0,
+    "grade": "F",
+    "slop_debt": 365,
+    "duplication": 365,
+    "weighted_duplication": 231.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -90.5,
+    "grade": "F",
+    "slop_debt": 364,
+    "duplication": 364,
+    "weighted_duplication": 230.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

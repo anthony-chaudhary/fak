@@ -2,6 +2,7 @@ package knobcensus
 
 import (
 	"bufio"
+	"github.com/anthony-chaudhary/fak/internal/sortkeys"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -141,13 +142,7 @@ func Scan(root string) (Census, error) {
 
 	sort.Slice(knobs, func(i, j int) bool {
 		a, b := knobs[i], knobs[j]
-		if a.File != b.File {
-			return a.File < b.File
-		}
-		if a.Line != b.Line {
-			return a.Line < b.Line
-		}
-		return a.Key() < b.Key()
+		return sortkeys.FileLine(a.File, a.Line, a.Key(), b.File, b.Line, b.Key())
 	})
 
 	// Route-coverage post-pass. Group by logical knob identity so the same control
