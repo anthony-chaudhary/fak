@@ -594,6 +594,7 @@ var tier = map[string]int{
 	"kvint2eval":            1, // stdlib-only INT2 KV rotation evidence contract; CUDA producer is fixture-only.
 	"codexresume":           2,
 	"disambiguation":        1, // stdlib-only terminology schema, validation, and self-test; no policy or model kernel.
+	"suiteverify":           1, // stdlib-only shared suite schema validation; imported by higher-tier test harnesses (#7214).
 	"sessionregistry":       2, // stdlib-only durable child-lineage record and read-back; no runtime kernel.
 	"grafanacontract":       1, // stdlib-only contract checks for shipped Grafana dashboard JSON.
 	"processforest":         1, // stdlib-only durable logical process-forest identity, ancestry, adoption, and deterministic snapshots.
