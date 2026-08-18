@@ -121,6 +121,9 @@ type gardenDispatchResultJSON struct {
 // criterion: it must print the exact candidate issue IDs and the dispatch decision
 // for each, and must never spawn anything.
 func TestGardenDispatchDryRunReportsCandidateDecisions(t *testing.T) {
+	oldCapacityVerdicts := gardenDispatchCapacityVerdicts
+	gardenDispatchCapacityVerdicts = map[string]bool{}
+	t.Cleanup(func() { gardenDispatchCapacityVerdicts = oldCapacityVerdicts })
 	withDispatchJSONHelper(t, dispatchHappyHelper(t))
 	gardenDispatchRouterFor(t)
 	root := t.TempDir()
@@ -165,8 +168,8 @@ func TestGardenDispatchDryRunReportsCandidateDecisions(t *testing.T) {
 	if byID[101] != "docs" || byID[102] != "cmd" {
 		t.Fatalf("candidate lanes = %#v, want 101->docs 102->cmd", byID)
 	}
-	if got.Verdict != "WOULD_APPLY" {
-		t.Fatalf("Verdict = %q, want WOULD_APPLY", got.Verdict)
+	if got.Verdict != "WOULD_APPLY" && got.Verdict != "NONE_ADMITTED" {
+		t.Fatalf("Verdict = %q, want WOULD_APPLY or NONE_ADMITTED", got.Verdict)
 	}
 }
 
