@@ -153,15 +153,6 @@ func scrapeMetricsText(ctx context.Context, client *http.Client, metricsURL, api
 	return string(raw), "", nil
 }
 
-// closeRequestChannels closes the token/done channels an EngineRequest signals
-// completion through. Callers must set their res/err fields BEFORE calling this —
-// Result() receives on done as its only synchronization point, so closing first
-// would let a reader observe done closed before res/err are written.
-func closeRequestChannels(tokens chan abi.EngineToken, done chan struct{}) {
-	close(tokens)
-	close(done)
-}
-
 // decodeOrEmptyJSONObject parses args as a JSON object, returning a fresh empty
 // object when args does not decode to a non-empty object. Every request-body
 // builder (SGLang's native /generate, vLLM's OpenAI chat/completions) starts from

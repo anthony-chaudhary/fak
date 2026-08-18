@@ -414,8 +414,7 @@ type sglangRequest struct {
 	finishReason string
 	metaID       string
 
-	res *abi.Result
-	err error
+	requestFinish
 }
 
 func (r *sglangRequest) Tokens() <-chan abi.EngineToken { return r.tokens }
@@ -536,8 +535,7 @@ func (r *sglangRequest) recordPrefixHit() {
 }
 
 func (r *sglangRequest) finish(res *abi.Result, err error) {
-	r.res, r.err = res, err
-	closeRequestChannels(r.tokens, r.done)
+	r.requestFinish.complete(r.tokens, r.done, res, err)
 }
 
 type sglangUsage struct {

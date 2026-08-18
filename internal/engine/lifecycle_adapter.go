@@ -138,8 +138,7 @@ type adapterRequest struct {
 	gen    []int
 
 	// written once by pump before close(done); read only after <-done.
-	res *abi.Result
-	err error
+	requestFinish
 }
 
 func (r *adapterRequest) Tokens() <-chan abi.EngineToken { return r.tokens }
@@ -207,8 +206,7 @@ func (r *adapterRequest) assemble() *abi.Result {
 }
 
 func (r *adapterRequest) finish(res *abi.Result, err error) {
-	r.res, r.err = res, err
-	closeRequestChannels(r.tokens, r.done)
+	r.requestFinish.complete(r.tokens, r.done, res, err)
 }
 
 // AdapterEngine is a LifecycleEngine and each request satisfies EngineRequest —

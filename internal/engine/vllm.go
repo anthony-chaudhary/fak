@@ -312,8 +312,7 @@ type vllmRequest struct {
 	finishReason string
 	streamModel  string
 
-	res *abi.Result
-	err error
+	requestFinish
 }
 
 func (r *vllmRequest) Tokens() <-chan abi.EngineToken { return r.tokens }
@@ -386,8 +385,7 @@ func (r *vllmRequest) assemble() *abi.Result {
 }
 
 func (r *vllmRequest) finish(res *abi.Result, err error) {
-	r.res, r.err = res, err
-	closeRequestChannels(r.tokens, r.done)
+	r.requestFinish.complete(r.tokens, r.done, res, err)
 }
 
 type vllmUsage struct {
