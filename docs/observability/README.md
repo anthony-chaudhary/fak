@@ -19,6 +19,15 @@ A running gateway returns Prometheus exposition text. Change the host and port t
 the deployed address; then choose the question below instead of treating one
 signal as a complete diagnosis.
 
+## Start with your own recent context health
+
+```bash
+fak session observe             # this workspace, active Codex profile, last 4 calendar days
+fak session observe --json      # deterministic aggregate for jq, a cron job, or a dashboard
+```
+
+This local, offline command answers the first user question before the fleet telemetry below: did context compaction fire, how much resident context did it shed, and what was the daily input/fire pattern? It reads native Codex rollout counters, includes its inferred scope in the report, and labels resident shedding as occupancy reduction rather than estimated billing savings. Use `fak session compact-audit` for per-fire and regrowth detail.
+
 ## Choose by operator question
 
 | Production question | Signal and command | Read the result as | Authority |

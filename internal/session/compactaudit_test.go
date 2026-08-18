@@ -418,16 +418,16 @@ func TestAggregateCompactReportsTotalsAndDailyRollup(t *testing.T) {
 	}
 
 	agg := AggregateCompactReports(reports)
-	if agg.CumulativeInputTokens != 3500 || agg.ResidentTokensShed != 1450 {
-		t.Fatalf("aggregate totals = input %d shed %d", agg.CumulativeInputTokens, agg.ResidentTokensShed)
+	if agg.CumulativeInputTokens != 3500 || agg.ResidentTokensShed != 1450 || agg.Sampled != 2 {
+		t.Fatalf("aggregate totals = input %d shed %d sampled %d", agg.CumulativeInputTokens, agg.ResidentTokensShed, agg.Sampled)
 	}
 	if len(agg.Daily) != 2 {
 		t.Fatalf("daily rows = %d, want 2: %#v", len(agg.Daily), agg.Daily)
 	}
-	if got := agg.Daily[0]; got.Date != "2026-08-14" || got.Sessions != 2 || got.CumulativeInputTokens != 1500 || got.Fires != 1 || got.ResidentTokensShed != 700 {
+	if got := agg.Daily[0]; got.Date != "2026-08-14" || got.Sessions != 2 || got.Sampled != 1 || got.CumulativeInputTokens != 1500 || got.Fires != 1 || got.ResidentTokensShed != 700 {
 		t.Fatalf("day 1 = %#v", got)
 	}
-	if got := agg.Daily[1]; got.Date != "2026-08-15" || got.Sessions != 1 || got.CumulativeInputTokens != 2000 || got.Fires != 1 || got.ResidentTokensShed != 750 {
+	if got := agg.Daily[1]; got.Date != "2026-08-15" || got.Sessions != 1 || got.Sampled != 1 || got.CumulativeInputTokens != 2000 || got.Fires != 1 || got.ResidentTokensShed != 750 {
 		t.Fatalf("day 2 = %#v", got)
 	}
 }

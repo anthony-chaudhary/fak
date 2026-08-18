@@ -1,0 +1,14 @@
+Codex context — WORKING
+  77 measured fires shed 11,523,860 resident tokens; median occupancy 152,559 -> 17,737 (12.2% remains)
+  scope: 4 calendar days since 2026-08-15 · <current workspace> · 1 profile root(s)
+  observed: 206 sessions · 2,938,773,326 cumulative input tokens
+
+  daily (UTC):
+    date         sessions    cumulative input    fires    resident shed
+    2026-08-15         20         715,647,190      11       1,470,906
+    2026-08-16         19         290,899,035      20       2,876,255
+    2026-08-17        103       1,433,181,643      27       3,971,775
+    2026-08-18         64         499,045,458      19       3,204,924
+
+  resident shed is measured occupancy reduction, not a billable-token savings estimate.
+  More detail: fak session compact-audit --since <date>

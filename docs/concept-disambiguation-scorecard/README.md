@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **278** (clarity 17 + coverage 261) |
-| **Crystal-clear concepts (and climbing)** | **459** crystal of 2172 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2323 / 2584** (89.9% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **276** (clarity 16 + coverage 260) |
+| **Crystal-clear concepts (and climbing)** | **458** crystal of 2171 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2322 / 2582** (89.9% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 192 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **61** of 2850 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **61** of 2849 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 86.2/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 86.5/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2172 concepts - score 86.2/100 (grade B) - disambiguation-debt 278
+concept-disambiguation chart - 2171 concepts - score 86.5/100 (grade B) - disambiguation-debt 276
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ########.................... 459
+  * crystal       #######..................... 458
   o defined       ############################ 1713
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -55,7 +55,7 @@ clarity mix by family (each cell = one concept):
   pool             ******oooooooooooooooooooooooooooooo (36 concept(s); 6 crystal)
   render-materialize *****ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (158 concept(s); 5 crystal)
   score-debt       ********oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (72 concept(s); 8 crystal)
-  session-runtime  **************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (188 concept(s); 26 crystal)
+  session-runtime  *************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (187 concept(s); 25 crystal)
   support-maturity *********************oooooooooooooooooooooo (43 concept(s); 21 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
@@ -64,7 +64,7 @@ clarity mix by family (each cell = one concept):
 coverage by family (positioned / discovered):
   guard-gate       ########################.... 392/457
   plan             #########################... 320/360
-  session-runtime  ########################.... 214/251
+  session-runtime  ########################.... 213/249
   policy-capability #########################... 159/181
   render-materialize #########################... 177/197
   cache            ##########################.. 261/280
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [#############################...] 89.9%  (2323/2584 confusable tokens positioned)
+namespace coverage  [#############################...] 89.9%  (2322/2582 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 191
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 192/192
 
-name index: 2850 lookup name(s) -> 2172 concept(s), 61 ambiguous
+name index: 2849 lookup name(s) -> 2171 concept(s), 61 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **192 / 192** (191 mutual, 1 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 2 |
-| Boundaries drawn (mutual / total) | 1536 / 4043 |
+| Boundaries drawn (mutual / total) | 1532 / 4039 |
 | Dangling `distinct_from` references (drive to 0) | 6 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 2850 over 2172 concepts |
+| Lookup names indexed | 2849 over 2171 concepts |
 | Lookup names landing on several concepts | 61 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **1** |
-| Concepts carrying a contrast set | 2172 |
+| Concepts carrying a contrast set | 2171 |
 
 ## The concepts (best verdict first)
 
@@ -489,7 +489,6 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | session-runtime | **ForkSessionID** - The forked session id whose lookahead rollout produced a RolloutEvidence/Lesson (#5204): the twin session spun off to roll the trajectory forward under the fork-rollout runner. |
 | * | crystal | symbol | session-runtime | **claudeSessionUUID** - The cmd/fak resolver for the STABLE Claude Code session UUID (the transcript id) that a guard-session descriptor publishes as SessionDescriptor.AgentUUID, so a wip checkpoint's owning session becomes joinable to a live descriptor (#5343). Reads CLAUDE_CODE_SESSION_ID, then CLAUDE_SESSION_ID, then FAK_SESSION_ID; empty when none is set. |
 | * | crystal | symbol | session-runtime | **session_fatigue** - The read-only lens that folds the fak.guard-stop.v1 ledger into a per-gate approval-without-inspection rate and names the gates that have crossed into rubber-stamp territory; flags a gate only when it clears BOTH a fatigue rate and a minimum fire count, so a 1-of-1 approval cannot score a perfect 1.00 and be called evidence. |
-| * | crystal | artifact | session-runtime | **session intent** - A provider-neutral declaration of when a session may start, how much active or elapsed effort it should receive, what terminal evidence or limits stop it, and which bounded lifecycle reactions apply. |
 | * | crystal | symbol | session-runtime | **sessionQuarantineRetentionPolicy (corrupt-registry quarantine retention)** - How long, and how many, quarantined copies of a corrupt session registry are kept after RecoverCorruptRegistry moves the bad file aside — read from the sessionQuarantineRetentionEnv knob, falling back to the default policy when the knob is unparseable. |
 | * | crystal | symbol | session-runtime | **sessionQuarantineRetentionEnv** - The cmd/fak constant naming the environment variable that overrides the corrupt-registry quarantine retention policy. It is the NAME of the knob, not the knob's parsed value and not the policy itself. |
 | * | crystal | config | session-runtime | **FAK_SESSION_QUARANTINE_RETENTION** - The operator-facing environment variable bounding corrupt-registry quarantine evidence: 'off' disables cleanup entirely, 'count=N,age=DURATION,bytes=N' overrides individual dimensions with 0 meaning unbounded, and unset keeps session.DefaultQuarantineRetention. A malformed value warns and falls back to the default; it never prevents MCP startup. |
@@ -2446,11 +2445,11 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `reference_resolves` | 16 | 6 | 6 dangling distinct_from reference(s) |
 | honesty | `clarity_consistent` | 64 | 2 | 2 verdict overclaim(s) |
 | indexed | `index_resolves` | 82 | 1 | 1 unresolvable shared lookup name(s) |
-| well-formed | `well_formed` | 88 | 1 | 1 malformed field(s) |
 | separation | `pair_mutual` | 90 | 1 | 1 one-sided boundary on a confusable pair |
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2507/4043 boundaries drawn one-way only |
+| separation | `mutuality_soft` | 80 | 0 | 2507/4039 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2171 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2463,7 +2462,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---:|---:|---:|
 | guard-gate | 392 | 457 | 65 |
 | plan | 320 | 360 | 40 |
-| session-runtime | 214 | 251 | 37 |
+| session-runtime | 213 | 249 | 36 |
 | policy-capability | 159 | 181 | 22 |
 | render-materialize | 177 | 197 | 20 |
 | cache | 261 | 280 | 19 |

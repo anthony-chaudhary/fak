@@ -1,0 +1,339 @@
+{
+  "provenance": {
+    "guarded_only": false
+  },
+  "aggregate": {
+    "sessions": 206,
+    "rollout_bytes": 1535553903,
+    "fires": 77,
+    "measured_fires": 77,
+    "compacted_sessions": 47,
+    "telemetry_sessions": 195,
+    "cumulative_input_tokens": 2939547027,
+    "resident_tokens_shed": 11523860,
+    "daily": [
+      {
+        "date": "2026-08-15",
+        "sessions": 20,
+        "telemetry_sessions": 19,
+        "cumulative_input_tokens": 715647190,
+        "fires": 11,
+        "resident_tokens_shed": 1470906
+      },
+      {
+        "date": "2026-08-16",
+        "sessions": 19,
+        "telemetry_sessions": 19,
+        "cumulative_input_tokens": 290899035,
+        "fires": 20,
+        "resident_tokens_shed": 2876255
+      },
+      {
+        "date": "2026-08-17",
+        "sessions": 103,
+        "telemetry_sessions": 93,
+        "cumulative_input_tokens": 1433301814,
+        "fires": 27,
+        "resident_tokens_shed": 3971775
+      },
+      {
+        "date": "2026-08-18",
+        "sessions": 64,
+        "telemetry_sessions": 64,
+        "cumulative_input_tokens": 499698988,
+        "fires": 19,
+        "resident_tokens_shed": 3204924
+      }
+    ],
+    "median_pre_tokens": 152559,
+    "median_post_tokens": 17737,
+    "median_shed_tokens": 134822,
+    "median_residual_ratio": 0.1217,
+    "anomaly_counts": {
+      "FAST_REBOUND": 9,
+      "INEFFECTIVE_FIRE": 1,
+      "LATE_FIRE": 1,
+      "NO_FIRE_ABOVE_CEILING": 4
+    },
+    "verdict_counts": {
+      "FIRED_AND_HELD": 37,
+      "FIRED_WITH_ANOMALIES": 10,
+      "NO_FIRE_ABOVE_CEILING": 4,
+      "NO_FIRE_BOUNDED": 144,
+      "NO_TELEMETRY": 11
+    },
+    "regrowth": {
+      "fires_with_telemetry": 77,
+      "rebounds": 36,
+      "censored": 41,
+      "timestamp_suspect": 0,
+      "median_seconds_to_rebound": 5681.8435,
+      "p90_seconds_to_rebound": 9827.061,
+      "median_samples_to_rebound": 175,
+      "rebounds_within_15min": 2,
+      "rebounds_within_30min": 4,
+      "median_next_fire_seconds": 7143.647,
+      "median_cache_read_fraction": 0.872,
+      "class_totals": {
+        "compaction_summary": {
+          "rows": 77,
+          "bytes": 5480973
+        },
+        "instructions": {
+          "rows": 25,
+          "bytes": 440365,
+          "dup_rows": 1,
+          "dup_bytes": 34447
+        },
+        "message/assistant": {
+          "rows": 164,
+          "bytes": 499249
+        },
+        "message/developer": {
+          "rows": 1016,
+          "bytes": 758494
+        },
+        "message/user": {
+          "rows": 107,
+          "bytes": 536294
+        },
+        "reasoning": {
+          "rows": 632,
+          "bytes": 1587328
+        },
+        "tool_call/apply_patch": {
+          "rows": 24,
+          "bytes": 116805
+        },
+        "tool_call/dos_answer": {
+          "rows": 1,
+          "bytes": 484
+        },
+        "tool_call/dos_arbitrate": {
+          "rows": 2,
+          "bytes": 1251
+        },
+        "tool_call/dos_commit_audit": {
+          "rows": 7,
+          "bytes": 3006
+        },
+        "tool_call/dos_doctor": {
+          "rows": 3,
+          "bytes": 1179
+        },
+        "tool_call/fak_adjudicate": {
+          "rows": 3,
+          "bytes": 1825
+        },
+        "tool_call/fak_capabilities": {
+          "rows": 2,
+          "bytes": 957
+        },
+        "tool_call/fak_changes": {
+          "rows": 2,
+          "bytes": 740
+        },
+        "tool_call/fak_context_restore": {
+          "rows": 7,
+          "bytes": 3163
+        },
+        "tool_call/fak_context_spans": {
+          "rows": 1,
+          "bytes": 365
+        },
+        "tool_call/fak_feature_query": {
+          "rows": 3,
+          "bytes": 1530
+        },
+        "tool_call/fak_index_docs": {
+          "rows": 1,
+          "bytes": 484
+        },
+        "tool_call/fak_index_lane": {
+          "rows": 6,
+          "bytes": 3574
+        },
+        "tool_call/fak_index_verbs": {
+          "rows": 1,
+          "bytes": 446
+        },
+        "tool_call/fak_read": {
+          "rows": 23,
+          "bytes": 9973
+        },
+        "tool_call/fak_resume_history": {
+          "rows": 1,
+          "bytes": 366
+        },
+        "tool_call/fak_syscall": {
+          "rows": 1,
+          "bytes": 455
+        },
+        "tool_call/fak_tools_search": {
+          "rows": 3,
+          "bytes": 1272
+        },
+        "tool_call/get_goal": {
+          "rows": 111,
+          "bytes": 36024
+        },
+        "tool_call/list_mcp_resource_templates": {
+          "rows": 2,
+          "bytes": 686
+        },
+        "tool_call/list_mcp_resources": {
+          "rows": 2,
+          "bytes": 668
+        },
+        "tool_call/search_openai_docs": {
+          "rows": 1,
+          "bytes": 458
+        },
+        "tool_call/shell_command": {
+          "rows": 16695,
+          "bytes": 13289646
+        },
+        "tool_call/update_goal": {
+          "rows": 27,
+          "bytes": 9443
+        },
+        "tool_call/update_plan": {
+          "rows": 422,
+          "bytes": 468330
+        },
+        "tool_call/view_image": {
+          "rows": 2,
+          "bytes": 856
+        },
+        "tool_result/apply_patch": {
+          "rows": 24,
+          "bytes": 11143
+        },
+        "tool_result/dos_answer": {
+          "rows": 1,
+          "bytes": 3063
+        },
+        "tool_result/dos_arbitrate": {
+          "rows": 2,
+          "bytes": 2109
+        },
+        "tool_result/dos_commit_audit": {
+          "rows": 7,
+          "bytes": 7804
+        },
+        "tool_result/dos_doctor": {
+          "rows": 3,
+          "bytes": 111777
+        },
+        "tool_result/fak_adjudicate": {
+          "rows": 3,
+          "bytes": 1653
+        },
+        "tool_result/fak_capabilities": {
+          "rows": 2,
+          "bytes": 3682
+        },
+        "tool_result/fak_changes": {
+          "rows": 2,
+          "bytes": 822
+        },
+        "tool_result/fak_context_restore": {
+          "rows": 7,
+          "bytes": 3654
+        },
+        "tool_result/fak_context_spans": {
+          "rows": 1,
+          "bytes": 485
+        },
+        "tool_result/fak_feature_query": {
+          "rows": 3,
+          "bytes": 47248
+        },
+        "tool_result/fak_index_docs": {
+          "rows": 1,
+          "bytes": 9558
+        },
+        "tool_result/fak_index_lane": {
+          "rows": 6,
+          "bytes": 6217
+        },
+        "tool_result/fak_index_verbs": {
+          "rows": 1,
+          "bytes": 1233
+        },
+        "tool_result/fak_read": {
+          "rows": 23,
+          "bytes": 33689
+        },
+        "tool_result/fak_resume_history": {
+          "rows": 1,
+          "bytes": 1000
+        },
+        "tool_result/fak_syscall": {
+          "rows": 1,
+          "bytes": 766
+        },
+        "tool_result/fak_tools_search": {
+          "rows": 3,
+          "bytes": 9369
+        },
+        "tool_result/get_goal": {
+          "rows": 111,
+          "bytes": 90758
+        },
+        "tool_result/list_mcp_resource_templates": {
+          "rows": 2,
+          "bytes": 690
+        },
+        "tool_result/list_mcp_resources": {
+          "rows": 2,
+          "bytes": 58336
+        },
+        "tool_result/search_openai_docs": {
+          "rows": 1,
+          "bytes": 51333
+        },
+        "tool_result/shell_command": {
+          "rows": 16683,
+          "bytes": 80393352,
+          "dup_rows": 33,
+          "dup_bytes": 285794
+        },
+        "tool_result/update_goal": {
+          "rows": 27,
+          "bytes": 30173
+        },
+        "tool_result/update_plan": {
+          "rows": 422,
+          "bytes": 139440
+        },
+        "tool_result/view_image": {
+          "rows": 2,
+          "bytes": 768
+        },
+        "unknown": {
+          "rows": 2,
+          "bytes": 1247
+        }
+      },
+      "anomaly_counts": {
+        "DUPLICATE_SETUP_REINJECTION": 1,
+        "REPEATED_TOOL_RESULT": 10
+      },
+      "fast_cohort": {
+        "windows": 4,
+        "median_tool_calls": 53,
+        "median_turns": 0,
+        "median_growth_tokens": 200675,
+        "median_cache_read_fraction": 0.9433
+      },
+      "slow_cohort": {
+        "windows": 73,
+        "median_tool_calls": 234,
+        "median_turns": 1,
+        "median_growth_tokens": 109243,
+        "median_cache_read_fraction": 0.8708
+      }
+    }
+  }
+}

@@ -760,6 +760,12 @@ func AggregateCompactReports(reports []CompactSessionReport) CompactAggregate {
 		if d := day(r.StartedAt); d != nil {
 			d.Sessions++
 			d.CumulativeInputTokens += int64(r.CumulativeInputTokens)
+			if r.TokenSamples > 0 {
+				d.Sampled++
+			}
+		}
+		if r.TokenSamples > 0 {
+			agg.Sampled++
 		}
 		if len(r.Fires) > 0 {
 			agg.CompactedSessions++
