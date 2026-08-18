@@ -60,6 +60,29 @@ func TestDesktopPopupRejectsNewSimilarPythonAndPowerShellHelpers(t *testing.T) {
 	}
 }
 
+func TestDesktopPopupRejectsHeadlessInteractiveTaskAtPreCommit(t *testing.T) {
+	src := `$action = New-ScheduledTaskAction -Execute conhost.exe -Argument '--headless fak.exe accounts refresh'
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+Register-ScheduledTask -TaskName Refresh -Action $action -Principal $principal`
+	got, err := CheckDesktopPopup(popupDiff(map[string]string{"tools/register_refresh.ps1": src}, "tools/register_refresh.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Gate != "DESKTOP_POPUP_REGRESSION" || got[0].File != "tools/register_refresh.ps1" {
+		t.Fatalf("interactive task findings = %#v, want one staged refusal despite headless action", got)
+	}
+}
+
+func TestDesktopPopupAcceptsS4UTaskAtPreCommit(t *testing.T) {
+	src := `$action = New-ScheduledTaskAction -Execute conhost.exe -Argument '--headless fak.exe accounts refresh'
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
+Register-ScheduledTask -TaskName Refresh -Action $action -Principal $principal`
+	got, err := CheckDesktopPopup(popupDiff(map[string]string{"tools/register_refresh.ps1": src}, "tools/register_refresh.ps1"))
+	if err != nil || len(got) != 0 {
+		t.Fatalf("S4U task findings = %#v, err=%v", got, err)
+	}
+}
+
 func TestDesktopPopupReadsCandidateIndexNotPeerWorktree(t *testing.T) {
 	staged := `package helper
 import "github.com/anthony-chaudhary/fak/internal/windowgate"

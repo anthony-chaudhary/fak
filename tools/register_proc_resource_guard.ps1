@@ -135,7 +135,7 @@ try {
   $s4uErr = $_.Exception.Message
   $exe = if ($useNative) { $guardExe } elseif ($pyw) { $pyw } else { $py }
   try {
-    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
     $headlessArgs = "--headless `"$exe`" $guardArgs"
     $taskAction = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $headlessArgs -WorkingDirectory $RepoRoot
     Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `

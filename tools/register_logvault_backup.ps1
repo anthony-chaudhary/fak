@@ -110,7 +110,7 @@ function Install-LogvaultTask([string]$name, [string]$loopId, [string[]]$verbArg
   } catch {
     $headlessArgs = "--headless `"$fak`" $exeArgs"
     $taskAction = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $headlessArgs -WorkingDirectory $Workspace
-    $principal  = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+    $principal  = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
     Register-ScheduledTask -TaskName $name -Action $taskAction -Trigger $trigger `
                  -Principal $principal -Settings $settings -Force | Out-Null
     $principalKind = "Interactive (non-elevated; conhost --headless)"

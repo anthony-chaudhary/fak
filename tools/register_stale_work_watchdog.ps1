@@ -81,7 +81,7 @@ try {
   Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `
                  -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
 } catch {
-  $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive
+  $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U
   $headlessArgs = "--headless `"$pwsh`" $psArgs"
   $headlessAction = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $headlessArgs -WorkingDirectory $RepoRoot
   Register-ScheduledTask -TaskName $TaskName -Action $headlessAction -Trigger $trigger `

@@ -92,7 +92,7 @@ try {
   $exe = if (Test-Path $pyw) { $pyw } else { $py }   # windowless if pythonw is present
   $headlessArgs = "--headless `"$exe`" $pyArgs"
   $taskAction = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $headlessArgs -WorkingDirectory $Workspace
-  $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+  $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
   $reg = Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `
                -Principal $principal -Settings $settings -Force
   $principalKind = "Interactive (non-elevated; conhost --headless $(Split-Path -Leaf $exe))"

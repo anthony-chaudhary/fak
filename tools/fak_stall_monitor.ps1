@@ -106,7 +106,7 @@ if ($Install) {
   $brokerSpool = Join-Path (Split-Path -Parent $Log) 'relaunch'
   $brokerArgs = "host-relaunch-broker --dir `"$brokerSpool`""
   $brokerAction = New-ScheduledTaskAction -Execute $fak -Argument $brokerArgs
-  $brokerPrincipal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+  $brokerPrincipal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
   $brokerTrigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
   $brokerSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
   try {

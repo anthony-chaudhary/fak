@@ -855,36 +855,20 @@ func psSkipString(src string, i int) int {
 	return len(src)
 }
 
-// PSInstallerViolation returns a one-line violation for a task-creating .ps1 that
-// is neither off-desktop nor headless, and ok=false when the file is clean (or is
-// not a task installer at all). Pure: no git, no disk.
+// PSInstallerViolation returns a one-line violation for a background task
+// installer that lacks an off-desktop principal. Action-level hiding is defense
+// in depth, not a principal boundary: descendants can allocate a console and a
+// later action edit can remove the wrapper while retaining desktop access.
 func PSInstallerViolation(rel, src string) (string, bool) {
 	if !psCodeMatch(reCreatesTask, src) {
 		return "", false
 	}
-	if psCodeMatch(reHeadless, src) {
-		return "", false // a fully headless launcher is safe under any principal
+	if psCodeMatch(reOffDesktop, src) && !psCodeMatch(reInteractive, src) {
+		return "", false
 	}
-	offDesktop := psCodeMatch(reOffDesktop, src)
-	interactive := psCodeMatch(reInteractive, src)
-	// A Register-ScheduledTask call that never sets a principal inherits the
-	// Interactive default — treat as interactive unless it goes headless.
-	if psCodeMatch(reRegisterTask, src) && !psCodeMatch(reSetsPrincipal, src) {
-		interactive = true
-	}
-	if interactive {
-		return fmt.Sprintf("%s: installs an INTERACTIVE scheduled task without a headless "+
-			"(conhost --headless) launcher — it will flash a console window on the desktop; "+
-			"use -LogonType S4U (session 0) or wrap the action in conhost.exe --headless (%s)",
-			rel, ReasonInteractiveTask), true
-	}
-	if !offDesktop {
-		return fmt.Sprintf("%s: installs a scheduled task with no off-desktop principal "+
-			"(-LogonType S4U / a service account) and no conhost "+
-			"--headless launcher — it may flash a console window (%s)",
-			rel, ReasonInteractiveTask), true
-	}
-	return "", false
+	return fmt.Sprintf("%s: background scheduled-task installer lacks a non-interactive principal; "+
+		"use -LogonType S4U or /RU SYSTEM (hidden/headless action flags are defense in depth, "+
+		"not a desktop boundary) (%s)", rel, ReasonInteractiveTask), true
 }
 
 // PSStartProcessViolations returns one row per Start-Process call that does not

@@ -92,7 +92,7 @@ try {
                -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
   $principalKind = 'S4U (session 0)'
 } catch {
-  $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+  $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
   $headlessArgs = "--headless `"$($taskAction.Execute)`" $($taskAction.Arguments)"
   $headlessAction = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $headlessArgs -WorkingDirectory $Workspace
   Register-ScheduledTask -TaskName $TaskName -Action $headlessAction -Trigger $trigger `

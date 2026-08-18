@@ -22,3 +22,13 @@
 - Runtime proof after rebuilding: `fak windowgate --live-tasks` must return `ACTION` until the elevated migration clears every enabled Interactive console-prone task.
 - Repair command (requires elevated PowerShell): `tools\migrate_fleet_tasks_to_s4u.ps1 -Apply -VerifyRun`.
 
+## Shift-left closure for new development
+
+The migration command is recovery, not the policy boundary. New development is now stopped at the candidate-index boundary:
+
+- `internal/windowgate.PSInstallerViolation` requires every executable PowerShell task installer to declare an off-desktop principal (`S4U` or `SYSTEM`).
+- `conhost --headless`, `-WindowStyle Hidden`, and `pythonw.exe` remain useful defense in depth, but no longer excuse an Interactive or omitted principal.
+- `internal/hooks.CheckDesktopPopup` invokes that rule from the staged pre-commit gate, so an unsafe installer cannot become a commit even when the developer never runs the migration or live audit.
+- The tracked-tree witness cross-checks every committed `.ps1` installer, and the previously Interactive fallback branches now choose S4U.
+
+This makes the safe state a source-level default for a new developer: copy an existing installer and it is S4U; author an unsafe one and the commit gate names `INTERACTIVE_TASK_POPUP` with the fix.
