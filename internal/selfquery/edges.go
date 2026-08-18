@@ -57,12 +57,6 @@ const (
 	EdgeResolvedBy = "resolved-by"
 )
 
-// maxEdgesPerCard bounds how many edges one card carries, so a note citing a
-// hundred issues cannot bloat a query response. The cut is applied AFTER the
-// deterministic sort, so the retained set is stable for the same input — but it
-// is a real truncation, not a full graph: a card at the cap may have more.
-const maxEdgesPerCard = 24
-
 // maxNoteBytes bounds a single note read on the query path. Every note in the
 // corpus is far under this; the cap exists so a pathological file cannot stall a
 // query.

@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T04:14:09.641502Z",
+  "issue": 7068,
+  "family": "unused private helper deletion, sixth slice",
+  "paths": [
+    "cmd/dispatchworker/guard.go",
+    "cmd/fak/gh_spam_comments.go",
+    "cmd/fak/wip_fleet.go",
+    "internal/selfquery/edges.go"
+  ],
+  "test": "fak-dev buildcheck",
+  "test_result": "PASS",
+  "before": {
+    "score": -114.6,
+    "grade": "F",
+    "slop_debt": 388,
+    "duplication": 371,
+    "weighted_duplication": 237.5,
+    "dead_code": 11,
+    "vacuous_tests": 6
+  },
+  "after": {
+    "score": -108.0,
+    "grade": "F",
+    "slop_debt": 382,
+    "duplication": 371,
+    "weighted_duplication": 237.5,
+    "dead_code": 5,
+    "vacuous_tests": 6
+  },
+  "verdict": "PASS: dead code and total hard debt strictly decreased; no measured hard KPI increased"
+}

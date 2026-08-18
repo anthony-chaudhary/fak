@@ -43,12 +43,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/wipref"
 )
 
-// wipStubIdentity is the fixed author/committer a metadata stub is minted under. It is a
-// placeholder identity, never a person: the stub is machinery, and binding it to whichever
-// clone happened to run the sync would make the object non-deterministic across the fleet
-// for no gain. The .invalid TLD is reserved by RFC 2606 precisely so it can never resolve.
-const wipStubIdentity = "fak wip <wip@fak.invalid>"
-
 // wipLocalHost resolves THIS machine's stable node id for the checkpoint stamp. It reuses
 // leaseref's node identity rather than minting a second convention, so "which machine holds
 // this lease" and "which machine stranded this WIP" are answered in the same vocabulary. A

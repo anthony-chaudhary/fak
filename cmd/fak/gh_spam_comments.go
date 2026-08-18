@@ -18,10 +18,6 @@ import (
 
 type ghSpamRunner func(args []string) ([]byte, error)
 
-func runGHSpamComments(stdout, stderr io.Writer, argv []string) int {
-	return runGHSpamCommentsWith(stdout, stderr, argv, nil)
-}
-
 func runGHSpamCommentsWith(stdout, stderr io.Writer, argv []string, runner ghSpamRunner) int {
 	fs := flag.NewFlagSet("gh-spam-comments", flag.ContinueOnError)
 	fs.SetOutput(stderr)
