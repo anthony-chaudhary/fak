@@ -64,6 +64,10 @@ func dispatchWorkerEnv(backend, lane, root, runsDir string, account dispatchtick
 	case "codex":
 		delete(env, "CLAUDE_CONFIG_DIR")
 		delete(env, "CLAUDE_CODE_OAUTH_TOKEN")
+		// A detached worker is a new Codex thread. Inheriting the interactive
+		// launcher's thread identity makes fak's current-thread gate audit the
+		// operator session and refuse every otherwise-guarded child as unguarded.
+		delete(env, "CODEX_THREAD_ID")
 		if account.Dir != "" {
 			env["CODEX_HOME"] = account.Dir
 		}
