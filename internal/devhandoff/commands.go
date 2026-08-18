@@ -22,6 +22,8 @@ var Commands = []Command{
 	{Name: "catchup"},
 	{Name: "checkpoint"},
 	{Name: "ci-preflight"},
+	{Name: "codex-hook-census"},
+	{Name: "codex-hook-gate"},
 	{Name: "codex-memory"},
 	{Name: "codex-tool-errors"},
 	{Name: "commit-subject-coverage"},
