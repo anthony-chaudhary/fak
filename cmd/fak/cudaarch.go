@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/cudaarch"
 )
@@ -35,5 +34,3 @@ func runCUDAArch(out, errOut io.Writer, args []string) int {
 	fmt.Fprintln(out, "cuda-arch-matrix: OK (declared SASS set + compute_120 PTX floor; Linux/Windows/Docker/docs agree)")
 	return 0
 }
-
-func cmdCUDAArch(args []string) { os.Exit(runCUDAArch(os.Stdout, os.Stderr, args)) }

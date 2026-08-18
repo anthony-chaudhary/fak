@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"text/tabwriter"
 
@@ -16,7 +15,6 @@ import (
 // cmdCapabilities is the installed product's outcome-first answer to "what can
 // fak do?". Repository-development capabilities remain in fak-dev; this verb
 // consumes only capindex's runtime-safe product catalog.
-func cmdCapabilities(argv []string) { os.Exit(runCapabilities(os.Stdout, os.Stderr, argv)) }
 
 func runCapabilities(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("capabilities", flag.ContinueOnError)

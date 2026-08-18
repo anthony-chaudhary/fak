@@ -207,8 +207,6 @@ func scanStreamView(root string, limit int) (devStreamView, error) {
 	return st, nil
 }
 
-func cmdDevWorkspace(argv []string) { os.Exit(runDevWorkspace(os.Stdout, os.Stderr, argv)) }
-
 func runDevWorkspace(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("dev workspace", flag.ContinueOnError)
 	fs.SetOutput(stderr)

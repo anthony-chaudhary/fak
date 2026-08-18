@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T03:59:30.061387Z",
+  "issue": 7071,
+  "family": "unused command wrappers and churn helper",
+  "paths": [
+    "cmd/fak/capabilities.go",
+    "cmd/fak/cudaarch.go",
+    "cmd/fak/dev_workspace.go",
+    "cmd/fak/dispatch_tick_preflight_churn.go"
+  ],
+  "test": "fak-dev buildcheck",
+  "test_result": "PASS",
+  "before": {
+    "score": -124.5,
+    "grade": "F",
+    "slop_debt": 397,
+    "duplication": 371,
+    "weighted_duplication": 237.5,
+    "dead_code": 20,
+    "vacuous_tests": 6
+  },
+  "after": {
+    "score": -120.1,
+    "grade": "F",
+    "slop_debt": 393,
+    "duplication": 371,
+    "weighted_duplication": 237.5,
+    "dead_code": 16,
+    "vacuous_tests": 6
+  },
+  "verdict": "PASS: dead code and total hard debt strictly decreased; no measured hard KPI increased"
+}

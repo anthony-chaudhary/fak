@@ -115,10 +115,6 @@ func dispatchStallLedgerPath() string {
 // not keep gating), or a disabled threshold (FAK_CHURN_BURST_THRESHOLD=off) each yields the
 // zero-value check -- a no-op fold that leaves the preflight untouched. A box that never
 // runs `fak stallscan --watch` therefore behaves exactly as before this term existed.
-func dispatchPreflightChurn() dispatchtick.ChurnCheck {
-	check, _ := dispatchPreflightChurnState()
-	return check
-}
 
 // dispatchPreflightChurnState is dispatchPreflightChurn plus the ARMING verdict: not just
 // what the churn signal said, but whether this host was measured at all.
