@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T05:06:57.039265Z",
+  "issue": 7057,
+  "family": "parent-directory preparation",
+  "paths": [
+    "internal/parentdir",
+    "cmd/webbench-run/main.go",
+    "internal/loopmgr/loopmgr.go",
+    "internal/loopmgr/registry.go"
+  ],
+  "test": "go test ./internal/parentdir ./internal/loopmgr ./cmd/webbench-run",
+  "test_result": "PASS",
+  "before": {
+    "score": -91.5,
+    "grade": "F",
+    "slop_debt": 366,
+    "duplication": 366,
+    "weighted_duplication": 232.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -91.0,
+    "grade": "F",
+    "slop_debt": 365,
+    "duplication": 365,
+    "weighted_duplication": 231.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

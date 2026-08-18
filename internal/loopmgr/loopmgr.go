@@ -8,9 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/parentdir"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -177,11 +177,8 @@ func Append(path string, ev Event, opts ...Option) (Event, error) {
 		return Event{}, err
 	}
 
-	dir := filepath.Dir(path)
-	if dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return Event{}, fmt.Errorf("create loop ledger dir: %w", err)
-		}
+	if err := parentdir.Ensure(path, 0o755); err != nil {
+		return Event{}, fmt.Errorf("create loop ledger dir: %w", err)
 	}
 
 	// Bound the hot active ledger at its shared write site. RotateIfDue first pays

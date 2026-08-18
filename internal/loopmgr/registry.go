@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/parentdir"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -149,18 +149,15 @@ func SaveRegistry(path string, r Registry) error {
 		return err
 	}
 
-	dir := filepath.Dir(path)
-	if dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("create loop registry dir: %w", err)
-		}
+	if err := parentdir.Ensure(path, 0o755); err != nil {
+		return fmt.Errorf("create loop registry dir: %w", err)
 	}
 
 	b, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal loop registry: %w", err)
 	}
-	tmp, err := os.CreateTemp(dir, ".loop-registry-*.tmp")
+	tmp, err := os.CreateTemp(parentdir.Dir(path), ".loop-registry-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create loop registry temp: %w", err)
 	}

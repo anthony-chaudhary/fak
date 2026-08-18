@@ -11,10 +11,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/parentdir"
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -637,12 +637,8 @@ func truncateResponse(body []byte) string {
 }
 
 func writeResults(summary *RunSummary, path string) error {
-	// Ensure directory exists
-	dir := filepath.Dir(path)
-	if dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("create directory: %w", err)
-		}
+	if err := parentdir.Ensure(path, 0o755); err != nil {
+		return fmt.Errorf("create directory: %w", err)
 	}
 
 	data, err := benchcli.MarshalReport(summary)
