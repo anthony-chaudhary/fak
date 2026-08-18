@@ -20,8 +20,13 @@ func runHarnessResolve(stdout, stderr io.Writer, argv []string) int {
 	osName := fs.String("os", "", "target operating system")
 	arch := fs.String("arch", "", "target architecture")
 	contract := fs.String("contract", "", "target harness contract")
+	outputPath := fs.String("output", "", "write the verified product lock for later inspect/preview/verify-run stages")
+	example := fs.String("example", "", "print a generic valid manifest or selection template")
 	if err := fs.Parse(argv); err != nil {
 		return 2
+	}
+	if *example != "" {
+		return writeHarnessResolveExample(stdout, stderr, *example)
 	}
 	if *manifestPath == "" || *selectionPath == "" || *osName == "" || *arch == "" || *contract == "" {
 		fmt.Fprintln(stderr, "fak harness resolve: --manifest, --selection, --os, --arch, and --contract are required")
@@ -56,11 +61,53 @@ func runHarnessResolve(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak harness resolve: %v\n", err)
 		return 1
 	}
+	if *outputPath != "" {
+		if err := writeDerivedJSON(*outputPath, result.Lock); err != nil {
+			fmt.Fprintf(stderr, "fak harness resolve: output: %v\n", err)
+			return 1
+		}
+	}
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(result); err != nil {
 		fmt.Fprintf(stderr, "fak harness resolve: %v\n", err)
 		return 1
 	}
+	return 0
+}
+
+func writeHarnessResolveExample(stdout, stderr io.Writer, example string) int {
+	var raw string
+	switch example {
+	case "manifest":
+		raw = `{
+  "schema": "fak.harness-product/v1alpha1",
+  "roots": ["example-core"],
+  "components": [{
+    "id": "example-core",
+    "version": "1.0.0",
+    "digest": "sha256:replace-with-component-digest",
+    "source": "operator:replace-with-provenance",
+    "provides": ["runtime"],
+    "compatibility": {"os": ["linux"], "arch": ["amd64"], "contract": "v1"},
+    "adapters": ["native"],
+    "evidence": {"authority": "operator", "source": "replace-with-evidence"}
+  }],
+  "assets": {
+    "schema": "fak.harness-assets/v1alpha1",
+    "layers": [{
+      "id": "base",
+      "scope": "project",
+      "assets": [{"kind": "instruction", "id": "response-style", "operation": "add", "value": "neutral"}]
+    }]
+  }
+}`
+	case "selection":
+		raw = `{"layers":["base"]}`
+	default:
+		fmt.Fprintln(stderr, "fak harness resolve: --example must be manifest or selection")
+		return 2
+	}
+	fmt.Fprintln(stdout, raw)
 	return 0
 }

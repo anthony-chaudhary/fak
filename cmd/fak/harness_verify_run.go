@@ -17,8 +17,16 @@ func runHarnessVerifyRun(stdout, stderr io.Writer, argv []string) int {
 	lockPath := fs.String("lock", "", "verified harness lock promised for the run")
 	observationPath := fs.String("observation", "", "runtime capability and decision observation JSON")
 	jsonView := fs.Bool("json", false, "emit machine-readable verification JSON")
+	observationTemplate := fs.Bool("print-observation-template", false, "print a runtime observation bound to --lock")
 	if err := fs.Parse(argv); err != nil {
 		return 2
+	}
+	if *observationTemplate {
+		if *lockPath == "" {
+			fmt.Fprintln(stderr, "fak harness verify-run: --print-observation-template requires --lock")
+			return 2
+		}
+		return writeHarnessObservationTemplate(stdout, stderr, *lockPath)
 	}
 	if *lockPath == "" || *observationPath == "" {
 		fmt.Fprintln(stderr, "fak harness verify-run: --lock and --observation are required")
@@ -58,6 +66,37 @@ func runHarnessVerifyRun(stdout, stderr io.Writer, argv []string) int {
 	}
 	if report.Verdict == "deviation" {
 		return 3
+	}
+	return 0
+}
+
+func writeHarnessObservationTemplate(stdout, stderr io.Writer, lockPath string) int {
+	lock, err := readHarnessPreviewLock(lockPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak harness verify-run: lock: %v\n", err)
+		return 1
+	}
+	observation := harnessverify.Observation{
+		Schema: harnessverify.ObservationSchema,
+		LockID: lock.ID,
+		RunID:  "replace-with-runtime-run-id",
+	}
+	for _, asset := range lock.Assets {
+		observation.Capabilities = append(observation.Capabilities, harnessverify.Capability{
+			Capability: asset.Kind + ":" + asset.ID,
+			Source:     asset.Source,
+			Value:      asset.Value,
+			Ref:        asset.Ref,
+			Boundary:   asset.Boundary,
+			Grants:     asset.Grants,
+			Denies:     asset.Denies,
+		})
+	}
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(observation); err != nil {
+		fmt.Fprintf(stderr, "fak harness verify-run: %v\n", err)
+		return 1
 	}
 	return 0
 }

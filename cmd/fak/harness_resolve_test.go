@@ -47,3 +47,47 @@ func TestHarnessResolveCLIRefusesCompatibilityBeforeLock(t *testing.T) {
 		t.Fatalf("unexpected lock=%s", out.String())
 	}
 }
+
+func TestHarnessStageTemplatesCompletePublicResolveToVerifyPath(t *testing.T) {
+	var manifestOut, selectionOut, errb bytes.Buffer
+	if code := runHarness(&manifestOut, &errb, []string{"resolve", "--example", "manifest"}); code != 0 {
+		t.Fatalf("manifest example code=%d stderr=%s", code, errb.String())
+	}
+	if code := runHarness(&selectionOut, &errb, []string{"resolve", "--example", "selection"}); code != 0 {
+		t.Fatalf("selection example code=%d stderr=%s", code, errb.String())
+	}
+	if strings.Contains(manifestOut.String(), "search_kb") || strings.Contains(manifestOut.String(), "customer-support") {
+		t.Fatalf("generic template leaked study answer: %s", manifestOut.String())
+	}
+
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "product.json")
+	selection := filepath.Join(dir, "selection.json")
+	lockPath := filepath.Join(dir, "product.lock.json")
+	if err := os.WriteFile(manifest, manifestOut.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(selection, selectionOut.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var resolveOut bytes.Buffer
+	if code := runHarness(&resolveOut, &errb, []string{"resolve", "--manifest", manifest, "--selection", selection, "--os", "linux", "--arch", "amd64", "--contract", "v1", "--output", lockPath}); code != 0 {
+		t.Fatalf("resolve code=%d stdout=%s stderr=%s", code, resolveOut.String(), errb.String())
+	}
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Fatalf("resolved lock: %v", err)
+	}
+
+	var observationOut bytes.Buffer
+	if code := runHarness(&observationOut, &errb, []string{"verify-run", "--lock", lockPath, "--print-observation-template"}); code != 0 {
+		t.Fatalf("observation template code=%d stderr=%s", code, errb.String())
+	}
+	observation := filepath.Join(dir, "observation.json")
+	if err := os.WriteFile(observation, bytes.ReplaceAll(observationOut.Bytes(), []byte("replace-with-runtime-run-id"), []byte("run-template-witness")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var verifyOut bytes.Buffer
+	if code := runHarness(&verifyOut, &errb, []string{"verify-run", "--lock", lockPath, "--observation", observation}); code != 0 || !strings.Contains(verifyOut.String(), "HARNESS VERIFY RUN | VERIFIED") {
+		t.Fatalf("verify code=%d stdout=%s stderr=%s", code, verifyOut.String(), errb.String())
+	}
+}
