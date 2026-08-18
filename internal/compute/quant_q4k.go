@@ -89,8 +89,8 @@ func rawKRowDot(dt Dtype, raw []byte, x []float32, scratch []float32) float32 {
 	return sum
 }
 func dequantQ5K(dst []float32, b []byte) {
-	d := math.Float32frombits(f16bitsToF32(binary.LittleEndian.Uint16(b)))
-	dm := math.Float32frombits(f16bitsToF32(binary.LittleEndian.Uint16(b[2:])))
+	d := math.Float32frombits(kquantbits.F16BitsToF32Bits(binary.LittleEndian.Uint16(b)))
+	dm := math.Float32frombits(kquantbits.F16BitsToF32Bits(binary.LittleEndian.Uint16(b[2:])))
 	sc, qh, ql := b[4:16], b[16:48], b[48:]
 	qi, is := 0, 0
 	u1, u2 := byte(1), byte(2)
@@ -119,7 +119,7 @@ func dequantQ5K(dst []float32, b []byte) {
 }
 func dequantQ6K(dst []float32, b []byte) {
 	ql, qh, sc := b[:128], b[128:192], b[192:208]
-	d := math.Float32frombits(f16bitsToF32(binary.LittleEndian.Uint16(b[208:])))
+	d := math.Float32frombits(kquantbits.F16BitsToF32Bits(binary.LittleEndian.Uint16(b[208:])))
 	qo, ho, so := 0, 0, 0
 	for n := 0; n < 256; n += 128 {
 		for l := 0; l < 32; l++ {
@@ -150,8 +150,8 @@ func i8AsBytes(s []int8) []byte {
 // q4kDequantBlock writes the 256 weights of one 144-byte super-block into dst (len >= 256) — the
 // exact arithmetic of model.q4kDequantSuperBlock.
 func q4kDequantBlock(dst []float32, blk []byte) {
-	d := math.Float32frombits(f16bitsToF32(binary.LittleEndian.Uint16(blk[0:])))
-	dmin := math.Float32frombits(f16bitsToF32(binary.LittleEndian.Uint16(blk[2:])))
+	d := math.Float32frombits(kquantbits.F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[0:])))
+	dmin := math.Float32frombits(kquantbits.F16BitsToF32Bits(binary.LittleEndian.Uint16(blk[2:])))
 	scales := blk[4 : 4+12]
 	q := blk[4+12 : q4kSuperBlock]
 	qi, is := 0, 0
@@ -192,27 +192,4 @@ func q4kRowDot(raw []byte, x []float32, buf []float32) float32 {
 	return acc
 }
 
-// f16bitsToF32 converts an IEEE binary16 bit pattern to the binary32 bit pattern — byte-for-byte
-// model.f16bitsToF32bits / ggufload.f16bitsToF32bits, so the Q4_K f16 scales dequant identically.
-func f16bitsToF32(h uint16) uint32 {
-	sign := uint32(h&0x8000) << 16
-	exp := int((h >> 10) & 0x1f)
-	frac := uint32(h & 0x03ff)
-	switch exp {
-	case 0:
-		if frac == 0 {
-			return sign
-		}
-		exp = -14
-		for frac&0x0400 == 0 {
-			frac <<= 1
-			exp--
-		}
-		frac &= 0x03ff
-		return sign | uint32(exp+127)<<23 | frac<<13
-	case 0x1f:
-		return sign | 0x7f800000 | frac<<13
-	default:
-		return sign | uint32(exp-15+127)<<23 | frac<<13
-	}
-}
+func f16bitsToF32(h uint16) uint32 { return kquantbits.F16BitsToF32Bits(h) }

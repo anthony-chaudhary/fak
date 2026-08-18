@@ -14,28 +14,7 @@ import "github.com/anthony-chaudhary/fak/internal/kquantbits"
 // and the normal range — by re-biasing the exponent and shifting the 10-bit mantissa into
 // the 23-bit f32 field, preserving the sign. The result is the bit pattern, not the float;
 // callers wrap it in math.Float32frombits.
-func F16BitsToF32Bits(h uint16) uint32 {
-	sign := uint32(h&0x8000) << 16
-	exp := int((h >> 10) & 0x1f)
-	frac := uint32(h & 0x03ff)
-	switch exp {
-	case 0:
-		if frac == 0 {
-			return sign
-		}
-		exp = -14
-		for frac&0x0400 == 0 {
-			frac <<= 1
-			exp--
-		}
-		frac &= 0x03ff
-		return sign | uint32(exp+127)<<23 | frac<<13
-	case 0x1f:
-		return sign | 0x7f800000 | frac<<13
-	default:
-		return sign | uint32(exp-15+127)<<23 | frac<<13
-	}
-}
+func F16BitsToF32Bits(h uint16) uint32 { return kquantbits.F16BitsToF32Bits(h) }
 
 // GetScaleMinK4 unpacks the j-th (scale, min) 6-bit pair from the 12-byte scales field of a
 // k-quant super-block. The 8 pairs are packed across 12 bytes: pairs 0..3 take their low 6

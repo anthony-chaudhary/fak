@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T07:23:38.009751Z",
+  "issue": 6959,
+  "family": "binary16-to-binary32 bit conversion",
+  "paths": [
+    "internal/kquantbits/f16.go",
+    "internal/kquantbits/f16_test.go",
+    "internal/compute/quant_q4k.go",
+    "internal/model/quantbits.go"
+  ],
+  "test": "go test ./internal/kquantbits ./internal/model; go test ./internal/compute -run TestQ4K|TestQ5K|TestQ6K|Test.*Quant|TestFP8 -count=1; fak-dev buildcheck --vet --mine internal/kquantbits/f16.go --mine internal/kquantbits/f16_test.go",
+  "test_result": "PASS",
+  "before": {
+    "score": -82.2,
+    "grade": "F",
+    "slop_debt": 348,
+    "duplication": 348,
+    "weighted_duplication": 221.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -81.6,
+    "grade": "F",
+    "slop_debt": 347,
+    "duplication": 347,
+    "weighted_duplication": 220.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}
