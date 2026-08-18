@@ -99,6 +99,7 @@ var tier = map[string]int{
 	"harnesscompose":         1, // typed inert asset overlap semantics before dependency solving and launch (#6904).
 	"harnessderive":          2, // verified base-lock deltas producing launchable resolved locks (#7225).
 	"harnesscontrolstudy":    2, // deterministic paired-preference evidence over typed harness variants (#7224).
+	"workflowoutcomestudy":   1, // deterministic equivalent-arm and blind-grading evidence gate (#7272).
 	"harnessinspect":         2, // product-facing inspection over composed assets and resolved locks (#7213/#7232).
 	"harnessmix":             2, // deterministic multi-lock composition with compatibility and budget admission (#7229/#7251).
 	"harnessoverride":        2, // bounded override proposals over composed assets and resolved locks (#7223/#7232).
