@@ -512,3 +512,7 @@ Additions and pure owner moves preserve query compatibility. Definition, scope, 
 `ValidateMigrations` consumes the typed diff report. A canonical removal or breaking alias move is rejected as `silent identity removal` unless a migration record names the removed term, replacement target, deprecation version, and distinct removal version. Invalid or zero-window records fail separately as `migration record invalid`; an explicit breaking record remains available for deliberate cutovers.
 
 Run `fak disambiguation migration-self-test --json` to witness silent-removal refusal and acceptance of a versioned alias migration with a replacement target. Migration records authorize compatibility changes; they do not mutate either index.
+
+## End-to-end agent lookup demo (#6325)
+
+`go run ./cmd/disambiguationdemo -selfcheck` searches the overloaded canonical term `runtime`, captures the five scoped choices, selects `runtime=gateway-serving`, and prints the canonical contrast. `-json` emits the deterministic `fak-disambiguation-demo/1` receipt. The captured test proves the whole path is local public-index logic: no model, API key, GPU, network, or private data is required.
