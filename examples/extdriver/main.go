@@ -18,6 +18,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/demoassert"
 	"os"
 
 	"github.com/anthony-chaudhary/fak/pkg/abi"
@@ -90,11 +91,8 @@ func init() {
 }
 
 func main() {
-	failed := false
-	fail := func(format string, a ...any) {
-		failed = true
-		fmt.Fprintf(os.Stderr, "FAIL: "+format+"\n", a...)
-	}
+	checks := demoassert.Recorder{Writer: os.Stderr}
+	fail := checks.Fail
 
 	fmt.Println("fak out-of-tree driver — ABI importable via pkg/abi")
 	fmt.Printf("  ABI version: v%d.%d\n", abi.ABIMajor, abi.ABIMinor)
@@ -143,7 +141,7 @@ func main() {
 		fmt.Printf("    Adjudicate(tool=%q) -> Kind=%d (VerdictDefer) — fold identity holds\n", "read_file", v2.Kind)
 	}
 
-	if failed {
+	if checks.Failed {
 		fmt.Fprintln(os.Stderr, "\nextdriver: ROUND-TRIP FAILED")
 		os.Exit(1)
 	}

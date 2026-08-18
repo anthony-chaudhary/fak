@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/demoassert"
 	"os"
 
 	"github.com/anthony-chaudhary/fak/pkg/abi"
@@ -15,11 +16,8 @@ import (
 // the mirror of ../extdriver. It needs no cgo, so it runs on any host (this
 // repo's CI is CGO_ENABLED=0).
 func main() {
-	failed := false
-	fail := func(format string, a ...any) {
-		failed = true
-		fmt.Fprintf(os.Stderr, "FAIL: "+format+"\n", a...)
-	}
+	checks := demoassert.Recorder{Writer: os.Stderr}
+	fail := checks.Fail
 
 	fmt.Println("fak mobile FFI — on-device tool calls routed through the adjudicator floor")
 	fmt.Printf("  ABI version: v%d.%d\n\n", abi.ABIMajor, abi.ABIMinor)
@@ -49,7 +47,7 @@ func main() {
 		fail("transfer_funds should DEFAULT_DENY, got %+v", d)
 	}
 
-	if failed {
+	if checks.Failed {
 		fmt.Fprintln(os.Stderr, "\nmobile-ffi: ROUND-TRIP FAILED")
 		os.Exit(1)
 	}

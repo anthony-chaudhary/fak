@@ -18,6 +18,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/demoassert"
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/a2achan"
@@ -48,11 +49,8 @@ func verdictStr(v abi.Verdict) string {
 func main() {
 	ctx := context.Background()
 	bus := a2achan.NewBus()
-	failed := false
-	fail := func(format string, a ...any) {
-		failed = true
-		fmt.Fprintf(os.Stderr, "FAIL: "+format+"\n", a...)
-	}
+	checks := demoassert.Recorder{Writer: os.Stderr}
+	fail := checks.Fail
 	line := func(label string, v abi.Verdict) { fmt.Printf("    %-46s -> %s\n", label, verdictStr(v)) }
 
 	fmt.Println("fak a2achan — in-kernel agent-to-agent message channel (no key, no model)")
@@ -137,7 +135,7 @@ func main() {
 	st := bus.Stats()
 	fmt.Printf("\n  bus audit: sent=%d received=%d denied=%d held=%d\n", st.Sent, st.Received, st.Denied, st.Held)
 
-	if failed {
+	if checks.Failed {
 		fmt.Fprintln(os.Stderr, "\na2ademo: FAILED")
 		os.Exit(1)
 	}

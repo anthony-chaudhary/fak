@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T05:22:45.595699Z",
+  "issue": 7054,
+  "family": "runnable demo self-check failure recording",
+  "paths": [
+    "internal/demoassert",
+    "cmd/a2ademo/main.go",
+    "examples/extdriver/main.go",
+    "examples/mobile-ffi/main.go"
+  ],
+  "test": "go test ./internal/demoassert ./cmd/a2ademo; go build examples/extdriver/main.go; (examples/mobile-ffi) go test ./...",
+  "test_result": "PASS",
+  "before": {
+    "score": -90.0,
+    "grade": "F",
+    "slop_debt": 363,
+    "duplication": 363,
+    "weighted_duplication": 229.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -89.4,
+    "grade": "F",
+    "slop_debt": 362,
+    "duplication": 362,
+    "weighted_duplication": 228.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}
