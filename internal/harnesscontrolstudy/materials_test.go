@@ -23,6 +23,18 @@ func TestPairedStudyMaterialsAreSelfContainedAndVerified(t *testing.T) {
 	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 	study := filepath.Join(root, "docs", "benchmarks", "harness-control-study")
 
+	readme := mustRead(t, filepath.Join(study, "README.md"))
+	for _, b := range readme {
+		if b < 0x20 && b != '\n' && b != '\r' {
+			t.Fatalf("study README contains control byte 0x%02x", b)
+		}
+	}
+	for _, want := range []string{"while `rows` was still empty", "normalized `task-card.md`"} {
+		if !strings.Contains(string(readme), want) {
+			t.Fatalf("study README missing correction text %q", want)
+		}
+	}
+
 	canonicalTask := mustRead(t, filepath.Join(study, "task-card.md"))
 	if got := sha256Hex(canonicalTask); got != controlTaskDigest {
 		t.Fatalf("task digest = %s, want %s", got, controlTaskDigest)
