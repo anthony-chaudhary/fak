@@ -23,7 +23,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -673,29 +672,6 @@ func deepMergeConfig(base, overlay map[string]any) map[string]any {
 		base[k] = v
 	}
 	return base
-}
-
-// opencodeGuardConfigContent merges the shed-line overlay into an existing
-// OPENCODE_CONFIG_CONTENT document, preserving operator keys. Returns existing
-// unchanged when there is no overlay to apply. Mirrors the compaction half of
-// dispatch_worker.opencode_guard_config_content (the Go launcher points opencode at
-// guard with --base-url, so it does not also rewrite the provider baseURL here).
-func opencodeGuardConfigContent(command []string, existing string) string {
-	overlay := opencodeCompactionOverlay(command)
-	if overlay == nil {
-		return existing
-	}
-	base := map[string]any{}
-	if strings.TrimSpace(existing) != "" {
-		if err := json.Unmarshal([]byte(existing), &base); err != nil {
-			base = map[string]any{}
-		}
-	}
-	out, err := json.Marshal(deepMergeConfig(base, overlay))
-	if err != nil {
-		return existing
-	}
-	return string(out)
 }
 
 func guardWrap(command []string, fakBin, lane, backend, workspace, workerModel string, env map[string]string) []string {

@@ -281,29 +281,6 @@ func readNoteBody(root, ref string) (string, bool) {
 	return string(buf[:n]), true
 }
 
-// applyEdges stamps the 1-hop outbound edges onto each card whose DetailRef
-// names a readable in-repo note — the issue's query mode (a), "expand the top-K
-// along 1-hop edges so neighbours surface with the hit".
-//
-// It runs over the RANKED, POST-LIMIT result rather than the full candidate set
-// (which is what freshness does), because this reads file bodies rather than
-// stat'ing paths: bounding the reads to what is actually returned keeps the hot
-// path proportional to --limit. Identical refs are read once via a small cache.
-//
-// defaultRoot is the checkout to resolve against for cards that carry no Root of
-// their own; a cross-repo card (#3435) resolves against the root it was loaded
-// from, so a merged result never reads the wrong checkout.
-//
-// It only writes the advisory Related field — it never re-orders or drops a card.
-func applyEdges(cards []FeatureCard, defaultRoot string) {
-	cache := map[string][]Edge{}
-	for i := range cards {
-		if edges := edgesForCard(cards[i], defaultRoot, cache); len(edges) > 0 {
-			cards[i].Related = edges
-		}
-	}
-}
-
 // edgesForCard resolves one card's edges against the checkout it was loaded from
 // (its own Root, else defaultRoot), memoising by root+ref so a repeated
 // DetailRef is read once per call. cache may be nil for a one-shot lookup.

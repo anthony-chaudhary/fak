@@ -387,11 +387,6 @@ func (g *Gate) admitPII(ctx context.Context, c *abi.ToolCall, r *abi.Result, bod
 	return g.redactPIIOutExcept(ctx, r, body, exempt)
 }
 
-// redactPIIOut masks the PII span(s) in body IN PLACE and admits the redacted result.
-func (g *Gate) redactPIIOut(ctx context.Context, r *abi.Result, body []byte) abi.Verdict {
-	return g.redactPIIOutExcept(ctx, r, body, nil)
-}
-
 func (g *Gate) redactPIIOutExcept(ctx context.Context, r *abi.Result, body []byte, exempt map[string]bool) abi.Verdict {
 	red, masked := canon.RedactPIIExcept(body, exempt)
 	if masked == 0 {

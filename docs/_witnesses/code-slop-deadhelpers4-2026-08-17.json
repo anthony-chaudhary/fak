@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T03:55:02.341445Z",
+  "issue": 7072,
+  "family": "unused private helper deletion, fourth slice",
+  "paths": [
+    "cmd/dispatchworker/guard.go",
+    "internal/armbench/caveman_factorial.go",
+    "internal/normgate/normgate.go",
+    "internal/selfquery/edges.go"
+  ],
+  "test": "go test ./cmd/dispatchworker ./internal/armbench ./internal/normgate ./internal/selfquery",
+  "test_result": "PASS",
+  "before": {
+    "score": -126.7,
+    "grade": "F",
+    "slop_debt": 399,
+    "duplication": 371,
+    "weighted_duplication": 237.5,
+    "dead_code": 22,
+    "vacuous_tests": 6
+  },
+  "after": {
+    "score": -124.5,
+    "grade": "F",
+    "slop_debt": 397,
+    "duplication": 371,
+    "weighted_duplication": 237.5,
+    "dead_code": 20,
+    "vacuous_tests": 6
+  },
+  "verdict": "PASS: dead code and total hard debt strictly decreased; no measured hard KPI increased"
+}
