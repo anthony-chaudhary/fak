@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/wipattr"
+	"github.com/anthony-chaudhary/fak/internal/wiplifecycle"
 	"github.com/anthony-chaudhary/fak/internal/wipref"
 )
 
@@ -995,13 +996,23 @@ func wipReap(ctx context.Context, repo string, dryRun bool) (wipReapResult, erro
 			res.Reaped = append(res.Reaped, v)
 			continue
 		}
+		receipt, err := wiplifecycle.Begin(repo, "checkpoint-reap", "", time.Now())
+		if err != nil {
+			return wipReapResult{}, fmt.Errorf("begin checkpoint reap receipt for %s: %w", v.Session, err)
+		}
 		deleted, err := wipDeleteRef(ctx, repo, v.Ref, v.Object)
 		if err != nil {
 			return wipReapResult{}, err
 		}
 		if deleted {
+			if _, err := wiplifecycle.Finish(repo, receipt.OperationID, time.Now()); err != nil {
+				return wipReapResult{}, fmt.Errorf("finish checkpoint reap receipt for %s: %w", v.Session, err)
+			}
 			res.Reaped = append(res.Reaped, v)
 		} else {
+			if _, err := wiplifecycle.Finish(repo, receipt.OperationID, time.Now()); err != nil {
+				return wipReapResult{}, fmt.Errorf("finish skipped checkpoint reap receipt for %s: %w", v.Session, err)
+			}
 			res.Kept = append(res.Kept, v) // ref advanced under us: a concurrent checkpoint won
 		}
 	}

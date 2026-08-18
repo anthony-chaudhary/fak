@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/wiplifecycle"
 	"github.com/anthony-chaudhary/fak/internal/wipref"
 )
 
@@ -245,5 +246,45 @@ func TestWipAutoCheckpointDebouncesUnchangedTree(t *testing.T) {
 	second := strings.TrimSpace(string(secondBytes))
 	if second != first {
 		t.Fatalf("unchanged tree minted duplicate ref: %s -> %s", first, second)
+	}
+}
+
+func TestWipReapPersistsHistoryAfterDeletingCheckpointRef(t *testing.T) {
+	ctx := context.Background()
+	dir, file := wipTestRepo(t)
+	if err := os.WriteFile(file, []byte("landed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint, err := wipCheckpoint(ctx, dir, "reaped-history", true, 1_700_000_000)
+	if err != nil || checkpoint.Object == "" {
+		t.Fatalf("checkpoint=%+v err=%v", checkpoint, err)
+	}
+	if _, err := gitWipOut(ctx, dir, nil, "add", "note.txt"); err != nil {
+		t.Fatal(err)
+	}
+	commit, err := wipPlumbBaseCommit(ctx, dir, "land checkpoint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitWipOut(ctx, dir, nil, "update-ref", "HEAD", commit); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := wipReap(ctx, dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Reaped) != 1 {
+		t.Fatalf("reap=%+v", result)
+	}
+	if _, err := gitWipOut(ctx, dir, nil, "show-ref", "--verify", checkpoint.Ref); err == nil {
+		t.Fatalf("checkpoint ref %s still exists", checkpoint.Ref)
+	}
+	receipts, err := wiplifecycle.List(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(receipts) != 1 || receipts[0].Kind != "checkpoint-reap" || receipts[0].FinishedAt == "" {
+		t.Fatalf("post-ref lifecycle history missing: %#v", receipts)
 	}
 }
