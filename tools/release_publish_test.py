@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -68,7 +69,7 @@ class ReleasePublishTest(unittest.TestCase):
         git(root, "init", "-b", "master")
         write(root / "VERSION", "0.1.0\n")
         if note:
-            write(root / "docs" / "releases" / "v0.1.0.md", "# v0.1.0\n\nRelease notes.\n")
+            write(root / "docs" / "releases" / "v0.1.0.md", "# fak v0.1.0: Useful changes\n\nRelease notes.\n\n## Upgrade\n\nNo migration.\n\n## Release facts\n\n- Version: `0.1.0`\n")
             git(root, "add", "VERSION", "docs/releases/v0.1.0.md")
         else:
             git(root, "add", "VERSION")
@@ -151,6 +152,25 @@ class ReleasePublishTest(unittest.TestCase):
         self.assertFalse(result["release_created"])
         self.assertIn("release_create_skipped_existing", result["idempotent_skips"])
         self.assertFalse(any(cmd[:3] == ["gh", "release", "create"] for cmd in calls))
+
+    def test_execute_refuses_machine_oriented_public_notes(self) -> None:
+        rp = load()
+        root = self._repo()
+        context = {
+            "ok": True,
+            "version": "1.2.3",
+            "tag": "v1.2.3",
+            "planned_create": True,
+            "github_release": {"status": "missing"},
+            "checks": {"release_note_at_tag": {"path": "docs/releases/v1.2.3.md"}},
+        }
+        bad = "---\nthemes:\n  - cmd\n---\nAutomatic patch release cut from 3 commit(s).\n(fak cmd)\n"
+        with mock.patch.object(rp, "show_text", return_value=(True, bad)):
+            result = rp.publish_release(root, context, execute=True, runner=lambda _cmd: (0, ""))
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["reason"], "release notes failed public quality gate")
+        self.assertTrue(any("H1" in error for error in result["errors"]))
+        self.assertTrue(any("YAML" in error for error in result["errors"]))
 
     def test_live_cli_dry_run_no_mutation(self) -> None:
         before = subprocess.run(

@@ -20,6 +20,23 @@ SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 Runner = Callable[[list[str]], tuple[int, str]]
 
 
+def public_notes_errors(text: str, version: str) -> list[str]:
+    errors: list[str] = []
+    stripped = text.lstrip()
+    if not stripped.startswith("# ") or stripped.startswith("## "):
+        errors.append("release notes must start with one human-readable H1 title")
+    if text.startswith("---") or re.search(r"^themes:|^highlights:", text, re.MULTILINE):
+        errors.append("machine-oriented YAML front matter is not public release prose")
+    for token in ["# ", "## Upgrade", "## Release facts", f"`{version}`"]:
+        if token not in text:
+            errors.append(f"missing required public-notes element: {token}")
+    if "Automatic " in text and "commit(s)" in text:
+        errors.append("automatic commit-count boilerplate is not a meaningful summary")
+    if re.search(r"\(fak [^)]+\)", text):
+        errors.append("internal commit trailers leaked into public notes")
+    return errors
+
+
 def run(cmd: list[str], *, cwd: Path | None = None, timeout: int = 300) -> tuple[int, str]:
     try:
         proc = subprocess.run(
@@ -193,6 +210,12 @@ def publish_release(root: Path, context: dict, *, execute: bool = False,
     if not note_ok:
         result["ok"] = False
         result.setdefault("errors", []).append(f"missing_release_note_at_tag:{note_rel}")
+        return result
+    note_errors = public_notes_errors(note_text, str(context.get("version") or ""))
+    if note_errors:
+        result["ok"] = False
+        result["reason"] = "release notes failed public quality gate"
+        result.setdefault("errors", []).extend(note_errors)
         return result
 
     runner = runner or (lambda cmd: run(cmd, cwd=root, timeout=300))

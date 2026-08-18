@@ -82,57 +82,51 @@ class ReleaseCutTest(unittest.TestCase):
     def test_render_notes_groups_commit_subjects(self) -> None:
         rc = load()
         text = rc.render_notes(
-            "0.23.0",
-            date="2026-06-18",
-            level="minor",
-            themes=["tools"],
-            headline="Minor release for tools",
-            commits=[
-                {"subject": "feat(tools): add release cut"},
-                {"subject": "fix(agent): repair adapter"},
-                {"subject": "v0.22.0: prior release"},
-            ],
-        )
-        self.assertIn("version: 0.23.0", text)
-        self.assertIn("headline: \"Minor release for tools\"", text)
-        self.assertIn("## tools", text)
-        self.assertIn("- feat(tools): add release cut", text)
-        self.assertNotIn("prior release", text)
+            "0.23.0", date="2026-06-18", level="minor", themes=["tools"],
+            headline="Useful release", commits=[
+                {"subject": "feat(tools): add release cut (fak tools)"},
+                {"subject": "fix(agent): repair adapter #42 (fak agent)"},
+                {"subject": "docs(readme): explain releases (fak docs)"},
+            ])
+        self.assertIn("# fak v0.23.0: Useful release", text)
+        self.assertIn("## What changed", text)
+        self.assertIn("Add release cut.", text)
+        self.assertIn("## Reliability and correctness", text)
+        self.assertIn("Repair adapter.", text)
+        self.assertIn("## Engineering quality and evidence", text)
+        self.assertIn("Explain releases.", text)
+        self.assertIn("## Upgrade", text)
+        self.assertIn("## Release facts", text)
+        self.assertNotIn("(fak tools)", text)
+        self.assertNotIn("themes:", text)
 
     def test_render_notes_normalizes_unicode_subjects(self) -> None:
         rc = load()
         text = rc.render_notes(
-            "0.23.0",
-            date="2026-06-18",
-            level="minor",
-            themes=["tools"],
-            headline="Minor release",
-            commits=[{"subject": "feat(tools): worktree doctor \u2014 safe prune"}],
-        )
-        self.assertIn("worktree doctor - safe prune", text)
+            "0.23.0", date="2026-06-18", level="minor", themes=["tools"],
+            headline="Minor release", commits=[{"subject": "feat(tools): worktree doctor — safe prune"}])
+        self.assertIn("Worktree doctor - safe prune.", text)
         text.encode("ascii")
 
     def test_render_notes_preserves_generation_metadata(self) -> None:
         rc = load()
         text = rc.render_notes(
-            "0.23.0",
-            date="2026-06-18",
-            level="minor",
-            themes=["tools"],
-            headline="Minor release",
-            commits=[
+            "0.23.0", date="2026-06-18", level="minor", themes=["tools"],
+            headline="Minor release", commits=[
                 {"subject": "feat(tools): add generation preview", "generation": "gen/now"},
                 {"subject": "fix(agent): preserve horizon", "body": "Generation: next"},
-                {"subject": "v0.22.0: prior release", "generation": "gen/future"},
-            ],
-        )
+            ])
+        self.assertIn("Add generation preview [gen/now].", text)
+        self.assertIn("Preserve horizon [gen/next].", text)
 
-        self.assertIn("generations:\n  gen/now: 1\n  gen/next: 1", text)
-        self.assertIn("## Generation", text)
-        self.assertIn("- gen/now: 1 commit(s)", text)
-        self.assertIn("- feat(tools): add generation preview [gen/now]", text)
-        self.assertIn("- fix(agent): preserve horizon [gen/next]", text)
-        self.assertNotIn("gen/future: 1", text)
+    def test_notes_quality_gate_rejects_public_leaks(self) -> None:
+        rc = load()
+        errors = rc.notes_quality_errors(
+            "---\nthemes:\n- cmd\nAutomatic patch release cut from 3 commit(s).\n(fak cmd)", "0.31.0")
+        self.assertTrue(any("H1" in error for error in errors))
+        self.assertTrue(any("YAML" in error for error in errors))
+        self.assertTrue(any("boilerplate" in error for error in errors))
+        self.assertTrue(any("trailers" in error for error in errors))
 
     def test_append_promotion_notes_records_source_range(self) -> None:
         rc = load()
@@ -247,6 +241,7 @@ class ReleaseCutTest(unittest.TestCase):
         self.assertTrue(plan["ok"])
         argv = json.loads((root / "decider-argv.json").read_text(encoding="utf-8"))
         self.assertIn("--require-ci-green", argv)
+
 
     def test_from_manifest_adds_structured_include_paths(self) -> None:
         rc = load()

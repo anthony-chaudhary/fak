@@ -191,8 +191,8 @@ def grouped_subjects(commits: list[dict]) -> tuple[dict[str, list[str]], list[st
     return buckets, order
 
 
-def render_notes(version: str, *, date: str, level: str, themes: list[str],
-                 headline: str, commits: list[dict]) -> str:
+def render_notes_legacy(version: str, *, date: str, level: str, themes: list[str],
+                        headline: str, commits: list[dict]) -> str:
     headline = ascii_clean(headline)
     themes = [ascii_clean(t) for t in themes]
     buckets, order = grouped_subjects(commits)
@@ -241,6 +241,71 @@ def render_notes(version: str, *, date: str, level: str, themes: list[str],
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
+
+
+def _clean_public_subject(subject: str) -> str:
+    text = re.sub(r"^@\s+", "", subject.strip())
+    text = re.sub(r"\s+\(fak [^)]+\)\s*$", "", text)
+    text = re.sub(r"\s+#[0-9]+(?=\s*$)", "", text)
+    text = re.sub(r"^[a-z]+(?:\([^)]+\))?!?:\s*", "", text)
+    return ascii_clean(text.strip().rstrip("."))
+
+
+def _public_kind(subject: str) -> str:
+    match = re.match(r"@?\s*([a-z]+)(?:\([^)]+\))?!?:", subject)
+    return match.group(1) if match else "other"
+
+
+def render_notes(version: str, *, date: str, level: str, themes: list[str],
+                 headline: str, commits: list[dict]) -> str:
+    del date, level, themes
+    rows = [(subject_with_generation(commit), _public_kind(str(commit.get("subject", ""))))
+            for commit in commits]
+    sections = [
+        ("What changed", [row for row, kind in rows if kind == "feat"]),
+        ("Reliability and correctness", [row for row, kind in rows if kind == "fix"]),
+        ("Engineering quality and evidence", [row for row, kind in rows if kind not in {"feat", "fix"}]),
+    ]
+    summary = ", ".join(
+        f"{len(items)} {heading.lower()} change{'s' if len(items) != 1 else ''}"
+        for heading, items in sections if items
+    )
+    title = ascii_clean(headline).strip()
+    lines = [f"# fak v{version}: {title}", "",
+             f"This release contains {len(commits)} commits: {summary}. "
+             "The sections below are grouped by operator impact, with the complete source history retained for auditability.", ""]
+    for heading, items in sections:
+        if not items:
+            continue
+        lines.extend([f"## {heading}", ""])
+        for item in items:
+            clean = _clean_public_subject(item)
+            lines.append(f"- {clean[0].upper() + clean[1:] if clean else clean}.")
+        lines.append("")
+    lines.extend([
+        "## Upgrade", "",
+        "No manual migration is required unless a change above says otherwise. Install or update with:", "",
+        "```bash", "go install github.com/anthony-chaudhary/fak/cmd/fak@latest", "```", "",
+        "## Release facts", "", f"- Version: `{version}`", f"- Commit count: {len(commits)}", "",
+    ])
+    return "\n".join(lines)
+
+
+def notes_quality_errors(text: str, version: str) -> list[str]:
+    errors: list[str] = []
+    stripped = text.lstrip()
+    if not stripped.startswith("# ") or stripped.startswith("## "):
+        errors.append("release notes must start with one human-readable H1 title")
+    if text.startswith("---") or re.search(r"^themes:|^highlights:", text, re.MULTILINE):
+        errors.append("machine-oriented YAML front matter is not public release prose")
+    for token in ["# ", "## Upgrade", "## Release facts", f"`{version}`"]:
+        if token not in text:
+            errors.append(f"missing required public-notes element: {token}")
+    if "Automatic " in text and "commit(s)" in text:
+        errors.append("automatic commit-count boilerplate is not a meaningful summary")
+    if re.search(r"\(fak [^)]+\)", text):
+        errors.append("internal commit trailers leaked into public notes")
+    return errors
 
 def append_manifest_notes(notes: str, envelope: dict) -> str:
     producer = envelope.get("producer") or {}
@@ -494,6 +559,9 @@ def build_plan(root: Path, *, version: str | None, level: str | None,
     promotion_witness = promotion_witness_from_env()
     if promotion_witness:
         notes_preview = append_promotion_notes(notes_preview, promotion_witness)
+    quality_errors = notes_quality_errors(notes_preview, target)
+    if quality_errors:
+        return {"ok": False, "reason": "release notes failed public quality gate", "errors": quality_errors}
     paths = dedupe(paths_from_bump_report(bump) + [notes_rel] + include_paths)
     return {
         "ok": True,
