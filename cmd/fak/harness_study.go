@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/harnesscontrolstudy"
 	"github.com/anthony-chaudhary/fak/internal/harnesscreationreceipt"
 	"github.com/anthony-chaudhary/fak/internal/harnesscreationstudy"
 	"github.com/anthony-chaudhary/fak/internal/harnesscrossover"
@@ -23,8 +24,11 @@ func runHarnessStudy(stdout, stderr io.Writer, argv []string) int {
 	if len(argv) > 0 && argv[0] == "creation" {
 		return runHarnessCreationStudy(stdout, stderr, argv[1:])
 	}
+	if len(argv) > 0 && argv[0] == "control" {
+		return runHarnessControlStudy(stdout, stderr, argv[1:])
+	}
 	if len(argv) == 0 || argv[0] != "crossover" {
-		fmt.Fprintln(stderr, "usage: fak harness study <creation|crossover> --input STUDY.json")
+		fmt.Fprintln(stderr, "usage: fak harness study <control|creation|crossover> --input STUDY.json")
 		return 2
 	}
 	fs := flag.NewFlagSet("harness study crossover", flag.ContinueOnError)
@@ -188,4 +192,32 @@ func verifyHarnessStudyReceiptSources(studyPath string, study harnesscreationstu
 		}
 	}
 	return nil
+}
+
+func runHarnessControlStudy(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("harness study control", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	input := fs.String("input", "", "fak-harness-control-study/1 JSON")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if *input == "" || fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "usage: fak harness study control --input STUDY.json")
+		return 2
+	}
+	report, err := harnesscontrolstudy.Evaluate(*input)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak harness study control: %v\n", err)
+		return 1
+	}
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(report); err != nil {
+		fmt.Fprintf(stderr, "fak harness study control: %v\n", err)
+		return 1
+	}
+	if report.Verdict != "measured" {
+		return 3
+	}
+	return 0
 }

@@ -1,0 +1,7 @@
+{
+  "schema": "fak-harness-control-study/1",
+  "study_id": "default-control-vs-scratch-2026-08",
+  "task_digest": "sha256:07d4a6c3e8b98ce0095f4188f1bed076eb4d6c3a046930c555a294bdff93ef09",
+  "min_pairs": 2,
+  "rows": []
+}
