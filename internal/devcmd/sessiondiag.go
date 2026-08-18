@@ -204,6 +204,7 @@ type codexInventorySnapshot struct {
 		Archived      bool   `json:"archived"`
 		AgentNickname string `json:"agent_nickname"`
 		AgentRole     string `json:"agent_role"`
+		CWD           string `json:"cwd"`
 	} `json:"threads"`
 	Turns []struct {
 		ThreadID       string `json:"thread_id"`
@@ -246,8 +247,8 @@ def db(name):
 state=db("state_5.sqlite")
 if state is not None:
     try:
-        for r in state.execute("select id,source,coalesce(thread_source,''),coalesce(created_at_ms,created_at*1000),coalesce(updated_at_ms,updated_at*1000),archived,coalesce(agent_nickname,''),coalesce(agent_role,'') from threads"):
-            out["threads"].append(dict(thread_id=r[0],source=r[1],thread_source=r[2],created_at_ms=r[3] or 0,updated_at_ms=r[4] or 0,archived=bool(r[5]),agent_nickname=r[6],agent_role=r[7]))
+        for r in state.execute("select id,source,coalesce(thread_source,''),coalesce(created_at_ms,created_at*1000),coalesce(updated_at_ms,updated_at*1000),archived,coalesce(agent_nickname,''),coalesce(agent_role,''),coalesce(cwd,'') from threads"):
+            out["threads"].append(dict(thread_id=r[0],source=r[1],thread_source=r[2],created_at_ms=r[3] or 0,updated_at_ms=r[4] or 0,archived=bool(r[5]),agent_nickname=r[6],agent_role=r[7],cwd=r[8]))
         for r in state.execute("select parent_thread_id,child_thread_id,status from thread_spawn_edges"):
             out["spawn_edges"].append(dict(parent_thread_id=r[0],child_thread_id=r[1],status=r[2]))
     except Exception:
@@ -284,6 +285,7 @@ print(json.dumps(out,separators=(",",":")))`
 			Archived:      row.Archived,
 			AgentNickname: row.AgentNickname,
 			AgentRole:     row.AgentRole,
+			CWD:           row.CWD,
 		})
 	}
 	for _, row := range snapshot.Turns {

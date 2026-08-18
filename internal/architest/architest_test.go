@@ -642,6 +642,7 @@ var tier = map[string]int{
 	"demoassert":            1, // stdlib-only self-check failure recorder shared by runnable demos (#7054).
 	"exclusivefile":         1, // stdlib-only O_EXCL PID/time marker creation shared by lock owners (#7051).
 	"wiplifecycle":          2, // lifecycle receipts depend on Git-backed WIP inventory collection (#7250).
+	"sessionrecovery":       2, // selects and witnesses bounded crash recovery without provider-private state (#8013).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

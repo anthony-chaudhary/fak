@@ -37,6 +37,9 @@ type codexResumeBatchResult struct {
 }
 
 func runCodexResume(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == "recover" {
+		return runSessionRecover(stdout, stderr, argv[1:])
+	}
 	fs := flag.NewFlagSet("codex-resume", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	rollout := fs.String("rollout", "", "existing rollout JSONL for one resumed thread (otherwise discovered under CODEX_HOME/sessions)")

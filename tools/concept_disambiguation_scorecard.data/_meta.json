@@ -2799,8 +2799,23 @@
         },
         {
           "category": "incidental",
+          "reason": "Typed receipt field for #7077 lifecycle counts; not a new session runtime concept.",
+          "token": "ambiguous_count"
+        },
+        {
+          "category": "incidental",
           "reason": "Audit issue code, not a new session runtime concept",
           "token": "ambiguous_session_root"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed receipt field listing #7077 lifecycle session IDs; not a new session runtime concept.",
+          "token": "ambiguous_sessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for the terminal Codex rollout archive verb; not a distinct operator concept.",
+          "token": "archiveterminalcodexloop"
         },
         {
           "category": "incidental",
@@ -2839,6 +2854,11 @@
         },
         {
           "category": "incidental",
+          "reason": "Implementation-local symbol for the fak session new launcher; not an operator-facing session concept.",
+          "token": "buildSessionTerminal"
+        },
+        {
+          "category": "incidental",
           "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
           "token": "bumpSessionHandoffBlocks"
         },
@@ -2846,6 +2866,21 @@
           "category": "incidental",
           "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "capability_digest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Data shape for the terminal Codex rollout archive receipt; not a distinct operator concept.",
+          "token": "codexlooparchivemanifest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Test seam for terminal Codex rollout archive timestamps; not a distinct operator concept.",
+          "token": "codexlooparchivenow"
+        },
+        {
+          "category": "incidental",
+          "reason": "Session report collector; not a distinct session-runtime concept.",
+          "token": "collectCodexWorkflowDefaultReport"
         },
         {
           "category": "incidental",
@@ -2889,6 +2924,16 @@
         },
         {
           "category": "incidental",
+          "reason": "Implementation symbol for #1365 durable serve state, not a separate session-runtime concept.",
+          "token": "defaultServeSessionStatePath"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local symbol for the fak session new launcher; not an operator-facing session concept.",
+          "token": "defaultSessionNewDeps"
+        },
+        {
+          "category": "incidental",
           "reason": "File-path identifier in the generated boundary-lint baseline, not a runtime session concept.",
           "token": "dispatchsessionsaudittest"
         },
@@ -2904,8 +2949,18 @@
         },
         {
           "category": "incidental",
+          "reason": "Session constructor adapter for #4835 follower decode, not a distinct session-runtime concept.",
+          "token": "epFollowerSessionFactory"
+        },
+        {
+          "category": "incidental",
           "reason": "local trajectory-report input slice; canonical episode/session concepts remain unchanged",
           "token": "episodes"
+        },
+        {
+          "category": "incidental",
+          "reason": "History query lookup error, not a runtime session lifecycle state",
+          "token": "ErrSessionNotFound"
         },
         {
           "category": "incidental",
@@ -2926,6 +2981,11 @@
           "category": "incidental",
           "reason": "Environment variable carrying the #6547 attachment bearer secret; a wire name, not a separate session concept.",
           "token": "FAK_SESSION_CLIENT_TOKEN"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #1365 durable serve state, not a separate session-runtime concept.",
+          "token": "FAK_SESSION_STATE"
         },
         {
           "category": "incidental",
@@ -2959,6 +3019,11 @@
         },
         {
           "category": "incidental",
+          "reason": "Implementation symbol for the terminal Codex rollout archive verb; not a distinct operator concept.",
+          "token": "findcodexlooparchivemanifest"
+        },
+        {
+          "category": "incidental",
           "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate session-runtime concept.",
           "token": "GatewaySeat"
         },
@@ -2971,6 +3036,11 @@
           "category": "incidental",
           "reason": "grandfathered visual generator filename in the generated Python compatibility inventory",
           "token": "gen_session_effectiveness_svg"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
+          "token": "guardInfoSessionWorkDoneQuery"
         },
         {
           "category": "incidental",
@@ -3079,8 +3149,23 @@
         },
         {
           "category": "incidental",
+          "reason": "Typed receipt field for #7077 lifecycle counts; not a new session runtime concept.",
+          "token": "live_count"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed receipt field listing #7077 lifecycle session IDs; not a new session runtime concept.",
+          "token": "live_sessions"
+        },
+        {
+          "category": "incidental",
           "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
           "token": "loadSchedulerRecords"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol joining #7077 loop evidence to the existing independent session registry; not a new runtime concept.",
+          "token": "loopStateForSession"
         },
         {
           "category": "incidental",
@@ -3109,6 +3194,11 @@
         },
         {
           "category": "incidental",
+          "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
+          "token": "modeled_from_observed_session_mean"
+        },
+        {
+          "category": "incidental",
           "reason": "Fixture evidence counter for existing scheduler slot separation; not a new session runtime concept.",
           "token": "ModelSlotsDuringToolWait"
         },
@@ -3126,6 +3216,11 @@
           "category": "incidental",
           "reason": "Implementation symbol of the positioned microagent session-affinity router; not a separate session-runtime concept.",
           "token": "NewSessionAffinityGateway"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
+          "token": "observed_session"
         },
         {
           "category": "incidental",
@@ -3149,6 +3244,11 @@
         },
         {
           "category": "incidental",
+          "reason": "Implementation helper for validating the terminal Codex rollout archive path; not a distinct operator concept.",
+          "token": "pathwithincodexsessions"
+        },
+        {
+          "category": "incidental",
           "reason": "Mechanical implementation detail of the authenticated cross-device session-discovery contract; not a separately operator-selectable runtime concept.",
           "token": "PublishSessionDiscovery"
         },
@@ -3159,8 +3259,18 @@
         },
         {
           "category": "incidental",
+          "reason": "Implementation-local symbol for the fak session new launcher; not an operator-facing session concept.",
+          "token": "readSessionClipboard"
+        },
+        {
+          "category": "incidental",
           "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
           "token": "readSessionHandoffBlocks"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol joining #7077 loop evidence to the existing independent session registry; not a new runtime concept.",
+          "token": "readSessionRows"
         },
         {
           "category": "incidental",
@@ -3169,8 +3279,23 @@
         },
         {
           "category": "incidental",
+          "reason": "Closed ownership-report reason code, not a session lifecycle state or runtime control",
+          "token": "ReasonSessionLive"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local symbol for the fak session new launcher; not an operator-facing session concept.",
+          "token": "receiptPromptMarker"
+        },
+        {
+          "category": "incidental",
           "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
           "token": "RecordSessionTerminalOutput"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local symbol for the fak session new launcher; not an operator-facing session concept.",
+          "token": "redactSessionNewArgs"
         },
         {
           "category": "incidental",
@@ -3181,6 +3306,11 @@
           "category": "incidental",
           "reason": "Audit count field, not a new session runtime concept",
           "token": "RegisteredObserved"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local symbol for the fak session new launcher; not an operator-facing session concept.",
+          "token": "registerSessionNewDispatch"
         },
         {
           "category": "incidental",
@@ -3199,8 +3329,23 @@
         },
         {
           "category": "incidental",
+          "reason": "Pure session-miner report assembly helper, not a runtime session lifecycle concept",
+          "token": "reportFromSessions"
+        },
+        {
+          "category": "incidental",
           "reason": "Experiment-local scheduler label or report field; not a reusable kernel concept.",
           "token": "repository-read"
+        },
+        {
+          "category": "incidental",
+          "reason": "Public terminology fixture plumbing for the session-source index, not a distinct session runtime mechanism",
+          "token": "requiredForbiddenPair"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #1365 durable serve state, not a separate session-runtime concept.",
+          "token": "resolveServeSessionState"
         },
         {
           "category": "incidental",
@@ -3239,6 +3384,11 @@
         },
         {
           "category": "incidental",
+          "reason": "Public terminology fixture plumbing for the session-source index, not a distinct session runtime mechanism",
+          "token": "runDisambiguationSessionSourceSelfTest"
+        },
+        {
+          "category": "incidental",
           "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
           "token": "runFilterToolScheduler"
         },
@@ -3274,6 +3424,21 @@
         },
         {
           "category": "incidental",
+          "reason": "CLI adapter for reading the sessionmine historical index, not a runtime session lifecycle state",
+          "token": "runSessionHistory"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI adapter for the durable history-index refresh worker, not a runtime session lifecycle state",
+          "token": "runSessionHistoryRefresh"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI adapter for vcache mining, not a session lifecycle concept",
+          "token": "runSessionMine"
+        },
+        {
+          "category": "incidental",
           "reason": "mechanical CLI or receipt implementation detail of the existing session movement contract",
           "token": "runSessionMove"
         },
@@ -3299,6 +3464,21 @@
         },
         {
           "category": "incidental",
+          "reason": "CLI adapter for a separate session launch verb, not a runtime lifecycle state",
+          "token": "runSessionNew"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local symbol for the fak session new launcher; not an operator-facing session concept.",
+          "token": "runSessionNewWith"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI adapter for compact-audit telemetry, not a runtime lifecycle state",
+          "token": "runSessionObserve"
+        },
+        {
+          "category": "incidental",
           "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "runSessionOpen"
         },
@@ -3316,11 +3496,46 @@
           "category": "incidental",
           "reason": "Implementation symbol or wire field admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing concept.",
           "token": "runSessionOpenSelfcheck"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for the terminal Codex rollout archive verb; not a distinct operator concept.",
+          "token": "runsessionscodexlooparchive"
+        },
+        {
+          "category": "incidental",
+          "reason": "Public terminology fixture plumbing for the session-source index, not a distinct session runtime mechanism",
+          "token": "RunSessionSourceSelfTest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Session subcommand implementation; not a distinct session-runtime concept.",
+          "token": "runSessionsWorkflowDefaultReport"
         },
         {
           "category": "incidental",
           "reason": "Implementation symbol carried by the shared Next/guard integration; not a standalone concept.",
           "token": "sanitizeSessionForPath"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #2174 scheduled-task launcher audit, not a separate session-runtime concept.",
+          "token": "schedSessionDesktop"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #2174 scheduled-task launcher audit, not a separate session-runtime concept.",
+          "token": "schedSessionIsolated"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #2174 scheduled-task launcher audit, not a separate session-runtime concept.",
+          "token": "schedSessionIsolation"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #2174 scheduled-task launcher audit, not a separate session-runtime concept.",
+          "token": "schedSessionUnknown"
         },
         {
           "category": "incidental",
@@ -3394,6 +3609,21 @@
         },
         {
           "category": "incidental",
+          "reason": "Implementation symbol for #1365 durable serve state, not a separate session-runtime concept.",
+          "token": "serveSessionStateEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #1365 durable serve state, not a separate session-runtime concept.",
+          "token": "serveSessionStateFile"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation symbol for #1365 durable serve state, not a separate session-runtime concept.",
+          "token": "serveSessionStateOff"
+        },
+        {
+          "category": "incidental",
           "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "SESSION_CLIENT_UNAVAILABLE"
         },
@@ -3406,6 +3636,16 @@
           "category": "incidental",
           "reason": "The JSON/metrics field spelling of the COMPACTION_THRASH session verdict, positioned as x2-context-ctx-reasoncompactionthrash. Same concept in its wire casing, not a session-runtime concept of its own.",
           "token": "session_compaction_thrash"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
+          "token": "session_counters_reset"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
+          "token": "session_counters_reset_during_window"
         },
         {
           "category": "incidental",
@@ -3429,8 +3669,18 @@
         },
         {
           "category": "incidental",
+          "reason": "typed import exclusion reason, not a runtime session concept",
+          "token": "session_or_transcript_residue"
+        },
+        {
+          "category": "incidental",
           "reason": "the stage's wire Name string, mirroring sessionRegistryRecoveryStage; a report label, not a concept",
           "token": "session_registry_recovery"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
+          "token": "session_total"
         },
         {
           "category": "incidental",
@@ -3674,6 +3924,16 @@
         },
         {
           "category": "incidental",
+          "reason": "local importer classifier regex, not a session runtime abstraction",
+          "token": "sessionMemoryPattern"
+        },
+        {
+          "category": "incidental",
+          "reason": "implementation package for privacy-safe offline mining, not a session lifecycle concept",
+          "token": "sessionmine"
+        },
+        {
+          "category": "incidental",
           "reason": "Implementation symbol or disclosure field within the #6548 logical-session epoch movement state machine; not a separate user-facing product concept.",
           "token": "SessionMoveCheckpoint"
         },
@@ -3784,6 +4044,31 @@
         },
         {
           "category": "incidental",
+          "reason": "Implementation-local symbol for the fak session new launcher; not an operator-facing session concept.",
+          "token": "sessionNewDeps"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local symbol for the fak session new launcher; not an operator-facing session concept.",
+          "token": "sessionNewDispatch"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local symbol for the fak session new launcher; not an operator-facing session concept.",
+          "token": "sessionNewPrompt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local symbol for the fak session new launcher; not an operator-facing session concept.",
+          "token": "sessionNewReceipt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local symbol for the fak session new launcher; not an operator-facing session concept.",
+          "token": "sessionNewUsage"
+        },
+        {
+          "category": "incidental",
           "reason": "Protocol implementation symbol or wire constant admitted with the #6547 full-power terminal/browser attachment spine; not a separate user-facing session primitive.",
           "token": "sessionOpenClient"
         },
@@ -3839,6 +4124,31 @@
         },
         {
           "category": "incidental",
+          "reason": "Public terminology fixture plumbing for the session-source index, not a distinct session runtime mechanism",
+          "token": "SessionSourceResolution"
+        },
+        {
+          "category": "incidental",
+          "reason": "Public terminology fixture plumbing for the session-source index, not a distinct session runtime mechanism",
+          "token": "SessionSourceSelfTestReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Public terminology fixture plumbing for the session-source index, not a distinct session runtime mechanism",
+          "token": "SessionSourceSelfTestSchemaVersion"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local path variable for validating the Codex rollout archive boundary; not a distinct session-runtime concept.",
+          "token": "sessionsRoot"
+        },
+        {
+          "category": "incidental",
+          "reason": "distinct session count supporting a trajectory candidate, not a session lifecycle concept",
+          "token": "SessionSupport"
+        },
+        {
+          "category": "incidental",
           "reason": "Implementation symbol or wire constant within the positioned full-session attachment concept; not a separate user-facing session primitive.",
           "token": "SessionTerminalView"
         },
@@ -3886,6 +4196,21 @@
           "category": "incidental",
           "reason": "Experiment-local fixture and report plumbing; not a reusable session-runtime concept.",
           "token": "taskSufficient"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON metric key local to compact-audit coverage, not a runtime lifecycle state",
+          "token": "telemetry_sessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed receipt field for #7077 lifecycle counts; not a new session runtime concept.",
+          "token": "terminal_count"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed receipt field listing #7077 lifecycle session IDs; not a new session runtime concept.",
+          "token": "terminal_sessions"
         },
         {
           "category": "incidental",
@@ -3949,258 +4274,23 @@
         },
         {
           "category": "incidental",
-          "reason": "CLI adapter for vcache mining, not a session lifecycle concept",
-          "token": "runSessionMine"
+          "reason": "CLI implementation symbol for the positioned session recovery capability",
+          "token": "runSessionRecover"
         },
         {
           "category": "incidental",
-          "reason": "implementation package for privacy-safe offline mining, not a session lifecycle concept",
-          "token": "sessionmine"
+          "reason": "CLI adapter symbol for the positioned session recovery capability",
+          "token": "cmdSessionRecover"
         },
         {
           "category": "incidental",
-          "reason": "distinct session count supporting a trajectory candidate, not a session lifecycle concept",
-          "token": "SessionSupport"
+          "reason": "test seam for the positioned session recovery capability",
+          "token": "recoveryInventory"
         },
         {
           "category": "incidental",
-          "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
-          "token": "observed_session"
-        },
-        {
-          "category": "incidental",
-          "reason": "Issue #6839 info work-done implementation or wire label; it projects existing cache, avoided-call, and latency concepts rather than introducing a new subsystem concept.",
-          "token": "modeled_from_observed_session_mean"
-        },
-        {
-          "category": "incidental",
-          "reason": "local importer classifier regex, not a session runtime abstraction",
-          "token": "sessionMemoryPattern"
-        },
-        {
-          "category": "incidental",
-          "reason": "typed import exclusion reason, not a runtime session concept",
-          "token": "session_or_transcript_residue"
-        },
-        {
-          "category": "incidental",
-          "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
-          "token": "guardInfoSessionWorkDoneQuery"
-        },
-        {
-          "category": "incidental",
-          "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
-          "token": "session_total"
-        },
-        {
-          "category": "incidental",
-          "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
-          "token": "session_counters_reset"
-        },
-        {
-          "category": "incidental",
-          "reason": "Issue #6842 query DTO, unavailable reason, reset marker, or projection helper for the existing work-done/session accounting seam; not a new cache, guard, or session subsystem concept.",
-          "token": "session_counters_reset_during_window"
-        },
-        {
-          "category": "incidental",
-          "reason": "Closed ownership-report reason code, not a session lifecycle state or runtime control",
-          "token": "ReasonSessionLive"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation symbol for #1365 durable serve state, not a separate session-runtime concept.",
-          "token": "defaultServeSessionStatePath"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation symbol for #1365 durable serve state, not a separate session-runtime concept.",
-          "token": "FAK_SESSION_STATE"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation symbol for #1365 durable serve state, not a separate session-runtime concept.",
-          "token": "resolveServeSessionState"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation symbol for #1365 durable serve state, not a separate session-runtime concept.",
-          "token": "serveSessionStateEnv"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation symbol for #1365 durable serve state, not a separate session-runtime concept.",
-          "token": "serveSessionStateFile"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation symbol for #1365 durable serve state, not a separate session-runtime concept.",
-          "token": "serveSessionStateOff"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation symbol for #2174 scheduled-task launcher audit, not a separate session-runtime concept.",
-          "token": "schedSessionDesktop"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation symbol for #2174 scheduled-task launcher audit, not a separate session-runtime concept.",
-          "token": "schedSessionIsolated"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation symbol for #2174 scheduled-task launcher audit, not a separate session-runtime concept.",
-          "token": "schedSessionIsolation"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation symbol for #2174 scheduled-task launcher audit, not a separate session-runtime concept.",
-          "token": "schedSessionUnknown"
-        },
-        {
-          "category": "incidental",
-          "reason": "Session constructor adapter for #4835 follower decode, not a distinct session-runtime concept.",
-          "token": "epFollowerSessionFactory"
-        },
-        {
-          "category": "incidental",
-          "reason": "Session subcommand implementation; not a distinct session-runtime concept.",
-          "token": "runSessionsWorkflowDefaultReport"
-        },
-        {
-          "category": "incidental",
-          "reason": "Session report collector; not a distinct session-runtime concept.",
-          "token": "collectCodexWorkflowDefaultReport"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation symbol joining #7077 loop evidence to the existing independent session registry; not a new runtime concept.",
-          "token": "readSessionRows"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation symbol joining #7077 loop evidence to the existing independent session registry; not a new runtime concept.",
-          "token": "loopStateForSession"
-        },
-        {
-          "category": "incidental",
-          "reason": "Typed receipt field for #7077 lifecycle counts; not a new session runtime concept.",
-          "token": "live_count"
-        },
-        {
-          "category": "incidental",
-          "reason": "Typed receipt field for #7077 lifecycle counts; not a new session runtime concept.",
-          "token": "terminal_count"
-        },
-        {
-          "category": "incidental",
-          "reason": "Typed receipt field for #7077 lifecycle counts; not a new session runtime concept.",
-          "token": "ambiguous_count"
-        },
-        {
-          "category": "incidental",
-          "reason": "Typed receipt field listing #7077 lifecycle session IDs; not a new session runtime concept.",
-          "token": "live_sessions"
-        },
-        {
-          "category": "incidental",
-          "reason": "Typed receipt field listing #7077 lifecycle session IDs; not a new session runtime concept.",
-          "token": "terminal_sessions"
-        },
-        {
-          "category": "incidental",
-          "reason": "Typed receipt field listing #7077 lifecycle session IDs; not a new session runtime concept.",
-          "token": "ambiguous_sessions"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation symbol for the terminal Codex rollout archive verb; not a distinct operator concept.",
-          "token": "runsessionscodexlooparchive"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation symbol for the terminal Codex rollout archive verb; not a distinct operator concept.",
-          "token": "archiveterminalcodexloop"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation symbol for the terminal Codex rollout archive verb; not a distinct operator concept.",
-          "token": "findcodexlooparchivemanifest"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation helper for validating the terminal Codex rollout archive path; not a distinct operator concept.",
-          "token": "pathwithincodexsessions"
-        },
-        {
-          "category": "incidental",
-          "reason": "Data shape for the terminal Codex rollout archive receipt; not a distinct operator concept.",
-          "token": "codexlooparchivemanifest"
-        },
-        {
-          "category": "incidental",
-          "reason": "Test seam for terminal Codex rollout archive timestamps; not a distinct operator concept.",
-          "token": "codexlooparchivenow"
-        },
-        {
-          "category": "incidental",
-          "reason": "Local path variable for validating the Codex rollout archive boundary; not a distinct session-runtime concept.",
-          "token": "sessionsRoot"
-        },
-        {
-          "category": "incidental",
-          "reason": "Pure session-miner report assembly helper, not a runtime session lifecycle concept",
-          "token": "reportFromSessions"
-        },
-        {
-          "category": "incidental",
-          "reason": "CLI adapter for reading the sessionmine historical index, not a runtime session lifecycle state",
-          "token": "runSessionHistory"
-        },
-        {
-          "category": "incidental",
-          "reason": "History query lookup error, not a runtime session lifecycle state",
-          "token": "ErrSessionNotFound"
-        },
-        {
-          "category": "incidental",
-          "reason": "JSON metric key local to compact-audit coverage, not a runtime lifecycle state",
-          "token": "telemetry_sessions"
-        },
-        {
-          "category": "incidental",
-          "reason": "CLI adapter for the durable history-index refresh worker, not a runtime session lifecycle state",
-          "token": "runSessionHistoryRefresh"
-        },
-        {
-          "category": "incidental",
-          "reason": "Public terminology fixture plumbing for the session-source index, not a distinct session runtime mechanism",
-          "token": "runDisambiguationSessionSourceSelfTest"
-        },
-        {
-          "category": "incidental",
-          "reason": "Public terminology fixture plumbing for the session-source index, not a distinct session runtime mechanism",
-          "token": "SessionSourceSelfTestSchemaVersion"
-        },
-        {
-          "category": "incidental",
-          "reason": "Public terminology fixture plumbing for the session-source index, not a distinct session runtime mechanism",
-          "token": "SessionSourceResolution"
-        },
-        {
-          "category": "incidental",
-          "reason": "Public terminology fixture plumbing for the session-source index, not a distinct session runtime mechanism",
-          "token": "SessionSourceSelfTestReport"
-        },
-        {
-          "category": "incidental",
-          "reason": "Public terminology fixture plumbing for the session-source index, not a distinct session runtime mechanism",
-          "token": "RunSessionSourceSelfTest"
-        },
-        {
-          "category": "incidental",
-          "reason": "Public terminology fixture plumbing for the session-source index, not a distinct session runtime mechanism",
-          "token": "requiredForbiddenPair"
+          "reason": "Go package name for the positioned session recovery capability",
+          "token": "sessionrecovery"
         }
       ],
       "id": "session-runtime",
@@ -4308,6 +4398,7 @@
         "boolInt",
         "bumpSessionHandoffBlocks",
         "capability_digest",
+        "cmdSessionRecover",
         "codexlooparchivemanifest",
         "codexlooparchivenow",
         "collectCodexWorkflowDefaultReport",
@@ -4374,6 +4465,7 @@
         "pumpStdinToSession",
         "readSessionHandoffBlocks",
         "readSessionRows",
+        "recoveryInventory",
         "refusalSafeSessionID",
         "renderSessionOpen",
         "repairMalformedLooseSessionRef",
@@ -4399,8 +4491,11 @@
         "runSessionMoveCheckpoint",
         "runSessionMoveRestore",
         "runSessionMoveVerify",
+        "runSessionNew",
+        "runSessionObserve",
         "runSessionOpen",
         "runSessionOpenSelfcheck",
+        "runSessionRecover",
         "runSessionsWorkflowDefaultReport",
         "runsessionscodexlooparchive",
         "runtuisessions",
@@ -4449,6 +4544,7 @@
         "sessionMoveState",
         "sessionMoveUsage",
         "sessionNameForBatch",
+        "sessionNewDispatch",
         "sessionOpenClient",
         "sessionOpenRestartResult",
         "sessionOpenRestartWitness",
@@ -4464,6 +4560,7 @@
         "session_total",
         "sessionids",
         "sessionmine",
+        "sessionrecovery",
         "sessionregistry",
         "sessions",
         "sessionsRoot",
@@ -4502,7 +4599,14 @@
         "scheduler"
       ],
       "tokens": [
+        "buildSessionTerminal",
+        "defaultSessionNewDeps",
+        "readSessionClipboard",
+        "receiptPromptMarker",
+        "redactSessionNewArgs",
+        "registerSessionNewDispatch",
         "renderSessionOpen",
+        "runSessionNewWith",
         "runSessionOpen",
         "runSessionOpenSelfcheck",
         "SESSION_CLIENT_UNAVAILABLE",
@@ -4518,6 +4622,10 @@
         "sessionClientRuntime",
         "sessionClientRuntimes",
         "sessionClientSchema",
+        "sessionNewDeps",
+        "sessionNewPrompt",
+        "sessionNewReceipt",
+        "sessionNewUsage",
         "sessionOpenClient"
       ]
     },
@@ -9173,6 +9281,11 @@
           "category": "incidental",
           "reason": "Private formatting helper for the generated contrast index",
           "token": "renderContrastIndex"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pane-local formatter for the agent adaptation posture; not a distinct rendering architecture or public concept.",
+          "token": "renderTUIAdapt"
         }
       ],
       "id": "render-materialize",
@@ -9266,7 +9379,9 @@
         "Rendered",
         "materialize"
       ],
-      "tokens": []
+      "tokens": [
+        "renderTUIAdapt"
+      ]
     },
     {
       "classifications": [
@@ -9689,6 +9804,11 @@
           "category": "incidental",
           "reason": "Metrics field grouping uncovered terminology candidates by coverage reason, not a planning concept.",
           "token": "UncoveredCandidateClasses"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal maturity continuity helper that selects full-portfolio cleanup behavior; it does not introduce a distinct planning concept.",
+          "token": "buildreconciledissueplan"
         }
       ],
       "exclude": [
@@ -9754,6 +9874,7 @@
         "WriteMergePlan",
         "auditDispatchWaveExecutionPlanBounded",
         "buildMainPlan",
+        "buildreconciledissueplan",
         "bytes_per_candidate",
         "candidateFingerprint",
         "candidateID",

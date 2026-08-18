@@ -1,0 +1,81 @@
+package sessionrecovery
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+	"testing"
+	"time"
+)
+
+func candidate(cwd string) Session {
+	return Session{Thread: &Thread{ID: "t1", Source: "interactive_tui", CWD: cwd}, LatestTurn: &Turn{Status: "inProgress", StartedAt: "2026-08-18T01:00:00Z"}}
+}
+func TestSelectPreservesPromptAsOneArg(t *testing.T) {
+	got := Select(InventoryReport{Sessions: []Session{candidate(`C:\work\fak`)}}, Options{Limit: 1, Prompt: "continue the exact task", ReceiptDir: t.TempDir()})
+	want := []string{"codex", "resume", "t1", "continue the exact task"}
+	if len(got) != 1 || !reflect.DeepEqual(got[0].Argv, want) {
+		t.Fatalf("argv=%q want %q", got[0].Argv, want)
+	}
+}
+func TestSelectCWDHandling(t *testing.T) {
+	report := InventoryReport{Sessions: []Session{candidate("")}}
+	got := Select(report, Options{Limit: 1, ReceiptDir: t.TempDir()})
+	if got[0].Status != "refused" || got[0].Reason != "cwd_unknown" {
+		t.Fatalf("got %+v", got[0])
+	}
+	got = Select(report, Options{Limit: 1, CWDOverride: `D:\authoritative`, ReceiptDir: t.TempDir()})
+	if got[0].CWD != `D:\authoritative` || got[0].Status != "candidate" {
+		t.Fatalf("override=%+v", got[0])
+	}
+}
+func TestReceiptIsLedgerFirstAndIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	req := Select(InventoryReport{Sessions: []Session{candidate(dir)}}, Options{Limit: 1, ReceiptDir: dir})[0]
+	wrote, err := WriteReceipt(req, time.Unix(1, 0))
+	if err != nil || !wrote {
+		t.Fatalf("first %v %v", wrote, err)
+	}
+	wrote, err = WriteReceipt(req, time.Unix(2, 0))
+	if err != nil || wrote {
+		t.Fatalf("second %v %v", wrote, err)
+	}
+	var r Receipt
+	b, _ := os.ReadFile(filepath.Clean(req.ReceiptPath))
+	if json.Unmarshal(b, &r) != nil || r.State != "launch_intent" {
+		t.Fatalf("receipt=%s", b)
+	}
+}
+func TestWitnessRequiresProcessGuardAndNewTurn(t *testing.T) {
+	before := InventoryReport{Sessions: []Session{candidate(`C:\x`)}}
+	after := InventoryReport{Sessions: []Session{candidate(`C:\x`)}}
+	after.Sessions[0].ProcessTrees = []ProcessTree{{RootPID: 42}}
+	if got := Witness(before, after, "t1"); got != "launched_unproven" {
+		t.Fatal(got)
+	}
+	after.Sessions[0].GuardReceipt = &GuardReceipt{RecordedAt: "2026-08-18T02:00:00Z"}
+	after.Sessions[0].LatestTurn = &Turn{Status: "inProgress", StartedAt: "2026-08-18T03:00:00Z"}
+	if got := Witness(before, after, "t1"); got != "productive" {
+		t.Fatal(got)
+	}
+}
+
+func TestSelectTwentySessionCohort(t *testing.T) {
+	report := InventoryReport{}
+	for i := 0; i < 25; i++ {
+		row := candidate(`C:\work\fak`)
+		row.Thread.ID = fmt.Sprintf("t%02d", i)
+		report.Sessions = append(report.Sessions, row)
+	}
+	got := Select(report, Options{Limit: 20, ReceiptDir: t.TempDir()})
+	if len(got) != 20 {
+		t.Fatalf("got %d candidates", len(got))
+	}
+	for _, req := range got {
+		if req.Status != "candidate" {
+			t.Fatalf("request=%+v", req)
+		}
+	}
+}

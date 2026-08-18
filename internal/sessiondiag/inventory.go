@@ -69,6 +69,7 @@ type ThreadEvidence struct {
 	Archived      bool
 	AgentNickname string
 	AgentRole     string
+	CWD           string
 }
 
 type TurnEvidence struct {
@@ -165,6 +166,7 @@ type ThreadRecord struct {
 	Archived      bool   `json:"archived,omitempty"`
 	AgentNickname string `json:"agent_nickname,omitempty"`
 	AgentRole     string `json:"agent_role,omitempty"`
+	CWD           string `json:"cwd,omitempty"`
 }
 
 type TurnRecord struct {
@@ -523,6 +525,7 @@ func buildSessionRecord(
 			Archived:      thread.Archived,
 			AgentNickname: safeLabel(thread.AgentNickname),
 			AgentRole:     safeLabel(thread.AgentRole),
+			CWD:           strings.TrimSpace(thread.CWD),
 		}
 	} else {
 		record.Thread = &ThreadRecord{ID: id}
