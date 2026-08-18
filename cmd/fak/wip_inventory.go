@@ -15,6 +15,7 @@ func runWIPInventory(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit schema-versioned JSON")
 	root := fs.String("root", ".", "repository root")
+	maxUntrackedAge := fs.Duration("max-untracked-age", 0, "fail when the oldest untracked source path exceeds this age (0 disables)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -24,6 +25,7 @@ func runWIPInventory(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	rep := wipinventory.Collect(abs, time.Now(), wipinventory.GitRunner{})
+	staleUntracked := *maxUntrackedAge > 0 && rep.Main.Untracked.Known && rep.Main.Untracked.Count > 0 && rep.Main.Untracked.Protection == "unprotected" && rep.Main.Untracked.OldestAgeSeconds >= int64(maxUntrackedAge.Seconds())
 	if *jsonOut {
 		b, err := rep.JSON()
 		if err != nil {
@@ -34,7 +36,11 @@ func runWIPInventory(args []string, stdout, stderr io.Writer) int {
 	} else {
 		fmt.Fprintf(stdout, "WIP INVENTORY — source WIP and generated files are separate populations\n")
 		fmt.Fprintf(stdout, "repo %s @ %s\n", rep.Repository, shortSHA(rep.HEAD))
-		fmt.Fprintf(stdout, "main: tracked=%d untracked=%d\n", rep.Main.Tracked.Count, rep.Main.Untracked.Count)
+		fmt.Fprintf(stdout, "main: tracked=%d untracked=%d", rep.Main.Tracked.Count, rep.Main.Untracked.Count)
+		if rep.Main.Untracked.OldestPath != "" {
+			fmt.Fprintf(stdout, " oldest=%s age=%s", rep.Main.Untracked.OldestPath, (time.Duration(rep.Main.Untracked.OldestAgeSeconds) * time.Second).Round(time.Second))
+		}
+		fmt.Fprintln(stdout)
 		fmt.Fprintf(stdout, "ignored/generated: %d (not source WIP)\n", rep.Ignored.Count)
 		wtTracked, wtUntracked := 0, 0
 		for _, wt := range rep.Worktrees {
@@ -51,6 +57,10 @@ func runWIPInventory(args []string, stdout, stderr io.Writer) int {
 	}
 	if len(rep.Errors) > 0 {
 		return 1
+	}
+	if staleUntracked {
+		fmt.Fprintf(stderr, "STALE_UNTRACKED_SOURCE: %s is %s old (limit %s); protect it now with `fak wip autocheckpoint --reason manual --session <id>` or move the task into `fak worktree worker prepare` isolation.\n", rep.Main.Untracked.OldestPath, time.Duration(rep.Main.Untracked.OldestAgeSeconds)*time.Second, *maxUntrackedAge)
+		return 3
 	}
 	return 0
 }

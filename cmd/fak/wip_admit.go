@@ -33,9 +33,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/wipattr"
+	"github.com/anthony-chaudhary/fak/internal/wipinventory"
 )
 
 // wipAdmitHoldExit is the exit code for a HOLD verdict, matching sweep-guard's hazard
@@ -57,6 +60,7 @@ func runWipAdmit(stdout, stderr io.Writer, argv []string) int {
 	strict := fs.Bool("strict", false, "promote every soft finding (undeclared intent, unlanded self-WIP) to a hard HOLD")
 	ceiling := fs.Int("ceiling", 0, "override how many unlanded paths this session may already hold (default: 3)")
 	asJSON := fs.Bool("json", false, "emit the admission report as JSON")
+	maxUntrackedAge := fs.Duration("max-untracked-age", 0, "refuse stale untracked source work before admitting a new task (0 disables)")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
@@ -67,6 +71,22 @@ func runWipAdmit(stdout, stderr io.Writer, argv []string) int {
 	if self == "" {
 		fmt.Fprintln(stderr, "fak wip admit: --session is required when no session environment is set")
 		return 2
+	}
+	if *maxUntrackedAge > 0 {
+		root, err := filepath.Abs(firstNonEmpty(*repo, "."))
+		if err != nil {
+			fmt.Fprintf(stderr, "fak wip admit: %v\n", err)
+			return 1
+		}
+		inv := wipinventory.Collect(root, time.Now(), wipinventory.GitRunner{})
+		if len(inv.Errors) > 0 {
+			fmt.Fprintf(stderr, "fak wip admit: cannot prove untracked-work age: %s\n", strings.Join(inv.Errors, "; "))
+			return 1
+		}
+		if inv.Main.Untracked.Count > 0 && inv.Main.Untracked.Protection == "unprotected" && inv.Main.Untracked.OldestAgeSeconds >= int64(maxUntrackedAge.Seconds()) {
+			fmt.Fprintf(stderr, "STALE_UNTRACKED_SOURCE: %s is %s old; protect it with `fak wip autocheckpoint --reason manual --session %s` before admitting more work.\n", inv.Main.Untracked.OldestPath, time.Duration(inv.Main.Untracked.OldestAgeSeconds)*time.Second, self)
+			return wipAdmitHoldExit
+		}
 	}
 
 	rep, err := wipAdmit(context.Background(), *repo, self, intends, *strict, *ceiling)
