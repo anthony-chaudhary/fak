@@ -500,3 +500,9 @@ Run `fak disambiguation ownership-source-self-test --json` to resolve a fixture 
 `fak disambiguation metrics --json` derives its report directly from the public index. It groups entries by all four freshness verdicts, source-family probe, and `leaf@lane` owner, and reserves an uncovered-candidate-class breakdown populated from coverage findings. Freshness and owner counts each sum exactly to `total`; no metric is a second index writer.
 
 The JSON schema is `fak-disambiguation-metrics/1`. Empty classes remain explicit where a closed vocabulary is meaningful (including zero freshness verdicts), while source, owner, and uncovered-class rows are sorted by key for deterministic output.
+
+## Typed index change impact (#6323)
+
+`fak disambiguation diff --before OLD.json --after NEW.json --json` compares two generated indexes and emits deterministic change rows. The taxonomy is additive, alias move, semantic change, contrast change, owner move, stale transition, and removal; every row also carries query compatibility impact as `compatible`, `review`, or `breaking`.
+
+Additions and pure owner moves preserve query compatibility. Definition, scope, contrast, and freshness transitions require review. Canonical removals and removed aliases are breaking because an existing exact query can stop resolving. The diff is read-only and accepts the generated-index schema rather than creating another index representation.
