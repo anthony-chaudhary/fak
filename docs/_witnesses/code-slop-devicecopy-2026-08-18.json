@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T07:32:01.125054Z",
+  "issue": 6958,
+  "family": "device-to-host float buffer reads",
+  "paths": [
+    "internal/compute/devicecopy.go",
+    "internal/compute/devicecopy_test.go",
+    "internal/compute/metal.go",
+    "internal/compute/vulkan.go"
+  ],
+  "test": "go test ./internal/compute -run TestReadDeviceFloats|Test.*KV -count=1; fak-dev buildcheck --vet --mine internal/compute/devicecopy.go --mine internal/compute/devicecopy_test.go",
+  "test_result": "PASS",
+  "before": {
+    "score": -81.6,
+    "grade": "F",
+    "slop_debt": 347,
+    "duplication": 347,
+    "weighted_duplication": 220.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -81.1,
+    "grade": "F",
+    "slop_debt": 346,
+    "duplication": 346,
+    "weighted_duplication": 220.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

@@ -1351,11 +1351,9 @@ func (k *vulkanKV) Free() {
 }
 
 func (k *vulkanKV) readVS(d *vslice) []float32 {
-	out := make([]float32, d.len)
-	if d.len > 0 {
+	return readDeviceFloats(d.len, func(out []float32) {
 		C.fvk_d2h(unsafe.Pointer(&out[0]), d.ptr, C.size_t(d.len*4))
-	}
-	return out
+	})
 }
 
 func (k *vulkanKV) writeVS(d *vslice, data []float32, what string) {

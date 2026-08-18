@@ -557,11 +557,9 @@ func (k *metalKV) Free() {
 }
 
 func (k *metalKV) readDS(d *mslice) []float32 {
-	out := make([]float32, d.len)
-	if d.len > 0 {
+	return readDeviceFloats(d.len, func(out []float32) {
 		C.fmetal_d2h(unsafe.Pointer(&out[0]), d.ptr, C.size_t(d.len*4))
-	}
-	return out
+	})
 }
 
 func (k *metalKV) writeDS(d *mslice, data []float32, site string) {
