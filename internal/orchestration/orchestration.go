@@ -155,11 +155,27 @@ func TaskFromText(text string) (TaskSpec, error) {
 		workClass = WorkGrind
 	} else if containsAny(lower, "unattended", "overnight", "all night", "backlog", "drain") {
 		workClass = WorkRigor
-	} else if containsAny(lower, "multi-step", "multistep", "multiple steps", " and then ") || strings.Count(lower, " and ") >= 2 {
+	} else if containsAny(lower, "multi-step", "multistep", "multiple steps", " and then ") || strings.Count(lower, " and ") >= 2 || isSerialActionList(lower) {
 		workClass = WorkGrind
 	}
 	id := taskTextID(text)
 	return TaskSpec{Schema: "fak-orchestration-task/1", ID: id, WorkClass: workClass}, nil
+}
+
+func isSerialActionList(text string) bool {
+	clauses := strings.FieldsFunc(text, func(r rune) bool { return r == ',' || r == ';' })
+	if len(clauses) < 3 {
+		return false
+	}
+	actions := 0
+	for _, clause := range clauses {
+		clause = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(clause), "and "))
+		verb, _, _ := strings.Cut(clause, " ")
+		if containsAny(verb, "add", "audit", "build", "continue", "dogfood", "fix", "implement", "inspect", "measure", "produce", "run", "ship", "summarize", "test", "verify", "write") {
+			actions++
+		}
+	}
+	return actions >= 3
 }
 
 func containsAny(s string, needles ...string) bool {

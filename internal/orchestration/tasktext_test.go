@@ -11,6 +11,8 @@ func TestTaskFromTextClassifiesWorkShape(t *testing.T) {
 		{"tiny", "fix typo", WorkDefault},
 		{"bounded", "implement the feature and verify its behavior", WorkDefault},
 		{"multi-step", "implement the multi-step feature, add observability, dogfood it, and ship it", WorkGrind},
+		{"serial-action-list", "inspect the workflow default, verify its receipt, and summarize the result", WorkGrind},
+		{"comma-prose", "summarize the current behavior, including caveats, for the operator", WorkDefault},
 		{"parallel", "fan out independent checks in parallel", WorkGrind},
 		{"long", "drain the backlog unattended overnight", WorkRigor},
 	}
