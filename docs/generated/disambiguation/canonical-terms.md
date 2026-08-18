@@ -7,10 +7,12 @@
 | [ABI refusal reason](#abi-refusal-reason-vocabulary-abi-reason) | `vocabulary:abi-reason` | A closed trainable ReasonCode explaining why an adjudication refused a call; POLICY_BLOCK means an explicit policy rule denied it. | `fak disambiguation query "ABI refusal reason"` |
 | [DOS decision kind](#dos-decision-kind-vocabulary-dos-decision-kind) | `vocabulary:dos-decision-kind` | A persistent DOS row category identifying arbitration refusal work whose resolution depends on the current lane-lease state. | `fak disambiguation query "DOS decision kind"` |
 | [account seat](#account-seat-dispatch-account-seat) | `dispatch:account-seat` | A provider account-capacity slot with availability, session cap, leased slots, free slots, and bound worker IDs. | `fak disambiguation query "account seat"` |
+| [activation posture](#activation-posture-disambiguation-activation) | `disambiguation:activation` | The normalized behavior state off, shadow, or on; it is always interpreted within the owning domain and does not imply lifecycle authority or maturity. | `fak disambiguation query "activation posture"` |
 | [adjudication verdict](#adjudication-verdict-policy-decision) | `policy:decision` | The typed per-call result emitted by the adjudication fold: allow, deny, transform, quarantine, require-witness, defer, or indeterminate, with a reason and deciding rung. | `fak disambiguation query "adjudication verdict"` |
 | [agent kernel](#agent-kernel-product-fak) | `product:fak` | The fak management boundary that governs model traffic, tool effects, context, and recovery. | `fak disambiguation query "agent kernel"` |
 | [agent session](#agent-session-runtime-internal-session) | `runtime:internal/session` | A durable, addressable agent execution record carrying drive state and pointers without storing the provider transcript. | `fak disambiguation query "agent session"` |
 | [capability floor](#capability-floor-policy-authority) | `policy:authority` | The minimum authority boundary represented by negotiated capability tokens and policy constraints; it limits what may proceed but does not describe the outcome of a particular call. | `fak disambiguation query "capability floor"` |
+| [capability maturity rung](#capability-maturity-rung-capability-maturity) | `capability:maturity` | A capability-readiness level in the ordered proposed, prototyped, tested, dogfooded, default ladder; measurement remains an orthogonal badge rather than another rung. | `fak disambiguation query "capability maturity rung"` |
 | [compute fleet](#compute-fleet-dispatch-fleet) | `dispatch:fleet` | A transport-agnostic roster of uniquely identified controllable machines whose live reports are folded by the public fleet core. | `fak disambiguation query "compute fleet"` |
 | [compute kernel](#compute-kernel-computing-processor) | `computing:processor` | An arithmetic routine executed by a processor. | `fak disambiguation query "compute kernel"` |
 | [context compaction](#context-compaction-runtime-codex-context) | `runtime:codex-context` | A context-window event that replaces prior history so resident input falls while cumulative usage and transcript bytes may continue rising. | `fak disambiguation query "context compaction"` |
@@ -23,6 +25,7 @@
 | [fak measurement arm](#fak-measurement-arm-claims-fak-arm) | `claims:fak-arm` | The fak-enabled treatment measured against a declared alternative; calling it a baseline obscures which arm is the comparator. | `fak disambiguation query "fak measurement arm"` |
 | [fleet supervisor](#fleet-supervisor-dispatch-supervisor) | `dispatch:supervisor` | A decision layer whose input is witnessed liveness, worker verdicts, escalations, and leases; missing witnesses cause escalation rather than inference. | `fak disambiguation query "fleet supervisor"` |
 | [hook gate class](#hook-gate-class-vocabulary-hook-gate-class) | `vocabulary:hook-gate-class` | A hook-runner classification declaring whether a gate mutates the index/worktree, intentionally uses a worktree, or is a tree-twin checker. | `fak disambiguation query "hook gate class"` |
+| [index lifecycle class](#index-lifecycle-class-disambiguation-entry-authority) | `disambiguation:entry-authority` | The authority status of a disambiguation entry: current, versioned, research, or archived; it says what role the source may play, not whether a feature is enabled. | `fak disambiguation query "index lifecycle class"` |
 | [kernel](#kernel-cli-fak) | `cli:fak` | The fak command-line product surface for operating the agent kernel. | `fak disambiguation query --scope-kind cli --scope-value fak "kernel"` |
 | [kernel](#kernel-package-internal-disambiguation) | `package:internal/disambiguation` | The internal/disambiguation Go package that validates and queries public terminology records. | `fak disambiguation query --scope-kind package --scope-value internal/disambiguation "kernel"` |
 | [lane lease](#lane-lease-dispatch-lease) | `dispatch:lease` | A live ownership claim carrying lease ID, lane or tree, holder identity, and read-only posture for collision admission. | `fak disambiguation query "lane lease"` |
@@ -94,6 +97,21 @@ A provider account-capacity slot with availability, session cap, leased slots, f
 - **Do not conflate with:**
   - [dispatch worker](contrast-index.md#dispatch-worker) — A seat supplies bounded account capacity; it is not the worker process consuming one slot.
 
+<a id="activation-posture-disambiguation-activation"></a>
+## activation posture — `disambiguation:activation`
+
+The normalized behavior state off, shadow, or on; it is always interpreted within the owning domain and does not imply lifecycle authority or maturity.
+
+- **Query:** `fak disambiguation query "activation posture"`
+- **Owner:** leaf `disambiguation`, lane `disambiguation`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `rollout posture`
+- **Sources:**
+  - `internal/disambiguation/entry.go` — `go-source` at `lifecycle-source/1`
+- **Do not conflate with:**
+  - [capability maturity rung](contrast-index.md#capability-maturity-rung) — Activation posture is a three-state operating switch; maturity is a domain-specific readiness ladder and may advance independently.
+  - [index lifecycle class](contrast-index.md#index-lifecycle-class) — Activation posture states whether behavior runs; lifecycle class states the authority role of the indexed definition.
+
 <a id="adjudication-verdict-policy-decision"></a>
 ## adjudication verdict — `policy:decision`
 
@@ -152,6 +170,21 @@ The minimum authority boundary represented by negotiated capability tokens and p
 - **Do not conflate with:**
   - [adjudication verdict](contrast-index.md#adjudication-verdict) — A capability is authority advertised or granted ahead of a call; a verdict is the call-specific result after checks run.
   - [policy declaration](contrast-index.md#policy-declaration) — The floor is the effective authority boundary; a declaration is one configured input used to establish it.
+
+<a id="capability-maturity-rung-capability-maturity"></a>
+## capability maturity rung — `capability:maturity`
+
+A capability-readiness level in the ordered proposed, prototyped, tested, dogfooded, default ladder; measurement remains an orthogonal badge rather than another rung.
+
+- **Query:** `fak disambiguation query "capability maturity rung"`
+- **Owner:** leaf `maturity`, lane `maturity`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `maturity rung`
+- **Sources:**
+  - `internal/maturity/maturity.go` — `go-source` at `lifecycle-source/1`
+- **Do not conflate with:**
+  - [activation posture](contrast-index.md#activation-posture) — Maturity is an ordered readiness ladder; activation posture is the independent off, shadow, or on operating state.
+  - [index lifecycle class](contrast-index.md#index-lifecycle-class) — A maturity rung grades operational readiness of a capability; index lifecycle class grades the authority role of terminology evidence.
 
 <a id="compute-fleet-dispatch-fleet"></a>
 ## compute fleet — `dispatch:fleet`
@@ -320,6 +353,21 @@ A hook-runner classification declaring whether a gate mutates the index/worktree
   - [ABI refusal reason](contrast-index.md#abi-refusal-reason) — LANDS_TREE declares hook execution scope; it is not a reason why a model tool call was refused.
   - [DOS decision kind](contrast-index.md#dos-decision-kind) — A hook class is local runner metadata; a DOS decision kind is a persisted arbitration or resolver category.
   - [policy posture verdict](contrast-index.md#policy-posture-verdict) — A hook class schedules and isolates gate execution; it does not grant or deny organization policy authority.
+
+<a id="index-lifecycle-class-disambiguation-entry-authority"></a>
+## index lifecycle class — `disambiguation:entry-authority`
+
+The authority status of a disambiguation entry: current, versioned, research, or archived; it says what role the source may play, not whether a feature is enabled.
+
+- **Query:** `fak disambiguation query "index lifecycle class"`
+- **Owner:** leaf `disambiguation`, lane `disambiguation`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `lifecycle class`
+- **Sources:**
+  - `internal/disambiguation/entry.go` — `go-source` at `lifecycle-source/1`
+- **Do not conflate with:**
+  - [activation posture](contrast-index.md#activation-posture) — Lifecycle class states an entry's authority and historical role; activation posture states whether behavior is off, shadowing, or on.
+  - [capability maturity rung](contrast-index.md#capability-maturity-rung) — Index lifecycle class governs terminology evidence; a capability maturity rung describes how operationally mature a product capability is in its own domain.
 
 <a id="kernel-cli-fak"></a>
 ## kernel — `cli:fak`

@@ -27,6 +27,14 @@
 - **Contrasts:**
   - **dispatch worker:** A seat supplies bounded account capacity; it is not the worker process consuming one slot.
 
+<a id="activation-posture"></a>
+## activation posture
+
+- **Identity:** [activation posture — `disambiguation:activation`](canonical-terms.md#activation-posture-disambiguation-activation); query with `fak disambiguation query "activation posture"`
+- **Contrasts:**
+  - **capability maturity rung:** Activation posture is a three-state operating switch; maturity is a domain-specific readiness ladder and may advance independently.
+  - **index lifecycle class:** Activation posture states whether behavior runs; lifecycle class states the authority role of the indexed definition.
+
 <a id="adjudication-verdict"></a>
 ## adjudication verdict
 
@@ -57,6 +65,14 @@
 - **Contrasts:**
   - **adjudication verdict:** A capability is authority advertised or granted ahead of a call; a verdict is the call-specific result after checks run.
   - **policy declaration:** The floor is the effective authority boundary; a declaration is one configured input used to establish it.
+
+<a id="capability-maturity-rung"></a>
+## capability maturity rung
+
+- **Identity:** [capability maturity rung — `capability:maturity`](canonical-terms.md#capability-maturity-rung-capability-maturity); query with `fak disambiguation query "capability maturity rung"`
+- **Contrasts:**
+  - **activation posture:** Maturity is an ordered readiness ladder; activation posture is the independent off, shadow, or on operating state.
+  - **index lifecycle class:** A maturity rung grades operational readiness of a capability; index lifecycle class grades the authority role of terminology evidence.
 
 <a id="compute-fleet"></a>
 ## compute fleet
@@ -144,6 +160,14 @@
   - **ABI refusal reason:** LANDS_TREE declares hook execution scope; it is not a reason why a model tool call was refused.
   - **DOS decision kind:** A hook class is local runner metadata; a DOS decision kind is a persisted arbitration or resolver category.
   - **policy posture verdict:** A hook class schedules and isolates gate execution; it does not grant or deny organization policy authority.
+
+<a id="index-lifecycle-class"></a>
+## index lifecycle class
+
+- **Identity:** [index lifecycle class — `disambiguation:entry-authority`](canonical-terms.md#index-lifecycle-class-disambiguation-entry-authority); query with `fak disambiguation query "index lifecycle class"`
+- **Contrasts:**
+  - **activation posture:** Lifecycle class states an entry's authority and historical role; activation posture states whether behavior is off, shadowing, or on.
+  - **capability maturity rung:** Index lifecycle class governs terminology evidence; a capability maturity rung describes how operationally mature a product capability is in its own domain.
 
 <a id="kernel"></a>
 ## kernel

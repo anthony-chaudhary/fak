@@ -8159,6 +8159,16 @@
           "category": "incidental",
           "reason": "CLI handler name only; anatomy is structural analysis, not another support-maturity lifecycle concept",
           "token": "runMaturityAnatomy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation enum member selecting the canonical capability maturity rung ladder, not a new maturity concept.",
+          "token": "LadderMaturity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local self-test error variable for rejecting a cross-ladder maturity spelling, not a new maturity concept.",
+          "token": "errMaturity"
         }
       ],
       "id": "support-maturity",
@@ -8191,6 +8201,7 @@
         "KVQUANT_SUPPORTED",
         "KVQUANT_UNKNOWN_SCHEME",
         "KVQUANT_UNSUPPORTED_TRANSITION",
+        "LadderMaturity",
         "MISSING_ACHIEVED_MATURITY",
         "MaturityLabel",
         "MinSupport",
@@ -8280,6 +8291,7 @@
         "defaultscoreparitytol",
         "enumerable_domain_coverage",
         "errInterleaveUnsupported",
+        "errMaturity",
         "errmmapunsupported",
         "errstreamingunsupported",
         "fak_fleet_goal_efficiency_coverage_threshold",

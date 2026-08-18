@@ -1,7 +1,7 @@
 {
   "schema": "fak-disambiguation-index/1",
-  "source_revision": "sha256:8eb9a1994585e0e4d226d376aa0426f4476efedae3eae0da2bf37c6366827c80",
-  "entry_count": 43,
+  "source_revision": "sha256:d910475a4f09e2cd65917a68bc0e6e8d32227bc691c1f08b9e391794e3948043",
+  "entry_count": 46,
   "entries": [
     {
       "schema": "fak-disambiguation-entry/1",
@@ -169,6 +169,61 @@
         "reason_code": "SOURCE_CURRENT",
         "checked_at": "2026-08-17T00:00:00Z",
         "probe": "fleet-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "activation posture",
+        "aliases": [
+          "rollout posture"
+        ]
+      },
+      "definition": "The normalized behavior state off, shadow, or on; it is always interpreted within the owning domain and does not imply lifecycle authority or maturity.",
+      "contrasts": [
+        {
+          "canonical_term": "capability maturity rung",
+          "explanation": "Activation posture is a three-state operating switch; maturity is a domain-specific readiness ladder and may advance independently.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "index lifecycle class",
+          "explanation": "Activation posture states whether behavior runs; lifecycle class states the authority role of the indexed definition.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "disambiguation",
+        "value": "activation"
+      },
+      "owner": {
+        "leaf": "disambiguation",
+        "lane": "disambiguation"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/disambiguation/entry.go",
+          "revision": "lifecycle-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-lifecycle-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "ActivationMode"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "lifecycle-source/1"
       },
       "lifecycle": {
         "class": "current",
@@ -379,6 +434,61 @@
         "reason_code": "SOURCE_CURRENT",
         "checked_at": "2026-08-17T00:00:00Z",
         "probe": "policy-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "capability maturity rung",
+        "aliases": [
+          "maturity rung"
+        ]
+      },
+      "definition": "A capability-readiness level in the ordered proposed, prototyped, tested, dogfooded, default ladder; measurement remains an orthogonal badge rather than another rung.",
+      "contrasts": [
+        {
+          "canonical_term": "activation posture",
+          "explanation": "Maturity is an ordered readiness ladder; activation posture is the independent off, shadow, or on operating state.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "index lifecycle class",
+          "explanation": "A maturity rung grades operational readiness of a capability; index lifecycle class grades the authority role of terminology evidence.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "capability",
+        "value": "maturity"
+      },
+      "owner": {
+        "leaf": "maturity",
+        "lane": "maturity"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/maturity/maturity.go",
+          "revision": "lifecycle-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-lifecycle-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "Rung"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "lifecycle-source/1"
       },
       "lifecycle": {
         "class": "current",
@@ -975,6 +1085,61 @@
         "reason_code": "SOURCE_CURRENT",
         "checked_at": "2026-08-17T00:00:00Z",
         "probe": "reason-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "index lifecycle class",
+        "aliases": [
+          "lifecycle class"
+        ]
+      },
+      "definition": "The authority status of a disambiguation entry: current, versioned, research, or archived; it says what role the source may play, not whether a feature is enabled.",
+      "contrasts": [
+        {
+          "canonical_term": "activation posture",
+          "explanation": "Lifecycle class states an entry's authority and historical role; activation posture states whether behavior is off, shadowing, or on.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "capability maturity rung",
+          "explanation": "Index lifecycle class governs terminology evidence; a capability maturity rung describes how operationally mature a product capability is in its own domain.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "disambiguation",
+        "value": "entry-authority"
+      },
+      "owner": {
+        "leaf": "disambiguation",
+        "lane": "disambiguation"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/disambiguation/entry.go",
+          "revision": "lifecycle-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-lifecycle-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "LifecycleClass"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "lifecycle-source/1"
       },
       "lifecycle": {
         "class": "current",

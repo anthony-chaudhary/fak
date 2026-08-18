@@ -596,6 +596,42 @@ var publicEntries = []Entry{
 		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/claimcheck/claimcheck.go", Revision: "claims-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-claims-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "Claim"}}},
 		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "claims-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
 	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "capability maturity rung", Aliases: []string{"maturity rung"}},
+		Definition: "A capability-readiness level in the ordered proposed, prototyped, tested, dogfooded, default ladder; measurement remains an orthogonal badge rather than another rung.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "index lifecycle class", Explanation: "A maturity rung grades operational readiness of a capability; index lifecycle class grades the authority role of terminology evidence.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "activation posture", Explanation: "Maturity is an ordered readiness ladder; activation posture is the independent off, shadow, or on operating state.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "capability", Value: "maturity"}, Owner: Owner{Leaf: "maturity", Lane: "maturity"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/maturity/maturity.go", Revision: "lifecycle-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-lifecycle-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "Rung"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "lifecycle-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "index lifecycle class", Aliases: []string{"lifecycle class"}},
+		Definition: "The authority status of a disambiguation entry: current, versioned, research, or archived; it says what role the source may play, not whether a feature is enabled.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "activation posture", Explanation: "Lifecycle class states an entry's authority and historical role; activation posture states whether behavior is off, shadowing, or on.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "capability maturity rung", Explanation: "Index lifecycle class governs terminology evidence; a capability maturity rung describes how operationally mature a product capability is in its own domain.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "disambiguation", Value: "entry-authority"}, Owner: Owner{Leaf: "disambiguation", Lane: "disambiguation"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/disambiguation/entry.go", Revision: "lifecycle-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-lifecycle-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "LifecycleClass"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "lifecycle-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "activation posture", Aliases: []string{"rollout posture"}},
+		Definition: "The normalized behavior state off, shadow, or on; it is always interpreted within the owning domain and does not imply lifecycle authority or maturity.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "index lifecycle class", Explanation: "Activation posture states whether behavior runs; lifecycle class states the authority role of the indexed definition.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "capability maturity rung", Explanation: "Activation posture is a three-state operating switch; maturity is a domain-specific readiness ladder and may advance independently.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "disambiguation", Value: "activation"}, Owner: Owner{Leaf: "disambiguation", Lane: "disambiguation"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/disambiguation/entry.go", Revision: "lifecycle-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-lifecycle-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "ActivationMode"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "lifecycle-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
 }
 
 var publicIndex = mustNewIndex(publicEntries)

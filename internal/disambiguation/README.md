@@ -464,3 +464,13 @@ Run `fak disambiguation policy-source-self-test --json` to resolve each term to 
 The index distinguishes the **naive baseline** (untuned floor), **tuned baseline** (credible next-best alternative), and **fak measurement arm** (the treatment, not another baseline). It separately names **witness provenance** as the closed `WITNESSED` / `OBSERVED` / `MODELED` / `SIMULATED` classification, **simulated evidence** as one honestly labeled provenance class, and a **net-true claim** as the full six-question value statement.
 
 Run `fak disambiguation claims-source-self-test --json` to resolve the six terms and prove a claim fixture without baseline, provenance, or scope is rejected. The source is the public `internal/claimcheck` contract; benchmark numbers remain owned by the benchmark authority rather than copied into this index.
+
+## Lifecycle and rollout terminology (#6312)
+
+Three ladders remain domain-scoped rather than sharing overloaded spellings:
+
+- **index lifecycle class** is the terminology authority ladder: `current`, `versioned`, `research`, or `archived`;
+- **activation posture** is the behavior switch: `off`, `shadow`, or `on`; and
+- **capability maturity rung** is the readiness ladder: `proposed`, `prototyped`, `tested`, `dogfooded`, or `default`. `benchmarked` remains an orthogonal badge.
+
+Run `fak disambiguation lifecycle-source-self-test --json` to link every accepted spelling to one canonical public definition and prove cross-ladder spellings such as lifecycle `shadow`, activation `archived`, and maturity `benchmarked` are rejected. The fixture reads the existing disambiguation and maturity source contracts; it introduces no second lifecycle writer.
