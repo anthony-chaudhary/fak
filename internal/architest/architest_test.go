@@ -629,6 +629,7 @@ var tier = map[string]int{
 	"refid":                 1, // stdlib-only Git-ref segment validation shared by ref-backed operational leaves (#7130).
 	"generation":            1, // stdlib-only project horizon vocabulary shared by planning and handoff leaves (#7129).
 	"markerblock":           1, // stdlib-only generated-document marker extraction and replacement shared by report leaves (#7115).
+	"strictjson":            1, // stdlib-only strict single-document JSON decoder shared by contract leaves (#7064).
 	"wiplifecycle":          2, // lifecycle receipts depend on Git-backed WIP inventory collection (#7250).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.

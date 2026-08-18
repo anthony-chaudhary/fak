@@ -5,10 +5,8 @@
 package quantpolicy
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
+	"github.com/anthony-chaudhary/fak/internal/strictjson"
 	"math"
 	"strings"
 )
@@ -332,18 +330,7 @@ func validateContract(policy Policy) string {
 }
 
 func decodeStrict(raw []byte, dst any) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(dst); err != nil {
-		return err
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		if err == nil {
-			return fmt.Errorf("multiple JSON values")
-		}
-		return err
-	}
-	return nil
+	return strictjson.Decode(raw, dst, "multiple JSON values")
 }
 
 func decision(outcome Outcome, reason ReasonCode, predicate PredicateID, detail, action string, claims ClaimEnvelope) Result {

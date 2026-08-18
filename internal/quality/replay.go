@@ -1,10 +1,9 @@
 package quality
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
+	"github.com/anthony-chaudhary/fak/internal/strictjson"
 	"strings"
 )
 
@@ -235,18 +234,7 @@ func LoadBundle(data []byte) (FailureBundle, error) {
 }
 
 func strictDecodeJSON(data []byte, into any) error {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(into); err != nil {
-		return err
-	}
-	if err := dec.Decode(&struct{}{}); err != io.EOF {
-		if err == nil {
-			return fmt.Errorf("trailing document")
-		}
-		return err
-	}
-	return nil
+	return strictjson.Decode(data, into, "trailing document")
 }
 
 // ExplainReplay renders a replay verdict as the human half of the replay verb:

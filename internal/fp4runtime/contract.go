@@ -1,11 +1,9 @@
 package fp4runtime
 
 import (
-	"bytes"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io"
+	"github.com/anthony-chaudhary/fak/internal/strictjson"
 	"strings"
 )
 
@@ -368,18 +366,7 @@ func parseFailure(err error) Result {
 }
 
 func decodeStrict(raw []byte, destination any) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(destination); err != nil {
-		return err
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		if err == nil {
-			return fmt.Errorf("multiple JSON values")
-		}
-		return err
-	}
-	return nil
+	return strictjson.Decode(raw, destination, "multiple JSON values")
 }
 
 func validateRequest(request Request) error {
