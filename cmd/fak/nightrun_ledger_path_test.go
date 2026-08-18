@@ -47,6 +47,7 @@ func TestNightrunLedgerPathInsideWorktreeUsesPrimaryCheckout(t *testing.T) {
 }
 
 func TestNightrunLedgerPathHelper(t *testing.T) {
+	t.Helper()
 	rel := os.Getenv(ledgerPathHelperEnv)
 	if rel == "" {
 		return

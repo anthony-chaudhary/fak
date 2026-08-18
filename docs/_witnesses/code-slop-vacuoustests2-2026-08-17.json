@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T04:33:27.435152Z",
+  "issue": 7065,
+  "family": "subprocess fixture helper declarations",
+  "paths": [
+    "cmd/fak/garden_tick_test.go",
+    "cmd/fak/nightrun_ledger_path_test.go",
+    "cmd/fak/prepush_build_test.go",
+    "internal/toolcatalog/command_test.go"
+  ],
+  "test": "go test ./cmd/fak -run 'Test(NightrunLedgerPathHelper|PrepushClaimHelper|GardenWatchdogHangingChildHelper)$' -count=1; go test ./internal/toolcatalog -run TestCommandAdapterHelperProcess -count=1",
+  "test_result": "PASS",
+  "before": {
+    "score": -99.7,
+    "grade": "F",
+    "slop_debt": 375,
+    "duplication": 371,
+    "weighted_duplication": 237.5,
+    "dead_code": 0,
+    "vacuous_tests": 4
+  },
+  "after": {
+    "score": -94.1,
+    "grade": "F",
+    "slop_debt": 371,
+    "duplication": 371,
+    "weighted_duplication": 237.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: vacuous-test false positives and total hard debt strictly decreased; no measured hard KPI increased"
+}

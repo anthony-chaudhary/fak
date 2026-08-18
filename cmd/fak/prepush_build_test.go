@@ -714,6 +714,7 @@ func TestClaimPrepushTipCoalescesOnIndependentSuccess(t *testing.T) {
 }
 
 func TestPrepushClaimHelper(t *testing.T) {
+	t.Helper()
 	mode := os.Getenv("GO_PREPUSH_CLAIM_HELPER")
 	if mode == "" {
 		return

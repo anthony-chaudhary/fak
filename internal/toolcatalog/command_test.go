@@ -89,6 +89,7 @@ func TestRunCommandRefusesUndeclaredAdapterAndBadResultShape(t *testing.T) {
 }
 
 func TestCommandAdapterHelperProcess(t *testing.T) {
+	t.Helper()
 	if runtime.GOOS == "windows" && !strings.Contains(strings.Join(os.Args, " "), "TestCommandAdapterHelperProcess") {
 		return
 	}

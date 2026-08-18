@@ -350,6 +350,7 @@ const (
 // hanging child/grandchild process tree used by the regression below. It is a
 // normal no-op test in the parent process; the re-exec selects only this test.
 func TestGardenWatchdogHangingChildHelper(t *testing.T) {
+	t.Helper()
 	switch os.Getenv(gardenWatchdogHelperEnv) {
 	case gardenWatchdogGrandchildMode:
 		path := os.Getenv(gardenWatchdogHeartbeatEnv)
