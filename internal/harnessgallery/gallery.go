@@ -148,12 +148,17 @@ func systemPrompt(b Blueprint) string {
 func renderREADME(b Blueprint) string {
 	return fmt.Sprintf(`# %s
 
+This pack is a decision scaffold: it records the outcome, capability boundary, public
+extension seam, and proof you should build toward. It is not a finished runnable harness.
+
+## Why this pack exists
+
 - **For:** %s
 - **Problem:** %s
 - **Today:** %s
 - **Better because:** %s
-- **Public seam:** %s
-- **Witness:** %s
+- **Build from:** %s
+- **Proof to capture:** %s
 
 ## Required capabilities
 
@@ -171,8 +176,17 @@ func renderREADME(b Blueprint) string {
 
 %s
 
-Owned starter files are user-controlled. Regeneration preserves existing files.
-`, b.Name, b.For, b.Problem, b.Today, b.BetterBecause, b.Seam, b.Witness, bullets(b.RequiredCapabilities), bullets(b.ExcludedCapabilities), numbered(b.TenMinuteSpine), numbered(b.WeekendExtension))
+## What to do next
+
+1. Read `+"`harness.pack.json`"+` and replace the sample task and system prompt with your real job.
+2. Map each required capability to a concrete adapter; do not add an excluded capability by accident.
+3. Build the ten-minute spine through **%s** before starting the weekend extensions.
+4. Capture this proof: **%s**
+5. Run `+"`fak harness gallery selfcheck`"+` to validate the built-in catalog.
+
+Owned starter files are user-controlled. Running `+"`fak harness gallery init --id %s --dir .`"+`
+again preserves both this README and the manifest.
+`, b.Name, b.For, b.Problem, b.Today, b.BetterBecause, b.Seam, b.Witness, bullets(b.RequiredCapabilities), bullets(b.ExcludedCapabilities), numbered(b.TenMinuteSpine), numbered(b.WeekendExtension), b.Seam, b.Witness, b.ID)
 }
 func bullets(xs []string) string {
 	if len(xs) == 0 {

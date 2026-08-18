@@ -59,6 +59,15 @@ func TestInitEveryPackIsIdempotentAndPreservesUserFiles(t *testing.T) {
 				t.Fatalf("first=%+v", first)
 			}
 			path := filepath.Join(dir, "README.md")
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{"decision scaffold", "## What to do next", "fak harness gallery selfcheck", b.Witness} {
+				if !strings.Contains(string(body), want) {
+					t.Fatalf("README missing %q:\n%s", want, body)
+				}
+			}
 			custom := []byte("custom user instructions\n")
 			if err := os.WriteFile(path, custom, 0o644); err != nil {
 				t.Fatal(err)
@@ -70,7 +79,7 @@ func TestInitEveryPackIsIdempotentAndPreservesUserFiles(t *testing.T) {
 			if len(second.Created) != 0 || len(second.Preserved) != 2 {
 				t.Fatalf("second=%+v", second)
 			}
-			body, err := os.ReadFile(path)
+			body, err = os.ReadFile(path)
 			if err != nil || string(body) != string(custom) {
 				t.Fatalf("body=%q err=%v", body, err)
 			}
