@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T09:08:38.305672Z",
+  "issue": 7290,
+  "family": "common segment-slice prefix length",
+  "paths": [
+    "internal/strmatch/sequence.go",
+    "internal/strmatch/sequence_test.go",
+    "internal/gateway/residency_router.go",
+    "internal/modelengine/native_pd.go"
+  ],
+  "test": "go test ./internal/strmatch ./internal/gateway ./internal/modelengine; fak-dev buildcheck --mine internal/strmatch/sequence.go --vet",
+  "test_result": "PASS",
+  "before": {
+    "score": -74.4,
+    "grade": "F",
+    "slop_debt": 333,
+    "duplication": 333,
+    "weighted_duplication": 213.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -73.8,
+    "grade": "F",
+    "slop_debt": 332,
+    "duplication": 332,
+    "weighted_duplication": 213.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

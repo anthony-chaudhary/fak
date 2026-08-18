@@ -17,6 +17,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model"
 
 	"github.com/anthony-chaudhary/fak/internal/refutil"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 const nativePDDefaultBlockTokens = 16
@@ -519,7 +521,7 @@ func (r *nativePDLocalResidency) Overlap(worker string, prefix []string) int {
 	defer r.mu.Unlock()
 	best := 0
 	for _, held := range r.held[worker] {
-		if n := nativePDSegmentPrefixLen(held, prefix); n > best {
+		if n := strmatch.CommonSlicePrefixLen(held, prefix); n > best {
 			best = n
 		}
 	}
@@ -534,18 +536,6 @@ func (r *nativePDLocalResidency) Observe(worker string, prefix []string) {
 	r.mu.Lock()
 	r.held[worker] = append(r.held[worker], cp)
 	r.mu.Unlock()
-}
-
-func nativePDSegmentPrefixLen(a, b []string) int {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	i := 0
-	for i < n && a[i] == b[i] {
-		i++
-	}
-	return i
 }
 
 func (c *NativePDCluster) coldDecodePlacementLocked() int {

@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/mathx"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // Cache-aware fleet routing POLICY — the per-worker prefix-residency index + the
@@ -209,24 +211,11 @@ func (w *workerResidency) clear() int {
 func (w *workerResidency) overlap(prefix []string) int {
 	best := 0
 	for _, seg := range w.held {
-		if l := segmentPrefixLen(seg, prefix); l > best {
+		if l := strmatch.CommonSlicePrefixLen(seg, prefix); l > best {
 			best = l
 		}
 	}
 	return best
-}
-
-// segmentPrefixLen is the length of the shared leading run of two segment sequences.
-func segmentPrefixLen(a, b []string) int {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	i := 0
-	for i < n && a[i] == b[i] {
-		i++
-	}
-	return i
 }
 
 func prefixContainsAny(prefix []string, segments map[string]struct{}) bool {
