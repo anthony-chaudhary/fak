@@ -87,3 +87,69 @@ func TestInspectOrchestrationRunDoesNotHideANewerActiveTurn(t *testing.T) {
 		t.Fatalf("newer active turn hidden by older completion: %+v", got)
 	}
 }
+
+func TestOrchestrationStatusRejectsConflictingSelection(t *testing.T) {
+	var out, stderr bytes.Buffer
+	code := runOrchestrationStatus(&out, &stderr, []string{"--session", "x", "unexpected"})
+	if code != 2 || !strings.Contains(stderr.String(), "usage: fak orchestration status") {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+}
+
+func TestOrchestrationStatusSkipsInvalidNewestReceipt(t *testing.T) {
+	home := t.TempDir()
+	valid := codexOrchestrationLaunchReceipt{Schema: codexOrchestrationLaunchSchema, SessionID: "valid", RunID: "orch-valid", LaunchedAt: time.Now()}
+	if err := persistCodexOrchestrationLaunchReceipt(home, valid); err != nil {
+		t.Fatal(err)
+	}
+	invalidPath := filepath.Join(home, "fak-orchestration-launches", "newest-invalid.json")
+	if err := os.WriteFile(invalidPath, []byte("not-json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(invalidPath, future, future); err != nil {
+		t.Fatal(err)
+	}
+	got, err := newestOrchestrationReceipt(home, "")
+	if err != nil || got.SessionID != "valid" {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+}
+
+func TestOrchestrationStatusClassifiesMissingLogByProcessLiveness(t *testing.T) {
+	home := t.TempDir()
+	receipt := codexOrchestrationLaunchReceipt{Schema: codexOrchestrationLaunchSchema, SessionID: "missing-log", RunID: "orch-missing", Workers: []codexOrchestrationWorkerLaunch{
+		{RoleID: "live", PID: os.Getpid(), LogPath: "missing-live.jsonl"},
+		{RoleID: "dead", PID: 99999999, LogPath: "missing-dead.jsonl"},
+	}}
+	got := inspectOrchestrationRun(home, receipt)
+	if got.State != "running" || got.Running != 1 || got.Exited != 1 {
+		t.Fatalf("unexpected aggregate: %+v", got)
+	}
+	if got.Workers[0].State != "running" || got.Workers[1].State != "exited" {
+		t.Fatalf("unexpected workers: %+v", got.Workers)
+	}
+}
+
+func TestOrchestrationStatusUsesExplicitSessionOverNewerReceipt(t *testing.T) {
+	home := t.TempDir()
+	older := codexOrchestrationLaunchReceipt{Schema: codexOrchestrationLaunchSchema, SessionID: "chosen", RunID: "orch-chosen", LaunchedAt: time.Now().Add(-time.Hour)}
+	newer := codexOrchestrationLaunchReceipt{Schema: codexOrchestrationLaunchSchema, SessionID: "newest", RunID: "orch-newest", LaunchedAt: time.Now()}
+	if err := persistCodexOrchestrationLaunchReceipt(home, older); err != nil {
+		t.Fatal(err)
+	}
+	if err := persistCodexOrchestrationLaunchReceipt(home, newer); err != nil {
+		t.Fatal(err)
+	}
+	var out, stderr bytes.Buffer
+	if code := runOrchestrationStatus(&out, &stderr, []string{"--home", home, "--session", "chosen", "--json"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var got orchestrationRunStatus
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.SessionID != "chosen" || got.RunID != "orch-chosen" {
+		t.Fatalf("explicit selection ignored: %+v", got)
+	}
+}
