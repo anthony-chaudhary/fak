@@ -45,9 +45,10 @@ Before enrollment and while `rows` was still empty, #7264 normalized `task-card.
 2. Confirm the participant has not worked on fak internals. Record broad experience outside the repository if needed.
 3. Hash `task-card.md`; it must equal `task_digest` in `study.json` before either arm starts.
 4. Build the study binary once from the pinned commit and record both `fak version` and commit. Do not use an older PATH binary—a guarded agent pilot hit exactly this ambiguity.
-5. Copy only the assigned directory under `materials/` into a fresh arm directory. Give its `arm-card.md`, `task-card.md`, and the pinned binary; the default-control bundle includes its verified starting product, while the scratch bundle intentionally contains no product material. Record every additional hint as a help request.
-6. Stop at the task card boundary, preserve failed attempts, and independently replay the stated verification commands.
-7. Ask preference only after both arms. A preference without two completed artifacts is inadmissible.
-8. Privacy-review and archive the raw receipts, then rerun the evaluator.
+5. Copy only the assigned directory under `materials/` into a fresh arm directory. Give its `arm-card.md`, `task-card.md`, and the pinned binary; the default-control bundle includes its verified starting product, while the scratch bundle intentionally contains no product material.
+6. Before the clock, have the participant run packet `verify`, then `packet receipt start` with the privately assigned pseudonymous IDs and counterbalanced order. The emitted `STARTED` line begins the clock. Do not hand-edit `receipt.json`.
+7. Preserve the participant's exact `commands.txt`, optional `errors.txt`, failed attempts, and every additional hint as a help request. Stop at the task-card boundary and independently replay the stated verification commands.
+8. Finalize the receipt with the artifact/transcript paths and observed human fields. Ask and record preference only on arm 2, after both artifacts exist. A preference without two completed artifacts is inadmissible.
+9. Let the participant inspect the finalized receipt, then privacy-review and archive it and rerun the evaluator.
 
 The first release target is two complete independent pairs for a directional read. A promotional claim requires a larger preregistered sample and confidence interval; this repository must not turn a two-person pilot into a market-wide statement.
