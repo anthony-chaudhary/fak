@@ -88,6 +88,9 @@ The routes above describe the current generation of fak unless a page marks itse
 
 Deployment support depends on the selected backend and environment. Each quickstart names its own prerequisites and supported boundary; the [README](README.md#one-managed-agent-two-ways-to-run-the-kernel) is authoritative for choosing a mode.
 
+## FAK or DOS?
+
+Use **FAK** for the agent execution path (tool calls, context, tokens, models, cache, policy, and serving). Use **DOS** for the work decision/proof path (admission, leases, verification, witnesses, liveness, and operator decisions). FAK's repository workflows compose DOS; they do not make the two kernels interchangeable. See [FAK and DOS: which layer owns what](docs/fak-vs-dos.md).
 ## Deeper maps
 
 - **Words this project coined or overloaded:** [`docs/glossary.md`](docs/glossary.md) pins down kernel, context, adjudicator, vDSO, context-MMU, and the capability floor / result admission pair.

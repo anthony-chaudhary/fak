@@ -28,6 +28,7 @@ connects new work to operator value. Do not turn this direction into a shipped c
 - **Operational surface (the single-binary thesis):** the agent gateway and control plane — the OpenAI/Anthropic/MCP wires, routing, capability floor, result quarantine, audit with `X-Trace-Id` correlation, bearer and `x-api-key` auth, and Prometheus `/metrics` — collapsed into one static Go binary (two `golang.org/x` dependencies; no Python and no CUDA toolchain needed to build). Where vLLM and SGLang are multi-process Python/CUDA engines you wrap in a reverse proxy plus policy and audit layers, `fak` is that layer as a single process. The contrast is operational surface, not throughput.
 - **Honest scope:** a 29-claim prior-art audit scored **0/29 novel** — every primitive is established; the contribution is the *assembly* into one in-process gate where the tool call is the checkpoint. Per-surface claim status (`SHIPPED`, `SIMULATED`, `STUB`) is tracked in [`CLAIMS.md`](CLAIMS.md); treat anything not marked `SHIPPED` as unproven.
 
+- FAK vs DOS boundary — FAK owns agent execution; DOS owns work admission, leases, truth, liveness, and decisions; FAK workflows compose DOS: [`docs/fak-vs-dos.md`](docs/fak-vs-dos.md)
 ## Current authorities
 
 - Micro-context fabric contract and bounded 100/1k/10k floor (`microcontextdemo`): [`docs/research/micro-context-fabrics.md`](docs/research/micro-context-fabrics.md); captured stage witnesses: [`docs/research/README.md`](docs/research/README.md)

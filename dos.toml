@@ -81,7 +81,7 @@ concurrent = [
   "cmd", "experiments", "docs", "tools", "visuals", "claude", "ci",
   "tokenizer",
   "contextq", "journal", "examples",
-  "spec", "rulesynth", "wirescreen",
+  "rulesynth", "wirescreen",
   "appversion", "boundarylint", "deletioncert", "demoui", "enginecache", "gpulease",
   "leakcheck", "metalgemm", "modelengine", "pathlint", "pathutil", "radixkv",
   "ratelimit", "rsiloop", "swebench", "toollint", "tracesink", "urllint", "webbench",
@@ -140,7 +140,7 @@ concurrent = [
   "codexresume",
   # They landed by hand / during the new_leaf.py path-bug window, so the `# new-leaf:lane`
   # auto-insert never fired. All are real, architest-tiered packages.
-  "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
+  "blobfs", "blobhttp", "ctxplan", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
   "advmodel",
   "modelroute",
   # #5619: internal/gitbroker, the resident git query broker. Declared BEFORE the package
@@ -319,7 +319,7 @@ concurrent = [
   "guardrotate", "guardroute", "guardrsi", "guardsessions", "guardtrace", "guardvars",
   "guideddecode", "harnessres", "headlesslint", "heavinessscore", "hooks", "horizonrecovery",
   "hostfault", "hostplacement", "hostresurrect", "hwgatelint", "ideascout", "idempotency",
-  "intlist", "issuecatalog", "issuecohort", "issuecontract", "issuecontractrepair", "issuecost",
+  "intlist", "issuecatalog", "issuecohort", "issuecontractrepair", "issuecost",
   "issuededup", "issuehygiene", "issuesmallness", "issuestriage", "jsonlledger", "kimik3page",
   "knobcensus", "knownbad", "knownenv", "kvbudget", "l3region", "launchlatency", "lifebridge",
   "lifecycle", "linkstate", "loaddebounce", "logvault", "lookahead", "loopfleet", "loopmap",
@@ -374,13 +374,13 @@ concurrent = [
   "managedocs",
   "humanctl",
   "toolcatalog",
-  "harnesskit",
   "projectassets",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
 # they serialize like release/ABI/global work instead of running as ordinary docs.
-exclusive = ["abi", "release", "dos", "global"]
+# harnesskit overlaps docs through its contract pages, so serialize that lane too.
+exclusive = ["abi", "release", "dos", "global", "harnesskit"]
 autopick = [
   "adjudicator", "agent", "agentdojo", "architest", "bench", "blob", "canon", "compute",
   "cachemeta",
@@ -391,7 +391,7 @@ autopick = [
   "cmd", "experiments", "docs", "tools", "visuals", "claude", "ci",
   "tokenizer",
   "contextq", "journal", "examples",
-  "spec", "rulesynth", "wirescreen",
+  "rulesynth", "wirescreen",
   "appversion", "boundarylint", "deletioncert", "demoui", "enginecache", "gpulease",
   "leakcheck", "metalgemm", "modelengine", "pathlint", "pathutil", "radixkv",
   "ratelimit", "rsiloop", "swebench", "toollint", "tracesink", "urllint", "webbench",
@@ -400,7 +400,7 @@ autopick = [
   "headroom",
   "residency",
   "ctxresidency",
-  "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
+  "blobfs", "blobhttp", "ctxplan", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
   "advmodel",
   "modelroute",
   "gitbroker", # #5619: internal/gitbroker leaf (the resident git query broker), see [lanes].concurrent note
@@ -587,7 +587,6 @@ journal = ["internal/journal/**"]
 # off-lane package; declaring its lane lets the referee bind its ship-stamp and lets
 # the arbiter detect a same-tree collision on it. (Its architest tier-map entry is a
 # separate internal/architest concern, tracked outside this dos.toml lane.)
-spec = ["internal/spec/**"]
 rulesynth = ["internal/rulesynth/**"]
 wirescreen = ["internal/wirescreen/**"]
 # reconciled 2026-06-22: real internal/ leaves that previously had NO lane (so a
@@ -622,7 +621,6 @@ ctxresidency = ["internal/ctxresidency/**"]
 blobfs = ["internal/blobfs/**"]
 blobhttp = ["internal/blobhttp/**"]
 ctxplan = ["internal/ctxplan/**"]
-dgxbridge = ["internal/dgxbridge/**"]
 gitgate = ["internal/gitgate/**"]
 # #5619: the git query broker. Disjoint from gitgate by construction -- gitgate decides
 # whether a git command may run, gitbroker answers git questions without spawning one.
@@ -899,7 +897,6 @@ idempotency = ["internal/idempotency/**"]
 intlist = ["internal/intlist/**"]
 issuecatalog = ["internal/issuecatalog/**"]
 issuecohort = ["internal/issuecohort/**"]
-issuecontract = ["internal/issuecontract/**"]
 issuecontractrepair = ["internal/issuecontractrepair/**"]
 issuecost = ["internal/issuecost/**"]
 issuededup = ["internal/issuededup/**"]
@@ -1110,6 +1107,7 @@ managedocs = ["internal/managedocs/**"]
 humanctl = ["internal/humanctl/**"]
 toolcatalog = ["internal/toolcatalog/**"]
 harnesskit = ["pkg/harnesskit/**", "docs/harness-kit-contract.md", "docs/_witnesses/harness-kit-contract*"]
+projectassets = ["internal/projectassets/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose

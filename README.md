@@ -130,6 +130,9 @@ Every model request and proposed tool call crosses this checkpoint, so reuse hap
 
 After trying `guard`, `fak launch install --provider all --default claude` can install reversible provider shims so bare `claude`, `codex`, or `fak` uses the managed path. It never overwrites the original binaries; bypass it with `--fak-direct`, `FAK_DIRECT=1`, or `fak launch disable`. See the [zero-adoption guide](docs/zero-adoption-launch.md).
 
+## FAK and DOS are different layers
+
+FAK manages the agent's execution: tool calls, context, tokens, models, cache, and policy. DOS manages the work around it: concurrent admission and leases, proof, liveness, and operator decisions. FAK workflows use DOS rather than replacing it. See [FAK and DOS: which layer owns what](docs/fak-vs-dos.md) for the command-by-command boundary and current integration health.
 ## Next steps
 
 - **Use an existing agent:** [complete first run](GETTING-STARTED.md) · [tutorial](docs/fak/tutorial.md) · [examples](examples/README.md) · [showcase](docs/showcase.html)
