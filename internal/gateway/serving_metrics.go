@@ -799,7 +799,7 @@ func parsePromSample(line string) (promSample, bool) {
 		if close < 0 {
 			return promSample{}, false
 		}
-		labels, ok := parsePromLabels(rest[1:close])
+		labels, ok := metrics.ParsePromLabels(rest[1:close])
 		if !ok {
 			return promSample{}, false
 		}
@@ -837,29 +837,6 @@ func findPromLabelClose(s string) int {
 		}
 	}
 	return -1
-}
-
-func parsePromLabels(s string) (map[string]string, bool) {
-	labels := map[string]string{}
-	for strings.TrimSpace(s) != "" {
-		s = strings.TrimLeft(s, " \t,")
-		eq := strings.IndexByte(s, '=')
-		if eq <= 0 {
-			return nil, false
-		}
-		key := strings.TrimSpace(s[:eq])
-		s = strings.TrimLeft(s[eq+1:], " \t")
-		if !strings.HasPrefix(s, `"`) {
-			return nil, false
-		}
-		value, n, ok := metrics.ParsePromQuotedLabel(s)
-		if !ok {
-			return nil, false
-		}
-		labels[key] = value
-		s = s[n:]
-	}
-	return labels, true
 }
 
 func applyServingPromSample(row *ServingMetricRow, sample promSample, counters *servingScrapeCounters) {

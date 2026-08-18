@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T05:32:30.026753Z",
+  "issue": 7050,
+  "family": "Prometheus label-set parsing",
+  "paths": [
+    "internal/metrics/prom_labels.go",
+    "internal/metrics/prom_labels_test.go",
+    "internal/engine/vllm.go",
+    "internal/gateway/serving_metrics.go"
+  ],
+  "test": "go test ./internal/metrics ./internal/engine ./internal/gateway -run 'Test(ParseProm|ServingMetrics)' -count=1",
+  "test_result": "PASS",
+  "before": {
+    "score": -88.9,
+    "grade": "F",
+    "slop_debt": 361,
+    "duplication": 361,
+    "weighted_duplication": 227.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -88.4,
+    "grade": "F",
+    "slop_debt": 360,
+    "duplication": 360,
+    "weighted_duplication": 227.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

@@ -990,7 +990,7 @@ func parsePromMetricSample(line string) (promMetricSample, bool) {
 	labels := map[string]string{}
 	if i := strings.IndexByte(name, '{'); i >= 0 {
 		if j := strings.LastIndexByte(name, '}'); j > i {
-			if parsed, ok := parsePromSampleLabels(name[i+1 : j]); ok {
+			if parsed, ok := metrics.ParsePromLabels(name[i+1 : j]); ok {
 				labels = parsed
 			}
 		}
@@ -1001,29 +1001,6 @@ func parsePromMetricSample(line string) (promMetricSample, bool) {
 		return promMetricSample{}, false
 	}
 	return promMetricSample{name: name, labels: labels, value: v}, true
-}
-
-func parsePromSampleLabels(s string) (map[string]string, bool) {
-	labels := map[string]string{}
-	for strings.TrimSpace(s) != "" {
-		s = strings.TrimLeft(s, " \t,")
-		eq := strings.IndexByte(s, '=')
-		if eq <= 0 {
-			return nil, false
-		}
-		key := strings.TrimSpace(s[:eq])
-		s = strings.TrimLeft(s[eq+1:], " \t")
-		if !strings.HasPrefix(s, `"`) {
-			return nil, false
-		}
-		value, n, ok := metrics.ParsePromQuotedLabel(s)
-		if !ok {
-			return nil, false
-		}
-		labels[key] = value
-		s = s[n:]
-	}
-	return labels, true
 }
 
 // Prometheus renders normalized metrics. The values are relabeled as fak_serving_*
