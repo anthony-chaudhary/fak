@@ -75,6 +75,40 @@ This page describes the **current generation's public architecture**. Runtime co
 
 The deterministic offline path is the default architecture witness. Live HTTP serving requires a configured engine/provider and production deployment controls. Accelerator-backed and private-control routes have environment-specific prerequisites and are not implied by the general diagram.
 
+
+## Runtime and repository-development artifacts
+
+A release has two executable boundaries with different audiences:
+
+| Artifact | For | Contains | Installation path |
+|---|---|---|---|
+| `fak` | Adopters and operators | The gateway, policy gate, agent runtime, serving, observability, and other production-facing commands | Release binary or `go install github.com/anthony-chaudhary/fak/cmd/fak@latest` |
+| `fak-dev` | Maintainers working in this repository | Documentation audits, isolated CI/build checks, issue-contract tooling, scaffolding, and other repository-development commands | Build from this checkout with `go build -o <scratch>/fak-dev ./cmd/fak-dev` |
+
+The deployment promise remains **one runtime binary**: an adopter does not install or ship `fak-dev`. The split prevents repository automation from enlarging the production command surface or dependency graph. Both executables may import narrow, product-neutral packages from `internal/`, but `cmd/fak` does not depend on `cmd/fak-dev` or dev-only command packages.
+
+```text
+                         shared, product-neutral internal packages
+                                      ^             ^
+                                      |             |
+                          cmd/fak ----+             +---- cmd/fak-dev
+                             |                                  |
+                    shipped runtime binary             maintainer-only binary
+                             |                                  |
+                 gateway / guard / serve / agent      wiki / buildcheck / issue
+```
+
+`fak dev <command>` is a compatibility handoff, not proof that development commands are linked into the runtime. When `fak-dev` is available, the runtime resolves it and forwards the original command; otherwise it returns `DEV_COMMAND_MOVED` with the explicit `fak-dev` invocation. New documentation and automation call `fak-dev` directly. Keep the handoff during the compatibility window; rollback is additive—restore or extend forwarding—rather than moving dev implementations back into the runtime.
+
+Use this boundary test:
+
+- **Belongs in `fak`:** needed to run, secure, route, observe, or operate an agent/model workload outside this source tree.
+- **Belongs in `fak-dev`:** meaningful only while developing, auditing, releasing, or maintaining this repository.
+- **May be shared:** leaf logic with no CLI/process dependency in either direction and a tested contract useful to both artifacts.
+- **Does not cross:** a runtime command importing a dev command, repository state becoming a runtime requirement, or adopter instructions requiring `fak-dev`.
+
+Keeping every verb in `fak` was rejected because it blurred the production trust boundary. Duplicating shared logic was rejected because it creates compatibility drift. The two-artifact boundary preserves one source tree and narrowly shared packages while keeping repository maintenance out of the shipped runtime.
+
 ## Deeper implementation authorities
 
 Read these only after choosing the applicable interface:
