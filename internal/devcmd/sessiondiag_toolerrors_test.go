@@ -2,6 +2,8 @@ package devcmd
 
 import (
 	"bytes"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -38,5 +40,27 @@ func TestWriteCodexToolErrorDiagnosisNamesOutcomeOnlyRecurrence(t *testing.T) {
 	})
 	if !strings.Contains(out.String(), "OUTCOMES_NOT_HOOKS") {
 		t.Fatalf("output = %s", out.String())
+	}
+}
+
+func TestQueryCodexToolErrorsForThreadFiltersTheGateNumerator(t *testing.T) {
+	python, err := exec.LookPath("python")
+	if err != nil {
+		t.Skip("python sqlite fixture unavailable")
+	}
+	path := filepath.Join(t.TempDir(), "logs.sqlite")
+	script := `import sqlite3,sys
+c=sqlite3.connect(sys.argv[1]); c.execute("create table logs(id integer primary key,ts integer,level text,target text,feedback_log_body text,thread_id text)")
+rows=[(1,200,"ERROR","codex_core::tools::router","tool_name=shell_command dispatch_tool_call_with_terminal_outcome: error=Exit code: 1","thread-a"),(2,200,"ERROR","codex_core::tools::router","tool_name=shell_command dispatch_tool_call_with_terminal_outcome: error=Exit code: 1","thread-b")]
+c.executemany("insert into logs values(?,?,?,?,?,?)",rows); c.commit()`
+	if out, err := exec.Command(python, "-c", script, path).CombinedOutput(); err != nil {
+		t.Fatalf("fixture: %v: %s", err, out)
+	}
+	got, err := queryCodexToolErrorsForThread(path, time.Unix(100, 0), "thread-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Total != 1 || got.OutcomeErrors != 1 {
+		t.Fatalf("summary=%+v", got)
 	}
 }

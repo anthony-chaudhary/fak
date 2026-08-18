@@ -72,6 +72,10 @@ func runCodexToolErrorDiagnosis(stdout, stderr io.Writer, codexHome string, sinc
 }
 
 func queryCodexToolErrors(path string, after time.Time) (codexToolErrorSummary, error) {
+	return queryCodexToolErrorsForThread(path, after, "")
+}
+
+func queryCodexToolErrorsForThread(path string, after time.Time, threadID string) (codexToolErrorSummary, error) {
 	summary := codexToolErrorSummary{Categories: make(map[string]int)}
 	python, err := exec.LookPath("python")
 	if err != nil && runtime.GOOS != "windows" {
@@ -83,9 +87,12 @@ func queryCodexToolErrors(path string, after time.Time) (codexToolErrorSummary, 
 	script := `import json,sqlite3,sys
 p=sys.argv[1]; uri='file:'+p.replace('\\','/')+'?mode=ro&immutable=0'
 c=sqlite3.connect(uri,uri=True,timeout=5); c.execute('pragma query_only=on')
-rows=c.execute("select target,coalesce(feedback_log_body,'') from logs where ts>=? and level='ERROR' order by id",(int(sys.argv[2]),)).fetchall()
+thread=sys.argv[3]
+q="select target,coalesce(feedback_log_body,'') from logs where ts>=? and level='ERROR'"; args=[int(sys.argv[2])]
+if thread: q += " and thread_id=?"; args.append(thread)
+rows=c.execute(q+" order by id",args).fetchall()
 print(json.dumps(rows))`
-	cmd := exec.Command(python, "-c", script, path, fmt.Sprint(after.Unix()))
+	cmd := exec.Command(python, "-c", script, path, fmt.Sprint(after.Unix()), threadID)
 	var out, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &stderr
 	if err := cmd.Run(); err != nil {

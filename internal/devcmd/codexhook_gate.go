@@ -68,7 +68,7 @@ func RunCodexHookRecurrence(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stderr, "codex-hook-gate: profile: %v\n", e)
 		return 1
 	}
-	outcomes, e := queryCodexToolErrors(filepath.Join(*home, "logs_2.sqlite"), now.Add(-*since))
+	outcomes, e := queryCodexToolErrorsForThread(filepath.Join(*home, "logs_2.sqlite"), now.Add(-*since), os.Getenv("CODEX_THREAD_ID"))
 	if e != nil {
 		fmt.Fprintf(stderr, "codex-hook-gate: outcomes: %v\n", e)
 		return 1
