@@ -84,6 +84,7 @@ var overviewGroups = []struct {
 // show. Kept deliberately far under one screen; the gate test holds the line.
 func usageCompact(w io.Writer) {
 	fmt.Fprintf(w, "fak - the Fused Agent Kernel (v%s)\n", appversion.Current())
+	fmt.Fprintln(w, "coordinates the whole agent path: context + routing + typed effects + evidence")
 	for _, g := range overviewGroups {
 		fmt.Fprintf(w, "\n%s:\n", g.title)
 		for _, e := range g.entries {

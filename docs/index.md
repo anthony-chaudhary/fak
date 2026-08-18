@@ -7,6 +7,8 @@ description: "fak is one Go binary you put in front of the AI agent you already 
 
 **Primary audience:** people entering the documentation who need to choose a current route by job. `fak` is one Go agent-kernel binary that adjudicates tool calls before they run, reuses shared setup, routes calls, serves repeats locally, and manages context.
 
+FAK coordinates the whole agent path, not isolated components. Start with the [canonical architecture map](architecture.md#whole-path-coordination-target) for the five-layer observation → constrained-plan → typed-effect contract, then use the [glossary](glossary.md#whole-path-decision-terms) to keep coordination, orchestration, scheduling, routing, and serving distinct.
+
 **Default next action:** run the deterministic offline proof in [the reproducibility packet](repro-packet.md) with `fak agent --offline`. It needs no API key, model, or GPU and ends with checkable task-completion and blocked-operation results.
 
 ## Choose your route

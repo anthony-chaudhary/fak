@@ -223,7 +223,8 @@ func TestCapturedManageHelpSurfaces(t *testing.T) {
 	var compact bytes.Buffer
 	usageCompact(&compact)
 	root := compact.String()
-	if !strings.Contains(root, "start here:") ||
+	if !strings.Contains(root, "coordinates the whole agent path: context + routing + typed effects + evidence") ||
+		!strings.Contains(root, "start here:") ||
 		!strings.Contains(root, "  manage") ||
 		!strings.Contains(root, "'fak m'; legacy: guard") {
 		t.Fatalf("captured `fak help` does not lead with canonical manage and its migration spellings:\n%s", root)
