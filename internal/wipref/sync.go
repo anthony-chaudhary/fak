@@ -102,8 +102,7 @@ const (
 // leading dash (would misparse as a flag), or an embedded whitespace/control byte. A
 // remote NAME (origin) and a remote URL (ssh://..., https://...) both pass — this is
 // argv hygiene, not URL validation; git itself decides whether the remote exists. Same
-// rule and same reasoning as leaseref's validRemote, restated here rather than imported
-// because this package must stay free of the I/O-bearing sibling.
+// rule and same reasoning is shared by the I/O-bearing leaseref sibling.
 func ValidRemote(remote string) bool {
 	if remote == "" || strings.HasPrefix(remote, "-") {
 		return false

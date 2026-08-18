@@ -46,6 +46,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/wipref"
 )
 
 // syncRefspec is the one refspec sync ever uses, on both the push and the fetch side:
@@ -91,21 +93,7 @@ type SyncResult struct {
 	PushSkippedEmpty bool `json:"push_skipped_empty,omitempty"`
 }
 
-// validRemote rejects a remote that cannot safely be one git argv token: empty, a
-// leading dash (would misparse as a flag), or embedded whitespace/control bytes. A
-// remote NAME (origin) and a remote URL (ssh://..., https://...) both pass; this is
-// argv hygiene, not URL validation — git itself decides whether the remote exists.
-func validRemote(remote string) bool {
-	if remote == "" || strings.HasPrefix(remote, "-") {
-		return false
-	}
-	for _, c := range []byte(remote) {
-		if c <= ' ' || c == 0x7f {
-			return false
-		}
-	}
-	return true
-}
+func validRemote(remote string) bool { return wipref.ValidRemote(remote) }
 
 // Sync converges the refs/fak/locks/* namespace with remote: push the local records,
 // then fetch the remote's (see the file doc for why that order and why a failed push
@@ -116,7 +104,7 @@ func validRemote(remote string) bool {
 // to send is not one of those errors: it is skipped and reported as PushSkippedEmpty,
 // and the fetch still runs (#5550).
 func (s *Store) Sync(ctx context.Context, remote string, doPush, doFetch bool) (SyncResult, error) {
-	if !validRemote(remote) {
+	if !wipref.ValidRemote(remote) {
 		return SyncResult{}, fmt.Errorf("leaseref: invalid remote %q (must be one safe git argv token)", remote)
 	}
 	if !doPush && !doFetch {

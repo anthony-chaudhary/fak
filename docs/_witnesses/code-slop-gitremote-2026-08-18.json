@@ -1,0 +1,31 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T08:00:58.100186Z",
+  "issue": 6954,
+  "family": "git remote argv validation",
+  "paths": [
+    "internal/leaseref/sync.go",
+    "internal/wipref/sync.go"
+  ],
+  "test": "go test ./internal/leaseref ./internal/wipref; fak-dev buildcheck --vet",
+  "test_result": "PASS",
+  "before": {
+    "score": -80.1,
+    "grade": "F",
+    "slop_debt": 344,
+    "duplication": 344,
+    "weighted_duplication": 219.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -79.6,
+    "grade": "F",
+    "slop_debt": 343,
+    "duplication": 343,
+    "weighted_duplication": 218.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}
