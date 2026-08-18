@@ -15,6 +15,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 )
 
 // dispatchTickFixtureCores / dispatchTickFixtureRAMMB / dispatchTickFixtureThreads are the
@@ -1095,6 +1096,7 @@ func TestDispatchTickLiveCodexLoopGateRefusesGuardlessSpawn(t *testing.T) {
 	// no-progress thrash loop the guardless gate must still refuse. Distinct-arg
 	// planning progress is a non-loop, covered elsewhere.
 	writeCodexLoopFixture(t, filepath.Join(sessionsDir, "rollout-loop.jsonl"), []string{
+		`{"timestamp":"2026-07-06T02:25:02.000Z","type":"session_meta","payload":{"session_id":"loop-session","originator":"codex-tui","model_provider":"openai"}}`,
 		`{"timestamp":"2026-07-06T02:25:03.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"one\",\"status\":\"in_progress\"}]}","call_id":"plan_1"}}`,
 		`{"timestamp":"2026-07-06T02:25:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_1","output":"Plan updated"}}`,
 		`{"timestamp":"2026-07-06T02:25:15.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"one\",\"status\":\"in_progress\"}]}","call_id":"plan_2"}}`,
@@ -1108,6 +1110,10 @@ func TestDispatchTickLiveCodexLoopGateRefusesGuardlessSpawn(t *testing.T) {
 	oldSpawner := dispatchIssueWorkerSpawner
 	spawned := false
 	dispatchProbeCodexProcessRows = func() ([]dispatchCodexProcessRow, error) { return nil, nil }
+	oldRegistry := readSessionRows
+	readSessionRows = func() ([]sessionregistry.Record, error) {
+		return []sessionregistry.Record{{State: sessionregistry.StateActive, Identity: sessionregistry.Identity{Runtime: "codex", SessionID: "loop-session"}}}, nil
+	}
 	launchSpawnBroker = func(a launchBrokerAttempt) launchBrokerGrant {
 		return allowLaunchBrokerGrant(a, "unit-test-allow")
 	}
@@ -1117,6 +1123,7 @@ func TestDispatchTickLiveCodexLoopGateRefusesGuardlessSpawn(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		dispatchProbeCodexProcessRows = oldRows
+		readSessionRows = oldRegistry
 		launchSpawnBroker = oldBroker
 		dispatchIssueWorkerSpawner = oldSpawner
 	})
