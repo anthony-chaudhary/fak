@@ -9673,6 +9673,11 @@
           "category": "incidental",
           "reason": "Implementation type for the reviewed Go-source terminology candidate inventory, not a planning concept.",
           "token": "GoSourceCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed ownership-fixture mismatch for a missing or wrong dispatch lane, not a planning concept.",
+          "token": "OwnershipLaneMismatch"
         }
       ],
       "exclude": [
@@ -9709,6 +9714,7 @@
         "MotifCatalogPlanFanoutReconcile",
         "NewCandidates",
         "NoteCandidates",
+        "OwnershipLaneMismatch",
         "PlanDecodeInterleave",
         "PlanEviction",
         "PlanGoTmp",

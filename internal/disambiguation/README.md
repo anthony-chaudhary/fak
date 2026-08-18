@@ -483,3 +483,14 @@ The go-source inventory emits two candidate classes for review rather than silen
 - a **package capability token** is a literal passed to `abi.RegisterCapability`, representing explicit negotiation vocabulary rather than an authorization verdict.
 
 `InventoryGoSource` walks an injected public filesystem deterministically and excludes `_test.go`, generated files carrying the standard `Code generated … DO NOT EDIT.` marker, methods, and unexported helpers. Run `fak disambiguation go-source-self-test --json` for a fixture proving stable ordering and every exclusion rule. The inventory is a read-only candidate source; the canonical index remains the only terminology writer.
+
+## Module, leaf, lane, and stamp ownership (#6313)
+
+Four identities form one checked chain without becoming synonyms:
+
+- **module revision identity** is the history-derived `module@rN+gSHA` version surface;
+- **leaf identity** is the semantic package or command owner attributed by a commit;
+- **dispatch ownership lane** is the file-tree concurrency region used for admission; and
+- **fak commit stamp** is the validated `(fak <leaf>)` subject token.
+
+Run `fak disambiguation ownership-source-self-test --json` to resolve a fixture path to all four fields. `ResolveOwnershipFixture` returns typed `leaf-mismatch`, `lane-mismatch`, and `stamp-mismatch` errors instead of guessing from similar names. The fixture reads the public ownership, module-version, and commit-lint contracts and does not duplicate their writers.

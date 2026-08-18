@@ -649,6 +649,37 @@ var publicEntries = []Entry{
 		Scope:      Scope{Kind: "disambiguation", Value: "capability-token"}, Owner: Owner{Leaf: "abi", Lane: "abi"},
 		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/abi/registry.go", Revision: "go-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-go-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "RegisterCapability"}}},
 		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "go-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	}, {
+		Schema: EntrySchemaVersion, Identity: Identity{CanonicalTerm: "module revision identity", Aliases: []string{"module@rev"}},
+		Definition: "A history-derived identity rendered as module@r<touch-count>+g<commit>, naming which module moved and at what revision.",
+		Contrasts:  []Contrast{{CanonicalTerm: "leaf identity", Explanation: "A module is the versioned path surface; a leaf is the semantic owner used for attribution and stamps.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)}},
+		Scope:      Scope{Kind: "ownership", Value: "module-revision"}, Owner: Owner{Leaf: "fak", Lane: "cmd"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/modver/modver.go", Revision: "ownership-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-ownership-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "Module"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "ownership-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema: EntrySchemaVersion, Identity: Identity{CanonicalTerm: "leaf identity", Aliases: []string{"leaf"}},
+		Definition: "The semantic package or command unit that owns a change and supplies the attribution token in a valid fak commit stamp.",
+		Contrasts:  []Contrast{{CanonicalTerm: "dispatch lane", Explanation: "A leaf identifies what semantic unit changed; a lane is the concurrency ownership region that admits work.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)}},
+		Scope:      Scope{Kind: "ownership", Value: "leaf"}, Owner: Owner{Leaf: "disambiguation", Lane: "disambiguation"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/disambiguation/ownership.go", Revision: "ownership-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-ownership-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "Owner"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "ownership-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema: EntrySchemaVersion, Identity: Identity{CanonicalTerm: "dispatch ownership lane", Aliases: []string{"ownership lane"}},
+		Definition: "A declared file-tree region used to arbitrate concurrent work; it may own several leaves and must not be inferred from a similar name.",
+		Contrasts:  []Contrast{{CanonicalTerm: "leaf identity", Explanation: "A lane controls collision-safe admission; a leaf provides semantic attribution and may map into that lane.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)}},
+		Scope:      Scope{Kind: "ownership", Value: "lane"}, Owner: Owner{Leaf: "disambiguation", Lane: "disambiguation"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/disambiguation/ownership.go", Revision: "ownership-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-ownership-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "PublicManifests"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "ownership-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema: EntrySchemaVersion, Identity: Identity{CanonicalTerm: "fak commit stamp", Aliases: []string{"commit stamp"}},
+		Definition: "The validated (fak <leaf>) commit-subject token binding one commit to its semantic leaf; it is not a lane lease or module version.",
+		Contrasts:  []Contrast{{CanonicalTerm: "module revision identity", Explanation: "A stamp attributes a commit to a leaf; module@rev identifies the history-derived version after commits land.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)}},
+		Scope:      Scope{Kind: "ownership", Value: "commit-stamp"}, Owner: Owner{Leaf: "fak", Lane: "cmd"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/hooks/commitstamp.go", Revision: "ownership-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-ownership-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "CommitLintReport"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "ownership-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
 	},
 }
 

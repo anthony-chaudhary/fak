@@ -1,7 +1,7 @@
 {
   "schema": "fak-disambiguation-index/1",
-  "source_revision": "sha256:f6bbe62689b35ab843b397542b19a2eac702e9e38668b5a8144c406e05b173ab",
-  "entry_count": 48,
+  "source_revision": "sha256:108bdec34eaad676f688ed7cddcb7e18938c32f98b53b2bc43cca337d5590f70",
+  "entry_count": 52,
   "entries": [
     {
       "schema": "fak-disambiguation-entry/1",
@@ -784,6 +784,55 @@
     {
       "schema": "fak-disambiguation-entry/1",
       "identity": {
+        "canonical_term": "dispatch ownership lane",
+        "aliases": [
+          "ownership lane"
+        ]
+      },
+      "definition": "A declared file-tree region used to arbitrate concurrent work; it may own several leaves and must not be inferred from a similar name.",
+      "contrasts": [
+        {
+          "canonical_term": "leaf identity",
+          "explanation": "A lane controls collision-safe admission; a leaf provides semantic attribution and may map into that lane.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "ownership",
+        "value": "lane"
+      },
+      "owner": {
+        "leaf": "disambiguation",
+        "lane": "disambiguation"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/disambiguation/ownership.go",
+          "revision": "ownership-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-ownership-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "PublicManifests"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "ownership-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
         "canonical_term": "dispatch wave",
         "aliases": [
           "wave"
@@ -969,6 +1018,55 @@
         "reason_code": "SOURCE_CURRENT",
         "checked_at": "2026-08-11T00:00:00Z",
         "probe": "public-seed/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "fak commit stamp",
+        "aliases": [
+          "commit stamp"
+        ]
+      },
+      "definition": "The validated (fak <leaf>) commit-subject token binding one commit to its semantic leaf; it is not a lane lease or module version.",
+      "contrasts": [
+        {
+          "canonical_term": "module revision identity",
+          "explanation": "A stamp attributes a commit to a leaf; module@rev identifies the history-derived version after commits land.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "ownership",
+        "value": "commit-stamp"
+      },
+      "owner": {
+        "leaf": "fak",
+        "lane": "cmd"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/hooks/commitstamp.go",
+          "revision": "ownership-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-ownership-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "CommitLintReport"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "ownership-source/1"
       },
       "lifecycle": {
         "class": "current",
@@ -1333,6 +1431,55 @@
     {
       "schema": "fak-disambiguation-entry/1",
       "identity": {
+        "canonical_term": "leaf identity",
+        "aliases": [
+          "leaf"
+        ]
+      },
+      "definition": "The semantic package or command unit that owns a change and supplies the attribution token in a valid fak commit stamp.",
+      "contrasts": [
+        {
+          "canonical_term": "dispatch lane",
+          "explanation": "A leaf identifies what semantic unit changed; a lane is the concurrency ownership region that admits work.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "ownership",
+        "value": "leaf"
+      },
+      "owner": {
+        "leaf": "disambiguation",
+        "lane": "disambiguation"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/disambiguation/ownership.go",
+          "revision": "ownership-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-ownership-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "Owner"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "ownership-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
         "canonical_term": "model KV cache",
         "aliases": [
           "KV cache",
@@ -1435,6 +1582,55 @@
         "reason_code": "SOURCE_CURRENT",
         "checked_at": "2026-08-17T00:00:00Z",
         "probe": "policy-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "module revision identity",
+        "aliases": [
+          "module@rev"
+        ]
+      },
+      "definition": "A history-derived identity rendered as module@r<touch-count>+g<commit>, naming which module moved and at what revision.",
+      "contrasts": [
+        {
+          "canonical_term": "leaf identity",
+          "explanation": "A module is the versioned path surface; a leaf is the semantic owner used for attribution and stamps.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "ownership",
+        "value": "module-revision"
+      },
+      "owner": {
+        "leaf": "fak",
+        "lane": "cmd"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/modver/modver.go",
+          "revision": "ownership-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-ownership-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "Module"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "ownership-source/1"
       },
       "lifecycle": {
         "class": "current",

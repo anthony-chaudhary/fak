@@ -19,10 +19,12 @@
 | [disambiguation package](#disambiguation-package-package-internal-disambiguation) | `package:internal/disambiguation` | The internal/disambiguation package, named as a contrast target for the CLI-scoped kernel entry. | `fak disambiguation query "disambiguation package"` |
 | [dispatch lane](#dispatch-lane-dispatch-lane) | `dispatch:lane` | A named taxonomy partition that maps a work request to a canonical file-tree region and concurrency policy. | `fak disambiguation query "dispatch lane"` |
 | [dispatch loop](#dispatch-loop-dispatch-loop) | `dispatch:loop` | A durable recurring dispatch state machine identified by loop ID and measured through admitted, refused, started, ended, and witnessed runs. | `fak disambiguation query "dispatch loop"` |
+| [dispatch ownership lane](#dispatch-ownership-lane-ownership-lane) | `ownership:lane` | A declared file-tree region used to arbitrate concurrent work; it may own several leaves and must not be inferred from a similar name. | `fak disambiguation query "dispatch ownership lane"` |
 | [dispatch wave](#dispatch-wave-dispatch-wave) | `dispatch:wave` | An indexed, bounded batch of dispatch members with a shared step budget and explicit lease regions or whole-lane claims. | `fak disambiguation query "dispatch wave"` |
 | [dispatch worker](#dispatch-worker-dispatch-worker) | `dispatch:worker` | One executing worker record with structured issue, lane, backend, and witnessed-result fields; its free-form output is untrusted narration. | `fak disambiguation query "dispatch worker"` |
 | [exported Go symbol candidate](#exported-go-symbol-candidate-disambiguation-go-symbol-candidate) | `disambiguation:go-symbol-candidate` | A reviewed exported type, function, variable, or constant from non-test, non-generated Go source that may warrant canonical or incidental terminology classification. | `fak disambiguation query "exported Go symbol candidate"` |
 | [fak CLI kernel](#fak-cli-kernel-cli-fak) | `cli:fak` | The fak command-line product surface, named as a contrast target for the package-scoped kernel entry. | `fak disambiguation query "fak CLI kernel"` |
+| [fak commit stamp](#fak-commit-stamp-ownership-commit-stamp) | `ownership:commit-stamp` | The validated (fak <leaf>) commit-subject token binding one commit to its semantic leaf; it is not a lane lease or module version. | `fak disambiguation query "fak commit stamp"` |
 | [fak measurement arm](#fak-measurement-arm-claims-fak-arm) | `claims:fak-arm` | The fak-enabled treatment measured against a declared alternative; calling it a baseline obscures which arm is the comparator. | `fak disambiguation query "fak measurement arm"` |
 | [fleet supervisor](#fleet-supervisor-dispatch-supervisor) | `dispatch:supervisor` | A decision layer whose input is witnessed liveness, worker verdicts, escalations, and leases; missing witnesses cause escalation rather than inference. | `fak disambiguation query "fleet supervisor"` |
 | [hook gate class](#hook-gate-class-vocabulary-hook-gate-class) | `vocabulary:hook-gate-class` | A hook-runner classification declaring whether a gate mutates the index/worktree, intentionally uses a worktree, or is a tree-twin checker. | `fak disambiguation query "hook gate class"` |
@@ -30,8 +32,10 @@
 | [kernel](#kernel-cli-fak) | `cli:fak` | The fak command-line product surface for operating the agent kernel. | `fak disambiguation query --scope-kind cli --scope-value fak "kernel"` |
 | [kernel](#kernel-package-internal-disambiguation) | `package:internal/disambiguation` | The internal/disambiguation Go package that validates and queries public terminology records. | `fak disambiguation query --scope-kind package --scope-value internal/disambiguation "kernel"` |
 | [lane lease](#lane-lease-dispatch-lease) | `dispatch:lease` | A live ownership claim carrying lease ID, lane or tree, holder identity, and read-only posture for collision admission. | `fak disambiguation query "lane lease"` |
+| [leaf identity](#leaf-identity-ownership-leaf) | `ownership:leaf` | The semantic package or command unit that owns a change and supplies the attribution token in a valid fak commit stamp. | `fak disambiguation query "leaf identity"` |
 | [model KV cache](#model-kv-cache-cache-model-attention) | `cache:model-attention` | Kernel-owned per-layer attention key/value tensors indexed by token position and invalidated or rewritten when the model sequence changes. | `fak disambiguation query "model KV cache"` |
 | [model-mediated check](#model-mediated-check-policy-model-mediated) | `policy:model-mediated` | A semantic assessment whose result depends on a model interpreting content or intent; it is distinct from fak's deterministic structural preflight and is not part of the preflight command's local fold. | `fak disambiguation query "model-mediated check"` |
+| [module revision identity](#module-revision-identity-ownership-module-revision) | `ownership:module-revision` | A history-derived identity rendered as module@r<touch-count>+g<commit>, naming which module moved and at what revision. | `fak disambiguation query "module revision identity"` |
 | [naive baseline](#naive-baseline-claims-naive-baseline) | `claims:naive-baseline` | A comparison arm representing the untuned or resend-everything floor; useful context, but never the decision-grade headline alternative. | `fak disambiguation query "naive baseline"` |
 | [net-true claim](#net-true-claim-claims-net-true) | `claims:net-true` | A scoped value statement graded against the real tuned alternative and stated net of introduced costs, with provenance, reproduction witness, and realization status. | `fak disambiguation query "net-true claim"` |
 | [package capability token](#package-capability-token-disambiguation-capability-token) | `disambiguation:capability-token` | A string explicitly registered by a public package as a negotiated ABI capability; it is inventory evidence, not automatically a canonical term or an authorization verdict. | `fak disambiguation query "package capability token"` |
@@ -270,6 +274,20 @@ A durable recurring dispatch state machine identified by loop ID and measured th
 - **Do not conflate with:**
   - [fleet supervisor](contrast-index.md#fleet-supervisor) — A loop owns recurring execution state for one cadence; a supervisor observes multiple witnessed surfaces and decides interventions.
 
+<a id="dispatch-ownership-lane-ownership-lane"></a>
+## dispatch ownership lane — `ownership:lane`
+
+A declared file-tree region used to arbitrate concurrent work; it may own several leaves and must not be inferred from a similar name.
+
+- **Query:** `fak disambiguation query "dispatch ownership lane"`
+- **Owner:** leaf `disambiguation`, lane `disambiguation`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `ownership lane`
+- **Sources:**
+  - `internal/disambiguation/ownership.go` — `go-source` at `ownership-source/1`
+- **Do not conflate with:**
+  - [leaf identity](contrast-index.md#leaf-identity) — A lane controls collision-safe admission; a leaf provides semantic attribution and may map into that lane.
+
 <a id="dispatch-wave-dispatch-wave"></a>
 ## dispatch wave — `dispatch:wave`
 
@@ -324,6 +342,20 @@ The fak command-line product surface, named as a contrast target for the package
   - `cmd/fak/main.go` — `go-source` at `public-seed/1`
 - **Do not conflate with:**
   - [kernel](contrast-index.md#kernel) — The CLI surface and package-scoped kernel are distinct.
+
+<a id="fak-commit-stamp-ownership-commit-stamp"></a>
+## fak commit stamp — `ownership:commit-stamp`
+
+The validated (fak <leaf>) commit-subject token binding one commit to its semantic leaf; it is not a lane lease or module version.
+
+- **Query:** `fak disambiguation query "fak commit stamp"`
+- **Owner:** leaf `fak`, lane `cmd`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `commit stamp`
+- **Sources:**
+  - `internal/hooks/commitstamp.go` — `go-source` at `ownership-source/1`
+- **Do not conflate with:**
+  - [module revision identity](contrast-index.md#module-revision-identity) — A stamp attributes a commit to a leaf; module@rev identifies the history-derived version after commits land.
 
 <a id="fak-measurement-arm-claims-fak-arm"></a>
 ## fak measurement arm — `claims:fak-arm`
@@ -425,6 +457,20 @@ A live ownership claim carrying lease ID, lane or tree, holder identity, and rea
 - **Do not conflate with:**
   - [dispatch lane](contrast-index.md#dispatch-lane) — A lease is an active holder claim; the lane is the durable taxonomy partition it may claim.
 
+<a id="leaf-identity-ownership-leaf"></a>
+## leaf identity — `ownership:leaf`
+
+The semantic package or command unit that owns a change and supplies the attribution token in a valid fak commit stamp.
+
+- **Query:** `fak disambiguation query "leaf identity"`
+- **Owner:** leaf `disambiguation`, lane `disambiguation`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `leaf`
+- **Sources:**
+  - `internal/disambiguation/ownership.go` — `go-source` at `ownership-source/1`
+- **Do not conflate with:**
+  - [dispatch lane](contrast-index.md#dispatch-lane) — A leaf identifies what semantic unit changed; a lane is the concurrency ownership region that admits work.
+
 <a id="model-kv-cache-cache-model-attention"></a>
 ## model KV cache — `cache:model-attention`
 
@@ -454,6 +500,20 @@ A semantic assessment whose result depends on a model interpreting content or in
   - `cmd/fak/main.go` — `go-source` at `policy-source/1`
 - **Do not conflate with:**
   - [structural preflight](contrast-index.md#structural-preflight) — A model-mediated check depends on model inference; structural preflight reaches its verdict from local grammar and adjudicator rules with no model in the loop.
+
+<a id="module-revision-identity-ownership-module-revision"></a>
+## module revision identity — `ownership:module-revision`
+
+A history-derived identity rendered as module@r<touch-count>+g<commit>, naming which module moved and at what revision.
+
+- **Query:** `fak disambiguation query "module revision identity"`
+- **Owner:** leaf `fak`, lane `cmd`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `module@rev`
+- **Sources:**
+  - `internal/modver/modver.go` — `go-source` at `ownership-source/1`
+- **Do not conflate with:**
+  - [leaf identity](contrast-index.md#leaf-identity) — A module is the versioned path surface; a leaf is the semantic owner used for attribution and stamps.
 
 <a id="naive-baseline-claims-naive-baseline"></a>
 ## naive baseline — `claims:naive-baseline`

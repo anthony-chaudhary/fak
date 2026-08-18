@@ -116,6 +116,13 @@
 - **Contrasts:**
   - **fleet supervisor:** A loop owns recurring execution state for one cadence; a supervisor observes multiple witnessed surfaces and decides interventions.
 
+<a id="dispatch-ownership-lane"></a>
+## dispatch ownership lane
+
+- **Identity:** [dispatch ownership lane — `ownership:lane`](canonical-terms.md#dispatch-ownership-lane-ownership-lane); query with `fak disambiguation query "dispatch ownership lane"`
+- **Contrasts:**
+  - **leaf identity:** A lane controls collision-safe admission; a leaf provides semantic attribution and may map into that lane.
+
 <a id="dispatch-wave"></a>
 ## dispatch wave
 
@@ -143,6 +150,13 @@
 - **Identity:** [fak CLI kernel — `cli:fak`](canonical-terms.md#fak-cli-kernel-cli-fak); query with `fak disambiguation query "fak CLI kernel"`
 - **Contrasts:**
   - **kernel:** The CLI surface and package-scoped kernel are distinct.
+
+<a id="fak-commit-stamp"></a>
+## fak commit stamp
+
+- **Identity:** [fak commit stamp — `ownership:commit-stamp`](canonical-terms.md#fak-commit-stamp-ownership-commit-stamp); query with `fak disambiguation query "fak commit stamp"`
+- **Contrasts:**
+  - **module revision identity:** A stamp attributes a commit to a leaf; module@rev identifies the history-derived version after commits land.
 
 <a id="fak-measurement-arm"></a>
 ## fak measurement arm
@@ -192,6 +206,13 @@
 - **Contrasts:**
   - **dispatch lane:** A lease is an active holder claim; the lane is the durable taxonomy partition it may claim.
 
+<a id="leaf-identity"></a>
+## leaf identity
+
+- **Identity:** [leaf identity — `ownership:leaf`](canonical-terms.md#leaf-identity-ownership-leaf); query with `fak disambiguation query "leaf identity"`
+- **Contrasts:**
+  - **dispatch lane:** A leaf identifies what semantic unit changed; a lane is the concurrency ownership region that admits work.
+
 <a id="model-kv-cache"></a>
 ## model KV cache
 
@@ -207,6 +228,13 @@
 - **Identity:** [model-mediated check — `policy:model-mediated`](canonical-terms.md#model-mediated-check-policy-model-mediated); query with `fak disambiguation query "model-mediated check"`
 - **Contrasts:**
   - **structural preflight:** A model-mediated check depends on model inference; structural preflight reaches its verdict from local grammar and adjudicator rules with no model in the loop.
+
+<a id="module-revision-identity"></a>
+## module revision identity
+
+- **Identity:** [module revision identity — `ownership:module-revision`](canonical-terms.md#module-revision-identity-ownership-module-revision); query with `fak disambiguation query "module revision identity"`
+- **Contrasts:**
+  - **leaf identity:** A module is the versioned path surface; a leaf is the semantic owner used for attribution and stamps.
 
 <a id="naive-baseline"></a>
 ## naive baseline
