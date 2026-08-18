@@ -25,7 +25,7 @@ func runWIPInventory(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	rep := wipinventory.Collect(abs, time.Now(), wipinventory.GitRunner{})
-	staleUntracked := *maxUntrackedAge > 0 && rep.Main.Untracked.Known && rep.Main.Untracked.Count > 0 && rep.Main.Untracked.Protection == "unprotected" && rep.Main.Untracked.OldestAgeSeconds >= int64(maxUntrackedAge.Seconds())
+	staleUntracked := *maxUntrackedAge > 0 && rep.Main.Untracked.Known && rep.Main.Untracked.Count > 0 && rep.Main.Untracked.OldestUnprotectedPath != "" && rep.Main.Untracked.OldestUnprotectedAgeSeconds >= int64(maxUntrackedAge.Seconds())
 	if *jsonOut {
 		b, err := rep.JSON()
 		if err != nil {
@@ -59,7 +59,7 @@ func runWIPInventory(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if staleUntracked {
-		fmt.Fprintf(stderr, "STALE_UNTRACKED_SOURCE: %s is %s old (limit %s); protect it now with `fak wip autocheckpoint --reason manual --session <id>` or move the task into `fak worktree worker prepare` isolation.\n", rep.Main.Untracked.OldestPath, time.Duration(rep.Main.Untracked.OldestAgeSeconds)*time.Second, *maxUntrackedAge)
+		fmt.Fprintf(stderr, "STALE_UNTRACKED_SOURCE: %s is %s old (limit %s); protect it now with `fak wip autocheckpoint --reason manual --session <id>` or move the task into `fak worktree worker prepare` isolation.\n", rep.Main.Untracked.OldestUnprotectedPath, time.Duration(rep.Main.Untracked.OldestUnprotectedAgeSeconds)*time.Second, *maxUntrackedAge)
 		return 3
 	}
 	return 0

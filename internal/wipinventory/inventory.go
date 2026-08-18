@@ -58,13 +58,21 @@ func (GitRunner) Run(dir string, args ...string) ([]byte, error) {
 }
 
 type Population struct {
-	Count            int      `json:"count"`
-	Known            bool     `json:"known"`
-	Samples          []string `json:"samples,omitempty"`
-	Error            string   `json:"error,omitempty"`
-	OldestPath       string   `json:"oldest_path,omitempty"`
-	OldestAgeSeconds int64    `json:"oldest_age_seconds,omitempty"`
-	Protection       string   `json:"protection,omitempty"`
+	Count                       int      `json:"count"`
+	Known                       bool     `json:"known"`
+	Samples                     []string `json:"samples,omitempty"`
+	Error                       string   `json:"error,omitempty"`
+	OldestPath                  string   `json:"oldest_path,omitempty"`
+	OldestAgeSeconds            int64    `json:"oldest_age_seconds,omitempty"`
+	OldestUnprotectedPath       string   `json:"oldest_unprotected_path,omitempty"`
+	OldestUnprotectedAgeSeconds int64    `json:"oldest_unprotected_age_seconds,omitempty"`
+	Protection                  string   `json:"protection,omitempty"`
+	paths                       []agedPath
+}
+
+type agedPath struct {
+	path       string
+	ageSeconds int64
 }
 type Checkout struct {
 	Path      string     `json:"path"`
@@ -79,14 +87,15 @@ type StaleWorker struct {
 	Detail string `json:"detail,omitempty"`
 }
 type Checkpoint struct {
-	Ref     string   `json:"ref"`
-	SHA     string   `json:"sha"`
-	Unix    int64    `json:"unix"`
-	Changed int      `json:"changed_paths"`
-	Added   int      `json:"added_paths"`
-	Known   bool     `json:"known"`
-	Error   string   `json:"error,omitempty"`
-	Paths   []string `json:"paths,omitempty"`
+	Ref      string   `json:"ref"`
+	SHA      string   `json:"sha"`
+	Unix     int64    `json:"unix"`
+	Changed  int      `json:"changed_paths"`
+	Added    int      `json:"added_paths"`
+	Known    bool     `json:"known"`
+	Error    string   `json:"error,omitempty"`
+	Paths    []string `json:"paths,omitempty"`
+	allPaths []string
 }
 type IgnoreInputs struct {
 	GitignoreHash string `json:"gitignore_hash,omitempty"`
@@ -204,12 +213,11 @@ func observeAge(p *Population, root, name string, now time.Time) {
 		}
 		return
 	}
-	age := int64(now.Sub(info.ModTime()).Seconds())
-	if age < 0 {
-		age = 0
-	}
+	age := max(int64(now.Sub(info.ModTime()).Seconds()), 0)
+	path := filepath.ToSlash(name)
+	p.paths = append(p.paths, agedPath{path: path, ageSeconds: age})
 	if p.OldestPath == "" || age > p.OldestAgeSeconds {
-		p.OldestPath = filepath.ToSlash(name)
+		p.OldestPath = path
 		p.OldestAgeSeconds = age
 	}
 }
@@ -309,8 +317,12 @@ func checkpoints(root string, r Runner, rep *Report) ([]Checkpoint, bool) {
 				}
 				cp.Changed++
 				parts := strings.SplitN(row, "\t", 2)
-				if len(parts) == 2 && len(cp.Paths) < sampleLimit {
-					cp.Paths = append(cp.Paths, filepath.ToSlash(parts[1]))
+				if len(parts) == 2 {
+					path := filepath.ToSlash(parts[1])
+					cp.allPaths = append(cp.allPaths, path)
+					if len(cp.Paths) < sampleLimit {
+						cp.Paths = append(cp.Paths, path)
+					}
 				}
 				if strings.HasPrefix(row, "A\t") {
 					cp.Added++
@@ -330,16 +342,34 @@ func labelProtection(rep *Report) {
 	if rep.Main.Untracked.Count == 0 {
 		return
 	}
-	rep.Main.Untracked.Protection = "unprotected"
+	protected := make(map[string]string)
 	for _, cp := range rep.Checkpoints {
-		for _, path := range cp.Paths {
-			for _, source := range rep.Main.Untracked.Samples {
-				if path == source {
-					rep.Main.Untracked.Protection = "checkpoint:" + cp.Ref
-					return
-				}
+		for _, path := range cp.allPaths {
+			if _, exists := protected[path]; !exists {
+				protected[path] = "checkpoint:" + cp.Ref
 			}
 		}
+	}
+	protectedCount := 0
+	var oneProtection string
+	for _, source := range rep.Main.Untracked.paths {
+		if protection := protected[source.path]; protection != "" {
+			protectedCount++
+			oneProtection = protection
+			continue
+		}
+		if source.ageSeconds > rep.Main.Untracked.OldestUnprotectedAgeSeconds || rep.Main.Untracked.OldestUnprotectedPath == "" {
+			rep.Main.Untracked.OldestUnprotectedPath = source.path
+			rep.Main.Untracked.OldestUnprotectedAgeSeconds = source.ageSeconds
+		}
+	}
+	switch {
+	case protectedCount == 0:
+		rep.Main.Untracked.Protection = "unprotected"
+	case protectedCount == rep.Main.Untracked.Count:
+		rep.Main.Untracked.Protection = oneProtection
+	default:
+		rep.Main.Untracked.Protection = "mixed"
 	}
 }
 

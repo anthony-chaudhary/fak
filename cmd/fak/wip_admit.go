@@ -83,8 +83,8 @@ func runWipAdmit(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak wip admit: cannot prove untracked-work age: %s\n", strings.Join(inv.Errors, "; "))
 			return 1
 		}
-		if inv.Main.Untracked.Count > 0 && inv.Main.Untracked.Protection == "unprotected" && inv.Main.Untracked.OldestAgeSeconds >= int64(maxUntrackedAge.Seconds()) {
-			fmt.Fprintf(stderr, "STALE_UNTRACKED_SOURCE: %s is %s old; protect it with `fak wip autocheckpoint --reason manual --session %s` before admitting more work.\n", inv.Main.Untracked.OldestPath, time.Duration(inv.Main.Untracked.OldestAgeSeconds)*time.Second, self)
+		if inv.Main.Untracked.Count > 0 && inv.Main.Untracked.OldestUnprotectedPath != "" && inv.Main.Untracked.OldestUnprotectedAgeSeconds >= int64(maxUntrackedAge.Seconds()) {
+			fmt.Fprintf(stderr, "STALE_UNTRACKED_SOURCE: %s is %s old; protect it with `fak wip autocheckpoint --reason manual --session %s` before admitting more work.\n", inv.Main.Untracked.OldestUnprotectedPath, time.Duration(inv.Main.Untracked.OldestUnprotectedAgeSeconds)*time.Second, self)
 			return wipAdmitHoldExit
 		}
 	}

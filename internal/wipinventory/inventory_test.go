@@ -97,6 +97,16 @@ func TestCollectSeparatesEveryPopulationWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestCollectMarksStatFailureUnknown(t *testing.T) {
+	root := t.TempDir()
+	workerRoot := filepath.Join(root, "workers")
+	f := &fakeRunner{root: root, worker: filepath.Join(workerRoot, workerMarker+"-live")}
+	rep := Collect(root, time.Unix(1700000100, 0), f, Options{WorkerRoot: workerRoot})
+	if rep.Main.Untracked.Known || rep.Main.Untracked.Error == "" {
+		t.Fatalf("stat failure was not provenance-visible: %#v", rep.Main.Untracked)
+	}
+}
+
 func TestCollectIsDeterministicExceptObservationTime(t *testing.T) {
 	root := t.TempDir()
 	workerRoot := filepath.Join(root, "workers")
