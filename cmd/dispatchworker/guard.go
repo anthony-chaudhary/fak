@@ -625,36 +625,6 @@ func opencodeModelProvider(command []string) string {
 
 // opencodeCompactionOverlay builds the OpenCode-native 96K shed-line config overlay,
 // or nil when the provider's real limits are unknown (fail OPEN). Mirrors
-// dispatch_worker.opencode_compaction_overlay.
-func opencodeCompactionOverlay(command []string) map[string]any {
-	catalog, ok := opencodeModelLimits[opencodeModelProvider(command)]
-	if !ok {
-		return nil
-	}
-	models := map[string]any{}
-	for model, lim := range catalog {
-		// A window already at/below the shed line needs no early trigger -- and
-		// declaring input >= context would be a lie about the model.
-		if lim[0] <= opencodeCompactShedLineTokens {
-			continue
-		}
-		models[model] = map[string]any{"limit": map[string]any{
-			"context": lim[0],
-			"input":   opencodeCompactShedLineTokens,
-			"output":  lim[1],
-		}}
-	}
-	if len(models) == 0 {
-		return nil
-	}
-	return map[string]any{
-		// `auto` guards against a project config that disabled compaction outright;
-		// `reserved` 0 is honored and is what makes the trigger land ON the shed line
-		// rather than a maxOutputTokens-sized distance below it.
-		"compaction": map[string]any{"auto": true, "reserved": 0},
-		"provider":   map[string]any{opencodeModelProvider(command): map[string]any{"models": models}},
-	}
-}
 
 // deepMergeConfig overlays overlay onto base, recursing into nested objects. Mirrors
 // dispatch_worker._deep_merge_config.

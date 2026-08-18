@@ -283,25 +283,3 @@ func readNoteBody(root, ref string) (string, bool) {
 
 // edgesForCard resolves one card's edges against the checkout it was loaded from
 // (its own Root, else defaultRoot), memoising by root+ref so a repeated
-// DetailRef is read once per call. cache may be nil for a one-shot lookup.
-func edgesForCard(c FeatureCard, defaultRoot string, cache map[string][]Edge) []Edge {
-	root := c.Root
-	if root == "" {
-		root = defaultRoot
-	}
-	if root == "" {
-		return nil
-	}
-	key := root + "\x00" + c.DetailRef
-	if edges, done := cache[key]; done {
-		return edges
-	}
-	edges := NoteEdges(root, c.DetailRef)
-	if len(edges) > maxEdgesPerCard {
-		edges = edges[:maxEdgesPerCard]
-	}
-	if cache != nil {
-		cache[key] = edges
-	}
-	return edges
-}

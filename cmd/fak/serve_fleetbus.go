@@ -578,13 +578,6 @@ func resolveFleetBusID(sf *serveFlags) string {
 
 // defaultFleetBusInstanceID retains the old no-flags helper for address-less callers.
 // The real serve path calls resolveFleetBusIdentity with its configured transport; an
-// address-less caller necessarily gets the named process-local fallback.
-func defaultFleetBusInstanceID() string {
-	return fleetbus.ResolveServeIdentity(fleetbus.ServeIdentityRequest{
-		Machine: fleetBusMachine(),
-		PID:     fleetBusPID(),
-	}).ID
-}
 
 var fleetBusPID = os.Getpid
 

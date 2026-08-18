@@ -69,14 +69,6 @@ var (
 	buildCheckNow          = time.Now
 )
 
-// goOverlay is the JSON shape `go build -overlay <file>` consumes: a single Replace
-// map from an on-disk file path to its backing file. An EMPTY backing path makes the
-// go command treat the disk file as if it does not exist (see `go help build`), which
-// is exactly how we hide an untracked sibling from the compile.
-type goOverlay struct {
-	Replace map[string]string `json:"Replace"`
-}
-
 type buildCheckReport struct {
 	Schema           string                           `json:"schema"`
 	Mode             string                           `json:"mode"`
