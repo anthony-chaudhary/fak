@@ -20,6 +20,9 @@ func cmdOrchestration(args []string) {
 }
 
 func runOrchestration(stdout, stderr io.Writer, args []string) int {
+	if len(args) > 0 && args[0] == "status" {
+		return runOrchestrationStatus(stdout, stderr, args[1:])
+	}
 	if len(args) == 0 || args[0] != "plan" {
 		fmt.Fprintln(stderr, "usage: fak orchestration plan --profile off|auto|ultracode (--task FIXTURE | --task-text TEXT) [--json] [--strict] [--launch] [--selfcheck]")
 		return 2
