@@ -520,3 +520,9 @@ Run `fak disambiguation migration-self-test --json` to witness silent-removal re
 ## Projected-scale benchmark (#6327)
 
 `scale_benchmark_test.go` exercises deterministic generation plus exact, alias, and reverse queries at 4,096 valid entries. Every benchmark logs dataset size, tuned implementation baseline, OS/architecture and Go scope, and `OBSERVED` provenance; it reports machine-readable entry/provenance/baseline metrics as well. The dated observed run and exact reproduce command are captured in [`docs/benchmarks/DISAMBIGUATION-SCALE-2026-08-17.md`](../../docs/benchmarks/DISAMBIGUATION-SCALE-2026-08-17.md). These are scoped observations, not unsupported cross-hardware gains.
+
+## Public-safe issue-contract suggestions (#6328)
+
+`SuggestIssue` turns one uncovered coverage finding into a read-only contract containing title, problem, done condition, acceptance gate, likely files, and dedupe query. It never invokes GitHub or files an issue. Before rendering, the candidate term and source are passed through the same public-safety admission used by index entries, so credentials, local paths, private repositories or hosts, and control text are refused.
+
+Run `fak disambiguation issue-suggest-self-test --json` to capture all required fields, explicit `no_auto_file`, and refusal of an unsafe local-path candidate. Operators may review and file an emitted contract through the normal guarded issue workflow.

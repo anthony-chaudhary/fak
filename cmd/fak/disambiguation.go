@@ -24,10 +24,12 @@ func cmdDisambiguation(args []string) {
 
 func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak disambiguation migration-self-test [--json]\n       fak disambiguation diff --before FILE --after FILE [--json]\n       fak disambiguation metrics [--json]\n       fak disambiguation schema [--json] [--self-test]\n       fak disambiguation query <canonical-term> [--json]\n       fak disambiguation query --self-test [--json]\n       fak disambiguation search <term> [--json]\n       fak disambiguation reverse --kind source-path|symbol|cli-token|reason-code <locator> [--json]\n       fak disambiguation reverse --self-test [--json]\n       fak disambiguation cli-source [--json] [--self-test]\n       fak disambiguation docs [--output-dir DIR] [--check] [--json]\n       fak disambiguation ownership-source-self-test [--json]\n       fak disambiguation go-source-self-test [--json]\n       fak disambiguation lifecycle-source-self-test [--json]\n       fak disambiguation claims-source-self-test [--json]\n       fak disambiguation policy-source-self-test [--json]\n       fak disambiguation fleet-source-self-test [--json]\n       fak disambiguation runtime-source-self-test [--json]\n       fak disambiguation reason-source-self-test [--json]\n       fak disambiguation cache-source-self-test [--json]\n       fak disambiguation session-source-self-test [--json]\n       fak disambiguation stale-symbols-self-test [--json]\n       fak disambiguation coverage-self-test [--json]")
+		fmt.Fprintln(stderr, "usage: fak disambiguation issue-suggest-self-test [--json]\n       fak disambiguation migration-self-test [--json]\n       fak disambiguation diff --before FILE --after FILE [--json]\n       fak disambiguation metrics [--json]\n       fak disambiguation schema [--json] [--self-test]\n       fak disambiguation query <canonical-term> [--json]\n       fak disambiguation query --self-test [--json]\n       fak disambiguation search <term> [--json]\n       fak disambiguation reverse --kind source-path|symbol|cli-token|reason-code <locator> [--json]\n       fak disambiguation reverse --self-test [--json]\n       fak disambiguation cli-source [--json] [--self-test]\n       fak disambiguation docs [--output-dir DIR] [--check] [--json]\n       fak disambiguation ownership-source-self-test [--json]\n       fak disambiguation go-source-self-test [--json]\n       fak disambiguation lifecycle-source-self-test [--json]\n       fak disambiguation claims-source-self-test [--json]\n       fak disambiguation policy-source-self-test [--json]\n       fak disambiguation fleet-source-self-test [--json]\n       fak disambiguation runtime-source-self-test [--json]\n       fak disambiguation reason-source-self-test [--json]\n       fak disambiguation cache-source-self-test [--json]\n       fak disambiguation session-source-self-test [--json]\n       fak disambiguation stale-symbols-self-test [--json]\n       fak disambiguation coverage-self-test [--json]")
 		return 2
 	}
 	switch args[0] {
+	case "issue-suggest-self-test":
+		return runDisambiguationIssueSuggestSelfTest(stdout, stderr, args[1:])
 	case "migration-self-test":
 		return runDisambiguationMigrationSelfTest(stdout, stderr, args[1:])
 	case "diff":
@@ -85,9 +87,32 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 	case "coverage-self-test":
 		return runDisambiguationCoverageSelfTest(stdout, stderr, args[1:])
 	default:
-		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want migration-self-test, diff, metrics, schema, query, search, reverse, cli-source, docs, explain, ownership, freshness, provenance, ownership-source-self-test, go-source-self-test, lifecycle-source-self-test, claims-source-self-test, policy-source-self-test, fleet-source-self-test, runtime-source-self-test, reason-source-self-test, cache-source-self-test, session-source-self-test, stale-symbols-self-test, or coverage-self-test)\n", args[0])
+		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want issue-suggest-self-test, migration-self-test, diff, metrics, schema, query, search, reverse, cli-source, docs, explain, ownership, freshness, provenance, ownership-source-self-test, go-source-self-test, lifecycle-source-self-test, claims-source-self-test, policy-source-self-test, fleet-source-self-test, runtime-source-self-test, reason-source-self-test, cache-source-self-test, session-source-self-test, stale-symbols-self-test, or coverage-self-test)\n", args[0])
 		return 2
 	}
+}
+
+func runDisambiguationIssueSuggestSelfTest(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("disambiguation issue-suggest-self-test", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	jsonOutput := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "fak disambiguation issue-suggest-self-test: unexpected positional arguments")
+		return 2
+	}
+	report, err := disambiguation.RunIssueSuggestionSelfTest()
+	if err != nil {
+		fmt.Fprintf(stderr, "disambiguation issue-suggest self-test: FAIL: %v\n", err)
+		return 1
+	}
+	if *jsonOutput {
+		return encodeDisambiguationJSON(stdout, stderr, report)
+	}
+	fmt.Fprintf(stdout, "PASS %s: title=%q unsafe rejected=%t auto-file=%t\n", report.Schema, report.Suggestion.Title, report.UnsafeRejected, !report.NoAutoFile)
+	return 0
 }
 
 func runDisambiguationMigrationSelfTest(stdout, stderr io.Writer, args []string) int {
