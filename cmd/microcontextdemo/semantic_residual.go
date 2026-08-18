@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
@@ -479,49 +478,6 @@ func oneOf(s string, xs ...string) bool {
 		}
 	}
 	return false
-}
-
-func importSemanticJSONL(packetPath, jsonlPath, out, adjudicator, model string) error {
-	pb, e := os.ReadFile(packetPath)
-	if e != nil {
-		return e
-	}
-	var p semanticPacket
-	if e = json.Unmarshal(pb, &p); e != nil {
-		return e
-	}
-	by := map[string]semanticRecord{}
-	for _, x := range p.Records {
-		by[x.ID] = x
-	}
-	f, e := os.Open(jsonlPath)
-	if e != nil {
-		return e
-	}
-	defer f.Close()
-	r := semanticJudgmentBundle{Schema: semanticJudgmentSchema, Adjudicator: adjudicator, Model: model, PromptVersion: "semantic-residual-v1", PacketSHA256: shaHex(pb), CreatedAt: time.Now().UTC().Format(time.RFC3339), Endpoint: "independent-jsonl"}
-	s := bufio.NewScanner(f)
-	for s.Scan() {
-		var j semanticJudgment
-		if e = json.Unmarshal(s.Bytes(), &j); e != nil {
-			return e
-		}
-		x, ok := by[j.ID]
-		if !ok {
-			return fmt.Errorf("unknown id %s", j.ID)
-		}
-		if e = validateJudgment(x, j); e != nil {
-			return e
-		}
-		r.Judgments = append(r.Judgments, j)
-	}
-	if e = s.Err(); e != nil {
-		return e
-	}
-	if len(r.Judgments) != len(p.Records) {
-		return fmt.Errorf("judgments=%d records=%d", len(r.Judgments), len(p.Records))
-	}
-	return writeJSONFile(out, r)
 }
 
 const semanticGoldSchema = "fak-microcontext-semantic-gold/1"

@@ -459,12 +459,6 @@ func sourceLabel(v, provider string) string {
 	return provider + "-sessions"
 }
 
-func cleanRoot(v string) string {
-	if v == "" {
-		return ""
-	}
-	return filepath.Clean(v)
-}
 func suggestLeaf(seq []string) string {
 	parts := make([]string, 0, len(seq))
 	for _, v := range seq {

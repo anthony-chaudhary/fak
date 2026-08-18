@@ -64,8 +64,6 @@ func continuityCanonicalTask(sub string) (task string, impliedChannel string) {
 	}
 }
 
-type portabilityChannel string
-
 func runContinuityExplain(w io.Writer, args []string) int {
 	code, jsonOut := "READY", false
 	for i := 0; i < len(args); i++ {

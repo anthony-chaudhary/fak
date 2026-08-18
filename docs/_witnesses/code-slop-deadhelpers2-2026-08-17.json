@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T03:42:30.959148Z",
+  "issue": 7085,
+  "family": "unused private helper deletion, second slice",
+  "paths": [
+    "cmd/fak/continuity_ux.go",
+    "cmd/fak/fleet_metrics.go",
+    "cmd/microcontextdemo/semantic_residual.go",
+    "internal/sessionmine/sessionmine.go"
+  ],
+  "test": "go test ./cmd/microcontextdemo ./internal/sessionmine; fak-dev buildcheck --mine <changed paths>",
+  "test_result": "PASS",
+  "before": {
+    "score": -134.4,
+    "grade": "F",
+    "slop_debt": 406,
+    "duplication": 371,
+    "weighted_duplication": 237.5,
+    "dead_code": 29,
+    "vacuous_tests": 6
+  },
+  "after": {
+    "score": -130.0,
+    "grade": "F",
+    "slop_debt": 402,
+    "duplication": 371,
+    "weighted_duplication": 237.5,
+    "dead_code": 25,
+    "vacuous_tests": 6
+  },
+  "verdict": "PASS: dead code and total hard debt strictly decreased; no measured hard KPI increased"
+}

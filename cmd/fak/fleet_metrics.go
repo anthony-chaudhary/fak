@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -175,17 +174,6 @@ func (s fleetMetricsSources) render(now time.Time) string {
 // registrationInventory reads the execution lineage graph written before every guard /
 // dispatchworker child starts. Missing is an honest empty graph; malformed or unreadable
 // data flips the readability gauge so absence is never mistaken for "no goals".
-func defaultChildRegistrationLedgerPath() string {
-	// FAK_SESSION_REGISTRY historically names the durable PCB registry consumed by
-	// --registry. Reusing it here would make the two unrelated schemas collide. The
-	// child-lineage writer uses its own documented default; an operator sharing a custom
-	// lineage store names it explicitly with --registration-ledger.
-	if d, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(d, "fak", "child-registrations.jsonl")
-	}
-	return filepath.Join(".fak", "child-registrations.jsonl")
-}
-
 func (s fleetMetricsSources) registrationInventory() ([]sessionregistry.Record, bool) {
 	path := strings.TrimSpace(s.registrationLedger)
 	if path == "" {
