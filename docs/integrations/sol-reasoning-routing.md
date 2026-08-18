@@ -8,7 +8,7 @@
 |---|---|---|---|
 | `standard` | one Codex worker, `reasoning_effort=high` | small, bounded implementation work | fastest and least expensive guarded route |
 | `max` | one Codex worker, `reasoning_effort=xhigh` | correctness-heavy, uncertain, security, architecture, or adversarial work | more reasoning time and tokens; no extra independence |
-| `ultra` | FAK's leased multi-worker orchestration, each at `high`, with independent effect readback | fleet waves, backlog work, fan-out, and genuinely independent issue work | multiplies worker usage; collision control and reconciliation are mandatory |
+| `ultra` | FAK's leased multi-worker orchestration at `high`, or `xhigh` when rigor/uncertainty also applies, with independent effect readback | fleet waves, backlog work, fan-out, and genuinely independent issue work | multiplies worker usage; collision control and reconciliation are mandatory |
 | `pro` | OpenAI Responses `reasoning.mode="pro"`, independent of effort | an explicit, separately metered consultation or adversarial review | potentially slow/expensive; not suitable for every tool-use turn |
 
 OpenAI's reasoning guide says `reasoning.mode` chooses `standard` or `pro` execution and is independent of `reasoning.effort`; omitted effort defaults to `medium` in either mode. Do not spell Pro as `xhigh`, `max`, or a model slug. Product “Ultra” is likewise not an API reasoning mode: it is multi-agent delegation (or, on some surfaces, a UI label for maximum effort).
@@ -31,13 +31,13 @@ fak orchestration plan --profile auto --task-text "audit an uncertain security i
 fak orchestration plan --profile auto --task-text "run a fleet wave over independent issues" --json
 ```
 
-The first resolves to `max/xhigh`; the second resolves to `ultra/high` and the ultracode profile. An explicit `consult pro` request resolves to `pro`, but `--launch` returns `SOL_ROUTE_PRO_CONSULT_ONLY` instead of silently launching ordinary reasoning.
+The first resolves to `max/xhigh`; the second resolves to `ultra/high` and the ultracode profile. If a task is both independent and rigor-sensitive, it resolves to `ultra/xhigh`: workflow topology never downgrades reasoning depth. An explicit `consult pro` request resolves to `pro`, but `--launch` returns `SOL_ROUTE_PRO_CONSULT_ONLY` instead of silently launching ordinary reasoning.
 
 ## Default policy
 
 - Keep ordinary issue workers on `standard/high`.
 - Select `max/xhigh` when correctness or uncertainty dominates and parallelism would not provide independent evidence.
-- Select `ultra/high` for fleet-wave, super-loop, backlog, unattended, or clearly decomposable independent work. Leases, bounded workers, independent witnesses, telemetry receipts, and reconciliation remain required.
+- Select `ultra/high` for ordinary fleet-wave, super-loop, backlog, unattended, or clearly decomposable independent work; retain `ultra/xhigh` when the same work is an audit, security-sensitive, uncertain, or otherwise rigor-classed. Leases, bounded workers, independent witnesses, telemetry receipts, and reconciliation remain required.
 - Select `pro` only when the issue explicitly asks for a Pro consultation. Until Codex supports `reasoning.mode`, fail closed and retain the planned question; never relabel xhigh as Pro.
 - Do not enable Pro globally for FAK development. Its value is concentrated in scarce architectural decisions and final adversarial review, while its latency/cost and missing Codex wire support make default-on both inefficient and unverifiable.
 

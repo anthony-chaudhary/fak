@@ -17,6 +17,8 @@ func TestSelectSOLRoute(t *testing.T) {
 		{name: "rigor", task: "audit an uncertain security invariant", profile: ProfileAuto, workClass: WorkRigor, wantMode: SOLMax, wantEffort: "xhigh"},
 		{name: "wave", task: "run a fleet wave over independent issues", profile: ProfileAuto, workClass: WorkGrind, wantMode: SOLUltra, wantEffort: "high", wantMulti: true},
 		{name: "ultracode profile", task: "implement the feature", profile: ProfileUltracode, workClass: WorkGrind, wantMode: SOLUltra, wantEffort: "high", wantMulti: true},
+		{name: "parallel rigor", task: "audit an uncertain security invariant in parallel", profile: ProfileAuto, workClass: WorkRigor, wantMode: SOLUltra, wantEffort: "xhigh", wantMulti: true},
+		{name: "ultracode rigor", task: "verify the migration", profile: ProfileUltracode, workClass: WorkRigor, wantMode: SOLUltra, wantEffort: "xhigh", wantMulti: true},
 		{name: "pro is consult only", task: "consult pro for an adversarial review", profile: ProfileAuto, workClass: WorkRigor, wantMode: SOLPro, wantEffort: "xhigh", wantConsult: true},
 		{name: "off", task: "audit an uncertain invariant", profile: ProfileOff, workClass: WorkRigor, wantMode: SOLStandard, wantEffort: "medium"},
 	}

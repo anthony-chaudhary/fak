@@ -69,14 +69,19 @@ func SelectSOLRoute(task string, profile Profile, workClass WorkClass, model str
 		route.Decision = "explicit Pro consultation requested; keep it separate because Codex cannot yet transmit reasoning.mode"
 		return route
 	}
+	rigor := workClass == WorkRigor || containsAny(lower, rigorSignals...)
 	if profile == ProfileUltracode || containsAny(lower, parallelSignals...) || (workClass == WorkGrind && profile == ProfileAuto) {
 		route.Mode = SOLUltra
-		route.ReasoningEffort = "high"
 		route.MultiAgent = true
-		route.Decision = "independent issue work can be delegated behind leases and reconciled by witnesses"
+		if rigor {
+			route.ReasoningEffort = "xhigh"
+			route.Decision = "independent work can be delegated, but correctness or uncertainty keeps each worker at maximum effort"
+		} else {
+			route.Decision = "independent issue work can be delegated behind leases and reconciled by witnesses"
+		}
 		return route
 	}
-	if workClass == WorkRigor || containsAny(lower, rigorSignals...) {
+	if rigor {
 		route.Mode = SOLMax
 		route.ReasoningEffort = "xhigh"
 		route.Decision = "correctness or uncertainty dominates, so spend the maximum supported reasoning effort"
