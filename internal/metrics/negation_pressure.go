@@ -2,7 +2,8 @@ package metrics
 
 import (
 	"encoding/json"
-	"math"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 const NegationPressureSchema = "fak.negation_pressure.v1"
@@ -36,32 +37,9 @@ func FoldNegationPressure(provenance string, buckets []NegationPressureBucket) N
 		negative = append(negative, rows[i].NegativePassRate)
 		positive = append(positive, rows[i].PositivePassRate)
 	}
-	negCorr := correlation(pressure, negative)
-	posCorr := correlation(pressure, positive)
+	negCorr := mathx.Pearson(pressure, negative)
+	posCorr := mathx.Pearson(pressure, positive)
 	return NegationPressureReport{Schema: NegationPressureSchema, Provenance: provenance, Buckets: rows, NegativePressureCorrelation: negCorr, PositivePressureCorrelation: posCorr, SignPinned: negCorr < 0}
 }
 
 func (r NegationPressureReport) JSON() []byte { b, _ := json.MarshalIndent(r, "", "  "); return b }
-
-func correlation(x, y []float64) float64 {
-	if len(x) != len(y) || len(x) == 0 {
-		return 0
-	}
-	var sx, sy float64
-	for i := range x {
-		sx += x[i]
-		sy += y[i]
-	}
-	mx, my := sx/float64(len(x)), sy/float64(len(y))
-	var num, dx, dy float64
-	for i := range x {
-		a, b := x[i]-mx, y[i]-my
-		num += a * b
-		dx += a * a
-		dy += b * b
-	}
-	if dx == 0 || dy == 0 {
-		return 0
-	}
-	return num / math.Sqrt(dx*dy)
-}

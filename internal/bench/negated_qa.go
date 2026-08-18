@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 )
 
@@ -85,7 +86,7 @@ func AnalyzeNegatedQA(items []NegatedQAItem, witnessPath string) (NegatedQARepor
 			ties++
 		}
 	}
-	corr := pearson(tax, failure)
+	corr := mathx.Pearson(tax, failure)
 	p := twoSidedSignP(improved, worsened)
 	directional := corr > 0 && improved > worsened
 	significant := p <= 0.05
@@ -153,29 +154,6 @@ func containsForbidden(output string, forbidden []string) bool {
 		}
 	}
 	return false
-}
-
-func pearson(x, y []float64) float64 {
-	if len(x) != len(y) || len(x) == 0 {
-		return 0
-	}
-	var sx, sy float64
-	for i := range x {
-		sx += x[i]
-		sy += y[i]
-	}
-	mx, my := sx/float64(len(x)), sy/float64(len(y))
-	var num, dx, dy float64
-	for i := range x {
-		a, b := x[i]-mx, y[i]-my
-		num += a * b
-		dx += a * a
-		dy += b * b
-	}
-	if dx == 0 || dy == 0 {
-		return 0
-	}
-	return num / math.Sqrt(dx*dy)
 }
 
 func twoSidedSignP(positive, negative int) float64 {
