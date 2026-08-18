@@ -1,8 +1,11 @@
 package workerworktree
 
 import (
+	"archive/zip"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -218,5 +221,203 @@ func TestColdReapListNilOracleKeepsEverything(t *testing.T) {
 	plan := ColdReapList("/repo", g.run, now, 30*time.Minute, nil)
 	if len(plan) != 1 || plan[0].Eligible {
 		t.Fatalf("nil oracle must keep everything, got %+v", plan)
+	}
+}
+
+func TestUnregisteredResidueArchivesBeforeRemoval(t *testing.T) {
+	repo := newResidueRepo(t)
+	base := t.TempDir()
+	now := time.Now().UTC()
+	old := now.Add(-2 * time.Hour)
+	stale := filepath.Join(base, "fak-worker-wt-stale-deadbeef0001")
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stale, "valuable.txt"), []byte("preserve me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(stale, "valuable.txt"), old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := CollectUnregisteredResidue(repo, ResidueOptions{BaseDir: base, Now: now, AgeFloor: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || !items[0].Eligible || items[0].Entries != 1 {
+		t.Fatalf("unexpected plan: %+v", items)
+	}
+	if _, err := os.Stat(stale); err != nil {
+		t.Fatalf("dry-run mutated source: %v", err)
+	}
+
+	archiveDir := filepath.Join(t.TempDir(), "archives")
+	items, err = ApplyUnregisteredResidue(items, ResidueOptions{BaseDir: base, ArchiveDir: archiveDir, Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !items[0].Removed || items[0].Archive == "" {
+		t.Fatalf("unexpected apply: %+v", items[0])
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("source not removed: %v", err)
+	}
+	zr, err := zip.OpenReader(filepath.FromSlash(items[0].Archive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+	if len(zr.File) != 1 || zr.File[0].Name != "valuable.txt" {
+		t.Fatalf("bad archive: %+v", zr.File)
+	}
+	if _, err := os.Stat(filepath.FromSlash(items[0].Archive) + ".json"); err != nil {
+		t.Fatalf("receipt missing: %v", err)
+	}
+}
+
+func TestUnregisteredResidueKeepsFreshOwnedAndForeign(t *testing.T) {
+	repo := newResidueRepo(t)
+	base := t.TempDir()
+	now := time.Now().UTC()
+	old := now.Add(-2 * time.Hour)
+	for _, name := range []string{"fak-worker-wt-fresh-deadbeef0002", "fak-worker-wt-owned-deadbeef0003", "fak-worker-wt-foreign-deadbeef0004"} {
+		if err := os.MkdirAll(filepath.Join(base, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	owned := filepath.Join(base, "fak-worker-wt-owned-deadbeef0003")
+	_ = os.Chtimes(owned, old, old)
+	if err := os.MkdirAll(filepath.Join(base, ".fak-worker-intents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, ".fak-worker-intents", filepath.Base(owned)+".json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	foreign := filepath.Join(base, "fak-worker-wt-foreign-deadbeef0004")
+	if err := os.WriteFile(filepath.Join(foreign, ".git"), []byte("gitdir: elsewhere"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(foreign, old, old)
+	items, err := CollectUnregisteredResidue(repo, ResidueOptions{BaseDir: base, Now: now, AgeFloor: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("got %d: %+v", len(items), items)
+	}
+	for _, item := range items {
+		if item.Eligible {
+			t.Fatalf("must retain %s: %+v", item.Path, item)
+		}
+		if !strings.HasPrefix(item.Reason, "kept:") {
+			t.Fatalf("missing typed keep: %+v", item)
+		}
+	}
+}
+
+func TestApplyUnregisteredResidueRejectsEscapingPath(t *testing.T) {
+	base := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "fak-worker-wt-outside-deadbeef0005")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	items, err := ApplyUnregisteredResidue([]ResidueItem{{Path: filepath.ToSlash(outside), Eligible: true}}, ResidueOptions{BaseDir: base, ArchiveDir: t.TempDir()})
+	if err == nil || items[0].Removed {
+		t.Fatalf("escape accepted: err=%v item=%+v", err, items[0])
+	}
+	if _, statErr := os.Stat(outside); statErr != nil {
+		t.Fatalf("outside path changed: %v", statErr)
+	}
+}
+
+func newResidueRepo(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	cmd := exec.Command("git", "init", "-q", repo)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	return repo
+}
+
+func TestUnregisteredResidueRemovesEmptyAndPreservesOnArchiveFailure(t *testing.T) {
+	repo := newResidueRepo(t)
+	base := t.TempDir()
+	now := time.Now().UTC()
+	old := now.Add(-2 * time.Hour)
+	empty := filepath.Join(base, "fak-worker-wt-empty-deadbeef0006")
+	full := filepath.Join(base, "fak-worker-wt-full-deadbeef0007")
+	for _, path := range []string{empty, full} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(full, "work.txt"), []byte("work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{empty, full, filepath.Join(full, "work.txt")} {
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, err := CollectUnregisteredResidue(repo, ResidueOptions{BaseDir: base, Now: now, AgeFloor: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archiveBlocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(archiveBlocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	items, err = ApplyUnregisteredResidue(items, ResidueOptions{BaseDir: base, ArchiveDir: archiveBlocker, Now: now, AgeFloor: time.Hour})
+	if err == nil {
+		t.Fatal("expected archive failure")
+	}
+	byPath := map[string]ResidueItem{}
+	for _, item := range items {
+		byPath[filepath.FromSlash(item.Path)] = item
+	}
+	if !byPath[empty].Removed {
+		t.Fatalf("empty residue not removed: %+v", byPath[empty])
+	}
+	if byPath[full].Removed {
+		t.Fatalf("non-empty residue removed after archive failure: %+v", byPath[full])
+	}
+	if _, statErr := os.Stat(filepath.Join(full, "work.txt")); statErr != nil {
+		t.Fatalf("valuable source lost: %v", statErr)
+	}
+}
+
+func TestApplyUnregisteredResidueRevalidatesFreshness(t *testing.T) {
+	repo := newResidueRepo(t)
+	base := t.TempDir()
+	now := time.Now().UTC()
+	old := now.Add(-2 * time.Hour)
+	path := filepath.Join(base, "fak-worker-wt-race-deadbeef0008")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(path, old, old)
+	items, err := CollectUnregisteredResidue(repo, ResidueOptions{Repo: repo, BaseDir: base, Now: now, AgeFloor: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || !items[0].Eligible {
+		t.Fatalf("bad plan: %+v", items)
+	}
+	if err := os.WriteFile(filepath.Join(path, "new-work.txt"), []byte("live"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	items, err = ApplyUnregisteredResidue(items, ResidueOptions{Repo: repo, BaseDir: base, ArchiveDir: t.TempDir(), Now: now, AgeFloor: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items[0].Removed || items[0].Eligible || !strings.Contains(items[0].Reason, "changed after planning") {
+		t.Fatalf("race not refused: %+v", items[0])
+	}
+	if _, err := os.Stat(filepath.Join(path, "new-work.txt")); err != nil {
+		t.Fatalf("new work lost: %v", err)
 	}
 }

@@ -337,8 +337,9 @@ type worktreeColdReapOut struct {
 	// kept only because they still carry uncommitted work, with their reclaimable
 	// bytes. Reported separately from the generic keep because it is a triage queue,
 	// not a wait: that disk comes back only once each diff is landed or abandoned.
-	HeldByWork      int   `json:"held_by_work"`
-	HeldByWorkBytes int64 `json:"held_by_work_bytes"`
+	HeldByWork          int                          `json:"held_by_work"`
+	HeldByWorkBytes     int64                        `json:"held_by_work_bytes"`
+	UnregisteredResidue []workerworktree.ResidueItem `json:"unregistered_residue,omitempty"`
 }
 
 // worktreeWorkerReapAllCold is the bulk cold sweep (#5351): enumerate every worker
@@ -350,7 +351,17 @@ func worktreeWorkerReapAllCold(repoRoot string, apply bool, ageFloor time.Durati
 	if !apply && strings.EqualFold(strings.TrimSpace(os.Getenv(worktreeColdApplyEnv)), "apply") {
 		apply = true
 	}
-	out := worktreeColdReapReport(repoRoot, apply, ageFloor, time.Now(), evenIfUnlanded)
+	now := time.Now()
+	out := worktreeColdReapReport(repoRoot, apply, ageFloor, now, evenIfUnlanded)
+	residueOpts := workerworktree.ResidueOptions{Repo: repoRoot, Now: now, AgeFloor: ageFloor}
+	residue, residueErr := workerworktree.CollectUnregisteredResidue(repoRoot, residueOpts)
+	if residueErr == nil && apply {
+		residue, residueErr = workerworktree.ApplyUnregisteredResidue(residue, residueOpts)
+	}
+	out.UnregisteredResidue = residue
+	if residueErr != nil {
+		out.Failures = append(out.Failures, worktreeColdReapFailure{Path: "unregistered-residue", Reason: residueErr.Error()})
+	}
 	worktreeWorkerEmit(out)
 	// The human one-liner goes to stderr so stdout stays exactly one JSON object.
 	kept := len(out.Worktrees) - out.WouldReap
