@@ -1209,7 +1209,7 @@ func selfRegisters(t *testing.T, internal, pkg string) bool {
 // wired by its constructor at the Submit seam, not as a passive driver.
 // A leaf added here is a conscious "wired elsewhere" decision, the same review
 // chokepoint as the tier table.
-var regOffList = map[string]bool{"agent": true, "gateway": true, "computeadmit": true}
+var regOffList = map[string]bool{"agent": true, "gateway": true, "computeadmit": true, "codetools": true}
 
 // TestRequestPathLeavesRegistered closes the registration-completeness hole: a leaf whose
 // production init() calls abi.Register* MUST be either blank-imported by the defconfig
