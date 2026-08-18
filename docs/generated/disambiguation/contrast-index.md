@@ -53,6 +53,33 @@
   - **disambiguation package:** The command-line product surface is not the internal Go package API.
   - **fak CLI kernel:** The package API is not the fak command-line product surface.
 
+<a id="model-kv-cache"></a>
+## model KV cache
+
+- **Identity:** [model KV cache — `cache:model-attention`](canonical-terms.md#model-kv-cache-cache-model-attention); query with `fak disambiguation query "model KV cache"`
+- **Contrasts:**
+  - **provider prompt cache:** The model KV cache is directly owned and mutable inside fak; provider prompt caching is an upstream reuse service exposed as billed token axes.
+  - **radix prefix cache:** A KV cache is one sequence's live attention state; the radix cache indexes token prefixes and references reusable snapshots across requests.
+  - **tool-result cache:** The KV cache contains model attention state, not completed tool outputs or world-versioned effects.
+
+<a id="provider-prompt-cache"></a>
+## provider prompt cache
+
+- **Identity:** [provider prompt cache — `cache:provider-prompt-prefix`](canonical-terms.md#provider-prompt-cache-cache-provider-prompt-prefix); query with `fak disambiguation query "provider prompt cache"`
+- **Contrasts:**
+  - **model KV cache:** Provider prompt cache state is not directly addressable tensor memory in fak and cannot be edited like the kernel-owned KV cache.
+  - **radix prefix cache:** Provider cache lifetime and identity are upstream contracts; the radix prefix cache is fak-owned, namespace-keyed, and explicitly budgeted and evicted.
+  - **tool-result cache:** Provider prompt caching reuses model input prefixes outside fak; the tool-result cache locally serves completed tool outputs under effect-aware invalidation.
+
+<a id="radix-prefix-cache"></a>
+## radix prefix cache
+
+- **Identity:** [radix prefix cache — `cache:radix-prefix-snapshots`](canonical-terms.md#radix-prefix-cache-cache-radix-prefix-snapshots); query with `fak disambiguation query "radix prefix cache"`
+- **Contrasts:**
+  - **model KV cache:** The radix cache is a multi-prefix lookup and residency index; a model KV cache is the live tensor state for one sequence.
+  - **provider prompt cache:** The radix cache is namespace-scoped, budgeted, and evicted by fak; provider prompt caching is controlled upstream and reported through cache read/write usage.
+  - **tool-result cache:** The radix cache keys token-prefix paths and snapshot residency; the tool-result cache keys tool calls plus effect epochs.
+
 <a id="recovery-checkpoint"></a>
 ## recovery checkpoint
 
@@ -76,3 +103,12 @@
 - **Contrasts:**
   - **agent session:** Resume changes the run state of an existing session; it is not the session identity or transcript.
   - **session recovery:** Resume continues a valid paused session; recovery repairs or reroutes state that cannot safely continue as-is.
+
+<a id="tool-result-cache"></a>
+## tool-result cache
+
+- **Identity:** [tool-result cache — `cache:tool-results`](canonical-terms.md#tool-result-cache-cache-tool-results); query with `fak disambiguation query "tool-result cache"`
+- **Contrasts:**
+  - **model KV cache:** The tool-result cache stores tool outputs and invalidates on modeled world changes; the KV cache stores per-token attention tensors.
+  - **provider prompt cache:** The tool-result cache is kernel-owned and directly invalidated by fak epochs; provider prompt-cache entries are externally owned and observed through usage accounting.
+  - **radix prefix cache:** The tool-result cache looks up effect-safe tool calls; the radix cache longest-prefix-matches token sequences to reusable model snapshots.

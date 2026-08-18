@@ -717,6 +717,31 @@
           "category": "incidental",
           "reason": "Exported summary field for #2789 tier evidence, not a separate cache mechanism concept.",
           "token": "CacheCreationTokensTierObserved"
+        },
+        {
+          "category": "incidental",
+          "reason": "Public cache-terminology fixture plumbing, not an additional cache mechanism",
+          "token": "runDisambiguationCacheSourceSelfTest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Public cache-terminology fixture plumbing, not an additional cache mechanism",
+          "token": "RunCacheSourceSelfTest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Public cache-terminology fixture plumbing, not an additional cache mechanism",
+          "token": "CacheSourceSelfTestSchemaVersion"
+        },
+        {
+          "category": "incidental",
+          "reason": "Public cache-terminology fixture plumbing, not an additional cache mechanism",
+          "token": "CacheSourceResolution"
+        },
+        {
+          "category": "incidental",
+          "reason": "Public cache-terminology fixture plumbing, not an additional cache mechanism",
+          "token": "CacheSourceSelfTestReport"
         }
       ],
       "id": "cache",
@@ -733,6 +758,9 @@
         "CacheLineage",
         "CacheLineageChanged",
         "CacheReadRate",
+        "CacheSourceResolution",
+        "CacheSourceSelfTestReport",
+        "CacheSourceSelfTestSchemaVersion",
         "CacheStateAllowlist",
         "CacheValueBaseline",
         "CacheValueFacts",
@@ -758,6 +786,7 @@
         "ProviderCacheWriteTokens",
         "ReasonCacheState",
         "RestartCacheHits",
+        "RunCacheSourceSelfTest",
         "SharedPrefixProviderCache",
         "SubCacheWarmReplay",
         "TestMicroCacheWitnessCapturesOnOffProviderCounters",
@@ -899,6 +928,7 @@
         "replaceMicroCacheWitness",
         "resetClaudeKeychainCache",
         "runCacheValueGateScore",
+        "runDisambiguationCacheSourceSelfTest",
         "runMicroCacheArm",
         "runMicroCacheWitness",
         "selectorCacheKey",

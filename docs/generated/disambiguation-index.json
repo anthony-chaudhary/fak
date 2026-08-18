@@ -1,7 +1,7 @@
 {
   "schema": "fak-disambiguation-index/1",
-  "source_revision": "sha256:3e4f241248d956d4619c90b8fbea5186dbff74538ed871d64cc26f32a798fa9f",
-  "entry_count": 11,
+  "source_revision": "sha256:d581df4a46e492d344f791f301152f4cc85f798847c12203a20f6f12a4fd7019",
+  "entry_count": 15,
   "entries": [
     {
       "schema": "fak-disambiguation-entry/1",
@@ -372,6 +372,192 @@
     {
       "schema": "fak-disambiguation-entry/1",
       "identity": {
+        "canonical_term": "model KV cache",
+        "aliases": [
+          "KV cache",
+          "KVCache"
+        ]
+      },
+      "definition": "Kernel-owned per-layer attention key/value tensors indexed by token position and invalidated or rewritten when the model sequence changes.",
+      "contrasts": [
+        {
+          "canonical_term": "provider prompt cache",
+          "explanation": "The model KV cache is directly owned and mutable inside fak; provider prompt caching is an upstream reuse service exposed as billed token axes.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "radix prefix cache",
+          "explanation": "A KV cache is one sequence's live attention state; the radix cache indexes token prefixes and references reusable snapshots across requests.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "tool-result cache",
+          "explanation": "The KV cache contains model attention state, not completed tool outputs or world-versioned effects.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "cache",
+        "value": "model-attention"
+      },
+      "owner": {
+        "leaf": "model",
+        "lane": "model"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/model/kvcache.go",
+          "revision": "cache-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-cache-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "KVCache"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "cache-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "provider prompt cache",
+        "aliases": [
+          "prompt cache",
+          "provider cache"
+        ]
+      },
+      "definition": "An upstream provider-owned prompt-prefix reuse service observed as cache-read and cache-creation token accounting with provider TTL and pricing rules.",
+      "contrasts": [
+        {
+          "canonical_term": "model KV cache",
+          "explanation": "Provider prompt cache state is not directly addressable tensor memory in fak and cannot be edited like the kernel-owned KV cache.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "radix prefix cache",
+          "explanation": "Provider cache lifetime and identity are upstream contracts; the radix prefix cache is fak-owned, namespace-keyed, and explicitly budgeted and evicted.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "tool-result cache",
+          "explanation": "Provider prompt caching reuses model input prefixes outside fak; the tool-result cache locally serves completed tool outputs under effect-aware invalidation.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "cache",
+        "value": "provider-prompt-prefix"
+      },
+      "owner": {
+        "leaf": "gateway",
+        "lane": "gateway"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/gateway/cache_pricing.go",
+          "revision": "cache-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-cache-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "CacheUsage"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "cache-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "radix prefix cache",
+        "aliases": [
+          "prefix cache",
+          "radix cache"
+        ]
+      },
+      "definition": "A fak-owned radix tree that longest-prefix-matches namespaced token sequences to reusable KV snapshots under token and byte budgets.",
+      "contrasts": [
+        {
+          "canonical_term": "model KV cache",
+          "explanation": "The radix cache is a multi-prefix lookup and residency index; a model KV cache is the live tensor state for one sequence.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "provider prompt cache",
+          "explanation": "The radix cache is namespace-scoped, budgeted, and evicted by fak; provider prompt caching is controlled upstream and reported through cache read/write usage.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "tool-result cache",
+          "explanation": "The radix cache keys token-prefix paths and snapshot residency; the tool-result cache keys tool calls plus effect epochs.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "cache",
+        "value": "radix-prefix-snapshots"
+      },
+      "owner": {
+        "leaf": "radixkv",
+        "lane": "radixkv"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/radixkv/radixkv.go",
+          "revision": "cache-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-cache-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "Tree"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "cache-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
         "canonical_term": "recovery checkpoint",
         "aliases": [
           "checkpoint"
@@ -528,6 +714,67 @@
         "reason_code": "SOURCE_CURRENT",
         "checked_at": "2026-08-17T00:00:00Z",
         "probe": "session-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "tool-result cache",
+        "aliases": [
+          "vDSO cache"
+        ]
+      },
+      "definition": "A fak-owned cache of completed tool-call results keyed by tool, argument hash, principal when isolated, and world-version epochs.",
+      "contrasts": [
+        {
+          "canonical_term": "model KV cache",
+          "explanation": "The tool-result cache stores tool outputs and invalidates on modeled world changes; the KV cache stores per-token attention tensors.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "provider prompt cache",
+          "explanation": "The tool-result cache is kernel-owned and directly invalidated by fak epochs; provider prompt-cache entries are externally owned and observed through usage accounting.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "radix prefix cache",
+          "explanation": "The tool-result cache looks up effect-safe tool calls; the radix cache longest-prefix-matches token sequences to reusable model snapshots.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "cache",
+        "value": "tool-results"
+      },
+      "owner": {
+        "leaf": "vdso",
+        "lane": "vdso"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/vdso/vdso.go",
+          "revision": "cache-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-cache-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "VDSO"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "cache-source/1"
       },
       "lifecycle": {
         "class": "current",

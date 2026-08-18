@@ -357,3 +357,24 @@ fak disambiguation query compaction
 ```
 
 Two conflations are explicitly forbidden: **resume is not recovery**, because a paused but valid session does not require repair; and **compaction is not a recovery checkpoint**, because rewriting model context is not the same operation as preserving control-plane continuation state. All records cite public Go symbols under `internal/session`; no private transcript or secondary terminology writer is involved.
+
+## Cache and prefix-reuse terminology (#6315)
+
+“Cache” names four different objects in fak. The canonical index distinguishes them by owner, cached object, lookup identity, and invalidation boundary:
+
+| Input | Canonical identity | Owner and object | Lookup / invalidation boundary |
+|---|---|---|---|
+| `vDSO cache` | `tool-result cache` | `internal/vdso`; completed tool outputs | Tool + argument hash + principal + effect epochs; writes strand old epoch keys. |
+| `KV cache` | `model KV cache` | `internal/model`; live attention K/V tensors | Sequence positions; token eviction or sequence rewrite mutates the tensors. |
+| `radix cache` | `radix prefix cache` | `internal/radixkv`; reusable prefix snapshots | Namespaced token longest-prefix match; explicit token/byte budgets and eviction. |
+| `provider cache` | `provider prompt cache` | Upstream provider; prompt-prefix reuse | Provider identity/TTL; fak observes cache-read and cache-creation token axes rather than owning entries. |
+
+Run the public four-way fixture:
+
+```text
+fak disambiguation cache-source-self-test --json
+fak disambiguation query "KV cache"
+fak disambiguation query "provider cache"
+```
+
+The fixture requires every record to carry three explicit forbidden contrasts, a distinct owner leaf, and public Go-symbol provenance. In particular, a radix prefix lookup is not the same object as a live KV tensor, and neither is evidence that the external provider prompt cache hit.

@@ -12,9 +12,13 @@
 | [fak CLI kernel](#fak-cli-kernel-cli-fak) | `cli:fak` | The fak command-line product surface, named as a contrast target for the package-scoped kernel entry. | `fak disambiguation query "fak CLI kernel"` |
 | [kernel](#kernel-cli-fak) | `cli:fak` | The fak command-line product surface for operating the agent kernel. | `fak disambiguation query --scope-kind cli --scope-value fak "kernel"` |
 | [kernel](#kernel-package-internal-disambiguation) | `package:internal/disambiguation` | The internal/disambiguation Go package that validates and queries public terminology records. | `fak disambiguation query --scope-kind package --scope-value internal/disambiguation "kernel"` |
+| [model KV cache](#model-kv-cache-cache-model-attention) | `cache:model-attention` | Kernel-owned per-layer attention key/value tensors indexed by token position and invalidated or rewritten when the model sequence changes. | `fak disambiguation query "model KV cache"` |
+| [provider prompt cache](#provider-prompt-cache-cache-provider-prompt-prefix) | `cache:provider-prompt-prefix` | An upstream provider-owned prompt-prefix reuse service observed as cache-read and cache-creation token accounting with provider TTL and pricing rules. | `fak disambiguation query "provider prompt cache"` |
+| [radix prefix cache](#radix-prefix-cache-cache-radix-prefix-snapshots) | `cache:radix-prefix-snapshots` | A fak-owned radix tree that longest-prefix-matches namespaced token sequences to reusable KV snapshots under token and byte budgets. | `fak disambiguation query "radix prefix cache"` |
 | [recovery checkpoint](#recovery-checkpoint-runtime-internal-session) | `runtime:internal/session` | A typed snapshot of goal, pending turn, continuation, generation, and state revision emitted when session recovery is requested. | `fak disambiguation query "recovery checkpoint"` |
 | [session recovery](#session-recovery-runtime-internal-session) | `runtime:internal/session` | A bounded repair or reroute response when persisted or cumulative session state cannot safely continue unchanged. | `fak disambiguation query "session recovery"` |
 | [session resume](#session-resume-runtime-internal-session) | `runtime:internal/session` | The paused-to-running boundary that re-admits an existing session using warm KV when available or a safe cold re-prefill. | `fak disambiguation query "session resume"` |
+| [tool-result cache](#tool-result-cache-cache-tool-results) | `cache:tool-results` | A fak-owned cache of completed tool-call results keyed by tool, argument hash, principal when isolated, and world-version epochs. | `fak disambiguation query "tool-result cache"` |
 
 <a id="agent-kernel-product-fak"></a>
 ## agent kernel — `product:fak`
@@ -123,6 +127,54 @@ The internal/disambiguation Go package that validates and queries public termino
 - **Do not conflate with:**
   - [fak CLI kernel](contrast-index.md#fak-cli-kernel) — The package API is not the fak command-line product surface.
 
+<a id="model-kv-cache-cache-model-attention"></a>
+## model KV cache — `cache:model-attention`
+
+Kernel-owned per-layer attention key/value tensors indexed by token position and invalidated or rewritten when the model sequence changes.
+
+- **Query:** `fak disambiguation query "model KV cache"`
+- **Owner:** leaf `model`, lane `model`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `KV cache`, `KVCache`
+- **Sources:**
+  - `internal/model/kvcache.go` — `go-source` at `cache-source/1`
+- **Do not conflate with:**
+  - [provider prompt cache](contrast-index.md#provider-prompt-cache) — The model KV cache is directly owned and mutable inside fak; provider prompt caching is an upstream reuse service exposed as billed token axes.
+  - [radix prefix cache](contrast-index.md#radix-prefix-cache) — A KV cache is one sequence's live attention state; the radix cache indexes token prefixes and references reusable snapshots across requests.
+  - [tool-result cache](contrast-index.md#tool-result-cache) — The KV cache contains model attention state, not completed tool outputs or world-versioned effects.
+
+<a id="provider-prompt-cache-cache-provider-prompt-prefix"></a>
+## provider prompt cache — `cache:provider-prompt-prefix`
+
+An upstream provider-owned prompt-prefix reuse service observed as cache-read and cache-creation token accounting with provider TTL and pricing rules.
+
+- **Query:** `fak disambiguation query "provider prompt cache"`
+- **Owner:** leaf `gateway`, lane `gateway`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `prompt cache`, `provider cache`
+- **Sources:**
+  - `internal/gateway/cache_pricing.go` — `go-source` at `cache-source/1`
+- **Do not conflate with:**
+  - [model KV cache](contrast-index.md#model-kv-cache) — Provider prompt cache state is not directly addressable tensor memory in fak and cannot be edited like the kernel-owned KV cache.
+  - [radix prefix cache](contrast-index.md#radix-prefix-cache) — Provider cache lifetime and identity are upstream contracts; the radix prefix cache is fak-owned, namespace-keyed, and explicitly budgeted and evicted.
+  - [tool-result cache](contrast-index.md#tool-result-cache) — Provider prompt caching reuses model input prefixes outside fak; the tool-result cache locally serves completed tool outputs under effect-aware invalidation.
+
+<a id="radix-prefix-cache-cache-radix-prefix-snapshots"></a>
+## radix prefix cache — `cache:radix-prefix-snapshots`
+
+A fak-owned radix tree that longest-prefix-matches namespaced token sequences to reusable KV snapshots under token and byte budgets.
+
+- **Query:** `fak disambiguation query "radix prefix cache"`
+- **Owner:** leaf `radixkv`, lane `radixkv`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `prefix cache`, `radix cache`
+- **Sources:**
+  - `internal/radixkv/radixkv.go` — `go-source` at `cache-source/1`
+- **Do not conflate with:**
+  - [model KV cache](contrast-index.md#model-kv-cache) — The radix cache is a multi-prefix lookup and residency index; a model KV cache is the live tensor state for one sequence.
+  - [provider prompt cache](contrast-index.md#provider-prompt-cache) — The radix cache is namespace-scoped, budgeted, and evicted by fak; provider prompt caching is controlled upstream and reported through cache read/write usage.
+  - [tool-result cache](contrast-index.md#tool-result-cache) — The radix cache keys token-prefix paths and snapshot residency; the tool-result cache keys tool calls plus effect epochs.
+
 <a id="recovery-checkpoint-runtime-internal-session"></a>
 ## recovery checkpoint — `runtime:internal/session`
 
@@ -167,3 +219,19 @@ The paused-to-running boundary that re-admits an existing session using warm KV 
 - **Do not conflate with:**
   - [agent session](contrast-index.md#agent-session) — Resume changes the run state of an existing session; it is not the session identity or transcript.
   - [session recovery](contrast-index.md#session-recovery) — Resume continues a valid paused session; recovery repairs or reroutes state that cannot safely continue as-is.
+
+<a id="tool-result-cache-cache-tool-results"></a>
+## tool-result cache — `cache:tool-results`
+
+A fak-owned cache of completed tool-call results keyed by tool, argument hash, principal when isolated, and world-version epochs.
+
+- **Query:** `fak disambiguation query "tool-result cache"`
+- **Owner:** leaf `vdso`, lane `vdso`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `vDSO cache`
+- **Sources:**
+  - `internal/vdso/vdso.go` — `go-source` at `cache-source/1`
+- **Do not conflate with:**
+  - [model KV cache](contrast-index.md#model-kv-cache) — The tool-result cache stores tool outputs and invalidates on modeled world changes; the KV cache stores per-token attention tensors.
+  - [provider prompt cache](contrast-index.md#provider-prompt-cache) — The tool-result cache is kernel-owned and directly invalidated by fak epochs; provider prompt-cache entries are externally owned and observed through usage accounting.
+  - [radix prefix cache](contrast-index.md#radix-prefix-cache) — The tool-result cache looks up effect-safe tool calls; the radix cache longest-prefix-matches token sequences to reusable model snapshots.
