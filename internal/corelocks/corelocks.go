@@ -275,7 +275,7 @@ func parseClassTables(data []byte) ([]classTable, error) {
 			}
 			cur.globs = arr
 		case "name", "reason":
-			s, err := parseString(val)
+			s, err := strmatch.ParseQuotedScalar(val)
 			if err != nil {
 				return nil, fmt.Errorf("corelocks: line %d: %v", n+1, err)
 			}
@@ -288,17 +288,6 @@ func parseClassTables(data []byte) ([]classTable, error) {
 		}
 	}
 	return tables, nil
-}
-
-func parseString(v string) (string, error) {
-	if len(v) < 2 || v[0] != '"' || v[len(v)-1] != '"' {
-		return "", fmt.Errorf("expected a double-quoted string, got %q", v)
-	}
-	inner := v[1 : len(v)-1]
-	if strings.Contains(inner, `"`) {
-		return "", fmt.Errorf("unexpected quote inside string %q", v)
-	}
-	return inner, nil
 }
 
 func parseStringArray(v string) ([]string, error) {
@@ -315,7 +304,7 @@ func parseStringArray(v string) ([]string, error) {
 		if part == "" {
 			continue
 		}
-		s, err := parseString(part)
+		s, err := strmatch.ParseQuotedScalar(part)
 		if err != nil {
 			return nil, err
 		}

@@ -117,7 +117,7 @@ func assignTOML(t *Task, section, key, val string, line int) error {
 	switch section {
 	case "":
 		if key == "version" {
-			s, err := tomlString(val)
+			s, err := strmatch.ParseQuotedScalar(val)
 			if err != nil {
 				return fmt.Errorf("line %d: version: %w", line, err)
 			}
@@ -126,13 +126,13 @@ func assignTOML(t *Task, section, key, val string, line int) error {
 	case "metadata":
 		switch key {
 		case "difficulty":
-			s, err := tomlString(val)
+			s, err := strmatch.ParseQuotedScalar(val)
 			if err != nil {
 				return fmt.Errorf("line %d: metadata.difficulty: %w", line, err)
 			}
 			t.Metadata.Difficulty = s
 		case "category":
-			s, err := tomlString(val)
+			s, err := strmatch.ParseQuotedScalar(val)
 			if err != nil {
 				return fmt.Errorf("line %d: metadata.category: %w", line, err)
 			}
@@ -171,7 +171,7 @@ func assignTimeoutSec(dst *float64, section, key, val string, line int) error {
 func assignEnvironment(e *Environment, key, val string, line int) error {
 	switch key {
 	case "docker_image":
-		s, err := tomlString(val)
+		s, err := strmatch.ParseQuotedScalar(val)
 		if err != nil {
 			return fmt.Errorf("line %d: environment.docker_image: %w", line, err)
 		}
@@ -222,17 +222,6 @@ func assignEnvironment(e *Environment, key, val string, line int) error {
 	return nil
 }
 
-func tomlString(v string) (string, error) {
-	if len(v) < 2 || v[0] != '"' || v[len(v)-1] != '"' {
-		return "", fmt.Errorf("expected a double-quoted string, got %q", v)
-	}
-	inner := v[1 : len(v)-1]
-	if strings.Contains(inner, `"`) {
-		return "", fmt.Errorf("unexpected quote inside string %q", v)
-	}
-	return inner, nil
-}
-
 func tomlFloat(v string) (float64, error) {
 	f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
 	if err != nil {
@@ -280,7 +269,7 @@ func tomlStringArray(v string) ([]string, error) {
 		if part == "" {
 			continue
 		}
-		s, err := tomlString(part)
+		s, err := strmatch.ParseQuotedScalar(part)
 		if err != nil {
 			return nil, err
 		}
