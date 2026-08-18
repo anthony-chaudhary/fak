@@ -204,16 +204,7 @@ func clampStaleness(d time.Duration) time.Duration {
 // OrgPolicyCachePath mirrors OrgEnrollmentPath's resolution order so the anchor
 // and the cache it authorizes live side by side.
 func OrgPolicyCachePath() string {
-	if v := strings.TrimSpace(os.Getenv(OrgPolicyCachePathEnv)); v != "" {
-		return v
-	}
-	if dir, err := os.UserConfigDir(); err == nil && dir != "" {
-		return filepath.Join(dir, "fak", "org-policy-lastgood.json")
-	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".fak", "org-policy-lastgood.json")
-	}
-	return filepath.Join(".fak", "org-policy-lastgood.json")
+	return orgStatePath(OrgPolicyCachePathEnv, "org-policy-lastgood.json")
 }
 
 // lastGoodSum length-prefixes every field so no re-partitioning of the contents

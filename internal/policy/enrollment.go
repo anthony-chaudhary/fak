@@ -169,16 +169,20 @@ func enrollmentSum(e OrgEnrollment) string {
 // directory. The final fallback is relative so a box with neither still resolves
 // to something explicit rather than an empty path a caller might treat as "off".
 func OrgEnrollmentPath() string {
-	if v := strings.TrimSpace(os.Getenv(OrgEnrollmentPathEnv)); v != "" {
-		return v
+	return orgStatePath(OrgEnrollmentPathEnv, "org-enrollment.json")
+}
+
+func orgStatePath(env, filename string) string {
+	if value := strings.TrimSpace(os.Getenv(env)); value != "" {
+		return value
 	}
 	if dir, err := os.UserConfigDir(); err == nil && dir != "" {
-		return filepath.Join(dir, "fak", "org-enrollment.json")
+		return filepath.Join(dir, "fak", filename)
 	}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".fak", "org-enrollment.json")
+		return filepath.Join(home, ".fak", filename)
 	}
-	return filepath.Join(".fak", "org-enrollment.json")
+	return filepath.Join(".fak", filename)
 }
 
 // LoadOrgEnrollment reads the enrollment store.

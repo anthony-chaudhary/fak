@@ -1,0 +1,31 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T08:24:33.587786Z",
+  "issue": 7284,
+  "family": "organization state path resolution",
+  "paths": [
+    "internal/policy/enrollment.go",
+    "internal/policy/orgpull.go"
+  ],
+  "test": "go test ./internal/policy; fak-dev buildcheck --vet",
+  "test_result": "PASS",
+  "before": {
+    "score": -78.0,
+    "grade": "F",
+    "slop_debt": 340,
+    "duplication": 340,
+    "weighted_duplication": 217.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -77.5,
+    "grade": "F",
+    "slop_debt": 339,
+    "duplication": 339,
+    "weighted_duplication": 216.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}
