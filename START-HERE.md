@@ -4,6 +4,8 @@
 
 This page routes; it does not re-explain. The repository's configured homepage is the published copy of [`docs/showcase.html`](docs/showcase.html), which the README audit keeps in step with the README.
 
+FAK coordinates the whole agent path, not isolated components. It turns observations about context, policy, and execution options into a constrained route, then brings tool actions and results back through typed checks. This coordination is broader than worker orchestration.
+
 For the current product focus—fewer tokens, fewer turns, better model routing, and controllable long sessions—start with [Spend fewer tokens and turns](docs/CAPABILITIES.md).
 
 For the durable product thesis—“don’t make me think,” without surrendering control—read
@@ -35,6 +37,17 @@ expanded policy, routing, and benchmark sequence, use the
 [one-minute offline proof](docs/repro-packet.md).
 
 Everything below is the route map — choose the job you have now.
+
+## If you already have an AI assistant
+
+Treat onboarding as a capability decision, not just a proxy setting:
+
+- Route the assistant through one managed interface: `fak agent`, `fak manage`, `fak serve`, or a documented adapter.
+- Inventory every tool, credential, direct provider call, shell, network path, and MCP server it can reach.
+- Start with least authority, prove one allowed action and one structural denial, and retain the verdict/result evidence.
+- Expand one capability at a time; keep bypass paths out of reach or isolate them separately.
+
+**Blast radius:** FAK mediates only traffic crossing the selected interface. It does not sandbox the host or govern side channels and credentials that bypass FAK. The [architecture boundary](docs/architecture.md) shows what is inside and outside that claim.
 
 ## Choose your route
 

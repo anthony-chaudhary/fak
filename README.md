@@ -10,6 +10,8 @@ fak is an all-in-one agent boundary: one Go binary for model routing, context re
 
 The current project boundary and capability classification are recorded in [Project orientation: the agent-kernel center](docs/project-orientation.md). It distinguishes Core kernel outcomes from Enabling substrates, Stewardship obligations, and Peripheral expansion without turning centrality into a priority score.
 
+FAK coordinates the whole agent path, not isolated components: observations about context, policy, and available execution become a constrained plan; model and tool actions return through typed effects and result admission. Here, **coordination** means that cross-layer decision path—not worker orchestration or generic integration.
+
 > **Pick your path:** run `fak guard -- claude` to manage the agent you already use, or run `fak harness init` to generate a small agent product you own. Both use the same managed-context, model, tool-policy, journal, and recovery boundary. The existing-agent path forwards your subscription credential; the build-your-own selfcheck needs no API key, model, or GPU (`go run ./cmd/product --selfcheck` → `{"type":"turn.completed","detail":"ok"}`).
 > **Help test those two paths:** we need two independent Linux/amd64 operators for a 45–75 minute paired task comparing a verified default with visible controls against scratch harness construction. No API key or model is needed. The preference claim is **not yet measured (0/2 pairs)**. If you have not worked on fak internals or inspected the study answer materials, [volunteer on #7224](https://github.com/anthony-chaudhary/fak/issues/7224).
 
@@ -130,6 +132,17 @@ Every model request and proposed tool call crosses this checkpoint, so reuse hap
 **Like Caveman’s fewer-token instinct or Ponytail’s “code you never wrote” instinct?** fak applies the same economy at the runtime boundary: keep repeated setup out of prompts, shed stale context, serve repeated work locally, and prevent unnecessary effects before they execute. It complements prompt/output compression and YAGNI-style coding guidance rather than replacing either. [See the plain-language comparison and choose the smallest useful layer.](docs/explainers/less-context-less-code.md)
 
 After trying `guard`, `fak launch install --provider all --default claude` can install reversible provider shims so bare `claude`, `codex`, or `fak` uses the managed path. It never overwrites the original binaries; bypass it with `--fak-direct`, `FAK_DIRECT=1`, or `fak launch disable`. See the [zero-adoption guide](docs/zero-adoption-launch.md).
+
+## Bring an assistant through the boundary
+
+FAK governs only traffic routed through it. Before giving an existing AI assistant real tools:
+
+1. Choose a managed entry point: `fak agent`, `fak manage`, an OpenAI-compatible `fak serve` endpoint, or a documented adapter.
+2. Declare its tools and least-authority policy; begin read-only and test a known denial with `fak preflight`.
+3. Keep credentials and any direct shell, network, MCP, or provider paths outside the model's reach unless they cross the same policy boundary.
+4. Capture verdict and result-admission evidence, then widen authority one capability at a time.
+
+The blast radius is explicit: FAK can mediate model and tool traffic that crosses a FAK-managed interface. It is not an operating-system sandbox and cannot govern credentials, side channels, or effects that bypass that interface. See [Start here](START-HERE.md) for newcomer routes and [Architecture](docs/architecture.md) for the trust boundary.
 
 ## FAK and DOS are different layers
 
