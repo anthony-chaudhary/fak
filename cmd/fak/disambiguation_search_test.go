@@ -11,7 +11,7 @@ import (
 
 func TestDisambiguationSearchReturnsRankedJSON(t *testing.T) {
 	var out, errb bytes.Buffer
-	code := runDisambiguation(&out, &errb, []string{"search", "agent", "--json"})
+	code := runDisambiguation(&out, &errb, []string{"search", "compute k", "--json"})
 	if code != 0 {
 		t.Fatalf("code=%d err=%s", code, errb.String())
 	}
