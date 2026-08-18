@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -340,13 +339,4 @@ func verifySelectorArtifact(path string) error {
 func compactSelectorReport(r selectorReport) selectorReport {
 	r.Decisions = nil
 	return r
-}
-
-func sortedStageNames(m map[string]int) []string {
-	names := make([]string, 0, len(m))
-	for name := range m {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
 }

@@ -698,22 +698,6 @@ func opencodeGuardConfigContent(command []string, existing string) string {
 	return string(out)
 }
 
-// opencodeCompactEnvAugment stamps the shed line onto the CHILD env of a guarded
-// opencode worker (#4661). This is deliberately NOT done inside guardWrap: main.go
-// calls guardedLaunchCommand with a nil env (a throwaway process snapshot) and builds
-// the real child env separately via childEnv, so a mutation there would be silently
-// inert — the same wired-to-nothing failure #4253 was reopened for. Mutates and
-// returns env.
-func opencodeCompactEnvAugment(env map[string]string, backend string, command []string) map[string]string {
-	if backend != "opencode" {
-		return env
-	}
-	if merged := opencodeGuardConfigContent(command, env["OPENCODE_CONFIG_CONTENT"]); merged != "" {
-		env["OPENCODE_CONFIG_CONTENT"] = merged
-	}
-	return env
-}
-
 func guardWrap(command []string, fakBin, lane, backend, workspace, workerModel string, env map[string]string) []string {
 	if len(command) == 0 || fakBin == "" {
 		return command

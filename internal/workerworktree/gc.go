@@ -203,17 +203,6 @@ func removeOwnerStamp(wtPath string) {
 	_ = os.Remove(filepath.Dir(path)) // succeeds only when this was the final stamp
 }
 
-func ownerAge(stamp OwnerStamp, now time.Time) time.Duration {
-	if now.IsZero() {
-		now = time.Now()
-	}
-	age := now.Sub(stamp.CreatedAt)
-	if age < 0 {
-		return 0
-	}
-	return age
-}
-
 // GCList enumerates worker worktrees and returns only the deletion-free,
 // owner-stamped candidates satisfying every gate in GCOptions. Kept worktrees are
 // deliberately omitted so dry-run is a literal list of what apply would attempt.
