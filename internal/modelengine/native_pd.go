@@ -538,6 +538,8 @@ func (r *nativePDLocalResidency) Observe(worker string, prefix []string) {
 	r.mu.Unlock()
 }
 
+func nativePDSegmentPrefixLen(a, b []string) int { return strmatch.CommonSlicePrefixLen(a, b) }
+
 func (c *NativePDCluster) coldDecodePlacementLocked() int {
 	best := 0
 	for i := 1; i < len(c.decode); i++ {
