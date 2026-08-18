@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T09:29:09.447040Z",
+  "issue": 7294,
+  "family": "single JSON number-preserving value decoding",
+  "paths": [
+    "internal/strictjson/value.go",
+    "internal/strictjson/value_test.go",
+    "internal/sharedtask/contract.go",
+    "internal/wirescreen/jsonwalk.go"
+  ],
+  "test": "go test ./internal/strictjson ./internal/sharedtask ./internal/wirescreen; fak-dev buildcheck --mine internal/strictjson/value.go --vet",
+  "test_result": "PASS",
+  "before": {
+    "score": -72.3,
+    "grade": "F",
+    "slop_debt": 329,
+    "duplication": 329,
+    "weighted_duplication": 211.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -71.8,
+    "grade": "F",
+    "slop_debt": 328,
+    "duplication": 328,
+    "weighted_duplication": 211.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
+
+	"github.com/anthony-chaudhary/fak/internal/strictjson"
 )
 
 // jsonwalk.go is the JSON-leaf-aware sibling of the flat pre-send redaction path
@@ -95,7 +96,7 @@ func RedactJSONLeaves(ctx context.Context, r Redactor, body []byte, tool string)
 	if len(trimmed) == 0 || (trimmed[0] != '{' && trimmed[0] != '[' && trimmed[0] != '"') {
 		return JSONRedaction{Redacted: body}, false
 	}
-	root, err := decodeJSONValue(body)
+	root, err := strictjson.NumberValue(body)
 	if err != nil {
 		return JSONRedaction{Redacted: body}, false
 	}
@@ -263,7 +264,7 @@ func decodeStringifiedJSON(s string) (any, bool) {
 	if t == "" || (t[0] != '{' && t[0] != '[') {
 		return nil, false
 	}
-	v, err := decodeJSONValue([]byte(s))
+	v, err := strictjson.NumberValue([]byte(s))
 	if err != nil {
 		return nil, false
 	}
@@ -272,20 +273,6 @@ func decodeStringifiedJSON(s string) (any, bool) {
 
 // decodeJSONValue decodes one JSON value with numbers preserved (json.Number) so
 // re-marshalling does not reformat integers, and rejects trailing garbage so only a
-// clean single JSON value is treated as JSON.
-func decodeJSONValue(b []byte) (any, error) {
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.UseNumber()
-	var v any
-	if err := dec.Decode(&v); err != nil {
-		return nil, err
-	}
-	if dec.More() {
-		return nil, fmt.Errorf("wirescreen: trailing data after JSON value")
-	}
-	return v, nil
-}
-
 // marshalJSONValue re-serializes a walked tree without HTML escaping (so '<', '>', '&'
 // in prose survive byte-exact) and without the trailing newline json.Encoder appends.
 func marshalJSONValue(v any) ([]byte, error) {

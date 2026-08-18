@@ -1,7 +1,6 @@
 package sharedtask
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -11,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/anthony-chaudhary/fak/internal/strictjson"
 )
 
 // SchemaArtifactRef is the envelope schema name for a standalone disaggregated
@@ -33,19 +34,7 @@ var contractSchemaFiles = map[string]string{
 // decodeContractJSON decodes one JSON value keeping numbers as json.Number, so the
 // validator can distinguish an integer from a float the way the contract requires
 // (a "bytes": 5.0 must fail an integer check even though Go would otherwise fold
-// both into float64).
-func decodeContractJSON(data []byte) (any, error) {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
-	var v any
-	if err := dec.Decode(&v); err != nil {
-		return nil, err
-	}
-	if dec.More() {
-		return nil, fmt.Errorf("trailing data after JSON value")
-	}
-	return v, nil
-}
+func decodeContractJSON(data []byte) (any, error) { return strictjson.NumberValue(data) }
 
 // LoadContractSchema reads and parses the named contract schema from schemaDir.
 func LoadContractSchema(schemaDir, name string) (map[string]any, error) {
@@ -57,7 +46,7 @@ func LoadContractSchema(schemaDir, name string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	v, err := decodeContractJSON(data)
+	v, err := strictjson.NumberValue(data)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
@@ -283,7 +272,7 @@ func loadContractFile(path string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	v, err := decodeContractJSON(data)
+	v, err := strictjson.NumberValue(data)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -324,7 +313,7 @@ func ValidateContractDoc(schemaDir, docPath string) (map[string]int, error) {
 	text := strings.ReplaceAll(string(data), "\r\n", "\n")
 	counts := map[string]int{}
 	for i, m := range contractDocExampleRE.FindAllStringSubmatch(text, -1) {
-		v, err := decodeContractJSON([]byte(m[1]))
+		v, err := strictjson.NumberValue([]byte(m[1]))
 		if err != nil {
 			return nil, fmt.Errorf("JSON example %d: %w", i+1, err)
 		}
