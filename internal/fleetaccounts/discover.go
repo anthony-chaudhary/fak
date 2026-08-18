@@ -460,6 +460,13 @@ func classifyRow(acctDir, product, account string, pol Policy, acctIdx accountsR
 		row.AccountUUID = strp(codexID.AccountUUID)
 		row.LoginStatus = strp(string(st))
 		row.CanServe = boolp(can)
+	} else if product == "opencode" {
+		// OpenCode account homes are admitted only after opencode.json is parsed by
+		// stampProfile above. Project that concrete configured-home witness into the
+		// same readiness contract dispatch preflight requires from every backend.
+		status := string(configaccounts.LoginReady)
+		row.LoginStatus = &status
+		row.CanServe = boolp(true)
 	}
 	return row
 }

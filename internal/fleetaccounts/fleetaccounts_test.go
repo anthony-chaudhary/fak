@@ -142,6 +142,9 @@ func TestProfileTierInference(t *testing.T) {
 		t.Errorf("claude default profile_source = %q", derefStr(def.ProfileSource))
 	}
 	glm := find(rows, "opencode-glm")
+	if glm.LoginStatus == nil || *glm.LoginStatus != "ready" || glm.CanServe == nil || !*glm.CanServe {
+		t.Fatalf("opencode readiness = %v/%v, want ready/true", glm.LoginStatus, glm.CanServe)
+	}
 	if glm.ModelTier == nil || *glm.ModelTier != 2 {
 		t.Errorf("opencode glm: tier = %v want 2", glm.ModelTier)
 	}
@@ -543,7 +546,13 @@ func TestPolicyExcludeMatchesClaudeLoginEmail(t *testing.T) {
 func TestJSONShapeMatchesPythonContract(t *testing.T) {
 	home, cfg, regPath := fixture(t)
 	reg := LoadRegistry(regPath)
-	rows := AnnotatedRoster(home, cfg, DefaultPolicy(), reg)
+	discovered := Discover(home, cfg, DefaultPolicy())
+	before := find(discovered, "opencode-glm")
+	rows := Annotate(discovered, reg)
+	after := find(rows, "opencode-glm")
+	if before.LoginStatus == nil || before.CanServe == nil || after.LoginStatus == nil || after.CanServe == nil {
+		t.Fatalf("opencode readiness lost across annotation: before=%v/%v after=%v/%v", before.LoginStatus, before.CanServe, after.LoginStatus, after.CanServe)
+	}
 
 	workerKeys := []string{
 		"dir", "product", "account", "tag", "kind", "reason", "notes",
@@ -561,6 +570,7 @@ func TestJSONShapeMatchesPythonContract(t *testing.T) {
 	opencodeWorkerKeys := []string{
 		"dir", "product", "account", "tag", "kind", "reason", "notes",
 		"model_tier", "model", "small_model", "model_effort", "agent", "profile_source", "route_weight",
+		"login_status", "can_serve",
 		"available", "blocked", "block_kind", "block_reason", "reset", "weekly", "throttled",
 		"active_sessions", "live_sessions", "auth_blocked_sessions", "status_source", "registry_age_min",
 	}

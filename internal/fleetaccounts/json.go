@@ -68,6 +68,11 @@ func (a Account) MarshalJSON() ([]byte, error) {
 			o.set("login_status", *a.LoginStatus)
 			o.set("can_serve", derefBool(a.CanServe))
 		}
+	} else if a.LoginStatus != nil {
+		// OpenCode has no Claude identity block, but dispatch consumes the same
+		// credential-readiness contract before it will launch a guarded worker.
+		o.set("login_status", *a.LoginStatus)
+		o.set("can_serve", derefBool(a.CanServe))
 	}
 
 	// runtime-status block (attached by Annotate; present on every annotated row)
