@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T05:54:32.428319Z",
+  "issue": 7047,
+  "family": "lexically sorted string-set views",
+  "paths": [
+    "internal/stringset/stringset.go",
+    "internal/stringset/stringset_test.go",
+    "internal/archreport/source_scan.go",
+    "internal/rungobs/cost_ledger.go"
+  ],
+  "test": "go test ./internal/stringset ./internal/archreport ./internal/rungobs; go test ./internal/architest -run Test.*Tier|TestArchitecture -count=1; fak-dev buildcheck --vet --mine internal/stringset/stringset.go --mine internal/stringset/stringset_test.go",
+  "test_result": "PASS",
+  "before": {
+    "score": -87.4,
+    "grade": "F",
+    "slop_debt": 358,
+    "duplication": 358,
+    "weighted_duplication": 226.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -86.8,
+    "grade": "F",
+    "slop_debt": 357,
+    "duplication": 357,
+    "weighted_duplication": 225.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

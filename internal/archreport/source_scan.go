@@ -2,6 +2,7 @@ package archreport
 
 import (
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/stringset"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -90,12 +91,7 @@ func internalImports(dir string) ([]string, error) {
 			}
 		}
 	}
-	out := make([]string, 0, len(set))
-	for d := range set {
-		out = append(out, d)
-	}
-	sort.Strings(out)
-	return out, nil
+	return stringset.Sorted(set), nil
 }
 
 func cloneStringSet(source map[string]struct{}) map[string]struct{} {

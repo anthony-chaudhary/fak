@@ -31,6 +31,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/stringset"
 	"sort"
 	"strings"
 )
@@ -208,14 +209,7 @@ func foldLedger(month []suiteRun) costLedger {
 	return costLedger{rows: rows, distinctDefects: len(distinct)}
 }
 
-func sortedDefects(set map[string]struct{}) []string {
-	out := make([]string, 0, len(set))
-	for d := range set {
-		out = append(out, d)
-	}
-	sort.Strings(out)
-	return out
-}
+func sortedDefects(set map[string]struct{}) []string { return stringset.Sorted(set) }
 
 // --- faithful folds: same ledger regardless of replay order -----------------
 
