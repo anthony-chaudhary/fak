@@ -28,3 +28,33 @@ func TestHarnessControlStudyCLIReportsNotYetWithoutPairs(t *testing.T) {
 		t.Fatalf("code=%d stderr=%q report=%+v", code, errb.String(), report)
 	}
 }
+
+func TestHarnessControlPacketCLIRejectsCrossArmLeakAndVerifies(t *testing.T) {
+	root := t.TempDir()
+	materials := filepath.Join(root, "scratch")
+	if err := os.MkdirAll(materials, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"arm-card.md": "scratch", "task-card.md": "task"} {
+		if err := os.WriteFile(filepath.Join(materials, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	binary := filepath.Join(root, "fak")
+	receipt := filepath.Join(root, "receipt.json")
+	os.WriteFile(binary, []byte("binary"), 0o755)
+	os.WriteFile(receipt, []byte("{}"), 0o644)
+	packet := filepath.Join(root, "packet")
+	var out, errb bytes.Buffer
+	code := runHarness(&out, &errb, []string{"study", "control", "packet", "create", "--arm", "scratch", "--materials", materials, "--binary", binary, "--receipt", receipt, "--output", packet, "--source-commit", "abc123", "--binary-version", "study abc123"})
+	if code != 0 || !strings.Contains(out.String(), "HARNESS CONTROL PACKET | CREATED") {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	out.Reset()
+	if code := runHarness(&out, &errb, []string{"study", "control", "packet", "verify", "--dir", packet}); code != 0 || !strings.Contains(out.String(), "HARNESS CONTROL PACKET | VERIFIED") {
+		t.Fatalf("verify code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+	if _, err := os.Stat(filepath.Join(packet, "product.json")); !os.IsNotExist(err) {
+		t.Fatalf("scratch packet leaked product: %v", err)
+	}
+}

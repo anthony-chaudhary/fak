@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/harnesscontrolpacket"
 	"github.com/anthony-chaudhary/fak/internal/harnesscontrolstudy"
 	"github.com/anthony-chaudhary/fak/internal/harnesscreationreceipt"
 	"github.com/anthony-chaudhary/fak/internal/harnesscreationstudy"
@@ -25,6 +26,9 @@ func runHarnessStudy(stdout, stderr io.Writer, argv []string) int {
 		return runHarnessCreationStudy(stdout, stderr, argv[1:])
 	}
 	if len(argv) > 0 && argv[0] == "control" {
+		if len(argv) > 1 && argv[1] == "packet" {
+			return runHarnessControlPacket(stdout, stderr, argv[2:])
+		}
 		return runHarnessControlStudy(stdout, stderr, argv[1:])
 	}
 	if len(argv) == 0 || argv[0] != "crossover" {
@@ -219,5 +223,62 @@ func runHarnessControlStudy(stdout, stderr io.Writer, argv []string) int {
 	if report.Verdict != "measured" {
 		return 3
 	}
+	return 0
+}
+
+func runHarnessControlPacket(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) == 0 || (argv[0] != "create" && argv[0] != "verify") {
+		fmt.Fprintln(stderr, "usage: fak harness study control packet <create|verify>")
+		return 2
+	}
+	if argv[0] == "verify" {
+		fs := flag.NewFlagSet("harness study control packet verify", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		dir := fs.String("dir", "", "extracted assigned-arm packet directory")
+		if err := fs.Parse(argv[1:]); err != nil {
+			return 2
+		}
+		if *dir == "" || fs.NArg() != 0 {
+			fmt.Fprintln(stderr, "fak harness study control packet verify: --dir is required")
+			return 2
+		}
+		raw, err := os.ReadFile(filepath.Join(*dir, "packet.json"))
+		if err != nil {
+			fmt.Fprintf(stderr, "fak harness study control packet verify: %v\n", err)
+			return 1
+		}
+		manifest, err := harnesscontrolpacket.Parse(raw)
+		if err == nil {
+			err = harnesscontrolpacket.Verify(*dir, manifest)
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "fak harness study control packet verify: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "HARNESS CONTROL PACKET | VERIFIED\narm: %s\nsource: %s\nbinary: %s\nfiles: %d\n", manifest.Arm, manifest.SourceCommit, manifest.BinaryVersion, len(manifest.Files))
+		return 0
+	}
+
+	fs := flag.NewFlagSet("harness study control packet create", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	arm := fs.String("arm", "", "assigned arm: default-control or scratch")
+	materials := fs.String("materials", "", "assigned arm materials directory")
+	binary := fs.String("binary", "", "pinned Linux/amd64 fak binary")
+	receipt := fs.String("receipt", "", "blank receipt template")
+	output := fs.String("output", "", "new packet directory")
+	commit := fs.String("source-commit", "", "exact source commit embedded in the binary")
+	version := fs.String("binary-version", "", "exact output of fak version, flattened to one line")
+	if err := fs.Parse(argv[1:]); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		return 2
+	}
+	manifest, err := harnesscontrolpacket.Create(harnesscontrolpacket.CreateOptions{Arm: *arm, MaterialsDir: *materials, BinaryPath: *binary, ReceiptPath: *receipt, OutputDir: *output, SourceCommit: *commit, BinaryVersion: *version})
+	if err != nil {
+		fmt.Fprintf(stderr, "fak harness study control packet create: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "HARNESS CONTROL PACKET | CREATED\narm: %s\nsource: %s\noutput: %s\nfiles: %d\nnext: fak harness study control packet verify --dir %s\n", manifest.Arm, manifest.SourceCommit, *output, len(manifest.Files), *output)
 	return 0
 }
