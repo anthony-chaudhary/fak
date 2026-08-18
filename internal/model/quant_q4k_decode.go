@@ -1,10 +1,5 @@
 package model
 
-import (
-	"os"
-	"sync"
-)
-
 // quant_q4k_decode.go — the affine-split fast decode path for resident Q4_K batch-1 GEMV.
 //
 // The exact kernel (quant_amd64_q4k_f32.s) is bit-identical to the scalar reference and is the
@@ -25,24 +20,6 @@ import (
 // Reassociating the dot changes f32 rounding order, so this is NOT a drop-in for the golden kernel;
 // it is selected only for the decode GEMV dispatch and held to a cosine/argmax quality gate
 // (TestQ4KDecodeAffineMatchesScalar), never to max|Δ|==0.
-
-var q4kDecodeFastOnce sync.Once
-var q4kDecodeFastOn bool
-
-// q4kDecodeFastEnabled reports whether the affine-split FMA decode kernel is selected. It is opt-in
-// via FAK_Q4K_DECODE in {1,on,fma,affine} while the tok/s win is being witnessed on the EPYC box;
-// FAK_Q4K_DECODE in {0,off,scalar} force-disables. Read once per process.
-func q4kDecodeFastEnabled() bool {
-	q4kDecodeFastOnce.Do(func() {
-		switch os.Getenv("FAK_Q4K_DECODE") {
-		case "1", "on", "fma", "affine":
-			q4kDecodeFastOn = true
-		default:
-			q4kDecodeFastOn = false
-		}
-	})
-	return q4kDecodeFastOn
-}
 
 // q4kDecodeXSum returns the per-sub-block activation sums for a super-block-aligned x (len nblk*256):
 // entry j = Σ x[j*32:(j+1)*32], for j in [0, nblk*8). This is the m_s·Σx term's shared factor,

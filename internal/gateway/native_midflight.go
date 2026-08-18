@@ -31,12 +31,9 @@ package gateway
 // for a verb nothing will ever drain.
 
 import (
-	"net/http"
-	"strings"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
-	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
 // midflightRuns is the live per-trace mid-flight mailbox registry: the lookup a
@@ -86,19 +83,6 @@ func (m *midflightRuns) lookup(trace string) *agent.MidflightVerbs {
 	return m.runs[trace]
 }
 
-// isMidflightVerb reports whether a control-plane verb belongs to the mid-flight
-// mailbox rather than the drive-state table. The vocabulary is agent's own closed set,
-// referenced rather than restated so the route can never drift from the loop that
-// drains it; an unknown verb still falls through to the drive-state control path
-// unchanged.
-func isMidflightVerb(verb string) bool {
-	switch verb {
-	case agent.MidflightInterrupt, agent.MidflightDropPendingCall, agent.MidflightSetBudget:
-		return true
-	}
-	return false
-}
-
 // midflightRunOption opens this run's mailbox and returns the RunOption that wires it
 // plus the release to defer. Called from nativeRunOptions, so every owned-loop
 // entrypoint — the buffered and streamed native /v1/messages turns and the
@@ -106,81 +90,4 @@ func isMidflightVerb(verb string) bool {
 func (s *Server) midflightRunOption(reqTrace string) (agent.RunOption, func()) {
 	v, release := s.midflight.register(reqTrace)
 	return agent.WithMidflightVerbs(v), release
-}
-
-// handleFakSessionMidflight applies one mid-flight verb to the LIVE owned run named by
-// traceID. Accepted verbs are enqueued (202) and land at the loop's next clean turn
-// boundary; the response carries the run's verb journal so the caller sees the
-// tamper-evident record of the command it just issued, not merely an ack.
-func (s *Server) handleFakSessionMidflight(w http.ResponseWriter, r *http.Request, traceID, verb string) {
-	// The honest-contract gate the sibling /steer verb applies (#3528): a mid-flight
-	// verb is only ever DRAINED by an owned agent loop. The default proxy serve forwards
-	// a single upstream turn and owns no loop, so an enqueue there would be an
-	// accepted-but-never-applied phantom. Refuse at ingress rather than return a false
-	// 202, so the operator learns the verb will not land instead of trusting a lie.
-	if !s.ownsSessionLoop() {
-		writeErrCode(w, http.StatusConflict, "midflight_no_owned_loop",
-			"MIDFLIGHT_NO_OWNED_LOOP: this serve process forwards proxy turns and owns no agent loop to "+
-				"apply a mid-flight verb at a turn boundary; start the gateway with --native, which runs "+
-				"agent.RunArm and drains the mid-flight mailbox at each boundary")
-		return
-	}
-	verbs := s.midflight.lookup(traceID)
-	if verbs == nil {
-		// No live run under this trace. A mid-flight verb lands at a RUNNING loop's next
-		// boundary; with no such loop there is no boundary to land at, and queuing it for
-		// a future run would apply an operator's stop to a run they never saw.
-		writeErrCode(w, http.StatusConflict, "midflight_no_live_run",
-			"MIDFLIGHT_NO_LIVE_RUN: no owned loop is currently running under this trace; a mid-flight "+
-				"verb lands at a live run's next turn boundary and there is none to land at")
-		return
-	}
-	var req SessionControlRequest
-	if !decodeRequestBody(w, r, &req) {
-		return
-	}
-
-	var refusal *session.ControlRefusal
-	switch verb {
-	case agent.MidflightInterrupt:
-		refusal = verbs.Interrupt()
-	case agent.MidflightDropPendingCall:
-		// The named call is the whole verb — an unnamed drop would silently skip nothing
-		// (agent ignores an empty id) and read as accepted, so it is a request-shape error.
-		callID := strings.TrimSpace(req.CallID)
-		if callID == "" {
-			writeErr(w, http.StatusBadRequest, "call_id is required for drop-pending-call")
-			return
-		}
-		refusal = verbs.DropPendingCall(callID)
-	case agent.MidflightSetBudget:
-		if req.Budget == nil {
-			writeErr(w, http.StatusBadRequest, "budget is required for set-budget")
-			return
-		}
-		// Same projection the drive-state `budget` verb uses in cmd/fak: the priced spend
-		// axis rides the budget wire (#2762), so carrying it here keeps a mid-flight write
-		// from silently clearing a live spend ceiling.
-		refusal = verbs.SetBudget(session.Budget{
-			TurnsLeft:           req.Budget.TurnsLeft,
-			TokensLeft:          req.Budget.TokensLeft,
-			ContextTokensLeft:   req.Budget.ContextTokensLeft,
-			SpendMicroCentsLeft: req.Budget.SpendMicroCentsLeft,
-			SpendMicroCentsCap:  req.Budget.SpendMicroCentsCap,
-		})
-	}
-	if refusal != nil {
-		// The arm returned between the lookup and the enqueue: the mailbox is sealed and
-		// refuses with the closed CONTROL_SESSION_TERMINAL token — the same terminal-session
-		// refusal the drive-state verbs give, mapped to the same 409.
-		writeErrCode(w, http.StatusConflict, "midflight_refused", refusal.Reason+": "+refusal.Detail)
-		return
-	}
-	s.logf("gateway: session %s midflight %s queued for the next turn boundary", traceID, verb)
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"trace_id": traceID,
-		"verb":     verb,
-		"queued":   true,
-		"journal":  verbs.Journal(),
-	})
 }

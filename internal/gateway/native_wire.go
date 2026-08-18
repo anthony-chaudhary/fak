@@ -108,20 +108,6 @@ func newNativeWireSeed(req *agent.AnthropicMessagesRequest) (nativeWireSeed, *na
 	return seed, nil
 }
 
-// runOptions lowers the seed onto the owned loop's option set. Both options are no-ops
-// when their half of the seed is empty, so a request that declares nothing drives the
-// byte-for-byte historical loop.
-func (s nativeWireSeed) runOptions() []agent.RunOption {
-	var opts []agent.RunOption
-	if len(s.Conversation) > 0 {
-		opts = append(opts, agent.WithConversation(s.Conversation))
-	}
-	if len(s.Tools) > 0 {
-		opts = append(opts, agent.WithToolCatalog(s.Tools))
-	}
-	return opts
-}
-
 // nativeConversation validates and copies the served transcript. DecodeAnthropicMessages
 // Request has already lowered Anthropic content blocks onto the canonical Message shape
 // (tool_use → ToolCalls, tool_result → RoleTool), so this preserves order and roles

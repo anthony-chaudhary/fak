@@ -206,12 +206,6 @@ type SessionMoveHooks struct {
 	RecordTransition    func(context.Context, SessionMoveTransition) error
 }
 
-type sessionMoveState struct {
-	placement SessionPlacement
-	last      []SessionMoveTransition
-	moving    bool
-}
-
 type SessionMoveError struct {
 	Code        string
 	Message     string

@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T04:23:07.217492Z",
+  "issue": 7067,
+  "family": "unused gateway and model helper deletion",
+  "paths": [
+    "internal/gateway/native_midflight.go",
+    "internal/gateway/native_wire.go",
+    "internal/gateway/session_move.go",
+    "internal/model/quant_q4k_decode.go"
+  ],
+  "test": "go test ./internal/model; fak-dev buildcheck (gateway package); full gateway test suite has an unrelated behavioral failure after compiling",
+  "test_result": "PASS build; model tests PASS; gateway suite compiled then reported pre-existing behavior failure",
+  "before": {
+    "score": -108.0,
+    "grade": "F",
+    "slop_debt": 382,
+    "duplication": 371,
+    "weighted_duplication": 237.5,
+    "dead_code": 5,
+    "vacuous_tests": 6
+  },
+  "after": {
+    "score": -102.5,
+    "grade": "F",
+    "slop_debt": 377,
+    "duplication": 371,
+    "weighted_duplication": 237.5,
+    "dead_code": 0,
+    "vacuous_tests": 6
+  },
+  "verdict": "PASS: dead code and total hard debt strictly decreased; no measured hard KPI increased"
+}
