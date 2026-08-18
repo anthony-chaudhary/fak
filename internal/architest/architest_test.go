@@ -629,6 +629,7 @@ var tier = map[string]int{
 	"refid":                 1, // stdlib-only Git-ref segment validation shared by ref-backed operational leaves (#7130).
 	"generation":            1, // stdlib-only project horizon vocabulary shared by planning and handoff leaves (#7129).
 	"kquantbits":            1, // stdlib-only k-quant metadata bit decoding shared by compute and model (#6986).
+	"linefmt":               1, // stdlib-only newline-terminated formatting shared by service renderers (#6970).
 	"markerblock":           1, // stdlib-only generated-document marker extraction and replacement shared by report leaves (#7115).
 	"strictjson":            1, // stdlib-only strict single-document JSON decoder shared by contract leaves (#7064).
 	"childprocess":          1, // stdlib-only child exit-status normalization shared by launchers (#7063).
