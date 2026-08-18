@@ -76,6 +76,46 @@ This page describes the **current generation's public architecture**. Runtime co
 The deterministic offline path is the default architecture witness. Live HTTP serving requires a configured engine/provider and production deployment controls. Accelerator-backed and private-control routes have environment-specific prerequisites and are not implied by the general diagram.
 
 
+
+## Whole-path coordination target
+
+FAK coordinates the whole agent path, not isolated components. **Coordination** means folding observations from five existing layers into one bounded decision and returning typed actions, effects, and evidence through the same boundary. It is not a synonym for worker orchestration or generic integration.
+
+The diagram below is the target contract tracked by [#6042](https://github.com/anthony-chaudhary/fak/issues/6042), not a claim that one cross-layer coordinator already ships. The participating leaves exist today; their complete `snapshot -> constrained plan -> typed action/effect` fold remains program work.
+
+```text
+observations
+  cache/context ------ retained turns, reuse state, token pressure
+  compute/placement -- device capacity, locality, queue pressure
+  harness/runtime ---- agent state, tools, capabilities, budgets
+  serve/engine ------- model support, route health, request shape
+  trust/operations --- policy, identity, provenance, operator intent
+         |                 |                 |                 |
+         +-----------------+--------+--------+-----------------+
+                                    v
+                         constrained coordination plan
+                    (allowed route, placement, context, authority)
+                                    |
+                 +------------------+------------------+
+                 v                  v                  v
+          typed model action   typed tool effect   operator evidence
+                 |                  |                  |
+                 +------------ result admission -------+
+                                    |
+                                    v
+                         next observed agent turn
+```
+
+| Layer | Existing participants | Program authority |
+|---|---|---|
+| Cache/context | `ctxmmu`, `kvmmu`, `vdso`, `session` | [#5964](https://github.com/anthony-chaudhary/fak/issues/5964) |
+| Compute/placement | `compute`, `modelroute`, `executionroute`, `regionadmit` | [#5416](https://github.com/anthony-chaudhary/fak/issues/5416) and scheduling [#1911](https://github.com/anthony-chaudhary/fak/issues/1911) |
+| Harness/runtime | `agent`, `harnessprofile`, `taskmgr`, `orchestration` | Whole-path fold [#6042](https://github.com/anthony-chaudhary/fak/issues/6042) |
+| Serve/engine | `gateway`, `engine`, `model`, `apihostprobe` | Serving/runtime work folded by [#6042](https://github.com/anthony-chaudhary/fak/issues/6042) |
+| Trust/operations | `policy`, `adjudicator`, `provenance`, `journal`, `operatorbrief` | Trace/evidence [#5629](https://github.com/anthony-chaudhary/fak/issues/5629) and meaningful control [#2208](https://github.com/anthony-chaudhary/fak/issues/2208) |
+
+The terms name different scopes: orchestration manages a work graph and workers; scheduling orders admitted work over time; routing selects an allowed destination; serving executes a model-facing request; coordination constrains those decisions together across all five layers.
+
 ## Runtime and repository-development artifacts
 
 A release has two executable boundaries with different audiences:

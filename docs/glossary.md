@@ -21,6 +21,17 @@ vocabulary — colliding Go identifiers, package names, and internal families. I
 the term you met is a code symbol, resolve it there; every product term resolves
 here.
 
+
+## Whole-path decision terms
+
+These terms are deliberately not interchangeable:
+
+- **Coordination** — The bounded cross-layer fold from observations about cache/context, compute/placement, harness/runtime, serve/engine, and trust/operations into a constrained plan, followed by typed actions/effects and evidence. Coordination is broader than worker orchestration and narrower than generic “everything integrates.” The complete fold is the target of [#6042](https://github.com/anthony-chaudhary/fak/issues/6042), not a claim that one coordinator already ships.
+- **Orchestration** — Managing roles, dependencies, leases, budgets, and reconciliation for a graph of agent or worker tasks. Orchestration can be one input to coordination; it does not choose every model, context, policy, or serving decision.
+- **Scheduling** — Ordering and admitting work over time and capacity after its constraints are known. Scheduling answers *when and in what order*, not which provider or policy is allowed.
+- **Routing** — Selecting an allowed destination or implementation for a request, such as a model, provider, engine, region, or execution route. Routing answers *where*, within policy and capability constraints.
+- **Serving** — Accepting and executing model-facing requests through a runtime endpoint and engine. Serving performs the request; it does not by itself coordinate the surrounding agent, context, tools, or operator controls.
+
 ## Canonical overloaded vocabulary
 
 | term | senses in this repo | house rule |
