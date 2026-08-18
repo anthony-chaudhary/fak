@@ -421,3 +421,28 @@ fak disambiguation runtime-source-self-test --json
 ```
 
 The selfcheck asks the ambiguous question first and then resolves both the canonical token and alias for every public scope. Runtime is execution context—not a synonym for agent kernel, durable session, model KV state, or DOS decision state.
+
+## Fleet and dispatch identities (#6317)
+
+The dispatch control plane uses eight distinct identities:
+
+| Input | Canonical identity | Authoritative typed source |
+|---|---|---|
+| `worker process` | `dispatch worker` | `dispatchaudit.Worker`: issue, lane, backend, and witnessed-result fields. |
+| `seat` | `account seat` | `fleetaccounts.Seat`: account capacity, session cap, leased/free slots. |
+| `lane` | `dispatch lane` | `laneadmit.Request`: taxonomy partition and requested tree. |
+| `lease` | `lane lease` | `laneadmit.Lease`: live holder claim over lane/tree. |
+| `fleet` | `compute fleet` | `fleet.Roster`: uniquely identified controllable machines. |
+| `wave` | `dispatch wave` | `issuecohort.Wave`: one concurrency-safe launch batch and lease region. |
+| `loop` | `dispatch loop` | `loopmgr.LoopSnapshot`: durable recurring run state and counters. |
+| `supervisor` | `fleet supervisor` | `supervisoragent.SupervisorInput`: witnessed liveness, workers, escalations, and leases. |
+
+Dispatch identity is never parsed from worker prose. `ResolveDispatchIdentity` reads only structured `worker_id`, `issue`, `lane`, and `lease_id`; narration has no authority. A narration-only sentence such as `worker=w-7 issue=6317 lane=dispatch lease=lease-7` returns `dispatch identity missing from structured fields`. If structured fields are present, conflicting narration cannot overwrite them.
+
+```text
+fak disambiguation fleet-source-self-test --json
+fak disambiguation query "worker process"
+fak disambiguation query lease
+```
+
+The selfcheck resolves all eight public concepts, rejects narration-only identity, and proves structured identity survives adversarial prose unchanged.

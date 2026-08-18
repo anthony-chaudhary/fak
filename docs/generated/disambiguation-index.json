@@ -1,7 +1,7 @@
 {
   "schema": "fak-disambiguation-index/1",
-  "source_revision": "sha256:ec4bc43a5f6a6cb8f48597102cccf32f948d629aeb4d458bb3af528f49ffd2d5",
-  "entry_count": 24,
+  "source_revision": "sha256:6b36a4df5f42937ad9707d38e4c5fa73a45c1326947f7e2d079f6b83f132ee56",
+  "entry_count": 32,
   "entries": [
     {
       "schema": "fak-disambiguation-entry/1",
@@ -129,6 +129,55 @@
     {
       "schema": "fak-disambiguation-entry/1",
       "identity": {
+        "canonical_term": "account seat",
+        "aliases": [
+          "seat"
+        ]
+      },
+      "definition": "A provider account-capacity slot with availability, session cap, leased slots, free slots, and bound worker IDs.",
+      "contrasts": [
+        {
+          "canonical_term": "dispatch worker",
+          "explanation": "A seat supplies bounded account capacity; it is not the worker process consuming one slot.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "dispatch",
+        "value": "account-seat"
+      },
+      "owner": {
+        "leaf": "fleetaccounts",
+        "lane": "accounts"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/fleetaccounts/resolve.go",
+          "revision": "fleet-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-fleet-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "Seat"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "fleet-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
         "canonical_term": "agent kernel",
         "aliases": [
           "fused agent kernel"
@@ -214,6 +263,55 @@
         "reason_code": "SOURCE_CURRENT",
         "checked_at": "2026-08-17T00:00:00Z",
         "probe": "session-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "compute fleet",
+        "aliases": [
+          "fleet"
+        ]
+      },
+      "definition": "A transport-agnostic roster of uniquely identified controllable machines whose live reports are folded by the public fleet core.",
+      "contrasts": [
+        {
+          "canonical_term": "dispatch wave",
+          "explanation": "A fleet is the available machine roster; a wave is one concurrency-safe batch of work selected for launch.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "dispatch",
+        "value": "fleet"
+      },
+      "owner": {
+        "leaf": "fleet",
+        "lane": "fleet"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/fleet/roster.go",
+          "revision": "fleet-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-fleet-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "Roster"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "fleet-source/1"
       },
       "lifecycle": {
         "class": "current",
@@ -362,6 +460,202 @@
     {
       "schema": "fak-disambiguation-entry/1",
       "identity": {
+        "canonical_term": "dispatch lane",
+        "aliases": [
+          "lane"
+        ]
+      },
+      "definition": "A named taxonomy partition that maps a work request to a canonical file-tree region and concurrency policy.",
+      "contrasts": [
+        {
+          "canonical_term": "lane lease",
+          "explanation": "The lane names the work partition; a lease is the time-bounded ownership claim that currently holds it or its tree.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "dispatch",
+        "value": "lane"
+      },
+      "owner": {
+        "leaf": "laneadmit",
+        "lane": "dos"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/laneadmit/laneadmit.go",
+          "revision": "fleet-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-fleet-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "Request"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "fleet-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "dispatch loop",
+        "aliases": [
+          "loop"
+        ]
+      },
+      "definition": "A durable recurring dispatch state machine identified by loop ID and measured through admitted, refused, started, ended, and witnessed runs.",
+      "contrasts": [
+        {
+          "canonical_term": "fleet supervisor",
+          "explanation": "A loop owns recurring execution state for one cadence; a supervisor observes multiple witnessed surfaces and decides interventions.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "dispatch",
+        "value": "loop"
+      },
+      "owner": {
+        "leaf": "loopmgr",
+        "lane": "loop"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/loopmgr/loopmgr.go",
+          "revision": "fleet-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-fleet-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "LoopSnapshot"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "fleet-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "dispatch wave",
+        "aliases": [
+          "wave"
+        ]
+      },
+      "definition": "An indexed, bounded batch of dispatch members with a shared step budget and explicit lease regions or whole-lane claims.",
+      "contrasts": [
+        {
+          "canonical_term": "compute fleet",
+          "explanation": "A wave is a selected launch batch; the fleet is the machine population on which batches may execute.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "dispatch",
+        "value": "wave"
+      },
+      "owner": {
+        "leaf": "issuecohort",
+        "lane": "dispatch"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/issuecohort/issuecohort.go",
+          "revision": "fleet-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-fleet-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "Wave"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "fleet-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "dispatch worker",
+        "aliases": [
+          "worker process"
+        ]
+      },
+      "definition": "One executing worker record with structured issue, lane, backend, and witnessed-result fields; its free-form output is untrusted narration.",
+      "contrasts": [
+        {
+          "canonical_term": "account seat",
+          "explanation": "A worker is one execution process; a seat is provider-account capacity that may host multiple worker sessions.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "dispatch",
+        "value": "worker"
+      },
+      "owner": {
+        "leaf": "dispatchaudit",
+        "lane": "dispatch"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/dispatchaudit/dispatchaudit.go",
+          "revision": "fleet-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-fleet-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "Worker"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "fleet-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
         "canonical_term": "fak CLI kernel",
         "aliases": []
       },
@@ -400,6 +694,55 @@
         "reason_code": "SOURCE_CURRENT",
         "checked_at": "2026-08-11T00:00:00Z",
         "probe": "public-seed/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "fleet supervisor",
+        "aliases": [
+          "supervisor"
+        ]
+      },
+      "definition": "A decision layer whose input is witnessed liveness, worker verdicts, escalations, and leases; missing witnesses cause escalation rather than inference.",
+      "contrasts": [
+        {
+          "canonical_term": "dispatch loop",
+          "explanation": "The supervisor reasons over witnessed fleet state; a loop is one recurring execution state machine it may observe or act on.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "dispatch",
+        "value": "supervisor"
+      },
+      "owner": {
+        "leaf": "supervisoragent",
+        "lane": "fleet"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/supervisoragent/input.go",
+          "revision": "fleet-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-fleet-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "SupervisorInput"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "fleet-source/1"
       },
       "lifecycle": {
         "class": "current",
@@ -547,6 +890,55 @@
         "reason_code": "SOURCE_CURRENT",
         "checked_at": "2026-08-11T00:00:00Z",
         "probe": "public-seed/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "lane lease",
+        "aliases": [
+          "lease"
+        ]
+      },
+      "definition": "A live ownership claim carrying lease ID, lane or tree, holder identity, and read-only posture for collision admission.",
+      "contrasts": [
+        {
+          "canonical_term": "dispatch lane",
+          "explanation": "A lease is an active holder claim; the lane is the durable taxonomy partition it may claim.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "dispatch",
+        "value": "lease"
+      },
+      "owner": {
+        "leaf": "laneadmit",
+        "lane": "dos"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/laneadmit/laneadmit.go",
+          "revision": "fleet-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-fleet-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "Lease"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "fleet-source/1"
       },
       "lifecycle": {
         "class": "current",

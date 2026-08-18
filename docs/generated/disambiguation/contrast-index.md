@@ -20,6 +20,13 @@
   - **hook gate class:** A DOS decision kind persists arbitration state; a hook gate class controls execution isolation for a checker.
   - **policy posture verdict:** A DOS decision kind drives resolver lifecycle and history, not an ALLOW/DENY policy amendment result.
 
+<a id="account-seat"></a>
+## account seat
+
+- **Identity:** [account seat — `dispatch:account-seat`](canonical-terms.md#account-seat-dispatch-account-seat); query with `fak disambiguation query "account seat"`
+- **Contrasts:**
+  - **dispatch worker:** A seat supplies bounded account capacity; it is not the worker process consuming one slot.
+
 <a id="agent-kernel"></a>
 ## agent kernel
 
@@ -33,6 +40,13 @@
 - **Identity:** [agent session — `runtime:internal/session`](canonical-terms.md#agent-session-runtime-internal-session); query with `fak disambiguation query "agent session"`
 - **Contrasts:**
   - **session resume:** The session is the durable execution identity; resume is one transition that re-admits a paused session.
+
+<a id="compute-fleet"></a>
+## compute fleet
+
+- **Identity:** [compute fleet — `dispatch:fleet`](canonical-terms.md#compute-fleet-dispatch-fleet); query with `fak disambiguation query "compute fleet"`
+- **Contrasts:**
+  - **dispatch wave:** A fleet is the available machine roster; a wave is one concurrency-safe batch of work selected for launch.
 
 <a id="compute-kernel"></a>
 ## compute kernel
@@ -55,12 +69,47 @@
 - **Contrasts:**
   - **kernel:** The package and CLI-scoped kernel are distinct.
 
+<a id="dispatch-lane"></a>
+## dispatch lane
+
+- **Identity:** [dispatch lane — `dispatch:lane`](canonical-terms.md#dispatch-lane-dispatch-lane); query with `fak disambiguation query "dispatch lane"`
+- **Contrasts:**
+  - **lane lease:** The lane names the work partition; a lease is the time-bounded ownership claim that currently holds it or its tree.
+
+<a id="dispatch-loop"></a>
+## dispatch loop
+
+- **Identity:** [dispatch loop — `dispatch:loop`](canonical-terms.md#dispatch-loop-dispatch-loop); query with `fak disambiguation query "dispatch loop"`
+- **Contrasts:**
+  - **fleet supervisor:** A loop owns recurring execution state for one cadence; a supervisor observes multiple witnessed surfaces and decides interventions.
+
+<a id="dispatch-wave"></a>
+## dispatch wave
+
+- **Identity:** [dispatch wave — `dispatch:wave`](canonical-terms.md#dispatch-wave-dispatch-wave); query with `fak disambiguation query "dispatch wave"`
+- **Contrasts:**
+  - **compute fleet:** A wave is a selected launch batch; the fleet is the machine population on which batches may execute.
+
+<a id="dispatch-worker"></a>
+## dispatch worker
+
+- **Identity:** [dispatch worker — `dispatch:worker`](canonical-terms.md#dispatch-worker-dispatch-worker); query with `fak disambiguation query "dispatch worker"`
+- **Contrasts:**
+  - **account seat:** A worker is one execution process; a seat is provider-account capacity that may host multiple worker sessions.
+
 <a id="fak-cli-kernel"></a>
 ## fak CLI kernel
 
 - **Identity:** [fak CLI kernel — `cli:fak`](canonical-terms.md#fak-cli-kernel-cli-fak); query with `fak disambiguation query "fak CLI kernel"`
 - **Contrasts:**
   - **kernel:** The CLI surface and package-scoped kernel are distinct.
+
+<a id="fleet-supervisor"></a>
+## fleet supervisor
+
+- **Identity:** [fleet supervisor — `dispatch:supervisor`](canonical-terms.md#fleet-supervisor-dispatch-supervisor); query with `fak disambiguation query "fleet supervisor"`
+- **Contrasts:**
+  - **dispatch loop:** The supervisor reasons over witnessed fleet state; a loop is one recurring execution state machine it may observe or act on.
 
 <a id="hook-gate-class"></a>
 ## hook gate class
@@ -79,6 +128,13 @@
 - **Contrasts:**
   - **disambiguation package:** The command-line product surface is not the internal Go package API.
   - **fak CLI kernel:** The package API is not the fak command-line product surface.
+
+<a id="lane-lease"></a>
+## lane lease
+
+- **Identity:** [lane lease — `dispatch:lease`](canonical-terms.md#lane-lease-dispatch-lease); query with `fak disambiguation query "lane lease"`
+- **Contrasts:**
+  - **dispatch lane:** A lease is an active holder claim; the lane is the durable taxonomy partition it may claim.
 
 <a id="model-kv-cache"></a>
 ## model KV cache

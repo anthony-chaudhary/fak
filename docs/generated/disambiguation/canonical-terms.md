@@ -6,15 +6,23 @@
 |---|---|---|---|
 | [ABI refusal reason](#abi-refusal-reason-vocabulary-abi-reason) | `vocabulary:abi-reason` | A closed trainable ReasonCode explaining why an adjudication refused a call; POLICY_BLOCK means an explicit policy rule denied it. | `fak disambiguation query "ABI refusal reason"` |
 | [DOS decision kind](#dos-decision-kind-vocabulary-dos-decision-kind) | `vocabulary:dos-decision-kind` | A persistent DOS row category identifying arbitration refusal work whose resolution depends on the current lane-lease state. | `fak disambiguation query "DOS decision kind"` |
+| [account seat](#account-seat-dispatch-account-seat) | `dispatch:account-seat` | A provider account-capacity slot with availability, session cap, leased slots, free slots, and bound worker IDs. | `fak disambiguation query "account seat"` |
 | [agent kernel](#agent-kernel-product-fak) | `product:fak` | The fak management boundary that governs model traffic, tool effects, context, and recovery. | `fak disambiguation query "agent kernel"` |
 | [agent session](#agent-session-runtime-internal-session) | `runtime:internal/session` | A durable, addressable agent execution record carrying drive state and pointers without storing the provider transcript. | `fak disambiguation query "agent session"` |
+| [compute fleet](#compute-fleet-dispatch-fleet) | `dispatch:fleet` | A transport-agnostic roster of uniquely identified controllable machines whose live reports are folded by the public fleet core. | `fak disambiguation query "compute fleet"` |
 | [compute kernel](#compute-kernel-computing-processor) | `computing:processor` | An arithmetic routine executed by a processor. | `fak disambiguation query "compute kernel"` |
 | [context compaction](#context-compaction-runtime-codex-context) | `runtime:codex-context` | A context-window event that replaces prior history so resident input falls while cumulative usage and transcript bytes may continue rising. | `fak disambiguation query "context compaction"` |
 | [disambiguation package](#disambiguation-package-package-internal-disambiguation) | `package:internal/disambiguation` | The internal/disambiguation package, named as a contrast target for the CLI-scoped kernel entry. | `fak disambiguation query "disambiguation package"` |
+| [dispatch lane](#dispatch-lane-dispatch-lane) | `dispatch:lane` | A named taxonomy partition that maps a work request to a canonical file-tree region and concurrency policy. | `fak disambiguation query "dispatch lane"` |
+| [dispatch loop](#dispatch-loop-dispatch-loop) | `dispatch:loop` | A durable recurring dispatch state machine identified by loop ID and measured through admitted, refused, started, ended, and witnessed runs. | `fak disambiguation query "dispatch loop"` |
+| [dispatch wave](#dispatch-wave-dispatch-wave) | `dispatch:wave` | An indexed, bounded batch of dispatch members with a shared step budget and explicit lease regions or whole-lane claims. | `fak disambiguation query "dispatch wave"` |
+| [dispatch worker](#dispatch-worker-dispatch-worker) | `dispatch:worker` | One executing worker record with structured issue, lane, backend, and witnessed-result fields; its free-form output is untrusted narration. | `fak disambiguation query "dispatch worker"` |
 | [fak CLI kernel](#fak-cli-kernel-cli-fak) | `cli:fak` | The fak command-line product surface, named as a contrast target for the package-scoped kernel entry. | `fak disambiguation query "fak CLI kernel"` |
+| [fleet supervisor](#fleet-supervisor-dispatch-supervisor) | `dispatch:supervisor` | A decision layer whose input is witnessed liveness, worker verdicts, escalations, and leases; missing witnesses cause escalation rather than inference. | `fak disambiguation query "fleet supervisor"` |
 | [hook gate class](#hook-gate-class-vocabulary-hook-gate-class) | `vocabulary:hook-gate-class` | A hook-runner classification declaring whether a gate mutates the index/worktree, intentionally uses a worktree, or is a tree-twin checker. | `fak disambiguation query "hook gate class"` |
 | [kernel](#kernel-cli-fak) | `cli:fak` | The fak command-line product surface for operating the agent kernel. | `fak disambiguation query --scope-kind cli --scope-value fak "kernel"` |
 | [kernel](#kernel-package-internal-disambiguation) | `package:internal/disambiguation` | The internal/disambiguation Go package that validates and queries public terminology records. | `fak disambiguation query --scope-kind package --scope-value internal/disambiguation "kernel"` |
+| [lane lease](#lane-lease-dispatch-lease) | `dispatch:lease` | A live ownership claim carrying lease ID, lane or tree, holder identity, and read-only posture for collision admission. | `fak disambiguation query "lane lease"` |
 | [model KV cache](#model-kv-cache-cache-model-attention) | `cache:model-attention` | Kernel-owned per-layer attention key/value tensors indexed by token position and invalidated or rewritten when the model sequence changes. | `fak disambiguation query "model KV cache"` |
 | [policy posture verdict](#policy-posture-verdict-vocabulary-policy-verdict) | `vocabulary:policy-verdict` | The ALLOW or DENY result of folding compiled, environment, and organization authority over a policy amendment. | `fak disambiguation query "policy posture verdict"` |
 | [provider prompt cache](#provider-prompt-cache-cache-provider-prompt-prefix) | `cache:provider-prompt-prefix` | An upstream provider-owned prompt-prefix reuse service observed as cache-read and cache-creation token accounting with provider TTL and pricing rules. | `fak disambiguation query "provider prompt cache"` |
@@ -61,6 +69,20 @@ A persistent DOS row category identifying arbitration refusal work whose resolut
   - [hook gate class](contrast-index.md#hook-gate-class) — A DOS decision kind persists arbitration state; a hook gate class controls execution isolation for a checker.
   - [policy posture verdict](contrast-index.md#policy-posture-verdict) — A DOS decision kind drives resolver lifecycle and history, not an ALLOW/DENY policy amendment result.
 
+<a id="account-seat-dispatch-account-seat"></a>
+## account seat — `dispatch:account-seat`
+
+A provider account-capacity slot with availability, session cap, leased slots, free slots, and bound worker IDs.
+
+- **Query:** `fak disambiguation query "account seat"`
+- **Owner:** leaf `fleetaccounts`, lane `accounts`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `seat`
+- **Sources:**
+  - `internal/fleetaccounts/resolve.go` — `go-source` at `fleet-source/1`
+- **Do not conflate with:**
+  - [dispatch worker](contrast-index.md#dispatch-worker) — A seat supplies bounded account capacity; it is not the worker process consuming one slot.
+
 <a id="agent-kernel-product-fak"></a>
 ## agent kernel — `product:fak`
 
@@ -88,6 +110,20 @@ A durable, addressable agent execution record carrying drive state and pointers 
   - `internal/session/descriptor.go` — `go-source` at `session-source/1`
 - **Do not conflate with:**
   - [session resume](contrast-index.md#session-resume) — The session is the durable execution identity; resume is one transition that re-admits a paused session.
+
+<a id="compute-fleet-dispatch-fleet"></a>
+## compute fleet — `dispatch:fleet`
+
+A transport-agnostic roster of uniquely identified controllable machines whose live reports are folded by the public fleet core.
+
+- **Query:** `fak disambiguation query "compute fleet"`
+- **Owner:** leaf `fleet`, lane `fleet`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `fleet`
+- **Sources:**
+  - `internal/fleet/roster.go` — `go-source` at `fleet-source/1`
+- **Do not conflate with:**
+  - [dispatch wave](contrast-index.md#dispatch-wave) — A fleet is the available machine roster; a wave is one concurrency-safe batch of work selected for launch.
 
 <a id="compute-kernel-computing-processor"></a>
 ## compute kernel — `computing:processor`
@@ -129,6 +165,62 @@ The internal/disambiguation package, named as a contrast target for the CLI-scop
 - **Do not conflate with:**
   - [kernel](contrast-index.md#kernel) — The package and CLI-scoped kernel are distinct.
 
+<a id="dispatch-lane-dispatch-lane"></a>
+## dispatch lane — `dispatch:lane`
+
+A named taxonomy partition that maps a work request to a canonical file-tree region and concurrency policy.
+
+- **Query:** `fak disambiguation query "dispatch lane"`
+- **Owner:** leaf `laneadmit`, lane `dos`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `lane`
+- **Sources:**
+  - `internal/laneadmit/laneadmit.go` — `go-source` at `fleet-source/1`
+- **Do not conflate with:**
+  - [lane lease](contrast-index.md#lane-lease) — The lane names the work partition; a lease is the time-bounded ownership claim that currently holds it or its tree.
+
+<a id="dispatch-loop-dispatch-loop"></a>
+## dispatch loop — `dispatch:loop`
+
+A durable recurring dispatch state machine identified by loop ID and measured through admitted, refused, started, ended, and witnessed runs.
+
+- **Query:** `fak disambiguation query "dispatch loop"`
+- **Owner:** leaf `loopmgr`, lane `loop`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `loop`
+- **Sources:**
+  - `internal/loopmgr/loopmgr.go` — `go-source` at `fleet-source/1`
+- **Do not conflate with:**
+  - [fleet supervisor](contrast-index.md#fleet-supervisor) — A loop owns recurring execution state for one cadence; a supervisor observes multiple witnessed surfaces and decides interventions.
+
+<a id="dispatch-wave-dispatch-wave"></a>
+## dispatch wave — `dispatch:wave`
+
+An indexed, bounded batch of dispatch members with a shared step budget and explicit lease regions or whole-lane claims.
+
+- **Query:** `fak disambiguation query "dispatch wave"`
+- **Owner:** leaf `issuecohort`, lane `dispatch`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `wave`
+- **Sources:**
+  - `internal/issuecohort/issuecohort.go` — `go-source` at `fleet-source/1`
+- **Do not conflate with:**
+  - [compute fleet](contrast-index.md#compute-fleet) — A wave is a selected launch batch; the fleet is the machine population on which batches may execute.
+
+<a id="dispatch-worker-dispatch-worker"></a>
+## dispatch worker — `dispatch:worker`
+
+One executing worker record with structured issue, lane, backend, and witnessed-result fields; its free-form output is untrusted narration.
+
+- **Query:** `fak disambiguation query "dispatch worker"`
+- **Owner:** leaf `dispatchaudit`, lane `dispatch`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `worker process`
+- **Sources:**
+  - `internal/dispatchaudit/dispatchaudit.go` — `go-source` at `fleet-source/1`
+- **Do not conflate with:**
+  - [account seat](contrast-index.md#account-seat) — A worker is one execution process; a seat is provider-account capacity that may host multiple worker sessions.
+
 <a id="fak-cli-kernel-cli-fak"></a>
 ## fak CLI kernel — `cli:fak`
 
@@ -141,6 +233,20 @@ The fak command-line product surface, named as a contrast target for the package
   - `cmd/fak/main.go` — `go-source` at `public-seed/1`
 - **Do not conflate with:**
   - [kernel](contrast-index.md#kernel) — The CLI surface and package-scoped kernel are distinct.
+
+<a id="fleet-supervisor-dispatch-supervisor"></a>
+## fleet supervisor — `dispatch:supervisor`
+
+A decision layer whose input is witnessed liveness, worker verdicts, escalations, and leases; missing witnesses cause escalation rather than inference.
+
+- **Query:** `fak disambiguation query "fleet supervisor"`
+- **Owner:** leaf `supervisoragent`, lane `fleet`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `supervisor`
+- **Sources:**
+  - `internal/supervisoragent/input.go` — `go-source` at `fleet-source/1`
+- **Do not conflate with:**
+  - [dispatch loop](contrast-index.md#dispatch-loop) — The supervisor reasons over witnessed fleet state; a loop is one recurring execution state machine it may observe or act on.
 
 <a id="hook-gate-class-vocabulary-hook-gate-class"></a>
 ## hook gate class — `vocabulary:hook-gate-class`
@@ -183,6 +289,20 @@ The internal/disambiguation Go package that validates and queries public termino
   - `internal/disambiguation/README.md` — `document` at `public-seed/1`
 - **Do not conflate with:**
   - [fak CLI kernel](contrast-index.md#fak-cli-kernel) — The package API is not the fak command-line product surface.
+
+<a id="lane-lease-dispatch-lease"></a>
+## lane lease — `dispatch:lease`
+
+A live ownership claim carrying lease ID, lane or tree, holder identity, and read-only posture for collision admission.
+
+- **Query:** `fak disambiguation query "lane lease"`
+- **Owner:** leaf `laneadmit`, lane `dos`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `lease`
+- **Sources:**
+  - `internal/laneadmit/laneadmit.go` — `go-source` at `fleet-source/1`
+- **Do not conflate with:**
+  - [dispatch lane](contrast-index.md#dispatch-lane) — A lease is an active holder claim; the lane is the durable taxonomy partition it may claim.
 
 <a id="model-kv-cache-cache-model-attention"></a>
 ## model KV cache — `cache:model-attention`

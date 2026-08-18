@@ -24,7 +24,7 @@ func cmdDisambiguation(args []string) {
 
 func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak disambiguation schema [--json] [--self-test]\n       fak disambiguation query <canonical-term> [--json]\n       fak disambiguation query --self-test [--json]\n       fak disambiguation search <term> [--json]\n       fak disambiguation reverse --kind source-path|symbol|cli-token|reason-code <locator> [--json]\n       fak disambiguation reverse --self-test [--json]\n       fak disambiguation cli-source [--json] [--self-test]\n       fak disambiguation docs [--output-dir DIR] [--check] [--json]\n       fak disambiguation runtime-source-self-test [--json]\n       fak disambiguation reason-source-self-test [--json]\n       fak disambiguation cache-source-self-test [--json]\n       fak disambiguation session-source-self-test [--json]\n       fak disambiguation stale-symbols-self-test [--json]\n       fak disambiguation coverage-self-test [--json]")
+		fmt.Fprintln(stderr, "usage: fak disambiguation schema [--json] [--self-test]\n       fak disambiguation query <canonical-term> [--json]\n       fak disambiguation query --self-test [--json]\n       fak disambiguation search <term> [--json]\n       fak disambiguation reverse --kind source-path|symbol|cli-token|reason-code <locator> [--json]\n       fak disambiguation reverse --self-test [--json]\n       fak disambiguation cli-source [--json] [--self-test]\n       fak disambiguation docs [--output-dir DIR] [--check] [--json]\n       fak disambiguation fleet-source-self-test [--json]\n       fak disambiguation runtime-source-self-test [--json]\n       fak disambiguation reason-source-self-test [--json]\n       fak disambiguation cache-source-self-test [--json]\n       fak disambiguation session-source-self-test [--json]\n       fak disambiguation stale-symbols-self-test [--json]\n       fak disambiguation coverage-self-test [--json]")
 		return 2
 	}
 	switch args[0] {
@@ -54,6 +54,8 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 		return runDisambiguationFreshness(stdout, stderr, args[1:])
 	case "provenance":
 		return runDisambiguationProvenance(stdout, stderr, args[1:])
+	case "fleet-source-self-test":
+		return runDisambiguationFleetSourceSelfTest(stdout, stderr, args[1:])
 	case "runtime-source-self-test":
 		return runDisambiguationRuntimeSourceSelfTest(stdout, stderr, args[1:])
 	case "reason-source-self-test":
@@ -67,9 +69,32 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 	case "coverage-self-test":
 		return runDisambiguationCoverageSelfTest(stdout, stderr, args[1:])
 	default:
-		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want schema, query, search, reverse, cli-source, docs, explain, ownership, freshness, provenance, runtime-source-self-test, reason-source-self-test, cache-source-self-test, session-source-self-test, stale-symbols-self-test, or coverage-self-test)\n", args[0])
+		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want schema, query, search, reverse, cli-source, docs, explain, ownership, freshness, provenance, fleet-source-self-test, runtime-source-self-test, reason-source-self-test, cache-source-self-test, session-source-self-test, stale-symbols-self-test, or coverage-self-test)\n", args[0])
 		return 2
 	}
+}
+
+func runDisambiguationFleetSourceSelfTest(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("disambiguation fleet-source-self-test", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	jsonOutput := fs.Bool("json", false, "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "fak disambiguation fleet-source-self-test: unexpected positional arguments")
+		return 2
+	}
+	report, err := disambiguation.RunFleetSourceSelfTest()
+	if err != nil {
+		fmt.Fprintf(stderr, "disambiguation fleet-source self-test: FAIL: %v\n", err)
+		return 1
+	}
+	if *jsonOutput {
+		return encodeDisambiguationJSON(stdout, stderr, report)
+	}
+	fmt.Fprintf(stdout, "PASS %s: %d concepts; narration rejected=%t; structured identity accepted=%t\n", report.Schema, len(report.Resolutions), report.NarrationRejected, report.StructuredAccepted)
+	return 0
 }
 
 func runDisambiguationRuntimeSourceSelfTest(stdout, stderr io.Writer, args []string) int {
