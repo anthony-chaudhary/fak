@@ -365,9 +365,6 @@ func fillFactorialProvider(ctx context.Context, cell *FactorialCell, o Factorial
 	cell.Quality = float64(cell.RetainedFacts) / float64(cell.TotalFacts)
 	return nil
 }
-func cellContext(c *FactorialCell) string {
-	return fmt.Sprintf("workload=%s pressure=%d total_facts=%d retained_transform_facts=%d", c.Workload, c.Pressure, c.TotalFacts, c.RetainedFacts) + " " + factList(c.TotalFacts)
-}
 func factList(n int) string {
 	var b strings.Builder
 	for i := 0; i < n; i++ {

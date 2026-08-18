@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
@@ -209,12 +208,6 @@ func guardInfoWorkHistoryRows(c guardInfoWorkHistoryComparison) []string {
 		return []string{fmt.Sprintf(" history %s · %s · %s", c.Status, strings.ReplaceAll(c.Attribution, "_", " "), strings.ReplaceAll(c.Reason, "_", " "))}
 	}
 	return []string{fmt.Sprintf(" history %s · tokens %+.0f · calls %+.0f · %s", c.Status, c.TokenDelta, float64(c.CallDelta), strings.ReplaceAll(c.Attribution, "_", " "))}
-}
-
-func sortedHistoryRecords(records []guardInfoWorkHistoryRecord) []guardInfoWorkHistoryRecord {
-	out := append([]guardInfoWorkHistoryRecord(nil), records...)
-	sort.Slice(out, func(i, j int) bool { return out[i].RecordedAt < out[j].RecordedAt })
-	return out
 }
 
 func (c *claudeMacDebugClient) decorateWorkHistory(v *guardInfoVars) {

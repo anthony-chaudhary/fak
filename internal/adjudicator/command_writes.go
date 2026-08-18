@@ -315,10 +315,6 @@ func commandWriteTargetsWithSpecs(cmd string, extra []InlineEvalSpec) []string {
 	return targets
 }
 
-func segmentWriteTargets(segment string) []string {
-	return segmentWriteTargetsWithSpecs(segment, nil)
-}
-
 func segmentWriteTargetsWithSpecs(segment string, extra []InlineEvalSpec) []string {
 	var targets []string
 	add := func(target string) {

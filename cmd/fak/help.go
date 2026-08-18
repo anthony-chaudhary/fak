@@ -80,22 +80,6 @@ var overviewGroups = []struct {
 	}},
 }
 
-// frontdoorCompanions maps a frontdoor companion spelling to the concept it folds
-// into for the compact overview: `fak replay` is `fak run --trace`, `fak top` is
-// `fak ps --watch`, `fak pull`/`fak ls` are `fak model` sub-spellings. Each is a
-// frontdoor-tier verb in its own right (C1), but listing it separately would just
-// reproduce its primary; instead the primary's blurb names it. The set-equality
-// gate treats a companion as covered when its primary is in the overview AND the
-// companion's spelling appears in that primary's blurb — folding never hides a verb.
-var frontdoorCompanions = map[string]string{
-	"guard":  "manage",
-	"m":      "manage",
-	"replay": "run",
-	"top":    "ps",
-	"pull":   "model",
-	"ls":     "model",
-}
-
 // usageCompact prints the curated overview — what `fak`, `fak -h`, and `fak help`
 // show. Kept deliberately far under one screen; the gate test holds the line.
 func usageCompact(w io.Writer) {
