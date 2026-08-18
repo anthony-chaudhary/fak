@@ -9678,6 +9678,11 @@
           "category": "incidental",
           "reason": "Typed ownership-fixture mismatch for a missing or wrong dispatch lane, not a planning concept.",
           "token": "OwnershipLaneMismatch"
+        },
+        {
+          "category": "incidental",
+          "reason": "Metrics field grouping uncovered terminology candidates by coverage reason, not a planning concept.",
+          "token": "UncoveredCandidateClasses"
         }
       ],
       "exclude": [
@@ -9739,6 +9744,7 @@
         "SweepPlanGreedy",
         "SweepPlanMain",
         "SweepPlanPairwise",
+        "UncoveredCandidateClasses",
         "WriteMergePlan",
         "auditDispatchWaveExecutionPlanBounded",
         "buildMainPlan",

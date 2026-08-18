@@ -494,3 +494,9 @@ Four identities form one checked chain without becoming synonyms:
 - **fak commit stamp** is the validated `(fak <leaf>)` subject token.
 
 Run `fak disambiguation ownership-source-self-test --json` to resolve a fixture path to all four fields. `ResolveOwnershipFixture` returns typed `leaf-mismatch`, `lane-mismatch`, and `stamp-mismatch` errors instead of guessing from similar names. The fixture reads the public ownership, module-version, and commit-lint contracts and does not duplicate their writers.
+
+## Freshness and coverage metrics (#6322)
+
+`fak disambiguation metrics --json` derives its report directly from the public index. It groups entries by all four freshness verdicts, source-family probe, and `leaf@lane` owner, and reserves an uncovered-candidate-class breakdown populated from coverage findings. Freshness and owner counts each sum exactly to `total`; no metric is a second index writer.
+
+The JSON schema is `fak-disambiguation-metrics/1`. Empty classes remain explicit where a closed vocabulary is meaningful (including zero freshness verdicts), while source, owner, and uncovered-class rows are sorted by key for deterministic output.
