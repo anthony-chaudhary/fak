@@ -130,12 +130,18 @@ func guardResolveServingNodes(n guardEndpointNodes) []gateway.SessionNode {
 // a stable placeholder when it cannot be read. Kept simple (no hardware-catalog lookup)
 // so the status area never depends on a repo-relative catalog file.
 func guardKernelNodeID() string {
-	if h, err := os.Hostname(); err == nil {
-		if h = strings.TrimSpace(h); h != "" {
-			return h
-		}
+	if hostname := trimmedHostname(); hostname != "" {
+		return hostname
 	}
 	return "this-host"
+}
+
+func trimmedHostname() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(hostname)
 }
 
 // guardHostFromBase returns the host[:port] of an upstream base URL, or "" when the

@@ -1,0 +1,31 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T08:50:18.135868Z",
+  "issue": 7288,
+  "family": "trimmed OS hostname lookup",
+  "paths": [
+    "cmd/fak/enroll.go",
+    "cmd/fak/guard_endpoints.go"
+  ],
+  "test": "go test ./cmd/fak -run 'Test.*(Enroll|Guard.*Endpoint|KernelNode)' -count=1; fak-dev buildcheck --vet",
+  "test_result": "PASS",
+  "before": {
+    "score": -75.4,
+    "grade": "F",
+    "slop_debt": 335,
+    "duplication": 335,
+    "weighted_duplication": 214.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -74.9,
+    "grade": "F",
+    "slop_debt": 334,
+    "duplication": 334,
+    "weighted_duplication": 214.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

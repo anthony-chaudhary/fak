@@ -263,14 +263,7 @@ func orgURLHost(raw string) string {
 	return strings.Trim(s, "[]")
 }
 
-func defaultDeviceID() string {
-	if h, err := os.Hostname(); err == nil {
-		if h = strings.TrimSpace(h); h != "" {
-			return h
-		}
-	}
-	return ""
-}
+func defaultDeviceID() string { return trimmedHostname() }
 
 func defaultUserID() string {
 	for _, k := range []string{"USER", "USERNAME", "LOGNAME"} {
