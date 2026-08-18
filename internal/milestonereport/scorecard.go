@@ -72,7 +72,7 @@ func BuildScorecard(m Maturity, e Epics) scorecard.Payload {
 	climbKPI := scorecard.KPI{
 		Key:   "climb_distance_to_matured",
 		Group: "climb",
-		Score: kpiScore(m.Matured, m.Cells),
+		Score: scorecard.CompletionPercent(m.Matured, m.Cells),
 		Detail: fmt.Sprintf("%d/%d cell(s) matured (M4+); climb shortfall sum(M4-current) = %d rung(s)",
 			m.Matured, m.Cells, climbDebt),
 		Defects: climbDefects,
@@ -80,7 +80,7 @@ func BuildScorecard(m Maturity, e Epics) scorecard.Payload {
 	roadKPI := scorecard.KPI{
 		Key:   "roadmap_open_children",
 		Group: "roadmap",
-		Score: kpiScore(e.Closed, e.Total),
+		Score: scorecard.CompletionPercent(e.Closed, e.Total),
 		Detail: fmt.Sprintf("%d/%d discrete child(ren) closed; roadmap shortfall = %d open child(ren) over %d measured discrete epic(s)",
 			e.Closed, e.Total, roadDebt, e.Discrete),
 		Defects: roadDefects,
@@ -234,10 +234,3 @@ func sortWorklist(items []WorklistItem) {
 }
 
 // kpiScore renders a 0..100 completion score for a KPI (100 when nothing is owed,
-// i.e. total == 0, matching the scorecard family's "no work, perfect" convention).
-func kpiScore(done, total int) float64 {
-	if total == 0 {
-		return 100
-	}
-	return scorecard.Round1(100 * float64(done) / float64(total))
-}

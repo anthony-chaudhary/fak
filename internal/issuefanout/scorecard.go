@@ -87,7 +87,7 @@ func kpiAdoption(r AdoptionReport) scorecard.KPI {
 	return scorecard.KPI{
 		Key:     "adoption_floor",
 		Group:   "usage",
-		Score:   ratio(r.ClearedLeaves, r.ShippedLeaves),
+		Score:   scorecard.CompletionPercent(r.ClearedLeaves, r.ShippedLeaves),
 		Detail:  fmt.Sprintf("%d/%d shipped leaf/leaves clear the >= %d fan-out floor", r.ClearedLeaves, r.ShippedLeaves, r.MinFanout),
 		Defects: defects,
 	}
@@ -108,7 +108,7 @@ func kpiIntegrity(r AdoptionReport) scorecard.KPI {
 	return scorecard.KPI{
 		Key:     "marker_integrity",
 		Group:   "failure_rate",
-		Score:   ratio(clean, clean+len(r.OrphanMarkers)),
+		Score:   scorecard.CompletionPercent(clean, clean+len(r.OrphanMarkers)),
 		Detail:  fmt.Sprintf("%d credited marker(s), %d orphan(s)", clean, len(r.OrphanMarkers)),
 		Defects: defects,
 	}
@@ -141,20 +141,13 @@ func kpiDrift() scorecard.KPI {
 	return scorecard.KPI{
 		Key:     "taxonomy_drift",
 		Group:   "drift",
-		Score:   ratio(present, len(DoctrineAreas)),
+		Score:   scorecard.CompletionPercent(present, len(DoctrineAreas)),
 		Detail:  fmt.Sprintf("%d/%d doctrine area(s) covered by the emitted plan", present, len(DoctrineAreas)),
 		Defects: defects,
 	}
 }
 
 // ratio is the 0..100 cleared fraction (100 when total == 0), rounded to one decimal -
-// the shared "no work, perfect" convention every scorecard KPI in the family uses.
-func ratio(done, total int) float64 {
-	if total == 0 {
-		return 100
-	}
-	return scorecard.Round1(100 * float64(done) / float64(total))
-}
 
 // RenderScorecard prints the scorecard for a terminal: the shared renderer over the
 // headline debt key, so a `fak issue fanout-health` style surface reads identically to

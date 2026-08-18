@@ -220,3 +220,11 @@ func normalizeKPIs(kpis []KPI) []KPI {
 	}
 	return out
 }
+
+// CompletionPercent returns the rounded 0..100 completed fraction; no work is perfect.
+func CompletionPercent(done, total int) float64 {
+	if total == 0 {
+		return 100
+	}
+	return Round1(100 * float64(done) / float64(total))
+}

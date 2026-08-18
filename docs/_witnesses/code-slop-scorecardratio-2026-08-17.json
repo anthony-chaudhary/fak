@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T05:39:14.629476Z",
+  "issue": 7049,
+  "family": "scorecard completion percentage",
+  "paths": [
+    "pkg/scorecard/scorecard.go",
+    "pkg/scorecard/scorecard_test.go",
+    "internal/issuefanout/scorecard.go",
+    "internal/milestonereport/scorecard.go"
+  ],
+  "test": "go test ./pkg/scorecard ./internal/issuefanout ./internal/milestonereport",
+  "test_result": "PASS",
+  "before": {
+    "score": -88.4,
+    "grade": "F",
+    "slop_debt": 360,
+    "duplication": 360,
+    "weighted_duplication": 227.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -87.9,
+    "grade": "F",
+    "slop_debt": 359,
+    "duplication": 359,
+    "weighted_duplication": 226.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

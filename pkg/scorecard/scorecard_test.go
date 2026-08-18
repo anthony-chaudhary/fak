@@ -336,3 +336,12 @@ func TestPassMark(t *testing.T) {
 		t.Fatalf("PassMark(false) = %q, want no", got)
 	}
 }
+
+func TestCompletionPercent(t *testing.T) {
+	if got := CompletionPercent(1, 3); got != 33.3 {
+		t.Fatalf("CompletionPercent = %v", got)
+	}
+	if got := CompletionPercent(0, 0); got != 100 {
+		t.Fatalf("empty CompletionPercent = %v", got)
+	}
+}
