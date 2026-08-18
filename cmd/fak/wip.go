@@ -70,6 +70,8 @@ func runWip(stdout, stderr io.Writer, argv []string) int {
 		return runWipOwner(stdout, stderr, argv[1:])
 	case "blocked":
 		return runWipBlocked(stdout, stderr, argv[1:])
+	case "inventory":
+		return runWIPInventory(argv[1:], stdout, stderr)
 	case "reconcile":
 		return runWipReconcile(stdout, stderr, argv[1:])
 	case "sweep-guard", "sweepguard":
@@ -213,6 +215,9 @@ func wipUsage(w io.Writer) {
       live; the refusal is correct), IDLE, ACTIVE. Staleness is judged on the change
       SET, never one file's mtime, so the stale half of a live set is never offered.
       With --landable, print only the LAND rows (exit 3 if any exist).
+
+  fak wip inventory [--json] [--root DIR]
+      Read-only census of main WIP, ignored files, worktrees, stale residue, and checkpoints.
 
   fak wip reconcile [-C <repo>] [--json] [--reclaim] [--file-ticket] [--dry-run]
       For every checkpoint whose owning session no longer holds a live lease

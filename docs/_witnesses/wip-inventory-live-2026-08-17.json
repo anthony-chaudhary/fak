@@ -1,0 +1,277 @@
+{
+  "schema": "fak-wip-inventory/1",
+  "observed_at": "2026-08-17T23:57:24.3036944Z",
+  "repository": "C:/work/fak",
+  "head": "189ffd39394fd27a7166abd1c278ec1029295e10",
+  "main": {
+    "path": "C:/work/fak",
+    "head": "189ffd39394fd27a7166abd1c278ec1029295e10",
+    "branch": "main",
+    "tracked_changes": {
+      "count": 10,
+      "known": true,
+      "samples": [
+        "cmd/fak/harness_resolve_test.go",
+        "cmd/fak/session_mine.go",
+        "cmd/fak/session_mine_test.go",
+        "cmd/fak/wip.go",
+        "internal/harnessinit/harnessinit.go",
+        "internal/harnessresolve/harnessresolve.go",
+        "internal/sessionmine/sessionmine.go",
+        "internal/windowgate/windowgate.go",
+        "internal/windowgate/windowgate_test.go",
+        "pkg/harnesskit/lock.go"
+      ]
+    },
+    "untracked": {
+      "count": 13,
+      "known": true,
+      "samples": [
+        "cmd/fak/wip_inventory.go",
+        "cmd/fak/wip_inventory_test.go",
+        "fak-orchestration-launches/01a011e5-590f-75e1-bfb5-c513d4fd3337.json",
+        "fak-orchestration-runs/orch-578c105d31ca06b2ba2e596e/worker-1-guard.audit.jsonl",
+        "fak-orchestration-runs/orch-578c105d31ca06b2ba2e596e/worker-1.jsonl",
+        "fak-orchestration-runs/orch-578c105d31ca06b2ba2e596e/worker-2-guard.audit.jsonl",
+        "fak-orchestration-runs/orch-578c105d31ca06b2ba2e596e/worker-2.jsonl",
+        "fak-orchestration-runs/orch-578c105d31ca06b2ba2e596e/worker-3-guard.audit.jsonl",
+        "fak-orchestration-runs/orch-578c105d31ca06b2ba2e596e/worker-3.jsonl",
+        "internal/sessionmine/index.go",
+        "internal/sessionmine/index_test.go",
+        "internal/wipinventory/inventory.go",
+        "internal/wipinventory/inventory_test.go"
+      ]
+    }
+  },
+  "ignored_generated": {
+    "count": 742136,
+    "known": true,
+    "samples": [
+      ".dispatch-runs/.opencode-pins/opencode-jack-barker/opencode",
+      ".dispatch-runs/.opencode-pins/opencode-nim-deepseek-v4-pro/opencode",
+      ".dispatch-runs/.opencode-pins/opencode-nim-kimi-k26/opencode",
+      ".dispatch-runs/.opencode-pins/opencode-zai2/opencode",
+      ".dispatch-runs/2256-body.txt",
+      ".dispatch-runs/2256-comments.txt",
+      ".dispatch-runs/5254-body.txt",
+      ".dispatch-runs/5254-comments.txt",
+      ".dispatch-runs/5624-body.txt",
+      ".dispatch-runs/_scratch/contract-6187-input.json",
+      ".dispatch-runs/_scratch/contract-issues/6560.json",
+      ".dispatch-runs/_scratch/contract-issues/6560.txt",
+      ".dispatch-runs/_scratch/contract-issues/6848.json",
+      ".dispatch-runs/_scratch/contract-repair/direct-6189.txt",
+      ".dispatch-runs/_scratch/contract-repair/fak-contract.exe",
+      ".dispatch-runs/_scratch/contract-repair/fak-dev-contract.exe",
+      ".dispatch-runs/_scratch/contract-repair/fak-dev.exe",
+      ".dispatch-runs/_scratch/contract-repair/final-verification.json",
+      ".dispatch-runs/_scratch/contract-repair/full-4049.json",
+      ".dispatch-runs/_scratch/contract-repair/full-600.json"
+    ]
+  },
+  "registered_worker_worktrees": [
+    {
+      "path": "C:/Users/USER/AppData/Local/Fleet/worker-worktrees/fak-worker-wt-codex-hook-census-9632b95e14e8",
+      "head": "34104248d88ccc3eee2bf62b19a8519b877c3f82",
+      "branch": "detached",
+      "tracked_changes": {
+        "count": 3,
+        "known": true,
+        "samples": [
+          "cmd/fak-dev/main.go",
+          "internal/devcmd/sessiondiag_toolerrors.go",
+          "internal/devcmd/sessiondiag_toolerrors_test.go"
+        ]
+      },
+      "untracked": {
+        "count": 0,
+        "known": true
+      }
+    },
+    {
+      "path": "C:/Users/USER/AppData/Local/Fleet/worker-worktrees/fak-worker-wt-codex-hook-census2-40e2b195d328",
+      "head": "bf667d0e4b7a09f9c7c640587815f74448a5acde",
+      "branch": "detached",
+      "tracked_changes": {
+        "count": 3,
+        "known": true,
+        "samples": [
+          "cmd/fak-dev/main.go",
+          "internal/devcmd/sessiondiag_toolerrors.go",
+          "internal/devcmd/sessiondiag_toolerrors_test.go"
+        ]
+      },
+      "untracked": {
+        "count": 0,
+        "known": true
+      }
+    },
+    {
+      "path": "C:/Users/USER/AppData/Local/Fleet/worker-worktrees/fak-worker-wt-codex-hook-profile-1450bab7a4e7",
+      "head": "3f949fc3ded961e3790592c93d53a34ef357c0a3",
+      "branch": "detached",
+      "tracked_changes": {
+        "count": 0,
+        "known": true
+      },
+      "untracked": {
+        "count": 3,
+        "known": true,
+        "samples": [
+          "docs/notes/CODEX-HOOK-PROFILE-2026-08-17.md",
+          "internal/devcmd/codex_hooks_config.go",
+          "internal/devcmd/codex_hooks_config_test.go"
+        ]
+      }
+    },
+    {
+      "path": "C:/Users/USER/AppData/Local/Fleet/worker-worktrees/fak-worker-wt-codex-hook-profile2-fc522ebfa0d6",
+      "head": "bf667d0e4b7a09f9c7c640587815f74448a5acde",
+      "branch": "detached",
+      "tracked_changes": {
+        "count": 0,
+        "known": true
+      },
+      "untracked": {
+        "count": 3,
+        "known": true,
+        "samples": [
+          "docs/notes/CODEX-HOOK-PROFILE-2026-08-17.md",
+          "internal/devcmd/codex_hooks_config.go",
+          "internal/devcmd/codex_hooks_config_test.go"
+        ]
+      }
+    },
+    {
+      "path": "C:/Users/USER/AppData/Local/Fleet/worker-worktrees/fak-worker-wt-tool-outcome-expectedness-ff022b398661",
+      "head": "3f949fc3ded961e3790592c93d53a34ef357c0a3",
+      "branch": "detached",
+      "tracked_changes": {
+        "count": 4,
+        "known": true,
+        "samples": [
+          "cmd/fak/toolcall_control.go",
+          "cmd/fak/toolcall_control_test.go",
+          "internal/toolcallcontrol/runtime.go",
+          "internal/toolcallcontrol/runtime_test.go"
+        ]
+      },
+      "untracked": {
+        "count": 0,
+        "known": true
+      }
+    }
+  ],
+  "stale_worker_residue": [
+    {
+      "path": "C:/Users/USER/AppData/Local/Fleet/worker-worktrees/fak-worker-wt-cmd-4609dd14821f",
+      "kind": "unregistered-directory"
+    },
+    {
+      "path": "C:/Users/USER/AppData/Local/Fleet/worker-worktrees/fak-worker-wt-cmd-582efa6109bc",
+      "kind": "unregistered-directory"
+    },
+    {
+      "path": "C:/Users/USER/AppData/Local/Fleet/worker-worktrees/fak-worker-wt-cmd-6ae6d762ad18",
+      "kind": "unregistered-directory"
+    },
+    {
+      "path": "C:/Users/USER/AppData/Local/Fleet/worker-worktrees/fak-worker-wt-cmd-bd2ea5f892ab",
+      "kind": "unregistered-directory"
+    },
+    {
+      "path": "C:/Users/USER/AppData/Local/Fleet/worker-worktrees/fak-worker-wt-cmd-e8077a1a7993",
+      "kind": "unregistered-directory"
+    },
+    {
+      "path": "C:/Users/USER/AppData/Local/Fleet/worker-worktrees/fak-worker-wt-mac-automation-2235899e156b",
+      "kind": "unregistered-directory"
+    },
+    {
+      "path": "C:/Users/USER/AppData/Local/Fleet/worker-worktrees/fak-worker-wt-mac-automation-2df44c6df76f",
+      "kind": "unregistered-directory"
+    },
+    {
+      "path": "C:/Users/USER/AppData/Local/Fleet/worker-worktrees/fak-worker-wt-mac-automation-78cb2f57aad0",
+      "kind": "unregistered-directory"
+    },
+    {
+      "path": "C:/Users/USER/AppData/Local/Fleet/worker-worktrees/fak-worker-wt-quality-4ac0e57bc817",
+      "kind": "unregistered-directory"
+    }
+  ],
+  "wip_checkpoints": [
+    {
+      "ref": "refs/fak/wip/guard",
+      "sha": "814805322e93ac5e3ea445a9c1d971f0e22e34ba",
+      "unix": 1787011049,
+      "changed_paths": 23,
+      "added_paths": 13,
+      "known": true
+    },
+    {
+      "ref": "refs/fak/wip/guard-c535099d8fd2194e-259e552441b84716",
+      "sha": "15b1b8f53a903dbe367d52ad35116371270838fd",
+      "unix": 1786969468,
+      "changed_paths": 2,
+      "added_paths": 0,
+      "known": true
+    },
+    {
+      "ref": "refs/fak/wip/guard-c535099d8fd2194e-2e58b579d7389e83",
+      "sha": "63f855e5ee6e6fdfead06328e2ffe128de453e17",
+      "unix": 1786951802,
+      "changed_paths": 1,
+      "added_paths": 0,
+      "known": true
+    },
+    {
+      "ref": "refs/fak/wip/guard-c535099d8fd2194e-9b108e26f5317b7d",
+      "sha": "de67376095511c7aa679523b99d9c7581ba1e213",
+      "unix": 1786954972,
+      "changed_paths": 1,
+      "added_paths": 0,
+      "known": true
+    },
+    {
+      "ref": "refs/fak/wip/guard-c535099d8fd2194e-a434a1f2ff560b37",
+      "sha": "b16714cde279e0883e739f569a396b55d678d02e",
+      "unix": 1786962034,
+      "changed_paths": 1,
+      "added_paths": 0,
+      "known": true
+    },
+    {
+      "ref": "refs/fak/wip/guard-c535099d8fd2194e-ed8eef1855602afd",
+      "sha": "4b818beaef90c4050ee5ad7bc2d09097bd948bb5",
+      "unix": 1786978726,
+      "changed_paths": 19,
+      "added_paths": 5,
+      "known": true
+    },
+    {
+      "ref": "refs/fak/wip/uuid-carry-4",
+      "sha": "1ddff5d1e547c1b1cf2aa386b39a766a590d0b00",
+      "unix": 1787007176,
+      "changed_paths": 23,
+      "added_paths": 10,
+      "known": true
+    },
+    {
+      "ref": "refs/fak/wip/w1",
+      "sha": "50d74747c225791e74b9a548a1e736f36ae56e12",
+      "unix": 1787007170,
+      "changed_paths": 23,
+      "added_paths": 10,
+      "known": true
+    }
+  ],
+  "wip_checkpoints_known": true,
+  "ignore_visibility": {
+    "gitignore_hash": "3a2d723f1040b3deb40665bf0a85148fe082f7cb93451d21572183620e797a09",
+    "exclude_hash": "4f4d4f8a0e242f5fa724ed5ac415c1751a5672abbe428eb5d7d45183fe5d2db1",
+    "sparse_checkout": false,
+    "skip_or_assume_unchanged": 0,
+    "known": true
+  }
+}
