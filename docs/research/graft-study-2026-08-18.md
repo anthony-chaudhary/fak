@@ -139,4 +139,3 @@ All observations below were read on 2026-08-18.
 - [`docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md`](../benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md)
 - [Issue #3439](https://github.com/anthony-chaudhary/fak/issues/3439), [open issue #7338](https://github.com/anthony-chaudhary/fak/issues/7338), [open issue #6205](https://github.com/anthony-chaudhary/fak/issues/6205), and [open issue #6526](https://github.com/anthony-chaudhary/fak/issues/6526)
 - `cmd/fak/guard_mcp.go` and `cmd/fak/guard.go` for the current guarded MCP registration seam.
-
