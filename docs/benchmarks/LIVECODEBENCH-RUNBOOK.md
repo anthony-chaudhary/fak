@@ -305,3 +305,25 @@ class, and `result_claim_allowed` requires `official-lcb-runner-graded`.
 - Evidence class and promotion requirements: [#2114](https://github.com/anthony-chaudhary/fak/issues/2114)
 - Authority row and submission gate: [#2115](https://github.com/anthony-chaudhary/fak/issues/2115)
 - Results scaffold: [LIVECODEBENCH-RESULTS.md](LIVECODEBENCH-RESULTS.md)
+
+
+## Deterministic arm-report export
+
+A completed `raw` or `fak` generation arm is already the authoritative source of
+`question_id` plus ordered completions. Convert that report directly to the
+upstream custom-evaluator input without hand-editing or another model call:
+
+```bash
+go run ./cmd/livecodebench export \
+  --from-report experiments/livecodebench/glm52-run/raw-report.json \
+  --format custom-evaluator \
+  --out custom-output.json
+python -m lcb_runner.runner.custom_evaluator \
+  --custom_output_file custom-output.json \
+  --release_version release_v6
+```
+
+The export fails closed if the report is not a `raw`/`fak` arm, omits its pinned
+release, contains duplicate or empty question IDs, or has missing/empty
+completions. Export does not itself permit a score claim; the official evaluator
+result remains the grading witness.

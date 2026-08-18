@@ -137,6 +137,33 @@ func TestRunExportCustomEvaluatorWritesGradeableInput(t *testing.T) {
 	}
 }
 
+func TestRunExportFromArmReportWritesGradeableInput(t *testing.T) {
+	dir := t.TempDir()
+	report := filepath.Join(dir, "raw-report.json")
+	out := filepath.Join(dir, "custom-output.json")
+	body := `{"arm":"raw","release":"release_v6","problems":[{"question_id":"real-q","completions":["def solve(): return 1"]}]}`
+	if err := os.WriteFile(report, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := run([]string{"export", "--from-report", report, "--out", out}); code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	var items []struct {
+		QuestionID string   `json:"question_id"`
+		CodeList   []string `json:"code_list"`
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &items); err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].QuestionID != "real-q" || len(items[0].CodeList) != 1 {
+		t.Fatalf("items = %#v", items)
+	}
+}
+
 // TestRunContractWritesGatedOfficialRunContract pins #2110: `livecodebench
 // contract` emits a JSON (+MD) official-run contract that performs no run and
 // asserts result_claim_allowed=false.

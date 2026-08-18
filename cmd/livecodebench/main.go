@@ -195,6 +195,7 @@ func run(argv []string) int {
 func runExport(argv []string) int {
 	fs := flag.NewFlagSet("livecodebench export", flag.ContinueOnError)
 	fixture := fs.String("fixture", "internal/livecodebench/testdata/fixture.json", "path to the LiveCodeBench fixture holding the generations to export")
+	fromReport := fs.String("from-report", "", "raw/fak arm report to convert directly to official custom-evaluator input")
 	format := fs.String("format", "custom-evaluator", "export format; only \"custom-evaluator\" is supported")
 	out := fs.String("out", "", "file to write the export to (default: stdout)")
 	if err := fs.Parse(argv); err != nil {
@@ -208,7 +209,17 @@ func runExport(argv []string) int {
 		fmt.Fprintf(os.Stderr, "livecodebench export: unsupported --format %q (only \"custom-evaluator\")\n", *format)
 		return 2
 	}
-	f, err := livecodebench.LoadFile(*fixture)
+	if *fromReport != "" && *fixture != "internal/livecodebench/testdata/fixture.json" {
+		fmt.Fprintln(os.Stderr, "livecodebench export: --fixture and --from-report are mutually exclusive")
+		return 2
+	}
+	var f livecodebench.Fixture
+	var err error
+	if *fromReport != "" {
+		f, err = livecodebench.LoadArmReportFixture(*fromReport)
+	} else {
+		f, err = livecodebench.LoadFile(*fixture)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "livecodebench export: %v\n", err)
 		return 1

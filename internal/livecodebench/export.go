@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"strings"
 )
 
 // CustomEvalItem is one entry of the input the upstream
@@ -57,4 +59,64 @@ func WriteCustomEvaluatorInput(w io.Writer, f Fixture) error {
 		return fmt.Errorf("livecodebench custom-evaluator: encode: %w", err)
 	}
 	return nil
+}
+
+// LoadArmReportFixture converts a raw or fak generation report into the exact
+// fixture shape consumed by the official custom evaluator. This is the
+// deterministic report-to-grader seam: generation output is read back from
+// disk, validated, and projected without another model call.
+func LoadArmReportFixture(path string) (Fixture, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Fixture{}, fmt.Errorf("livecodebench arm report: read: %w", err)
+	}
+	var envelope struct {
+		Arm     string `json:"arm"`
+		Release string `json:"release"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return Fixture{}, fmt.Errorf("livecodebench arm report: decode: %w", err)
+	}
+	arm := strings.TrimSpace(envelope.Arm)
+	if arm != "raw" && arm != "fak" {
+		return Fixture{}, fmt.Errorf("livecodebench arm report: arm = %q, want raw or fak", arm)
+	}
+	if strings.TrimSpace(envelope.Release) == "" {
+		return Fixture{}, fmt.Errorf("livecodebench arm report: release is required for official grading")
+	}
+	var report struct {
+		Problems []RawArmProblem `json:"problems"`
+	}
+	if err := json.Unmarshal(data, &report); err != nil {
+		return Fixture{}, fmt.Errorf("livecodebench arm report: decode problems: %w", err)
+	}
+	if len(report.Problems) == 0 {
+		return Fixture{}, fmt.Errorf("livecodebench arm report: no problems")
+	}
+	fixture := Fixture{Schema: FixtureSchema, ReleaseVersion: envelope.Release}
+	seen := make(map[string]struct{}, len(report.Problems))
+	for i, problem := range report.Problems {
+		id := strings.TrimSpace(problem.QuestionID)
+		if id == "" {
+			return Fixture{}, fmt.Errorf("livecodebench arm report: problem %d has no question_id", i)
+		}
+		if _, ok := seen[id]; ok {
+			return Fixture{}, fmt.Errorf("livecodebench arm report: duplicate question_id %q", id)
+		}
+		seen[id] = struct{}{}
+		if len(problem.Completions) == 0 {
+			return Fixture{}, fmt.Errorf("livecodebench arm report: problem %q has no completions", id)
+		}
+		for j, completion := range problem.Completions {
+			if strings.TrimSpace(completion) == "" {
+				return Fixture{}, fmt.Errorf("livecodebench arm report: problem %q completion %d is empty", id, j)
+			}
+		}
+		fixture.Items = append(fixture.Items, FixtureItem{
+			QuestionID: id,
+			Scenario:   string(ScenarioCodeGeneration),
+			CodeList:   append([]string(nil), problem.Completions...),
+		})
+	}
+	return fixture, nil
 }
