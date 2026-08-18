@@ -4,156 +4,172 @@
 
 # fak — the Fused Agent Kernel
 
-**Manage the AI agent you already use.**
+**Make the AI agent you already use faster, safer, and easier to operate.**
 
-fak is an all-in-one agent boundary: one Go binary for model routing, context reuse, tool policy, journaling, and recovery. Put Claude Code, Codex, OpenCode, or a harness you write yourself on one side; keep its UI, login, cloud or local model, and tools on the other. The same native modules can also compose fleets of small, bounded agents in one process.
-
-The current project boundary and capability classification are recorded in [Project orientation: the agent-kernel center](docs/project-orientation.md). It distinguishes Core kernel outcomes from Enabling substrates, Stewardship obligations, and Peripheral expansion without turning centrality into a priority score.
-
-FAK coordinates the whole agent path, not isolated components: observations about context, policy, and available execution become a constrained plan; model and tool actions return through typed effects and result admission. Here, **coordination** means that cross-layer decision path—not worker orchestration or generic integration.
-
-> **Pick your path:** run `fak guard -- claude` to manage the agent you already use, or run `fak harness init` to generate a small agent product you own. Both use the same managed-context, model, tool-policy, journal, and recovery boundary. The existing-agent path forwards your subscription credential; the build-your-own selfcheck needs no API key, model, or GPU (`go run ./cmd/product --selfcheck` → `{"type":"turn.completed","detail":"ok"}`).
-> **Help test those two paths:** we need two independent Linux/amd64 operators for a 45–75 minute paired task comparing a verified default with visible controls against scratch harness construction. No API key or model is needed. The preference claim is **not yet measured (0/2 pairs)**. If you have not worked on fak internals or inspected the study answer materials, [volunteer on #7224](https://github.com/anthony-chaudhary/fak/issues/7224).
-
-[![Watch the 40-second fak value walk: save tokens and turns first, then see pre-execution policy](visuals/fak-homepage-hero.gif)](visuals/fak-homepage-hero.mp4)
-
-<p align="center"><strong><a href="visuals/fak-homepage-hero.mp4">Watch the 20-second token-savings animation (MP4)</a></strong> · <a href="visuals/fak-hero-values.mp4">separate policy story</a> · <a href="tools/videogen/projects/token-savings/">reproduce the render</a></p>
-
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Go Reference](https://pkg.go.dev/badge/github.com/anthony-chaudhary/fak.svg)](https://pkg.go.dev/github.com/anthony-chaudhary/fak) [![Release](https://img.shields.io/github/v/release/anthony-chaudhary/fak?color=blue&label=release&sort=semver)](https://github.com/anthony-chaudhary/fak/releases/latest) [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8.svg)](go.mod) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/anthony-chaudhary/fak)
-
-<!-- readme-verified: 2026-08-17 vs VERSION 0.43.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
-
-**Current direction: one kernel, two ways in.** Adopt fak around Claude Code, Codex, or OpenCode today, or use its public harness contracts to build a focused agent product without forking the kernel. Performance remains the center: the [capability map](docs/CAPABILITIES.md) covers shipped turn-tax controls, stable-prefix reuse, managed context, per-call model routing, cache-value accounting, and out-of-band session controls. The security floor rides on the same checkpoint.
-
-## Install and run
-
-macOS or Linux (the installer verifies the release SHA-256):
+> TL;DR: Wrap Claude Code or Codex with `fak guard`. Or build a focused harness on the
+> same context and policy boundary, with routing, journals, and recovery included.
 
 ```bash
+# macOS / Linux
 curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
-fak manage claude                 # short form: fak m claude
+fak preflight --tool refund_payment --args "{}"
+# → DENY (DEFAULT_DENY): unknown tool, refused before execution
+fak guard -- claude
+# Also works with: fak guard -- codex
+# Windows or any host with Go 1.26+:
+go install github.com/anthony-chaudhary/fak/cmd/fak@v0.44.0
 ```
 
-With Go 1.26+, including Windows:
+## Start here
 
-```bash
-go install github.com/anthony-chaudhary/fak/cmd/fak@latest
-fak manage --provider openai -- codex    # provider is normally auto-detected
-```
+fak is one Go binary that sits between an agent and its models and tools. Keep your current
+assistant, login, and preferred model. fak adds a small control boundary.
 
-`guard` starts a private gateway, points the child agent at it, and passes its model wire and credentials through unchanged. Add a capability floor with `--policy examples/dev-agent-policy.json`; opt into API billing with `--api-key-env`; or use local inference with `--local` or `--gguf`. Use that whole harness, or make your own loop against `fak serve`'s OpenAI-compatible API and MCP/tool boundary. On exit, fak reports reuse, context, and policy decisions.
+It reuses shared context and routes each request. Deny-by-default rules check tool calls before
+they run. A journal records what happened and helps long-running sessions recover.
 
-See [INSTALL.md](INSTALL.md) for manual downloads, containers, source builds, and release verification, or [first-run troubleshooting](docs/adoption/troubleshooting-first-run.md) if the command refuses to start.
+Measured result: **4.1× less compute work than a tuned warm-cache baseline.** On a 50-turn ×
+5-agent Qwen2.5-1.5B Q8 run, fak took about 19 minutes versus 78 minutes on an Apple M3 Pro. This result is bounded to that workload. It measures exact work elimination, not a universal
+speedup or a claim that fak invented prompt caching.
 
-## What changes at the boundary
+Providers and gateways already cache repeated prompt beginnings. fak keeps that reuse dependable across real agent
+turns, where tool results and history usually disturb the prefix. The [benchmark authority](BENCHMARK-AUTHORITY.md) records scope, hardware, units, and the tuned
+baseline. The [method](docs/benchmark-methodology.md) links the reproducible evidence.
 
-The largest avoidable cost is often not one token string but an entire extra model round trip: the resident prefix is processed again, latency is paid again, and the result enlarges later context. fak can measure that **turn tax**, complete kernel-known work without another model call, and let an operator budget or steer a live session without prompting the model to manage itself.
+`fak guard` starts a private gateway and keeps the agent's model wire and credentials unchanged.
+It previews actions, records decisions, and can undo captured file changes. No API key, model download, proxy reconfiguration, or policy file is required. It is the
+lowest-friction path to safer agent runs. On Windows, use WSL or the Go install shown above.
 
-| Outcome | How fak provides it |
+## One boundary, five jobs
+
+Most agent stacks assemble these concerns as separate proxies, policy engines, context scripts,
+and supervisors. fak handles them at the point where every model request and tool call already
+passes:
+
+| Job | What changes for you |
 |---|---|
-| **Less model work** | Stabilizes prefixes for provider caches, sheds stale history, deduplicates tool calls, and reuses the live KV cache when it owns inference. |
-| **Longer, recoverable runs** | Compacts aged turns to a resident budget, checkpoints state, and resumes interrupted work. |
-| **Tool control prompts cannot override** | Returns `ALLOW`, `DENY`, `TRANSFORM`, or `REQUIRE_WITNESS` before execution; untrusted results can be quarantined before reaching the model. |
-| **One observable boundary** | Journals model traffic, reuse, compaction, policy, and recovery together. |
-| **Backend choice** | Preserves cloud providers, fronts OpenAI-compatible servers, or loads GGUF weights while exposing OpenAI, Anthropic, and MCP interfaces. |
+| Reuse context | Stable instructions and history remain a cacheable prefix; repeated work can be served locally. A KV cache is simply the model's reusable memory of that prefix. |
+| Route models | Choose cloud or local models per request instead of binding an entire session to one provider. |
+| Control tools | Enforce a default-deny capability floor before a tool runs; model prose cannot override it. |
+| Keep sessions bounded | Compact old turns while preserving the provider prefix cache, so long sessions do not grow without limit. |
+| Operate and recover | Journal decisions, inspect behavior, guard unattended work, and restore captured file changes. |
 
-These are measured features. On the current 50-turn × 5-agent Qwen2.5-1.5B Q8 workload, fak did about **4.1× less compute work** than a tuned baseline that already kept each agent's KV cache warm (about 19 versus 78 minutes on an Apple M3 Pro). Real `fak manage -- claude` sessions compacted up to about 107K aged tokens per fire while holding resident context to 48K. Local policy verdicts measured 362 ns without argument predicates and 560–605 ns with them. Scope, hardware, units, and tuned baselines are in [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) and the tagged [claims ledger](CLAIMS.md).
+The key design choice is fusion—not another generic LLM proxy. Performance and security share
+the same checkpoint. The fast path cannot bypass policy, and policy does not need a second proxy. The result is a
+small control plane rather than another agent UI.
 
-<p align="center">
-  <img src="visuals/75-token-savings-frontdoor.svg" alt="Measured token economics for fak manage sessions versus a tuned warm-cache baseline" width="900">
-</p>
+## Prove it in 60 seconds
 
-## Configure outcomes above implementations
-
-fak is building a **portable intent** plane: name the behavior you want at a product layer,
-then let a typed, versioned binding resolve it to the plugin, skill, prompt, model option, or
-native mechanism available in each harness. A shared conversation-style profile, for example,
-should not require every recipient to know or adopt the same implementation codename. The
-contract and boundaries are in the [canonical problem map](docs/problems-we-solve.md#cross-cutting-outcome-portable-intent);
-the runtime proof is tracked in [#6878](https://github.com/anthony-chaudhary/fak/issues/6878) and
-is **not yet a shipped capability**.
-
-## Use the whole harness—or make your own
-
-`fak manage` is the all-in-one default for an existing agent. `fak harness init` is the product-builder default: generate a standalone module you own, backed by fak's public harness contract. `fak serve` remains the lower-level option when you already have a loop or UI.
-
-| Goal | Command | Details |
-|---|---|---|
-| All-in-one managed agent | `fak manage claude` (or `fak m claude`) | Least-friction launch; model traffic and tool calls cross one observable boundary. [Claude](docs/integrations/claude.md) · [Codex](docs/integrations/openai-codex.md) · [all hosts](docs/supported/README.md) |
-| Build your own agent product | `fak harness init --dir ./my-harness --module example.com/my-harness` | Generates a standalone Go module with user-owned product config and a deterministic offline selfcheck. [Generator guide](docs/harness-init.md) · [starter gallery](docs/harness-pack-gallery.md) |
-| Bring your own loop or UI | `fak serve --base-url http://localhost:11434/v1 --model qwen3.5:4b` | Your client owns the loop; fak supplies OpenAI, Anthropic, and MCP endpoints plus the tool checkpoint. [Server quickstart](docs/fak/server-quickstart.md) |
-| Prove behavior offline | `fak agent --offline` | Deterministically demonstrates repair, reuse, policy denial, and result quarantine; writes `agent-report.json`. [Walkthrough](GETTING-STARTED.md#2-tier-0--try-the-kernel-zero-downloads-2-min) |
-| Run many bounded agents | `go run ./cmd/microfleetdemo -selfcheck` | Proves 24 agents in one process, four resident at once, with shared base/model state, fair scheduling, hibernation, policy, and egress control. [Concept](docs/concepts/micro-agents.md) · [measured demo](cmd/microfleetdemo/README.md) |
-| Use a Mac's local model from Claude Code | `fak mac` | Targets an existing `fak serve` gateway without replacing Claude's UI. [Setup and expectations](docs/fak/mac-agent-ui.md) |
-
-### Build a working harness first
+Clone the repository, then run the offline proof. It needs no key, model, network call, or GPU:
 
 ```bash
-fak harness init --dir ./my-harness --module example.com/my-harness
-cd my-harness
-# Edit product/config.go: product ID, profile, instructions, tools, and reply behavior.
-go build ./cmd/product
-go run ./cmd/product --selfcheck
+git clone https://github.com/anthony-chaudhary/fak.git
+cd fak
+go run ./cmd/fak preflight \
+  --policy examples/customer-support-readonly-policy.json \
+  --tool refund_payment --args "{}"
+# DENY (POLICY_BLOCK): refused by structure; no model in the loop
+
+go run ./cmd/fak preflight \
+  --policy examples/customer-support-readonly-policy.json \
+  --tool search_kb --args "{}"
+# ALLOW: the policy is not a blanket block
+
+go run ./cmd/fak agent --offline
+# task completed (booked) YES / YES · poisoned result blocked YES · destructive op prevented YES
 ```
 
-The generated product imports `pkg/harnesskit`; it does not copy fak internals. Regeneration preserves the product-owned `product/config.go`, so upgrades do not erase your choices. The selfcheck uses a deterministic offline model and tool, making the first working run possible with no API key or GPU. The generated launch seam can then hand control to your model/tool adapter while keeping semantic events stable.
+The [reproduction packet](docs/repro-packet.md) explains each result. For the shortest visual
+tour, open the [interactive showcase](docs/showcase.html).
 
-Use `fak harness gallery list` to explore starters for read-only support, coding workspaces, cited research, and incident operations. Use `fak harness web --selfcheck` to see the same contract in a local browser UI. The [generator and ownership guide](docs/harness-init.md) explains the file boundary, upgrade loop, and public extension seams.
+## Choose your path
 
-### Local model defaults that fit real devices
+### Keep your current assistant
 
-Start with **`qwen3.5:4b`** in Ollama: its current quantized image is about 3.4 GB, supports tools, and is the practical default for an 8 GB-class GPU or a 16 GB unified-memory laptop. Move to **`qwen3.5:9b`** (about 6.6 GB) when you have roughly 12 GB of GPU memory or 24 GB of unified memory and want more coding/tool-use quality. Small context windows leave more room for weights and speed; long agent sessions need additional memory for the growing model cache.
+Wrap it with `fak guard` first. When you are ready to move model traffic through the kernel, choose an integration guide:
+[Claude Code](docs/integrations/claude.md), [Codex](docs/integrations/openai-codex.md), or
+[OpenCode](docs/integrations/opencode.md). The [integration index](docs/integrations/README.md)
+covers more clients and providers.
 
 ```bash
-ollama pull qwen3.5:4b
-fak serve --base-url http://localhost:11434/v1 --model qwen3.5:4b
-# Point any OpenAI-compatible SDK or home-grown loop at http://127.0.0.1:8080/v1
+fak serve --backend http://127.0.0.1:8081/v1
+# Point the client at http://127.0.0.1:8080/v1
 ```
 
-These are front-door defaults, not a model lock-in: fak fronts any model exposed by Ollama, llama.cpp, LM Studio, vLLM, SGLang, or another OpenAI-compatible server. For a literal one-process stack, pass a compatible GGUF file with `fak serve --gguf FILE`; that in-kernel engine is the bit-exact correctness path, while an external server remains the production-throughput default. See [supported models](docs/supported/models.md) for the gateway/native distinction.
+`fak serve` does not replace the provider. It adds the shared boundary in front of a cloud or
+local OpenAI-compatible backend.
+
+### Build a small harness
+
+Start with a complete, working product instead of assembling an agent loop from primitives:
 
 ```bash
-fak agent --offline
-# -> task completed (booked) YES / YES · poisoned result blocked YES · destructive op prevented YES
+go run ./cmd/fak harness init --template minimal --dir my-agent
+cd my-agent
+go run . -selfcheck
+go run .
 ```
+
+The generated harness includes instructions, tools, and reply behavior. It also includes safety
+defaults and a self-check. Then edit the product profile rather than the engine. See
+[`pkg/harnesskit`](pkg/harnesskit), the [harness guide](docs/harness-init.md), and the
+[worked demos](examples/).
+
+### Run bounded autonomous work
+
+Use `fak agent` for one session and `fak nightrun` for unattended, ledgered work. Use the
+separate DOS plugin when you need several workers to arbitrate shared files, dispatch a plan,
+and independently witness completion. FAK is the runtime boundary; DOS is the multi-worker
+control layer. See [FAK and DOS](docs/architecture.md#fak-and-dos-are-different-layers).
+
+## How the request path works
 
 ```text
-Claude Code / Codex / OpenCode / your client
-                    │
-                    ▼
-        fak: cache · context · policy · journal · recovery
-                    │
-                    ▼
-       Anthropic / OpenAI / local server / GGUF
+agent UI / harness
+        │
+        ▼
+  observe → constrain → plan
+        │
+        ▼
+  reuse context · route model · compact history
+        │
+        ▼
+  check tool capability → execute → admit result
+        │
+        ▼
+  journal · measure · recover
 ```
 
-Every model request and proposed tool call crosses this checkpoint, so reuse happens before another inference, compaction before another context window is consumed, and policy before a tool runs. fak manages the boundaries without becoming the agent or model.
+This is what fak means by **coordination**: context, model, policy, and tool decisions share one
+typed path. It does not mean that fak silently takes over your agent or that every workload
+needs a fleet. The current boundary and its Core, Enabling, Stewardship, and Peripheral work are
+recorded in [project orientation](docs/project-orientation.md). Detailed proofs, operating
+envelopes, and secondary capabilities stay in the [documentation index](docs/index.md) so this
+front page remains a map rather than a catalog.
 
-**Like Caveman’s fewer-token instinct or Ponytail’s “code you never wrote” instinct?** fak applies the same economy at the runtime boundary: keep repeated setup out of prompts, shed stale context, serve repeated work locally, and prevent unnecessary effects before they execute. It complements prompt/output compression and YAGNI-style coding guidance rather than replacing either. [See the plain-language comparison and choose the smallest useful layer.](docs/explainers/less-context-less-code.md)
+## What is proven—and what is not
 
-After trying `guard`, `fak launch install --provider all --default claude` can install reversible provider shims so bare `claude`, `codex`, or `fak` uses the managed path. It never overwrites the original binaries; bypass it with `--fak-direct`, `FAK_DIRECT=1`, or `fak launch disable`. See the [zero-adoption guide](docs/zero-adoption-launch.md).
+- **Shipped:** structural tool denial and guarded execution; OpenAI-compatible serving and
+  exact-prefix reuse; bounded context; local-model management; journals, recovery, and harness
+  primitives.
+- **Measured:** benchmark claims above are tied to committed inputs, outputs, hardware notes, and
+  a reproducible methodology in [`experiments/session/`](experiments/session/).
+- **Not claimed:** a new foundation model, universal speedups for every trace, perfect prompt-
+  injection prevention, or a replacement for provider authentication and sandboxing.
 
-## Bring an assistant through the boundary
+The detailed honesty ledger is [`CLAIMS.md`](CLAIMS.md). Security assumptions and reporting are
+in [`SECURITY.md`](SECURITY.md). The project is Apache-2.0 licensed.
 
-FAK governs only traffic routed through it. Before giving an existing AI assistant real tools:
+## Find the next detail
 
-1. Choose a managed entry point: `fak agent`, `fak manage`, an OpenAI-compatible `fak serve` endpoint, or a documented adapter.
-2. Declare its tools and least-authority policy; begin read-only and test a known denial with `fak preflight`.
-3. Keep credentials and any direct shell, network, MCP, or provider paths outside the model's reach unless they cross the same policy boundary.
-4. Capture verdict and result-admission evidence, then widen authority one capability at a time.
+| If you want to… | Start here |
+|---|---|
+| Understand the design | [Architecture](docs/architecture.md) · [capability map](docs/CAPABILITIES.md) |
+| Reproduce performance | [Benchmark authority](BENCHMARK-AUTHORITY.md) · [methodology](docs/benchmark-methodology.md) · [results](experiments/session/) |
+| Configure commands | [CLI reference](docs/cli-reference.md) · [serve configuration](docs/serve-config.md) |
+| Connect an agent or model | [Integrations](docs/integrations/) · [model routing](docs/model-routing.md) |
+| Build on the Go packages | [Go API](pkg/) · [harness contract](docs/harness-kit-contract.md) |
+| Explore the long-form docs | [Documentation index](docs/index.md) · [interactive showcase](docs/showcase.html) |
+| Evaluate or contribute | [Start here](START-HERE.md) · [contributing](CONTRIBUTING.md) · [`llms.txt`](llms.txt) |
 
-The blast radius is explicit: FAK can mediate model and tool traffic that crosses a FAK-managed interface. It is not an operating-system sandbox and cannot govern credentials, side channels, or effects that bypass that interface. See [Start here](START-HERE.md) for newcomer routes and [Architecture](docs/architecture.md) for the trust boundary.
-
-## FAK and DOS are different layers
-
-FAK manages the agent's execution: tool calls, context, tokens, models, cache, and policy. DOS manages the work around it: concurrent admission and leases, proof, liveness, and operator decisions. FAK workflows use DOS rather than replacing it. See [FAK and DOS: which layer owns what](docs/fak-vs-dos.md) for the command-by-command boundary and current integration health.
-## Next steps
-
-- **Use an existing agent:** [complete first run](GETTING-STARTED.md) · [tutorial](docs/fak/tutorial.md) · [examples](examples/README.md) · [showcase](docs/showcase.html)
-- **Build an agent product:** [harness generator](docs/harness-init.md) · [starter gallery](docs/harness-pack-gallery.md) · [public contract](docs/harness-kit-contract.md) · [web UI](docs/harness-web-demo.md)
-- **Operate:** [serving](docs/serving/README.md) · [configuration](docs/fak/configuration.md) · [observability](docs/fak/observability.md) · [deployment](docs/fak/deployment-guide.md)
-- **Understand:** [performance](docs/performance.md) · [architecture](docs/architecture.md) · [concepts](docs/concepts-and-story.md) · [glossary](docs/glossary.md)
-- **Verify:** [benchmark methodology](docs/benchmark-methodology.md) · [reproduction packet](docs/repro-packet.md) · [claims](CLAIMS.md)
-- **Contribute:** [contributing guide](CONTRIBUTING.md) · [security policy](SECURITY.md) · [documentation map](docs/index.md) · [front-page overflow](docs/README-legacy.md)
-
-Apache-2.0. Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md); participation is governed by the [Code of Conduct](.github/CODE_OF_CONDUCT.md).
+<!-- readme-verified: 2026-08-18 vs VERSION 0.44.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
