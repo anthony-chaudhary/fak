@@ -13,3 +13,14 @@ func SplitCSV(value string) []string {
 	}
 	return out
 }
+
+// NonEmptyLines returns trimmed, non-empty lines in input order.
+func NonEmptyLines(value string) []string {
+	var out []string
+	for _, line := range strings.Split(value, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}

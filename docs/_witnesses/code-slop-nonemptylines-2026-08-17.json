@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T05:44:34.563329Z",
+  "issue": 7048,
+  "family": "trimmed non-empty line parsing",
+  "paths": [
+    "internal/stringlist/stringlist.go",
+    "internal/stringlist/stringlist_test.go",
+    "internal/commitlane/stageddelete.go",
+    "internal/hooks/gate_freshdeletion.go"
+  ],
+  "test": "go test ./internal/stringlist ./internal/commitlane; internal/hooks affected tests compile/pass before unrelated live-tree godfile and encoding gates fail",
+  "test_result": "PASS targeted; unrelated live-tree gate failures disclosed",
+  "before": {
+    "score": -87.9,
+    "grade": "F",
+    "slop_debt": 359,
+    "duplication": 359,
+    "weighted_duplication": 226.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -87.4,
+    "grade": "F",
+    "slop_debt": 358,
+    "duplication": 358,
+    "weighted_duplication": 226.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

@@ -3,6 +3,7 @@ package hooks
 import (
 	"context"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/stringlist"
 	"path"
 	"strconv"
 	"strings"
@@ -31,7 +32,7 @@ func freshDeletionFindingsWith(ctx context.Context, run Runner, root, msg string
 		return nil, ErrCouldNotRun
 	}
 	var findings []Finding
-	for _, p := range splitNonEmptyLines(out) {
+	for _, p := range stringlist.NonEmptyLines(out) {
 		addSHA, ok := recentlyAddedPath(ctx, run, root, p, window)
 		if !ok || messageMentionsDeletedPath(msg, p) {
 			continue
@@ -120,15 +121,4 @@ func normalizePathMention(s string) string {
 	repl := strings.NewReplacer("\\", "/", "_", " ", "-", " ")
 	s = repl.Replace(s)
 	return strings.Join(strings.Fields(s), " ")
-}
-
-func splitNonEmptyLines(s string) []string {
-	var out []string
-	for _, line := range strings.Split(s, "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			out = append(out, line)
-		}
-	}
-	return out
 }

@@ -32,6 +32,7 @@ package commitlane
 
 import (
 	"context"
+	"github.com/anthony-chaudhary/fak/internal/stringlist"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -295,7 +296,7 @@ func diskBlobHashes(ctx context.Context, run Runner, root string, paths []string
 			detail = "git hash-object could not read the working-tree copy"
 			continue
 		}
-		lines := splitLines(res.Stdout)
+		lines := stringlist.NonEmptyLines(res.Stdout)
 		if len(lines) != len(chunk) {
 			detail = "git hash-object returned an unexpected number of hashes"
 			continue
@@ -332,17 +333,6 @@ func splitNUL(s string) []string {
 		part = strings.TrimRight(part, "\r\n")
 		if part != "" {
 			out = append(out, part)
-		}
-	}
-	return out
-}
-
-func splitLines(s string) []string {
-	var out []string
-	for _, line := range strings.Split(s, "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			out = append(out, line)
 		}
 	}
 	return out
