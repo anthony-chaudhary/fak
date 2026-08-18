@@ -105,11 +105,21 @@ func MineIndexed(opts Options, statePath string) (IndexedResult, error) {
 		}
 		next.Seen[fp] = true
 	}
-	next.UpdatedAt = report.Generated
+	next.UpdatedAt = historyWatermark(sessions)
 	if err := writeIndexAtomic(statePath, next); err != nil {
 		return IndexedResult{}, err
 	}
 	return result, nil
+}
+
+func historyWatermark(sessions []Session) string {
+	watermark := "all"
+	for _, session := range sessions {
+		if session.EndedAt != "" && (watermark == "all" || session.EndedAt > watermark) {
+			watermark = session.EndedAt
+		}
+	}
+	return watermark
 }
 
 func LoadIndex(path string) (IndexState, error) {

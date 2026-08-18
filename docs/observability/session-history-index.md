@@ -23,7 +23,7 @@ fak vcache session-history --index ~/.fak/session-mine/index.json --provider cod
 fak vcache session-history --index ~/.fak/session-mine/index.json --session codex-0123456789ab
 ```
 
-The first view returns corpus metrics and sessions ranked by tool errors, recency, then stable ID. Filters recalculate the aggregate over the selected slice. `--session` returns one normalized record and its bounded anonymous trajectory, providing a direct drill-down without reopening or exposing the raw transcript.
+`indexed_at` is the newest normalized session-end timestamp represented by the index (or `all` when empty), not the wall-clock time a scan happened. `indexed_at` is the newest normalized session-end timestamp represented by the index (or `all` when empty), not the wall-clock time a scan happened. The first view returns corpus metrics and sessions ranked by tool errors, recency, then stable ID. Filters recalculate the aggregate over the selected slice. `--session` returns one normalized record and its bounded anonymous trajectory, providing a direct drill-down without reopening or exposing the raw transcript.
 
 
 ## Keep the index current

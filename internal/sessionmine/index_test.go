@@ -87,3 +87,36 @@ func mustRead(t *testing.T, path string) []byte {
 	}
 	return b
 }
+
+func TestMineIndexedUsesNewestSessionEndAsWatermark(t *testing.T) {
+	root := t.TempDir()
+	codex := filepath.Join(root, "codex")
+	if err := os.MkdirAll(codex, 0755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"timestamp":"2026-08-16T01:00:00Z","type":"response_item","payload":{"type":"function_call","name":"view_image"}}` + "\n" + `{"timestamp":"2026-08-17T03:00:00Z","type":"response_item","payload":{"type":"function_call_output","output":"ok"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(codex, "one.jsonl"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	index := filepath.Join(root, "index.json")
+	if _, err := MineIndexed(Options{CodexRoot: codex}, index); err != nil {
+		t.Fatal(err)
+	}
+	state, err := LoadIndex(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.UpdatedAt != "2026-08-17T03:00:00Z" {
+		t.Fatalf("watermark=%q", state.UpdatedAt)
+	}
+	if _, err := MineIndexed(Options{CodexRoot: codex}, index); err != nil {
+		t.Fatal(err)
+	}
+	reused, err := LoadIndex(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reused.UpdatedAt != state.UpdatedAt {
+		t.Fatalf("reused watermark=%q want %q", reused.UpdatedAt, state.UpdatedAt)
+	}
+}
