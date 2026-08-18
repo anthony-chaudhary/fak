@@ -599,9 +599,9 @@ func dispatchProductWorkerCount(root, product string) int {
 
 // dispatchProductWorkerPIDs is the identity behind dispatchProductWorkerCount: the set of
 // live worker PIDs for a product -- lease-tracked resolve/repair pidfiles, goal-run
-// breadcrumbs, cmdline-marked workers (`resolve GitHub issue #` / `dos-dispatch-loop`),
-// plus codex ambient sessions. The count is len() of this set; exposing the set lets the
-// #3109 self-heal name the exact orphan PIDs preflight counts as unattributed_live.
+// breadcrumbs, and cmdline-marked workers (`resolve GitHub issue #` / `dos-dispatch-loop`).
+// The count is len() of this set; exposing the set lets #3109 self-heal name the exact
+// orphan PIDs preflight counts as unattributed_live.
 func dispatchProductWorkerPIDs(root, product string) map[int]bool {
 	pids := dispatchLiveResolveWorkerPIDs(filepath.Join(root, dispatchtick.RunsDirName), product)
 	// Snapshot the host worker-process table ONCE per call and share it: both the
@@ -615,13 +615,15 @@ func dispatchProductWorkerPIDs(root, product string) map[int]bool {
 	for pid := range dispatchLiveGoalWorkerPIDs(filepath.Join(root, dispatchGoalRunsDirName), product, rows) {
 		pids[pid] = true
 	}
+	return dispatchMergeMarkedWorkerPIDs(pids, product, rows)
+}
+
+// dispatchMergeMarkedWorkerPIDs adds only explicitly marked dispatch workers to the
+// lease/breadcrumb-backed set. Ambient Codex UIs are host activity, not fleet WIP, and
+// must not consume guarded worker slots.
+func dispatchMergeMarkedWorkerPIDs(pids map[int]bool, product string, rows []dispatchCodexProcessRow) map[int]bool {
 	for pid := range dispatchCmdlineWorkerPIDs(product, rows) {
 		pids[pid] = true
-	}
-	if product == "codex" {
-		for pid := range dispatchAmbientCodexPIDsExcludingSidecarParents(pids) {
-			pids[pid] = true
-		}
 	}
 	return pids
 }
