@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T10:04:54.530815Z",
+  "issue": 7300,
+  "family": "typed JSON baseline file loading",
+  "paths": [
+    "internal/strictjson/file.go",
+    "internal/strictjson/file_test.go",
+    "internal/benchpost/benchpost.go",
+    "internal/milestonereport/ratchet.go"
+  ],
+  "test": "go test ./internal/strictjson ./internal/benchpost -run 'TestLoadBaseline' -count=1; go test ./internal/milestonereport -run 'Test.*Baseline' -count=1; fak-dev buildcheck --mine internal/strictjson/file.go --vet",
+  "test_result": "PASS; broad benchpost suite separately failed unrelated secret-bearing environment isolation fixture",
+  "before": {
+    "score": -69.7,
+    "grade": "F",
+    "slop_debt": 324,
+    "duplication": 324,
+    "weighted_duplication": 209.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -69.2,
+    "grade": "F",
+    "slop_debt": 323,
+    "duplication": 323,
+    "weighted_duplication": 208.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

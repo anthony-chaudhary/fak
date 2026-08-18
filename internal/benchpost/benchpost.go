@@ -37,6 +37,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
+
+	"github.com/anthony-chaudhary/fak/internal/strictjson"
 )
 
 // ChannelDefault is the CI/CD reporting sink (scoreboard.CICDReportChannel) — bench is
@@ -138,17 +140,7 @@ type Baseline struct {
 // LoadBaseline reads bench_baseline.json. A missing file is not an error to the
 // caller's eye — a nil Baseline yields an empty (clean) regression fold — but the
 // os.ReadFile error is surfaced so a typo in --baseline is visible.
-func LoadBaseline(path string) (*Baseline, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var bl Baseline
-	if err := json.Unmarshal(b, &bl); err != nil {
-		return nil, err
-	}
-	return &bl, nil
-}
+func LoadBaseline(path string) (*Baseline, error) { return strictjson.LoadFile[Baseline](path) }
 
 // Val returns the throughput number for a run: the HIGHER of peak/baseline tok/s (peak
 // is the headline, baseline a fallback), and false when neither is a real positive

@@ -22,6 +22,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
+
+	"github.com/anthony-chaudhary/fak/internal/strictjson"
 )
 
 // BaselineSchema is the schema id stamped into docs/milestones/baseline.json.
@@ -58,17 +60,7 @@ const Epsilon = 0.05
 // to the caller's eye — the ratchet treats a nil baseline as "nothing pinned yet"
 // (clean, first run pins it) — but the os.ReadFile / json error is surfaced so a typo
 // in the path or a corrupt file is visible rather than silently green.
-func LoadBaseline(path string) (*Baseline, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var bl Baseline
-	if err := json.Unmarshal(b, &bl); err != nil {
-		return nil, err
-	}
-	return &bl, nil
-}
+func LoadBaseline(path string) (*Baseline, error) { return strictjson.LoadFile[Baseline](path) }
 
 // ClimbKPIs are the two ratcheted numbers pulled off a built scorecard payload's
 // corpus. They are read back from the SAME map the control pane folds (corpus
