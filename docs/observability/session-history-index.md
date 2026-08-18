@@ -11,3 +11,16 @@ The JSON response includes the full aggregate `report`, `parsed_files`, `reused_
 The index stores normalized per-session counts and bounded tool trajectories plus one-way source fingerprints. It never stores transcript paths, prompts, tool arguments, results, or provider-private tool names. Writes use a same-directory temporary file and atomic rename; an unknown schema is rejected rather than overwritten.
 
 This is the foundational background-process seam: Task Scheduler, cron, or a long-lived supervisor can invoke the bounded command on a cadence while aggregate and drill-down query surfaces read one durable, incrementally refreshed artifact.
+
+
+## Retrospect from aggregate to one session
+
+Read the index without touching provider transcripts:
+
+```bash
+fak vcache session-history --index ~/.fak/session-mine/index.json
+fak vcache session-history --index ~/.fak/session-mine/index.json --provider codex --min-errors 1
+fak vcache session-history --index ~/.fak/session-mine/index.json --session codex-0123456789ab
+```
+
+The first view returns corpus metrics and sessions ranked by tool errors, recency, then stable ID. Filters recalculate the aggregate over the selected slice. `--session` returns one normalized record and its bounded anonymous trajectory, providing a direct drill-down without reopening or exposing the raw transcript.

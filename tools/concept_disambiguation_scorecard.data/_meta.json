@@ -4118,13 +4118,13 @@
         },
         {
           "category": "incidental",
-          "reason": "Aggregate field name local to compact-audit telemetry coverage; not a session lifecycle concept",
-          "token": "MeasuredSessions"
+          "reason": "CLI adapter for reading the sessionmine historical index, not a runtime session lifecycle state",
+          "token": "runSessionHistory"
         },
         {
           "category": "incidental",
-          "reason": "JSON metric key local to compact-audit telemetry coverage; not a session lifecycle concept",
-          "token": "telemetry_sessions"
+          "reason": "History query lookup error, not a runtime session lifecycle state",
+          "token": "ErrSessionNotFound"
         }
       ],
       "id": "session-runtime",
@@ -4136,6 +4136,7 @@
         "BeginSessionEffect",
         "ConfigureSessionClientAuth",
         "ConfigureSessionMove",
+        "ErrSessionNotFound",
         "FAK_SESSION_CLIENT_TOKEN",
         "FAK_SESSION_STATE",
         "FinalizeSessionMoveCheckpoint",
@@ -4144,7 +4145,6 @@
         "HeldScheduleReportSchema",
         "ITERM_SESSION_ID",
         "MalformedSessionRef",
-        "MeasuredSessions",
         "ModelSlotsDuringToolWait",
         "MoveSession",
         "NarrowsSessions",
@@ -4309,6 +4309,7 @@
         "runSessionCheckpointWitness",
         "runSessionConPTY",
         "runSessionDiscoveryServe",
+        "runSessionHistory",
         "runSessionMine",
         "runSessionMove",
         "runSessionMoveAdmit",
@@ -4395,7 +4396,6 @@
         "tailTrial",
         "taskQuality",
         "taskSufficient",
-        "telemetry_sessions",
         "terminal_count",
         "terminal_sessions",
         "thrashSessions",
@@ -9480,6 +9480,11 @@
           "category": "incidental",
           "reason": "Pure report assembly helper over mined sessions, not a planning report",
           "token": "reportFromSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal pure collector helper; not a user-facing planning concept",
+          "token": "PlanUnregisteredResidue"
         }
       ],
       "exclude": [
@@ -9523,6 +9528,7 @@
         "PlanResolver",
         "PlanStepDecision",
         "PlanUnits",
+        "PlanUnregisteredResidue",
         "PressuredSnapshotCandidates",
         "ReadMergePlan",
         "ReconcilePlan",

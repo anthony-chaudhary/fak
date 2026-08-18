@@ -42,7 +42,7 @@ func MineIndexed(opts Options, statePath string) (IndexedResult, error) {
 	if statePath == "" {
 		return IndexedResult{}, errors.New("index path is required")
 	}
-	state, err := loadIndex(statePath)
+	state, err := LoadIndex(statePath)
 	if err != nil {
 		return IndexedResult{}, err
 	}
@@ -112,7 +112,7 @@ func MineIndexed(opts Options, statePath string) (IndexedResult, error) {
 	return result, nil
 }
 
-func loadIndex(path string) (IndexState, error) {
+func LoadIndex(path string) (IndexState, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return IndexState{Schema: indexSchema, Files: map[string]IndexedFile{}, Seen: map[string]bool{}}, nil
