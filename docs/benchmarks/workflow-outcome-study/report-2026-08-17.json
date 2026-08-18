@@ -10,14 +10,14 @@
     "direct": {
       "completed": 5,
       "failed": 0,
-      "elapsed_ms": 1018704,
+      "elapsed_ms": 1075637,
       "usage": {
-        "input_tokens": 10508974,
-        "cached_input_tokens": 9761408,
-        "output_tokens": 24536
+        "input_tokens": 7380973,
+        "cached_input_tokens": 6464256,
+        "output_tokens": 28658
       },
-      "correctness": 11,
-      "usefulness": 11,
+      "correctness": 10,
+      "usefulness": 10,
       "grades": 5
     },
     "workflow": {
