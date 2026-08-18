@@ -13,12 +13,31 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 const Schema = "fak-wip-inventory/1"
 const sampleLimit = 20
+
+const (
+	workerRootEnv = "FLEET_WORKER_WORKTREE_ROOT"
+	workerMarker  = "fak-worker-wt"
+)
+
+func defaultWorkerRoot() string {
+	if override := strings.TrimSpace(os.Getenv(workerRootEnv)); override != "" {
+		return override
+	}
+	base := os.Getenv("LOCALAPPDATA")
+	if base == "" {
+		base = os.TempDir()
+	}
+	return filepath.Join(base, "Fleet", "worker-worktrees")
+}
+
+func isWorkerWorktree(path string) bool {
+	name := filepath.Base(filepath.Clean(path))
+	return name == workerMarker || strings.HasPrefix(name, workerMarker+"-")
+}
 
 type Runner interface {
 	Run(dir string, args ...string) ([]byte, error)
@@ -39,10 +58,13 @@ func (GitRunner) Run(dir string, args ...string) ([]byte, error) {
 }
 
 type Population struct {
-	Count   int      `json:"count"`
-	Known   bool     `json:"known"`
-	Samples []string `json:"samples,omitempty"`
-	Error   string   `json:"error,omitempty"`
+	Count            int      `json:"count"`
+	Known            bool     `json:"known"`
+	Samples          []string `json:"samples,omitempty"`
+	Error            string   `json:"error,omitempty"`
+	OldestPath       string   `json:"oldest_path,omitempty"`
+	OldestAgeSeconds int64    `json:"oldest_age_seconds,omitempty"`
+	Protection       string   `json:"protection,omitempty"`
 }
 type Checkout struct {
 	Path      string     `json:"path"`
@@ -57,13 +79,14 @@ type StaleWorker struct {
 	Detail string `json:"detail,omitempty"`
 }
 type Checkpoint struct {
-	Ref     string `json:"ref"`
-	SHA     string `json:"sha"`
-	Unix    int64  `json:"unix"`
-	Changed int    `json:"changed_paths"`
-	Added   int    `json:"added_paths"`
-	Known   bool   `json:"known"`
-	Error   string `json:"error,omitempty"`
+	Ref     string   `json:"ref"`
+	SHA     string   `json:"sha"`
+	Unix    int64    `json:"unix"`
+	Changed int      `json:"changed_paths"`
+	Added   int      `json:"added_paths"`
+	Known   bool     `json:"known"`
+	Error   string   `json:"error,omitempty"`
+	Paths   []string `json:"paths,omitempty"`
 }
 type IgnoreInputs struct {
 	GitignoreHash string `json:"gitignore_hash,omitempty"`
@@ -97,15 +120,16 @@ func Collect(root string, now time.Time, r Runner, opts ...Options) Report {
 	}
 	rep := Report{Schema: Schema, ObservedAt: now.UTC(), Repository: filepath.ToSlash(root)}
 	rep.HEAD = one(root, r, &rep, "rev-parse", "HEAD")
-	rep.Main = checkout(root, rep.HEAD, "main", r, &rep)
+	rep.Main = checkout(root, rep.HEAD, "main", now, r, &rep)
 	rep.Ignored = populationZ(root, r, "ls-files", "--others", "--ignored", "--exclude-standard", "-z")
 	recordPopulationError(&rep, "ignored_generated", &rep.Ignored)
-	workerRoot := workerworktree.DefaultRoot()
+	workerRoot := defaultWorkerRoot()
 	if len(opts) > 0 && opts[0].WorkerRoot != "" {
 		workerRoot = opts[0].WorkerRoot
 	}
 	rep.Worktrees, rep.StaleWorkers = worktrees(root, workerRoot, r, &rep)
 	rep.Checkpoints, rep.CheckpointsKnown = checkpoints(root, r, &rep)
+	labelProtection(&rep)
 	rep.IgnoreInputs = ignoreInputs(root, r)
 	if !rep.IgnoreInputs.Known {
 		rep.Errors = append(rep.Errors, "ignore_visibility: "+rep.IgnoreInputs.Error)
@@ -140,7 +164,7 @@ func recordPopulationError(rep *Report, name string, p *Population) {
 		rep.Errors = append(rep.Errors, name+": "+p.Error)
 	}
 }
-func checkout(path, head, branch string, r Runner, rep *Report) Checkout {
+func checkout(path, head, branch string, now time.Time, r Runner, rep *Report) Checkout {
 	c := Checkout{Path: filepath.ToSlash(path), HEAD: head, Branch: branch, Tracked: Population{Known: true}, Untracked: Population{Known: true}}
 	out, err := r.Run(path, "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
@@ -157,6 +181,7 @@ func checkout(path, head, branch string, r Runner, rep *Report) Checkout {
 		name := line[3:]
 		if strings.HasPrefix(line, "?? ") {
 			addSample(&c.Untracked, name)
+			observeAge(&c.Untracked, path, name, now)
 		} else {
 			addSample(&c.Tracked, name)
 		}
@@ -167,6 +192,25 @@ func addSample(p *Population, path string) {
 	p.Count++
 	if len(p.Samples) < sampleLimit {
 		p.Samples = append(p.Samples, filepath.ToSlash(path))
+	}
+}
+
+func observeAge(p *Population, root, name string, now time.Time) {
+	info, err := os.Stat(filepath.Join(root, filepath.FromSlash(name)))
+	if err != nil {
+		p.Known = false
+		if p.Error == "" {
+			p.Error = err.Error()
+		}
+		return
+	}
+	age := int64(now.Sub(info.ModTime()).Seconds())
+	if age < 0 {
+		age = 0
+	}
+	if p.OldestPath == "" || age > p.OldestAgeSeconds {
+		p.OldestPath = filepath.ToSlash(name)
+		p.OldestAgeSeconds = age
 	}
 }
 
@@ -193,7 +237,7 @@ func worktrees(root, workerRoot string, r Runner, rep *Report) ([]Checkout, []St
 				prunable = strings.TrimSpace(strings.TrimPrefix(line, "prunable"))
 			}
 		}
-		if path == "" || samePath(path, root) || !workerworktree.IsWorkerWorktree(path) {
+		if path == "" || samePath(path, root) || !isWorkerWorktree(path) {
 			continue
 		}
 		registered[pathKey(path)] = true
@@ -205,7 +249,7 @@ func worktrees(root, workerRoot string, r Runner, rep *Report) ([]Checkout, []St
 			stale = append(stale, StaleWorker{Path: filepath.ToSlash(path), Kind: "registered-missing", Detail: statErr.Error()})
 			continue
 		}
-		live = append(live, checkout(path, head, branch, r, rep))
+		live = append(live, checkout(path, head, branch, rep.ObservedAt, r, rep))
 	}
 	entries, readErr := os.ReadDir(workerRoot)
 	if readErr != nil && !os.IsNotExist(readErr) {
@@ -213,7 +257,7 @@ func worktrees(root, workerRoot string, r Runner, rep *Report) ([]Checkout, []St
 		stale = append(stale, StaleWorker{Path: filepath.ToSlash(workerRoot), Kind: "unknown", Detail: readErr.Error()})
 	}
 	for _, e := range entries {
-		if !e.IsDir() || !workerworktree.IsWorkerWorktree(e.Name()) {
+		if !e.IsDir() || !isWorkerWorktree(e.Name()) {
 			continue
 		}
 		path := filepath.Join(workerRoot, e.Name())
@@ -264,6 +308,10 @@ func checkpoints(root string, r Runner, rep *Report) ([]Checkpoint, bool) {
 					continue
 				}
 				cp.Changed++
+				parts := strings.SplitN(row, "\t", 2)
+				if len(parts) == 2 && len(cp.Paths) < sampleLimit {
+					cp.Paths = append(cp.Paths, filepath.ToSlash(parts[1]))
+				}
 				if strings.HasPrefix(row, "A\t") {
 					cp.Added++
 				}
@@ -274,6 +322,27 @@ func checkpoints(root string, r Runner, rep *Report) ([]Checkpoint, bool) {
 	sort.Slice(result, func(i, j int) bool { return result[i].Ref < result[j].Ref })
 	return result, true
 }
+func labelProtection(rep *Report) {
+	for i := range rep.Worktrees {
+		rep.Worktrees[i].Tracked.Protection = "worker-worktree"
+		rep.Worktrees[i].Untracked.Protection = "worker-worktree"
+	}
+	if rep.Main.Untracked.Count == 0 {
+		return
+	}
+	rep.Main.Untracked.Protection = "unprotected"
+	for _, cp := range rep.Checkpoints {
+		for _, path := range cp.Paths {
+			for _, source := range rep.Main.Untracked.Samples {
+				if path == source {
+					rep.Main.Untracked.Protection = "checkpoint:" + cp.Ref
+					return
+				}
+			}
+		}
+	}
+}
+
 func ignoreInputs(root string, r Runner) IgnoreInputs {
 	in := IgnoreInputs{Known: true}
 	in.GitignoreHash = hashFile(filepath.Join(root, ".gitignore"))
