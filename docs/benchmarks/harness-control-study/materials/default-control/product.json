@@ -4,7 +4,7 @@
   "components": [{
     "id": "kernel",
     "version": "1.0.0",
-    "digest": "sha256:117ea3e15d94787518cc1a63d37e48b16e18c467442bb9fde222011cfba9e58d",
+    "digest": "sha256:7c2348ecbdc353d4b1f2a5ac7f583b4116a7baecfd7cc7aa071434a705989283",
     "source": "study/default-control",
     "provides": ["runtime"],
     "compatibility": {"os": ["linux"], "arch": ["amd64"], "contract": "v1"},

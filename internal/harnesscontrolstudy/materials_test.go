@@ -16,7 +16,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessresolve"
 )
 
-const controlTaskDigest = "07d4a6c3e8b98ce0095f4188f1bed076eb4d6c3a046930c555a294bdff93ef09"
+const controlTaskDigest = "b82b6d9e17853a40fa37ffa4b8d78da53bc42bab3f6d6ffbe21ba876cf2d7fa3"
 
 func TestPairedStudyMaterialsAreSelfContainedAndVerified(t *testing.T) {
 	_, file, _, _ := runtime.Caller(0)
@@ -35,6 +35,9 @@ func TestPairedStudyMaterialsAreSelfContainedAndVerified(t *testing.T) {
 		card := string(mustRead(t, filepath.Join(armDir, "arm-card.md")))
 		if !strings.Contains(card, "pinned `fak` binary") || !strings.Contains(card, "Stop the clock") {
 			t.Fatalf("%s arm card lacks pinned-binary or clock boundary", arm)
+		}
+		if !strings.Contains(card, "`task-card.md`") || strings.Contains(card, "../") {
+			t.Fatalf("%s arm card must reference only its local task card", arm)
 		}
 	}
 

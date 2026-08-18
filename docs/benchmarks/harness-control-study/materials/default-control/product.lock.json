@@ -1,6 +1,6 @@
 {
   "schema": "fak.harness-product-lock/v1alpha2",
-  "id": "sha256:22d8a14e8482866afbe89ce1eaab60e31a0f92739fc9d4c000437aab8194d560",
+  "id": "sha256:518381f886ec4719d8a21647b2e4f5a31b54e5bd711b7e3d7a9afe00e4774d1d",
   "environment": {
     "os": "linux",
     "arch": "amd64",
@@ -11,7 +11,7 @@
     {
       "id": "kernel",
       "version": "1.0.0",
-      "digest": "sha256:117ea3e15d94787518cc1a63d37e48b16e18c467442bb9fde222011cfba9e58d",
+      "digest": "sha256:7c2348ecbdc353d4b1f2a5ac7f583b4116a7baecfd7cc7aa071434a705989283",
       "source": "study/default-control",
       "reason": "selected root",
       "provider": "manifest",

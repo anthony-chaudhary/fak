@@ -36,6 +36,10 @@ fak harness study control --input docs/benchmarks/harness-control-study/study.js
 
 Exit `3` means the study is still `not_yet`; exit `0` means the declared minimum pair count is admissible and both arms have verification evidence. `measured` does not itself mean the preference hypothesis won: report the arm metrics and preference counts as observed.
 
+## Preregistration correction
+
+Before enrollment and while ows was still empty, #7264 normalized 	ask-card.md to repository-stored LF bytes and changed its declared digest from sha256:07d4a6c3e8b98ce0095f4188f1bed076eb4d6c3a046930c555a294bdff93ef09 to sha256:b82b6d9e17853a40fa37ffa4b8d78da53bc42bab3f6d6ffbe21ba876cf2d7fa3. The old digest named a Windows working-tree line-ending variant rather than the canonical Git blob. No task wording or outcome changed and no participant result existed when corrected.
+
 ## Human handoff
 
 1. Record random privacy-safe `person-…`, `pair-…`, and machine slugs. Do not record names, handles, emails, employers, or account identifiers.

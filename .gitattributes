@@ -18,5 +18,6 @@
 *.cu text eol=lf
 
 # The preregistered harness-control task is SHA-256 addressed; preserve its exact bytes on every OS (#7252).
-docs/benchmarks/harness-control-study/task-card.md -text
-docs/benchmarks/harness-control-study/materials/*/task-card.md -text
+docs/benchmarks/harness-control-study/task-card.md text eol=lf
+docs/benchmarks/harness-control-study/materials/*/task-card.md text eol=lf
+docs/benchmarks/harness-control-study/materials/default-control/kernel-component.txt text eol=lf
