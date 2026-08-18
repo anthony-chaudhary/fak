@@ -11,6 +11,7 @@ fak is an all-in-one agent boundary: one Go binary for model routing, context re
 The current project boundary and capability classification are recorded in [Project orientation: the agent-kernel center](docs/project-orientation.md). It distinguishes Core kernel outcomes from Enabling substrates, Stewardship obligations, and Peripheral expansion without turning centrality into a priority score.
 
 > **Pick your path:** run `fak guard -- claude` to manage the agent you already use, or run `fak harness init` to generate a small agent product you own. Both use the same managed-context, model, tool-policy, journal, and recovery boundary. The existing-agent path forwards your subscription credential; the build-your-own selfcheck needs no API key, model, or GPU (`go run ./cmd/product --selfcheck` → `{"type":"turn.completed","detail":"ok"}`).
+> **Help test those two paths:** we need two independent Linux/amd64 operators for a 45–75 minute paired task comparing a verified default with visible controls against scratch harness construction. No API key or model is needed. The preference claim is **not yet measured (0/2 pairs)**. If you have not worked on fak internals or inspected the study answer materials, [volunteer on #7224](https://github.com/anthony-chaudhary/fak/issues/7224).
 
 [![Watch the 40-second fak value walk: save tokens and turns first, then see pre-execution policy](visuals/fak-homepage-hero.gif)](visuals/fak-homepage-hero.mp4)
 
