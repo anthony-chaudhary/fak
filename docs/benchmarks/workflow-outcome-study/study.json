@@ -1,0 +1,57 @@
+{
+  "schema": "fak-workflow-outcome-study/1",
+  "study_id": "workflow-default-equivalent-outcomes-2026-08",
+  "tasks": [
+    {
+      "id": "T1",
+      "class": "trivial",
+      "prompt": "fix typo",
+      "rubric": [
+        "Identifies that the requested change is trivial",
+        "Returns a concise actionable result without inventing repository evidence"
+      ]
+    },
+    {
+      "id": "T2",
+      "class": "multi-step-serial",
+      "prompt": "inspect the workflow default, verify its receipt, and summarize the result",
+      "rubric": [
+        "Inspects the workflow-default implementation",
+        "Verifies a concrete receipt field or path",
+        "Summarizes findings with evidence"
+      ]
+    },
+    {
+      "id": "T3",
+      "class": "parallelizable",
+      "prompt": "inspect independent workflow-default, launch-receipt, and report evidence in parallel",
+      "rubric": [
+        "Covers workflow-default, launch-receipt, and report evidence",
+        "Keeps independent findings distinguishable",
+        "Reconciles findings into one accurate conclusion"
+      ]
+    },
+    {
+      "id": "T4",
+      "class": "unattended",
+      "prompt": "run an unattended audit of workflow-default uptake and produce a witnessed summary",
+      "rubric": [
+        "Audits uptake from persisted evidence",
+        "Separates authored from provider-observed evidence",
+        "Produces a witnessed summary without unsupported gain claims"
+      ]
+    },
+    {
+      "id": "T5",
+      "class": "mixed-grind",
+      "prompt": "continue the multi-step implementation, add observability, dogfood it, and ship it",
+      "rubric": [
+        "Identifies implementation and observability state",
+        "Evaluates dogfood evidence",
+        "Names the ship verdict and remaining evidence honestly"
+      ]
+    }
+  ],
+  "results": [],
+  "grades": []
+}

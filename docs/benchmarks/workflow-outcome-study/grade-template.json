@@ -1,0 +1,8 @@
+{
+  "task_id": "T1",
+  "candidate_id": "blind-random",
+  "grader_id": "independent-random",
+  "correctness": 0,
+  "usefulness": 0,
+  "rationale": ""
+}

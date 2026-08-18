@@ -1,0 +1,18 @@
+{
+  "task_id": "T1",
+  "arm": "direct",
+  "candidate_id": "blind-random",
+  "model": "gpt-5.6-sol",
+  "effort": "high",
+  "budget_tokens": 12000,
+  "completed": false,
+  "elapsed_ms": 0,
+  "artifact_digest": "",
+  "usage": {
+    "input_tokens": 0,
+    "cached_input_tokens": 0,
+    "output_tokens": 0
+  },
+  "failure": "",
+  "producer_id": "agent-random"
+}

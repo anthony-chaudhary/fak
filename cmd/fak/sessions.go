@@ -66,6 +66,8 @@ func runSessionsWithStdin(stdout, stderr io.Writer, stdin io.Reader, argv []stri
 		return sessionsCodexLoopHook(stdout, stderr, stdin, rest)
 	case "workflow-default-report":
 		return runSessionsWorkflowDefaultReport(stdout, stderr, rest)
+	case "workflow-outcome-study":
+		return runWorkflowOutcomeStudy(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		sessionsUsage(stdout)
 		return 0
@@ -87,6 +89,7 @@ usage:
 //	fak sessions codex-loop archive --path FILE [--codex-home DIR] [--dry-run] [--json]
   fak sessions codex-loop-hook [--codex-home DIR] [--allow-direct]
   fak sessions workflow-default-report [--codex-home DIR] [--json]
+  fak sessions workflow-outcome-study --input STUDY.json [--json]
   fak sessions codex-hook-install [--codex-home DIR] [--dry-run]
 
 Start here:
