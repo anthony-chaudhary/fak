@@ -28,3 +28,9 @@ The GitHub API's 100-item page cap means “at least 100” is deliberate. Stars
 5. A completed `study-repo` pass updates this row in the same commit as its dated study note. A `scout-loop` pass selects due candidates before opening a fresh outward search.
 
 This list intentionally does not claim that these repositories contain a borrowable gap. It proves only that they were fresh, relevant, previously untracked by exact source identity, and worth the next disciplined study pass on 2026-08-14.
+
+## Newly studied source
+
+| Repository | Result | Pinned evidence |
+|---|---|---|
+| [`strukto-ai/mirage`](https://github.com/strukto-ai/mirage) | Deep study retained one borrow: a strict pre-effect drift contract for mutable external inputs on resume/replay. Typed backend capabilities and transactional workspaces map to stronger existing fak seams/issues; a universal VFS is a bounded optional integration, not the default. | [`mirage-study-2026-08-17.md`](mirage-study-2026-08-17.md), revision `e0a4f51109cbe6b8a239700d8348f0cbebd70b26`; 3,499 stars and last push `2026-08-17T23:41:51Z` at check time. |

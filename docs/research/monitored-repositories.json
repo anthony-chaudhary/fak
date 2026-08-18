@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-15",
+  "updated_at": "2026-08-17T17:45:00-07:00",
   "methodology": "Harness-related repositories absent by exact owner/name from tracked fak docs were ranked by direct seam relevance, current development activity, adoption signal, and license clarity. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -69,6 +69,18 @@
       "stars_at_check": 0,
       "last_push_at_check": "",
       "study_note": "docs/research/tensor-build-local-study-2026-08-15.md"
+    },
+    {
+      "repository": "strukto-ai/mirage",
+      "url": "https://github.com/strukto-ai/mirage",
+      "status": "studied",
+      "priority": 7,
+      "why": "Unified agent resource substrate deeply studied for snapshot drift gates, typed per-operation backend capabilities, transactional workspace branches, policy placement, and observer fidelity. The surviving fak gap is a strict pre-effect external-input drift contract; stronger or already-planned fak work covers the other candidates.",
+      "last_checked": "2026-08-17",
+      "checked_revision": "e0a4f51109cbe6b8a239700d8348f0cbebd70b26",
+      "stars_at_check": 3499,
+      "last_push_at_check": "2026-08-17T23:41:51Z",
+      "study_note": "docs/research/mirage-study-2026-08-17.md"
     }
   ]
 }
