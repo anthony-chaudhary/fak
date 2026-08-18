@@ -14,6 +14,7 @@ package wipref
 
 import (
 	"encoding/json"
+	"github.com/anthony-chaudhary/fak/internal/refid"
 	"strings"
 )
 
@@ -86,20 +87,7 @@ type Stamp struct {
 // ValidSession reports whether id is a single safe ref segment: no '/', no
 // whitespace, none of git's refname metacharacters. Same rule as leaseref.validID
 // — a checkpoint ref must be exactly one path component under RefNamespace.
-func ValidSession(id string) bool {
-	if id == "" {
-		return false
-	}
-	for _, c := range id {
-		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
-		case c == '-' || c == '_' || c == '.':
-		default:
-			return false
-		}
-	}
-	return true
-}
+func ValidSession(id string) bool { return refid.Valid(id) }
 
 // SessionRef is the fully-qualified ref a session's checkpoint lives at.
 func SessionRef(id string) string { return RefNamespace + id }

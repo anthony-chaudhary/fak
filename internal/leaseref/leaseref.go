@@ -54,6 +54,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dormancy"
+	"github.com/anthony-chaudhary/fak/internal/refid"
 )
 
 // refPrefix is the dedicated ref namespace every fak side ref lives under. Unlike
@@ -210,23 +211,7 @@ func NewWithStdinRunner(r Runner, sr StdinRunner, dir string) *Store {
 // the namespace), and contain no whitespace / ref-special bytes git's check-ref-format
 // would reject. This is the namespace-confinement guard: an id is structurally unable to
 // target a ref outside refs/fak/locks/.
-func validID(id string) bool {
-	if id == "" || len(id) > 200 {
-		return false
-	}
-	if strings.HasPrefix(id, "-") || strings.HasPrefix(id, ".") {
-		return false // a leading dash misparses as a flag; a leading dot is ref-illegal
-	}
-	for _, c := range []byte(id) {
-		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
-		case c == '-' || c == '_' || c == '.':
-		default:
-			return false // no '/', no whitespace, no '~^:?*[\' — keep it one safe segment
-		}
-	}
-	return true
-}
+func validID(id string) bool { return refid.Valid(id) }
 
 // Acquire publishes rec under refs/fak/locks/<rec.ID>. It writes the JSON record as a
 // blob via `git hash-object -w` (through a temp file, since the Runner seam carries no

@@ -1,0 +1,32 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T02:26:30.7184813Z",
+  "issue": 7130,
+  "family": "Git-ref path segment validation",
+  "paths": [
+    "internal/refid",
+    "internal/leaseref/leaseref.go",
+    "internal/wipref/wipref.go"
+  ],
+  "test": "go test ./internal/refid ./internal/leaseref ./internal/wipref",
+  "test_result": "PASS",
+  "before": {
+    "score": -137.1,
+    "grade": "F",
+    "slop_debt": 409,
+    "duplication": 372,
+    "weighted_duplication": 239.5,
+    "dead_code": 31,
+    "vacuous_tests": 6
+  },
+  "after": {
+    "score": -136.6,
+    "grade": "F",
+    "slop_debt": 408,
+    "duplication": 371,
+    "weighted_duplication": 238.5,
+    "dead_code": 31,
+    "vacuous_tests": 6
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no other hard KPI increased"
+}
