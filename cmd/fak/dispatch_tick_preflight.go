@@ -690,15 +690,20 @@ func dispatchPreflightAccount(root string, _ io.Writer, workKind, product string
 }
 
 func dispatchCodexAmbientAccount() dispatchtick.AccountCheck {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return dispatchtick.AccountCheck{Available: false, Reason: "could not resolve home directory for codex ambient login"}
+	dir := strings.TrimSpace(os.Getenv("CODEX_HOME"))
+	reason := "ambient CODEX_HOME login"
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil || strings.TrimSpace(home) == "" {
+			return dispatchtick.AccountCheck{Available: false, Reason: "could not resolve home directory for codex ambient login"}
+		}
+		dir = filepath.Join(home, ".codex")
+		reason = "ambient ~/.codex login"
 	}
-	dir := filepath.Join(home, ".codex")
 	if _, err := os.Stat(filepath.Join(dir, "auth.json")); err == nil {
-		return dispatchtick.AccountCheck{Available: true, Tag: "codex-ambient", Dir: dir, Tier: 1, Reason: "ambient ~/.codex login"}
+		return dispatchtick.AccountCheck{Available: true, Tag: "codex-ambient", Dir: dir, Tier: 1, Reason: reason}
 	}
-	return dispatchtick.AccountCheck{Available: false, Reason: "no ~/.codex/auth.json - run `codex login`"}
+	return dispatchtick.AccountCheck{Available: false, Dir: dir, Reason: "no auth.json in Codex home - run `codex login`"}
 }
 
 func dispatchCodexOAuthSessionCap() int {
