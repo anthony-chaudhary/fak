@@ -253,6 +253,8 @@ func worktreeWorkerReap(argv []string) {
 	flags.Parse(argv)
 
 	repoRoot := worktreeWorkerRoot(*root)
+	finishLifecycle := beginAutomaticWIPLifecycle(repoRoot, "worker-reap", os.Stderr)
+	defer finishLifecycle()
 
 	if *allCold {
 		worktreeWorkerReapAllCold(repoRoot, *apply, time.Duration(*ageFloorMin)*time.Minute, *evenIfUnlanded)
@@ -261,11 +263,13 @@ func worktreeWorkerReap(argv []string) {
 
 	if strings.TrimSpace(*worktree) == "" {
 		fmt.Fprintln(os.Stderr, "fak worktree worker reap: --worktree is required (or pass --all-cold for the bulk cold sweep)")
+		finishLifecycle()
 		os.Exit(2)
 	}
 	res := workerworktree.Reap(repoRoot, strings.TrimSpace(*worktree), nil)
 	worktreeWorkerEmit(res)
 	if !res.OK {
+		finishLifecycle()
 		os.Exit(1)
 	}
 }
@@ -686,11 +690,14 @@ func worktreeWorkerRecover(argv []string) {
 	fs.Parse(argv)
 
 	repoRoot := worktreeWorkerRoot(*root)
+	finishLifecycle := beginAutomaticWIPLifecycle(repoRoot, "crash-recovery", os.Stderr)
+	defer finishLifecycle()
 	out := worktreeWorkerRecoverOut{Candidates: []workerworktree.RecoveryEntry{}}
 	if *fetch {
 		if err := workerworktree.FetchRecoveryMirror(repoRoot, *remote, nil); err != nil {
 			out.Reason = err.Error()
 			worktreeWorkerEmit(out)
+			finishLifecycle()
 			os.Exit(1)
 		}
 	}
@@ -700,6 +707,7 @@ func worktreeWorkerRecover(argv []string) {
 		if *apply && !plan.Applied {
 			out.Reason = plan.Reason
 			worktreeWorkerEmit(out)
+			finishLifecycle()
 			os.Exit(1)
 		}
 	}
@@ -707,6 +715,7 @@ func worktreeWorkerRecover(argv []string) {
 		if err := workerworktree.DeleteRecoveryRef(repoRoot, *cleanup, *force, nil); err != nil {
 			out.Reason = err.Error()
 			worktreeWorkerEmit(out)
+			finishLifecycle()
 			os.Exit(1)
 		}
 		out.Cleaned = *cleanup
@@ -715,6 +724,7 @@ func worktreeWorkerRecover(argv []string) {
 	if err != nil {
 		out.Reason = err.Error()
 		worktreeWorkerEmit(out)
+		finishLifecycle()
 		os.Exit(1)
 	}
 	out.OK = true

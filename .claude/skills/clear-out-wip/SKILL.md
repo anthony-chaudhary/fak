@@ -33,6 +33,16 @@ collision-priced follow-on units. Do not recreate those workflows here.
 - Do not close a parent issue merely because an independently useful enabling slice shipped.
   Describe and witness exactly the slice that landed; keep or file the remaining done-condition.
 
+## 0. Open the lifecycle receipt
+
+Before any mutation, run:
+
+```bash
+fak wip lifecycle begin --kind clear-out --root .
+```
+
+Keep the returned `operation_id`. This persists the `fak-wip-inventory/1` before snapshot outside the working tree. If capture fails, report the typed `WIP_LIFECYCLE_CAPTURE_FAILED` condition but continue any safety-critical recovery; never reinterpret capture failure as a zero WIP count.
+
 ## 1. Freeze a read-only census
 
 Run the inventory before editing anything. Save bulky machine output under an allocated scratch
@@ -239,6 +249,16 @@ Follow `/fleet-wave` for liveness and account recovery and `/wave-harvest` for r
 witnesses; a process exit, worker log, or final message is insufficient. Release leases and account
 slots after reconciliation, then run another census. Start a later collision wave only from the
 new state and only while live-clear-out intent remains in force.
+## 6.5. Close the lifecycle receipt
+
+After the last mutation and verification, run:
+
+```bash
+fak wip lifecycle end --root . --id <operation_id>
+```
+
+The resulting `fak-wip-lifecycle/1` receipt links ordered before/after inventory artifacts under one operation identity. Include its `receipt_path` in the final report.
+
 ## 7. Exit with a residual proof
 
 Repeat the read-only census and reconcile every original unit plus any newly observed path. Report:

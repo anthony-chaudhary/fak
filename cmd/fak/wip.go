@@ -72,6 +72,8 @@ func runWip(stdout, stderr io.Writer, argv []string) int {
 		return runWipBlocked(stdout, stderr, argv[1:])
 	case "inventory":
 		return runWIPInventory(argv[1:], stdout, stderr)
+	case "lifecycle":
+		return runWIPLifecycle(argv[1:], stdout, stderr)
 	case "reconcile":
 		return runWipReconcile(stdout, stderr, argv[1:])
 	case "sweep-guard", "sweepguard":

@@ -17,7 +17,9 @@ Live witness: [`docs/_witnesses/wip-inventory-live-2026-08-17.json`](../_witness
 
 ## Integration path
 
-Capture this schema immediately before and after `clear-out-wip`, worker-worktree reap, and crash recovery. Compare populations by label; never treat a drop in ignored/generated files or a full detached-worktree copy as shipped source WIP.
+Lifecycle mutation uses a `fak-wip-lifecycle/1` receipt that links ordered before/after copies of this inventory under one operation identity. `fak worktree worker reap` and `fak worktree worker recover` capture automatically. The multi-command `/clear-out-wip` workflow brackets its mutations with `fak wip lifecycle begin --kind clear-out --root .` and `fak wip lifecycle end --root . --id <operation_id>`. Receipts live under Git administrative storage (`.git/fak-wip-lifecycle/`), outside source WIP. A capture has `known: false` plus an error when observation failed; that is distinct from a known zero count, and capture persistence failure must not block safety-critical recovery.
+
+Compare populations by label; never treat a drop in ignored/generated files or a full detached-worktree copy as shipped source WIP.
 
 ## Age gate and isolation policy
 
