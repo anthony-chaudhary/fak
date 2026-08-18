@@ -28,6 +28,8 @@ import (
 	"fmt"
 	"path"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // The closed vocabulary. These two sets are the validation boundary: a
@@ -240,7 +242,7 @@ func parseClassTables(data []byte) ([]classTable, error) {
 
 	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
 	for n, raw := range lines {
-		line := stripComment(raw)
+		line := strmatch.StripUnquotedComment(raw, '#')
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -288,24 +290,6 @@ func parseClassTables(data []byte) ([]classTable, error) {
 	return tables, nil
 }
 
-// stripComment removes a trailing '#' comment that is not inside a string. The
-// fixture grammar has no '#' inside its string literals, so a first-unquoted-#
-// scan is sufficient.
-func stripComment(s string) string {
-	inStr := false
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '"':
-			inStr = !inStr
-		case '#':
-			if !inStr {
-				return s[:i]
-			}
-		}
-	}
-	return s
-}
-
 func parseString(v string) (string, error) {
 	if len(v) < 2 || v[0] != '"' || v[len(v)-1] != '"' {
 		return "", fmt.Errorf("expected a double-quoted string, got %q", v)
@@ -326,7 +310,7 @@ func parseStringArray(v string) ([]string, error) {
 		return []string{}, nil
 	}
 	var out []string
-	for _, part := range splitTopLevel(body) {
+	for _, part := range strmatch.SplitQuoted(body, ',') {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
@@ -338,31 +322,4 @@ func parseStringArray(v string) ([]string, error) {
 		out = append(out, s)
 	}
 	return out, nil
-}
-
-// splitTopLevel splits an array body on commas. The grammar has no nested
-// arrays, so a plain comma split (respecting quotes) is enough.
-func splitTopLevel(body string) []string {
-	var parts []string
-	var b strings.Builder
-	inStr := false
-	for i := 0; i < len(body); i++ {
-		c := body[i]
-		switch c {
-		case '"':
-			inStr = !inStr
-			b.WriteByte(c)
-		case ',':
-			if inStr {
-				b.WriteByte(c)
-			} else {
-				parts = append(parts, b.String())
-				b.Reset()
-			}
-		default:
-			b.WriteByte(c)
-		}
-	}
-	parts = append(parts, b.String())
-	return parts
 }

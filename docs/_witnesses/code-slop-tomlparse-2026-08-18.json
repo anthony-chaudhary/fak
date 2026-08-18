@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T08:33:57.214639Z",
+  "issue": 7285,
+  "family": "quote-aware TOML text parsing",
+  "paths": [
+    "internal/strmatch/toml.go",
+    "internal/strmatch/toml_test.go",
+    "internal/corelocks/corelocks.go",
+    "internal/frontierswe/load.go"
+  ],
+  "test": "go test ./internal/strmatch ./internal/corelocks ./internal/frontierswe; fak-dev buildcheck --mine internal/strmatch/toml.go --vet",
+  "test_result": "PASS",
+  "before": {
+    "score": -77.5,
+    "grade": "F",
+    "slop_debt": 339,
+    "duplication": 339,
+    "weighted_duplication": 216.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -76.4,
+    "grade": "F",
+    "slop_debt": 337,
+    "duplication": 337,
+    "weighted_duplication": 215.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt decreased by two; no measured hard KPI increased"
+}

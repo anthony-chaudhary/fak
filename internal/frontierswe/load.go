@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 // LoadTask reads a FrontierSWE task directory (tasks/<name>/) into a typed Task.
@@ -74,7 +76,7 @@ func parseTaskTOML(data []byte, t *Task) error {
 	section := "" // current [section]; "" is the top-level table
 	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
 	for n, raw := range lines {
-		line := strings.TrimSpace(stripTOMLComment(raw))
+		line := strings.TrimSpace(strmatch.StripUnquotedComment(raw, '#'))
 		if line == "" {
 			continue
 		}
@@ -220,24 +222,6 @@ func assignEnvironment(e *Environment, key, val string, line int) error {
 	return nil
 }
 
-// stripTOMLComment removes a trailing '#' comment that is not inside a string.
-// task.toml has no '#' inside its string/number literals, so a first-unquoted-#
-// scan is sufficient.
-func stripTOMLComment(s string) string {
-	inStr := false
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '"':
-			inStr = !inStr
-		case '#':
-			if !inStr {
-				return s[:i]
-			}
-		}
-	}
-	return s
-}
-
 func tomlString(v string) (string, error) {
 	if len(v) < 2 || v[0] != '"' || v[len(v)-1] != '"' {
 		return "", fmt.Errorf("expected a double-quoted string, got %q", v)
@@ -291,7 +275,7 @@ func tomlStringArray(v string) ([]string, error) {
 		return []string{}, nil
 	}
 	var out []string
-	for _, part := range splitTOMLArray(body) {
+	for _, part := range strmatch.SplitQuoted(body, ',') {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
@@ -303,33 +287,6 @@ func tomlStringArray(v string) ([]string, error) {
 		out = append(out, s)
 	}
 	return out, nil
-}
-
-// splitTOMLArray splits an array body on top-level commas (respecting quotes).
-// The grammar has no nested arrays, so a plain quote-aware split is enough.
-func splitTOMLArray(body string) []string {
-	var parts []string
-	var b strings.Builder
-	inStr := false
-	for i := 0; i < len(body); i++ {
-		c := body[i]
-		switch c {
-		case '"':
-			inStr = !inStr
-			b.WriteByte(c)
-		case ',':
-			if inStr {
-				b.WriteByte(c)
-			} else {
-				parts = append(parts, b.String())
-				b.Reset()
-			}
-		default:
-			b.WriteByte(c)
-		}
-	}
-	parts = append(parts, b.String())
-	return parts
 }
 
 // --- tolerant YAML-ish line readers for job.yaml / oracle.yaml ---
