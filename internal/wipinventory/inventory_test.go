@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
 type fakeRunner struct {
@@ -55,8 +53,8 @@ func (f *fakeRunner) Run(dir string, args ...string) ([]byte, error) {
 func TestCollectSeparatesEveryPopulationWithoutMutation(t *testing.T) {
 	root := t.TempDir()
 	workerRoot := filepath.Join(root, "workers")
-	worker := filepath.Join(workerRoot, workerworktree.WorktreeMarker+"-live")
-	stale := filepath.Join(workerRoot, workerworktree.WorktreeMarker+"-stale")
+	worker := filepath.Join(workerRoot, workerMarker+"-live")
+	stale := filepath.Join(workerRoot, workerMarker+"-stale")
 	for _, path := range []string{worker, stale, filepath.Join(root, ".git", "info")} {
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			t.Fatal(err)
@@ -102,7 +100,7 @@ func TestCollectSeparatesEveryPopulationWithoutMutation(t *testing.T) {
 func TestCollectIsDeterministicExceptObservationTime(t *testing.T) {
 	root := t.TempDir()
 	workerRoot := filepath.Join(root, "workers")
-	worker := filepath.Join(workerRoot, workerworktree.WorktreeMarker+"-live")
+	worker := filepath.Join(workerRoot, workerMarker+"-live")
 	if err := os.MkdirAll(worker, 0o755); err != nil {
 		t.Fatal(err)
 	}
