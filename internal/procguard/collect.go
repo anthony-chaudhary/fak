@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/strictjson"
 )
 
 // CollectProcesses returns one process snapshot (no CPU rate) via the platform's
@@ -112,7 +114,7 @@ func collectWindowsCPU() ([]Proc, map[int]float64, string) {
 		"cpu=$_.CPU; start=$st } } catch {} " +
 		"} | ConvertTo-Json -Compress"
 	out, toolErr := runTool(60*time.Second, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
-	rows := parseJSONRows[winRow](out)
+	rows := strictjson.Rows[winRow](out)
 	// Truncated or absent JSON does not parse, so censusError cannot dress a broken scan
 	// up as a clean host here: no rows come back and the error stands.
 	if e := censusError(len(rows), toolErr); e != "" {
@@ -151,7 +153,7 @@ func collectWindowsRelations() ([]Proc, string) {
 		"[pscustomobject]@{ pid=$_.ProcessId; ppid=$_.ParentProcessId; name=$_.Name; cmd=$_.CommandLine; age=$a } " +
 		"} catch {} } | ConvertTo-Json -Compress"
 	out, toolErr := runTool(90*time.Second, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
-	rows := parseJSONRows[winRelRow](out)
+	rows := strictjson.Rows[winRelRow](out)
 	if e := censusError(len(rows), toolErr); e != "" {
 		return nil, e
 	}
@@ -546,22 +548,6 @@ func runTool(timeout time.Duration, name string, args ...string) (string, string
 		return string(out), detail
 	}
 	return string(out), ""
-}
-
-func parseJSONRows[T any](text string) []T {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return nil
-	}
-	var rows []T
-	if json.Unmarshal([]byte(text), &rows) == nil {
-		return rows
-	}
-	var one T
-	if json.Unmarshal([]byte(text), &one) == nil {
-		return []T{one}
-	}
-	return nil
 }
 
 func stripExe(name string) string {

@@ -3,7 +3,6 @@ package appversion
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/strictjson"
 )
 
 const (
@@ -272,7 +273,7 @@ func collectBinaryProcessesWindows(candidates []string) ([]BinaryProcess, string
 	if err != "" {
 		return nil, err
 	}
-	rows := parseBinaryRows[winProcRow](out)
+	rows := strictjson.Rows[winProcRow](out)
 	procs := make([]BinaryProcess, 0, len(rows))
 	for _, r := range rows {
 		procs = append(procs, BinaryProcess{PID: r.PID, Path: r.Path, Command: r.Command})
@@ -337,22 +338,6 @@ func runBinaryDoctorTool(timeout time.Duration, name string, args ...string) (st
 		return "", err.Error()
 	}
 	return string(out), ""
-}
-
-func parseBinaryRows[T any](text string) []T {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return nil
-	}
-	var rows []T
-	if json.Unmarshal([]byte(text), &rows) == nil {
-		return rows
-	}
-	var one T
-	if json.Unmarshal([]byte(text), &one) == nil {
-		return []T{one}
-	}
-	return nil
 }
 
 func hashFile(path string) string {
