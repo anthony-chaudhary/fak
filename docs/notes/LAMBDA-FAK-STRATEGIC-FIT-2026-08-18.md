@@ -275,6 +275,10 @@ Accessed 2026-08-18. Dates are Lambda publication dates shown in its sitemap/art
   distilled for post-training from top open-source
   models”](https://lambda.ai/blog/creating-highly-efficient-agents-450m-tool-calling-tokens-distilled-for-post-training-from-top-open-source-models).
 
+## Implementation issue
+
+The bounded provider-integration spine is tracked as [#7346 — one auditable Lambda managed-GPU deployment spine](https://github.com/anthony-chaudhary/fak/issues/7346). It preserves the provider-neutral boundary and requires both a deterministic fixture and a scrubbed live provision-to-teardown receipt.
+
 ## fak evidence used for the mapping
 
 These are implementation/doctrine sources for fak's side of the comparison. They do not prove

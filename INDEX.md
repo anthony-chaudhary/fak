@@ -265,6 +265,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Learning observation lineage](docs/learning-observation.md) — content-addressed source/candidate/witness/verdict records and closed-enum edges; separate from witness-gated admission.
 
 ## Notes & research (`docs/notes/`)
+- [Top next GitHub work — 2026-08-18](docs/notes/TOP-NEXT-GITHUB-WORK-2026-08-18.md) -- auto-indexed dated note.
 - [WIP checkpoint lifecycle: when parked refs are used](docs/notes/WIP-CHECKPOINT-LIFECYCLE-2026-08-18.md) -- auto-indexed dated note.
 - [Where fak fits Lambda's latest direction](docs/notes/LAMBDA-FAK-STRATEGIC-FIT-2026-08-18.md) -- auto-indexed dated note.
 - [Five whys: why desktop-window spam kept returning (2026-08-17)](docs/notes/WINDOW-SPAM-FIVE-WHYS-2026-08-17.md) -- auto-indexed dated note.
