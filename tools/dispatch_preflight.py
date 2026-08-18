@@ -272,11 +272,24 @@ def _fak_command(root: Path) -> list[str] | None:
     configured = os.environ.get("FAK_BIN", "").strip()
     if configured:
         return shlex.split(configured, posix=os.name != "nt")
-    for candidate in (root / "fak.exe", root / "fak"):
-        if candidate.is_file():
-            return [str(candidate)]
-    found = shutil.which("fak")
-    return [found] if found else None
+    # The repository-root binary is a developer artifact and can be older, dirty,
+    # or held open by another fleet process. Selecting it here made account policy
+    # depend on an uncommitted build while workers were guarded by the installed
+    # binary. Prefer the installed PATH artifact; FAK_BIN remains the explicit
+    # override for a deliberately pinned build.
+    # ``shutil.which`` on Windows may consult the current directory before PATH,
+    # even when an explicit PATH is supplied. Walk PATH directly so a root-level
+    # ``fak.exe`` cannot masquerade as the installed artifact.
+    names = ("fak.exe", "fak") if os.name == "nt" else ("fak",)
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        directory = Path(entry.strip().strip('"')) if entry.strip() else None
+        if directory is None:
+            continue
+        for name in names:
+            candidate = directory / name
+            if candidate.is_file():
+                return [str(candidate)]
+    return None
 
 
 # --- which `fak` build made this decision? (binary provenance) --------------- #

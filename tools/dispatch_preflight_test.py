@@ -969,6 +969,24 @@ class WorkerCountTest(unittest.TestCase):
         self.assertEqual(p["live"], 10)
         self.assertEqual(p["verdict"], mod.REFUSE_NO_SEAT)
 
+    def test_fak_command_prefers_installed_binary_over_repo_artifact(self) -> None:
+        mod = load_module()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ("fak.exe" if os.name == "nt" else "fak")).write_text(
+                "stale developer build", encoding="utf-8")
+            bindir = root / "bin"
+            bindir.mkdir()
+            installed = bindir / ("fak.exe" if os.name == "nt" else "fak")
+            installed.write_text("installed build", encoding="utf-8")
+            with mock.patch.dict(mod.os.environ, {"PATH": str(bindir), "FAK_BIN": ""}, clear=False):
+                self.assertEqual(mod._fak_command(root), [str(installed)])
+
+    def test_fak_command_explicit_override_still_wins(self) -> None:
+        mod = load_module()
+        with mock.patch.dict(mod.os.environ, {"FAK_BIN": "C:/pinned/fak.exe"}, clear=False):
+            self.assertEqual(mod._fak_command(ROOT), ["C:/pinned/fak.exe"])
+
     def test_account_check_native_route_rejects_needs_login(self) -> None:
         mod = load()
         # Models an enabled registry home whose credential file exists but whose
