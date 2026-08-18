@@ -8,7 +8,7 @@ A `refs/fak/wip/<session>` checkpoint is a **durability copy of uncommitted work
 |---|---|---|
 | `SKIP` / `LIVE` | The owner is still active. The ref protects against a crash; it should not compete with that owner's normal commit. | `fak wip status`; let the owner commit normally. |
 | `DISCARD_WITNESSED` / `LANDED` | Every checkpoint payload byte is already represented by HEAD. | Retire only through the witnessed lifecycle/reap path; do not hand-delete the ref. |
-| `RECLAIM` / `CLOSED_DIRTY_RECOVERABLE` | The owner is gone and the entire delta still applies cleanly. | Use the exact `fak wip reconcile --reclaim --session …` command, which claims and materializes the work without deleting the source ref. |
+| `RECLAIM` / `CLOSED_DIRTY_RECOVERABLE` | The owner is gone and the entire delta still applies cleanly. | Use the exact `fak wip reconcile --reclaim --session <id>` command, which claims and materializes the work without deleting the source ref. |
 | `QUARANTINE` / `DIVERGED` | HEAD contains one or more payload paths with different bytes. Automatic landing could revert newer work. | Run each emitted `review_commands` diff, merge intentionally, then use the normal explicit-path commit path. Never checkout a divergent path from the ref. |
 | `QUARANTINE` / `CLOSED_DIRTY_RECOVERABLE` | The aggregate patch no longer applies even though no individual payload file is byte-divergent (for example, context drift or tree shape changed). | Inspect `fak wip census --json`; reconstruct deliberately rather than treating quarantine as loss. |
 
