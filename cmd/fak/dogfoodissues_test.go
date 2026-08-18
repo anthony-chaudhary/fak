@@ -58,6 +58,19 @@ func TestDogfoodIssuesDryRunPlansScopedCodeSlopRow(t *testing.T) {
 	}
 }
 
+func stubDogfoodIssuesSync(t *testing.T) {
+	t.Helper()
+	oldSync := dogfoodIssuesSync
+	dogfoodIssuesSync = func(plan []dogfoodissues.PlanRow, repo string, labels []string, _ dogfoodissues.Runner) []dogfoodissues.SyncRow {
+		rows := make([]dogfoodissues.SyncRow, 0, len(plan))
+		for _, row := range plan {
+			rows = append(rows, dogfoodissues.SyncRow{Key: row.Key, Action: row.Action, OK: true, Verified: true})
+		}
+		return rows
+	}
+	t.Cleanup(func() { dogfoodIssuesSync = oldSync })
+}
+
 func TestDogfoodIssuesLiveAcceptsScopedCodeSlopRow(t *testing.T) {
 	oldSync := dogfoodIssuesSync
 	dogfoodIssuesSync = func(plan []dogfoodissues.PlanRow, repo string, labels []string, _ dogfoodissues.Runner) []dogfoodissues.SyncRow {
@@ -161,6 +174,7 @@ func TestDogfoodIssuesLiveRefusesStaleReportBeforeGithub(t *testing.T) {
 }
 
 func TestDogfoodIssuesLiveOverrideAllowsStaleReportWithoutGithub(t *testing.T) {
+	stubDogfoodIssuesSync(t)
 	dir := t.TempDir()
 	report := writeDogfoodIssuesReportIn(t, dir, 2*time.Hour)
 	existing := filepath.Join(dir, "existing.json")
@@ -248,6 +262,7 @@ func TestDogfoodIssuesNoEvidenceNamesTheProducingCommand(t *testing.T) {
 // dogfood-score chain axis reads. (The unscoped fixture plans nothing, so no gh
 // is touched; the receipt still witnesses that the bridge ran on this report.)
 func TestDogfoodIssuesLiveWritesBridgeReceipt(t *testing.T) {
+	stubDogfoodIssuesSync(t)
 	dir := t.TempDir()
 	report := writeDogfoodIssuesReportIn(t, dir, 5*time.Minute)
 	existing := filepath.Join(dir, "existing.json")
