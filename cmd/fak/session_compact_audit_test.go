@@ -273,3 +273,12 @@ func TestSessionCompactAuditRejectsUnknownTopBy(t *testing.T) {
 		t.Fatalf("stderr=%s", errb.String())
 	}
 }
+
+func TestDefaultCodexSessionsRootUsesCodexHome(t *testing.T) {
+	t.Setenv("FAK_CODEX_SESSIONS_ROOT", "")
+	root := t.TempDir()
+	t.Setenv("CODEX_HOME", root)
+	if got, want := defaultCodexSessionsRoot(), filepath.Join(root, "sessions"); got != want {
+		t.Fatalf("default root = %q, want %q", got, want)
+	}
+}

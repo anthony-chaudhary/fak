@@ -28,6 +28,9 @@ func defaultCodexSessionsRoot() string {
 	if v := os.Getenv("FAK_CODEX_SESSIONS_ROOT"); v != "" {
 		return v
 	}
+	if home := os.Getenv("CODEX_HOME"); home != "" {
+		return filepath.Join(home, "sessions")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
@@ -50,6 +53,8 @@ func runSessionCompactAudit(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("session compact-audit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("root", defaultCodexSessionsRoot(), "Codex rollout corpus root")
+	var additionalRoots stringListFlag
+	fs.Var(&additionalRoots, "also-root", "additional Codex rollout root to merge into one aggregate (repeatable)")
 	since := fs.String("since", "", "only rollouts modified at/after this date (YYYY-MM-DD or RFC3339)")
 	cwd := fs.String("cwd", "", "only sessions whose workspace path contains this substring")
 	limit := fs.Int("limit", 0, "scan at most N rollouts (0 = all)")
@@ -78,8 +83,9 @@ func runSessionCompactAudit(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
+	roots := append([]string{*root}, additionalRoots...)
 	opts := session.CompactAuditOptions{
-		Root: *root, Cwd: *cwd, Limit: *limit,
+		Roots: roots, Cwd: *cwd, Limit: *limit,
 		GuardedOnly: *guardedOnly, GuardWitnessDir: *guardDir,
 	}
 	if *since != "" {

@@ -22,8 +22,10 @@ import (
 
 // CompactAuditOptions configures a corpus sweep.
 type CompactAuditOptions struct {
-	// Root is the rollout corpus root (e.g. ~/.codex/sessions).
-	Root string
+	// Roots merges multiple rollout corpora into one aggregate. Root remains the
+	// compatibility form used when Roots is empty.
+	Roots []string
+	Root  string
 	// Since drops rollouts not modified at/after this instant. Zero = no filter.
 	Since time.Time
 	// Cwd, when set, keeps only rollouts whose session_meta cwd contains this string —
@@ -58,7 +60,11 @@ type CompactAuditResult struct {
 // health. Files are scanned one at a time and each is streamed head-bounded, so corpus
 // size drives wall time, not memory.
 func AuditCompactCorpus(opts CompactAuditOptions) (CompactAuditResult, error) {
-	res := CompactAuditResult{Root: opts.Root}
+	roots := append([]string(nil), opts.Roots...)
+	if len(roots) == 0 {
+		roots = []string{opts.Root}
+	}
+	res := CompactAuditResult{Root: strings.Join(roots, string(os.PathListSeparator))}
 	res.Provenance.GuardedOnly = opts.GuardedOnly
 
 	// Resolve the ledger BEFORE the walk: a guarded-only sweep with no ledger must fail
@@ -74,29 +80,31 @@ func AuditCompactCorpus(opts CompactAuditOptions) (CompactAuditResult, error) {
 	}
 
 	var paths []string
-	err := filepath.WalkDir(opts.Root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			// A corpus is a live directory: a vanished/locked file must not sink the
-			// whole sweep.
-			if d != nil && d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") {
-			return nil
-		}
-		if !opts.Since.IsZero() {
-			info, e := d.Info()
-			if e != nil || info.ModTime().Before(opts.Since) {
+	for _, root := range roots {
+		err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				// A corpus is a live directory: a vanished/locked file must not sink the
+				// whole sweep.
+				if d != nil && d.IsDir() {
+					return fs.SkipDir
+				}
 				return nil
 			}
+			if d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") {
+				return nil
+			}
+			if !opts.Since.IsZero() {
+				info, e := d.Info()
+				if e != nil || info.ModTime().Before(opts.Since) {
+					return nil
+				}
+			}
+			paths = append(paths, p)
+			return nil
+		})
+		if err != nil {
+			return res, err
 		}
-		paths = append(paths, p)
-		return nil
-	})
-	if err != nil {
-		return res, err
 	}
 	sort.Strings(paths)
 

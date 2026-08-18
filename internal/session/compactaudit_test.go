@@ -9,8 +9,10 @@ package session
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -406,6 +408,30 @@ func TestAggregateCompactReportsUsesMedians(t *testing.T) {
 }
 
 // The checked-in artifact must carry no filesystem paths or session cwd.
+func TestAggregateCompactReportsTotalsAndDailyRollup(t *testing.T) {
+	day1 := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	day2 := day1.Add(24 * time.Hour)
+	reports := []CompactSessionReport{
+		{StartedAt: day1, CumulativeInputTokens: 1000, TokenSamples: 2, Fires: []CompactFire{{At: day1.Add(time.Hour), PreTokens: 900, PostTokens: 200, Shed: 700}}},
+		{StartedAt: day1.Add(2 * time.Hour), CumulativeInputTokens: 500},
+		{StartedAt: day2, CumulativeInputTokens: 2000, TokenSamples: 3, Fires: []CompactFire{{At: day2.Add(time.Hour), PreTokens: 1000, PostTokens: 250, Shed: 750}}},
+	}
+
+	agg := AggregateCompactReports(reports)
+	if agg.CumulativeInputTokens != 3500 || agg.ResidentTokensShed != 1450 {
+		t.Fatalf("aggregate totals = input %d shed %d", agg.CumulativeInputTokens, agg.ResidentTokensShed)
+	}
+	if len(agg.Daily) != 2 {
+		t.Fatalf("daily rows = %d, want 2: %#v", len(agg.Daily), agg.Daily)
+	}
+	if got := agg.Daily[0]; got.Date != "2026-08-14" || got.Sessions != 2 || got.CumulativeInputTokens != 1500 || got.Fires != 1 || got.ResidentTokensShed != 700 {
+		t.Fatalf("day 1 = %#v", got)
+	}
+	if got := agg.Daily[1]; got.Date != "2026-08-15" || got.Sessions != 1 || got.CumulativeInputTokens != 2000 || got.Fires != 1 || got.ResidentTokensShed != 750 {
+		t.Fatalf("day 2 = %#v", got)
+	}
+}
+
 func TestScrubCompactResultDropsPrivatePaths(t *testing.T) {
 	res := CompactAuditResult{
 		Root:     `C:\Users\someone\.codex\sessions`,
@@ -497,5 +523,28 @@ func TestAuditCompactCorpusWalksAndFilters(t *testing.T) {
 	}
 	if future.Aggregate.Sessions != 0 {
 		t.Errorf("since-filtered sessions = %d, want 0", future.Aggregate.Sessions)
+	}
+}
+
+func TestAuditCompactCorpusMergesRoots(t *testing.T) {
+	roots := []string{t.TempDir(), t.TempDir()}
+	row := func(id, ts string, input int) string {
+		return strings.Join([]string{
+			`{"timestamp":"` + ts + `","type":"session_meta","payload":{"id":"` + id + `","cwd":"C:\\work\\fak","model":"gpt-test"}}`,
+			`{"timestamp":"` + ts + `","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":` + strconv.Itoa(input) + `},"last_token_usage":{"input_tokens":` + strconv.Itoa(input) + `},"model_context_window":1000}}}`,
+		}, "\n") + "\n"
+	}
+	for i, root := range roots {
+		path := filepath.Join(root, fmt.Sprintf("rollout-%d.jsonl", i))
+		if err := os.WriteFile(path, []byte(row(fmt.Sprintf("id-%d", i), fmt.Sprintf("2026-08-%02dT12:00:00Z", 14+i), 100+i)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err := AuditCompactCorpus(CompactAuditOptions{Roots: roots})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Aggregate.Sessions != 2 || res.Aggregate.CumulativeInputTokens != 201 || len(res.Aggregate.Daily) != 2 {
+		t.Fatalf("merged aggregate = %#v", res.Aggregate)
 	}
 }

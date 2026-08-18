@@ -4125,6 +4125,11 @@
           "category": "incidental",
           "reason": "History query lookup error, not a runtime session lifecycle state",
           "token": "ErrSessionNotFound"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON metric key local to compact-audit coverage, not a runtime lifecycle state",
+          "token": "telemetry_sessions"
         }
       ],
       "id": "session-runtime",
@@ -4396,6 +4401,7 @@
         "tailTrial",
         "taskQuality",
         "taskSufficient",
+        "telemetry_sessions",
         "terminal_count",
         "terminal_sessions",
         "thrashSessions",

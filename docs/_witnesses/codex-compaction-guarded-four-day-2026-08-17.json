@@ -1,0 +1,328 @@
+{
+  "provenance": {
+    "guarded_only": true,
+    "ledger_sessions": 107,
+    "guarded_sessions": 99,
+    "unguarded_sessions": 107
+  },
+  "aggregate": {
+    "sessions": 99,
+    "rollout_bytes": 346407965,
+    "fires": 23,
+    "measured_fires": 23,
+    "compacted_sessions": 14,
+    "telemetry_sessions": 73,
+    "cumulative_input_tokens": 643673576,
+    "resident_tokens_shed": 3879538,
+    "daily": [
+      {
+        "date": "2026-08-14",
+        "sessions": 40,
+        "telemetry_sessions": 23,
+        "cumulative_input_tokens": 42876441,
+        "fires": 2,
+        "resident_tokens_shed": 424777
+      },
+      {
+        "date": "2026-08-15",
+        "sessions": 6,
+        "telemetry_sessions": 6,
+        "cumulative_input_tokens": 265534594,
+        "fires": 8,
+        "resident_tokens_shed": 1550800
+      },
+      {
+        "date": "2026-08-16",
+        "sessions": 0,
+        "telemetry_sessions": 0,
+        "cumulative_input_tokens": 0,
+        "fires": 3,
+        "resident_tokens_shed": 388881
+      },
+      {
+        "date": "2026-08-17",
+        "sessions": 46,
+        "telemetry_sessions": 37,
+        "cumulative_input_tokens": 322489879,
+        "fires": 9,
+        "resident_tokens_shed": 1387580
+      },
+      {
+        "date": "2026-08-18",
+        "sessions": 7,
+        "telemetry_sessions": 7,
+        "cumulative_input_tokens": 12772662,
+        "fires": 1,
+        "resident_tokens_shed": 127500
+      }
+    ],
+    "median_pre_tokens": 224016,
+    "median_post_tokens": 29498,
+    "median_shed_tokens": 180204,
+    "median_residual_ratio": 0.1278,
+    "anomaly_counts": {
+      "FAST_REBOUND": 5,
+      "LATE_FIRE": 1
+    },
+    "verdict_counts": {
+      "FIRED_AND_HELD": 9,
+      "FIRED_WITH_ANOMALIES": 5,
+      "NO_FIRE_BOUNDED": 59,
+      "NO_TELEMETRY": 26
+    },
+    "regrowth": {
+      "fires_with_telemetry": 23,
+      "rebounds": 12,
+      "censored": 11,
+      "timestamp_suspect": 0,
+      "median_seconds_to_rebound": 2864.0575,
+      "p90_seconds_to_rebound": 5688.279,
+      "median_samples_to_rebound": 85,
+      "rebounds_within_15min": 3,
+      "rebounds_within_30min": 4,
+      "median_next_fire_seconds": 4911.741,
+      "median_cache_read_fraction": 0.9357,
+      "class_totals": {
+        "compaction_summary": {
+          "rows": 23,
+          "bytes": 1789576
+        },
+        "instructions": {
+          "rows": 5,
+          "bytes": 83431
+        },
+        "message/assistant": {
+          "rows": 53,
+          "bytes": 90197
+        },
+        "message/developer": {
+          "rows": 16,
+          "bytes": 10953
+        },
+        "message/user": {
+          "rows": 20,
+          "bytes": 63340
+        },
+        "reasoning": {
+          "rows": 776,
+          "bytes": 1825324
+        },
+        "tool_call/apply_patch": {
+          "rows": 47,
+          "bytes": 183706
+        },
+        "tool_call/dos_commit_audit": {
+          "rows": 3,
+          "bytes": 1290
+        },
+        "tool_call/exec": {
+          "rows": 185,
+          "bytes": 189905
+        },
+        "tool_call/fak_adjudicate": {
+          "rows": 4,
+          "bytes": 4182
+        },
+        "tool_call/fak_changes": {
+          "rows": 1,
+          "bytes": 370
+        },
+        "tool_call/fak_context_restore": {
+          "rows": 1,
+          "bytes": 442
+        },
+        "tool_call/fak_feature_query": {
+          "rows": 1,
+          "bytes": 506
+        },
+        "tool_call/fak_index_docs": {
+          "rows": 1,
+          "bytes": 484
+        },
+        "tool_call/fak_index_lane": {
+          "rows": 2,
+          "bytes": 1289
+        },
+        "tool_call/fak_index_verbs": {
+          "rows": 1,
+          "bytes": 446
+        },
+        "tool_call/fak_read": {
+          "rows": 11,
+          "bytes": 4786
+        },
+        "tool_call/fak_tools_search": {
+          "rows": 3,
+          "bytes": 1306
+        },
+        "tool_call/get_goal": {
+          "rows": 15,
+          "bytes": 4877
+        },
+        "tool_call/list_agents": {
+          "rows": 1,
+          "bytes": 364
+        },
+        "tool_call/list_mcp_resource_templates": {
+          "rows": 1,
+          "bytes": 343
+        },
+        "tool_call/list_mcp_resources": {
+          "rows": 1,
+          "bytes": 334
+        },
+        "tool_call/search_openai_docs": {
+          "rows": 1,
+          "bytes": 458
+        },
+        "tool_call/send_message": {
+          "rows": 3,
+          "bytes": 12898
+        },
+        "tool_call/shell_command": {
+          "rows": 3143,
+          "bytes": 2466870
+        },
+        "tool_call/update_goal": {
+          "rows": 3,
+          "bytes": 1050
+        },
+        "tool_call/update_plan": {
+          "rows": 63,
+          "bytes": 74333
+        },
+        "tool_call/view_image": {
+          "rows": 2,
+          "bytes": 856
+        },
+        "tool_call/wait": {
+          "rows": 71,
+          "bytes": 27821
+        },
+        "tool_call/wait_agent": {
+          "rows": 4,
+          "bytes": 1531
+        },
+        "tool_result/apply_patch": {
+          "rows": 47,
+          "bytes": 22407
+        },
+        "tool_result/dos_commit_audit": {
+          "rows": 3,
+          "bytes": 3594
+        },
+        "tool_result/exec": {
+          "rows": 185,
+          "bytes": 1006997
+        },
+        "tool_result/fak_adjudicate": {
+          "rows": 4,
+          "bytes": 2202
+        },
+        "tool_result/fak_changes": {
+          "rows": 1,
+          "bytes": 411
+        },
+        "tool_result/fak_context_restore": {
+          "rows": 1,
+          "bytes": 522
+        },
+        "tool_result/fak_feature_query": {
+          "rows": 1,
+          "bytes": 7668
+        },
+        "tool_result/fak_index_docs": {
+          "rows": 1,
+          "bytes": 9558
+        },
+        "tool_result/fak_index_lane": {
+          "rows": 2,
+          "bytes": 2195
+        },
+        "tool_result/fak_index_verbs": {
+          "rows": 1,
+          "bytes": 1233
+        },
+        "tool_result/fak_read": {
+          "rows": 11,
+          "bytes": 11908
+        },
+        "tool_result/fak_tools_search": {
+          "rows": 3,
+          "bytes": 3298
+        },
+        "tool_result/get_goal": {
+          "rows": 15,
+          "bytes": 15395
+        },
+        "tool_result/list_agents": {
+          "rows": 1,
+          "bytes": 2592
+        },
+        "tool_result/list_mcp_resource_templates": {
+          "rows": 1,
+          "bytes": 345
+        },
+        "tool_result/list_mcp_resources": {
+          "rows": 1,
+          "bytes": 29168
+        },
+        "tool_result/search_openai_docs": {
+          "rows": 1,
+          "bytes": 51333
+        },
+        "tool_result/send_message": {
+          "rows": 3,
+          "bytes": 912
+        },
+        "tool_result/shell_command": {
+          "rows": 3137,
+          "bytes": 18327673,
+          "dup_rows": 9,
+          "dup_bytes": 66937
+        },
+        "tool_result/update_goal": {
+          "rows": 3,
+          "bytes": 3840
+        },
+        "tool_result/update_plan": {
+          "rows": 63,
+          "bytes": 20673
+        },
+        "tool_result/view_image": {
+          "rows": 2,
+          "bytes": 768
+        },
+        "tool_result/wait": {
+          "rows": 71,
+          "bytes": 91868
+        },
+        "tool_result/wait_agent": {
+          "rows": 4,
+          "bytes": 1406
+        },
+        "unknown": {
+          "rows": 9,
+          "bytes": 32677
+        }
+      },
+      "anomaly_counts": {
+        "REPEATED_TOOL_RESULT": 3
+      },
+      "fast_cohort": {
+        "windows": 4,
+        "median_tool_calls": 49,
+        "median_turns": 0,
+        "median_growth_tokens": 207023,
+        "median_cache_read_fraction": 0.9541
+      },
+      "slow_cohort": {
+        "windows": 19,
+        "median_tool_calls": 113,
+        "median_turns": 1,
+        "median_growth_tokens": 103711,
+        "median_cache_read_fraction": 0.9239
+      }
+    }
+  }
+}

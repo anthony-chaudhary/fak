@@ -164,10 +164,12 @@ type CompactFire struct {
 
 // CompactSessionReport is one rollout file's compaction health.
 type CompactSessionReport struct {
-	SessionID string `json:"session_id"`
-	Path      string `json:"path"`
-	Model     string `json:"model"`
-	Cwd       string `json:"cwd"`
+	SessionID string    `json:"session_id"`
+	Path      string    `json:"path"`
+	Model     string    `json:"model"`
+	Cwd       string    `json:"cwd"`
+	StartedAt time.Time `json:"started_at,omitempty"`
+	EndedAt   time.Time `json:"ended_at,omitempty"`
 
 	// The three quantities the report exists to keep apart.
 	Bytes                 int64 `json:"rollout_bytes"`           // append-only: grows forever
@@ -190,12 +192,28 @@ type CompactSessionReport struct {
 }
 
 // CompactAggregate is the fleet-wide roll-up across many rollouts.
+// DailyTokenStats attributes session-level work to the rollout start day and
+// fire-level effects to the fire timestamp. It makes multi-day audits comparable without
+// pretending cumulative provider input is resident context or compaction savings.
+type DailyTokenStats struct {
+	Date                  string `json:"date"`
+	Sessions              int    `json:"sessions"`
+	Sampled               int    `json:"telemetry_sessions"`
+	CumulativeInputTokens int64  `json:"cumulative_input_tokens"`
+	Fires                 int    `json:"fires"`
+	ResidentTokensShed    int64  `json:"resident_tokens_shed"`
+}
+
 type CompactAggregate struct {
-	Sessions          int   `json:"sessions"`
-	Bytes             int64 `json:"rollout_bytes"`
-	Fires             int   `json:"fires"`
-	MeasuredFires     int   `json:"measured_fires"` // fires with both witnesses
-	CompactedSessions int   `json:"compacted_sessions"`
+	Sessions              int               `json:"sessions"`
+	Bytes                 int64             `json:"rollout_bytes"`
+	Fires                 int               `json:"fires"`
+	MeasuredFires         int               `json:"measured_fires"` // fires with both witnesses
+	CompactedSessions     int               `json:"compacted_sessions"`
+	Sampled               int               `json:"telemetry_sessions"`
+	CumulativeInputTokens int64             `json:"cumulative_input_tokens"`
+	ResidentTokensShed    int64             `json:"resident_tokens_shed"`
+	Daily                 []DailyTokenStats `json:"daily,omitempty"`
 
 	MedianPreTokens     int     `json:"median_pre_tokens"`
 	MedianPostTokens    int     `json:"median_post_tokens"`
@@ -428,6 +446,12 @@ func scanCompactRollout(r io.Reader, path string, size int64, opt RegrowthReplay
 		if rawTS != "" {
 			if t, e := time.Parse(time.RFC3339Nano, rawTS); e == nil {
 				ts = t
+				if rep.StartedAt.IsZero() || t.Before(rep.StartedAt) {
+					rep.StartedAt = t
+				}
+				if rep.EndedAt.IsZero() || t.After(rep.EndedAt) {
+					rep.EndedAt = t
+				}
 			}
 		}
 
@@ -717,10 +741,26 @@ func AggregateCompactReports(reports []CompactSessionReport) CompactAggregate {
 	}
 	var pre, post, shed []int
 	var residual []float64
+	daily := map[string]*DailyTokenStats{}
+	day := func(at time.Time) *DailyTokenStats {
+		if at.IsZero() {
+			return nil
+		}
+		key := at.UTC().Format("2006-01-02")
+		if daily[key] == nil {
+			daily[key] = &DailyTokenStats{Date: key}
+		}
+		return daily[key]
+	}
 	for _, r := range reports {
 		agg.Sessions++
 		agg.Bytes += r.Bytes
 		agg.Fires += len(r.Fires)
+		agg.CumulativeInputTokens += int64(r.CumulativeInputTokens)
+		if d := day(r.StartedAt); d != nil {
+			d.Sessions++
+			d.CumulativeInputTokens += int64(r.CumulativeInputTokens)
+		}
 		if len(r.Fires) > 0 {
 			agg.CompactedSessions++
 		}
@@ -729,14 +769,29 @@ func AggregateCompactReports(reports []CompactSessionReport) CompactAggregate {
 			agg.AnomalyCounts[a]++
 		}
 		for _, f := range r.Fires {
+			if d := day(f.At); d != nil {
+				d.Fires++
+				if f.PreTokens > 0 && f.PostTokens > 0 {
+					d.ResidentTokensShed += int64(f.Shed)
+				}
+			}
 			if f.PreTokens > 0 && f.PostTokens > 0 {
 				agg.MeasuredFires++
 				pre = append(pre, f.PreTokens)
 				post = append(post, f.PostTokens)
 				shed = append(shed, f.Shed)
+				agg.ResidentTokensShed += int64(f.Shed)
 				residual = append(residual, f.ResidualRatio)
 			}
 		}
+	}
+	keys := make([]string, 0, len(daily))
+	for key := range daily {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		agg.Daily = append(agg.Daily, *daily[key])
 	}
 	agg.MedianPreTokens = medianInt(pre)
 	agg.MedianPostTokens = medianInt(post)
