@@ -18,6 +18,40 @@ import (
 
 const codexOrchestrationLaunchSchema = "fak.codex_orchestration_launch.v1"
 
+func validateCodexOrchestrationArtifactHome(codexHome string) error {
+	home, err := resolvedCodexLoopHome(codexHome)
+	if err != nil {
+		return err
+	}
+	absHome, err := filepath.Abs(home)
+	if err != nil {
+		return fmt.Errorf("resolve Codex home: %w", err)
+	}
+	probe := absHome
+	for {
+		if _, statErr := os.Stat(probe); statErr == nil {
+			break
+		} else if !os.IsNotExist(statErr) {
+			return fmt.Errorf("inspect Codex home %q: %w", absHome, statErr)
+		}
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			return nil
+		}
+		probe = parent
+	}
+	cmd := exec.Command("git", "-C", probe, "rev-parse", "--show-toplevel")
+	root, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	worktree := strings.TrimSpace(string(root))
+	if worktree == "" {
+		return nil
+	}
+	return fmt.Errorf("unsafe Codex home %q is inside Git worktree %q; omit --codex-home to use $CODEX_HOME, or choose an external path allocated for scratch/runtime state", absHome, worktree)
+}
+
 type codexOrchestrationWorkerLaunch struct {
 	RoleID  string `json:"role_id"`
 	PID     int    `json:"pid,omitempty"`

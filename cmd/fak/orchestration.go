@@ -114,6 +114,12 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stderr, "SELFCHECK PASS schema=%s offline=true launched=0\n", resolved.Schema)
 	}
 	sessionID := strings.TrimSpace(os.Getenv("CODEX_THREAD_ID"))
+	if *launch {
+		if err := validateCodexOrchestrationArtifactHome(*codexHome); err != nil {
+			fmt.Fprintf(stderr, "fak orchestration plan: %v\n", err)
+			return 1
+		}
+	}
 	if sessionID != "" && !*selfcheck {
 		if err := writeCodexOrchestrationInvocationReceipt(*codexHome, codexOrchestrationInvocationReceipt{
 			Schema: "fak.codex_orchestration_invocation.v1", SessionID: sessionID,

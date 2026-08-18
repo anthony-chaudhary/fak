@@ -33,6 +33,13 @@ fak orchestration plan --profile auto --task-text "run a fleet wave over indepen
 
 The first resolves to `max/xhigh`; the second resolves to `ultra/high` and the ultracode profile. If a task is both independent and rigor-sensitive, it resolves to `ultra/xhigh`: workflow topology never downgrades reasoning depth. An explicit `consult pro` request resolves to `pro`, but `--launch` returns `SOL_ROUTE_PRO_CONSULT_ONLY` instead of silently launching ordinary reasoning.
 
+### Keep launch artifacts outside source checkouts
+
+A launched plan joins receipts and worker JSONL logs under the resolved Codex home. Omit
+`--codex-home` to use `$CODEX_HOME`, or point it at an external runtime/scratch directory.
+The launcher rejects a Git worktree root or any path inside one before writing receipts or
+starting workers, so a mistaken `--codex-home .` cannot turn runtime transcripts into
+untracked source-tree WIP.
 ## Default policy
 
 - Keep ordinary issue workers on `standard/high`.

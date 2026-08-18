@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,8 +12,21 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/orchestration"
 )
 
+func externalOrchestrationTestHome(t *testing.T) string {
+	t.Helper()
+	base, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := os.MkdirTemp(base, "fak-orchestration-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
+	return home
+}
 func TestOrchestrationLaunchWritesJoinedWorkerReceipt(t *testing.T) {
-	home := t.TempDir()
+	home := externalOrchestrationTestHome(t)
 	t.Setenv("CODEX_THREAD_ID", "session-launch")
 	old := orchestrationWorkerLauncher
 	orchestrationWorkerLauncher = func(req orchestrationWorkerLaunchRequest) (codexOrchestrationWorkerLaunch, error) {
@@ -42,7 +56,7 @@ func TestOrchestrationLaunchWritesJoinedWorkerReceipt(t *testing.T) {
 }
 
 func TestOrchestrationLaunchRecordsDirectDecline(t *testing.T) {
-	home := t.TempDir()
+	home := externalOrchestrationTestHome(t)
 	t.Setenv("CODEX_THREAD_ID", "session-direct")
 	old := orchestrationWorkerLauncher
 	orchestrationWorkerLauncher = func(orchestrationWorkerLaunchRequest) (codexOrchestrationWorkerLaunch, error) {
@@ -62,7 +76,7 @@ func TestOrchestrationLaunchRecordsDirectDecline(t *testing.T) {
 }
 
 func TestOrchestrationLaunchRefusesUnsupportedProRoute(t *testing.T) {
-	home := t.TempDir()
+	home := externalOrchestrationTestHome(t)
 	t.Setenv("CODEX_THREAD_ID", "session-pro")
 	old := orchestrationWorkerLauncher
 	orchestrationWorkerLauncher = func(orchestrationWorkerLaunchRequest) (codexOrchestrationWorkerLaunch, error) {
@@ -108,5 +122,36 @@ func TestReadCodexOrchestrationLaunchReceiptRejectsMalformed(t *testing.T) {
 	}
 	if _, ok := readCodexOrchestrationLaunchReceipt(home, "s"); ok {
 		t.Fatal("accepted malformed receipt")
+	}
+}
+
+func TestOrchestrationLaunchRejectsGitWorktreeArtifactHomeBeforeWriting(t *testing.T) {
+	home := t.TempDir()
+	git := exec.Command("git", "init", "--quiet", home)
+	if output, err := git.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, output)
+	}
+	t.Setenv("CODEX_THREAD_ID", "session-worktree-home")
+	old := orchestrationWorkerLauncher
+	orchestrationWorkerLauncher = func(orchestrationWorkerLaunchRequest) (codexOrchestrationWorkerLaunch, error) {
+		t.Fatal("unsafe worktree home launched a worker")
+		return codexOrchestrationWorkerLaunch{}, nil
+	}
+	t.Cleanup(func() { orchestrationWorkerLauncher = old })
+
+	var stdout, stderr bytes.Buffer
+	code := runOrchestration(&stdout, &stderr, []string{"plan", "--task-text", "continue the multi-step implementation, add observability, dogfood it, and ship it", "--codex-home", filepath.Join(home, "nested", "state"), "--launch", "--json"})
+	if code != 1 {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	for _, want := range []string{"unsafe Codex home", "inside Git worktree", "omit --codex-home", "$CODEX_HOME", "external path"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr=%q, want %q", stderr.String(), want)
+		}
+	}
+	for _, name := range []string{"fak-orchestration-invocations", "fak-orchestration-launches", "fak-orchestration-runs"} {
+		if _, err := os.Stat(filepath.Join(home, "nested", "state", name)); !os.IsNotExist(err) {
+			t.Fatalf("%s exists after rejected launch: %v", name, err)
+		}
 	}
 }
