@@ -1,0 +1,31 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T04:28:24.800175Z",
+  "issue": 7066,
+  "family": "panic-safety assertions in vacuous tests",
+  "paths": [
+    "cmd/fak/info_resize_test.go",
+    "internal/gateway/cache_creation_tier_test.go"
+  ],
+  "test": "go test ./cmd/fak -run TestNewInfoResizeChanStopIsIdempotent -count=1; go test ./internal/gateway -run TestRecordCacheCreationTierSplitNilMetricsIsInert -count=1",
+  "test_result": "PASS",
+  "before": {
+    "score": -102.5,
+    "grade": "F",
+    "slop_debt": 377,
+    "duplication": 371,
+    "weighted_duplication": 237.5,
+    "dead_code": 0,
+    "vacuous_tests": 6
+  },
+  "after": {
+    "score": -99.7,
+    "grade": "F",
+    "slop_debt": 375,
+    "duplication": 371,
+    "weighted_duplication": 237.5,
+    "dead_code": 0,
+    "vacuous_tests": 4
+  },
+  "verdict": "PASS: vacuous tests and total hard debt strictly decreased; no measured hard KPI increased"
+}

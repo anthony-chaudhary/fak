@@ -139,6 +139,11 @@ func TestWatchInfoTermSizeCoalesces(t *testing.T) {
 func TestNewInfoResizeChanStopIsIdempotent(t *testing.T) {
 	_, stop := newInfoResizeChan(80, 24)
 	stop()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("second stop panicked: %v", r)
+		}
+	}()
 	stop()
 }
 

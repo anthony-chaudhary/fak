@@ -64,6 +64,11 @@ func TestRecordCacheCreationTierSplitObservedSpanCoversBothTiers(t *testing.T) {
 // request path's error budget: a gateway running without metrics must not panic.
 func TestRecordCacheCreationTierSplitNilMetricsIsInert(t *testing.T) {
 	var m *gatewayMetrics
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("nil metrics panicked: %v", r)
+		}
+	}()
 	m.recordCacheCreationTierSplit(100, false, false)
 	m.recordCacheCreationTierSplit(100, true, true)
 }
