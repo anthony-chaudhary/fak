@@ -399,3 +399,25 @@ fak disambiguation query ARBITER_REFUSE
 ```
 
 The selfcheck inventories public paths and symbols, admits the declared alias, and mutates one duplicate to an incompatible kind/meaning to prove rejection. It reads the same canonical index and public source tree as other disambiguation commands; there is no private or second vocabulary writer.
+
+## Scoped runtime terminology (#6316)
+
+`runtime` is intentionally overloaded and therefore cannot be queried safely without scope. The canonical index exposes five choices:
+
+| Scope | Alias | Public owner | What executes |
+|---|---|---|---|
+| `runtime:agent-application` | `agent application runtime` | `internal/agent.Planner` | Host-side model/tool task loop. |
+| `runtime:gateway-serving` | `gateway serving runtime` | `internal/gateway.Server` | HTTP/MCP transport, auth, routing, and kernel mediation. |
+| `runtime:guard-enforcement` | `guard enforcement runtime` | `fak guard` | Wrapped guest process under policy, capability, hook, and stop enforcement. |
+| `runtime:model-serving` | `model serving runtime` | `internal/engine.OnDeviceRuntime` | Model completion implementation behind an engine driver. |
+| `runtime:worker-execution` | `worker execution runtime` | `dispatchworker` | One backend worker executing a lane-scoped work packet. |
+
+An unscoped exact query returns `scope required for overloaded term`; search returns all five choices. Resolve one explicitly:
+
+```text
+fak disambiguation query runtime --scope-kind runtime --scope-value gateway-serving
+fak disambiguation query "guard enforcement runtime" --scope-kind runtime --scope-value guard-enforcement
+fak disambiguation runtime-source-self-test --json
+```
+
+The selfcheck asks the ambiguous question first and then resolves both the canonical token and alias for every public scope. Runtime is execution context—not a synonym for agent kernel, durable session, model KV state, or DOS decision state.

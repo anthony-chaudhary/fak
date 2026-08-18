@@ -20,6 +20,11 @@
 | [provider prompt cache](#provider-prompt-cache-cache-provider-prompt-prefix) | `cache:provider-prompt-prefix` | An upstream provider-owned prompt-prefix reuse service observed as cache-read and cache-creation token accounting with provider TTL and pricing rules. | `fak disambiguation query "provider prompt cache"` |
 | [radix prefix cache](#radix-prefix-cache-cache-radix-prefix-snapshots) | `cache:radix-prefix-snapshots` | A fak-owned radix tree that longest-prefix-matches namespaced token sequences to reusable KV snapshots under token and byte budgets. | `fak disambiguation query "radix prefix cache"` |
 | [recovery checkpoint](#recovery-checkpoint-runtime-internal-session) | `runtime:internal/session` | A typed snapshot of goal, pending turn, continuation, generation, and state revision emitted when session recovery is requested. | `fak disambiguation query "recovery checkpoint"` |
+| [runtime](#runtime-runtime-agent-application) | `runtime:agent-application` | The host-side agent application loop that turns model completions into tool calls and final answers through the Planner seam. | `fak disambiguation query --scope-kind runtime --scope-value agent-application "runtime"` |
+| [runtime](#runtime-runtime-gateway-serving) | `runtime:gateway-serving` | The configured gateway server that exposes HTTP or MCP transport, authentication, routing, kernel mediation, and observability. | `fak disambiguation query --scope-kind runtime --scope-value gateway-serving "runtime"` |
+| [runtime](#runtime-runtime-guard-enforcement) | `runtime:guard-enforcement` | The wrapper process that launches a guest command under fak policy, hook, capability, and stop-gate enforcement. | `fak disambiguation query --scope-kind runtime --scope-value guard-enforcement "runtime"` |
+| [runtime](#runtime-runtime-model-serving) | `runtime:model-serving` | The model-completion implementation behind an engine driver, such as an on-device llama.cpp or Ollama adapter that generates text for one turn. | `fak disambiguation query --scope-kind runtime --scope-value model-serving "runtime"` |
+| [runtime](#runtime-runtime-worker-execution) | `runtime:worker-execution` | The dispatch worker process that selects a backend, optionally wraps it with fak guard, and executes one lane-scoped work packet. | `fak disambiguation query --scope-kind runtime --scope-value worker-execution "runtime"` |
 | [session recovery](#session-recovery-runtime-internal-session) | `runtime:internal/session` | A bounded repair or reroute response when persisted or cumulative session state cannot safely continue unchanged. | `fak disambiguation query "session recovery"` |
 | [session resume](#session-resume-runtime-internal-session) | `runtime:internal/session` | The paused-to-running boundary that re-admits an existing session using warm KV when available or a safe cold re-prefill. | `fak disambiguation query "session resume"` |
 | [tool-result cache](#tool-result-cache-cache-tool-results) | `cache:tool-results` | A fak-owned cache of completed tool-call results keyed by tool, argument hash, principal when isolated, and world-version epochs. | `fak disambiguation query "tool-result cache"` |
@@ -257,6 +262,76 @@ A typed snapshot of goal, pending turn, continuation, generation, and state revi
 - **Do not conflate with:**
   - [context compaction](contrast-index.md#context-compaction) — The checkpoint preserves control-plane continuation state; compaction rewrites model-visible history to reduce resident context.
   - [session recovery](contrast-index.md#session-recovery) — The checkpoint is evidence and continuation data for recovery, not the repair or reroute action itself.
+
+<a id="runtime-runtime-agent-application"></a>
+## runtime — `runtime:agent-application`
+
+The host-side agent application loop that turns model completions into tool calls and final answers through the Planner seam.
+
+- **Query:** `fak disambiguation query --scope-kind runtime --scope-value agent-application "runtime"`
+- **Owner:** leaf `agent`, lane `agent`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `agent application runtime`
+- **Sources:**
+  - `internal/agent/chat.go` — `go-source` at `runtime-source/1`
+- **Do not conflate with:**
+  - [agent kernel](contrast-index.md#agent-kernel) — The agent application runtime drives the task loop; the agent kernel mediates its model and tool effects at the enforcement boundary.
+
+<a id="runtime-runtime-gateway-serving"></a>
+## runtime — `runtime:gateway-serving`
+
+The configured gateway server that exposes HTTP or MCP transport, authentication, routing, kernel mediation, and observability.
+
+- **Query:** `fak disambiguation query --scope-kind runtime --scope-value gateway-serving "runtime"`
+- **Owner:** leaf `gateway`, lane `gateway`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `gateway serving runtime`
+- **Sources:**
+  - `internal/gateway/gateway.go` — `go-source` at `runtime-source/1`
+- **Do not conflate with:**
+  - [fak CLI kernel](contrast-index.md#fak-cli-kernel) — The gateway runtime is a long-lived transport server; the fak CLI kernel is the command surface used to configure and launch it.
+
+<a id="runtime-runtime-guard-enforcement"></a>
+## runtime — `runtime:guard-enforcement`
+
+The wrapper process that launches a guest command under fak policy, hook, capability, and stop-gate enforcement.
+
+- **Query:** `fak disambiguation query --scope-kind runtime --scope-value guard-enforcement "runtime"`
+- **Owner:** leaf `guard`, lane `guard`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `guard enforcement runtime`
+- **Sources:**
+  - `cmd/fak/guard.go` — `go-source` at `runtime-source/1`
+- **Do not conflate with:**
+  - [agent session](contrast-index.md#agent-session) — The guard runtime enforces a launched process; an agent session is the durable execution identity and state pointers that may outlive one wrapper process.
+
+<a id="runtime-runtime-model-serving"></a>
+## runtime — `runtime:model-serving`
+
+The model-completion implementation behind an engine driver, such as an on-device llama.cpp or Ollama adapter that generates text for one turn.
+
+- **Query:** `fak disambiguation query --scope-kind runtime --scope-value model-serving "runtime"`
+- **Owner:** leaf `engine`, lane `engine`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `model serving runtime`
+- **Sources:**
+  - `internal/engine/on_device.go` — `go-source` at `runtime-source/1`
+- **Do not conflate with:**
+  - [model KV cache](contrast-index.md#model-kv-cache) — The model-serving runtime executes completion; the model KV cache is attention state owned or reused during that execution.
+
+<a id="runtime-runtime-worker-execution"></a>
+## runtime — `runtime:worker-execution`
+
+The dispatch worker process that selects a backend, optionally wraps it with fak guard, and executes one lane-scoped work packet.
+
+- **Query:** `fak disambiguation query --scope-kind runtime --scope-value worker-execution "runtime"`
+- **Owner:** leaf `dispatchworker`, lane `dispatch`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `worker execution runtime`
+- **Sources:**
+  - `cmd/dispatchworker/main.go` — `go-source` at `runtime-source/1`
+- **Do not conflate with:**
+  - [DOS decision kind](contrast-index.md#dos-decision-kind) — The worker runtime executes admitted work; a DOS decision kind classifies persisted arbitration or resolver state about whether work may proceed.
 
 <a id="session-recovery-runtime-internal-session"></a>
 ## session recovery — `runtime:internal/session`

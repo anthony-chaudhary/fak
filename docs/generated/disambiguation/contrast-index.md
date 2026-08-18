@@ -124,6 +124,21 @@
   - **context compaction:** The checkpoint preserves control-plane continuation state; compaction rewrites model-visible history to reduce resident context.
   - **session recovery:** The checkpoint is evidence and continuation data for recovery, not the repair or reroute action itself.
 
+<a id="runtime"></a>
+## runtime
+
+- **Identity:** [runtime — `runtime:agent-application`](canonical-terms.md#runtime-runtime-agent-application); query with `fak disambiguation query --scope-kind runtime --scope-value agent-application "runtime"`
+- **Identity:** [runtime — `runtime:gateway-serving`](canonical-terms.md#runtime-runtime-gateway-serving); query with `fak disambiguation query --scope-kind runtime --scope-value gateway-serving "runtime"`
+- **Identity:** [runtime — `runtime:guard-enforcement`](canonical-terms.md#runtime-runtime-guard-enforcement); query with `fak disambiguation query --scope-kind runtime --scope-value guard-enforcement "runtime"`
+- **Identity:** [runtime — `runtime:model-serving`](canonical-terms.md#runtime-runtime-model-serving); query with `fak disambiguation query --scope-kind runtime --scope-value model-serving "runtime"`
+- **Identity:** [runtime — `runtime:worker-execution`](canonical-terms.md#runtime-runtime-worker-execution); query with `fak disambiguation query --scope-kind runtime --scope-value worker-execution "runtime"`
+- **Contrasts:**
+  - **DOS decision kind:** The worker runtime executes admitted work; a DOS decision kind classifies persisted arbitration or resolver state about whether work may proceed.
+  - **agent kernel:** The agent application runtime drives the task loop; the agent kernel mediates its model and tool effects at the enforcement boundary.
+  - **agent session:** The guard runtime enforces a launched process; an agent session is the durable execution identity and state pointers that may outlive one wrapper process.
+  - **fak CLI kernel:** The gateway runtime is a long-lived transport server; the fak CLI kernel is the command surface used to configure and launch it.
+  - **model KV cache:** The model-serving runtime executes completion; the model KV cache is attention state owned or reused during that execution.
+
 <a id="session-recovery"></a>
 ## session recovery
 
