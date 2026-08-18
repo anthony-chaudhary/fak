@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T06:46:33.924531Z",
+  "issue": 6985,
+  "family": "successful inline ABI result construction",
+  "paths": [
+    "internal/abi/call.go",
+    "internal/abi/call_test.go",
+    "internal/agent/transcript.go",
+    "internal/recall/recall.go"
+  ],
+  "test": "go test ./internal/abi ./internal/agent ./internal/recall; fak-dev buildcheck --vet --mine internal/abi/call.go --mine internal/abi/call_test.go",
+  "test_result": "PASS",
+  "before": {
+    "score": -84.8,
+    "grade": "F",
+    "slop_debt": 353,
+    "duplication": 353,
+    "weighted_duplication": 223.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -84.2,
+    "grade": "F",
+    "slop_debt": 352,
+    "duplication": 352,
+    "weighted_duplication": 223.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

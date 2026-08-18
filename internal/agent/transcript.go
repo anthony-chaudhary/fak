@@ -36,18 +36,9 @@ func QuarantineOutboundMessages(messages []Message) ([]Message, []TranscriptQuar
 			continue
 		}
 		body := []byte(out[i].Content)
-		call := &abi.ToolCall{Tool: out[i].Name}
-		res := &abi.Result{
-			Call: call,
-			Payload: abi.Ref{
-				Kind:   abi.RefInline,
-				Inline: append([]byte(nil), body...),
-				Len:    int64(len(body)),
-				Taint:  abi.TaintTainted,
-				Scope:  abi.ScopeAgent,
-			},
-			Status: abi.StatusOK,
-		}
+		call, res := abi.InlineResult(out[i].Name, body)
+		res.Payload.Taint = abi.TaintTainted
+		res.Payload.Scope = abi.ScopeAgent
 		v := admitOutbound(ctx, call, res)
 		switch v.Kind {
 		case abi.VerdictQuarantine:

@@ -195,14 +195,9 @@ func (r *Recorder) RecordWithWitness(ctx context.Context, tool string, rawBody [
 	body := append([]byte(nil), rawBody...)
 	digest := Digest(body)
 
-	call := &abi.ToolCall{Tool: tool}
+	call, res := abi.InlineResult(tool, body)
 	if witness != "" {
 		call.Meta = map[string]string{"witness": witness}
-	}
-	res := &abi.Result{
-		Call:    call,
-		Payload: abi.Ref{Kind: abi.RefInline, Inline: append([]byte(nil), body...), Len: int64(len(body))},
-		Status:  abi.StatusOK,
 	}
 	v := r.mmu.Admit(ctx, res.Call, res)
 	// Defense in depth: the de-obfuscating detector catches what the raw ctxmmu
