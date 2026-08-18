@@ -116,8 +116,8 @@ func validManifest() Manifest {
 	e := stackresolve.Evidence{Authority: "test", Source: "fixture", Freshness: "2026-08-15"}
 	return Manifest{Schema: Schema, Roots: []string{"legal-pack"}, Compatibility: Compatibility{OS: []string{"linux"}, Arch: []string{"amd64"}, Contract: "v1"}, Budget: Budget{ContextTokens: 2000, MemoryMiB: 512, Workers: 2}, Components: []Component{
 		{ID: "kernel", Version: "1.0.0", Digest: "sha256:kernel", Source: "registry/kernel", Provides: []string{"runtime"}, Cost: Budget{ContextTokens: 500, MemoryMiB: 256}, Evidence: e},
-		{ID: "legal-pack", Version: "1.2.0", Digest: "sha256:legal", Source: "registry/legal", Requires: []Requirement{{Capability: "runtime", Range: ">=1.0.0"}, {Capability: "search", Range: ">=1.0.0"}}, Compatibility: Compatibility{Contract: "v1"}, Cost: Budget{ContextTokens: 1000, MemoryMiB: 64, Workers: 1}, Evidence: e},
-		{ID: "search-provider", Version: "1.1.0", Digest: "sha256:search", Source: "registry/search", Provides: []string{"search"}, Cost: Budget{MemoryMiB: 0}, Evidence: e},
+		{ID: "legal-pack", Version: "1.2.0", Digest: "sha256:legal", Source: "registry/legal", Adapters: []string{"instruction", "policy", "workflow"}, Requires: []Requirement{{Capability: "runtime", Range: ">=1.0.0"}, {Capability: "search", Range: ">=1.0.0"}}, Compatibility: Compatibility{Contract: "v1"}, Cost: Budget{ContextTokens: 1000, MemoryMiB: 64, Workers: 1}, Evidence: e},
+		{ID: "search-provider", Version: "1.1.0", Digest: "sha256:search", Source: "registry/search", Adapters: []string{"tool"}, Provides: []string{"search"}, Cost: Budget{MemoryMiB: 0}, Evidence: e},
 	}, Assets: harnesscompose.Manifest{Schema: harnesscompose.Schema, Layers: []harnesscompose.Layer{
 		{ID: "company", Scope: "company", Assets: []harnesscompose.Asset{{Kind: "policy", ID: "tools", Grants: []string{"search"}, Denies: []string{"shell"}, Lock: true}, {Kind: "workflow", ID: "audit", Value: "record", Mandatory: true}}},
 		{ID: "legal", Scope: "domain", Assets: []harnesscompose.Asset{{Kind: "instruction", ID: "citations", Value: "primary-only"}}},
@@ -140,5 +140,54 @@ func TestVerifyLockRejectsForgedIdentity(t *testing.T) {
 	lock.ID = id
 	if err := VerifyLock(lock); err != nil {
 		t.Fatalf("valid lock refused: %v", err)
+	}
+}
+
+func TestResolveRetainsMixSafetyEvidence(t *testing.T) {
+	manifest := validManifest()
+	manifest.Components[1].Conflicts = []string{"unsafe-shell"}
+	manifest.Components[1].Compatibility = Compatibility{OS: []string{"linux"}, Arch: []string{"amd64"}, Contract: "v1"}
+	result, err := Resolve(context.Background(), manifest, []string{"company"}, Environment{OS: "linux", Arch: "amd64", Contract: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *LockedComponent
+	for i := range result.Lock.Components {
+		if result.Lock.Components[i].ID == "legal-pack" {
+			found = &result.Lock.Components[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("legal-pack not selected")
+	}
+	if len(found.Requires) != 2 || len(found.Conflicts) != 1 || found.Compatibility.Contract != "v1" || found.Cost.ContextTokens != 1000 || len(found.Adapters) != 3 {
+		t.Fatalf("evidence not retained: %+v", *found)
+	}
+	if err := VerifyLock(result.Lock); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMixableRefusesLegacyAndMissingEvidence(t *testing.T) {
+	lock := Lock{Schema: LegacyLockSchema, Components: []LockedComponent{{ID: "x", Version: "1.0.0", Digest: "sha256:x", Source: "r"}}}
+	if err := ReidentifyLock(&lock); err != nil {
+		t.Fatal(err)
+	}
+	if err := Mixable(lock); err == nil || !strings.Contains(err.Error(), "launchable but not mixable") {
+		t.Fatalf("legacy err=%v", err)
+	}
+	lock.Schema = LockSchema
+	if err := ReidentifyLock(&lock); err != nil {
+		t.Fatal(err)
+	}
+	if err := Mixable(lock); err == nil || !strings.Contains(err.Error(), "compatibility contract") {
+		t.Fatalf("compat err=%v", err)
+	}
+	lock.Components[0].Compatibility.Contract = "v1"
+	if err := ReidentifyLock(&lock); err != nil {
+		t.Fatal(err)
+	}
+	if err := Mixable(lock); err == nil || !strings.Contains(err.Error(), "adapter conformance") {
+		t.Fatalf("adapter err=%v", err)
 	}
 }

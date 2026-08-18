@@ -10,7 +10,8 @@ import (
 	"strings"
 )
 
-const ProductLockSchema = "fak.harness-product-lock/v1alpha1"
+const ProductLockSchema = "fak.harness-product-lock/v1alpha2"
+const LegacyProductLockSchema = "fak.harness-product-lock/v1alpha1"
 const LaunchReceiptSchema = "fak.harness-launch-receipt/v1alpha1"
 
 type ProductLock struct {
@@ -34,14 +35,29 @@ type LockBudget struct {
 	MemoryMiB     int `json:"memory_mib,omitempty"`
 	Workers       int `json:"workers,omitempty"`
 }
+type LockRequirement struct {
+	Capability string `json:"capability"`
+	Range      string `json:"range,omitempty"`
+	Optional   bool   `json:"optional,omitempty"`
+}
+type LockCompatibility struct {
+	OS       []string `json:"os,omitempty"`
+	Arch     []string `json:"arch,omitempty"`
+	Contract string   `json:"contract,omitempty"`
+}
 type LockedComponent struct {
-	ID       string   `json:"id"`
-	Version  string   `json:"version"`
-	Digest   string   `json:"digest"`
-	Source   string   `json:"source"`
-	Reason   string   `json:"reason"`
-	Provider string   `json:"provider"`
-	Provides []string `json:"provides,omitempty"`
+	ID            string            `json:"id"`
+	Version       string            `json:"version"`
+	Digest        string            `json:"digest"`
+	Source        string            `json:"source"`
+	Reason        string            `json:"reason"`
+	Provider      string            `json:"provider"`
+	Provides      []string          `json:"provides,omitempty"`
+	Requires      []LockRequirement `json:"requires,omitempty"`
+	Conflicts     []string          `json:"conflicts,omitempty"`
+	Compatibility LockCompatibility `json:"compatibility,omitempty"`
+	Cost          LockBudget        `json:"cost,omitempty"`
+	Adapters      []string          `json:"adapters,omitempty"`
 }
 type LockedAsset struct {
 	Kind      string   `json:"kind"`
@@ -81,8 +97,8 @@ func ParseProductLock(raw []byte) (ProductLock, error) {
 	if err := dec.Decode(&lock); err != nil {
 		return ProductLock{}, fmt.Errorf("parse product lock: %w", err)
 	}
-	if lock.Schema != ProductLockSchema {
-		return ProductLock{}, fmt.Errorf("product lock schema must be %q", ProductLockSchema)
+	if lock.Schema != ProductLockSchema && lock.Schema != LegacyProductLockSchema {
+		return ProductLock{}, fmt.Errorf("product lock schema must be %q or legacy %q", ProductLockSchema, LegacyProductLockSchema)
 	}
 	if lock.ID == "" || len(lock.Components) == 0 {
 		return ProductLock{}, fmt.Errorf("product lock id and components are required")
@@ -113,6 +129,24 @@ func ParseProductLock(raw []byte) (ProductLock, error) {
 	}
 	lock.ID = want
 	return lock, nil
+}
+
+// Mixable reports whether the lock carries the v1alpha2 component evidence
+// required for sound downstream composition. Legacy locks remain launchable,
+// but missing compatibility facts are never guessed.
+func (l ProductLock) Mixable() error {
+	if l.Schema != ProductLockSchema {
+		return fmt.Errorf("legacy product lock %q is launchable but not mixable; rebuild it from source as %q", l.Schema, ProductLockSchema)
+	}
+	for _, component := range l.Components {
+		if component.Compatibility.Contract == "" {
+			return fmt.Errorf("component %q has no compatibility contract", component.ID)
+		}
+		if len(component.Adapters) == 0 {
+			return fmt.Errorf("component %q has no runtime adapter conformance evidence", component.ID)
+		}
+	}
+	return nil
 }
 
 func (l ProductLock) Profile() Profile {

@@ -15,7 +15,8 @@ import (
 )
 
 const Schema = "fak.harness-product/v1alpha1"
-const LockSchema = "fak.harness-product-lock/v1alpha1"
+const LockSchema = "fak.harness-product-lock/v1alpha2"
+const LegacyLockSchema = "fak.harness-product-lock/v1alpha1"
 
 type Manifest struct {
 	Schema        string                  `json:"schema"`
@@ -36,6 +37,7 @@ type Component struct {
 	Conflicts     []string              `json:"conflicts,omitempty"`
 	Compatibility Compatibility         `json:"compatibility,omitempty"`
 	Cost          Budget                `json:"cost,omitempty"`
+	Adapters      []string              `json:"adapters,omitempty"`
 	Evidence      stackresolve.Evidence `json:"evidence"`
 }
 
@@ -64,13 +66,18 @@ type Environment struct {
 }
 
 type LockedComponent struct {
-	ID       string   `json:"id"`
-	Version  string   `json:"version"`
-	Digest   string   `json:"digest"`
-	Source   string   `json:"source"`
-	Reason   string   `json:"reason"`
-	Provider string   `json:"provider"`
-	Provides []string `json:"provides,omitempty"`
+	ID            string        `json:"id"`
+	Version       string        `json:"version"`
+	Digest        string        `json:"digest"`
+	Source        string        `json:"source"`
+	Reason        string        `json:"reason"`
+	Provider      string        `json:"provider"`
+	Provides      []string      `json:"provides,omitempty"`
+	Requires      []Requirement `json:"requires,omitempty"`
+	Conflicts     []string      `json:"conflicts,omitempty"`
+	Compatibility Compatibility `json:"compatibility,omitempty"`
+	Cost          Budget        `json:"cost,omitempty"`
+	Adapters      []string      `json:"adapters,omitempty"`
 }
 
 type Lock struct {
@@ -184,7 +191,7 @@ func Resolve(ctx context.Context, manifest Manifest, selectedLayers []string, en
 			return Result{}, fmt.Errorf("selected component %q missing metadata", selected.ID)
 		}
 		used = addBudget(used, component.Cost)
-		locked = append(locked, LockedComponent{ID: component.ID, Version: component.Version, Digest: component.Digest, Source: component.Source, Reason: decisionReason(receipt.Decisions, selected.ID), Provider: providerFor(receipt.Decisions, selected.ID), Provides: sortedStrings(component.Provides)})
+		locked = append(locked, LockedComponent{ID: component.ID, Version: component.Version, Digest: component.Digest, Source: component.Source, Reason: decisionReason(receipt.Decisions, selected.ID), Provider: providerFor(receipt.Decisions, selected.ID), Provides: sortedStrings(component.Provides), Requires: sortedRequirements(component.Requires), Conflicts: sortedStrings(component.Conflicts), Compatibility: normalizedCompatibility(component.Compatibility), Cost: component.Cost, Adapters: sortedStrings(component.Adapters)})
 	}
 	if err := withinBudget(used, manifest.Budget); err != nil {
 		return Result{}, err
@@ -487,6 +494,26 @@ func sortedStrings(in []string) []string {
 	return out
 }
 
+func sortedRequirements(in []Requirement) []Requirement {
+	out := append([]Requirement(nil), in...)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Capability != out[j].Capability {
+			return out[i].Capability < out[j].Capability
+		}
+		if out[i].Range != out[j].Range {
+			return out[i].Range < out[j].Range
+		}
+		return !out[i].Optional && out[j].Optional
+	})
+	return out
+}
+
+func normalizedCompatibility(in Compatibility) Compatibility {
+	in.OS = sortedStrings(in.OS)
+	in.Arch = sortedStrings(in.Arch)
+	return in
+}
+
 func appendProvider(in []Component, component Component) []Component {
 	for _, existing := range in {
 		if existing.ID == component.ID && existing.Version == component.Version {
@@ -500,8 +527,8 @@ func appendProvider(in []Component, component Component) []Component {
 // the canonical contents. Callers must verify before treating an unchanged ID
 // as an admission decision.
 func VerifyLock(lock Lock) error {
-	if lock.Schema != LockSchema {
-		return fmt.Errorf("lock schema must be %q", LockSchema)
+	if lock.Schema != LockSchema && lock.Schema != LegacyLockSchema {
+		return fmt.Errorf("lock schema must be %q or legacy %q", LockSchema, LegacyLockSchema)
 	}
 	if lock.ID == "" {
 		return fmt.Errorf("lock id is required")
@@ -513,6 +540,27 @@ func VerifyLock(lock Lock) error {
 	}
 	if got != want {
 		return fmt.Errorf("lock digest mismatch: got %s want %s", want, got)
+	}
+	return nil
+}
+
+// Mixable validates the evidence floor needed to combine a resolved lock with
+// independently produced locks. Legacy locks remain valid launch inputs but
+// cannot establish facts their schema never retained.
+func Mixable(lock Lock) error {
+	if err := VerifyLock(lock); err != nil {
+		return err
+	}
+	if lock.Schema != LockSchema {
+		return fmt.Errorf("legacy product lock %q is launchable but not mixable; rebuild it from source as %q", lock.Schema, LockSchema)
+	}
+	for _, component := range lock.Components {
+		if component.Compatibility.Contract == "" {
+			return fmt.Errorf("component %q has no compatibility contract", component.ID)
+		}
+		if len(component.Adapters) == 0 {
+			return fmt.Errorf("component %q has no runtime adapter conformance evidence", component.ID)
+		}
 	}
 	return nil
 }

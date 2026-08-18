@@ -56,3 +56,22 @@ func sha256Sum(raw []byte) string {
 	h.Write(raw)
 	return hex.EncodeToString(h.Sum(nil))
 }
+
+func TestMixableRefusesLegacyAndMissingEvidence(t *testing.T) {
+	base := ProductLock{Schema: LegacyProductLockSchema, Components: []LockedComponent{{ID: "x", Version: "1.0.0", Digest: "sha256:x", Source: "r"}}}
+	if err := base.Mixable(); err == nil || !strings.Contains(err.Error(), "launchable but not mixable") {
+		t.Fatalf("legacy err=%v", err)
+	}
+	base.Schema = ProductLockSchema
+	if err := base.Mixable(); err == nil || !strings.Contains(err.Error(), "compatibility contract") {
+		t.Fatalf("compat err=%v", err)
+	}
+	base.Components[0].Compatibility.Contract = "v1"
+	if err := base.Mixable(); err == nil || !strings.Contains(err.Error(), "adapter conformance") {
+		t.Fatalf("adapter err=%v", err)
+	}
+	base.Components[0].Adapters = []string{"instruction"}
+	if err := base.Mixable(); err != nil {
+		t.Fatal(err)
+	}
+}

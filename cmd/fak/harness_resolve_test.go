@@ -24,7 +24,7 @@ func TestHarnessResolveCLIEmitsImmutableExplainableLock(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errb.String())
 	}
-	for _, want := range []string{`"schema": "fak.harness-product-lock/v1alpha1"`, `"id": "sha256:`, `"version": "1.2.0"`, `"digest": "sha256:legal"`, `"source": "registry/legal"`, `"kind": "instruction"`, `"kind": "policy"`, `"kind": "workflow"`, `"explain": [`} {
+	for _, want := range []string{`"schema": "fak.harness-product-lock/v1alpha2"`, `"id": "sha256:`, `"version": "1.2.0"`, `"digest": "sha256:legal"`, `"source": "registry/legal"`, `"kind": "instruction"`, `"kind": "policy"`, `"kind": "workflow"`, `"explain": [`} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %s:\n%s", want, out.String())
 		}
