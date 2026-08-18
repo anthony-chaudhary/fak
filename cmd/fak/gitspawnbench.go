@@ -141,8 +141,6 @@ type gitSpawnScenario struct {
 	Argv       []string
 }
 
-func cmdGitSpawnBench(argv []string) { os.Exit(runGitSpawnBench(os.Stdout, os.Stderr, argv)) }
-
 func runGitSpawnBench(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("bench gitspawn", flag.ContinueOnError)
 	fs.SetOutput(stderr)

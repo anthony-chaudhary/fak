@@ -18,8 +18,6 @@ import (
 
 type ghSpamRunner func(args []string) ([]byte, error)
 
-func cmdGHSpamComments(argv []string) { os.Exit(runGHSpamComments(os.Stdout, os.Stderr, argv)) }
-
 func runGHSpamComments(stdout, stderr io.Writer, argv []string) int {
 	return runGHSpamCommentsWith(stdout, stderr, argv, nil)
 }

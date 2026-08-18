@@ -61,5 +61,3 @@ func runReleaseReadiness(stdout, stderr io.Writer, args []string) int {
 	}
 	return 0
 }
-
-func cmdReleaseReadiness(args []string) { os.Exit(runReleaseReadiness(os.Stdout, os.Stderr, args)) }
