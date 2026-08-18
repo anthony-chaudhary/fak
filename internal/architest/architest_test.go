@@ -98,6 +98,7 @@ var tier = map[string]int{
 	"harnesscreationstudy":   1, // deterministic independent-participant denominator and claim eligibility fold (#6937).
 	"harnesscompose":         1, // typed inert asset overlap semantics before dependency solving and launch (#6904).
 	"harnessderive":          2, // verified base-lock deltas producing launchable resolved locks (#7225).
+	"harnesscontrolstudy":    2, // deterministic paired-preference evidence over typed harness variants (#7224).
 	"harnessinspect":         2, // product-facing inspection over composed assets and resolved locks (#7213/#7232).
 	"harnessoverride":        2, // bounded override proposals over composed assets and resolved locks (#7223/#7232).
 	"harnessverify":          2, // runtime deviation checks over composed assets and resolved locks (#7222/#7233).
@@ -618,6 +619,8 @@ var tier = map[string]int{
 	"devhandoff":            1, // stdlib-only moved-command inventory shared across the runtime/fak-dev process boundary.
 	"workshape":             1, // stdlib-only dispatch execution-shape contract and capacity pricing.
 	"valuechain":            2, // deterministic offline audit over declared stack and outcome evidence; stdlib-only, off the hot path.
+	"doneclaimaudit":        1, // stdlib-only deterministic audit of issue completion claims against repository-local evidence.
+	"wipinventory":          1, // read-only Git/filesystem census for provenance-honest working-tree operations.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
