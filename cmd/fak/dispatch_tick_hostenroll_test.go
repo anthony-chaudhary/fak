@@ -75,11 +75,15 @@ func TestDispatchTickMicroBackendEnrollsIntoHostNotDetachedSpawn(t *testing.T) {
 		t.Fatalf("lease = %#v, want not refused (no peer holds the lane)", lease)
 	}
 
-	// #4324: the enrolled path never detaches, so nothing else will witness it. The
-	// in-process retirement must hand its acquired lease back immediately rather than
-	// strand the lane for the full TTL.
-	if got["lease_release"] != "released" {
-		t.Fatalf("lease_release = %v, want released", got["lease_release"])
+	// #4324: the enrolled path never detaches, so nothing else will witness it. An acquired
+	// lease must be released immediately; a bare non-git fixture fail-opens without a lease
+	// ID, so there is nothing to release.
+	wantRelease := "released"
+	if lease["acquired"] != true {
+		wantRelease = "no_lease_id"
+	}
+	if got["lease_release"] != wantRelease {
+		t.Fatalf("lease_release = %v, want %s for lease %#v", got["lease_release"], wantRelease, lease)
 	}
 }
 
