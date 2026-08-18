@@ -19,6 +19,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/browseraction"
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/suiteverify"
 )
 
 const (
@@ -181,8 +182,8 @@ func Load(path string) (Suite, error) {
 var osReadFile = os.ReadFile
 
 func (s Suite) Validate() error {
-	if s.Schema != "" && s.Schema != SuiteSchema {
-		return fmt.Errorf("toolsandbox suite: schema %q != %q", s.Schema, SuiteSchema)
+	if err := suiteverify.OptionalSchema("toolsandbox", s.Schema, SuiteSchema); err != nil {
+		return err
 	}
 	if s.Benchmark == "" {
 		return fmt.Errorf("toolsandbox suite: benchmark is required")

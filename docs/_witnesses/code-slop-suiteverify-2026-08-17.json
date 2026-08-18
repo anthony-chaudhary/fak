@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T01:46:36.9342333Z",
+  "issue": 7214,
+  "family": "optional JSON suite schema validation",
+  "paths": [
+    "internal/suiteverify",
+    "internal/browseraction/action_mediation.go",
+    "internal/terminalbench/terminalbench.go",
+    "internal/toolsandbox/toolsandbox.go"
+  ],
+  "test": "go test ./internal/suiteverify ./internal/browseraction ./internal/terminalbench ./internal/toolsandbox",
+  "test_result": "PASS",
+  "before": {
+    "score": -138.2,
+    "grade": "F",
+    "slop_debt": 410,
+    "duplication": 372,
+    "weighted_duplication": 239.5,
+    "dead_code": 32,
+    "vacuous_tests": 6
+  },
+  "after": {
+    "score": -137.1,
+    "grade": "F",
+    "slop_debt": 409,
+    "duplication": 372,
+    "weighted_duplication": 239.5,
+    "dead_code": 31,
+    "vacuous_tests": 6
+  },
+  "verdict": "PASS: total hard debt and dead-code debt strictly decreased; no other hard KPI increased"
+}

@@ -18,6 +18,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/suiteverify"
 	"github.com/anthony-chaudhary/fak/internal/webbench"
 )
 
@@ -201,8 +202,8 @@ func LoadActionMediationSuite(path string) (ActionMediationSuite, error) {
 var actionMediationReadFile = os.ReadFile
 
 func (s ActionMediationSuite) Validate() error {
-	if s.Schema != "" && s.Schema != ActionMediationSuiteSchema {
-		return fmt.Errorf("browser action mediation suite: schema %q != %q", s.Schema, ActionMediationSuiteSchema)
+	if err := suiteverify.OptionalSchema("browser action mediation", s.Schema, ActionMediationSuiteSchema); err != nil {
+		return err
 	}
 	if s.Benchmark == "" {
 		return fmt.Errorf("browser action mediation suite: benchmark is required")
