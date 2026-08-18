@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/stringlist"
 	"io"
 	"net/http"
 	"net/url"
@@ -80,7 +81,7 @@ func sessionMoveDestinationFlags(fs *flag.FlagSet) (*string, *string, *string, *
 }
 
 func sessionMoveDestination(provider, account, model, compute, capabilities string, contextLimit int64, budget int64, cache string) gateway.SessionPlacement {
-	return gateway.SessionPlacement{Provider: provider, AccountRef: account, Model: model, Compute: compute, Capabilities: splitSessionMoveCSV(capabilities), ContextLimit: contextLimit, BudgetAvailable: budget, ComputeAvailable: true, CacheLineage: cache}
+	return gateway.SessionPlacement{Provider: provider, AccountRef: account, Model: model, Compute: compute, Capabilities: stringlist.SplitCSV(capabilities), ContextLimit: contextLimit, BudgetAvailable: budget, ComputeAvailable: true, CacheLineage: cache}
 }
 
 func runSessionMoveAdmit(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
@@ -106,7 +107,7 @@ func runSessionMoveAdmit(stdin io.Reader, stdout, stderr io.Writer, argv []strin
 		fmt.Fprintln(stderr, "fak session move admit:", err)
 		return 1
 	}
-	destination := gateway.SessionPlacement{Provider: *provider, AccountRef: *account, Model: *model, Compute: *compute, Capabilities: splitSessionMoveCSV(*caps), ContextLimit: *contextLimit, BudgetAvailable: *budget, ComputeAvailable: true, CacheLineage: *cache}
+	destination := gateway.SessionPlacement{Provider: *provider, AccountRef: *account, Model: *model, Compute: *compute, Capabilities: stringlist.SplitCSV(*caps), ContextLimit: *contextLimit, BudgetAvailable: *budget, ComputeAvailable: true, CacheLineage: *cache}
 	receipt, err := gateway.AdmitSessionMoveCheckpoint(checkpoint, destination)
 	if err != nil {
 		fmt.Fprintln(stderr, "fak session move admit:", err)
@@ -268,15 +269,6 @@ func runSessionMoveVerify(stdin io.Reader, stdout, stderr io.Writer, argv []stri
 	return 0
 }
 
-func splitSessionMoveCSV(s string) []string {
-	var out []string
-	for _, v := range strings.Split(s, ",") {
-		if v = strings.TrimSpace(v); v != "" {
-			out = append(out, v)
-		}
-	}
-	return out
-}
 func sessionMoveUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: fak session move admit --provider P --account-ref R --model M --compute C [--capabilities A,B] [--context-limit N] [--budget N] < checkpoint.json\n       fak session move verify --receipt receipt.json < checkpoint.json")
 }

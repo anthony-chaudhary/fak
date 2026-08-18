@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T04:50:23.988989Z",
+  "issue": 7062,
+  "family": "trimmed CSV string-list parsing",
+  "paths": [
+    "internal/stringlist",
+    "cmd/fak/armbench.go",
+    "cmd/fak/session_move.go",
+    "internal/devcmd/selfquery_commands.go"
+  ],
+  "test": "go test ./internal/stringlist ./internal/devcmd; fak-dev buildcheck --mine internal/stringlist/stringlist.go",
+  "test_result": "PASS",
+  "before": {
+    "score": -93.1,
+    "grade": "F",
+    "slop_debt": 369,
+    "duplication": 369,
+    "weighted_duplication": 235.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -92.6,
+    "grade": "F",
+    "slop_debt": 368,
+    "duplication": 368,
+    "weighted_duplication": 234.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/stringlist"
 	"io"
 	"strings"
 	"text/tabwriter"
@@ -74,7 +75,7 @@ func runFeatureQuery(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak-dev feature query: %v\n", err)
 		return 1
 	}
-	resp, err := cat.Query(selfquery.Request{Query: joinArgs(args), Plane: selfquery.Plane(*plane), Detail: *detail, Limit: *limit, All: *all, MissingContext: splitCSVDev(*missing)})
+	resp, err := cat.Query(selfquery.Request{Query: joinArgs(args), Plane: selfquery.Plane(*plane), Detail: *detail, Limit: *limit, All: *all, MissingContext: stringlist.SplitCSV(*missing)})
 	if err != nil {
 		fmt.Fprintf(stderr, "fak-dev feature query: %v\n", err)
 		return 2
@@ -148,15 +149,7 @@ func RunCapabilities(stdout, stderr io.Writer, argv []string) int {
 }
 
 func devindexRoot() string { return devindex.FindRoot(".") }
-func splitCSVDev(s string) []string {
-	var out []string
-	for _, v := range strings.Split(s, ",") {
-		if v = strings.TrimSpace(v); v != "" {
-			out = append(out, v)
-		}
-	}
-	return out
-}
+
 func writeFeatureUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: fak-dev feature query <intent> [--json] [--plane dev|live|all] [--root DIR]")
 }

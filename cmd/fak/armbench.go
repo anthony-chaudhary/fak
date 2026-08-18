@@ -32,6 +32,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/stringlist"
 	"io"
 	"os"
 	"path/filepath"
@@ -592,26 +593,16 @@ func armbenchPonytailManaged(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	var managed []armbench.ManagedArm
-	for _, v := range splitArmbenchCSV(*arms) {
+	for _, v := range stringlist.SplitCSV(*arms) {
 		managed = append(managed, armbench.ManagedArm(v))
 	}
-	r, err := armbench.RunManagedMatrix(context.Background(), armbench.ManagedRunOptions{UpstreamDir: *upstream, Tasks: splitArmbenchCSV(*tasks), Treatments: splitArmbenchCSV(*treatments), Arms: managed, Model: *model, Runs: *runs, Workers: *workers, DryRun: *dry, ReceiptPath: *receipt})
+	r, err := armbench.RunManagedMatrix(context.Background(), armbench.ManagedRunOptions{UpstreamDir: *upstream, Tasks: stringlist.SplitCSV(*tasks), Treatments: stringlist.SplitCSV(*treatments), Arms: managed, Model: *model, Runs: *runs, Workers: *workers, DryRun: *dry, ReceiptPath: *receipt})
 	if err != nil {
 		fmt.Fprintln(stderr, "fak armbench ponytail-managed:", err)
 		return 1
 	}
 	writeArmbenchJSON(stdout, r)
 	return 0
-}
-
-func splitArmbenchCSV(s string) []string {
-	var out []string
-	for _, v := range strings.Split(s, ",") {
-		if v = strings.TrimSpace(v); v != "" {
-			out = append(out, v)
-		}
-	}
-	return out
 }
 
 func armbenchPonytailGates(stdout, stderr io.Writer, argv []string) int {
