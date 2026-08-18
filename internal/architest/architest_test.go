@@ -625,6 +625,7 @@ var tier = map[string]int{
 	"doneclaimaudit":        1, // stdlib-only deterministic audit of issue completion claims against repository-local evidence.
 	"wipinventory":          1, // read-only Git/filesystem census for provenance-honest working-tree operations.
 	"processalive":          1, // stdlib-only no-spawn process liveness probe shared by operational leaves (#7215).
+	"refid":                 1, // stdlib-only Git-ref segment validation shared by ref-backed operational leaves (#7130).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
