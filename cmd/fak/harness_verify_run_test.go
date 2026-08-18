@@ -55,3 +55,32 @@ func TestHarnessVerifyRunRefusesWrongLock(t *testing.T) {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errb.String())
 	}
 }
+
+func TestHarnessVerifyRunIsPubliclyDispatched(t *testing.T) {
+	lockPath := writePreviewLock(t, harnessresolve.Lock{Schema: harnessresolve.LockSchema, Assets: []harnesscompose.EffectiveAsset{
+		{Kind: "instruction", ID: "tone", Value: "concise", Source: "default"},
+	}})
+	var lock harnessresolve.Lock
+	raw, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &lock); err != nil {
+		t.Fatal(err)
+	}
+	observation := filepath.Join(t.TempDir(), "run.json")
+	writeOverrideFile(t, observation, `{"schema":"fak-harness-runtime-observation/1","lock_id":"`+lock.ID+`","run_id":"run-public","capabilities":[{"capability":"instruction:tone","source":"default","value":"concise"}]}`)
+
+	var out, errb bytes.Buffer
+	code := runHarness(&out, &errb, []string{"verify-run", "--lock", lockPath, "--observation", observation})
+	if code != 0 || errb.Len() != 0 || !strings.Contains(out.String(), "HARNESS VERIFY RUN | VERIFIED") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errb.String())
+	}
+}
+
+func TestHarnessUsageListsVerifyRun(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := runHarness(&out, &errb, nil); code != 2 || !strings.Contains(errb.String(), "verify-run") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errb.String())
+	}
+}
