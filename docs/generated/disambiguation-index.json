@@ -1,6 +1,6 @@
 {
   "schema": "fak-disambiguation-index/1",
-  "source_revision": "sha256:e7c3b3e5cdbe812768ef64890551ede4455a01cc17e2bee51ec052e74ff63a84",
+  "source_revision": "sha256:446f96300dbf61dc1fc9a2560ab9df69293fc34fc001a08f4541ee8991f2b251",
   "entry_count": 6,
   "entries": [
     {
@@ -116,11 +116,15 @@
       },
       "sources": [
         {
-          "kind": "document",
-          "locator": "internal/disambiguation/README.md",
+          "kind": "go-source",
+          "locator": "internal/disambiguation/query.go",
           "revision": "public-seed/1",
-          "checked_at": "2026-08-11T00:00:00Z",
-          "probe": "fak-disambiguation-seed"
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-seed",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "Query"
+          }
         }
       ],
       "freshness": {
@@ -159,11 +163,15 @@
       },
       "sources": [
         {
-          "kind": "document",
-          "locator": "README.md#how-it-works",
+          "kind": "go-source",
+          "locator": "cmd/fak/main.go",
           "revision": "public-seed/1",
-          "checked_at": "2026-08-11T00:00:00Z",
-          "probe": "fak-disambiguation-seed"
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-seed",
+          "reference": {
+            "kind": "cli-verb",
+            "name": "disambiguation"
+          }
         }
       ],
       "freshness": {

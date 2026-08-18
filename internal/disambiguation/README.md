@@ -321,3 +321,17 @@ fak disambiguation docs --json
 ```
 
 `--check` is the drift gate: it fails if either page differs and never rewrites it. Rendering is sorted and byte-identical, so documentation does not become a second terminology writer.
+
+## Reverse lookup from repository evidence (#6321)
+
+Agents that start from evidence rather than a glossary term can use `fak disambiguation reverse` to find the canonical distinction that owns it. The lookup reads the same immutable `Entry` index as `query` and `search`; it does not crawl the tree, infer fuzzy matches, or maintain a second registry.
+
+```text
+fak disambiguation reverse --kind source-path internal/disambiguation/query.go
+fak disambiguation reverse --kind symbol Query
+fak disambiguation reverse --kind cli-token disambiguation
+fak disambiguation reverse --kind reason-code SOURCE_CURRENT
+fak disambiguation reverse --self-test --json
+```
+
+Supported kinds are exact and closed: `source-path` matches a source locator (including the path portion before a document anchor), while `symbol`, `cli-token`, and `reason-code` match typed public references. Freshness reason codes are also indexed. A locator may return multiple evidenced owners; unknown input returns `reverse locator not found` with an empty `matches` array rather than fabricating an owner.

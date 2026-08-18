@@ -47,7 +47,7 @@ The internal/disambiguation package, named as a contrast target for the CLI-scop
 - **Owner:** leaf `disambiguation`, lane `canon`
 - **Lifecycle:** `current`, rollout `on`
 - **Sources:**
-  - `internal/disambiguation/README.md` — `document` at `public-seed/1`
+  - `internal/disambiguation/query.go` — `go-source` at `public-seed/1`
 - **Do not conflate with:**
   - [kernel](contrast-index.md#kernel) — The package and CLI-scoped kernel are distinct.
 
@@ -60,7 +60,7 @@ The fak command-line product surface, named as a contrast target for the package
 - **Owner:** leaf `disambiguation`, lane `canon`
 - **Lifecycle:** `current`, rollout `on`
 - **Sources:**
-  - `README.md#how-it-works` — `document` at `public-seed/1`
+  - `cmd/fak/main.go` — `go-source` at `public-seed/1`
 - **Do not conflate with:**
   - [kernel](contrast-index.md#kernel) — The CLI surface and package-scoped kernel are distinct.
 

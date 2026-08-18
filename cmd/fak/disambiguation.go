@@ -24,7 +24,7 @@ func cmdDisambiguation(args []string) {
 
 func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak disambiguation schema [--json] [--self-test]\n       fak disambiguation query <canonical-term> [--json]\n       fak disambiguation query --self-test [--json]\n       fak disambiguation search <term> [--json]\n       fak disambiguation cli-source [--json] [--self-test]\n       fak disambiguation docs [--output-dir DIR] [--check] [--json]\n       fak disambiguation stale-symbols-self-test [--json]\n       fak disambiguation coverage-self-test [--json]")
+		fmt.Fprintln(stderr, "usage: fak disambiguation schema [--json] [--self-test]\n       fak disambiguation query <canonical-term> [--json]\n       fak disambiguation query --self-test [--json]\n       fak disambiguation search <term> [--json]\n       fak disambiguation reverse --kind source-path|symbol|cli-token|reason-code <locator> [--json]\n       fak disambiguation reverse --self-test [--json]\n       fak disambiguation cli-source [--json] [--self-test]\n       fak disambiguation docs [--output-dir DIR] [--check] [--json]\n       fak disambiguation stale-symbols-self-test [--json]\n       fak disambiguation coverage-self-test [--json]")
 		return 2
 	}
 	switch args[0] {
@@ -40,6 +40,8 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 		return runDisambiguationQuery(stdout, stderr, args[1:])
 	case "search":
 		return runDisambiguationSearch(stdout, stderr, args[1:])
+	case "reverse":
+		return runDisambiguationReverse(stdout, stderr, args[1:])
 	case "cli-source":
 		return runDisambiguationCLISource(stdout, stderr, args[1:])
 	case "docs":
@@ -57,9 +59,71 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 	case "coverage-self-test":
 		return runDisambiguationCoverageSelfTest(stdout, stderr, args[1:])
 	default:
-		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want schema, query, search, cli-source, docs, explain, ownership, freshness, provenance, stale-symbols-self-test, or coverage-self-test)\n", args[0])
+		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want schema, query, search, reverse, cli-source, docs, explain, ownership, freshness, provenance, stale-symbols-self-test, or coverage-self-test)\n", args[0])
 		return 2
 	}
+}
+
+func runDisambiguationReverse(stdout, stderr io.Writer, args []string) int {
+	var jsonOutput, selfTest bool
+	var kind disambiguation.ReverseLocatorKind
+	var values []string
+	for n := 0; n < len(args); n++ {
+		switch args[n] {
+		case "--json":
+			jsonOutput = true
+		case "--self-test":
+			selfTest = true
+		case "--kind":
+			if n+1 >= len(args) {
+				fmt.Fprintln(stderr, "fak disambiguation reverse: --kind requires a value")
+				return 2
+			}
+			n++
+			kind = disambiguation.ReverseLocatorKind(args[n])
+		default:
+			if strings.HasPrefix(args[n], "-") {
+				fmt.Fprintf(stderr, "fak disambiguation reverse: unknown option %q\n", args[n])
+				return 2
+			}
+			values = append(values, args[n])
+		}
+	}
+	if selfTest {
+		if kind != "" || len(values) != 0 {
+			fmt.Fprintln(stderr, "fak disambiguation reverse: --self-test does not accept --kind or a locator")
+			return 2
+		}
+		report, err := disambiguation.RunReverseSelfTest()
+		if err != nil {
+			fmt.Fprintf(stderr, "disambiguation reverse self-test: FAIL: %v\n", err)
+			return 1
+		}
+		if jsonOutput {
+			return encodeDisambiguationJSON(stdout, stderr, report)
+		}
+		fmt.Fprintf(stdout, "PASS %s: %d locator kinds resolved; unknown input rejected=%t\n", report.Schema, len(report.Cases), report.UnknownRejected)
+		return 0
+	}
+	if kind == "" || len(values) != 1 {
+		fmt.Fprintln(stderr, "usage: fak disambiguation reverse --kind source-path|symbol|cli-token|reason-code <locator> [--json]")
+		return 2
+	}
+	response, err := disambiguation.ReverseLookup(kind, values[0])
+	if err != nil {
+		if jsonOutput {
+			_ = json.NewEncoder(stdout).Encode(response)
+		}
+		fmt.Fprintf(stderr, "fak disambiguation reverse: %v\n", err)
+		return 1
+	}
+	if jsonOutput {
+		return encodeDisambiguationJSON(stdout, stderr, response)
+	}
+	for _, match := range response.Matches {
+		fmt.Fprintf(stdout, "%s\t%s:%s\t%s\n", match.Entry.Identity.CanonicalTerm, match.Entry.Scope.Kind, match.Entry.Scope.Value, match.MatchedValue)
+	}
+	return 0
 }
 
 const defaultDisambiguationIndexPath = "docs/generated/disambiguation-index.json"

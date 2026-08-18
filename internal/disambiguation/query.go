@@ -186,7 +186,7 @@ var publicEntries = []Entry{
 		Definition: "The fak command-line product surface, named as a contrast target for the package-scoped kernel entry.",
 		Contrasts:  []Contrast{{CanonicalTerm: "kernel", Explanation: "The CLI surface and package-scoped kernel are distinct.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)}},
 		Scope:      Scope{Kind: "cli", Value: "fak"}, Owner: Owner{Leaf: "disambiguation", Lane: "canon"},
-		Sources:   []SourceWitness{{Kind: "document", Locator: "README.md#how-it-works", Revision: "public-seed/1", CheckedAt: "2026-08-11T00:00:00Z", Probe: "fak-disambiguation-seed"}},
+		Sources:   []SourceWitness{{Kind: "go-source", Locator: "cmd/fak/main.go", Revision: "public-seed/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-seed", Reference: &PublicReference{Kind: ReferenceKindCLIVerb, Name: "disambiguation"}}},
 		Freshness: Freshness{Verdict: "fresh", ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-11T00:00:00Z", Probe: "public-seed/1"}, Lifecycle: Lifecycle{Class: "current", Rollout: "on"},
 	},
 	{
@@ -195,7 +195,7 @@ var publicEntries = []Entry{
 		Definition: "The internal/disambiguation package, named as a contrast target for the CLI-scoped kernel entry.",
 		Contrasts:  []Contrast{{CanonicalTerm: "kernel", Explanation: "The package and CLI-scoped kernel are distinct.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)}},
 		Scope:      Scope{Kind: "package", Value: "internal/disambiguation"}, Owner: Owner{Leaf: "disambiguation", Lane: "canon"},
-		Sources:   []SourceWitness{{Kind: "document", Locator: "internal/disambiguation/README.md", Revision: "public-seed/1", CheckedAt: "2026-08-11T00:00:00Z", Probe: "fak-disambiguation-seed"}},
+		Sources:   []SourceWitness{{Kind: "go-source", Locator: "internal/disambiguation/query.go", Revision: "public-seed/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-seed", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "Query"}}},
 		Freshness: Freshness{Verdict: "fresh", ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-11T00:00:00Z", Probe: "public-seed/1"}, Lifecycle: Lifecycle{Class: "current", Rollout: "on"},
 	},
 }
