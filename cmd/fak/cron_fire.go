@@ -22,11 +22,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/exclusivefile"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -223,10 +223,8 @@ func cronFireSlot(at time.Time, interval time.Duration) string {
 func cronTickLock(path string, wait, ttl time.Duration) (release func() error, err error) {
 	deadline := time.Now().Add(wait)
 	for {
-		f, cerr := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		cerr := exclusivefile.CreatePIDTime(path)
 		if cerr == nil {
-			_, _ = f.WriteString(strconv.Itoa(os.Getpid()) + " " + strconv.FormatInt(time.Now().Unix(), 10) + "\n")
-			_ = f.Close()
 			return func() error {
 				if rerr := os.Remove(path); rerr != nil && !os.IsNotExist(rerr) {
 					return rerr

@@ -24,9 +24,9 @@
 package resume
 
 import (
+	"github.com/anthony-chaudhary/fak/internal/exclusivefile"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 )
 
@@ -94,13 +94,7 @@ func attemptTickLock(path string) (release func() error, acquired bool, err erro
 // lock; only the create itself can fail with os.IsExist for TryTickLock to read as
 // "held".
 func createTickLock(path string) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	_, _ = f.WriteString(strconv.Itoa(os.Getpid()) + " " + strconv.FormatInt(time.Now().Unix(), 10) + "\n")
-	_ = f.Close()
-	return nil
+	return exclusivefile.CreatePIDTime(path)
 }
 
 func tickLockReleaser(path string) func() error {

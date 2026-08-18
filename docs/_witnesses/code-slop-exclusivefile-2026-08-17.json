@@ -1,0 +1,32 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T05:26:47.211924Z",
+  "issue": 7051,
+  "family": "exclusive PID/time lock marker creation",
+  "paths": [
+    "internal/exclusivefile",
+    "cmd/fak/cron_fire.go",
+    "internal/resume/ticklock.go"
+  ],
+  "test": "go test ./internal/exclusivefile ./internal/resume; fak-dev buildcheck --mine internal/exclusivefile/exclusivefile.go",
+  "test_result": "PASS",
+  "before": {
+    "score": -89.4,
+    "grade": "F",
+    "slop_debt": 362,
+    "duplication": 362,
+    "weighted_duplication": 228.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -88.9,
+    "grade": "F",
+    "slop_debt": 361,
+    "duplication": 361,
+    "weighted_duplication": 227.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}
