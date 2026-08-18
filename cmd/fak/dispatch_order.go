@@ -86,6 +86,8 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchAudit(stdout, stderr, argv[1:])
 	case "closure-audit":
 		return runDispatchClosureAudit(stdout, stderr, argv[1:])
+	case "done-claim-audit":
+		return runDispatchDoneClaimAudit(stdout, stderr, argv[1:])
 	case "acceptance-resolve":
 		return runDispatchAcceptanceResolve(stdout, stderr, argv[1:])
 	case "scorecard":
