@@ -878,10 +878,10 @@ jobs:
       - name: tool test-coverage (advisory; unit tests HARD, load-bearing coverage a watched floor)
         working-directory: ${{ github.workspace }}
         run: |
-          python tools/tool_coverage_audit_test.py
+          go test ./internal/devcmd -run ToolCoverageAudit -count=1
           echo "::group::tool-coverage-audit (load-bearing python tools/ test coverage, advisory)"
-          python tools/tool_coverage_audit.py --min-coverage 75 \
-            || echo "::warning title=tool-coverage::load-bearing tool test-coverage below the watched floor (advisory) — add a sibling _test.py for the named modules; see tools/tool_coverage_audit.py"
+          go run ./cmd/fak-dev tool-coverage-audit --min-coverage 75 \
+            || echo "::warning title=tool-coverage::load-bearing tool test-coverage below the watched floor (advisory) — add a sibling _test.py for the named modules; run fak-dev tool-coverage-audit"
           echo "::endgroup::"
 
       # DOS trust-floor gate: the verdict IS the exit code. `dos review` fails the build
