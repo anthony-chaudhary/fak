@@ -32,6 +32,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 // CanarySchema versions the emitted replay artifact.
@@ -202,8 +204,8 @@ type CanaryResult struct {
 func AdjudicateCanary(c CanaryCase) CanaryResult {
 	res := CanaryResult{
 		Schema: CanarySchema, CaseID: c.ID, Tier: c.Tier,
-		BaselineMean:  canaryMean(c.Slices, func(s QualitySlice) float64 { return s.Baseline }),
-		CandidateMean: canaryMean(c.Slices, func(s QualitySlice) float64 { return s.Candidate }),
+		BaselineMean:  mathx.MeanBy(c.Slices, func(s QualitySlice) float64 { return s.Baseline }),
+		CandidateMean: mathx.MeanBy(c.Slices, func(s QualitySlice) float64 { return s.Candidate }),
 	}
 
 	// Fail closed on inconclusive evidence before judging any score.
@@ -331,17 +333,6 @@ func SimulateCanary() []CanaryResult {
 		AdjudicateCanary(hold),
 		AdjudicateCanary(rollback),
 	}
-}
-
-func canaryMean(slices []QualitySlice, pick func(QualitySlice) float64) float64 {
-	if len(slices) == 0 {
-		return 0
-	}
-	var sum float64
-	for _, s := range slices {
-		sum += pick(s)
-	}
-	return sum / float64(len(slices))
 }
 
 // canaryScrub redacts host filesystem paths, emails, and secret-shaped values

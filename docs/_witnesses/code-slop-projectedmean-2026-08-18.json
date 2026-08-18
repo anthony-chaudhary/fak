@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T08:40:08.580113Z",
+  "issue": 7286,
+  "family": "projected arithmetic mean",
+  "paths": [
+    "internal/mathx/mean.go",
+    "internal/mathx/mean_test.go",
+    "internal/productscorecard/sliceregression.go",
+    "internal/shipgate/canary.go"
+  ],
+  "test": "go test ./internal/mathx ./internal/productscorecard ./internal/shipgate; fak-dev buildcheck --mine internal/mathx/mean.go --vet",
+  "test_result": "PASS",
+  "before": {
+    "score": -76.4,
+    "grade": "F",
+    "slop_debt": 337,
+    "duplication": 337,
+    "weighted_duplication": 215.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -75.9,
+    "grade": "F",
+    "slop_debt": 336,
+    "duplication": 336,
+    "weighted_duplication": 215.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

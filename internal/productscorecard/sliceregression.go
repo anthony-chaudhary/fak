@@ -26,6 +26,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 // SliceRegressionSchema versions the emitted replay artifact.
@@ -162,8 +164,8 @@ type GateResult struct {
 func Gate(c Case) GateResult {
 	res := GateResult{
 		Schema: SliceRegressionSchema, CaseID: c.ID, Tier: c.Tier,
-		BaselineMean:  meanOf(c.Slices, func(s Slice) float64 { return s.Baseline }),
-		CandidateMean: meanOf(c.Slices, func(s Slice) float64 { return s.Candidate }),
+		BaselineMean:  mathx.MeanBy(c.Slices, func(s Slice) float64 { return s.Baseline }),
+		CandidateMean: mathx.MeanBy(c.Slices, func(s Slice) float64 { return s.Candidate }),
 	}
 
 	// Fail closed on inconclusive evidence before judging any score.
@@ -259,17 +261,6 @@ func GateAll(cases []Case) ([]GateResult, bool) {
 	// Stable ordering by case id keeps a batch report deterministic.
 	sort.SliceStable(out, func(i, j int) bool { return out[i].CaseID < out[j].CaseID })
 	return out, pass
-}
-
-func meanOf(slices []Slice, pick func(Slice) float64) float64 {
-	if len(slices) == 0 {
-		return 0
-	}
-	var sum float64
-	for _, s := range slices {
-		sum += pick(s)
-	}
-	return sum / float64(len(slices))
 }
 
 // scrubText redacts host filesystem paths, emails, and secret-shaped values so a
