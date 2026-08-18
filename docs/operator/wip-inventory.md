@@ -21,7 +21,7 @@ Capture this schema immediately before and after `clear-out-wip`, worker-worktre
 
 ## Age gate and isolation policy
 
-Use `fak wip inventory --max-untracked-age 1h` as a recurring audit and `fak wip admit --max-untracked-age 1h ...` at task admission. Exit 3 means source work has remained filesystem-only beyond the chosen budget; checkpoint it immediately with `fak wip autocheckpoint --reason manual --session <id>`. Ignored/generated files are a separate population and never trigger this gate.
+Use `fak wip inventory --max-untracked-age 1h` as a recurring audit and `fak wip admit ...` at task admission (the default budget is one hour; override with `--max-untracked-age`, or use `0` only for a deliberate audit bypass). Exit 3 means source work has remained filesystem-only beyond the chosen budget; checkpoint it immediately with `fak wip autocheckpoint --reason manual --session <id>`. Ignored/generated files are a separate population and never trigger this gate.
 
 Shared trunk remains the default for a short, coherent, path-owned change that can be greened and landed promptly. Use the sanctioned detached worker path (`fak worktree worker prepare|land|reap`) when work is long-running, collision-prone, expected to leave a package temporarily broken, or cannot be landed within the untracked-age budget. The worker still lands through the serialized main-trunk gate. Ordinary feature branches and PRs do not solve filesystem-only WIP, stale ownership, or landing races, so they are not the default; introduce them only when review/cutover evidence cannot be represented by the detached-worker receipt and serialized landing path.
 

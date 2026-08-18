@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestWIPAdmitAutomaticallyHoldsStaleUntrackedSource(t *testing.T) {
+func TestWIPAdmitDefaultBudgetAutomaticallyHoldsStaleUntrackedSource(t *testing.T) {
 	repo := initWipAdmitRepo(t)
 	path := filepath.Join(repo, "stale.go")
 	if err := os.WriteFile(path, []byte("package stale\n"), 0o644); err != nil {
@@ -20,7 +20,7 @@ func TestWIPAdmitAutomaticallyHoldsStaleUntrackedSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
-	code := runWipAdmit(&out, &errOut, []string{"-C", repo, "--session", "age-gate", "--max-untracked-age", "1h"})
+	code := runWipAdmit(&out, &errOut, []string{"-C", repo, "--session", "age-gate"})
 	if code != wipAdmitHoldExit {
 		t.Fatalf("code=%d out=%s err=%s", code, out.String(), errOut.String())
 	}

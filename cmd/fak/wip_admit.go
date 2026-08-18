@@ -60,7 +60,7 @@ func runWipAdmit(stdout, stderr io.Writer, argv []string) int {
 	strict := fs.Bool("strict", false, "promote every soft finding (undeclared intent, unlanded self-WIP) to a hard HOLD")
 	ceiling := fs.Int("ceiling", 0, "override how many unlanded paths this session may already hold (default: 3)")
 	asJSON := fs.Bool("json", false, "emit the admission report as JSON")
-	maxUntrackedAge := fs.Duration("max-untracked-age", 0, "refuse stale untracked source work before admitting a new task (0 disables)")
+	maxUntrackedAge := fs.Duration("max-untracked-age", time.Hour, "refuse stale untracked source work before admitting a new task (0 disables)")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
