@@ -506,3 +506,9 @@ The JSON schema is `fak-disambiguation-metrics/1`. Empty classes remain explicit
 `fak disambiguation diff --before OLD.json --after NEW.json --json` compares two generated indexes and emits deterministic change rows. The taxonomy is additive, alias move, semantic change, contrast change, owner move, stale transition, and removal; every row also carries query compatibility impact as `compatible`, `review`, or `breaking`.
 
 Additions and pure owner moves preserve query compatibility. Definition, scope, contrast, and freshness transitions require review. Canonical removals and removed aliases are breaking because an existing exact query can stop resolving. The diff is read-only and accepts the generated-index schema rather than creating another index representation.
+
+## Alias and removal migration checks (#6324)
+
+`ValidateMigrations` consumes the typed diff report. A canonical removal or breaking alias move is rejected as `silent identity removal` unless a migration record names the removed term, replacement target, deprecation version, and distinct removal version. Invalid or zero-window records fail separately as `migration record invalid`; an explicit breaking record remains available for deliberate cutovers.
+
+Run `fak disambiguation migration-self-test --json` to witness silent-removal refusal and acceptance of a versioned alias migration with a replacement target. Migration records authorize compatibility changes; they do not mutate either index.
