@@ -65,7 +65,7 @@ var tier = map[string]int{
 	"eveimport":              1, // read-only Eve run/OTel evidence importer (#2606): pure deterministic fold of saved NDJSON session streams / eve.* spans into session-ledger rows with default body redaction; stdlib-only, imports nothing internal, off the hot path.
 	"benchcatalog":           2, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
 	"buildoverlay":           2, // neutral shared-checkout Go overlay/file-selection helpers; imports windowgate and is shared by runtime and fak-dev.
-	"buildwitness":           1, // structural CI guard (#3217): runs `go build ./cmd/fak` under default tags and reds the trunk (naming the undefined symbol) when uncommitted/tagless WIP breaks the shared build; stdlib-only (os/exec+runtime), imports nothing internal, off the hot path.
+	"buildwitness":           2, // structural CI guard (#3217): runs `go build ./cmd/fak` under default tags and reds the trunk (naming the undefined symbol) when uncommitted/tagless WIP breaks the shared build; stdlib-only (os/exec+runtime), imports nothing internal, off the hot path.
 	"clonescan":              1, // pure authoring-time clone QUERY: the forward half of the code-slop clone detector (normalized Go token-window engine) as an importable library — "does a token-similar block already exist?" before the code is written; stdlib-only, no internal import, off the hot path.
 	"sotamatrix":             1, // pure SOTA prior-art registry (op -> reference/route/oracle) read by fak sota, the PRIOR_ART gate, and the coverage scorecard; stdlib-only, off the hot path.
 	"stallscan":              1, // pure churn-signal stall classifier (Classify(Sample,Thresholds)->Verdict) for low-usage machine lockups read by fak stallscan; stdlib-only, imports nothing internal, off the hot path.
@@ -91,7 +91,7 @@ var tier = map[string]int{
 	"harnessinit":            1, // external product scaffold renderer; stdlib-only and outside kernel hot paths (#6788).
 	"harnessrelease":         1, // release-asset checksum/extraction and external-product witness runner (#6957).
 	"harnessgallery":         1, // static user-need blueprints and starter pack renderer (#6961).
-	"harnessdiscover":        1, // provenance-bearing scoped declaration discovery before contextual selection (#6898).
+	"harnessdiscover":        2, // provenance-bearing scoped declaration discovery before contextual selection (#6898).
 	"harnessclassify":        1, // deterministic explicit-first domain/task classification before contextual selection (#6900).
 	"harnesscrossover":       1, // pure reproducible net-work comparison for contextual versus tuned native profiles (#6903).
 	"harnesscreationreceipt": 1, // stdlib-only participant receipt validation and study-row projection (#6976).
@@ -134,7 +134,7 @@ var tier = map[string]int{
 	"resumebackoff":        2,                // pure resume signature backoff and cross-session park fold (#3584); stdlib only.
 	"commitlifecycle":      2,                // pure commit-to-ship lifecycle fold (#5989); stdlib-only, no git/filesystem/process I/O, off the hot path.
 	"wiplease":             2,                // live-WIP projection into laneadmit lease geometry; imports laneadmit(2)+wipattr(1), off the hot path.
-	"wipref":               1,                // append-only working-tree checkpoint ref store under refs/fak/wip/ read by fak wip (sibling of leaseref's refs/fak/locks); stdlib-only, imports nothing internal, off the hot path.
+	"wipref":               2,                // append-only working-tree checkpoint ref store under refs/fak/wip/ read by fak wip (sibling of leaseref's refs/fak/locks); stdlib-only, imports nothing internal, off the hot path.
 	"wipattr":              1,                // pure dirty-hunk-to-checkpoint attribution fold (#3874); stdlib-only, imports nothing internal, off the hot path.
 	"wiprecon":             1,                // pure crashed-checkpoint reconciliation decision fold (#3875); stdlib-only, imports nothing internal, off the hot path.
 	"supportmaturityscore": 3,                // support-maturity scorecard over covmatrix + supportmaturity(2); off the hot path.
@@ -155,7 +155,7 @@ var tier = map[string]int{
 	"focusscore":           2,                // fleet convergence/breadth focus scorecard over the trajctl objective tree; imports trajctl(1)+pkg/scorecard, off the hot path.
 	"memgate":              2,                // memory-pressure admission fold for heavy model loads; stdlib + windowgate shell helpers, off the hot path.
 	"rolloutmode":          1,                // stdlib-only closed rollout vocabulary and caller-selected parse fallback (#6090).
-	"memorycotravel":       1,                // stdlib-only project memory co-travel gate/ledger for shadow/live carryover between config roots; off the hot path.
+	"memorycotravel":       2,                // stdlib-only project memory co-travel gate/ledger for shadow/live carryover between config roots; off the hot path.
 	"dosdecision":          1,                // stdlib-only revalidation of DOS decision rows against caller-provided live lease state (#6494).
 	"memoryindex":          2,                // stdlib-only memory-index reconciliation mechanism; off the hot path.
 	"memorystability":      1,                // stdlib-only fleet-memory stability governor over drift trajectories; off the hot path.
@@ -428,7 +428,7 @@ var tier = map[string]int{
 	"fleetcap":            1, // Little's-law fleet-capacity calculator: required concurrent workers from target issue-rate + median session; stdlib-only, off the hot path.
 	"fleetcompare":        1, // pure fleet sweep slice builder that decomposes shared vs isolated/cross-cache gains; stdlib-only, off the hot path.
 	"fleettrend":          2, // fleet status JSONL history and sparkline trend fold; stdlib-only, off the hot path.
-	"workdelivery":        1, // independent record/admission/verification/integration/release contract (#7101); stdlib-only, off the hot path.
+	"workdelivery":        2, // independent record/admission/verification/integration/release contract (#7101); stdlib-only, off the hot path.
 	"workflowaudit":       2, // classifies every branch/tag ref in .github/workflows/*.yml against the branch-role contract (#1697/#1701): development/release-front-door/tag/legacy/unclassified, with an embedded allowlist + a committed audit report; imports only branchrole(1)+stdlib, off the hot path.
 	"fleetsim":            2, // synthetic 400-issues/hour dry-run replay fixture: deterministic ledger generator + closes/hour fold; stdlib-only, off the hot path.
 	"fleetmetrics":        1, // pure worker-session duration percentiles (p50/p95) over a ledger; stdlib-only, off the hot path.
