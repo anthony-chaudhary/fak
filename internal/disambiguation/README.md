@@ -516,3 +516,7 @@ Run `fak disambiguation migration-self-test --json` to witness silent-removal re
 ## End-to-end agent lookup demo (#6325)
 
 `go run ./cmd/disambiguationdemo -selfcheck` searches the overloaded canonical term `runtime`, captures the five scoped choices, selects `runtime=gateway-serving`, and prints the canonical contrast. `-json` emits the deterministic `fak-disambiguation-demo/1` receipt. The captured test proves the whole path is local public-index logic: no model, API key, GPU, network, or private data is required.
+
+## Projected-scale benchmark (#6327)
+
+`scale_benchmark_test.go` exercises deterministic generation plus exact, alias, and reverse queries at 4,096 valid entries. Every benchmark logs dataset size, tuned implementation baseline, OS/architecture and Go scope, and `OBSERVED` provenance; it reports machine-readable entry/provenance/baseline metrics as well. The dated observed run and exact reproduce command are captured in [`docs/benchmarks/DISAMBIGUATION-SCALE-2026-08-17.md`](../../docs/benchmarks/DISAMBIGUATION-SCALE-2026-08-17.md). These are scoped observations, not unsupported cross-hardware gains.
