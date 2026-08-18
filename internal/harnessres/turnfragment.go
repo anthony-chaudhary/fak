@@ -39,10 +39,10 @@ func (s Snapshot) TurnFragment() string {
 		parts = append(parts, fmt.Sprintf("cpu=%.0f%%", pct))
 	}
 	if s.Kernel.HaveRSS {
-		parts = append(parts, "rss="+compactBytes(s.Kernel.RSSBytes))
+		parts = append(parts, "rss="+CompactBytes(s.Kernel.RSSBytes))
 	}
 	if s.Kernel.HaveIO {
-		parts = append(parts, "io="+compactBytes(s.Kernel.IOReadBytes)+"r/"+compactBytes(s.Kernel.IOWriteBytes)+"w")
+		parts = append(parts, "io="+CompactBytes(s.Kernel.IOReadBytes)+"r/"+CompactBytes(s.Kernel.IOWriteBytes)+"w")
 	}
 	if len(parts) == 0 {
 		return ""
@@ -54,7 +54,7 @@ func (s Snapshot) TurnFragment() string {
 // It mirrors the `fak info` pane's own byte cell (guardInfoBytesText) digit for digit,
 // including its binary math under decimal-looking MB/GB labels, so the same reading is
 // never spelled two ways across the two surfaces an operator watches side by side.
-func compactBytes(b uint64) string {
+func CompactBytes(b uint64) string {
 	const mb = 1 << 20
 	const gb = 1 << 30
 	if b >= gb {

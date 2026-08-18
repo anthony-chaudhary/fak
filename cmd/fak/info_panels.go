@@ -24,6 +24,8 @@ package main
 import (
 	"fmt"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/harnessres"
 )
 
 // guardInfoPanelLevel is how much room a panel has been granted by the composer.
@@ -432,19 +434,7 @@ func guardInfoAgentsSummary(ss []guardInfoSession) string {
 	return out
 }
 
-// guardInfoBytesText renders a byte count at human scale (MB below 1 GiB, GB above),
-// sized for a gutter row where "41MB" reads better than eight digits.
-func guardInfoBytesText(b uint64) string {
-	const mb = 1 << 20
-	const gb = 1 << 30
-	if b >= gb {
-		return fmt.Sprintf("%.1fGB", float64(b)/gb)
-	}
-	if b >= 10*mb {
-		return fmt.Sprintf("%.0fMB", float64(b)/mb)
-	}
-	return fmt.Sprintf("%.1fMB", float64(b)/mb)
-}
+func guardInfoBytesText(b uint64) string { return harnessres.CompactBytes(b) }
 
 // guardInfoShortCount renders a count compactly for a budget cell: 950 -> "950",
 // 380000 -> "380k", 1200000 -> "1.2M".

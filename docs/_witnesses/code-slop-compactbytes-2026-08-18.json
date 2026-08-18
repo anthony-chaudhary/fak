@@ -1,0 +1,31 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T09:50:17.136583Z",
+  "issue": 7297,
+  "family": "compact byte-cell rendering",
+  "paths": [
+    "internal/harnessres/turnfragment.go",
+    "cmd/fak/info_panels.go"
+  ],
+  "test": "go test ./internal/harnessres ./cmd/fak -run 'Test.*(Compact|GuardInfoBytes)' -count=1; fak-dev buildcheck --vet",
+  "test_result": "PASS",
+  "before": {
+    "score": -70.7,
+    "grade": "F",
+    "slop_debt": 326,
+    "duplication": 326,
+    "weighted_duplication": 210.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -70.2,
+    "grade": "F",
+    "slop_debt": 325,
+    "duplication": 325,
+    "weighted_duplication": 209.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}
