@@ -17,7 +17,11 @@
 // filesystem access, hermetically testable like the rest of the core.
 package repoguard
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
+)
 
 // ReasonInteractiveHang is the structured refusal token for would-hang
 // interactive invocations.
@@ -86,7 +90,7 @@ func stripEnvAndEnvVerb(toks []string) (verb string, operands []string, overridd
 			i++
 			continue
 		}
-		if strings.TrimSuffix(basename(t), ".exe") == "env" {
+		if strings.TrimSuffix(pathutil.Base(t), ".exe") == "env" {
 			i++
 			continue
 		}
@@ -95,7 +99,7 @@ func stripEnvAndEnvVerb(toks []string) (verb string, operands []string, overridd
 	if i >= len(toks) {
 		return "", nil, overridden
 	}
-	return strings.TrimSuffix(basename(toks[i]), ".exe"), toks[i+1:], overridden
+	return strings.TrimSuffix(pathutil.Base(toks[i]), ".exe"), toks[i+1:], overridden
 }
 
 // envAssignName parses a leading shell env assignment token (NAME=value).

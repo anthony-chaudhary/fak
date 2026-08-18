@@ -52,3 +52,18 @@ func TestExpandTilde(t *testing.T) {
 		}
 	}
 }
+
+func TestBaseHandlesBothSeparators(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		want string
+	}{
+		{path: "/usr/bin/go", want: "go"},
+		{path: `C:\tools\go.exe`, want: "go.exe"},
+		{path: "go", want: "go"},
+	} {
+		if got := Base(tc.path); got != tc.want {
+			t.Errorf("Base(%q) = %q, want %q", tc.path, got, tc.want)
+		}
+	}
+}

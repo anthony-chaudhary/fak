@@ -21,6 +21,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 const (
@@ -311,12 +313,6 @@ func shlexSplit(s string) ([]string, bool) {
 
 // basename returns the final path component, splitting on both / and \ so the
 // verb of `/usr/bin/rm` or `C:\tools\go.exe` resolves the same on any OS.
-func basename(p string) string {
-	if i := strings.LastIndexAny(p, "/\\"); i >= 0 {
-		return p[i+1:]
-	}
-	return p
-}
 
 func stripHeredocBodies(command string) string {
 	var out strings.Builder
@@ -422,7 +418,7 @@ func extractTargets(command string) []target {
 		if len(toks) == 0 {
 			continue
 		}
-		verb := basename(toks[0])
+		verb := pathutil.Base(toks[0])
 		operands := toks[1:]
 		// -o / --output PATH (and --output=PATH); -o only for build verbs.
 		for k, t := range operands {
@@ -659,7 +655,7 @@ func privateCompanionRoots(workspaceRoot string) []string {
 	if ws == "" {
 		return nil
 	}
-	if strings.HasSuffix(basename(ws), "-private") {
+	if strings.HasSuffix(pathutil.Base(ws), "-private") {
 		return nil
 	}
 	return []string{ws + "-private"}

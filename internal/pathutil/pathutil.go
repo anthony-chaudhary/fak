@@ -43,3 +43,11 @@ func ReadFileOrStdin(path string) ([]byte, error) {
 	}
 	return os.ReadFile(path)
 }
+
+// Base returns the final component of a slash- or backslash-delimited path.
+func Base(p string) string {
+	if i := strings.LastIndexAny(p, "/\\"); i >= 0 {
+		return p[i+1:]
+	}
+	return p
+}

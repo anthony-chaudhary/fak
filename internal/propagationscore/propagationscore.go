@@ -41,6 +41,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
@@ -434,13 +435,6 @@ func controlPaneMentions(text string, m Member) bool {
 	if m.DebtKey != "" {
 		needles = append(needles, m.DebtKey)
 	}
-	needles = append(needles, baseName(m.PkgDir))
+	needles = append(needles, pathutil.Base(m.PkgDir))
 	return scorecard.HasAny(text, needles)
-}
-
-func baseName(p string) string {
-	if i := strings.LastIndexAny(p, "/\\"); i >= 0 {
-		return p[i+1:]
-	}
-	return p
 }
