@@ -187,15 +187,15 @@ Unknown or not-yet selections fail before the run. Response profiles do not chan
 
 ## Verbs
 
-The verb surface is **two-tier** (epic #2228). The **frontdoor** tier is the
-product — what an adopter or operator of the kernel touches (`guard`, `serve`,
+The command surface has two executable boundaries. The shipped **`fak` runtime** is
+the product — what an adopter or operator touches (`manage`, `serve`, `agent`,
 `run`, `preflight`, `policy`, `attest`, `audit`, `egress`, `info`, `session`,
 `ps`/`top`, `signal`, `resume`, `doctor`, `recover`, `model`, `codex`,
-`self-update`, `version`, `help`). `fak help` shows exactly these. Everything
-else — repo-workflow verbs, scorecards, benches, dispatch/loop plumbing — is the
-**dev** tier, spelled `fak dev <verb>` and listed by `fak dev`; `fak help --all`
-lists every verb with its tier. The bare dev spellings below still work today
-(the `fak dev` namespace is compatibility-first); `fak dev` is the canonical form.
+`self-update`, `version`, `help`). `fak help` and `fak help --all` describe that
+runtime. Repository workflows, scorecards, benches, and issue/docs tooling live
+in the separate **`fak-dev`** executable; `fak-dev help` lists them. The legacy
+`fak dev <verb>` spelling is a compatibility handoff to a sibling or
+`PATH`-installed `fak-dev`, not a dev namespace linked into the runtime.
 
 ### `fak architecture`
 
@@ -250,7 +250,8 @@ touch, the witness that proves it applied, and the closed refusal tokens are
 specified in [`docs/operator-control-plane.md`](operator-control-plane.md).
 
 ```
-fak dev       [<verb> ...]                             # list the dev tier, or run a dev verb (canonical spelling)
+fak dev       [<verb> ...]                             # compatibility handoff to the separate fak-dev executable
+fak-dev help                                              # canonical maintainer-tool catalog (separate artifact)
 fak run       --trace testdata/tau2/tau2-smoke.json    # replay a trace through the kernel
 fak preflight --tool create_user --args '{"_positional":["alice"]}'   # rung-only check
 fak architecture [--leaf NAME] [--json]              # inspect the enforced internal tier/import graph

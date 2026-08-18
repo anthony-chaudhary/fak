@@ -184,11 +184,10 @@ here is the split. It is not a convention you have to learn: the binary carries 
 | Tier | Count on `main` | What it is | Lists itself with |
 | --- | --- | --- | --- |
 | **frontdoor** | 26 | the product: gateway, guard, policy, sessions, models, audit, attest | `fak help` |
-| **dev** | 241 | tooling for developing the `fak` repository itself | `fak dev` |
 | *hidden* | 6 | re-exec / hook seams `fak` spawns for itself; never listed | — |
 
 Don't trust those counts — they move as verbs land, and none of the rest of this page
-depends on them. Derive your own: `fak dev` prints the dev-tier count and the whole list
+depends on them. Repository-development commands are not part of this runtime count; maintainers install the separate `fak-dev` artifact with `go install ./cmd/fak-dev`, and `fak-dev help` lists that surface. Derive your own runtime count: `fak help --all` prints the whole list
 for the build you actually installed, `fak help --all` prints every listed verb tagged with
 its tier, and `fak index verbs --json` emits the same classification as machine-readable
 rows. The classification has exactly one home in the source
@@ -237,9 +236,12 @@ a specific commit, the Go module is the repository root:
 ```sh
 git clone https://github.com/anthony-chaudhary/fak.git
 cd fak
-go build -o fak ./cmd/fak        # needs Go 1.26+
+go build -o fak ./cmd/fak        # shipped runtime; needs Go 1.26+
+go build -o fak-dev ./cmd/fak-dev # maintainer-only repository tooling
 ./fak version
 ```
+
+Adopters install and deploy only `fak`. Maintainers use `fak-dev` directly for repository checks and issue/docs tooling. The legacy `fak dev ...` spelling is a compatibility handoff to a sibling or `PATH`-installed `fak-dev`; it does not link those commands into the runtime.
 
 The default binary is pure Go with no cgo (the Vulkan compute backend is behind a build
 tag and absent from the default build), so it cross-compiles cleanly:
