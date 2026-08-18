@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
+	"github.com/anthony-chaudhary/fak/internal/stringset"
 )
 
 const InventorySchema = "fak.sessiondiag.inventory.v1"
@@ -1297,12 +1298,7 @@ func uniqueSorted(values []string) []string {
 			set[value] = true
 		}
 	}
-	out := make([]string, 0, len(set))
-	for value := range set {
-		out = append(out, value)
-	}
-	sort.Strings(out)
-	return out
+	return stringset.Sorted(set)
 }
 
 func sortSessions(sessions []SessionRecord) {

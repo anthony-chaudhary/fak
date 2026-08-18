@@ -1,0 +1,30 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T06:07:24.935504Z",
+  "issue": 7046,
+  "family": "session diagnostic sorted string-set view",
+  "paths": [
+    "internal/sessiondiag/inventory.go"
+  ],
+  "test": "go test ./internal/sessiondiag; fak-dev buildcheck --vet",
+  "test_result": "PASS",
+  "before": {
+    "score": -87.4,
+    "grade": "F",
+    "slop_debt": 358,
+    "duplication": 358,
+    "weighted_duplication": 226.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -86.8,
+    "grade": "F",
+    "slop_debt": 357,
+    "duplication": 357,
+    "weighted_duplication": 225.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}
