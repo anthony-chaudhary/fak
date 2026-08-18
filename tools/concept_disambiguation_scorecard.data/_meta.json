@@ -10558,6 +10558,11 @@
           "category": "incidental",
           "reason": "Implementation detail of the terminal Codex rollout archive verb; not a distinct loop concept.",
           "token": "findcodexlooparchivemanifest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Exported bind-address predicate; loopback is a network interface class, not an agent loop lifecycle concept",
+          "token": "LoopbackOnly"
         }
       ],
       "id": "loop",
@@ -10568,6 +10573,7 @@
         "FakMetaSuperloopNight100",
         "FleetScoutLoop",
         "LoopView",
+        "LoopbackOnly",
         "OldestLoopID",
         "POLLING_LOOP",
         "TRANSFORM_LOOP",

@@ -17,7 +17,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **276** (clarity 16 + coverage 260) |
 | **Crystal-clear concepts (and climbing)** | **458** crystal of 2171 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2323 / 2583** (89.9% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2322 / 2582** (89.9% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 192 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **61** of 2849 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
@@ -71,7 +71,7 @@ coverage by family (positioned / discovered):
   context-ctx      ##########################.. 207/226
   witness-proof    #########################... 140/155
   gateway-engine   ##########################.. 169/182
-  loop             #########################... 77/87
+  loop             #########################... 76/86
   evict            #########################... 48/54
   support-maturity #########################... 49/55
   decision         ##########################.. 52/57
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [#############################...] 89.9%  (2323/2583 confusable tokens positioned)
+namespace coverage  [#############################...] 89.9%  (2322/2582 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 191
@@ -2469,7 +2469,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | context-ctx | 207 | 226 | 19 |
 | witness-proof | 140 | 155 | 15 |
 | gateway-engine | 169 | 182 | 13 |
-| loop | 77 | 87 | 10 |
+| loop | 76 | 86 | 10 |
 | evict | 48 | 54 | 6 |
 | support-maturity | 49 | 55 | 6 |
 | decision | 52 | 57 | 5 |

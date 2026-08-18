@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dropin"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 )
 
@@ -438,22 +439,4 @@ func guardWaitHealthy(gwURL string, serveErr <-chan error, timeout time.Duration
 	return lastErr, false
 }
 
-// guardLoopbackOnly reports whether addr binds only the loopback interface. It mirrors
-// the gateway's own (unexported) loopbackOnly so guard can re-assert the no-auth warning
-// the gateway skips when handed a pre-bound listener. A bare ":port" (all interfaces)
-// and any routable IP are NOT loopback.
-func guardLoopbackOnly(addr string) bool {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		host = addr // no port present
-	}
-	host = strings.Trim(host, "[]")
-	if host == "" {
-		return false // ":port" => all interfaces
-	}
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
+func guardLoopbackOnly(addr string) bool { return gateway.LoopbackOnly(addr) }

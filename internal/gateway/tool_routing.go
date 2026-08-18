@@ -705,7 +705,7 @@ func resultMeta(r *abi.Result) map[string]string {
 // is NOT loopback, and an empty host (the ":port" wildcard, which net.Listen binds
 // to ALL interfaces) is NOT loopback either. A non-IP host (a DNS name) cannot be
 // proven loopback at bind time, so it is treated as exposed.
-func loopbackOnly(addr string) bool {
+func LoopbackOnly(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		host = addr // no port present
@@ -720,6 +720,8 @@ func loopbackOnly(addr string) bool {
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
 }
+
+func loopbackOnly(addr string) bool { return LoopbackOnly(addr) }
 
 // RotationEvidenceSnapshot returns cumulative provider-side failures that are safe to
 // use as positive account-rotation evidence. Local child exit codes are intentionally

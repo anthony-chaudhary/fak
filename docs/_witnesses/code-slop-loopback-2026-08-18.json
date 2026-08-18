@@ -1,0 +1,31 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T09:35:16.023910Z",
+  "issue": 7295,
+  "family": "loopback-only bind classification",
+  "paths": [
+    "internal/gateway/tool_routing.go",
+    "cmd/fak/guard_provider.go"
+  ],
+  "test": "go test ./internal/gateway -run '^TestLoopbackOnly' -count=1; go test ./cmd/fak -run '^TestGuardLoopbackOnly' -count=1; fak-dev buildcheck --vet",
+  "test_result": "PASS; broader gateway loopback regex also selected unrelated engine-registration fixture failure",
+  "before": {
+    "score": -71.8,
+    "grade": "F",
+    "slop_debt": 328,
+    "duplication": 328,
+    "weighted_duplication": 211.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -71.2,
+    "grade": "F",
+    "slop_debt": 327,
+    "duplication": 327,
+    "weighted_duplication": 210.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}
