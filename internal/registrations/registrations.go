@@ -11,6 +11,7 @@ package registrations
 import (
 	// Ref backend + MMU page-out codec (must be present so ActiveResolver works).
 	_ "github.com/anthony-chaudhary/fak/internal/blob"
+	_ "github.com/anthony-chaudhary/fak/internal/codetools"
 
 	// Optional DURABLE, on-disk content-addressed store (inert unless FAK_BLOB_DIR
 	// is set). Registers a page-out codec under id "blobfs" so a quarantined/cold
