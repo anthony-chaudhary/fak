@@ -24,6 +24,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/toolproc"
+
+	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
 
 // ConsoleFaultEventSchema stamps one durable console-fault row.
@@ -378,15 +380,7 @@ func AppendConsoleFaultEvent(w io.Writer, ev ConsoleFaultEvent) error {
 	if ev.Schema == "" {
 		ev.Schema = ConsoleFaultEventSchema
 	}
-	if err := ValidateConsoleFaultEvent(ev); err != nil {
-		return err
-	}
-	b, err := json.Marshal(ev)
-	if err != nil {
-		return err
-	}
-	_, err = w.Write(append(b, '\n'))
-	return err
+	return jsonlledger.AppendValidated(w, ev, ValidateConsoleFaultEvent)
 }
 
 // ParseConsoleFaultEvents reads console-fault JSONL fail-closed: unknown

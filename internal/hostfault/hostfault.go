@@ -33,6 +33,8 @@ import (
 	"io"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
 
 // HostFaultEventSchema stamps one durable host-fault row.
@@ -212,15 +214,7 @@ func AppendHostFaultEvent(w io.Writer, ev HostFaultEvent) error {
 	if ev.Schema == "" {
 		ev.Schema = HostFaultEventSchema
 	}
-	if err := ValidateHostFaultEvent(ev); err != nil {
-		return err
-	}
-	b, err := json.Marshal(ev)
-	if err != nil {
-		return err
-	}
-	_, err = w.Write(append(b, '\n'))
-	return err
+	return jsonlledger.AppendValidated(w, ev, ValidateHostFaultEvent)
 }
 
 // ParseHostFaultEvents reads host-fault JSONL fail-closed: unknown fields and

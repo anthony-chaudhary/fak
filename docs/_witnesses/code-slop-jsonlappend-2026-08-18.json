@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T09:18:00.110715Z",
+  "issue": 7291,
+  "family": "validated JSONL event append",
+  "paths": [
+    "internal/jsonlledger/append.go",
+    "internal/jsonlledger/append_test.go",
+    "internal/hostfault/hostfault.go",
+    "internal/toolprocgate/consolefault.go"
+  ],
+  "test": "go test ./internal/jsonlledger ./internal/hostfault ./internal/toolprocgate; fak-dev buildcheck --mine internal/jsonlledger/append.go --vet",
+  "test_result": "PASS after #7292 restored an unrelated modelengine test helper seam",
+  "before": {
+    "score": -73.8,
+    "grade": "F",
+    "slop_debt": 332,
+    "duplication": 332,
+    "weighted_duplication": 213.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -73.3,
+    "grade": "F",
+    "slop_debt": 331,
+    "duplication": 331,
+    "weighted_duplication": 212.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}
