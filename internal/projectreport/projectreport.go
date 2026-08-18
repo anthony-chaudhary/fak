@@ -15,6 +15,7 @@ package projectreport
 
 import (
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/generation"
 	"sort"
 	"strings"
 )
@@ -27,7 +28,7 @@ const unmeasured = "(unset)"
 
 // generationOrder is the board's Generation single-select horizon, in ramp order
 // (project-board-sync.yml maps gen/now|next|second-next|future to these options).
-var generationOrder = []string{"now", "next", "second-next", "future"}
+var generationOrder = generation.Order()
 
 // Item is one board row: an issue and its single-select field values ("" when the
 // field is unset on the board).

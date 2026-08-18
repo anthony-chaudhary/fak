@@ -9,6 +9,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 
+	"github.com/anthony-chaudhary/fak/internal/generation"
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
@@ -561,16 +562,7 @@ func normalizeAchievedMaturity(raw string) string {
 	return ""
 }
 
-func normalizeHandoffGeneration(g string) string {
-	s := strings.ToLower(strings.TrimSpace(g))
-	s = strings.TrimPrefix(s, "gen/")
-	switch s {
-	case "now", "next", "second-next", "future":
-		return "gen/" + s
-	default:
-		return ""
-	}
-}
+func normalizeHandoffGeneration(g string) string { return generation.Label(g) }
 
 func handoffGenerationLabels(g string) []string {
 	gen := normalizeHandoffGeneration(g)

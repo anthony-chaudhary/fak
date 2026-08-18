@@ -1,0 +1,34 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T02:47:03.0380742Z",
+  "issue": 7129,
+  "family": "project generation horizon normalization",
+  "paths": [
+    "internal/generation",
+    "internal/milestonereport/milestonereport.go",
+    "internal/projectreport/ledger.go",
+    "internal/projectreport/projectreport.go",
+    "internal/taskmgr/handoff.go"
+  ],
+  "test": "go test ./internal/generation ./internal/milestonereport ./internal/projectreport ./internal/taskmgr",
+  "test_result": "PASS",
+  "before": {
+    "score": -136.6,
+    "grade": "F",
+    "slop_debt": 408,
+    "duplication": 371,
+    "weighted_duplication": 238.5,
+    "dead_code": 31,
+    "vacuous_tests": 6
+  },
+  "after": {
+    "score": -136.1,
+    "grade": "F",
+    "slop_debt": 407,
+    "duplication": 370,
+    "weighted_duplication": 237.5,
+    "dead_code": 31,
+    "vacuous_tests": 6
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no other hard KPI increased"
+}

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/covmatrix"
+	"github.com/anthony-chaudhary/fak/internal/generation"
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	"github.com/anthony-chaudhary/fak/internal/supportmaturity"
 	"github.com/anthony-chaudhary/fak/internal/trendreport"
@@ -260,18 +261,9 @@ func InterpretEpics(specs []EpicSpec, counts []EpicCounts, runErr string) Epics 
 	return e
 }
 
-var generationOrder = []string{"now", "next", "second-next", "future", "unclassified"}
+var generationOrder = append(generation.Order(), "unclassified")
 
-func normalizeGeneration(g string) string {
-	s := strings.ToLower(strings.TrimSpace(g))
-	s = strings.TrimPrefix(s, "gen/")
-	switch s {
-	case "now", "next", "second-next", "future":
-		return s
-	default:
-		return "unclassified"
-	}
-}
+func normalizeGeneration(g string) string { return generation.Normalize(g) }
 
 func summarizeGenerations(rows []EpicRow) []GenerationRow {
 	by := make(map[string]*GenerationRow, len(generationOrder))

@@ -10,8 +10,8 @@ package projectreport
 
 import (
 	"fmt"
-	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/generation"
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
 
@@ -80,16 +80,7 @@ func RowFromReport(r Report) LedgerRow {
 // vocabulary, treating anything else (a custom option, or the (unset) bucket) as
 // unclassified. It mirrors milestonereport.normalizeGeneration so the two PM surfaces
 // bucket horizons alike.
-func normalizeGeneration(g string) string {
-	s := strings.ToLower(strings.TrimSpace(g))
-	s = strings.TrimPrefix(s, "gen/")
-	switch s {
-	case "now", "next", "second-next", "future":
-		return s
-	default:
-		return "unclassified"
-	}
-}
+func normalizeGeneration(g string) string { return generation.Normalize(g) }
 
 // ParseLedger parses an append-only JSONL ledger, tolerating blank lines and skipping
 // any line that is not a valid dated row (a hand-edit can't crash the reader). Rows are
