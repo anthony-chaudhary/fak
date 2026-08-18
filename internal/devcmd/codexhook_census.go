@@ -45,11 +45,22 @@ type hookCensusReport struct {
 }
 
 type hookObservation struct {
-	Exit    int       `json:"exit"`
-	Verb    string    `json:"verb"`
-	TS      time.Time `json:"ts"`
-	Outcome string    `json:"outcome"`
+	CallID     string    `json:"call_id"`
+	SessionID  string    `json:"session_id"`
+	Workspace  string    `json:"workspace"`
+	Profile    string    `json:"profile"`
+	PhaseState string    `json:"phase_state"`
+	Exit       int       `json:"exit"`
+	Verb       string    `json:"verb"`
+	TS         time.Time `json:"ts"`
+	Outcome    string    `json:"outcome"`
 }
+type dispatchedCall struct {
+	CallID    string
+	SessionID string
+	Workspace string
+}
+
 type rolloutRow struct {
 	Timestamp time.Time `json:"timestamp"`
 	Type      string    `json:"type"`
@@ -119,7 +130,7 @@ func buildHookCensus(home, logHome, workspace, threadID, observations string, si
 	absLog, _ := filepath.Abs(logHome)
 	absObs, _ := filepath.Abs(observations)
 	absWork, _ := filepath.Abs(workspace)
-	calls, err := countCodexDispatches(filepath.Join(absLog, "sessions"), absWork, threadID, now.Add(-since))
+	calls, err := readCodexDispatches(filepath.Join(absLog, "sessions"), absWork, threadID, now.Add(-since))
 	if err != nil {
 		return hookCensusReport{}, err
 	}
@@ -127,16 +138,16 @@ func buildHookCensus(home, logHome, workspace, threadID, observations string, si
 	if err != nil {
 		return hookCensusReport{}, err
 	}
-	r := hookCensusReport{Schema: codexHookCensusSchema, GeneratedAt: now, Window: since.String(), CodexHome: absHome, LogStore: absLog, ObservationStore: absObs, ProfileMatch: samePath(absHome, absLog), DispatchedCalls: calls, DispatchSource: filepath.Join(absLog, "sessions"), NewestReceipt: newest, TelemetryFresh: !newest.IsZero() && now.Sub(newest) <= 5*time.Minute}
-	r.PreToolUse = phaseCounts(calls, receipts["pretool"], absObs)
-	r.PostToolUse = phaseCounts(calls, receipts["posttool"], absObs)
+	r := hookCensusReport{Schema: codexHookCensusSchema, GeneratedAt: now, Window: since.String(), CodexHome: absHome, LogStore: absLog, ObservationStore: absObs, ProfileMatch: samePath(absHome, absLog), DispatchedCalls: len(calls), DispatchSource: filepath.Join(absLog, "sessions"), NewestReceipt: newest, TelemetryFresh: !newest.IsZero() && now.Sub(newest) <= 5*time.Minute}
+	r.PreToolUse = phaseCountsForCalls(calls, receipts["pretool"], absHome, absWork, absObs)
+	r.PostToolUse = phaseCountsForCalls(calls, receipts["posttool"], absHome, absWork, absObs)
 	if !r.TelemetryFresh {
 		r.Reasons = append(r.Reasons, "STALE_TELEMETRY")
 	}
 	if !r.ProfileMatch {
 		r.Reasons = append(r.Reasons, "PROFILE_LOG_STORE_MISMATCH")
 	}
-	if calls == 0 {
+	if len(calls) == 0 {
 		r.Reasons = append(r.Reasons, "DISPATCH_DENOMINATOR_UNOBSERVED")
 	}
 	if r.PreToolUse.Unknown > 0 {
@@ -159,6 +170,48 @@ func samePath(a, b string) bool { return strings.EqualFold(filepath.Clean(a), fi
 func phaseCounts(den int, obs []hookObservation, source string) lifecycleCounts {
 	c := lifecycleCounts{Denominator: den, Source: source}
 	for _, o := range obs {
+		classifyPhase(&c, o)
+	}
+	accounted := c.Succeeded + c.Failed + c.Skipped + c.Disabled
+	if accounted < den {
+		c.Unknown = den - accounted
+	}
+	return c
+}
+
+func phaseCountsForCalls(calls []dispatchedCall, obs []hookObservation, profile, workspace, source string) lifecycleCounts {
+	c := lifecycleCounts{Denominator: len(calls), Source: source}
+	wanted := make(map[string]dispatchedCall, len(calls))
+	for _, call := range calls {
+		wanted[call.SessionID+"\x00"+call.CallID] = call
+	}
+	matched := map[string]bool{}
+	for _, o := range obs {
+		key := o.SessionID + "\x00" + o.CallID
+		call, ok := wanted[key]
+		if !ok || matched[key] || !samePath(o.Workspace, call.Workspace) || !samePath(o.Workspace, workspace) || !samePath(o.Profile, profile) {
+			continue
+		}
+		matched[key] = true
+		classifyPhase(&c, o)
+	}
+	c.Unknown = len(calls) - len(matched)
+	return c
+}
+
+func classifyPhase(c *lifecycleCounts, o hookObservation) {
+	switch strings.ToLower(o.PhaseState) {
+	case "skipped":
+		c.Skipped++
+	case "disabled":
+		c.Disabled++
+	case "failed":
+		c.Attempted++
+		c.Failed++
+	case "succeeded":
+		c.Attempted++
+		c.Succeeded++
+	default:
 		switch strings.ToLower(o.Outcome) {
 		case "skipped":
 			c.Skipped++
@@ -173,14 +226,9 @@ func phaseCounts(den int, obs []hookObservation, source string) lifecycleCounts 
 			}
 		}
 	}
-	accounted := c.Succeeded + c.Failed + c.Skipped + c.Disabled
-	if accounted < den {
-		c.Unknown = den - accounted
-	}
-	return c
 }
-func countCodexDispatches(root, workspace, threadID string, after time.Time) (int, error) {
-	seen := map[string]bool{}
+func readCodexDispatches(root, workspace, threadID string, after time.Time) ([]dispatchedCall, error) {
+	seen := map[string]dispatchedCall{}
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
 			return nil
@@ -195,6 +243,7 @@ func countCodexDispatches(root, workspace, threadID string, after time.Time) (in
 		defer f.Close()
 		var rows []rolloutRow
 		rowWorkspace := ""
+		sessionID := ""
 		s := bufio.NewScanner(f)
 		s.Buffer(make([]byte, 64*1024), 4*1024*1024)
 		for s.Scan() {
@@ -208,10 +257,12 @@ func countCodexDispatches(root, workspace, threadID string, after time.Time) (in
 			}
 			if raw.Type == "session_meta" {
 				var meta struct {
-					CWD string `json:"cwd"`
+					CWD       string `json:"cwd"`
+					SessionID string `json:"session_id"`
 				}
 				_ = json.Unmarshal(raw.Payload, &meta)
 				rowWorkspace = meta.CWD
+				sessionID = meta.SessionID
 			}
 			if raw.Timestamp.Before(after) || raw.Type != "response_item" {
 				continue
@@ -230,15 +281,19 @@ func countCodexDispatches(root, workspace, threadID string, after time.Time) (in
 				if id == "" {
 					id = path + fmt.Sprint(len(seen))
 				}
-				seen[id] = true
+				seen[sessionID+"\x00"+id] = dispatchedCall{CallID: id, SessionID: sessionID, Workspace: rowWorkspace}
 			}
 		}
 		return s.Err()
 	})
 	if os.IsNotExist(err) {
-		return 0, fmt.Errorf("session log store missing: %s", root)
+		return nil, fmt.Errorf("session log store missing: %s", root)
 	}
-	return len(seen), err
+	out := make([]dispatchedCall, 0, len(seen))
+	for _, call := range seen {
+		out = append(out, call)
+	}
+	return out, err
 }
 
 func readHookObservations(path string, after time.Time) (map[string][]hookObservation, time.Time, error) {
