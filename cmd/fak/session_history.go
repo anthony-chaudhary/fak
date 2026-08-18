@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -9,6 +10,9 @@ import (
 )
 
 func runSessionHistory(stdout, stderr io.Writer, args []string) int {
+	if len(args) > 0 && args[0] == "refresh" {
+		return runSessionHistoryRefresh(context.Background(), stdout, stderr, args[1:])
+	}
 	fs := flag.NewFlagSet("session-history", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	index := fs.String("index", "", "path to fak-sessionmine-index/1")

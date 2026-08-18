@@ -24,3 +24,20 @@ fak vcache session-history --index ~/.fak/session-mine/index.json --session code
 ```
 
 The first view returns corpus metrics and sessions ranked by tool errors, recency, then stable ID. Filters recalculate the aggregate over the selected slice. `--session` returns one normalized record and its bounded anonymous trajectory, providing a direct drill-down without reopening or exposing the raw transcript.
+
+
+## Keep the index current
+
+Run one refresh from a scheduler:
+
+```bash
+fak vcache session-history refresh --once
+```
+
+Or let an existing supervisor keep a bounded worker alive:
+
+```bash
+fak vcache session-history refresh --interval 15m --max-runs 96
+```
+
+The worker refreshes immediately before waiting, writes the same atomic privacy-safe index, and emits one `fak-session-history-refresh/1` receipt per run. Receipts contain only counts (`parsed_files`, `reused_files`, sessions, candidates); cancellation is a clean stop. `--index`, provider roots, horizon, support, and candidate limit remain configurable, while the defaults cover the normal local Codex and Claude stores under the user's home directory.

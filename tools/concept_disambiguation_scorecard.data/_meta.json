@@ -4130,6 +4130,11 @@
           "category": "incidental",
           "reason": "JSON metric key local to compact-audit coverage, not a runtime lifecycle state",
           "token": "telemetry_sessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI adapter for the durable history-index refresh worker, not a runtime session lifecycle state",
+          "token": "runSessionHistoryRefresh"
         }
       ],
       "id": "session-runtime",
@@ -4315,6 +4320,7 @@
         "runSessionConPTY",
         "runSessionDiscoveryServe",
         "runSessionHistory",
+        "runSessionHistoryRefresh",
         "runSessionMine",
         "runSessionMove",
         "runSessionMoveAdmit",
