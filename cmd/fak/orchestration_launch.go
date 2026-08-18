@@ -125,7 +125,7 @@ func launchCodexOrchestrationWorkers(home, sessionID, requestedProfile, capabili
 
 func orchestrationWorkerArgs(req orchestrationWorkerLaunchRequest, auditPath string) []string {
 	return []string{
-		"guard", "--provider", "openai-responses", "--audit", auditPath, "--expose-profile", "headless", "--",
+		"guard", "--codex-loop-gate", "off", "--provider", "openai-responses", "--audit", auditPath, "--expose-profile", "headless", "--",
 		"codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "--dangerously-bypass-hook-trust", "--json",
 		"-c", "model=" + strconv.Quote(req.Model), "-c", "model_reasoning_effort=" + strconv.Quote(req.Effort), "-",
 	}

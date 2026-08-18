@@ -80,7 +80,7 @@ func TestOrchestrationLaunchRefusesUnsupportedProRoute(t *testing.T) {
 func TestOrchestrationWorkerArgsPinResolvedSOLRoute(t *testing.T) {
 	args := orchestrationWorkerArgs(orchestrationWorkerLaunchRequest{Model: "gpt-5.6-sol", Effort: "high"}, "audit.jsonl")
 	joined := strings.Join(args, " ")
-	for _, want := range []string{`model="gpt-5.6-sol"`, `model_reasoning_effort="high"`} {
+	for _, want := range []string{"--codex-loop-gate off", `model="gpt-5.6-sol"`, `model_reasoning_effort="high"`} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("worker args missing %q: %q", want, joined)
 		}
