@@ -38,3 +38,8 @@ witness: internal/quantobs/testdata/local_gguf_measured.golden.json
 witness: internal/quantobs/testdata/unsupported_measured_storage.golden.json
 reason: The landed subject says test(quantobs), but the diff adds only the three golden fixture documents consumed by the already-landed TestSchemaGolden and changes no test source. The evidence supports a fixture/documentation claim, not a new test-code claim.
 
+
+commit: 794fb1cada8ad1fc24c57f8249cc6512dd2c5dbc
+type: ci
+witness: .github/workflows/ci.yml
+reason: The landed subject says fix(ci), but the diff changes only the GitHub Actions workflow contract and no test or program source. It replaces deleted Python tool-coverage invocations with their Go command equivalents; the evidence supports a CI configuration claim, not the test claim inferred from the original subject.
