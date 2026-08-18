@@ -1,0 +1,35 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T01:15:31.6257944Z",
+  "issue": 7215,
+  "family": "Windows and Unix process-liveness probes",
+  "paths": [
+    "internal/processalive",
+    "internal/dispatchaudit/alive_windows.go",
+    "internal/dispatchaudit/alive_unix.go",
+    "internal/safecommit/alive_windows.go",
+    "internal/safecommit/alive_unix.go",
+    "internal/procguard/collect_windows_native.go"
+  ],
+  "test": "go test ./internal/processalive ./internal/dispatchaudit ./internal/safecommit ./internal/procguard",
+  "test_result": "PASS",
+  "before": {
+    "score": -138.8,
+    "grade": "F",
+    "slop_debt": 411,
+    "duplication": 373,
+    "weighted_duplication": 240.5,
+    "dead_code": 32,
+    "vacuous_tests": 6
+  },
+  "after": {
+    "score": -138.2,
+    "grade": "F",
+    "slop_debt": 410,
+    "duplication": 372,
+    "weighted_duplication": 239.5,
+    "dead_code": 32,
+    "vacuous_tests": 6
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no other hard KPI increased"
+}

@@ -4,6 +4,7 @@ package procguard
 
 import (
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/processalive"
 	"sort"
 	"strings"
 	"syscall"
@@ -306,19 +307,4 @@ func terminatePIDNative(pid int) (bool, string) {
 	return true, "terminated"
 }
 
-func pidAliveNative(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	h, err := syscall.OpenProcess(processQueryLimitedInformation, false, uint32(pid))
-	if err != nil || h == 0 {
-		return false
-	}
-	defer syscall.CloseHandle(h)
-	var code uint32
-	r, _, _ := procGetExitCodeProcessGuard.Call(uintptr(h), uintptr(unsafe.Pointer(&code)))
-	if r == 0 {
-		return true
-	}
-	return code == stillActiveExitCode
-}
+func pidAliveNative(pid int) bool { return processalive.Check(pid) }

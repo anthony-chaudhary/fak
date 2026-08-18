@@ -2,10 +2,7 @@
 
 package dispatchaudit
 
-import (
-	"syscall"
-	"unsafe"
-)
+import "github.com/anthony-chaudhary/fak/internal/processalive"
 
 // ProcessAlive reports whether a process with the given pid is currently running,
 // WITHOUT spawning anything. OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION) succeeds
@@ -20,29 +17,4 @@ import (
 //
 // Exported because liveness is ONE question with one answer: the dispatch tick's own pid
 // probe (cmd/fak) carried a byte-identical private copy on both platforms.
-func ProcessAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	const (
-		processQueryLimitedInformation = 0x1000
-		stillActive                    = 259
-	)
-	h, err := syscall.OpenProcess(processQueryLimitedInformation, false, uint32(pid))
-	if err != nil || h == 0 {
-		return false
-	}
-	defer syscall.CloseHandle(h)
-
-	var code uint32
-	r, _, _ := procGetExitCodeProcess.Call(uintptr(h), uintptr(unsafe.Pointer(&code)))
-	if r == 0 {
-		return true
-	}
-	return code == stillActive
-}
-
-var (
-	modkernel32            = syscall.NewLazyDLL("kernel32.dll")
-	procGetExitCodeProcess = modkernel32.NewProc("GetExitCodeProcess")
-)
+func ProcessAlive(pid int) bool { return processalive.Check(pid) }

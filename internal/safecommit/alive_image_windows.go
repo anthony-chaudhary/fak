@@ -45,4 +45,4 @@ func processImageName(pid int) (string, bool) {
 	return base, true
 }
 
-var procQueryFullProcessImageNameW = modkernel32.NewProc("QueryFullProcessImageNameW")
+var procQueryFullProcessImageNameW = syscall.NewLazyDLL("kernel32.dll").NewProc("QueryFullProcessImageNameW")
