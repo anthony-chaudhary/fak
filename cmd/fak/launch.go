@@ -146,16 +146,7 @@ func runLaunchChild(stdout, stderr io.Writer, command string, args []string) int
 	return 0
 }
 
-func launchBinDir() (string, error) {
-	if p := strings.TrimSpace(os.Getenv("FAK_LAUNCH_BIN")); p != "" {
-		return p, nil
-	}
-	d, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(d, "fak", "bin"), nil
-}
+func launchBinDir() (string, error) { return launchshim.BinDir() }
 
 func mustLaunchBinDir() string {
 	dir, _ := launchBinDir()

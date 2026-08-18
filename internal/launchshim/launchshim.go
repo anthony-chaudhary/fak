@@ -41,6 +41,18 @@ func Path() (string, error) {
 	return filepath.Join(d, "fak", "launch.json"), nil
 }
 
+// BinDir returns the install directory for launcher shims.
+func BinDir() (string, error) {
+	if path := strings.TrimSpace(os.Getenv("FAK_LAUNCH_BIN")); path != "" {
+		return path, nil
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "fak", "bin"), nil
+}
+
 func Load() (Config, error) {
 	p, err := Path()
 	if err != nil {
