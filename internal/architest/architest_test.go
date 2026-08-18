@@ -628,6 +628,7 @@ var tier = map[string]int{
 	"processalive":          1, // stdlib-only no-spawn process liveness probe shared by operational leaves (#7215).
 	"refid":                 1, // stdlib-only Git-ref segment validation shared by ref-backed operational leaves (#7130).
 	"generation":            1, // stdlib-only project horizon vocabulary shared by planning and handoff leaves (#7129).
+	"markerblock":           1, // stdlib-only generated-document marker extraction and replacement shared by report leaves (#7115).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

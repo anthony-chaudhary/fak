@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/markerblock"
+
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
@@ -102,31 +104,14 @@ func classMeaning(c RefClass) string {
 // Extract returns the generated block (markers inclusive) embedded in doc, or ("", false)
 // when the two markers are not both present in order.
 func Extract(doc string) (string, bool) {
-	i := strings.Index(doc, Begin)
-	if i < 0 {
-		return "", false
-	}
-	j := strings.Index(doc[i:], End)
-	if j < 0 {
-		return "", false
-	}
-	return doc[i : i+j+len(End)], true
+	return markerblock.Extract(doc, Begin, End)
 }
 
 // Splice replaces the block between the markers in doc with a freshly rendered Block(rep)
 // and returns the new doc. It errors when the markers are absent so the generator never
 // guesses where to write.
 func Splice(doc string, rep Report) (string, error) {
-	i := strings.Index(doc, Begin)
-	if i < 0 {
-		return "", fmt.Errorf("begin marker not found: %s", Begin)
-	}
-	j := strings.Index(doc[i:], End)
-	if j < 0 {
-		return "", fmt.Errorf("end marker not found after begin marker: %s", End)
-	}
-	end := i + j + len(End)
-	return doc[:i] + Block(rep) + doc[end:], nil
+	return markerblock.Splice(doc, Begin, End, Block(rep))
 }
 
 // Fresh reports whether the committed doc's embedded block equals the live Block(rep).

@@ -1,0 +1,32 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T03:06:37.111126Z",
+  "issue": 7115,
+  "family": "generated document marker block extraction and splicing",
+  "paths": [
+    "internal/markerblock",
+    "internal/milestonedoc/milestonedoc.go",
+    "internal/workflowaudit/doc.go"
+  ],
+  "test": "go test ./internal/markerblock ./internal/milestonedoc ./internal/workflowaudit",
+  "test_result": "PASS",
+  "before": {
+    "score": -136.1,
+    "grade": "F",
+    "slop_debt": 407,
+    "duplication": 370,
+    "weighted_duplication": 237.5,
+    "dead_code": 31,
+    "vacuous_tests": 6
+  },
+  "after": {
+    "score": -135.6,
+    "grade": "F",
+    "slop_debt": 406,
+    "duplication": 369,
+    "weighted_duplication": 236.5,
+    "dead_code": 31,
+    "vacuous_tests": 6
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no other hard KPI increased"
+}

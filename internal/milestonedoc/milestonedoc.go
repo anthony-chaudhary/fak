@@ -26,6 +26,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/markerblock"
+
 	"github.com/anthony-chaudhary/fak/internal/covmatrix"
 	"github.com/anthony-chaudhary/fak/internal/milestonereport"
 	"github.com/anthony-chaudhary/fak/internal/supportmaturity"
@@ -89,31 +91,14 @@ func Block() string {
 // ("", false) when the two markers are not both present in order. The freshness check
 // compares this against Block().
 func Extract(doc string) (string, bool) {
-	i := strings.Index(doc, Begin)
-	if i < 0 {
-		return "", false
-	}
-	j := strings.Index(doc[i:], End)
-	if j < 0 {
-		return "", false
-	}
-	return doc[i : i+j+len(End)], true
+	return markerblock.Extract(doc, Begin, End)
 }
 
 // Splice replaces the block between the markers in doc with a freshly generated
 // Block() and returns the new doc. It errors when the markers are absent so the
 // generator never guesses where to write.
 func Splice(doc string) (string, error) {
-	i := strings.Index(doc, Begin)
-	if i < 0 {
-		return "", fmt.Errorf("begin marker not found: %s", Begin)
-	}
-	j := strings.Index(doc[i:], End)
-	if j < 0 {
-		return "", fmt.Errorf("end marker not found after begin marker: %s", End)
-	}
-	end := i + j + len(End)
-	return doc[:i] + Block() + doc[end:], nil
+	return markerblock.Splice(doc, Begin, End, Block())
 }
 
 // Fresh reports whether the committed doc's embedded block equals the live Block().
