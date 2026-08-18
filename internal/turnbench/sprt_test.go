@@ -4,6 +4,8 @@ import (
 	"math"
 	"math/rand"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 // gaussianFixture draws n deterministic samples from N(mean, sigma²) off a fixed seed — a
@@ -18,10 +20,10 @@ func gaussianFixture(seed int64, n int, mean, sigma float64) []float64 {
 	return out
 }
 
-// TestInvNormCDF_MatchesKnownQuantiles pins the inverse-normal helper that sizes NFixed and
+// TestNormalQuantileMatchesKnownQuantiles pins the inverse-normal helper that sizes NFixed and
 // the fixed-N z-test: the conventional one-sided critical values must come out right, or every
 // downstream sample-size and verdict is off.
-func TestInvNormCDF_MatchesKnownQuantiles(t *testing.T) {
+func TestNormalQuantileMatchesKnownQuantiles(t *testing.T) {
 	cases := []struct {
 		p, want float64
 	}{
@@ -33,14 +35,14 @@ func TestInvNormCDF_MatchesKnownQuantiles(t *testing.T) {
 		{0.995, 2.575829},
 	}
 	for _, c := range cases {
-		got := invNormCDF(c.p)
+		got := mathx.NormalQuantile(c.p)
 		if math.Abs(got-c.want) > 1e-4 {
-			t.Errorf("invNormCDF(%g) = %.6f, want %.6f", c.p, got, c.want)
+			t.Errorf("mathx.NormalQuantile(%g) = %.6f, want %.6f", c.p, got, c.want)
 		}
 	}
 	// Symmetry: Φ⁻¹(p) == -Φ⁻¹(1-p).
-	if got := invNormCDF(0.1); math.Abs(got+invNormCDF(0.9)) > 1e-9 {
-		t.Errorf("invNormCDF not antisymmetric: invNormCDF(0.1)=%.9f invNormCDF(0.9)=%.9f", got, invNormCDF(0.9))
+	if got := mathx.NormalQuantile(0.1); math.Abs(got+mathx.NormalQuantile(0.9)) > 1e-9 {
+		t.Errorf("NormalQuantile not antisymmetric: mathx.NormalQuantile(0.1)=%.9f mathx.NormalQuantile(0.9)=%.9f", got, mathx.NormalQuantile(0.9))
 	}
 }
 
