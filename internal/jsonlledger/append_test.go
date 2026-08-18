@@ -12,7 +12,9 @@ func TestAppendValidated(t *testing.T) {
 		N int `json:"n"`
 	}{2}, func(v struct {
 		N int `json:"n"`
-	}) error { return nil }); err != nil || out.String() != "{\"n\":2}\n" {
+	}) error {
+		return nil
+	}); err != nil || out.String() != "{\"n\":2}\n" {
 		t.Fatalf("append=%q, %v", out.String(), err)
 	}
 	want := errors.New("bad")
