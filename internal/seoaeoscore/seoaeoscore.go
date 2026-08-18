@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -30,6 +29,8 @@ import (
 	"strings"
 	"sync"
 	"unicode/utf8"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 // SCHEMA is the payload schema tag (matches the python SCHEMA constant).
@@ -440,16 +441,7 @@ func stripFrontMatter(text string) string {
 	return text[end+4:]
 }
 
-func clampScore(score float64) int {
-	r := math.RoundToEven(score)
-	if r < 0 {
-		r = 0
-	}
-	if r > 100 {
-		r = 100
-	}
-	return int(r)
-}
+func clampScore(score float64) int { return mathx.ClampScore(score) }
 
 func round1(x float64) float64 {
 	f, _ := strconv.ParseFloat(strconv.FormatFloat(x, 'f', 1, 64), 64)

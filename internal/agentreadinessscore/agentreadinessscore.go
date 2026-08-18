@@ -42,6 +42,8 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 // Schema is the control-pane schema id (unchanged from the Python tool).
@@ -283,18 +285,6 @@ type Payload struct {
 // ---------------------------------------------------------------------------
 // Small pure helpers (the testable core).
 // ---------------------------------------------------------------------------
-
-// clamp rounds (banker's, matching Python round()) and clamps to [0,100].
-func clamp(score float64) int {
-	r := math.RoundToEven(score)
-	if r < 0 {
-		r = 0
-	}
-	if r > 100 {
-		r = 100
-	}
-	return int(r)
-}
 
 // round1 rounds to one decimal the way Python round(x, 1) does (correctly-rounded,
 // half-to-even) by round-tripping through fixed-precision formatting.
@@ -756,7 +746,7 @@ func kpiAgentsEntrypoint(agentsText string, present bool) KPI {
 	if len(defects) > 0 {
 		detail = strconv.Itoa(len(defects)) + " missing entry-point element(s)"
 	}
-	return KPI{"agents_entrypoint", "discover", clamp(100 - 22*float64(len(defects))), detail, defects, []string{}}
+	return KPI{"agents_entrypoint", "discover", mathx.ClampScore(100 - 22*float64(len(defects))), detail, defects, []string{}}
 }
 
 // kpiCoverage renders the "N of M families are covered" KPI shape: one defect per
@@ -769,7 +759,7 @@ func kpiCoverage(kpi, group string, total int, missing []string, defect func(lab
 	}
 	covered := total - len(missing)
 	return KPI{kpi, group,
-		clamp(100 * float64(covered) / float64(max1(total))),
+		mathx.ClampScore(100 * float64(covered) / float64(max1(total))),
 		strconv.Itoa(covered) + "/" + strconv.Itoa(total) + " " + noun,
 		defects, []string{}}
 }
@@ -795,7 +785,7 @@ func kpiLLMSMap(llmsPresent, llmsFullPresent bool) KPI {
 	if len(defects) > 0 {
 		detail = "no " + llmsFile
 	}
-	return KPI{"llms_map", "discover", clamp(100 - 60*float64(len(defects)) - 8*float64(len(soft))), detail, defects, soft}
+	return KPI{"llms_map", "discover", mathx.ClampScore(100 - 60*float64(len(defects)) - 8*float64(len(soft))), detail, defects, soft}
 }
 
 func kpiIdentityStatement(presentIn, missingFrom []string) KPI {
@@ -829,7 +819,7 @@ func kpiEntryLinksResolve(dead []string) KPI {
 	if len(defects) > 0 {
 		detail = strconv.Itoa(len(defects)) + " dead orientation link(s)"
 	}
-	return KPI{"entry_links_resolve", "discover", clamp(100 - 14*float64(len(defects))), detail, defects, []string{}}
+	return KPI{"entry_links_resolve", "discover", mathx.ClampScore(100 - 14*float64(len(defects))), detail, defects, []string{}}
 }
 
 // kpiPresence renders the "the one runnable thing is either there or it is not" KPI
@@ -890,7 +880,7 @@ func kpiHonestyLedger(present bool, untagged []string) KPI {
 	if present {
 		detail = claimsFile + " present, " + strconv.Itoa(len(untagged)) + " untagged claim(s)"
 	}
-	return KPI{"honesty_ledger", "adopt", clamp(base - 12*float64(nPresentDefects)), detail, defects, soft}
+	return KPI{"honesty_ledger", "adopt", mathx.ClampScore(base - 12*float64(nPresentDefects)), detail, defects, soft}
 }
 
 func kpiIntegrationRecipes(missing []string) KPI {
@@ -907,7 +897,7 @@ func kpiCodexRecipeCurrent(gaps []string) KPI {
 	if n > 0 {
 		detail = strconv.Itoa(n) + " Codex currentness gap(s)"
 	}
-	return KPI{"codex_recipe_current", "adopt", clamp(100 - 15*float64(n)), detail, gaps, []string{}}
+	return KPI{"codex_recipe_current", "adopt", mathx.ClampScore(100 - 15*float64(n)), detail, gaps, []string{}}
 }
 
 func kpiExtensionScaffold(scaffold, extending bool) KPI {
@@ -922,7 +912,7 @@ func kpiExtensionScaffold(scaffold, extending bool) KPI {
 	if len(defects) > 0 {
 		detail = strconv.Itoa(len(defects)) + " missing extension affordance(s)"
 	}
-	return KPI{"extension_scaffold", "build", clamp(100 - 50*float64(len(defects))), detail, defects, []string{}}
+	return KPI{"extension_scaffold", "build", mathx.ClampScore(100 - 50*float64(len(defects))), detail, defects, []string{}}
 }
 
 func kpiGuardrailsSurfaced(missing []string) KPI {
@@ -932,7 +922,7 @@ func kpiGuardrailsSurfaced(missing []string) KPI {
 	}
 	covered := len(guardrailClusters) - len(missing)
 	return KPI{"guardrails_surfaced", "build",
-		clamp(100 * float64(covered) / float64(max1(len(guardrailClusters)))),
+		mathx.ClampScore(100 * float64(covered) / float64(max1(len(guardrailClusters)))),
 		strconv.Itoa(covered) + "/" + strconv.Itoa(len(guardrailClusters)) + " enforced rules surfaced up front",
 		defects, []string{}}
 }
@@ -951,7 +941,7 @@ func kpiContributorContract(contributing, linked, greenGate bool) KPI {
 	if len(defects) > 0 {
 		detail = strconv.Itoa(len(defects)) + " missing contract/feedback affordance(s)"
 	}
-	return KPI{"contributor_contract", "build", clamp(100 - 30*float64(len(defects))), detail, defects, []string{}}
+	return KPI{"contributor_contract", "build", mathx.ClampScore(100 - 30*float64(len(defects))), detail, defects, []string{}}
 }
 
 func kpiMachineConsumable(jsonTools, totalTools int, missing []string) KPI {
@@ -971,7 +961,7 @@ func kpiMachineConsumable(jsonTools, totalTools int, missing []string) KPI {
 	if totalTools != 0 {
 		detail = strconv.Itoa(jsonTools) + "/" + strconv.Itoa(totalTools) + " measurement tools expose --json (" + pctString(rate) + ")"
 	}
-	return KPI{"machine_consumable", "build", clamp(math.RoundToEven(100 * rate)), detail, []string{}, soft}
+	return KPI{"machine_consumable", "build", mathx.ClampScore(math.RoundToEven(100 * rate)), detail, []string{}, soft}
 }
 
 func kpiCommandVerbsResolve(unknown []string) KPI {
@@ -984,7 +974,7 @@ func kpiCommandVerbsResolve(unknown []string) KPI {
 	if n > 0 {
 		detail = strconv.Itoa(n) + " pasted `fak <verb>` command(s) don't resolve to a dispatched verb"
 	}
-	return KPI{"command_verbs_resolve", "adopt", clamp(100 - 20*float64(n)), detail, defects, []string{}}
+	return KPI{"command_verbs_resolve", "adopt", mathx.ClampScore(100 - 20*float64(n)), detail, defects, []string{}}
 }
 
 func kpiRecipeLinksResolve(dead []string) KPI {
@@ -998,7 +988,7 @@ func kpiRecipeLinksResolve(dead []string) KPI {
 	if len(defects) > 0 {
 		detail = strconv.Itoa(len(defects)) + " dead link(s) inside the integration recipes"
 	}
-	return KPI{"recipe_links_resolve", "discover", clamp(100 - 12*float64(len(defects))), detail, defects, []string{}}
+	return KPI{"recipe_links_resolve", "discover", mathx.ClampScore(100 - 12*float64(len(defects))), detail, defects, []string{}}
 }
 
 func kpiAgentConfigValid(bad []string) KPI {
@@ -1007,7 +997,7 @@ func kpiAgentConfigValid(bad []string) KPI {
 	if len(defects) > 0 {
 		detail = strconv.Itoa(len(defects)) + " agent-config integrity defect(s)"
 	}
-	return KPI{"agent_config_valid", "discover", clamp(100 - 34*float64(len(defects))), detail, defects, []string{}}
+	return KPI{"agent_config_valid", "discover", mathx.ClampScore(100 - 34*float64(len(defects))), detail, defects, []string{}}
 }
 
 func kpiFencedPathsResolve(badPaths []string) KPI {
@@ -1020,7 +1010,7 @@ func kpiFencedPathsResolve(badPaths []string) KPI {
 	if n > 0 {
 		detail = strconv.Itoa(n) + " fenced command path(s) don't resolve from a clean clone"
 	}
-	return KPI{"fenced_paths_resolve", "adopt", clamp(100 - 10*float64(n)), detail, defects, []string{}}
+	return KPI{"fenced_paths_resolve", "adopt", mathx.ClampScore(100 - 10*float64(n)), detail, defects, []string{}}
 }
 
 func kpiFirstCommandRuns(found, policyOK bool, policyRef string, needsKey bool) KPI {
@@ -1042,7 +1032,7 @@ func kpiFirstCommandRuns(found, policyOK bool, policyRef string, needsKey bool) 
 	if len(defects) > 0 {
 		detail = strconv.Itoa(len(defects)) + " runnability gap(s) in the first command"
 	}
-	return KPI{"first_command_runs", "adopt", clamp(100 - 50*float64(len(defects))), detail, defects, []string{}}
+	return KPI{"first_command_runs", "adopt", mathx.ClampScore(100 - 50*float64(len(defects))), detail, defects, []string{}}
 }
 
 func kpiPlatformGuidanceConsistent(sellsMake, hasBridge bool) KPI {
@@ -1068,7 +1058,7 @@ func kpiRefusalRecoveryMapped(unmapped []string, total int) KPI {
 	score := 100
 	detail := "no dos.toml [reasons.*] parsed — abstain"
 	if total != 0 {
-		score = clamp(100 * float64(mapped) / float64(total))
+		score = mathx.ClampScore(100 * float64(mapped) / float64(total))
 		detail = strconv.Itoa(mapped) + "/" + strconv.Itoa(total) + " kernel refusal tokens have an agent-facing recovery"
 	}
 	return KPI{"refusal_recovery_mapped", "build", score, detail, defects, []string{}}
@@ -1086,7 +1076,7 @@ func kpiQuickstartSuccessSignal(found, hasSignal bool) KPI {
 	if len(defects) > 0 {
 		detail = "the proof block names no expected outcome"
 	}
-	return KPI{"quickstart_success_signal", "adopt", clamp(100 - 60*float64(len(defects))), detail, defects, []string{}}
+	return KPI{"quickstart_success_signal", "adopt", mathx.ClampScore(100 - 60*float64(len(defects))), detail, defects, []string{}}
 }
 
 func kpiToolchainPinned(hasDirective, docNamed bool) KPI {
@@ -1101,7 +1091,7 @@ func kpiToolchainPinned(hasDirective, docNamed bool) KPI {
 	if len(defects) > 0 {
 		detail = strconv.Itoa(len(defects)) + " toolchain-pin gap(s)"
 	}
-	return KPI{"toolchain_pinned", "adopt", clamp(100 - 50*float64(len(defects))), detail, defects, []string{}}
+	return KPI{"toolchain_pinned", "adopt", mathx.ClampScore(100 - 50*float64(len(defects))), detail, defects, []string{}}
 }
 
 // ---------------------------------------------------------------------------
