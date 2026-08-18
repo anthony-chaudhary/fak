@@ -1,7 +1,7 @@
 {
   "schema": "fak-disambiguation-index/1",
-  "source_revision": "sha256:446f96300dbf61dc1fc9a2560ab9df69293fc34fc001a08f4541ee8991f2b251",
-  "entry_count": 6,
+  "source_revision": "sha256:3e4f241248d956d4619c90b8fbea5186dbff74538ed871d64cc26f32a798fa9f",
+  "entry_count": 11,
   "entries": [
     {
       "schema": "fak-disambiguation-entry/1",
@@ -51,6 +51,55 @@
     {
       "schema": "fak-disambiguation-entry/1",
       "identity": {
+        "canonical_term": "agent session",
+        "aliases": [
+          "session"
+        ]
+      },
+      "definition": "A durable, addressable agent execution record carrying drive state and pointers without storing the provider transcript.",
+      "contrasts": [
+        {
+          "canonical_term": "session resume",
+          "explanation": "The session is the durable execution identity; resume is one transition that re-admits a paused session.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "runtime",
+        "value": "internal/session"
+      },
+      "owner": {
+        "leaf": "session",
+        "lane": "session"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/session/descriptor.go",
+          "revision": "session-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-session-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "Descriptor"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "session-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
         "canonical_term": "compute kernel",
         "aliases": []
       },
@@ -85,6 +134,55 @@
         "reason_code": "SOURCE_CURRENT",
         "checked_at": "2026-08-11T00:00:00Z",
         "probe": "public-seed/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "context compaction",
+        "aliases": [
+          "compaction"
+        ]
+      },
+      "definition": "A context-window event that replaces prior history so resident input falls while cumulative usage and transcript bytes may continue rising.",
+      "contrasts": [
+        {
+          "canonical_term": "recovery checkpoint",
+          "explanation": "Compaction reduces resident model context; a recovery checkpoint preserves typed continuation state for rerouting or repair.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "runtime",
+        "value": "codex-context"
+      },
+      "owner": {
+        "leaf": "session",
+        "lane": "session"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/session/compactaudit.go",
+          "revision": "session-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-session-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "CompactSessionReport"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "session-source/1"
       },
       "lifecycle": {
         "class": "current",
@@ -265,6 +363,171 @@
         "reason_code": "SOURCE_CURRENT",
         "checked_at": "2026-08-11T00:00:00Z",
         "probe": "public-seed/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "recovery checkpoint",
+        "aliases": [
+          "checkpoint"
+        ]
+      },
+      "definition": "A typed snapshot of goal, pending turn, continuation, generation, and state revision emitted when session recovery is requested.",
+      "contrasts": [
+        {
+          "canonical_term": "context compaction",
+          "explanation": "The checkpoint preserves control-plane continuation state; compaction rewrites model-visible history to reduce resident context.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "session recovery",
+          "explanation": "The checkpoint is evidence and continuation data for recovery, not the repair or reroute action itself.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "runtime",
+        "value": "internal/session"
+      },
+      "owner": {
+        "leaf": "session",
+        "lane": "session"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/session/cumulative_envelope.go",
+          "revision": "session-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-session-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "SessionRecoveryCheckpoint"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "session-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "session recovery",
+        "aliases": [
+          "recovery"
+        ]
+      },
+      "definition": "A bounded repair or reroute response when persisted or cumulative session state cannot safely continue unchanged.",
+      "contrasts": [
+        {
+          "canonical_term": "recovery checkpoint",
+          "explanation": "Recovery is the repair action; a recovery checkpoint is the structured continuation state handed to that action.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "session resume",
+          "explanation": "Recovery responds to corrupt or over-envelope state; resume merely re-admits a valid paused session.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "runtime",
+        "value": "internal/session"
+      },
+      "owner": {
+        "leaf": "session",
+        "lane": "session"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/session/quarantine.go",
+          "revision": "session-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-session-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "RecoveryEvent"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "session-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "session resume",
+        "aliases": [
+          "resume"
+        ]
+      },
+      "definition": "The paused-to-running boundary that re-admits an existing session using warm KV when available or a safe cold re-prefill.",
+      "contrasts": [
+        {
+          "canonical_term": "agent session",
+          "explanation": "Resume changes the run state of an existing session; it is not the session identity or transcript.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "session recovery",
+          "explanation": "Resume continues a valid paused session; recovery repairs or reroutes state that cannot safely continue as-is.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "runtime",
+        "value": "internal/session"
+      },
+      "owner": {
+        "leaf": "session",
+        "lane": "session"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/session/resume.go",
+          "revision": "session-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-session-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "ResumeMode"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "session-source/1"
       },
       "lifecycle": {
         "class": "current",

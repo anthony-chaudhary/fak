@@ -5,11 +5,16 @@
 | Canonical term | Scope | Definition | Query |
 |---|---|---|---|
 | [agent kernel](#agent-kernel-product-fak) | `product:fak` | The fak management boundary that governs model traffic, tool effects, context, and recovery. | `fak disambiguation query "agent kernel"` |
+| [agent session](#agent-session-runtime-internal-session) | `runtime:internal/session` | A durable, addressable agent execution record carrying drive state and pointers without storing the provider transcript. | `fak disambiguation query "agent session"` |
 | [compute kernel](#compute-kernel-computing-processor) | `computing:processor` | An arithmetic routine executed by a processor. | `fak disambiguation query "compute kernel"` |
+| [context compaction](#context-compaction-runtime-codex-context) | `runtime:codex-context` | A context-window event that replaces prior history so resident input falls while cumulative usage and transcript bytes may continue rising. | `fak disambiguation query "context compaction"` |
 | [disambiguation package](#disambiguation-package-package-internal-disambiguation) | `package:internal/disambiguation` | The internal/disambiguation package, named as a contrast target for the CLI-scoped kernel entry. | `fak disambiguation query "disambiguation package"` |
 | [fak CLI kernel](#fak-cli-kernel-cli-fak) | `cli:fak` | The fak command-line product surface, named as a contrast target for the package-scoped kernel entry. | `fak disambiguation query "fak CLI kernel"` |
 | [kernel](#kernel-cli-fak) | `cli:fak` | The fak command-line product surface for operating the agent kernel. | `fak disambiguation query --scope-kind cli --scope-value fak "kernel"` |
 | [kernel](#kernel-package-internal-disambiguation) | `package:internal/disambiguation` | The internal/disambiguation Go package that validates and queries public terminology records. | `fak disambiguation query --scope-kind package --scope-value internal/disambiguation "kernel"` |
+| [recovery checkpoint](#recovery-checkpoint-runtime-internal-session) | `runtime:internal/session` | A typed snapshot of goal, pending turn, continuation, generation, and state revision emitted when session recovery is requested. | `fak disambiguation query "recovery checkpoint"` |
+| [session recovery](#session-recovery-runtime-internal-session) | `runtime:internal/session` | A bounded repair or reroute response when persisted or cumulative session state cannot safely continue unchanged. | `fak disambiguation query "session recovery"` |
+| [session resume](#session-resume-runtime-internal-session) | `runtime:internal/session` | The paused-to-running boundary that re-admits an existing session using warm KV when available or a safe cold re-prefill. | `fak disambiguation query "session resume"` |
 
 <a id="agent-kernel-product-fak"></a>
 ## agent kernel — `product:fak`
@@ -25,6 +30,20 @@ The fak management boundary that governs model traffic, tool effects, context, a
 - **Do not conflate with:**
   - [compute kernel](contrast-index.md#compute-kernel) — An arithmetic routine executed by a processor; it does not govern an agent's tool effects.
 
+<a id="agent-session-runtime-internal-session"></a>
+## agent session — `runtime:internal/session`
+
+A durable, addressable agent execution record carrying drive state and pointers without storing the provider transcript.
+
+- **Query:** `fak disambiguation query "agent session"`
+- **Owner:** leaf `session`, lane `session`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `session`
+- **Sources:**
+  - `internal/session/descriptor.go` — `go-source` at `session-source/1`
+- **Do not conflate with:**
+  - [session resume](contrast-index.md#session-resume) — The session is the durable execution identity; resume is one transition that re-admits a paused session.
+
 <a id="compute-kernel-computing-processor"></a>
 ## compute kernel — `computing:processor`
 
@@ -37,6 +56,20 @@ An arithmetic routine executed by a processor.
   - `README.md#how-it-works` — `document` at `692e4b57d0`
 - **Do not conflate with:**
   - [agent kernel](contrast-index.md#agent-kernel) — The fak management boundary governs agent behavior; it is not a processor arithmetic routine.
+
+<a id="context-compaction-runtime-codex-context"></a>
+## context compaction — `runtime:codex-context`
+
+A context-window event that replaces prior history so resident input falls while cumulative usage and transcript bytes may continue rising.
+
+- **Query:** `fak disambiguation query "context compaction"`
+- **Owner:** leaf `session`, lane `session`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `compaction`
+- **Sources:**
+  - `internal/session/compactaudit.go` — `go-source` at `session-source/1`
+- **Do not conflate with:**
+  - [recovery checkpoint](contrast-index.md#recovery-checkpoint) — Compaction reduces resident model context; a recovery checkpoint preserves typed continuation state for rerouting or repair.
 
 <a id="disambiguation-package-package-internal-disambiguation"></a>
 ## disambiguation package — `package:internal/disambiguation`
@@ -89,3 +122,48 @@ The internal/disambiguation Go package that validates and queries public termino
   - `internal/disambiguation/README.md` — `document` at `public-seed/1`
 - **Do not conflate with:**
   - [fak CLI kernel](contrast-index.md#fak-cli-kernel) — The package API is not the fak command-line product surface.
+
+<a id="recovery-checkpoint-runtime-internal-session"></a>
+## recovery checkpoint — `runtime:internal/session`
+
+A typed snapshot of goal, pending turn, continuation, generation, and state revision emitted when session recovery is requested.
+
+- **Query:** `fak disambiguation query "recovery checkpoint"`
+- **Owner:** leaf `session`, lane `session`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `checkpoint`
+- **Sources:**
+  - `internal/session/cumulative_envelope.go` — `go-source` at `session-source/1`
+- **Do not conflate with:**
+  - [context compaction](contrast-index.md#context-compaction) — The checkpoint preserves control-plane continuation state; compaction rewrites model-visible history to reduce resident context.
+  - [session recovery](contrast-index.md#session-recovery) — The checkpoint is evidence and continuation data for recovery, not the repair or reroute action itself.
+
+<a id="session-recovery-runtime-internal-session"></a>
+## session recovery — `runtime:internal/session`
+
+A bounded repair or reroute response when persisted or cumulative session state cannot safely continue unchanged.
+
+- **Query:** `fak disambiguation query "session recovery"`
+- **Owner:** leaf `session`, lane `session`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `recovery`
+- **Sources:**
+  - `internal/session/quarantine.go` — `go-source` at `session-source/1`
+- **Do not conflate with:**
+  - [recovery checkpoint](contrast-index.md#recovery-checkpoint) — Recovery is the repair action; a recovery checkpoint is the structured continuation state handed to that action.
+  - [session resume](contrast-index.md#session-resume) — Recovery responds to corrupt or over-envelope state; resume merely re-admits a valid paused session.
+
+<a id="session-resume-runtime-internal-session"></a>
+## session resume — `runtime:internal/session`
+
+The paused-to-running boundary that re-admits an existing session using warm KV when available or a safe cold re-prefill.
+
+- **Query:** `fak disambiguation query "session resume"`
+- **Owner:** leaf `session`, lane `session`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `resume`
+- **Sources:**
+  - `internal/session/resume.go` — `go-source` at `session-source/1`
+- **Do not conflate with:**
+  - [agent session](contrast-index.md#agent-session) — Resume changes the run state of an existing session; it is not the session identity or transcript.
+  - [session recovery](contrast-index.md#session-recovery) — Resume continues a valid paused session; recovery repairs or reroutes state that cannot safely continue as-is.

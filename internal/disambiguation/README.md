@@ -335,3 +335,25 @@ fak disambiguation reverse --self-test --json
 ```
 
 Supported kinds are exact and closed: `source-path` matches a source locator (including the path portion before a document anchor), while `symbol`, `cli-token`, and `reason-code` match typed public references. Freshness reason codes are also indexed. A locator may return multiple evidenced owners; unknown input returns `reverse locator not found` with an empty `matches` array rather than fabricating an owner.
+
+## Session-family terminology (#6314)
+
+The canonical index separates five related runtime concepts that must not collapse into a generic “session state” label:
+
+| Input term | Canonical identity | Mechanism |
+|---|---|---|
+| `session` | `agent session` | Durable execution identity and drive-state pointers; not the provider transcript. |
+| `resume` | `session resume` | Re-admit a valid paused session, warm when KV can be reattached and safely cold otherwise. |
+| `recovery` | `session recovery` | Repair or reroute state that cannot safely continue unchanged. |
+| `compaction` | `context compaction` | Replace model-visible history so resident context falls; cumulative usage can still rise. |
+| `checkpoint` | `recovery checkpoint` | Preserve typed continuation state for a recovery action. |
+
+The public witness resolves every input and checks required forbidden pairs in both directions:
+
+```text
+fak disambiguation session-source-self-test --json
+fak disambiguation query resume
+fak disambiguation query compaction
+```
+
+Two conflations are explicitly forbidden: **resume is not recovery**, because a paused but valid session does not require repair; and **compaction is not a recovery checkpoint**, because rewriting model context is not the same operation as preserving control-plane continuation state. All records cite public Go symbols under `internal/session`; no private transcript or secondary terminology writer is involved.

@@ -4135,6 +4135,36 @@
           "category": "incidental",
           "reason": "CLI adapter for the durable history-index refresh worker, not a runtime session lifecycle state",
           "token": "runSessionHistoryRefresh"
+        },
+        {
+          "category": "incidental",
+          "reason": "Public terminology fixture plumbing for the session-source index, not a distinct session runtime mechanism",
+          "token": "runDisambiguationSessionSourceSelfTest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Public terminology fixture plumbing for the session-source index, not a distinct session runtime mechanism",
+          "token": "SessionSourceSelfTestSchemaVersion"
+        },
+        {
+          "category": "incidental",
+          "reason": "Public terminology fixture plumbing for the session-source index, not a distinct session runtime mechanism",
+          "token": "SessionSourceResolution"
+        },
+        {
+          "category": "incidental",
+          "reason": "Public terminology fixture plumbing for the session-source index, not a distinct session runtime mechanism",
+          "token": "SessionSourceSelfTestReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Public terminology fixture plumbing for the session-source index, not a distinct session runtime mechanism",
+          "token": "RunSessionSourceSelfTest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Public terminology fixture plumbing for the session-source index, not a distinct session runtime mechanism",
+          "token": "requiredForbiddenPair"
         }
       ],
       "id": "session-runtime",
@@ -4172,6 +4202,7 @@
         "RetiredSessions",
         "RevokeSessionDiscovery",
         "RunSessionDiag",
+        "RunSessionSourceSelfTest",
         "SESSION_CLIENT_UNAVAILABLE",
         "SESSION_NOT_FOUND",
         "SESSION_OPENED",
@@ -4218,6 +4249,9 @@
         "SessionPlacement",
         "SessionRecoveryScenarios",
         "SessionShellErrorRate",
+        "SessionSourceResolution",
+        "SessionSourceSelfTestReport",
+        "SessionSourceSelfTestSchemaVersion",
         "SessionSupport",
         "SessionTerminalView",
         "SetSessionAffinity",
@@ -4309,10 +4343,12 @@
         "repairMalformedLooseSessionRef",
         "reportFromSessions",
         "repository-read",
+        "requiredForbiddenPair",
         "requireminimaxsession",
         "resolveServeSessionState",
         "restartfreshsession",
         "rotateSessionDiscoveryEpoch",
+        "runDisambiguationSessionSourceSelfTest",
         "runFilterToolScheduler",
         "runSessionAuditBatch",
         "runSessionAuditCodex",
@@ -6964,12 +7000,23 @@
           "category": "incidental",
           "reason": "Local numeric bucketing helper for replay observability, not a managed-context subsystem",
           "token": "contextBucket"
+        },
+        {
+          "category": "incidental",
+          "reason": "Self-test result field proving context compaction is distinct from recovery checkpoint state",
+          "token": "CompactionCheckpointConflation"
+        },
+        {
+          "category": "incidental",
+          "reason": "Self-test result field proving context compaction is distinct from recovery checkpoint state",
+          "token": "compaction_checkpoint_conflation_rejected"
         }
       ],
       "id": "context-ctx",
       "ignore": [
         "AffinityFromContext",
         "COMPACTION_THRASH",
+        "CompactionCheckpointConflation",
         "CompactionContract",
         "ContextKey",
         "ContextLimit",
@@ -7003,6 +7050,7 @@
         "compactionThrashRefusalBody",
         "compactionThrashStreak",
         "compactionWitness",
+        "compaction_checkpoint_conflation_rejected",
         "compactions",
         "context",
         "contextBucket",

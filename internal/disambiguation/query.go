@@ -198,6 +198,60 @@ var publicEntries = []Entry{
 		Sources:   []SourceWitness{{Kind: "go-source", Locator: "internal/disambiguation/query.go", Revision: "public-seed/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-seed", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "Query"}}},
 		Freshness: Freshness{Verdict: "fresh", ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-11T00:00:00Z", Probe: "public-seed/1"}, Lifecycle: Lifecycle{Class: "current", Rollout: "on"},
 	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "agent session", Aliases: []string{"session"}},
+		Definition: "A durable, addressable agent execution record carrying drive state and pointers without storing the provider transcript.",
+		Contrasts:  []Contrast{{CanonicalTerm: "session resume", Explanation: "The session is the durable execution identity; resume is one transition that re-admits a paused session.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)}},
+		Scope:      Scope{Kind: "runtime", Value: "internal/session"}, Owner: Owner{Leaf: "session", Lane: "session"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/session/descriptor.go", Revision: "session-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-session-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "Descriptor"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "session-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "session resume", Aliases: []string{"resume"}},
+		Definition: "The paused-to-running boundary that re-admits an existing session using warm KV when available or a safe cold re-prefill.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "agent session", Explanation: "Resume changes the run state of an existing session; it is not the session identity or transcript.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "session recovery", Explanation: "Resume continues a valid paused session; recovery repairs or reroutes state that cannot safely continue as-is.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "runtime", Value: "internal/session"}, Owner: Owner{Leaf: "session", Lane: "session"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/session/resume.go", Revision: "session-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-session-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "ResumeMode"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "session-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "session recovery", Aliases: []string{"recovery"}},
+		Definition: "A bounded repair or reroute response when persisted or cumulative session state cannot safely continue unchanged.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "session resume", Explanation: "Recovery responds to corrupt or over-envelope state; resume merely re-admits a valid paused session.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "recovery checkpoint", Explanation: "Recovery is the repair action; a recovery checkpoint is the structured continuation state handed to that action.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "runtime", Value: "internal/session"}, Owner: Owner{Leaf: "session", Lane: "session"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/session/quarantine.go", Revision: "session-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-session-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "RecoveryEvent"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "session-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "context compaction", Aliases: []string{"compaction"}},
+		Definition: "A context-window event that replaces prior history so resident input falls while cumulative usage and transcript bytes may continue rising.",
+		Contrasts:  []Contrast{{CanonicalTerm: "recovery checkpoint", Explanation: "Compaction reduces resident model context; a recovery checkpoint preserves typed continuation state for rerouting or repair.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)}},
+		Scope:      Scope{Kind: "runtime", Value: "codex-context"}, Owner: Owner{Leaf: "session", Lane: "session"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/session/compactaudit.go", Revision: "session-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-session-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "CompactSessionReport"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "session-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "recovery checkpoint", Aliases: []string{"checkpoint"}},
+		Definition: "A typed snapshot of goal, pending turn, continuation, generation, and state revision emitted when session recovery is requested.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "context compaction", Explanation: "The checkpoint preserves control-plane continuation state; compaction rewrites model-visible history to reduce resident context.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "session recovery", Explanation: "The checkpoint is evidence and continuation data for recovery, not the repair or reroute action itself.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "runtime", Value: "internal/session"}, Owner: Owner{Leaf: "session", Lane: "session"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/session/cumulative_envelope.go", Revision: "session-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-session-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "SessionRecoveryCheckpoint"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "session-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
 }
 
 var publicIndex = mustNewIndex(publicEntries)

@@ -9,12 +9,26 @@
 - **Contrasts:**
   - **compute kernel:** An arithmetic routine executed by a processor; it does not govern an agent's tool effects.
 
+<a id="agent-session"></a>
+## agent session
+
+- **Identity:** [agent session — `runtime:internal/session`](canonical-terms.md#agent-session-runtime-internal-session); query with `fak disambiguation query "agent session"`
+- **Contrasts:**
+  - **session resume:** The session is the durable execution identity; resume is one transition that re-admits a paused session.
+
 <a id="compute-kernel"></a>
 ## compute kernel
 
 - **Identity:** [compute kernel — `computing:processor`](canonical-terms.md#compute-kernel-computing-processor); query with `fak disambiguation query "compute kernel"`
 - **Contrasts:**
   - **agent kernel:** The fak management boundary governs agent behavior; it is not a processor arithmetic routine.
+
+<a id="context-compaction"></a>
+## context compaction
+
+- **Identity:** [context compaction — `runtime:codex-context`](canonical-terms.md#context-compaction-runtime-codex-context); query with `fak disambiguation query "context compaction"`
+- **Contrasts:**
+  - **recovery checkpoint:** Compaction reduces resident model context; a recovery checkpoint preserves typed continuation state for rerouting or repair.
 
 <a id="disambiguation-package"></a>
 ## disambiguation package
@@ -38,3 +52,27 @@
 - **Contrasts:**
   - **disambiguation package:** The command-line product surface is not the internal Go package API.
   - **fak CLI kernel:** The package API is not the fak command-line product surface.
+
+<a id="recovery-checkpoint"></a>
+## recovery checkpoint
+
+- **Identity:** [recovery checkpoint — `runtime:internal/session`](canonical-terms.md#recovery-checkpoint-runtime-internal-session); query with `fak disambiguation query "recovery checkpoint"`
+- **Contrasts:**
+  - **context compaction:** The checkpoint preserves control-plane continuation state; compaction rewrites model-visible history to reduce resident context.
+  - **session recovery:** The checkpoint is evidence and continuation data for recovery, not the repair or reroute action itself.
+
+<a id="session-recovery"></a>
+## session recovery
+
+- **Identity:** [session recovery — `runtime:internal/session`](canonical-terms.md#session-recovery-runtime-internal-session); query with `fak disambiguation query "session recovery"`
+- **Contrasts:**
+  - **recovery checkpoint:** Recovery is the repair action; a recovery checkpoint is the structured continuation state handed to that action.
+  - **session resume:** Recovery responds to corrupt or over-envelope state; resume merely re-admits a valid paused session.
+
+<a id="session-resume"></a>
+## session resume
+
+- **Identity:** [session resume — `runtime:internal/session`](canonical-terms.md#session-resume-runtime-internal-session); query with `fak disambiguation query "session resume"`
+- **Contrasts:**
+  - **agent session:** Resume changes the run state of an existing session; it is not the session identity or transcript.
+  - **session recovery:** Resume continues a valid paused session; recovery repairs or reroutes state that cannot safely continue as-is.
