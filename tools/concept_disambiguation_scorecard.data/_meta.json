@@ -4115,6 +4115,16 @@
           "category": "incidental",
           "reason": "Pure session-miner report assembly helper, not a runtime session lifecycle concept",
           "token": "reportFromSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Aggregate field name local to compact-audit telemetry coverage; not a session lifecycle concept",
+          "token": "MeasuredSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON metric key local to compact-audit telemetry coverage; not a session lifecycle concept",
+          "token": "telemetry_sessions"
         }
       ],
       "id": "session-runtime",
@@ -4134,6 +4144,7 @@
         "HeldScheduleReportSchema",
         "ITERM_SESSION_ID",
         "MalformedSessionRef",
+        "MeasuredSessions",
         "ModelSlotsDuringToolWait",
         "MoveSession",
         "NarrowsSessions",
@@ -4384,6 +4395,7 @@
         "tailTrial",
         "taskQuality",
         "taskSufficient",
+        "telemetry_sessions",
         "terminal_count",
         "terminal_sessions",
         "thrashSessions",
@@ -8967,6 +8979,26 @@
           "category": "incidental",
           "reason": "local formatting closure for anatomy ranking rows, not a render/materialization domain concept",
           "token": "renderRanks"
+        },
+        {
+          "category": "incidental",
+          "reason": "Public wrapper over the canonical documentation generator, not a distinct rendering concept",
+          "token": "RenderPublicDocs"
+        },
+        {
+          "category": "incidental",
+          "reason": "Parameterized form of the canonical documentation generator, not a distinct rendering concept",
+          "token": "RenderDocs"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private formatting helper for generated canonical-term pages",
+          "token": "renderCanonicalTerms"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private formatting helper for the generated contrast index",
+          "token": "renderContrastIndex"
         }
       ],
       "id": "render-materialize",
@@ -8982,10 +9014,12 @@
         "RenderCeilings",
         "RenderCompactTrajectoryRanking",
         "RenderDents",
+        "RenderDocs",
         "RenderFacet",
         "RenderFidelity",
         "RenderFreshness",
         "RenderKind",
+        "RenderPublicDocs",
         "RenderQueue",
         "RenderReopen",
         "RenderSegment",
@@ -9003,10 +9037,12 @@
         "printWorkflowConcepts",
         "priorwtrendercrash",
         "renderAxisPartition",
+        "renderCanonicalTerms",
         "renderCheckpointWitness",
         "renderCommitDrainResult",
         "renderCommitVelocity",
         "renderConcepts",
+        "renderContrastIndex",
         "renderConversion",
         "renderFleetControl",
         "renderFleetGoalExposition",

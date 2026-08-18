@@ -309,3 +309,15 @@ fak disambiguation coverage-self-test --json
 ```
 
 A passing report has `covered: true`, `absent_from_query: true`, and the stable classification/reason fields. The older `[]IncidentalTerm` coverage argument remains accepted for compatibility with #6283, but new declarations should use `NewClassifiedIndex` so classification belongs to the shared index.
+
+## Generated documentation pages (#6320)
+
+`fak disambiguation docs` renders the human-facing canonical-term page and reverse contrast index from the same typed `Entry` records used by `generate`, `query`, and `search`. The tracked pages live under [`docs/generated/disambiguation/`](../../docs/generated/disambiguation/); each row links to a scoped identity and prints the exact public query command.
+
+```text
+fak disambiguation docs
+fak disambiguation docs --check
+fak disambiguation docs --json
+```
+
+`--check` is the drift gate: it fails if either page differs and never rewrites it. Rendering is sorted and byte-identical, so documentation does not become a second terminology writer.

@@ -24,7 +24,7 @@ func cmdDisambiguation(args []string) {
 
 func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak disambiguation schema [--json] [--self-test]\n       fak disambiguation query <canonical-term> [--json]\n       fak disambiguation query --self-test [--json]\n       fak disambiguation search <term> [--json]\n       fak disambiguation cli-source [--json] [--self-test]\n       fak disambiguation stale-symbols-self-test [--json]\n       fak disambiguation coverage-self-test [--json]")
+		fmt.Fprintln(stderr, "usage: fak disambiguation schema [--json] [--self-test]\n       fak disambiguation query <canonical-term> [--json]\n       fak disambiguation query --self-test [--json]\n       fak disambiguation search <term> [--json]\n       fak disambiguation cli-source [--json] [--self-test]\n       fak disambiguation docs [--output-dir DIR] [--check] [--json]\n       fak disambiguation stale-symbols-self-test [--json]\n       fak disambiguation coverage-self-test [--json]")
 		return 2
 	}
 	switch args[0] {
@@ -42,6 +42,8 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 		return runDisambiguationSearch(stdout, stderr, args[1:])
 	case "cli-source":
 		return runDisambiguationCLISource(stdout, stderr, args[1:])
+	case "docs":
+		return runDisambiguationDocs(stdout, stderr, args[1:])
 	case "explain":
 		return runDisambiguationExplain(stdout, stderr, args[1:])
 	case "ownership":
@@ -55,7 +57,7 @@ func runDisambiguation(stdout, stderr io.Writer, args []string) int {
 	case "coverage-self-test":
 		return runDisambiguationCoverageSelfTest(stdout, stderr, args[1:])
 	default:
-		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want schema, query, search, cli-source, explain, ownership, freshness, provenance, stale-symbols-self-test, or coverage-self-test)\n", args[0])
+		fmt.Fprintf(stderr, "fak disambiguation: unknown command %q (want schema, query, search, cli-source, docs, explain, ownership, freshness, provenance, stale-symbols-self-test, or coverage-self-test)\n", args[0])
 		return 2
 	}
 }
@@ -146,6 +148,80 @@ func runDisambiguationGenerate(stdout, stderr io.Writer, args []string) int {
 			verb = "wrote"
 		}
 		fmt.Fprintf(stdout, "%s %s sha256:%s\n", verb, report.Path, report.SHA256)
+	}
+	return 0
+}
+
+const defaultDisambiguationDocsDir = "docs/generated/disambiguation"
+
+type disambiguationDocsFile struct {
+	Path    string `json:"path"`
+	SHA256  string `json:"sha256"`
+	Bytes   int    `json:"bytes"`
+	Changed bool   `json:"changed"`
+}
+
+type disambiguationDocsReport struct {
+	Schema string                   `json:"schema"`
+	Check  bool                     `json:"check"`
+	Files  []disambiguationDocsFile `json:"files"`
+}
+
+func runDisambiguationDocs(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("disambiguation docs", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	outputDir := fs.String("output-dir", defaultDisambiguationDocsDir, "generated documentation directory")
+	check := fs.Bool("check", false, "fail when a tracked page differs")
+	jsonOutput := fs.Bool("json", false, "emit JSON report")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "fak disambiguation docs: unexpected positional arguments")
+		return 2
+	}
+	pages, err := disambiguation.RenderPublicDocs()
+	if err != nil {
+		fmt.Fprintf(stderr, "fak disambiguation docs: %v\n", err)
+		return 1
+	}
+	report := disambiguationDocsReport{Schema: disambiguation.GeneratedDocsSchemaVersion, Check: *check, Files: make([]disambiguationDocsFile, 0, len(pages))}
+	stale := false
+	for _, page := range pages {
+		path := filepath.Join(*outputDir, filepath.FromSlash(page.Path))
+		existing, readErr := os.ReadFile(path)
+		changed := readErr != nil || !bytes.Equal(existing, page.Content)
+		if changed && !*check {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				fmt.Fprintf(stderr, "fak disambiguation docs: create output directory: %v\n", err)
+				return 1
+			}
+			if err := os.WriteFile(path, page.Content, 0o644); err != nil {
+				fmt.Fprintf(stderr, "fak disambiguation docs: write %s: %v\n", path, err)
+				return 1
+			}
+		}
+		digest := sha256.Sum256(page.Content)
+		report.Files = append(report.Files, disambiguationDocsFile{Path: filepath.ToSlash(path), SHA256: hex.EncodeToString(digest[:]), Bytes: len(page.Content), Changed: changed})
+		stale = stale || changed
+	}
+	if *check && stale {
+		fmt.Fprintf(stderr, "fak disambiguation docs: stale pages in %s; rerun without --check\n", *outputDir)
+		return 1
+	}
+	if *jsonOutput {
+		if err := json.NewEncoder(stdout).Encode(report); err != nil {
+			fmt.Fprintf(stderr, "fak disambiguation docs: encode report: %v\n", err)
+			return 1
+		}
+	} else {
+		for _, file := range report.Files {
+			verb := "unchanged"
+			if file.Changed && !*check {
+				verb = "wrote"
+			}
+			fmt.Fprintf(stdout, "%s %s sha256:%s\n", verb, file.Path, file.SHA256)
+		}
 	}
 	return 0
 }
