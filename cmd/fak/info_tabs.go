@@ -72,22 +72,23 @@ func infoViewName(v infoView) string {
 type infoInputKind int
 
 const (
-	infoInputNone        infoInputKind = iota
-	infoInputFocusIn                   // terminal focus report ESC [ I
-	infoInputFocusOut                  // ESC [ O
-	infoInputQuit                      // a quit key/byte (Ctrl-C/D/\, or 'q')
-	infoInputTabNext                   // Tab / right-arrow — cycle to the next view
-	infoInputTabPrev                   // left-arrow — cycle to the previous view
-	infoInputTabSelect                 // a digit 1-9 — jump to view Index (1-based)
-	infoInputToggleGloss               // '?' / 'g' — toggle the glossary overlay
-	infoInputMouseClick                // an SGR left-button press at (X,Y), 1-based cells
-	infoInputScrollUp                  // up-arrow / wheel-up — scroll the active view up a line
-	infoInputScrollDown                // down-arrow / wheel-down — scroll the active view down a line
-	infoInputPageUp                    // PageUp — scroll the active view up a page
-	infoInputPageDown                  // PageDown — scroll the active view down a page
-	infoInputScrollHome                // Home — jump the active view to the top
-	infoInputScrollEnd                 // End — jump the active view to the bottom
-	infoInputCopyMode                  // 'c' — toggle copy/freeze mode (hand selection back to the terminal)
+	infoInputNone             infoInputKind = iota
+	infoInputFocusIn                        // terminal focus report ESC [ I
+	infoInputFocusOut                       // ESC [ O
+	infoInputQuit                           // a quit key/byte (Ctrl-C/D/\, or 'q')
+	infoInputTabNext                        // Tab / right-arrow — cycle to the next view
+	infoInputTabPrev                        // left-arrow — cycle to the previous view
+	infoInputTabSelect                      // a digit 1-9 — jump to view Index (1-based)
+	infoInputToggleGloss                    // '?' / 'g' — toggle the glossary overlay
+	infoInputMouseClick                     // an SGR left-button press at (X,Y), 1-based cells
+	infoInputScrollUp                       // up-arrow / wheel-up — scroll the active view up a line
+	infoInputScrollDown                     // down-arrow / wheel-down — scroll the active view down a line
+	infoInputPageUp                         // PageUp — scroll the active view up a page
+	infoInputPageDown                       // PageDown — scroll the active view down a page
+	infoInputScrollHome                     // Home — jump the active view to the top
+	infoInputScrollEnd                      // End — jump the active view to the bottom
+	infoInputCopyMode                       // 'c' — toggle copy/freeze mode (hand selection back to the terminal)
+	infoInputLaunchHarnessWeb               // 'w' — launch the shipped loopback web gateway
 )
 
 // infoInput is one decoded input event. Index is meaningful only for infoInputTabSelect; X/Y
@@ -172,6 +173,8 @@ func (s *infoInputScanner) stepGround(b byte) infoInput {
 		return infoInput{Kind: infoInputToggleGloss}
 	case b == 'c' || b == 'C':
 		return infoInput{Kind: infoInputCopyMode}
+	case b == 'w' || b == 'W':
+		return infoInput{Kind: infoInputLaunchHarnessWeb}
 	case b >= '1' && b <= '9':
 		return infoInput{Kind: infoInputTabSelect, Index: int(b - '0')}
 	}
@@ -326,7 +329,8 @@ type infoViewState struct {
 	// select + copy the frame without the next tick's in-place redraw erasing it; toggled by 'c'.
 	// The loop (info.go) owns the side effects — disabling mouse reporting, suppressing the redraw,
 	// and making Ctrl-C forgiving here — while the renderer only swaps the tab bar for the banner.
-	copyMode bool
+	copyMode  bool
+	launchWeb bool // one-shot request consumed by the interactive loop
 }
 
 // infoScrollPageStep is how many rows a PageUp/PageDown moves the active view. Fixed (not
@@ -352,6 +356,8 @@ func applyInfoInput(s infoViewState, ev infoInput) infoViewState {
 		if ev.Index >= 1 && ev.Index <= infoViewCount() {
 			s.active = infoView(ev.Index - 1)
 		}
+	case infoInputLaunchHarnessWeb:
+		s.launchWeb = true
 	case infoInputToggleGloss:
 		s.glossaryOpen = !s.glossaryOpen
 		s.glossaryTerm = ""
@@ -384,6 +390,10 @@ func applyInfoClick(s infoViewState, x, y int) infoViewState {
 		bar := buildInfoTabBar(s.active, s.glossaryOpen)
 		for _, r := range bar.regions {
 			if x >= r.start && x <= r.end {
+				if r.term == "web-gateway" {
+					s.launchWeb = true
+					return s
+				}
 				if r.view == viewNone { // the glossary toggle
 					s.glossaryOpen = !s.glossaryOpen
 					s.glossaryTerm = ""
@@ -452,11 +462,15 @@ func (bb *barBuilder) segment(s string) (start, end int) {
 
 // buildInfoTabBar renders the tab bar and its click regions for the given active view and
 // glossary state. The active view's chip is wrapped in guillemets («…»), the rest in brackets
-// ([…]), so the selection reads at a glance without relying on color; a trailing glossary toggle
-// («? close» when open, "[? glossary]" when closed) rounds out the row.
+// ([…]), so the selection reads at a glance without relying on color. The dedicated web-gateway
+// button leads the row so it remains visible when narrow terminals clip the right edge; the glossary
+// toggle («? close» when open, "[? glossary]" when closed) follows the view tabs.
 func buildInfoTabBar(active infoView, glossaryOpen bool) infoBar {
 	var bb barBuilder
 	var regions []infoTabRegion
+	start, end := bb.segment("[w web gateway]")
+	regions = append(regions, infoTabRegion{view: viewNone, term: "web-gateway", start: start, end: end})
+	bb.sep("   ")
 	for i := 0; i < infoViewCount(); i++ {
 		v := infoView(i)
 		if i > 0 {
@@ -475,7 +489,7 @@ func buildInfoTabBar(active infoView, glossaryOpen bool) infoBar {
 	if glossaryOpen {
 		glossChip = "«? close»"
 	}
-	start, end := bb.segment(glossChip)
+	start, end = bb.segment(glossChip)
 	regions = append(regions, infoTabRegion{view: viewNone, start: start, end: end})
 	// Keyboard-only hint for copy/freeze mode. No click region: entering copy mode disables mouse
 	// reporting (a loop side effect the pure click-fold cannot do), so 'c' is the only way in.

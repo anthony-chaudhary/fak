@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"sort"
 	"strconv"
@@ -217,6 +218,28 @@ type guardInfoManagedCache = guardvars.ManagedCacheVars
 // internal/guardvars, shared with the gateway producer (debugCacheAttributionVars) so emit and
 // decode cannot drift.
 type guardInfoCacheAttribution = guardvars.CacheAttributionVars
+
+var startInfoHarnessWeb = func() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve fak executable: %w", err)
+	}
+	return launchInfoHarnessWeb(exe, func(cmd *exec.Cmd) error {
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		go func() { _ = cmd.Wait() }()
+		return nil
+	})
+}
+
+func launchInfoHarnessWeb(executable string, start func(*exec.Cmd) error) error {
+	cmd := exec.Command(executable, "harness", "web")
+	if err := start(cmd); err != nil {
+		return fmt.Errorf("start fak harness web: %w", err)
+	}
+	return nil
+}
 
 func writerIsTerminal(w io.Writer) bool {
 	f, ok := w.(interface{ Fd() uintptr })
@@ -924,6 +947,12 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 					ev.Y = blockRelativeRow(ev.Y, height, prevRows)
 				}
 				next := applyInfoInput(viewState, ev)
+				if next.launchWeb {
+					next.launchWeb = false
+					if err := startInfoHarnessWeb(); err != nil {
+						writeNote(stderr, "fak info: web gateway launch failed: "+err.Error())
+					}
+				}
 				// A body click the tab/glossary layout did not claim may still land on a Cache-tab
 				// ablation bar → toggle that mechanism's detail sub-panel, resolved against the rows
 				// just rendered (so scroll/width are already baked in).

@@ -271,7 +271,7 @@ func TestApplyInfoClickTabBar(t *testing.T) {
 		if r.view == viewSafety {
 			safety = r
 		}
-		if r.view == viewNone {
+		if r.view == viewNone && r.term == "" {
 			gloss = r
 		}
 	}
