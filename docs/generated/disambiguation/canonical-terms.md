@@ -4,21 +4,57 @@
 
 | Canonical term | Scope | Definition | Query |
 |---|---|---|---|
+| [ABI refusal reason](#abi-refusal-reason-vocabulary-abi-reason) | `vocabulary:abi-reason` | A closed trainable ReasonCode explaining why an adjudication refused a call; POLICY_BLOCK means an explicit policy rule denied it. | `fak disambiguation query "ABI refusal reason"` |
+| [DOS decision kind](#dos-decision-kind-vocabulary-dos-decision-kind) | `vocabulary:dos-decision-kind` | A persistent DOS row category identifying arbitration refusal work whose resolution depends on the current lane-lease state. | `fak disambiguation query "DOS decision kind"` |
 | [agent kernel](#agent-kernel-product-fak) | `product:fak` | The fak management boundary that governs model traffic, tool effects, context, and recovery. | `fak disambiguation query "agent kernel"` |
 | [agent session](#agent-session-runtime-internal-session) | `runtime:internal/session` | A durable, addressable agent execution record carrying drive state and pointers without storing the provider transcript. | `fak disambiguation query "agent session"` |
 | [compute kernel](#compute-kernel-computing-processor) | `computing:processor` | An arithmetic routine executed by a processor. | `fak disambiguation query "compute kernel"` |
 | [context compaction](#context-compaction-runtime-codex-context) | `runtime:codex-context` | A context-window event that replaces prior history so resident input falls while cumulative usage and transcript bytes may continue rising. | `fak disambiguation query "context compaction"` |
 | [disambiguation package](#disambiguation-package-package-internal-disambiguation) | `package:internal/disambiguation` | The internal/disambiguation package, named as a contrast target for the CLI-scoped kernel entry. | `fak disambiguation query "disambiguation package"` |
 | [fak CLI kernel](#fak-cli-kernel-cli-fak) | `cli:fak` | The fak command-line product surface, named as a contrast target for the package-scoped kernel entry. | `fak disambiguation query "fak CLI kernel"` |
+| [hook gate class](#hook-gate-class-vocabulary-hook-gate-class) | `vocabulary:hook-gate-class` | A hook-runner classification declaring whether a gate mutates the index/worktree, intentionally uses a worktree, or is a tree-twin checker. | `fak disambiguation query "hook gate class"` |
 | [kernel](#kernel-cli-fak) | `cli:fak` | The fak command-line product surface for operating the agent kernel. | `fak disambiguation query --scope-kind cli --scope-value fak "kernel"` |
 | [kernel](#kernel-package-internal-disambiguation) | `package:internal/disambiguation` | The internal/disambiguation Go package that validates and queries public terminology records. | `fak disambiguation query --scope-kind package --scope-value internal/disambiguation "kernel"` |
 | [model KV cache](#model-kv-cache-cache-model-attention) | `cache:model-attention` | Kernel-owned per-layer attention key/value tensors indexed by token position and invalidated or rewritten when the model sequence changes. | `fak disambiguation query "model KV cache"` |
+| [policy posture verdict](#policy-posture-verdict-vocabulary-policy-verdict) | `vocabulary:policy-verdict` | The ALLOW or DENY result of folding compiled, environment, and organization authority over a policy amendment. | `fak disambiguation query "policy posture verdict"` |
 | [provider prompt cache](#provider-prompt-cache-cache-provider-prompt-prefix) | `cache:provider-prompt-prefix` | An upstream provider-owned prompt-prefix reuse service observed as cache-read and cache-creation token accounting with provider TTL and pricing rules. | `fak disambiguation query "provider prompt cache"` |
 | [radix prefix cache](#radix-prefix-cache-cache-radix-prefix-snapshots) | `cache:radix-prefix-snapshots` | A fak-owned radix tree that longest-prefix-matches namespaced token sequences to reusable KV snapshots under token and byte budgets. | `fak disambiguation query "radix prefix cache"` |
 | [recovery checkpoint](#recovery-checkpoint-runtime-internal-session) | `runtime:internal/session` | A typed snapshot of goal, pending turn, continuation, generation, and state revision emitted when session recovery is requested. | `fak disambiguation query "recovery checkpoint"` |
 | [session recovery](#session-recovery-runtime-internal-session) | `runtime:internal/session` | A bounded repair or reroute response when persisted or cumulative session state cannot safely continue unchanged. | `fak disambiguation query "session recovery"` |
 | [session resume](#session-resume-runtime-internal-session) | `runtime:internal/session` | The paused-to-running boundary that re-admits an existing session using warm KV when available or a safe cold re-prefill. | `fak disambiguation query "session resume"` |
 | [tool-result cache](#tool-result-cache-cache-tool-results) | `cache:tool-results` | A fak-owned cache of completed tool-call results keyed by tool, argument hash, principal when isolated, and world-version epochs. | `fak disambiguation query "tool-result cache"` |
+
+<a id="abi-refusal-reason-vocabulary-abi-reason"></a>
+## ABI refusal reason — `vocabulary:abi-reason`
+
+A closed trainable ReasonCode explaining why an adjudication refused a call; POLICY_BLOCK means an explicit policy rule denied it.
+
+- **Query:** `fak disambiguation query "ABI refusal reason"`
+- **Owner:** leaf `abi`, lane `abi`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `POLICY_BLOCK`, `refusal reason`
+- **Sources:**
+  - `internal/abi/reasons.go` — `go-source` at `reason-source/1`
+- **Do not conflate with:**
+  - [DOS decision kind](contrast-index.md#dos-decision-kind) — A refusal reason is a closed ABI label; a DOS decision kind classifies an operator queue row and its resolver lifecycle.
+  - [hook gate class](contrast-index.md#hook-gate-class) — ReasonCode labels adjudication semantics; a hook gate class declares which tree surface a hook may mutate.
+  - [policy posture verdict](contrast-index.md#policy-posture-verdict) — A refusal reason explains a tool-call decision; a policy posture verdict is the ALLOW/DENY result of folding organization amendment authority.
+
+<a id="dos-decision-kind-vocabulary-dos-decision-kind"></a>
+## DOS decision kind — `vocabulary:dos-decision-kind`
+
+A persistent DOS row category identifying arbitration refusal work whose resolution depends on the current lane-lease state.
+
+- **Query:** `fak disambiguation query "DOS decision kind"`
+- **Owner:** leaf `dosdecision`, lane `dos`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `ARBITER_REFUSE`
+- **Sources:**
+  - `internal/dosdecision/revalidate.go` — `go-source` at `reason-source/1`
+- **Do not conflate with:**
+  - [ABI refusal reason](contrast-index.md#abi-refusal-reason) — ARBITER_REFUSE classifies a DOS decision row; it is not a ReasonCode in the kernel adjudication ABI.
+  - [hook gate class](contrast-index.md#hook-gate-class) — A DOS decision kind persists arbitration state; a hook gate class controls execution isolation for a checker.
+  - [policy posture verdict](contrast-index.md#policy-posture-verdict) — A DOS decision kind drives resolver lifecycle and history, not an ALLOW/DENY policy amendment result.
 
 <a id="agent-kernel-product-fak"></a>
 ## agent kernel — `product:fak`
@@ -101,6 +137,22 @@ The fak command-line product surface, named as a contrast target for the package
 - **Do not conflate with:**
   - [kernel](contrast-index.md#kernel) — The CLI surface and package-scoped kernel are distinct.
 
+<a id="hook-gate-class-vocabulary-hook-gate-class"></a>
+## hook gate class — `vocabulary:hook-gate-class`
+
+A hook-runner classification declaring whether a gate mutates the index/worktree, intentionally uses a worktree, or is a tree-twin checker.
+
+- **Query:** `fak disambiguation query "hook gate class"`
+- **Owner:** leaf `hooks`, lane `hooks`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `LANDS_TREE`
+- **Sources:**
+  - `internal/hooks/gatescope.go` — `go-source` at `reason-source/1`
+- **Do not conflate with:**
+  - [ABI refusal reason](contrast-index.md#abi-refusal-reason) — LANDS_TREE declares hook execution scope; it is not a reason why a model tool call was refused.
+  - [DOS decision kind](contrast-index.md#dos-decision-kind) — A hook class is local runner metadata; a DOS decision kind is a persisted arbitration or resolver category.
+  - [policy posture verdict](contrast-index.md#policy-posture-verdict) — A hook class schedules and isolates gate execution; it does not grant or deny organization policy authority.
+
 <a id="kernel-cli-fak"></a>
 ## kernel — `cli:fak`
 
@@ -142,6 +194,22 @@ Kernel-owned per-layer attention key/value tensors indexed by token position and
   - [provider prompt cache](contrast-index.md#provider-prompt-cache) — The model KV cache is directly owned and mutable inside fak; provider prompt caching is an upstream reuse service exposed as billed token axes.
   - [radix prefix cache](contrast-index.md#radix-prefix-cache) — A KV cache is one sequence's live attention state; the radix cache indexes token prefixes and references reusable snapshots across requests.
   - [tool-result cache](contrast-index.md#tool-result-cache) — The KV cache contains model attention state, not completed tool outputs or world-versioned effects.
+
+<a id="policy-posture-verdict-vocabulary-policy-verdict"></a>
+## policy posture verdict — `vocabulary:policy-verdict`
+
+The ALLOW or DENY result of folding compiled, environment, and organization authority over a policy amendment.
+
+- **Query:** `fak disambiguation query "policy posture verdict"`
+- **Owner:** leaf `policy`, lane `policy`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `organization amendment verdict`
+- **Sources:**
+  - `internal/policy/orgprecedence.go` — `go-source` at `reason-source/1`
+- **Do not conflate with:**
+  - [ABI refusal reason](contrast-index.md#abi-refusal-reason) — The posture verdict is the decision result; POLICY_BLOCK is one explanatory reason attached to a separate tool-call refusal vocabulary.
+  - [DOS decision kind](contrast-index.md#dos-decision-kind) — A posture verdict resolves one policy fold; a DOS decision kind categorizes persistent arbitration or operator work.
+  - [hook gate class](contrast-index.md#hook-gate-class) — ALLOW/DENY describes policy authority, not whether a hook lands the tree or operates in a worktree twin.
 
 <a id="provider-prompt-cache-cache-provider-prompt-prefix"></a>
 ## provider prompt cache — `cache:provider-prompt-prefix`

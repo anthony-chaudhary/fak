@@ -2420,6 +2420,11 @@
           "category": "incidental",
           "reason": "JSON metric name for summed cyclomatic complexity, not an enforcement guard or gate",
           "token": "aggregate_complexity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum member naming a vocabulary role in the disambiguation fixture, not a hook gate mechanism",
+          "token": "VocabularyGateClass"
         }
       ],
       "exclude": [
@@ -2498,6 +2503,7 @@
         "SafetyGate",
         "SessionAffinityGateway",
         "TestGuardSelfTightenOverlayPathIsAgentWritable",
+        "VocabularyGateClass",
         "WithAffinity",
         "WritePonytailGateReport",
         "admitGuardShrinkLevers",
@@ -8685,6 +8691,11 @@
           "category": "incidental",
           "reason": "private scorecard registry row, not a runtime decision-domain concept",
           "token": "reviewedDefaultDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum member naming a vocabulary role in the disambiguation fixture, not a decision mechanism",
+          "token": "VocabularyDecision"
         }
       ],
       "id": "decision",
@@ -8714,6 +8725,7 @@
         "SessionClientDecisionRequest",
         "TotalDecisionOverhead",
         "ValidDecisions",
+        "VocabularyDecision",
         "appendsteerdecisions",
         "decisionReason",
         "decisionStderr",

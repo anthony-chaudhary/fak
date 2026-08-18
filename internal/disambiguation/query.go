@@ -304,6 +304,58 @@ var publicEntries = []Entry{
 		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/gateway/cache_pricing.go", Revision: "cache-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-cache-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "CacheUsage"}}},
 		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "cache-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
 	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "ABI refusal reason", Aliases: []string{"POLICY_BLOCK", "refusal reason"}},
+		Definition: "A closed trainable ReasonCode explaining why an adjudication refused a call; POLICY_BLOCK means an explicit policy rule denied it.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "policy posture verdict", Explanation: "A refusal reason explains a tool-call decision; a policy posture verdict is the ALLOW/DENY result of folding organization amendment authority.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "hook gate class", Explanation: "ReasonCode labels adjudication semantics; a hook gate class declares which tree surface a hook may mutate.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "DOS decision kind", Explanation: "A refusal reason is a closed ABI label; a DOS decision kind classifies an operator queue row and its resolver lifecycle.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "vocabulary", Value: "abi-reason"}, Owner: Owner{Leaf: "abi", Lane: "abi"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/abi/reasons.go", Revision: "reason-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-reason-source", Reference: &PublicReference{Kind: ReferenceKindReasonCode, Name: "POLICY_BLOCK"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "reason-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "policy posture verdict", Aliases: []string{"organization amendment verdict"}},
+		Definition: "The ALLOW or DENY result of folding compiled, environment, and organization authority over a policy amendment.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "ABI refusal reason", Explanation: "The posture verdict is the decision result; POLICY_BLOCK is one explanatory reason attached to a separate tool-call refusal vocabulary.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "hook gate class", Explanation: "ALLOW/DENY describes policy authority, not whether a hook lands the tree or operates in a worktree twin.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "DOS decision kind", Explanation: "A posture verdict resolves one policy fold; a DOS decision kind categorizes persistent arbitration or operator work.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "vocabulary", Value: "policy-verdict"}, Owner: Owner{Leaf: "policy", Lane: "policy"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/policy/orgprecedence.go", Revision: "reason-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-reason-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "OrgAmendVerdict"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "reason-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "hook gate class", Aliases: []string{"LANDS_TREE"}},
+		Definition: "A hook-runner classification declaring whether a gate mutates the index/worktree, intentionally uses a worktree, or is a tree-twin checker.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "ABI refusal reason", Explanation: "LANDS_TREE declares hook execution scope; it is not a reason why a model tool call was refused.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "policy posture verdict", Explanation: "A hook class schedules and isolates gate execution; it does not grant or deny organization policy authority.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "DOS decision kind", Explanation: "A hook class is local runner metadata; a DOS decision kind is a persisted arbitration or resolver category.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "vocabulary", Value: "hook-gate-class"}, Owner: Owner{Leaf: "hooks", Lane: "hooks"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/hooks/gatescope.go", Revision: "reason-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-reason-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "ClassLandsTree"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "reason-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "DOS decision kind", Aliases: []string{"ARBITER_REFUSE"}},
+		Definition: "A persistent DOS row category identifying arbitration refusal work whose resolution depends on the current lane-lease state.",
+		Contrasts: []Contrast{
+			{CanonicalTerm: "ABI refusal reason", Explanation: "ARBITER_REFUSE classifies a DOS decision row; it is not a ReasonCode in the kernel adjudication ABI.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "policy posture verdict", Explanation: "A DOS decision kind drives resolver lifecycle and history, not an ALLOW/DENY policy amendment result.", RequiredPair: boolPointer(false), ForbiddenConflation: boolPointer(true)},
+			{CanonicalTerm: "hook gate class", Explanation: "A DOS decision kind persists arbitration state; a hook gate class controls execution isolation for a checker.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)},
+		},
+		Scope: Scope{Kind: "vocabulary", Value: "dos-decision-kind"}, Owner: Owner{Leaf: "dosdecision", Lane: "dos"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/dosdecision/revalidate.go", Revision: "reason-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-reason-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "KindArbiterRefuse"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "reason-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
 }
 
 var publicIndex = mustNewIndex(publicEntries)

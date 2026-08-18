@@ -378,3 +378,24 @@ fak disambiguation query "provider cache"
 ```
 
 The fixture requires every record to carry three explicit forbidden contrasts, a distinct owner leaf, and public Go-symbol provenance. In particular, a radix prefix lookup is not the same object as a live KV tensor, and neither is evidence that the external provider prompt cache hit.
+
+## Reason-code and verdict namespaces (#6311)
+
+Uppercase tokens are not one global enum. The index separates four semantic roles:
+
+| Example | Canonical identity | Meaning |
+|---|---|---|
+| `POLICY_BLOCK` | `ABI refusal reason` | Closed `abi.ReasonCode` explaining why a tool-call adjudication refused. |
+| `DENY` | `policy posture verdict` | Result of folding organization amendment authority. |
+| `LANDS_TREE` | `hook gate class` | Hook-runner metadata describing a gate’s tree mutation/isolation surface. |
+| `ARBITER_REFUSE` | `DOS decision kind` | Persistent decision-row category revalidated against live lane leases. |
+
+`ValidateVocabulary` makes duplicate handling explicit. Reusing the same code is accepted only when every declaration has the same `kind` and `canonical_meaning`; package and symbol may differ. Thus the public `COLLISION_RISK` declarations in `internal/dispatchorder` and `internal/dispatchtick` are a declared cross-package alias for `unsafe-tree-region-overlap`. Reusing that token as a verdict meaning “request denied” is rejected as `incompatible vocabulary collision`.
+
+```text
+fak disambiguation reason-source-self-test --json
+fak disambiguation query POLICY_BLOCK
+fak disambiguation query ARBITER_REFUSE
+```
+
+The selfcheck inventories public paths and symbols, admits the declared alias, and mutates one duplicate to an incompatible kind/meaning to prove rejection. It reads the same canonical index and public source tree as other disambiguation commands; there is no private or second vocabulary writer.

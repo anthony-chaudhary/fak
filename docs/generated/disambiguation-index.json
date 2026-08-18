@@ -1,8 +1,131 @@
 {
   "schema": "fak-disambiguation-index/1",
-  "source_revision": "sha256:d581df4a46e492d344f791f301152f4cc85f798847c12203a20f6f12a4fd7019",
-  "entry_count": 15,
+  "source_revision": "sha256:4e88f7cad0157477a3f4d57d894a3d01534edde58c266eda14d8eede54045a6c",
+  "entry_count": 19,
   "entries": [
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "ABI refusal reason",
+        "aliases": [
+          "POLICY_BLOCK",
+          "refusal reason"
+        ]
+      },
+      "definition": "A closed trainable ReasonCode explaining why an adjudication refused a call; POLICY_BLOCK means an explicit policy rule denied it.",
+      "contrasts": [
+        {
+          "canonical_term": "DOS decision kind",
+          "explanation": "A refusal reason is a closed ABI label; a DOS decision kind classifies an operator queue row and its resolver lifecycle.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "hook gate class",
+          "explanation": "ReasonCode labels adjudication semantics; a hook gate class declares which tree surface a hook may mutate.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "policy posture verdict",
+          "explanation": "A refusal reason explains a tool-call decision; a policy posture verdict is the ALLOW/DENY result of folding organization amendment authority.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "vocabulary",
+        "value": "abi-reason"
+      },
+      "owner": {
+        "leaf": "abi",
+        "lane": "abi"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/abi/reasons.go",
+          "revision": "reason-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-reason-source",
+          "reference": {
+            "kind": "reason-code",
+            "name": "POLICY_BLOCK"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "reason-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "DOS decision kind",
+        "aliases": [
+          "ARBITER_REFUSE"
+        ]
+      },
+      "definition": "A persistent DOS row category identifying arbitration refusal work whose resolution depends on the current lane-lease state.",
+      "contrasts": [
+        {
+          "canonical_term": "ABI refusal reason",
+          "explanation": "ARBITER_REFUSE classifies a DOS decision row; it is not a ReasonCode in the kernel adjudication ABI.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "hook gate class",
+          "explanation": "A DOS decision kind persists arbitration state; a hook gate class controls execution isolation for a checker.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "policy posture verdict",
+          "explanation": "A DOS decision kind drives resolver lifecycle and history, not an ALLOW/DENY policy amendment result.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "vocabulary",
+        "value": "dos-decision-kind"
+      },
+      "owner": {
+        "leaf": "dosdecision",
+        "lane": "dos"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/dosdecision/revalidate.go",
+          "revision": "reason-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-reason-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "KindArbiterRefuse"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "reason-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
     {
       "schema": "fak-disambiguation-entry/1",
       "identity": {
@@ -286,6 +409,67 @@
     {
       "schema": "fak-disambiguation-entry/1",
       "identity": {
+        "canonical_term": "hook gate class",
+        "aliases": [
+          "LANDS_TREE"
+        ]
+      },
+      "definition": "A hook-runner classification declaring whether a gate mutates the index/worktree, intentionally uses a worktree, or is a tree-twin checker.",
+      "contrasts": [
+        {
+          "canonical_term": "ABI refusal reason",
+          "explanation": "LANDS_TREE declares hook execution scope; it is not a reason why a model tool call was refused.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "DOS decision kind",
+          "explanation": "A hook class is local runner metadata; a DOS decision kind is a persisted arbitration or resolver category.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "policy posture verdict",
+          "explanation": "A hook class schedules and isolates gate execution; it does not grant or deny organization policy authority.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "vocabulary",
+        "value": "hook-gate-class"
+      },
+      "owner": {
+        "leaf": "hooks",
+        "lane": "hooks"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/hooks/gatescope.go",
+          "revision": "reason-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-reason-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "ClassLandsTree"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "reason-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
         "canonical_term": "kernel",
         "aliases": []
       },
@@ -425,6 +609,67 @@
         "reason_code": "SOURCE_CURRENT",
         "checked_at": "2026-08-17T00:00:00Z",
         "probe": "cache-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "policy posture verdict",
+        "aliases": [
+          "organization amendment verdict"
+        ]
+      },
+      "definition": "The ALLOW or DENY result of folding compiled, environment, and organization authority over a policy amendment.",
+      "contrasts": [
+        {
+          "canonical_term": "ABI refusal reason",
+          "explanation": "The posture verdict is the decision result; POLICY_BLOCK is one explanatory reason attached to a separate tool-call refusal vocabulary.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "DOS decision kind",
+          "explanation": "A posture verdict resolves one policy fold; a DOS decision kind categorizes persistent arbitration or operator work.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        },
+        {
+          "canonical_term": "hook gate class",
+          "explanation": "ALLOW/DENY describes policy authority, not whether a hook lands the tree or operates in a worktree twin.",
+          "required_pair": false,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "vocabulary",
+        "value": "policy-verdict"
+      },
+      "owner": {
+        "leaf": "policy",
+        "lane": "policy"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/policy/orgprecedence.go",
+          "revision": "reason-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-reason-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "OrgAmendVerdict"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "reason-source/1"
       },
       "lifecycle": {
         "class": "current",
