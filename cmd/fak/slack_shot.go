@@ -33,6 +33,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/interspersedflags"
 	"html"
 	"io"
 	"os"
@@ -135,17 +136,9 @@ func runSlackShot(stdout, stderr io.Writer, argv []string) int {
 	// Parse flags allowing them on EITHER side of the surface positional — Go's flag
 	// package stops at the first non-flag, so a plain fs.Parse would silently drop the
 	// flags in `fak slack shot dispatch --out x.html`. Collect positionals across the gaps.
-	var positional []string
-	for rest := argv; ; {
-		if err := fs.Parse(rest); err != nil {
-			return 2
-		}
-		rest = fs.Args()
-		if len(rest) == 0 {
-			break
-		}
-		positional = append(positional, rest[0])
-		rest = rest[1:]
+	positional, err := interspersedflags.Parse(fs, argv)
+	if err != nil {
+		return 2
 	}
 
 	// Resolve the target: an explicit --channel wins; otherwise the first positional is a

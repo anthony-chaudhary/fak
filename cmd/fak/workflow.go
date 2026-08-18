@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/interspersedflags"
 	"io"
 	"os"
 
@@ -55,17 +56,9 @@ func workflowLint(stdout, stderr io.Writer, stdin io.Reader, argv []string) int 
 	// Accept --json before OR after the positional script path. Go's flag package
 	// stops at the first non-flag arg, so interleave Parse with positional collection
 	// (the same ergonomics as `fak index`).
-	var pos []string
-	for rest := argv; ; {
-		if err := fs.Parse(rest); err != nil {
-			return 2
-		}
-		rest = fs.Args()
-		if len(rest) == 0 {
-			break
-		}
-		pos = append(pos, rest[0])
-		rest = rest[1:]
+	pos, parseErr := interspersedflags.Parse(fs, argv)
+	if parseErr != nil {
+		return 2
 	}
 
 	src := "-"

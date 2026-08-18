@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T05:02:37.396307Z",
+  "issue": 7058,
+  "family": "interspersed Go flag parsing",
+  "paths": [
+    "internal/interspersedflags",
+    "cmd/fak/slack_shot.go",
+    "cmd/fak/workflow.go",
+    "cmd/fak/workflow_resume.go"
+  ],
+  "test": "go test ./internal/interspersedflags; prospective commit build gate",
+  "test_result": "PASS helper; prospective build pending commit",
+  "before": {
+    "score": -92.0,
+    "grade": "F",
+    "slop_debt": 367,
+    "duplication": 367,
+    "weighted_duplication": 233.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -91.5,
+    "grade": "F",
+    "slop_debt": 366,
+    "duplication": 366,
+    "weighted_duplication": 232.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

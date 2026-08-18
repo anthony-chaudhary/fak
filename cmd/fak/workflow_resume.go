@@ -23,6 +23,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/interspersedflags"
 	"io"
 	"os"
 	"os/exec"
@@ -96,17 +97,9 @@ func workflowResume(stdout, stderr io.Writer, argv []string, corr workflow.Corro
 	// Accept flags before OR after the run directory: Go's flag package stops at the
 	// first non-flag argument, so interleave Parse with positional collection (the same
 	// ergonomics `fak workflow lint` already has).
-	var pos []string
-	for rest := argv; ; {
-		if err := fs.Parse(rest); err != nil {
-			return 2
-		}
-		rest = fs.Args()
-		if len(rest) == 0 {
-			break
-		}
-		pos = append(pos, rest[0])
-		rest = rest[1:]
+	pos, err := interspersedflags.Parse(fs, argv)
+	if err != nil {
+		return 2
 	}
 	if len(pos) != 1 {
 		fmt.Fprintln(stderr, "usage: fak workflow resume <run-dir> [--json] [--epoch LABEL] [--now-ms N] [--repo DIR]")

@@ -633,6 +633,7 @@ var tier = map[string]int{
 	"childprocess":          1, // stdlib-only child exit-status normalization shared by launchers (#7063).
 	"stringlist":            1, // stdlib-only compact string-list parsing shared by CLI surfaces (#7062).
 	"numbermap":             1, // stdlib-only JSON numeric-map normalization shared by score renderers (#7059).
+	"interspersedflags":     1, // stdlib-only interspersed Go flag parsing shared by CLI surfaces (#7058).
 	"wiplifecycle":          2, // lifecycle receipts depend on Git-backed WIP inventory collection (#7250).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
