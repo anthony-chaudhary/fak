@@ -122,6 +122,7 @@ type WorkflowPlan struct {
 	Reconcile    ReconcilePolicy   `json:"reconcile"`
 	Interaction  InteractionPolicy `json:"interaction"`
 	EngineRef    string            `json:"engine_ref"`
+	SOLRoute     SOLRoute          `json:"sol_route"`
 	Degradations []Degradation     `json:"degradations"`
 	Explanation  []string          `json:"explanation"`
 }
@@ -234,6 +235,8 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 		case WorkRigor:
 			workers, tokens, witness = 3, 65536, true
 			resolvedProfile = ProfileUltracode
+		default:
+			resolvedProfile = ProfileOff
 		}
 		prov = append(prov, Provenance{"profile", "task.work_class", resolvedProfile})
 	} else if req.Name == ProfileUltracode {
@@ -306,11 +309,12 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 	if engine == "" {
 		engine = "executionroute:auto"
 	}
+	solRoute := SelectSOLRoute("", resolvedProfile, task.WorkClass, "gpt-5.6-sol")
 	explain := []string{fmt.Sprintf("profile %s resolved from %s work", resolvedProfile, task.WorkClass), fmt.Sprintf("budget capped at %d workers and %d tokens", workers, tokens), fmt.Sprintf("task execution remains delegated to taskmgr with engine reference %s", engine)}
 	for _, d := range deg {
 		explain = append(explain, "degraded: "+d.Reason)
 	}
-	plan := WorkflowPlan{SchemaVersion, resolvedProfile, task.ID, task.WorkClass, roles, dag, Budget{workers, tokens}, LeasePolicy{"taskmgr", multi}, WitnessPolicy{witness, witness}, ReconcilePolicy{multi, "effect-readback"}, InteractionPolicy{attended, multi, multi}, engine, deg, explain}
+	plan := WorkflowPlan{SchemaVersion, resolvedProfile, task.ID, task.WorkClass, roles, dag, Budget{workers, tokens}, LeasePolicy{"taskmgr", multi}, WitnessPolicy{witness, witness}, ReconcilePolicy{multi, "effect-readback"}, InteractionPolicy{attended, multi, multi}, engine, solRoute, deg, explain}
 	return Resolution{SchemaVersion, req, plan, prov, deg}, nil
 }
 

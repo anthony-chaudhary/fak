@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,9 @@ type codexOrchestrationWorkerLaunch struct {
 	PID     int    `json:"pid,omitempty"`
 	Status  string `json:"status"`
 	LogPath string `json:"log_path,omitempty"`
+	Model   string `json:"model"`
+	Mode    string `json:"mode"`
+	Effort  string `json:"reasoning_effort"`
 }
 
 type codexOrchestrationLaunchReceipt struct {
@@ -49,10 +53,14 @@ func orchestrationDegradationNames(items []orchestration.Degradation) []string {
 }
 
 type orchestrationWorkerLaunchRequest struct {
-	Role     orchestration.Role
-	TaskText string
-	Root     string
-	RunDir   string
+	Role      orchestration.Role
+	WorkClass orchestration.WorkClass
+	TaskText  string
+	Root      string
+	RunDir    string
+	Model     string
+	Mode      orchestration.SOLMode
+	Effort    string
 }
 
 var orchestrationWorkerLauncher = launchGuardedCodexOrchestrationWorker
@@ -82,11 +90,22 @@ func launchCodexOrchestrationWorkers(home, sessionID, requestedProfile, capabili
 	if err != nil {
 		return receipt, err
 	}
+	route := resolution.Resolved.SOLRoute
+	if route.Model == "" {
+		route = orchestration.SelectSOLRoute(taskText, resolution.Resolved.Profile, resolution.Resolved.WorkClass, guardCodexDefaultModelID)
+	}
+	if route.ConsultOnly {
+		return receipt, fmt.Errorf("SOL_ROUTE_PRO_CONSULT_ONLY: Codex cannot transmit reasoning.mode=pro; launch a separately metered Pro consultation instead")
+	}
 	for _, role := range resolution.Resolved.Roles {
 		if role.ID == "lead" {
 			continue
 		}
-		launched, launchErr := orchestrationWorkerLauncher(orchestrationWorkerLaunchRequest{Role: role, TaskText: taskText, Root: root, RunDir: runDir})
+		request := orchestrationWorkerLaunchRequest{Role: role, WorkClass: resolution.Resolved.WorkClass, TaskText: taskText, Root: root, RunDir: runDir, Model: route.Model, Mode: route.Mode, Effort: route.ReasoningEffort}
+		launched, launchErr := orchestrationWorkerLauncher(request)
+		launched.Model = route.Model
+		launched.Mode = string(route.Mode)
+		launched.Effort = route.ReasoningEffort
 		if launchErr != nil {
 			launched.RoleID = role.ID
 			launched.Status = "failed"
@@ -104,6 +123,14 @@ func launchCodexOrchestrationWorkers(home, sessionID, requestedProfile, capabili
 	return receipt, nil
 }
 
+func orchestrationWorkerArgs(req orchestrationWorkerLaunchRequest, auditPath string) []string {
+	return []string{
+		"guard", "--provider", "openai-responses", "--audit", auditPath, "--expose-profile", "headless", "--",
+		"codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "--dangerously-bypass-hook-trust", "--json",
+		"-c", "model=" + strconv.Quote(req.Model), "-c", "model_reasoning_effort=" + strconv.Quote(req.Effort), "-",
+	}
+}
+
 func launchGuardedCodexOrchestrationWorker(req orchestrationWorkerLaunchRequest) (codexOrchestrationWorkerLaunch, error) {
 	fakBin, err := os.Executable()
 	if err != nil {
@@ -115,8 +142,7 @@ func launchGuardedCodexOrchestrationWorker(req orchestrationWorkerLaunchRequest)
 		return codexOrchestrationWorkerLaunch{}, err
 	}
 	auditPath := filepath.Join(req.RunDir, req.Role.ID+"-guard.audit.jsonl")
-	args := []string{"guard", "--provider", "openai-responses", "--audit", auditPath, "--expose-profile", "headless", "--", "codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "--dangerously-bypass-hook-trust", "--json", "-"}
-	cmd := exec.Command(fakBin, args...)
+	cmd := exec.Command(fakBin, orchestrationWorkerArgs(req, auditPath)...)
 	cmd.Dir = req.Root
 	cmd.Stdin = strings.NewReader(orchestrationWorkerPrompt(req))
 	cmd.Stdout = logFile

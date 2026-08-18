@@ -19,7 +19,7 @@ func TestOrchestrationPlanAcceptsCurrentTaskText(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Requested.Name != orchestration.ProfileAuto || got.Resolved.Profile != orchestration.ProfileUltracode || got.Resolved.TaskID == "" {
+	if got.Requested.Name != orchestration.ProfileAuto || got.Resolved.Profile != orchestration.ProfileUltracode || got.Resolved.TaskID == "" || got.Resolved.SOLRoute.Mode != orchestration.SOLUltra {
 		t.Fatalf("resolved=%+v", got)
 	}
 	if strings.Contains(stdout.String(), "fan out independent checks") {
@@ -37,8 +37,8 @@ func TestOrchestrationPlanTaskTextKeepsTinyWorkDirect(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Resolved.Profile != orchestration.ProfileOff {
-		t.Fatalf("effective=%s want off", got.Resolved.Profile)
+	if got.Resolved.Profile != orchestration.ProfileOff || got.Resolved.SOLRoute.Mode != orchestration.SOLStandard {
+		t.Fatalf("resolved=%+v, want off/standard", got.Resolved)
 	}
 }
 

@@ -81,6 +81,9 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 		req.Attended = &attended.value
 	}
 	resolved, err := orchestration.Resolve(req, task, caps)
+	if err == nil && taskText != nil && *taskText != "" {
+		orchestration.RouteResolution(&resolved, *taskText, guardCodexDefaultModelID)
+	}
 	if err != nil {
 		if errors.Is(err, orchestration.ErrStrictDegradation) {
 			fmt.Fprintf(stderr, "fak orchestration plan: %v\n", err)
