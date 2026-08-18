@@ -322,7 +322,7 @@ var tier = map[string]int{
 	"goalpark":            2, // durable long Retry-After goal parking and exactly-once supervisor claim (#4805)
 	"codexmcphealth":      3, // Codex MCP transport health diagnostic (#1445): fresh stdio smoke + stale-child inventory/reap fold over subprocess evidence. Tool-shaped mechanism leaf, off the hot path, imports only stdlib.
 	"pythongate":          3, // NEW-PYTHON-TOOL de-Python ratchet: scans tracked tools/*.py (git ls-files) against a frozen grandfathered baseline and refuses any new .py (NEW_PYTHON_TOOL). A tool-shaped witness leaf (reads tree, folds, emits offenses); shells to git off the hot path, imports nothing internal.
-	"ctxknobs":            1, // MANUAL-OVERLAY COUNTER ratchet (#2199): walks cmd/fak flags/env + .claude/skills for context knobs, classifies operator-debug vs user-required, refuses a NEW user-required overlay against a frozen baseline (NEW_USER_REQUIRED_KNOB). Pure filesystem walk + fold, stdlib-only, imports nothing internal, off the hot path.
+	"ctxknobs":            2, // MANUAL-OVERLAY COUNTER ratchet (#2199): walks cmd/fak flags/env + .claude/skills for context knobs, classifies operator-debug vs user-required, refuses a NEW user-required overlay against a frozen baseline (NEW_USER_REQUIRED_KNOB). Pure filesystem walk + fold, stdlib-only, imports nothing internal, off the hot path.
 	"knobcensus":          3, // knob census (#2210): classifies every cmd/fak flag/env + skill knob as INTENT vs HOUSEKEEPING over a tree walk. Tool-shaped mechanism leaf; imports ctxknobs(1)+stdlib, off the hot path.
 	"treedoctor":          3, // tree-hygiene doctor over safecommit's lock seam plus git worktree reads; mechanism/tool leaf, off the hot path.
 	"tooltrend":           4, // cross-session tool-mix & I/O-shape drift lens (#2826): folds toolrollup(3) per-tool rollups across a session corpus into a drift/delta trend. Composer/analytics leaf, imports toolrollup(3)+stdlib, off the hot path.
@@ -576,10 +576,10 @@ var tier = map[string]int{
 	"kvquantmeta":           1,
 	"quantmeta":             1, // stdlib-only neutral quantization descriptor, parser, and typed adjudication contract (#6222).
 	"quantdetect":           1,
-	"fp4runtime":            1, // stdlib-only FP4/microscaling runtime, GPU-architecture, and accumulator compatibility contract; no model kernel.
+	"fp4runtime":            2, // stdlib-only FP4/microscaling runtime, GPU-architecture, and accumulator compatibility contract; no model kernel.
 	"fp4meta":               1, // stdlib-only neutral FP4 artifact, recipe, scale, runtime, and hardware metadata contract; no model kernel.
 	"bitnetruntime":         1, // stdlib-only BitNet runtime delegation and host-compatibility contract; discovers external runtimes but does not execute a model kernel.
-	"quantpolicy":           1, // stdlib-only structural quantization capability policy; no quantizer, conversion, runtime, or model kernel.
+	"quantpolicy":           2, // stdlib-only structural quantization capability policy; no quantizer, conversion, runtime, or model kernel.
 	"requanteval":           1,
 	"lightroteval":          1,
 	"turntaxvisual":         1, // deterministic stdlib-only SVG renderer; off the kernel hot path.
@@ -631,6 +631,7 @@ var tier = map[string]int{
 	"markerblock":           1, // stdlib-only generated-document marker extraction and replacement shared by report leaves (#7115).
 	"strictjson":            1, // stdlib-only strict single-document JSON decoder shared by contract leaves (#7064).
 	"childprocess":          1, // stdlib-only child exit-status normalization shared by launchers (#7063).
+	"stringset":             1, // stdlib-only deterministic string-set views shared by report leaves (#7047).
 	"stringlist":            1, // stdlib-only compact string-list parsing shared by CLI surfaces (#7062).
 	"numbermap":             1, // stdlib-only JSON numeric-map normalization shared by score renderers (#7059).
 	"interspersedflags":     1, // stdlib-only interspersed Go flag parsing shared by CLI surfaces (#7058).
