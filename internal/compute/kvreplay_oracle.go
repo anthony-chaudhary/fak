@@ -3,6 +3,8 @@ package compute
 import (
 	"math"
 	"math/bits"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 // KVReplayResult is the structured replay row #2675 needs for policy comparisons.
@@ -99,7 +101,7 @@ func ReplayKVCacheMulti(events []KVReplayEvent, budget int, policies ...KVEvictP
 	out := make(map[KVEvictPolicy]KVReplayResult, len(policies))
 	for _, policy := range policies {
 		result := ReplayKVCacheResult(events, budget, policy)
-		result.GoodDecisionRatio = goodDecisionRatio(result.HitTokens, oracle.HitTokens)
+		result.GoodDecisionRatio = mathx.AgainstOracle(result.HitTokens, oracle.HitTokens)
 		out[policy] = result
 	}
 	return out
@@ -228,16 +230,6 @@ func evictionsPerHit(evictions, hitTokens int) float64 {
 		return math.Inf(1)
 	}
 	return float64(evictions) / float64(hitTokens)
-}
-
-func goodDecisionRatio(hitTokens, oracleHitTokens int) float64 {
-	if oracleHitTokens <= 0 {
-		if hitTokens == 0 {
-			return 1
-		}
-		return 0
-	}
-	return float64(hitTokens) / float64(oracleHitTokens)
 }
 
 func beladyGreedyHits(events []KVReplayEvent, budget int) int {

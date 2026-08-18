@@ -1,0 +1,33 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T10:10:47.416046Z",
+  "issue": 7301,
+  "family": "achieved-versus-oracle decision ratio",
+  "paths": [
+    "internal/mathx/ratio.go",
+    "internal/mathx/ratio_test.go",
+    "internal/compute/kvreplay_oracle.go",
+    "internal/model/expert_residency_lfu.go"
+  ],
+  "test": "go test ./internal/mathx ./internal/compute -run 'Test.*KVReplay|TestAgainstOracle' -count=1; go test ./internal/model -run 'Test.*Residency|Test.*Ring' -count=1",
+  "test_result": "PASS; fleet-safe broad vet later hit transient missing Go build-cache artifacts unrelated to these paths",
+  "before": {
+    "score": -69.2,
+    "grade": "F",
+    "slop_debt": 323,
+    "duplication": 323,
+    "weighted_duplication": 208.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -68.6,
+    "grade": "F",
+    "slop_debt": 322,
+    "duplication": 322,
+    "weighted_duplication": 208.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

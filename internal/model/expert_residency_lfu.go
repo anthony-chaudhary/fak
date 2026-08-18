@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+
+	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
 // Value-aware expert residency (issue #4357, epic #3174, colibri-inspired @1bdaeee c/tier.h).
@@ -103,7 +105,7 @@ func ReplayExpertResidencyLFUDecay(trace ExpertAccessTrace, opts ExpertResidency
 	oracle := compute.BeladyKVReplayOracle(events, budget)
 	lru := compute.ReplayKVCacheMulti(events, budget, compute.KVEvictLRU)[compute.KVEvictLRU]
 	row := simulateLFUDecayResidency(events, budget, decayEvery)
-	row.GoodDecisionRatio = ratioAgainstOracle(row.HitTokens, oracle.HitTokens)
+	row.GoodDecisionRatio = mathx.AgainstOracle(row.HitTokens, oracle.HitTokens)
 
 	return ExpertResidencyLFUReport{
 		Name: trace.Name, Source: trace.Source, BudgetBytes: trace.BudgetBytes,
@@ -211,13 +213,7 @@ func simulateHeatResidency(events []compute.KVReplayEvent, budget, decayEvery in
 }
 
 func ratioAgainstOracle(hitTokens, oracleHitTokens int) float64 {
-	if oracleHitTokens <= 0 {
-		if hitTokens == 0 {
-			return 1
-		}
-		return 0
-	}
-	return float64(hitTokens) / float64(oracleHitTokens)
+	return mathx.AgainstOracle(hitTokens, oracleHitTokens)
 }
 
 func residencyEvictionsPerHit(evictions, hitTokens int) float64 {
