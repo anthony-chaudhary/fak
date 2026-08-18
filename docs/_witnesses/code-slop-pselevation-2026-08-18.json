@@ -1,0 +1,31 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T09:23:03.314938Z",
+  "issue": 7293,
+  "family": "PowerShell live-source predicate traversal",
+  "paths": [
+    "internal/adjudicator/runas_elevation.go",
+    "internal/adjudicator/terraform_destroy.go"
+  ],
+  "test": "go test ./internal/adjudicator; fak-dev buildcheck --vet",
+  "test_result": "PASS",
+  "before": {
+    "score": -73.3,
+    "grade": "F",
+    "slop_debt": 331,
+    "duplication": 331,
+    "weighted_duplication": 212.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -72.3,
+    "grade": "F",
+    "slop_debt": 329,
+    "duplication": 329,
+    "weighted_duplication": 211.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt decreased by two; no measured hard KPI increased"
+}

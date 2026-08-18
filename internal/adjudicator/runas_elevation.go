@@ -64,35 +64,37 @@ func commandInvokesRunAsElevation(cmd string) bool {
 }
 
 func psSourceElevates(src string, depth int) bool {
+	return psSourceMatches(src, depth, func(head string, rest []psToken) bool {
+		return head == "start-process" && psArgvHasRunAsVerb(rest)
+	})
+}
+
+func psSourceMatches(src string, depth int, matches func(string, []psToken) bool) bool {
 	if depth > maxRCEShellSourceDepth {
-		return true // too deeply nested to decide: keep the deny
+		return true
 	}
-	segs, ok := psSegments(src)
+	segments, ok := psSegments(src)
 	if !ok {
-		return true // unterminated quote: undecidable, keep the deny
+		return true
 	}
-	for _, seg := range segs {
-		head, rest, ok := psCommandWord(seg)
+	for _, segment := range segments {
+		head, rest, ok := psCommandWord(segment)
 		if !ok {
 			continue
 		}
-		if head == "start-process" && psArgvHasRunAsVerb(rest) {
+		if matches(head, rest) {
 			return true
 		}
 		if !psLivePayloadHeads[head] {
-			// Not a launcher: this statement's quoted arguments are inert
-			// mentions — a grep pattern, a commit message, a printed
-			// instruction — never a statement that executes (#2752).
 			continue
 		}
-		for _, tok := range rest {
-			if psEncodedPayloadFlag(tok.text) {
-				return true // base64 payload we cannot read: keep the deny
+		for _, token := range rest {
+			if psEncodedPayloadFlag(token.text) {
+				return true
 			}
 		}
-		// A launcher's quoted argument IS a live statement, so recurse into it.
-		for _, tok := range rest {
-			if tok.quoted && psSourceElevates(tok.text, depth+1) {
+		for _, token := range rest {
+			if token.quoted && psSourceMatches(token.text, depth+1, matches) {
 				return true
 			}
 		}

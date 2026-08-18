@@ -102,36 +102,9 @@ func posixTerraformDestroys(cmd string) bool {
 // backslash as a path byte), recursing into a launcher's quoted argument because
 // that argument is a statement that executes rather than inert text (#2752).
 func psTerraformDestroys(src string, depth int) bool {
-	if depth > maxRCEShellSourceDepth {
-		return true // too deeply nested to decide: keep the deny
-	}
-	segs, ok := psSegments(src)
-	if !ok {
-		return true // unterminated quote: undecidable, keep the deny
-	}
-	for _, seg := range segs {
-		head, rest, ok := psCommandWord(seg)
-		if !ok {
-			continue
-		}
-		if head == "terraform" && terraformArgvDestroys(psTokenTexts(rest)) {
-			return true
-		}
-		if !psLivePayloadHeads[head] {
-			continue
-		}
-		for _, tok := range rest {
-			if psEncodedPayloadFlag(tok.text) {
-				return true // base64 payload we cannot read: keep the deny
-			}
-		}
-		for _, tok := range rest {
-			if tok.quoted && psTerraformDestroys(tok.text, depth+1) {
-				return true
-			}
-		}
-	}
-	return false
+	return psSourceMatches(src, depth, func(head string, rest []psToken) bool {
+		return head == "terraform" && terraformArgvDestroys(psTokenTexts(rest))
+	})
 }
 
 func psTokenTexts(toks []psToken) []string {
