@@ -6536,6 +6536,11 @@
           "category": "incidental",
           "reason": "Deliberately conflicting fixture symbol used only to prove incompatible POLICY_BLOCK reuse is rejected.",
           "token": "VerdictPolicyBlock"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation enum member for a reviewed package capability token candidate, not a new capability concept.",
+          "token": "GoCandidateCapability"
         }
       ],
       "exclude": [
@@ -6565,6 +6570,7 @@
         "FAK_ORG_POLICY_CACHE_PATH",
         "FAK_ORG_POLICY_URL",
         "FAK_PREFLIGHT_ALLOW_BIN_SKEW",
+        "GoCandidateCapability",
         "HeldSchedulePolicy",
         "MaxPostures",
         "NewWithTierBudgetsAndEvictionPolicy",
@@ -9647,6 +9653,26 @@
           "category": "incidental",
           "reason": "Internal pure collector helper; not a user-facing planning concept",
           "token": "PlanUnregisteredResidue"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation type for the reviewed Go-source terminology candidate inventory, not a planning concept.",
+          "token": "GoCandidateCapability"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation type for the reviewed Go-source terminology candidate inventory, not a planning concept.",
+          "token": "GoCandidateKind"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation type for the reviewed Go-source terminology candidate inventory, not a planning concept.",
+          "token": "GoCandidateSymbol"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation type for the reviewed Go-source terminology candidate inventory, not a planning concept.",
+          "token": "GoSourceCandidate"
         }
       ],
       "exclude": [
@@ -9671,6 +9697,10 @@
         "ExplainFilingPlan",
         "ExplanationSeconds",
         "FleetBenchPlanDoc",
+        "GoCandidateCapability",
+        "GoCandidateKind",
+        "GoCandidateSymbol",
+        "GoSourceCandidate",
         "KVPrefixPressureCandidate",
         "KVPrefixPressuredCandidates",
         "KindCandidate",

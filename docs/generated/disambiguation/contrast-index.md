@@ -130,6 +130,13 @@
 - **Contrasts:**
   - **account seat:** A worker is one execution process; a seat is provider-account capacity that may host multiple worker sessions.
 
+<a id="exported-go-symbol-candidate"></a>
+## exported Go symbol candidate
+
+- **Identity:** [exported Go symbol candidate — `disambiguation:go-symbol-candidate`](canonical-terms.md#exported-go-symbol-candidate-disambiguation-go-symbol-candidate); query with `fak disambiguation query "exported Go symbol candidate"`
+- **Contrasts:**
+  - **package capability token:** An exported symbol is discovered from a public Go declaration; a capability token is an explicit runtime negotiation declaration and need not be an exported identifier.
+
 <a id="fak-cli-kernel"></a>
 ## fak CLI kernel
 
@@ -216,6 +223,13 @@
 - **Contrasts:**
   - **tuned baseline:** The tuned baseline answers only what the claim is compared against; net-true grading requires all six claim dimensions.
   - **witness provenance:** Provenance answers only how the value was obtained; a net-true claim also names baseline, net cost, scope, witness, and realization.
+
+<a id="package-capability-token"></a>
+## package capability token
+
+- **Identity:** [package capability token — `disambiguation:capability-token`](canonical-terms.md#package-capability-token-disambiguation-capability-token); query with `fak disambiguation query "package capability token"`
+- **Contrasts:**
+  - **exported Go symbol candidate:** A capability token comes from explicit RegisterCapability declarations; an exported symbol candidate comes from the package's reviewed public identifier surface.
 
 <a id="policy-declaration"></a>
 ## policy declaration

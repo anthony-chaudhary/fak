@@ -1,0 +1,171 @@
+package disambiguation
+
+import (
+	"errors"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
+	"path"
+	"sort"
+	"strconv"
+	"strings"
+	"testing/fstest"
+)
+
+const GoSourceSelfTestSchemaVersion = "fak-disambiguation-go-source-self-test/1"
+
+type GoCandidateKind string
+
+const (
+	GoCandidateSymbol     GoCandidateKind = "exported-symbol"
+	GoCandidateCapability GoCandidateKind = "capability-token"
+)
+
+type GoSourceCandidate struct {
+	Kind       GoCandidateKind `json:"kind"`
+	Name       string          `json:"name"`
+	Package    string          `json:"package"`
+	SourcePath string          `json:"source_path"`
+}
+
+type GoSourceInventory struct {
+	Schema             string              `json:"schema"`
+	Candidates         []GoSourceCandidate `json:"candidates"`
+	ExcludedTests      int                 `json:"excluded_tests"`
+	ExcludedGenerated  int                 `json:"excluded_generated"`
+	ExcludedUnexported int                 `json:"excluded_unexported"`
+}
+
+func InventoryGoSource(source fs.FS, root string) (GoSourceInventory, error) {
+	inventory := GoSourceInventory{Schema: "fak-disambiguation-go-source-inventory/1"}
+	err := fs.WalkDir(source, root, func(filePath string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if path.Ext(filePath) != ".go" {
+			return nil
+		}
+		if strings.HasSuffix(filePath, "_test.go") {
+			inventory.ExcludedTests++
+			return nil
+		}
+		data, err := fs.ReadFile(source, filePath)
+		if err != nil {
+			return err
+		}
+		if generatedGoSource(data) {
+			inventory.ExcludedGenerated++
+			return nil
+		}
+		parsed, err := parser.ParseFile(token.NewFileSet(), filePath, data, 0)
+		if err != nil {
+			return fmt.Errorf("parse %s: %w", filePath, err)
+		}
+		for _, declaration := range parsed.Decls {
+			switch decl := declaration.(type) {
+			case *ast.FuncDecl:
+				if decl.Recv == nil {
+					inventory.addSymbolOrExclude(decl.Name.Name, parsed.Name.Name, filePath)
+				}
+				inventory.addCapabilities(decl, parsed.Name.Name, filePath)
+			case *ast.GenDecl:
+				for _, spec := range decl.Specs {
+					switch item := spec.(type) {
+					case *ast.TypeSpec:
+						inventory.addSymbolOrExclude(item.Name.Name, parsed.Name.Name, filePath)
+					case *ast.ValueSpec:
+						for _, name := range item.Names {
+							inventory.addSymbolOrExclude(name.Name, parsed.Name.Name, filePath)
+						}
+					}
+				}
+				inventory.addCapabilities(decl, parsed.Name.Name, filePath)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return inventory, err
+	}
+	sort.Slice(inventory.Candidates, func(i, j int) bool {
+		a, b := inventory.Candidates[i], inventory.Candidates[j]
+		if a.SourcePath != b.SourcePath {
+			return a.SourcePath < b.SourcePath
+		}
+		if a.Kind != b.Kind {
+			return a.Kind < b.Kind
+		}
+		return a.Name < b.Name
+	})
+	return inventory, nil
+}
+
+func generatedGoSource(data []byte) bool {
+	text := string(data)
+	return strings.Contains(text, "Code generated") && strings.Contains(text, "DO NOT EDIT.")
+}
+
+func (inventory *GoSourceInventory) addSymbolOrExclude(name, packageName, sourcePath string) {
+	if !ast.IsExported(name) {
+		inventory.ExcludedUnexported++
+		return
+	}
+	inventory.Candidates = append(inventory.Candidates, GoSourceCandidate{Kind: GoCandidateSymbol, Name: name, Package: packageName, SourcePath: sourcePath})
+}
+
+func (inventory *GoSourceInventory) addCapabilities(node ast.Node, packageName, sourcePath string) {
+	ast.Inspect(node, func(current ast.Node) bool {
+		call, ok := current.(*ast.CallExpr)
+		if !ok || len(call.Args) != 1 {
+			return true
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || selector.Sel.Name != "RegisterCapability" {
+			return true
+		}
+		literal, ok := call.Args[0].(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			return true
+		}
+		value, err := strconv.Unquote(literal.Value)
+		if err == nil {
+			inventory.Candidates = append(inventory.Candidates, GoSourceCandidate{Kind: GoCandidateCapability, Name: value, Package: packageName, SourcePath: sourcePath})
+		}
+		return true
+	})
+}
+
+type GoSourceSelfTestReport struct {
+	Schema             string              `json:"schema"`
+	Candidates         []GoSourceCandidate `json:"candidates"`
+	Deterministic      bool                `json:"deterministic"`
+	TestsExcluded      bool                `json:"tests_excluded"`
+	GeneratedExcluded  bool                `json:"generated_excluded"`
+	UnexportedExcluded bool                `json:"unexported_excluded"`
+}
+
+func RunGoSourceSelfTest() (GoSourceSelfTestReport, error) {
+	fixture := fstest.MapFS{
+		"pkg/api.go":       &fstest.MapFile{Data: []byte("package pkg\ntype PublicType struct{}\nfunc PublicFunc() {}\nfunc hidden() {}\nfunc init(){ abi.RegisterCapability(\"demo.v1\") }\n")},
+		"pkg/api_test.go":  &fstest.MapFile{Data: []byte("package pkg\ntype TestOnlyExport struct{}\n")},
+		"pkg/generated.go": &fstest.MapFile{Data: []byte("// Code generated by fixture; DO NOT EDIT.\npackage pkg\ntype GeneratedExport struct{}\n")},
+	}
+	first, err := InventoryGoSource(fixture, ".")
+	if err != nil {
+		return GoSourceSelfTestReport{}, err
+	}
+	second, err := InventoryGoSource(fixture, ".")
+	if err != nil {
+		return GoSourceSelfTestReport{}, err
+	}
+	report := GoSourceSelfTestReport{Schema: GoSourceSelfTestSchemaVersion, Candidates: first.Candidates, Deterministic: fmt.Sprint(first.Candidates) == fmt.Sprint(second.Candidates), TestsExcluded: first.ExcludedTests == 1, GeneratedExcluded: first.ExcludedGenerated == 1, UnexportedExcluded: first.ExcludedUnexported > 0}
+	if !report.Deterministic || !report.TestsExcluded || !report.GeneratedExcluded || !report.UnexportedExcluded {
+		return report, errors.New("go-source inventory rules failed")
+	}
+	return report, nil
+}

@@ -21,6 +21,7 @@
 | [dispatch loop](#dispatch-loop-dispatch-loop) | `dispatch:loop` | A durable recurring dispatch state machine identified by loop ID and measured through admitted, refused, started, ended, and witnessed runs. | `fak disambiguation query "dispatch loop"` |
 | [dispatch wave](#dispatch-wave-dispatch-wave) | `dispatch:wave` | An indexed, bounded batch of dispatch members with a shared step budget and explicit lease regions or whole-lane claims. | `fak disambiguation query "dispatch wave"` |
 | [dispatch worker](#dispatch-worker-dispatch-worker) | `dispatch:worker` | One executing worker record with structured issue, lane, backend, and witnessed-result fields; its free-form output is untrusted narration. | `fak disambiguation query "dispatch worker"` |
+| [exported Go symbol candidate](#exported-go-symbol-candidate-disambiguation-go-symbol-candidate) | `disambiguation:go-symbol-candidate` | A reviewed exported type, function, variable, or constant from non-test, non-generated Go source that may warrant canonical or incidental terminology classification. | `fak disambiguation query "exported Go symbol candidate"` |
 | [fak CLI kernel](#fak-cli-kernel-cli-fak) | `cli:fak` | The fak command-line product surface, named as a contrast target for the package-scoped kernel entry. | `fak disambiguation query "fak CLI kernel"` |
 | [fak measurement arm](#fak-measurement-arm-claims-fak-arm) | `claims:fak-arm` | The fak-enabled treatment measured against a declared alternative; calling it a baseline obscures which arm is the comparator. | `fak disambiguation query "fak measurement arm"` |
 | [fleet supervisor](#fleet-supervisor-dispatch-supervisor) | `dispatch:supervisor` | A decision layer whose input is witnessed liveness, worker verdicts, escalations, and leases; missing witnesses cause escalation rather than inference. | `fak disambiguation query "fleet supervisor"` |
@@ -33,6 +34,7 @@
 | [model-mediated check](#model-mediated-check-policy-model-mediated) | `policy:model-mediated` | A semantic assessment whose result depends on a model interpreting content or intent; it is distinct from fak's deterministic structural preflight and is not part of the preflight command's local fold. | `fak disambiguation query "model-mediated check"` |
 | [naive baseline](#naive-baseline-claims-naive-baseline) | `claims:naive-baseline` | A comparison arm representing the untuned or resend-everything floor; useful context, but never the decision-grade headline alternative. | `fak disambiguation query "naive baseline"` |
 | [net-true claim](#net-true-claim-claims-net-true) | `claims:net-true` | A scoped value statement graded against the real tuned alternative and stated net of introduced costs, with provenance, reproduction witness, and realization status. | `fak disambiguation query "net-true claim"` |
+| [package capability token](#package-capability-token-disambiguation-capability-token) | `disambiguation:capability-token` | A string explicitly registered by a public package as a negotiated ABI capability; it is inventory evidence, not automatically a canonical term or an authorization verdict. | `fak disambiguation query "package capability token"` |
 | [policy declaration](#policy-declaration-policy-declaration) | `policy:declaration` | A declarative set of tool, argument, network, and resource rules loaded by the adjudicator; it states configured constraints but is not itself a decision for one call. | `fak disambiguation query "policy declaration"` |
 | [policy posture verdict](#policy-posture-verdict-vocabulary-policy-verdict) | `vocabulary:policy-verdict` | The ALLOW or DENY result of folding compiled, environment, and organization authority over a policy amendment. | `fak disambiguation query "policy posture verdict"` |
 | [provider prompt cache](#provider-prompt-cache-cache-provider-prompt-prefix) | `cache:provider-prompt-prefix` | An upstream provider-owned prompt-prefix reuse service observed as cache-read and cache-creation token accounting with provider TTL and pricing rules. | `fak disambiguation query "provider prompt cache"` |
@@ -296,6 +298,20 @@ One executing worker record with structured issue, lane, backend, and witnessed-
 - **Do not conflate with:**
   - [account seat](contrast-index.md#account-seat) — A worker is one execution process; a seat is provider-account capacity that may host multiple worker sessions.
 
+<a id="exported-go-symbol-candidate-disambiguation-go-symbol-candidate"></a>
+## exported Go symbol candidate — `disambiguation:go-symbol-candidate`
+
+A reviewed exported type, function, variable, or constant from non-test, non-generated Go source that may warrant canonical or incidental terminology classification.
+
+- **Query:** `fak disambiguation query "exported Go symbol candidate"`
+- **Owner:** leaf `disambiguation`, lane `disambiguation`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `exported symbol candidate`
+- **Sources:**
+  - `internal/disambiguation/go_source.go` — `go-source` at `go-source/1`
+- **Do not conflate with:**
+  - [package capability token](contrast-index.md#package-capability-token) — An exported symbol is discovered from a public Go declaration; a capability token is an explicit runtime negotiation declaration and need not be an exported identifier.
+
 <a id="fak-cli-kernel-cli-fak"></a>
 ## fak CLI kernel — `cli:fak`
 
@@ -468,6 +484,20 @@ A scoped value statement graded against the real tuned alternative and stated ne
 - **Do not conflate with:**
   - [tuned baseline](contrast-index.md#tuned-baseline) — The tuned baseline answers only what the claim is compared against; net-true grading requires all six claim dimensions.
   - [witness provenance](contrast-index.md#witness-provenance) — Provenance answers only how the value was obtained; a net-true claim also names baseline, net cost, scope, witness, and realization.
+
+<a id="package-capability-token-disambiguation-capability-token"></a>
+## package capability token — `disambiguation:capability-token`
+
+A string explicitly registered by a public package as a negotiated ABI capability; it is inventory evidence, not automatically a canonical term or an authorization verdict.
+
+- **Query:** `fak disambiguation query "package capability token"`
+- **Owner:** leaf `abi`, lane `abi`
+- **Lifecycle:** `current`, rollout `on`
+- **Aliases:** `capability manifest token`
+- **Sources:**
+  - `internal/abi/registry.go` — `go-source` at `go-source/1`
+- **Do not conflate with:**
+  - [exported Go symbol candidate](contrast-index.md#exported-go-symbol-candidate) — A capability token comes from explicit RegisterCapability declarations; an exported symbol candidate comes from the package's reviewed public identifier surface.
 
 <a id="policy-declaration-policy-declaration"></a>
 ## policy declaration — `policy:declaration`

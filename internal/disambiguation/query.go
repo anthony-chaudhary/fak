@@ -632,6 +632,24 @@ var publicEntries = []Entry{
 		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/disambiguation/entry.go", Revision: "lifecycle-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-lifecycle-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "ActivationMode"}}},
 		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "lifecycle-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
 	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "exported Go symbol candidate", Aliases: []string{"exported symbol candidate"}},
+		Definition: "A reviewed exported type, function, variable, or constant from non-test, non-generated Go source that may warrant canonical or incidental terminology classification.",
+		Contrasts:  []Contrast{{CanonicalTerm: "package capability token", Explanation: "An exported symbol is discovered from a public Go declaration; a capability token is an explicit runtime negotiation declaration and need not be an exported identifier.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)}},
+		Scope:      Scope{Kind: "disambiguation", Value: "go-symbol-candidate"}, Owner: Owner{Leaf: "disambiguation", Lane: "disambiguation"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/disambiguation/go_source.go", Revision: "go-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-go-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "InventoryGoSource"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "go-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
+	{
+		Schema:     EntrySchemaVersion,
+		Identity:   Identity{CanonicalTerm: "package capability token", Aliases: []string{"capability manifest token"}},
+		Definition: "A string explicitly registered by a public package as a negotiated ABI capability; it is inventory evidence, not automatically a canonical term or an authorization verdict.",
+		Contrasts:  []Contrast{{CanonicalTerm: "exported Go symbol candidate", Explanation: "A capability token comes from explicit RegisterCapability declarations; an exported symbol candidate comes from the package's reviewed public identifier surface.", RequiredPair: boolPointer(true), ForbiddenConflation: boolPointer(true)}},
+		Scope:      Scope{Kind: "disambiguation", Value: "capability-token"}, Owner: Owner{Leaf: "abi", Lane: "abi"},
+		Sources:   []SourceWitness{{Kind: SourceKindGoSource, Locator: "internal/abi/registry.go", Revision: "go-source/1", CheckedAt: "2026-08-17T00:00:00Z", Probe: "fak-disambiguation-go-source", Reference: &PublicReference{Kind: ReferenceKindGoSymbol, Name: "RegisterCapability"}}},
+		Freshness: Freshness{Verdict: FreshnessFresh, ReasonCode: "SOURCE_CURRENT", CheckedAt: "2026-08-17T00:00:00Z", Probe: "go-source/1"}, Lifecycle: Lifecycle{Class: LifecycleCurrent, Rollout: RolloutOn},
+	},
 }
 
 var publicIndex = mustNewIndex(publicEntries)

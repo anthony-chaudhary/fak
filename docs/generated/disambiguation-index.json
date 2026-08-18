@@ -1,7 +1,7 @@
 {
   "schema": "fak-disambiguation-index/1",
-  "source_revision": "sha256:d910475a4f09e2cd65917a68bc0e6e8d32227bc691c1f08b9e391794e3948043",
-  "entry_count": 46,
+  "source_revision": "sha256:f6bbe62689b35ab843b397542b19a2eac702e9e38668b5a8144c406e05b173ab",
+  "entry_count": 48,
   "entries": [
     {
       "schema": "fak-disambiguation-entry/1",
@@ -882,6 +882,55 @@
     {
       "schema": "fak-disambiguation-entry/1",
       "identity": {
+        "canonical_term": "exported Go symbol candidate",
+        "aliases": [
+          "exported symbol candidate"
+        ]
+      },
+      "definition": "A reviewed exported type, function, variable, or constant from non-test, non-generated Go source that may warrant canonical or incidental terminology classification.",
+      "contrasts": [
+        {
+          "canonical_term": "package capability token",
+          "explanation": "An exported symbol is discovered from a public Go declaration; a capability token is an explicit runtime negotiation declaration and need not be an exported identifier.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "disambiguation",
+        "value": "go-symbol-candidate"
+      },
+      "owner": {
+        "leaf": "disambiguation",
+        "lane": "disambiguation"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/disambiguation/go_source.go",
+          "revision": "go-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-go-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "InventoryGoSource"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "go-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
         "canonical_term": "fak CLI kernel",
         "aliases": []
       },
@@ -1496,6 +1545,55 @@
         "reason_code": "SOURCE_CURRENT",
         "checked_at": "2026-08-17T00:00:00Z",
         "probe": "claims-source/1"
+      },
+      "lifecycle": {
+        "class": "current",
+        "rollout": "on"
+      }
+    },
+    {
+      "schema": "fak-disambiguation-entry/1",
+      "identity": {
+        "canonical_term": "package capability token",
+        "aliases": [
+          "capability manifest token"
+        ]
+      },
+      "definition": "A string explicitly registered by a public package as a negotiated ABI capability; it is inventory evidence, not automatically a canonical term or an authorization verdict.",
+      "contrasts": [
+        {
+          "canonical_term": "exported Go symbol candidate",
+          "explanation": "A capability token comes from explicit RegisterCapability declarations; an exported symbol candidate comes from the package's reviewed public identifier surface.",
+          "required_pair": true,
+          "forbidden_conflation": true
+        }
+      ],
+      "scope": {
+        "kind": "disambiguation",
+        "value": "capability-token"
+      },
+      "owner": {
+        "leaf": "abi",
+        "lane": "abi"
+      },
+      "sources": [
+        {
+          "kind": "go-source",
+          "locator": "internal/abi/registry.go",
+          "revision": "go-source/1",
+          "checked_at": "2026-08-17T00:00:00Z",
+          "probe": "fak-disambiguation-go-source",
+          "reference": {
+            "kind": "go-symbol",
+            "name": "RegisterCapability"
+          }
+        }
+      ],
+      "freshness": {
+        "verdict": "fresh",
+        "reason_code": "SOURCE_CURRENT",
+        "checked_at": "2026-08-17T00:00:00Z",
+        "probe": "go-source/1"
       },
       "lifecycle": {
         "class": "current",

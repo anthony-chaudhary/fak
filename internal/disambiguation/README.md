@@ -474,3 +474,12 @@ Three ladders remain domain-scoped rather than sharing overloaded spellings:
 - **capability maturity rung** is the readiness ladder: `proposed`, `prototyped`, `tested`, `dogfooded`, or `default`. `benchmarked` remains an orthogonal badge.
 
 Run `fak disambiguation lifecycle-source-self-test --json` to link every accepted spelling to one canonical public definition and prove cross-ladder spellings such as lifecycle `shadow`, activation `archived`, and maturity `benchmarked` are rejected. The fixture reads the existing disambiguation and maturity source contracts; it introduces no second lifecycle writer.
+
+## Exported Go and capability candidates (#6310)
+
+The go-source inventory emits two candidate classes for review rather than silently declaring either canonical:
+
+- an **exported Go symbol candidate** is an exported package-level type, function, variable, or constant from ordinary source; and
+- a **package capability token** is a literal passed to `abi.RegisterCapability`, representing explicit negotiation vocabulary rather than an authorization verdict.
+
+`InventoryGoSource` walks an injected public filesystem deterministically and excludes `_test.go`, generated files carrying the standard `Code generated … DO NOT EDIT.` marker, methods, and unexported helpers. Run `fak disambiguation go-source-self-test --json` for a fixture proving stable ordering and every exclusion rule. The inventory is a read-only candidate source; the canonical index remains the only terminology writer.
