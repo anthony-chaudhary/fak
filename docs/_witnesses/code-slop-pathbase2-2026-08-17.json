@@ -1,0 +1,30 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T06:25:45.825237Z",
+  "issue": 6988,
+  "family": "safe-commit path basename parsing",
+  "paths": [
+    "internal/safecommit/autoindex.go"
+  ],
+  "test": "go test ./internal/safecommit; fak-dev buildcheck --vet",
+  "test_result": "PASS",
+  "before": {
+    "score": -85.8,
+    "grade": "F",
+    "slop_debt": 355,
+    "duplication": 355,
+    "weighted_duplication": 224.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -85.3,
+    "grade": "F",
+    "slop_debt": 354,
+    "duplication": 354,
+    "weighted_duplication": 224.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}

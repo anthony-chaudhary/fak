@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/gitgate"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 var datedNoteRE = regexp.MustCompile(`20\d\d-\d\d-\d\d`)
@@ -78,7 +79,7 @@ func isDatedNotePath(p string) bool {
 	if !strings.HasPrefix(p, "docs/notes/") || !strings.HasSuffix(p, ".md") {
 		return false
 	}
-	base := pathBase(p)
+	base := pathutil.Base(p)
 	return base != "README.md" && (datedNoteRE.MatchString(base) || strings.HasPrefix(base, "PLAN-"))
 }
 
@@ -92,7 +93,7 @@ func readNoteIndexEntry(dir, p string) (noteIndexEntry, bool) {
 	if err != nil {
 		return noteIndexEntry{}, false
 	}
-	base := pathBase(p)
+	base := pathutil.Base(p)
 	return noteIndexEntry{
 		Path:  p,
 		Base:  base,
@@ -192,13 +193,6 @@ func repoAbs(dir, rel string) string {
 		return filepath.FromSlash(rel)
 	}
 	return filepath.Join(dir, filepath.FromSlash(rel))
-}
-
-func pathBase(p string) string {
-	if i := strings.LastIndex(p, "/"); i >= 0 {
-		return p[i+1:]
-	}
-	return p
 }
 
 func fileMode(path string) os.FileMode {
