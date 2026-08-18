@@ -12,6 +12,8 @@ var grandfathered = []string{
 	"tools/agent_walltime_test.py",
 	"tools/agent_walltime.py",
 	"tools/api_host_acceptance_probe_test.py",
+	"tools/appversion.py",
+	"tools/appversion_test.py",
 	"tools/api_host_acceptance_probe.py",
 	"tools/api_host_bridge_gate_test.py",
 	"tools/api_host_bridge_gate.py",
