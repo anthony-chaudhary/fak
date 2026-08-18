@@ -1053,7 +1053,7 @@ func servingSnapshotLabels(s ServingMetricsSnapshot, includeRole bool) string {
 }
 
 func writeServingSumCountRows(b *strings.Builder, name, help string, rows []ServingMetricsSnapshot, pick func(ServingMetricsSnapshot) metricSumCount) {
-	writeHelpType(b, name, help, "summary")
+	cachemeta.WritePromHelp(b, name, help, "summary")
 	for _, row := range rows {
 		labels := servingSnapshotLabels(row, false)
 		v := pick(row)
@@ -1074,7 +1074,7 @@ func writeCounterFloatRows(b *strings.Builder, name, help string, rows []Serving
 // snapshot. writeGaugeRows and writeCounterFloatRows differ only in the declared
 // metric type ("gauge" vs "counter"), so they share this body.
 func writeTypedFloatRows(b *strings.Builder, name, help, typ string, rows []ServingMetricsSnapshot, pick func(ServingMetricsSnapshot) float64) {
-	writeHelpType(b, name, help, typ)
+	cachemeta.WritePromHelp(b, name, help, typ)
 	for _, row := range rows {
 		fmt.Fprintf(b, "%s{%s} %s\n", name, servingSnapshotLabels(row, false), promFloat(pick(row)))
 	}
@@ -1091,7 +1091,7 @@ func writeOptionalGaugeRows(b *strings.Builder, name, help string, rows []Servin
 	if !any {
 		return
 	}
-	writeHelpType(b, name, help, "gauge")
+	cachemeta.WritePromHelp(b, name, help, "gauge")
 	for _, row := range rows {
 		v := pick(row)
 		if v == nil {
@@ -1099,11 +1099,6 @@ func writeOptionalGaugeRows(b *strings.Builder, name, help string, rows []Servin
 		}
 		fmt.Fprintf(b, "%s{%s} %s\n", name, servingSnapshotLabels(row, includeRole), promFloat(*v))
 	}
-}
-
-func writeHelpType(b *strings.Builder, name, help, typ string) {
-	b.WriteString("# HELP " + name + " " + help + "\n")
-	b.WriteString("# TYPE " + name + " " + typ + "\n")
 }
 
 func promFloat(v float64) string {

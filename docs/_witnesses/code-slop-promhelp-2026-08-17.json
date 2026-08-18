@@ -1,0 +1,30 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-18T06:20:13.087805Z",
+  "issue": 6989,
+  "family": "Prometheus HELP/TYPE preamble rendering",
+  "paths": [
+    "internal/engine/vllm.go"
+  ],
+  "test": "go test ./internal/engine -run Test.*Prom|Test.*ServingSnapshot -count=1; fak-dev buildcheck --vet",
+  "test_result": "PASS",
+  "before": {
+    "score": -86.3,
+    "grade": "F",
+    "slop_debt": 356,
+    "duplication": 356,
+    "weighted_duplication": 225.0,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "after": {
+    "score": -85.8,
+    "grade": "F",
+    "slop_debt": 355,
+    "duplication": 355,
+    "weighted_duplication": 224.5,
+    "dead_code": 0,
+    "vacuous_tests": 0
+  },
+  "verdict": "PASS: duplication and total hard debt strictly decreased; no measured hard KPI increased"
+}
