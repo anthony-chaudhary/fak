@@ -1,0 +1,4 @@
+kernel 1.0.0 study component
+provides: runtime
+adapter: native/v1
+

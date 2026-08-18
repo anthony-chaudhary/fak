@@ -1,0 +1,85 @@
+{
+  "schema": "fak.harness-product-lock/v1alpha2",
+  "id": "sha256:22d8a14e8482866afbe89ce1eaab60e31a0f92739fc9d4c000437aab8194d560",
+  "environment": {
+    "os": "linux",
+    "arch": "amd64",
+    "contract": "v1"
+  },
+  "budget": {},
+  "components": [
+    {
+      "id": "kernel",
+      "version": "1.0.0",
+      "digest": "sha256:117ea3e15d94787518cc1a63d37e48b16e18c467442bb9fde222011cfba9e58d",
+      "source": "study/default-control",
+      "reason": "selected root",
+      "provider": "manifest",
+      "provides": [
+        "runtime"
+      ],
+      "compatibility": {
+        "os": [
+          "linux"
+        ],
+        "arch": [
+          "amd64"
+        ],
+        "contract": "v1"
+      },
+      "cost": {},
+      "adapters": [
+        "native"
+      ]
+    }
+  ],
+  "assets": [
+    {
+      "kind": "instruction",
+      "id": "response-style",
+      "value": "concise",
+      "source": "default"
+    },
+    {
+      "kind": "policy",
+      "id": "tools",
+      "grants": [
+        "search_kb"
+      ],
+      "denies": [
+        "shell"
+      ],
+      "source": "default"
+    },
+    {
+      "kind": "tool",
+      "id": "search_kb",
+      "value": "available",
+      "source": "default"
+    }
+  ],
+  "asset_trace": [
+    {
+      "layer": "default",
+      "kind": "instruction",
+      "id": "response-style",
+      "action": "add",
+      "reason": "instruction uses explicit add semantics"
+    },
+    {
+      "layer": "default",
+      "kind": "tool",
+      "id": "search_kb",
+      "action": "add",
+      "reason": "tool uses explicit add semantics"
+    },
+    {
+      "layer": "default",
+      "kind": "policy",
+      "id": "tools",
+      "action": "add",
+      "reason": "establish policy grant/deny ceiling"
+    }
+  ],
+  "decisions": null
+}

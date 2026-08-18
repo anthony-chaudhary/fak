@@ -42,7 +42,7 @@ Exit `3` means the study is still `not_yet`; exit `0` means the declared minimum
 2. Confirm the participant has not worked on fak internals. Record broad experience outside the repository if needed.
 3. Hash `task-card.md`; it must equal `task_digest` in `study.json` before either arm starts.
 4. Build the study binary once from the pinned commit and record both `fak version` and commit. Do not use an older PATH binary—a guarded agent pilot hit exactly this ambiguity.
-5. Give only the assigned arm card and `--help`. Record every additional hint as a help request.
+5. Copy only the assigned directory under `materials/` into a fresh arm directory. Give its `arm-card.md`, `task-card.md`, and the pinned binary; the default-control bundle includes its verified starting product, while the scratch bundle intentionally contains no product material. Record every additional hint as a help request.
 6. Stop at the task card boundary, preserve failed attempts, and independently replay the stated verification commands.
 7. Ask preference only after both arms. A preference without two completed artifacts is inadmissible.
 8. Privacy-review and archive the raw receipts, then rerun the evaluator.

@@ -1,0 +1,27 @@
+{
+  "schema": "fak.harness-product/v1alpha1",
+  "roots": ["kernel"],
+  "components": [{
+    "id": "kernel",
+    "version": "1.0.0",
+    "digest": "sha256:117ea3e15d94787518cc1a63d37e48b16e18c467442bb9fde222011cfba9e58d",
+    "source": "study/default-control",
+    "provides": ["runtime"],
+    "compatibility": {"os": ["linux"], "arch": ["amd64"], "contract": "v1"},
+    "adapters": ["native"],
+    "evidence": {"authority": "fak study fixture", "source": "issue-7252", "tier": "captured"}
+  }],
+  "assets": {
+    "schema": "fak.harness-assets/v1alpha1",
+    "layers": [{
+      "id": "default",
+      "scope": "company",
+      "assets": [
+        {"kind": "instruction", "id": "response-style", "operation": "add", "value": "concise"},
+        {"kind": "tool", "id": "search_kb", "operation": "add", "value": "available"},
+        {"kind": "policy", "id": "tools", "operation": "add", "grants": ["search_kb"], "denies": ["shell"]}
+      ]
+    }]
+  }
+}
+
