@@ -31,6 +31,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // Closed refusal tokens for the land scope gate. They are the machine-checkable half of a
@@ -140,7 +142,7 @@ func wipPeerCheckpointSessions(ctx context.Context, repo, self string) ([]string
 // order, which git already sorted.
 func wipPartitionByScope(captured, declared []string) (in, out []string) {
 	for _, f := range captured {
-		if wipScopeClaims(declared, wipNormalizeScopePath(f)) {
+		if wipScopeClaims(declared, pathutil.NormalizeScope(f)) {
 			in = append(in, f)
 		} else {
 			out = append(out, f)
@@ -167,7 +169,7 @@ func wipNormalizeScope(scope []string) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, s := range scope {
-		s = wipNormalizeScopePath(s)
+		s = pathutil.NormalizeScope(s)
 		if s == "" || seen[s] {
 			continue
 		}
@@ -182,15 +184,6 @@ func wipNormalizeScope(scope []string) []string {
 }
 
 // wipNormalizeScopePath canonicalizes ONE path: Windows separators folded to git's, a
-// leading "./" and any trailing "/" removed.
-func wipNormalizeScopePath(p string) string {
-	p = strings.TrimSpace(strings.ReplaceAll(p, `\`, "/"))
-	for strings.HasPrefix(p, "./") {
-		p = p[2:]
-	}
-	return strings.TrimSuffix(p, "/")
-}
-
 // wipSameScope compares two already-normalized scopes. It is what reopens the checkpoint's
 // unchanged-tree debounce when only the CLAIM changed: the stamped scope is what a later
 // land reads, so re-declaring it over an unchanged tree must rewrite the stamp instead of

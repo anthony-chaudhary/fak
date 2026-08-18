@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // admit.go — the START-OF-TASK admission, the prospective mirror of SweepGuard.
@@ -157,7 +159,7 @@ func AdmitStart(in AdmitInput) AdmitReport {
 	// rows for one decision.
 	seen := map[string]bool{}
 	for _, a := range in.Attrs {
-		file := normalizePath(a.File)
+		file := pathutil.NormalizeScope(a.File)
 		if a.State == AttrOwned && a.Owner == in.Self && in.Self != "" {
 			rep.SelfDirty++
 			continue
@@ -170,7 +172,7 @@ func AdmitStart(in AdmitInput) AdmitReport {
 		rep.Findings = append(rep.Findings, attrFinding(intent, file, a, in.Live))
 	}
 	for _, u := range in.Untracked {
-		file := normalizePath(u)
+		file := pathutil.NormalizeScope(u)
 		intent, ok := matchIntent(intents, file)
 		if !ok || seen[intent] {
 			continue
@@ -281,7 +283,7 @@ func normalizeIntents(in []string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(in))
 	for _, p := range in {
-		p = normalizePath(p)
+		p = pathutil.NormalizeScope(p)
 		if p == "" || seen[p] {
 			continue
 		}
@@ -294,15 +296,6 @@ func normalizeIntents(in []string) []string {
 
 // normalizePath renders a declared or reported path in the one spelling the fold
 // compares: forward slashes, no "./" prefix, no trailing slash. An operator on Windows
-// types backslashes and git reports slashes; without this they would never meet.
-func normalizePath(p string) string {
-	p = strings.TrimSpace(strings.ReplaceAll(p, `\`, "/"))
-	for strings.HasPrefix(p, "./") {
-		p = p[2:]
-	}
-	return strings.TrimSuffix(p, "/")
-}
-
 // matchIntent finds the declared path covering file — an exact match, or a declared
 // directory the file sits beneath. It returns the declaration (not the file) so the
 // finding is reported against what the caller asked for.
