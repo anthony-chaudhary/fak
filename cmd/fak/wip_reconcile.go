@@ -101,7 +101,13 @@ func runWipReconcile(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stdout, "no checkpoints to reconcile")
 	default:
 		for _, d := range res.Decisions {
-			fmt.Fprintf(stdout, "%s\t%s\t%s\n", d.Action, d.Session, d.Reason)
+			fmt.Fprintf(stdout, "%s\t%s\tclass=%s repl=%s\t%s\n", d.Action, d.Session, firstNonEmpty(d.CheckpointClass, "unknown"), firstNonEmpty(d.Replication, "unknown"), d.Reason)
+			if d.NextCommand != "" {
+				fmt.Fprintf(stdout, "  next: %s\n", d.NextCommand)
+			}
+			for _, command := range d.ReviewCommands {
+				fmt.Fprintf(stdout, "  review: %s\n", command)
+			}
 		}
 	}
 	// Opt-in follow-up: file (or dry-run print) one idempotent ticket per QUARANTINE
@@ -245,39 +251,89 @@ func wipReconcileAt(ctx context.Context, repo string, now time.Time) (wipReconci
 	if err != nil {
 		return wipReconcileResult{}, err
 	}
+	status, err := wipStatus(ctx, repo, now.Unix())
+	if err != nil {
+		return wipReconcileResult{}, err
+	}
+	replication := make(map[string]string, len(status.Sessions))
+	for _, row := range status.Sessions {
+		replication[row.Session] = string(row.Replication)
+	}
 	live, err := wipLiveSessions(ctx, repo)
 	if err != nil {
 		return wipReconcileResult{}, err
 	}
 	cands := make([]wiprecon.Candidate, 0, len(recs))
 	bySession := make(map[string]wipref.RefRecord, len(recs))
+	payloads := make(map[string]wipref.PayloadCensus, len(recs))
+	classes := make(map[string]wipref.CensusClass, len(recs))
 	for _, r := range recs {
 		session := wipSessionOf(r)
 		bySession[session] = r
 		c := wiprecon.Candidate{Session: session, Owner: wiprecon.OwnerCrashed}
 		if live[session] {
 			c.Owner = wiprecon.OwnerLive
-			cands = append(cands, c)
-			continue
 		}
 		st, oerr := wipOwnerState(ctx, repo, r)
 		if oerr != nil {
 			return wipReconcileResult{}, oerr
 		}
 		c.Landed = st == wipref.OwnerLanded
-		if !c.Landed {
-			payload := wipref.BuildPayloadCensus(wipPayloadReading(ctx, repo, r))
-			if !payload.Read {
-				return wipReconcileResult{}, fmt.Errorf("measure checkpoint payload %s: %s", r.Ref, payload.Unreadable)
-			}
+		payload := wipref.BuildPayloadCensus(wipPayloadReading(ctx, repo, r))
+		if !payload.Read {
+			return wipReconcileResult{}, fmt.Errorf("measure checkpoint payload %s: %s", r.Ref, payload.Unreadable)
+		}
+		payloads[session] = payload
+		if !c.Landed && c.Owner != wiprecon.OwnerLive {
 			c.DivergedPaths = len(payload.DivergedPaths)
 			if c.DivergedPaths == 0 {
 				c.Applies = wipDeltaApplies(ctx, repo, r)
 			}
 		}
+		read, files, absent, diverged := payload.Facts()
+		classes[session] = wipref.Classify(wipref.CensusFacts{
+			Live: c.Owner == wiprecon.OwnerLive, Landed: c.Landed, Resolved: true,
+			PayloadRead: read, PayloadFiles: files, PayloadAbsent: absent, PayloadDiverged: diverged,
+		})
 		cands = append(cands, c)
 	}
 	decisions := wiprecon.Reconcile(cands)
+	for i := range decisions {
+		d := &decisions[i]
+		r := bySession[d.Session]
+		payload := payloads[d.Session]
+		d.CheckpointClass = string(classes[d.Session])
+		d.Replication = replication[d.Session]
+		d.AbsentPaths = len(payload.AbsentPaths)
+		d.DivergedPaths = len(payload.DivergedPaths)
+		d.LandedPaths = payload.Landed
+		for _, path := range payload.AbsentPaths {
+			command, _ := wipref.PayloadRemedy(wipref.PayloadAbsent, r.Ref, path)
+			d.ReviewCommands = append(d.ReviewCommands, command)
+		}
+		for _, path := range payload.DivergedPaths {
+			command, _ := wipref.PayloadRemedy(wipref.PayloadDiverged, r.Ref, path)
+			d.ReviewCommands = append(d.ReviewCommands, command)
+		}
+		switch d.Action {
+		case wiprecon.ActSkip:
+			d.NextCommand = "fak wip status"
+			d.Reason += "; checkpoint is crash/restart safety while its owner is live, not the normal landing path"
+		case wiprecon.ActReclaim:
+			d.NextCommand = fmt.Sprintf("fak wip reconcile --reclaim --session %s", d.Session)
+			d.Reason += "; adopt the whole clean delta instead of copying ref objects by hand"
+		case wiprecon.ActQuarantine:
+			if len(d.ReviewCommands) > 0 {
+				d.NextCommand = "run review_commands; salvage absent paths directly and merge divergent paths before a normal commit"
+			} else {
+				d.NextCommand = "fak wip census --json"
+			}
+			d.Reason += "; retained because automatic landing could overwrite newer HEAD content"
+		}
+		if d.Replication == string(wipref.ReplicationLocalOnly) {
+			d.Reason += "; LOCAL_ONLY survives session loss but not loss of this clone (`fak wip sync` replicates it)"
+		}
+	}
 	return wipReconcileResult{
 		Decisions: decisions,
 		Reclaim:   wipReclaimWorklist(ctx, repo, decisions, bySession, live, now),

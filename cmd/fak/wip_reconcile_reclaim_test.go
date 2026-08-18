@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/wiprecon"
+	"github.com/anthony-chaudhary/fak/internal/wipref"
 )
 
 // wipReclaimFixture builds a repo carrying exactly the three reconcile verdicts #5480 is
@@ -249,6 +250,96 @@ func TestWipReconcileReclaimEmptyQueueExitsZero(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "no reclaimable checkpoints") {
 		t.Errorf("empty queue must say so plainly; stdout:\n%s", out.String())
+	}
+}
+
+// TestWipReconcileQuarantineExplainsRecoveryAndDurability proves a parked ref does not
+// collapse into the opaque word QUARANTINE: the report names the divergent payload,
+// emits a non-destructive review command, and says whether the only copy is local.
+func TestWipReconcileQuarantineExplainsRecoveryAndDurability(t *testing.T) {
+	ctx := context.Background()
+	dir, _ := wipTestRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "shared.txt"), []byte("checkpoint\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := wipCheckpointScoped(ctx, dir, "lost-owner", true, 1_700_000_000, []string{"shared.txt"})
+	if err != nil || res.Object == "" {
+		t.Fatalf("checkpoint: res=%+v err=%v", res, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "shared.txt"), []byte("newer-head\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitWipOut(ctx, dir, nil, "add", "shared.txt"); err != nil {
+		t.Fatal(err)
+	}
+	commit, err := wipPlumbBaseCommit(ctx, dir, "advance head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitWipOut(ctx, dir, nil, "update-ref", "HEAD", commit); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := wipReconcileAt(ctx, dir, time.Unix(1_700_000_000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Decisions) != 1 {
+		t.Fatalf("decisions=%+v, want one", got.Decisions)
+	}
+	d := got.Decisions[0]
+	if d.Action != wiprecon.ActQuarantine || d.CheckpointClass != string(wipref.CensusDiverged) {
+		t.Fatalf("decision=%+v, want QUARANTINE with DIVERGED checkpoint class", d)
+	}
+	if d.Replication != string(wipref.ReplicationLocalOnly) || !strings.Contains(d.Reason, "not loss of this clone") {
+		t.Fatalf("decision must expose local-only durability: %+v", d)
+	}
+	wantReview := "git diff HEAD:shared.txt " + res.Ref + ":shared.txt"
+	if len(d.ReviewCommands) != 1 || d.ReviewCommands[0] != wantReview {
+		t.Fatalf("review_commands=%q, want %q", d.ReviewCommands, wantReview)
+	}
+	if strings.Contains(strings.Join(d.ReviewCommands, " "), "checkout") || !strings.Contains(d.NextCommand, "merge divergent") {
+		t.Fatalf("quarantine recovery must review, never overwrite: %+v", d)
+	}
+}
+
+// TestRunWipReconcileRendersNextSafeAction pins the operator-facing witness: parked work
+// names its lifecycle class, durability, and safe review command without requiring JSON.
+func TestRunWipReconcileRendersNextSafeAction(t *testing.T) {
+	ctx := context.Background()
+	dir, _ := wipTestRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "shared.txt"), []byte("checkpoint\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := wipCheckpointScoped(ctx, dir, "render-owner", true, 1_700_000_000, []string{"shared.txt"})
+	if err != nil || res.Object == "" {
+		t.Fatalf("checkpoint: res=%+v err=%v", res, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "shared.txt"), []byte("newer-head\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitWipOut(ctx, dir, nil, "add", "shared.txt"); err != nil {
+		t.Fatal(err)
+	}
+	commit, err := wipPlumbBaseCommit(ctx, dir, "advance head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitWipOut(ctx, dir, nil, "update-ref", "HEAD", commit); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := runWipReconcile(&out, &errb, []string{"-C", dir}); code != 0 {
+		t.Fatalf("runWipReconcile rc=%d stderr=%s", code, errb.String())
+	}
+	for _, want := range []string{"class=DIVERGED", "repl=LOCAL_ONLY", "next: run review_commands", "review: git diff HEAD:shared.txt " + res.Ref + ":shared.txt"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("stdout missing %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "review: git checkout") {
+		t.Fatalf("render offered destructive overwrite:\n%s", out.String())
 	}
 }
 

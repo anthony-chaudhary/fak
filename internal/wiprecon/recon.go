@@ -51,9 +51,16 @@ type Candidate struct {
 
 // Decision is the per-candidate verdict.
 type Decision struct {
-	Session string `json:"session"`
-	Action  Action `json:"action"`
-	Reason  string `json:"reason"`
+	Session         string   `json:"session"`
+	Action          Action   `json:"action"`
+	Reason          string   `json:"reason"`
+	CheckpointClass string   `json:"checkpoint_class,omitempty"`
+	Replication     string   `json:"replication,omitempty"`
+	AbsentPaths     int      `json:"absent_paths,omitempty"`
+	DivergedPaths   int      `json:"diverged_paths,omitempty"`
+	LandedPaths     int      `json:"landed_paths,omitempty"`
+	NextCommand     string   `json:"next_command,omitempty"`
+	ReviewCommands  []string `json:"review_commands,omitempty"`
 }
 
 // Decide is the per-candidate rule. Fail-safe: DISCARD_WITNESSED requires Landed, and
