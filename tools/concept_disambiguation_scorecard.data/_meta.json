@@ -4110,6 +4110,11 @@
           "category": "incidental",
           "reason": "Local path variable for validating the Codex rollout archive boundary; not a distinct session-runtime concept.",
           "token": "sessionsRoot"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pure session-miner report assembly helper, not a runtime session lifecycle concept",
+          "token": "reportFromSessions"
         }
       ],
       "id": "session-runtime",
@@ -4281,6 +4286,7 @@
         "refusalSafeSessionID",
         "renderSessionOpen",
         "repairMalformedLooseSessionRef",
+        "reportFromSessions",
         "repository-read",
         "requireminimaxsession",
         "resolveServeSessionState",
@@ -9418,6 +9424,26 @@
           "category": "incidental",
           "reason": "Study report accounting field, not an execution-plan concept",
           "token": "MaintenanceSeconds"
+        },
+        {
+          "category": "incidental",
+          "reason": "Persistence field for deduplicating already emitted mining candidates, not a planning concept",
+          "token": "seen_candidates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Session-miner output field for newly crossing fingerprints, not a planning candidate state",
+          "token": "NewCandidates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Stable session-miner deduplication hash, not a planning candidate identity",
+          "token": "candidateFingerprint"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pure report assembly helper over mined sessions, not a planning report",
+          "token": "reportFromSessions"
         }
       ],
       "exclude": [
@@ -9448,6 +9474,7 @@
         "MaintenanceSeconds",
         "MergePlan",
         "MotifCatalogPlanFanoutReconcile",
+        "NewCandidates",
         "NoteCandidates",
         "PlanDecodeInterleave",
         "PlanEviction",
@@ -9476,6 +9503,7 @@
         "auditDispatchWaveExecutionPlanBounded",
         "buildMainPlan",
         "bytes_per_candidate",
+        "candidateFingerprint",
         "candidateID",
         "candidateNote",
         "candidatePaths",
@@ -9513,9 +9541,11 @@
         "plants",
         "register_bench_plan_doc",
         "relationCandidates",
+        "reportFromSessions",
         "runAblatePlan",
         "runContinuitySyncPlan",
         "seedCandidate",
+        "seen_candidates",
         "stablePlanID",
         "wipLandOptions",
         "wipLandWith"

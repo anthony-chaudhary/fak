@@ -41,3 +41,38 @@ func TestRunSessionMineSpine(t *testing.T) {
 		t.Fatalf("trajectory=%v", got)
 	}
 }
+
+func TestRunSessionMineIndexedSpine(t *testing.T) {
+	root := t.TempDir()
+	codex := filepath.Join(root, "codex")
+	if err := os.MkdirAll(codex, 0755); err != nil {
+		t.Fatal(err)
+	}
+	body := "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"view_image\"}}\n{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"view_image\"}}\n"
+	if err := os.WriteFile(filepath.Join(codex, "a.jsonl"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	index := filepath.Join(root, "state", "index.json")
+	var first, errOut bytes.Buffer
+	args := []string{"--codex-root", codex, "--claude-root", "", "--days", "0", "--index", index, "--min-support", "1"}
+	if code := runSessionMine(&first, &errOut, args); code != 0 {
+		t.Fatalf("first code=%d stderr=%s", code, errOut.String())
+	}
+	var got sessionmine.IndexedResult
+	if err := json.Unmarshal(first.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ParsedFiles != 1 || len(got.NewCandidates) != 1 {
+		t.Fatalf("first=%+v", got)
+	}
+	var second bytes.Buffer
+	if code := runSessionMine(&second, &errOut, args); code != 0 {
+		t.Fatalf("second code=%d stderr=%s", code, errOut.String())
+	}
+	if err := json.Unmarshal(second.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ReusedFiles != 1 || len(got.NewCandidates) != 0 {
+		t.Fatalf("second=%+v", got)
+	}
+}

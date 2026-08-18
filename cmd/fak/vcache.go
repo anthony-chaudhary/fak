@@ -104,7 +104,7 @@ func vcacheUsage(w io.Writer) {
   fak vcache codex-session-extract [--session FILE | --thread-id ID] --out FILE
                    [--snapshot-out FILE|default] [--score-out FILE] [--family NAME]
   fak vcache session-mine [--codex-root DIR] [--claude-root DIR] [--days N]
-                   [--min-support N] [--limit N]
+                   [--min-support N] [--limit N] [--index FILE]
   fak vcache context-witness [--json] [--snapshot FILE] [--fixture FILE]
                    [--wire openai|anthropic]
   fak vcache score|bench [--json] [--out FILE] [--telemetry FILE] [--two-x F]

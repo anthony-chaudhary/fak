@@ -20,6 +20,7 @@ func runSessionMine(stdout, stderr io.Writer, args []string) int {
 	days := fs.Int("days", 7, "scan files modified in the last N days (0 scans all)")
 	minSupport := fs.Int("min-support", 2, "minimum distinct session support")
 	limit := fs.Int("limit", 25, "maximum ranked candidates")
+	index := fs.String("index", "", "incremental privacy-safe index path")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -31,12 +32,19 @@ func runSessionMine(stdout, stderr io.Writer, args []string) int {
 	if *days > 0 {
 		since = time.Now().Add(-time.Duration(*days) * 24 * time.Hour)
 	}
-	report, err := sessionmine.Mine(sessionmine.Options{CodexRoot: *codex, ClaudeRoot: *claude, Since: since, MinSupport: *minSupport, Limit: *limit})
+	opts := sessionmine.Options{CodexRoot: *codex, ClaudeRoot: *claude, Since: since, MinSupport: *minSupport, Limit: *limit}
+	var output any
+	var err error
+	if *index != "" {
+		output, err = sessionmine.MineIndexed(opts, *index)
+	} else {
+		output, err = sessionmine.Mine(opts)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "session-mine: %v\n", err)
 		return 1
 	}
-	if err := sessionmine.WriteJSON(stdout, report); err != nil {
+	if err := sessionmine.WriteJSON(stdout, output); err != nil {
 		fmt.Fprintf(stderr, "session-mine: %v\n", err)
 		return 1
 	}

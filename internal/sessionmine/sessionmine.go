@@ -138,6 +138,18 @@ func Mine(opts Options) (Report, error) {
 			return Report{}, fmt.Errorf("walk %s sessions: %w", source.provider, err)
 		}
 	}
+	return reportFromSessions(opts, sessions, report.Inputs.FilesScanned, report.Inputs.MalformedLines), nil
+}
+
+func reportFromSessions(opts Options, sessions []Session, filesScanned, malformed int) Report {
+	if opts.MinSupport <= 0 {
+		opts.MinSupport = 2
+	}
+	if opts.Limit <= 0 {
+		opts.Limit = 25
+	}
+	report := Report{Schema: Schema, Generated: generatedAt(opts.Since), Inputs: InputStats{CodexRoot: sourceLabel(opts.CodexRoot, "codex"), ClaudeRoot: sourceLabel(opts.ClaudeRoot, "claude"), FilesScanned: filesScanned}, Metrics: Metrics{ByProvider: map[string]int{}}}
+	report.Inputs.MalformedLines = malformed
 	sort.Slice(sessions, func(i, j int) bool {
 		if sessions[i].Provider != sessions[j].Provider {
 			return sessions[i].Provider < sessions[j].Provider
@@ -205,7 +217,7 @@ func Mine(opts Options) (Report, error) {
 		report.Candidates[i].Rank = i + 1
 	}
 	report.Metrics.CandidateCount = len(report.Candidates)
-	return report, nil
+	return report
 }
 
 func generatedAt(since time.Time) string {
@@ -468,7 +480,7 @@ func suggestLeaf(seq []string) string {
 	return strings.Trim(x, "-")
 }
 
-func WriteJSON(w io.Writer, report Report) error {
+func WriteJSON(w io.Writer, report any) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(report)
