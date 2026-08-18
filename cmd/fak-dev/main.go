@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime/debug"
 
+	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/devcmd"
 )
 
@@ -143,6 +144,9 @@ func runVersion(w io.Writer, argv []string) int {
 				revision = setting.Value
 			}
 		}
+	}
+	if appversion.BuildCommit != "" {
+		revision = appversion.BuildCommit
 	}
 	fmt.Fprintf(w, "fak-dev %s (%s)\n", version, revision)
 	fmt.Fprintf(w, "build: %s\n", revision)
