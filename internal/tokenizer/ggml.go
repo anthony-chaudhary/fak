@@ -92,6 +92,7 @@ func FromGGML(tokens, merges []string, tokenTypes []int32, pre string) (*Tokeniz
 		idToToken:        idToToken,
 		tokenToID:        tokenToID,
 		special:          special,
+		addedByContent:   specialByContent,
 		specialByContent: specialByContent,
 		mergeRank:        mergeRank,
 		split:            split,

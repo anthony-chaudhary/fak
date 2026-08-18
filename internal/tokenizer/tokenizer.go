@@ -34,6 +34,7 @@ type Tokenizer struct {
 	idToToken        []string
 	tokenToID        map[string]int
 	special          map[int]string
+	addedByContent   []specialToken
 	specialByContent []specialToken
 	mergeRank        map[tokenPair]int
 	split            func(string) []string
@@ -192,6 +193,7 @@ func ParseJSON(b []byte) (*Tokenizer, error) {
 		tokenToID[tok] = id
 	}
 	special := make(map[int]string)
+	addedByContent := make([]specialToken, 0, len(doc.AddedTokens))
 	specialByContent := make([]specialToken, 0, len(doc.AddedTokens))
 	for _, tok := range doc.AddedTokens {
 		if tok.Content == "" {
@@ -202,11 +204,15 @@ func ParseJSON(b []byte) (*Tokenizer, error) {
 		}
 		idToToken[tok.ID] = tok.Content
 		tokenToID[tok.Content] = tok.ID
+		addedByContent = append(addedByContent, specialToken{content: tok.Content, id: tok.ID})
 		if tok.Special {
 			special[tok.ID] = tok.Content
 			specialByContent = append(specialByContent, specialToken{content: tok.Content, id: tok.ID})
 		}
 	}
+	sort.Slice(addedByContent, func(i, j int) bool {
+		return len(addedByContent[i].content) > len(addedByContent[j].content)
+	})
 	sort.Slice(specialByContent, func(i, j int) bool {
 		return len(specialByContent[i].content) > len(specialByContent[j].content)
 	})
@@ -235,6 +241,7 @@ func ParseJSON(b []byte) (*Tokenizer, error) {
 		idToToken:        idToToken,
 		tokenToID:        tokenToID,
 		special:          special,
+		addedByContent:   addedByContent,
 		specialByContent: specialByContent,
 		mergeRank:        mergeRank,
 		split:            split,
@@ -255,19 +262,19 @@ func (t *Tokenizer) Encode(text string) ([]int, error) {
 	}
 	var ids []int
 	for len(text) > 0 {
-		if sp, ok := t.matchSpecial(text); ok {
+		if sp, ok := t.matchAdded(text); ok {
 			ids = append(ids, sp.id)
 			text = text[len(sp.content):]
 			continue
 		}
-		nextSpecial := len(text)
-		for _, sp := range t.specialByContent {
-			if i := strings.Index(text, sp.content); i >= 0 && i < nextSpecial {
-				nextSpecial = i
+		nextAdded := len(text)
+		for _, sp := range t.addedByContent {
+			if i := strings.Index(text, sp.content); i >= 0 && i < nextAdded {
+				nextAdded = i
 			}
 		}
-		chunk := text[:nextSpecial]
-		text = text[nextSpecial:]
+		chunk := text[:nextAdded]
+		text = text[nextAdded:]
 		// Metaspace (Gemma 4) BPEs the whole chunk on the ▁-marked literal text; the
 		// GPT-2 ByteLevel path splits into regex pieces and remaps bytes to its alphabet.
 		pieces := []string{chunk}
@@ -409,8 +416,8 @@ func makeByteLevelEncode() map[byte]rune {
 	return out
 }
 
-func (t *Tokenizer) matchSpecial(text string) (specialToken, bool) {
-	for _, sp := range t.specialByContent {
+func (t *Tokenizer) matchAdded(text string) (specialToken, bool) {
+	for _, sp := range t.addedByContent {
 		if strings.HasPrefix(text, sp.content) {
 			return sp, true
 		}

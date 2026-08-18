@@ -141,7 +141,9 @@ func TestOrnithQwen35JSONVocabAndTwoEOS(t *testing.T) {
 	  "added_tokens": [
 	    {"id": 248044, "content": "<|endoftext|>", "special": true},
 	    {"id": 248046, "content": "<|im_end|>", "special": true},
-	    {"id": 248045, "content": "<|im_start|>", "special": true}
+	    {"id": 248045, "content": "<|im_start|>", "special": true},
+	    {"id": 248068, "content": "<think>", "special": false},
+	    {"id": 248069, "content": "</think>", "special": false}
 	  ]
 	}`
 	tok, err := ParseJSON([]byte(doc))
@@ -170,6 +172,16 @@ func TestOrnithQwen35JSONVocabAndTwoEOS(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, []int{ornithEndOfText, ornithIMEnd}) {
 		t.Fatalf("Encode(two-eos) = %v, want %v", got, []int{ornithEndOfText, ornithIMEnd})
+	}
+	got, err = tok.Encode("<think></think>")
+	if err != nil {
+		t.Fatalf("Encode(non-special added tokens): %v", err)
+	}
+	if want := []int{248068, 248069}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Encode(non-special added tokens) = %v, want %v", got, want)
+	}
+	if _, ok := specials[248068]; ok {
+		t.Fatal("<think> is an added token but not a special token")
 	}
 }
 

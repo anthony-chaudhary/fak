@@ -122,19 +122,19 @@ func encodeNaive(tok *Tokenizer, text string) ([]int, error) {
 	}
 	var ids []int
 	for len(text) > 0 {
-		if sp, ok := tok.matchSpecial(text); ok {
+		if sp, ok := tok.matchAdded(text); ok {
 			ids = append(ids, sp.id)
 			text = text[len(sp.content):]
 			continue
 		}
-		nextSpecial := len(text)
-		for _, sp := range tok.specialByContent {
-			if i := strings.Index(text, sp.content); i >= 0 && i < nextSpecial {
-				nextSpecial = i
+		nextAdded := len(text)
+		for _, sp := range tok.addedByContent {
+			if i := strings.Index(text, sp.content); i >= 0 && i < nextAdded {
+				nextAdded = i
 			}
 		}
-		chunk := text[:nextSpecial]
-		text = text[nextSpecial:]
+		chunk := text[:nextAdded]
+		text = text[nextAdded:]
 		pieces := []string{chunk}
 		if !tok.metaspace {
 			pieces = split(chunk)
