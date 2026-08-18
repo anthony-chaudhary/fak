@@ -48,7 +48,6 @@ var guardCommonFlags = []guardCommonFlag{
 	{"audit", "change where the decision journal is written ('off' disables it)"},
 	{"quiet", "suppress the startup banner and the exit audit summary"},
 	{"dump-policy", "print the built-in capability floor (an editable manifest) and exit"},
-	{"split", "auto|on|off: a live fak-info pane beside the agent (auto-on inside a multiplexer)"},
 }
 
 // guardFlagGroup is one labeled section of the `fak guard -h -all` reference.
@@ -76,7 +75,7 @@ var guardFlagGroups = []guardFlagGroup{
 		"anthropic-oauth", "oauth-token-env", "env", "require-key-env", "rotate",
 	}},
 	{"Policy, floor & audit", []string{
-		"policy", "dump-policy", "audit", "log", "landlock-hooks",
+		"policy", "dump-policy", "audit", "log", "landlock-hooks", "toolcall-control",
 	}},
 	{"Token economy (cache & context savers)", []string{
 		"compact-history-budget", "compact-anchor-head", "assume-session-turns",
