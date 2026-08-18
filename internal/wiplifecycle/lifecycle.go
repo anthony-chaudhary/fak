@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -111,6 +112,49 @@ func Read(path string) (Receipt, error) {
 	return receipt, nil
 }
 
+// List returns every durable lifecycle receipt in newest-first order. Receipts live
+// under the Git directory, so this remains available after the refs or worktrees whose
+// transition they witnessed have disappeared.
+func List(root string) ([]Receipt, error) {
+	store, err := storeDir(root)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(store)
+	if errors.Is(err, os.ErrNotExist) {
+		return []Receipt{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	receipts := make([]Receipt, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() || !validID(entry.Name()) {
+			continue
+		}
+		receipt, err := Read(filepath.Join(store, entry.Name(), "receipt.json"))
+		if err != nil {
+			return nil, fmt.Errorf("read lifecycle receipt %s: %w", entry.Name(), err)
+		}
+		receipts = append(receipts, receipt)
+	}
+	sort.Slice(receipts, func(i, j int) bool {
+		left := receipts[i].FinishedAt
+		if left == "" {
+			left = receipts[i].StartedAt
+		}
+		right := receipts[j].FinishedAt
+		if right == "" {
+			right = receipts[j].StartedAt
+		}
+		if left == right {
+			return receipts[i].OperationID < receipts[j].OperationID
+		}
+		return left > right
+	})
+	return receipts, nil
+}
+
 func capture(root, path string, now time.Time) Capture {
 	rep := wipinventory.Collect(root, now, wipinventory.GitRunner{})
 	b, err := rep.JSON()
@@ -163,6 +207,14 @@ func operationDir(root, id string) (string, error) {
 	if !validID(id) {
 		return "", fmt.Errorf("invalid lifecycle operation id %q", id)
 	}
+	store, err := storeDir(root)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(store, id), nil
+}
+
+func storeDir(root string) (string, error) {
 	gitPath, err := wipinventory.GitRunner{}.Run(root, "rev-parse", "--git-path", "fak-wip-lifecycle")
 	if err != nil {
 		return "", err
@@ -171,7 +223,7 @@ func operationDir(root, id string) (string, error) {
 	if !filepath.IsAbs(store) {
 		store = filepath.Join(root, store)
 	}
-	return filepath.Join(store, id), nil
+	return store, nil
 }
 
 func validID(id string) bool {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/wiplifecycle"
@@ -68,6 +69,29 @@ func TestWorkerLifecycleMutationHooksStayWired(t *testing.T) {
 	} {
 		if !bytes.Contains(body, []byte(want)) {
 			t.Fatalf("automatic lifecycle hook missing: %s", want)
+		}
+	}
+}
+
+func TestRunWIPLifecycleListRendersDurableHistory(t *testing.T) {
+	repo := initWipAdmitRepo(t)
+	var out, errOut bytes.Buffer
+	if code := runWIPLifecycle([]string{"begin", "--root", repo, "--kind", "checkpoint-reap", "--id", "history-1"}, &out, &errOut); code != 0 {
+		t.Fatalf("begin rc=%d stderr=%s", code, errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runWIPLifecycle([]string{"end", "--root", repo, "--id", "history-1"}, &out, &errOut); code != 0 {
+		t.Fatalf("end rc=%d stderr=%s", code, errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runWIPLifecycle([]string{"list", "--root", repo}, &out, &errOut); code != 0 {
+		t.Fatalf("list rc=%d stderr=%s", code, errOut.String())
+	}
+	for _, want := range []string{"FINISHED", "checkpoint-reap", "history-1", "receipt.json"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("list missing %q:\n%s", want, out.String())
 		}
 	}
 }

@@ -15,7 +15,7 @@ import (
 
 func runWIPLifecycle(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak wip lifecycle begin --kind KIND [--root DIR] [--id ID] | end --id ID [--root DIR]")
+		fmt.Fprintln(stderr, "usage: fak wip lifecycle begin --kind KIND [--root DIR] [--id ID] | end --id ID [--root DIR] | list [--root DIR] [--json]")
 		return 2
 	}
 	switch args[0] {
@@ -38,6 +38,38 @@ func runWIPLifecycle(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		return emitWIPLifecycle(stdout, stderr, receipt)
+	case "list":
+		fs := flag.NewFlagSet("fak wip lifecycle list", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		root := fs.String("root", ".", "repository root")
+		rootShort := fs.String("C", "", "repository root (shorthand)")
+		jsonOut := fs.Bool("json", false, "emit JSON")
+		if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
+			return 2
+		}
+		if *rootShort != "" {
+			*root = *rootShort
+		}
+		receipts, err := wiplifecycle.List(*root)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak wip lifecycle list: %v\n", err)
+			return 1
+		}
+		if *jsonOut {
+			return encodeJSONOrFail(stdout, stderr, receipts, "fak wip lifecycle list")
+		}
+		if len(receipts) == 0 {
+			fmt.Fprintln(stdout, "no WIP lifecycle receipts")
+			return 0
+		}
+		for _, receipt := range receipts {
+			state, when := "OPEN", receipt.StartedAt
+			if receipt.FinishedAt != "" {
+				state, when = "FINISHED", receipt.FinishedAt
+			}
+			fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\t%s\n", state, receipt.Kind, receipt.OperationID, when, receipt.ReceiptPath)
+		}
+		return 0
 	case "end":
 		fs := flag.NewFlagSet("fak wip lifecycle end", flag.ContinueOnError)
 		fs.SetOutput(stderr)

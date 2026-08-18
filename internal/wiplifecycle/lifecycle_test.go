@@ -77,6 +77,40 @@ func TestBeginRejectsUnpersistableReceiptStore(t *testing.T) {
 	}
 }
 
+func TestListKeepsFinishedHistoryAfterObservedArtifactsDisappear(t *testing.T) {
+	repo := initRepo(t)
+	started := time.Unix(1700000000, 0)
+	first, err := Begin(repo, "checkpoint-reap", "reap-1", started)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished, err := Finish(repo, first.OperationID, started.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(repo, "base.txt")); err != nil {
+		t.Fatal(err)
+	}
+	second, err := Begin(repo, "worker-reap", "reap-2", started.Add(2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := List(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("List()=%#v, want two receipts", got)
+	}
+	if got[0].OperationID != second.OperationID || got[1].OperationID != finished.OperationID {
+		t.Fatalf("List() order=%#v, want newest-first", got)
+	}
+	if got[1].FinishedAt == "" || got[1].ReceiptPath == "" {
+		t.Fatalf("finished history lost completion evidence: %#v", got[1])
+	}
+}
+
 func initRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()

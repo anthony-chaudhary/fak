@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,5 +88,50 @@ func TestCollectSweepParkedIncludesWIPCheckpoints(t *testing.T) {
 	}
 	if got.Checkpoints[0].Kind != "checkpoint" || got.Checkpoints[0].Name != "refs/fak/wip/parked-test" {
 		t.Fatalf("checkpoint = %#v", got.Checkpoints[0])
+	}
+}
+
+func TestListParkedWorkClassifiesCheckpointAndRendersSafeNextAction(t *testing.T) {
+	repo, _ := wipTestRepo(t)
+	ctx := context.Background()
+	path := filepath.Join(repo, "shared.txt")
+	if err := os.WriteFile(path, []byte("checkpoint\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint, err := wipCheckpointScoped(ctx, repo, "parked-owner", true, 1_700_000_000, []string{"shared.txt"})
+	if err != nil || checkpoint.Object == "" {
+		t.Fatalf("checkpoint=%+v err=%v", checkpoint, err)
+	}
+	if err := os.WriteFile(path, []byte("newer-head\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitWipOut(ctx, repo, nil, "add", "shared.txt"); err != nil {
+		t.Fatal(err)
+	}
+	commit, err := wipPlumbBaseCommit(ctx, repo, "advance")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitWipOut(ctx, repo, nil, "update-ref", "HEAD", commit); err != nil {
+		t.Fatal(err)
+	}
+
+	got := collectSweepParked(repo)
+	if len(got.Checkpoints) != 1 {
+		t.Fatalf("checkpoints=%+v", got.Checkpoints)
+	}
+	item := got.Checkpoints[0]
+	if item.Action != "QUARANTINE" || item.CheckpointClass != "DIVERGED" || item.Replication != "LOCAL_ONLY" {
+		t.Fatalf("checkpoint lacks actionable lifecycle evidence: %+v", item)
+	}
+	if len(item.ReviewCommands) != 1 || strings.Contains(item.ReviewCommands[0], "checkout") {
+		t.Fatalf("checkpoint recovery is not safe: %+v", item)
+	}
+	var out bytes.Buffer
+	writeSweepParkedText(&out, got)
+	for _, want := range []string{"lifecycle=QUARANTINE", "class=DIVERGED", "replication=LOCAL_ONLY", "review: git diff"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("render missing %q:\n%s", want, out.String())
+		}
 	}
 }

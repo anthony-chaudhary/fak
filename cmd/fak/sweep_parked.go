@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/wiprecon"
 )
 
 type sweepParkedSummary struct {
@@ -16,10 +19,15 @@ type sweepParkedSummary struct {
 	Diagnostics []string          `json:"diagnostics,omitempty"`
 }
 type sweepParkedItem struct {
-	Kind    string `json:"kind"`
-	Name    string `json:"name"`
-	Summary string `json:"summary,omitempty"`
-	Paths   int    `json:"paths,omitempty"`
+	Kind            string   `json:"kind"`
+	Name            string   `json:"name"`
+	Summary         string   `json:"summary,omitempty"`
+	Paths           int      `json:"paths,omitempty"`
+	Action          string   `json:"action,omitempty"`
+	CheckpointClass string   `json:"checkpoint_class,omitempty"`
+	Replication     string   `json:"replication,omitempty"`
+	NextCommand     string   `json:"next_command,omitempty"`
+	ReviewCommands  []string `json:"review_commands,omitempty"`
 }
 
 func collectSweepParked(root string) sweepParkedSummary {
@@ -54,6 +62,14 @@ func collectSweepParked(root string) sweepParkedSummary {
 			out.Refs = append(out.Refs, sweepParkedItem{Kind: "ref", Name: parts[0], Summary: summary})
 		}
 	}
+	checkpointDecisions := map[string]wiprecon.Decision{}
+	if reconciled, err := wipReconcile(context.Background(), root); err != nil {
+		out.Diagnostics = append(out.Diagnostics, "WIP checkpoint classification: "+err.Error())
+	} else {
+		for _, decision := range reconciled.Decisions {
+			checkpointDecisions[decision.Session] = decision
+		}
+	}
 	if raw, err := gitOutput(root, "for-each-ref", "--format=%(refname)%09%(objectname:short)%09%(subject)", "refs/fak/wip"); err != nil {
 		out.Diagnostics = append(out.Diagnostics, "WIP checkpoint inventory: "+err.Error())
 	} else {
@@ -66,7 +82,15 @@ func collectSweepParked(root string) sweepParkedSummary {
 			if len(parts) == 3 && parts[2] != "" {
 				summary += " " + parts[2]
 			}
-			out.Checkpoints = append(out.Checkpoints, sweepParkedItem{Kind: "checkpoint", Name: parts[0], Summary: summary})
+			item := sweepParkedItem{Kind: "checkpoint", Name: parts[0], Summary: summary}
+			if decision, ok := checkpointDecisions[strings.TrimPrefix(parts[0], "refs/fak/wip/")]; ok {
+				item.Action = string(decision.Action)
+				item.CheckpointClass = decision.CheckpointClass
+				item.Replication = decision.Replication
+				item.NextCommand = decision.NextCommand
+				item.ReviewCommands = append([]string(nil), decision.ReviewCommands...)
+			}
+			out.Checkpoints = append(out.Checkpoints, item)
 		}
 	}
 	if raw, err := gitOutput(root, "worktree", "list", "--porcelain"); err != nil {
@@ -112,6 +136,15 @@ func writeSweepParkedText(b io.Writer, parked sweepParkedSummary) {
 				detail = fmt.Sprintf("%d changed path(s); %s", item.Paths, detail)
 			}
 			fmt.Fprintf(b, "  %-8s %-28s %s\n", item.Kind, item.Name, detail)
+			if item.Kind == "checkpoint" {
+				fmt.Fprintf(b, "           lifecycle=%s class=%s replication=%s\n", firstNonEmpty(item.Action, "unknown"), firstNonEmpty(item.CheckpointClass, "unknown"), firstNonEmpty(item.Replication, "unknown"))
+				if item.NextCommand != "" {
+					fmt.Fprintf(b, "           next: %s\n", item.NextCommand)
+				}
+				for _, command := range item.ReviewCommands {
+					fmt.Fprintf(b, "           review: %s\n", command)
+				}
+			}
 		}
 	}
 	for _, d := range parked.Diagnostics {
@@ -120,6 +153,6 @@ func writeSweepParkedText(b io.Writer, parked sweepParkedSummary) {
 	if parked.Count == 0 {
 		io.WriteString(b, "  none detected\n")
 	} else {
-		io.WriteString(b, "  inspect before dropping: git stash show -p <stash> / git show <ref> / fak wip reap --census / fak worktree worker list\n")
+		io.WriteString(b, "  inspect before dropping: git stash show -p <stash> / git show <ref> / fak wip reconcile / fak wip lifecycle list / fak worktree worker list\n")
 	}
 }
