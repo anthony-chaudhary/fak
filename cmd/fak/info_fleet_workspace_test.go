@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/dispatchaging"
 	"github.com/anthony-chaudhary/fak/internal/fleetpane"
+	"github.com/anthony-chaudhary/fak/internal/waiting"
 )
 
 type infoFleetRunner struct {
@@ -57,6 +59,64 @@ func TestCollectInfoFleetWorkspaceAttentionFirstAndTyped(t *testing.T) {
 	}
 }
 
+func TestFoldInfoFleetLanePressureStarvationBoundary(t *testing.T) {
+	deadline := int64(dispatchaging.DefaultStarvationSeconds)
+	for _, tc := range []struct {
+		name    string
+		age     float64
+		verdict string
+	}{
+		{name: "just under", age: float64(deadline - 1), verdict: "OK"},
+		{name: "at deadline", age: float64(deadline), verdict: "STARVING"},
+		{name: "just over", age: float64(deadline + 1), verdict: "STARVING"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := foldInfoFleetLanePressure([]infoFleetLaneFold{{
+				Lane:    "cmd",
+				Waiting: waiting.Queue{OldestAgeSeconds: tc.age},
+				Aging: dispatchaging.Result{Order: []dispatchaging.Ranked{
+					{Standing: dispatchaging.StandingStarved},
+					{Standing: dispatchaging.StandingAging},
+				}},
+			}}, deadline)
+			if got.Verdict != tc.verdict {
+				t.Fatalf("age=%v verdict=%q, want %q", tc.age, got.Verdict, tc.verdict)
+			}
+			if len(got.Lanes) != 1 || got.Lanes[0].Starved != 1 {
+				t.Fatalf("pressure=%+v, want one cmd lane with one StandingStarved unit", got)
+			}
+		})
+	}
+}
+
+func TestCollectInfoFleetWorkspaceRendersWorstLaneFirst(t *testing.T) {
+	root := writeInfoFleetConfig(t, `{"loops":{"cmd-pressure":{"enabled":true,"status_cmd":["cmd-pressure"]},"docs-pressure":{"enabled":true,"status_cmd":["docs-pressure"]}}}`)
+	runner := infoFleetRunner{runs: map[string]fleetpane.RunResult{
+		"cmd-pressure": {
+			ExitCode: 0,
+			Stdout:   `{"ok":true,"lane":"cmd","waiting":{"oldest_age_seconds":25200},"aging":{"order":[{"standing":"starved"},{"standing":"starved"},{"standing":"aging"}]}}`,
+		},
+		"docs-pressure": {
+			ExitCode: 0,
+			Stdout:   `{"ok":true,"lane":"docs","waiting":{"oldest_age_seconds":7200},"aging":{"order":[{"standing":"aging"}]}}`,
+		},
+	}}
+	got := collectInfoFleetWorkspace(root, runner, time.Date(2026, 8, 18, 20, 0, 0, 0, time.UTC))
+	rows := strings.Join(fleetWorkspaceRows(guardInfoVars{FleetWorkspace: got}), "\n")
+	for _, want := range []string{
+		"FLEET WORKSPACE · STARVING · read-only",
+		"cmd · oldest-wait 7h · starved 2",
+		"docs · oldest-wait 2h · starved 0",
+	} {
+		if !strings.Contains(rows, want) {
+			t.Fatalf("missing %q in Fleet workspace:\n%s", want, rows)
+		}
+	}
+	if strings.Index(rows, "cmd · oldest-wait") > strings.Index(rows, "docs · oldest-wait") {
+		t.Fatalf("oldest lane must render first:\n%s", rows)
+	}
+}
+
 func TestInfoFleetWorkspaceCapturedRender(t *testing.T) {
 	v := guardInfoVars{Fleet: fleetFixture(), FleetWorkspace: &infoFleetWorkspace{State: "READY", GeneratedAt: "2026-08-18T20:00:00Z", Configured: 2, Shown: 2, Loops: []fleetpane.LoopCheck{{Name: "stuck-loop", State: "ACTION", Detail: "no progress age=48m", Enabled: true}, {Name: "healthy-loop", State: "OK", Detail: "fresh progress age=2m", Enabled: true}}}}
 	got := renderGuardInfoInteractiveBlock(infoViewState{active: viewFleet}, v, nil, 120, 20)
@@ -96,7 +156,7 @@ func TestInfoFleetSelfcheckCapturedRun(t *testing.T) {
 	if code := runInfoFleetSelfcheck(&out, 100, 16); code != 0 {
 		t.Fatal(code)
 	}
-	for _, want := range []string{"«3 fleet»", "stuck-loop · ACTION", "fak fleetpane loop-check stuck-loop", "healthy-loop · OK", "SELFCHECK OK"} {
+	for _, want := range []string{"«3 fleet»", "FLEET WORKSPACE · STARVING", "cmd · oldest-wait 7h · starved 2", "docs · oldest-wait 2h · starved 0", "stuck-loop · ACTION", "fak fleetpane loop-check stuck-loop", "healthy-loop · OK", "SELFCHECK OK"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q:\n%s", want, out.String())
 		}

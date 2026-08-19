@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
@@ -9,8 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/dispatchaging"
 	"github.com/anthony-chaudhary/fak/internal/fleetpane"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/waiting"
 )
 
 const infoFleetRowCap = 8
@@ -21,7 +24,25 @@ type infoFleetWorkspace struct {
 	Configured  int                   `json:"configured"`
 	Shown       int                   `json:"shown"`
 	Loops       []fleetpane.LoopCheck `json:"loops,omitempty"`
+	Pressure    *infoFleetPressure    `json:"pressure,omitempty"`
 	Next        string                `json:"next,omitempty"`
+}
+
+type infoFleetLaneFold struct {
+	Lane    string
+	Waiting waiting.Queue
+	Aging   dispatchaging.Result
+}
+
+type infoFleetLanePressure struct {
+	Lane              string  `json:"lane"`
+	OldestWaitSeconds float64 `json:"oldest_wait_seconds"`
+	Starved           int     `json:"starved"`
+}
+
+type infoFleetPressure struct {
+	Verdict string                  `json:"verdict"`
+	Lanes   []infoFleetLanePressure `json:"lanes"`
 }
 
 func collectInfoFleetWorkspace(root string, runner fleetpane.Runner, now time.Time) *infoFleetWorkspace {
@@ -63,6 +84,10 @@ func collectInfoFleetWorkspace(root string, runner fleetpane.Runner, now time.Ti
 		}
 		return checks[i].Name < checks[j].Name
 	})
+	if folds := infoFleetLaneFoldsFromChecks(checks); len(folds) > 0 {
+		pressure := foldInfoFleetLanePressure(folds, dispatchaging.DefaultStarvationSeconds)
+		out.Pressure = &pressure
+	}
 	if len(checks) > infoFleetRowCap {
 		checks = checks[:infoFleetRowCap]
 	}
@@ -73,8 +98,84 @@ func collectInfoFleetWorkspace(root string, runner fleetpane.Runner, now time.Ti
 	return out
 }
 
+// infoFleetLaneFoldsFromChecks reuses typed folds already returned by configured fleet
+// loop checks. It performs no ledger read and ignores unrelated payloads.
+func infoFleetLaneFoldsFromChecks(checks []fleetpane.LoopCheck) []infoFleetLaneFold {
+	var out []infoFleetLaneFold
+	for _, check := range checks {
+		lane, _ := check.Payload["lane"].(string)
+		lane = strings.TrimSpace(lane)
+		if lane == "" {
+			continue
+		}
+		var fold infoFleetLaneFold
+		fold.Lane = lane
+		waitingOK := decodeInfoFleetFold(check.Payload["waiting"], &fold.Waiting)
+		agingOK := decodeInfoFleetFold(check.Payload["aging"], &fold.Aging)
+		if waitingOK || agingOK {
+			out = append(out, fold)
+		}
+	}
+	return out
+}
+
+func decodeInfoFleetFold(src any, dst any) bool {
+	if src == nil {
+		return false
+	}
+	raw, err := json.Marshal(src)
+	return err == nil && json.Unmarshal(raw, dst) == nil
+}
+
+// foldInfoFleetLanePressure joins waiting's per-lane oldest age with dispatchaging's
+// closed Standing verdicts. The aggregate becomes STARVING at the hard deadline.
+func foldInfoFleetLanePressure(folds []infoFleetLaneFold, starvationSeconds int64) infoFleetPressure {
+	if starvationSeconds <= 0 {
+		starvationSeconds = dispatchaging.DefaultStarvationSeconds
+	}
+	byLane := map[string]*infoFleetLanePressure{}
+	for _, fold := range folds {
+		lane := strings.TrimSpace(fold.Lane)
+		if lane == "" {
+			continue
+		}
+		row := byLane[lane]
+		if row == nil {
+			row = &infoFleetLanePressure{Lane: lane}
+			byLane[lane] = row
+		}
+		if fold.Waiting.OldestAgeSeconds > row.OldestWaitSeconds {
+			row.OldestWaitSeconds = fold.Waiting.OldestAgeSeconds
+		}
+		for _, unit := range fold.Aging.Order {
+			if unit.Standing == dispatchaging.StandingStarved {
+				row.Starved++
+			}
+		}
+	}
+
+	pressure := infoFleetPressure{Verdict: "OK", Lanes: make([]infoFleetLanePressure, 0, len(byLane))}
+	for _, row := range byLane {
+		pressure.Lanes = append(pressure.Lanes, *row)
+		if row.OldestWaitSeconds >= float64(starvationSeconds) {
+			pressure.Verdict = "STARVING"
+		}
+	}
+	sort.SliceStable(pressure.Lanes, func(i, j int) bool {
+		if pressure.Lanes[i].OldestWaitSeconds != pressure.Lanes[j].OldestWaitSeconds {
+			return pressure.Lanes[i].OldestWaitSeconds > pressure.Lanes[j].OldestWaitSeconds
+		}
+		return pressure.Lanes[i].Lane < pressure.Lanes[j].Lane
+	})
+	return pressure
+}
+
 func fleetWorkspaceRows(v guardInfoVars) []string {
-	rows := []string{"FLEET WORKSPACE · read-only"}
+	heading := "FLEET WORKSPACE · read-only"
+	if v.FleetWorkspace != nil && v.FleetWorkspace.Pressure != nil {
+		heading = fmt.Sprintf("FLEET WORKSPACE · %s · read-only", v.FleetWorkspace.Pressure.Verdict)
+	}
+	rows := []string{heading}
 	if v.Fleet != nil {
 		rows = append(rows, guardInfoFleetHeadText(v.Fleet), guardInfoFleetTotalsText(v.Fleet))
 	} else {
@@ -83,6 +184,11 @@ func fleetWorkspaceRows(v guardInfoVars) []string {
 	w := v.FleetWorkspace
 	if w == nil {
 		return append(rows, "loops · unavailable · next: fak fleetpane loop-list")
+	}
+	if w.Pressure != nil {
+		for _, lane := range w.Pressure.Lanes {
+			rows = append(rows, fmt.Sprintf("%s · oldest-wait %s · starved %d", lane.Lane, humanDur(int64(lane.OldestWaitSeconds)), lane.Starved))
+		}
 	}
 	rows = append(rows, fmt.Sprintf("loops · %s · configured %d · showing %d · source fleetpane @ %s", w.State, w.Configured, w.Shown, blankAs(w.GeneratedAt, "unknown")))
 	if len(w.Loops) == 0 {
@@ -124,12 +230,15 @@ func runInfoFleetSelfcheck(stdout io.Writer, width, height int) int {
 	}
 	v := guardInfoVars{
 		Fleet: &gateway.SessionFleet{Verdict: "ACTION", Machines: 2, Action: 1, Sessions: 4},
-		FleetWorkspace: &infoFleetWorkspace{State: "READY", GeneratedAt: "2026-08-18T20:00:00Z", Configured: 2, Shown: 2, Loops: []fleetpane.LoopCheck{
+		FleetWorkspace: &infoFleetWorkspace{State: "READY", GeneratedAt: "2026-08-18T20:00:00Z", Configured: 2, Shown: 2, Pressure: &infoFleetPressure{Verdict: "STARVING", Lanes: []infoFleetLanePressure{
+			{Lane: "cmd", OldestWaitSeconds: 7 * 3600, Starved: 2},
+			{Lane: "docs", OldestWaitSeconds: 2 * 3600},
+		}}, Loops: []fleetpane.LoopCheck{
 			{Name: "stuck-loop", Enabled: true, State: "ACTION", Detail: "no progress age=48m"},
 			{Name: "healthy-loop", Enabled: true, State: "OK", Detail: "fresh progress age=2m"},
 		}},
 	}
 	fmt.Fprintln(stdout, renderGuardInfoInteractiveBlock(infoViewState{active: viewFleet}, v, nil, width, height))
-	fmt.Fprintln(stdout, "SELFCHECK OK — Fleet workspace is read-only, attention-first, and every action has an existing CLI next step")
+	fmt.Fprintln(stdout, "SELFCHECK OK — Fleet workspace is read-only, starvation-first, and every action has an existing CLI next step")
 	return 0
 }
