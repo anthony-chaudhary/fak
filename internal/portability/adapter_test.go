@@ -7,6 +7,14 @@ import (
 	"testing"
 )
 
+func TestReferenceSpecsExcludeInactiveSupport(t *testing.T) {
+	for _, spec := range referenceSpecs {
+		if spec.Support == SupportInactive {
+			t.Fatalf("reference adapter %q is inactive", spec.Kind)
+		}
+	}
+}
+
 func TestReferenceAdaptersConform(t *testing.T) {
 	got, e := RunReferenceConformance(context.Background())
 	if e != nil {

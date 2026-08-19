@@ -201,6 +201,7 @@ func (a opaqueAdapter) Dependencies(context.Context, Record) ([]string, error) {
 	return nil, unsupported(a.kind, "dependencies")
 }
 
+//enumlint:exempt SupportInactive is reserved for unknown adapters; every reference adapter is active at a declared support level.
 var referenceSpecs = []AdapterInfo{
 	{Kind: "skill", Version: "1", Support: SupportFull, Sensitivity: "private", Compatibility: "v1", Capabilities: allCaps()},
 	{Kind: "workflow", Version: "1", Support: SupportPartial, Sensitivity: "private", Compatibility: "v1", Degradation: "host-specific triggers remain inactive", Capabilities: allCaps()},
