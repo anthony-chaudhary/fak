@@ -2,10 +2,10 @@
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 961  
-rows: 1036  
-unverified rows: 0 / 1036  
-source-only rows absent from help: 805
+parsed files: 962  
+rows: 1037  
+unverified rows: 0 / 1037  
+source-only rows absent from help: 806
 
 | VERB | PURPOSE | IMPLEMENTS | DOC | PRECONDITION | REFUSES | HELP |
 |---|---|---|---|---|---|---|
@@ -42,6 +42,7 @@ source-only rows absent from help: 805
 | `fak affected` | fast inner loop: run go test only for the packages your working-tree change can affect | cmdAffected / internal/affectedtests | `case` arm of the dispatch switch in dispatchPrimaryVerb() | STRUCTURAL | `TEST_FAILED`, `TEST_RUN_ERROR` | yes |
 | `fak agent` | run a live agent task and A/B the turn count (offline or against a provider) | cmdAgent / internal/abi, internal/adjudicator, internal/agent, internal/ifc, internal/journal, internal/modelroute, internal/policy, internal/syspromptmmu | `case` arm of the dispatch switch in dispatchCoreVerbA() | STRUCTURAL | `POLICY_BLOCK` | yes |
 | `fak agent profiles` |  | printAgentOutputProfiles | `if` arm of the dispatch in cmdAgent() | NONE | — | **SOURCE ONLY** |
+| `fak agents` |  | cmdAgents / internal/agentquery, internal/secretload, internal/sessionjournal | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak ailuminate` | AILuminate safety-benchmark runner (describe/eval/compare) | cmdAILuminate | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak ailuminate contract` |  | cmdAILuminateContract / internal/ailuminate, internal/dispatchpost, internal/policy | `case` arm of the dispatch switch in cmdAILuminate() | NONE | — | **SOURCE ONLY** |
 | `fak ailuminate help` |  | ailuminateUsage | `case` arm of the dispatch switch in cmdAILuminate() | NONE | — | **SOURCE ONLY** |
@@ -421,7 +422,7 @@ source-only rows absent from help: 805
 | `fak idempotency help` |  | idempotencyUsage | `case` arm of the dispatch switch in runIdempotency() | NONE | — | **SOURCE ONLY** |
 | `fak idempotency run` | wraps one mutating command with keyed dedup. | runIdempotencyRun / internal/idempotency | `case` arm of the dispatch switch in runIdempotency() | RUNTIME | — | **SOURCE ONLY** |
 | `fak idempotency selfcheck` | the #2093 "Done when" scenario end to end against a temp ledger: a retried keyed issue-create after a simulated hang replays the original result without double-filing, and a genuinely new op with a fr… | runIdempotencySelfcheck / internal/idempotency | `case` arm of the dispatch switch in runIdempotency() | NONE | — | **SOURCE ONLY** |
-| `fak info` | the live fak-info overlay: poll a gateway's /debug/vars and print one plain-words line per tick | cmdInfo / internal/abi, internal/cachemeta, internal/fleetpane, internal/gateway, internal/modver, internal/negframe, internal/scorecardpane, internal/workaccount | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | yes |
+| `fak info` | the live fak-info overlay: poll a gateway's /debug/vars and print one plain-words line per tick | cmdInfo / internal/abi, internal/cachemeta, internal/dispatchaging, internal/fleetpane, internal/gateway, internal/modver, internal/negframe, internal/scorecardpane, internal/workaccount | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | yes |
 | `fak init` | scaffold a minimal, valid fak.toml deployment manifest for a new workspace | cmdInit / internal/deploymanifest | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak intent` | task-claim collision check: intent leases (claim/release/list) so two agents don't both fix the same issue | cmdIntent | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak intent claim` |  | runIntentClaim / internal/leaseref, internal/pathutil | `case` arm of the dispatch switch in runIntent() | NONE | — | **SOURCE ONLY** |
@@ -612,7 +613,7 @@ source-only rows absent from help: 805
 | `fak policy land-rule` |  | runPolicyLandRule / internal/policy | `if` arm of the dispatch in cmdPolicy() | RUNTIME | — | **SOURCE ONLY** |
 | `fak popularization-tickets` | emit the concept-popularization ticket set as JSON, lane TSV, or issue-body files | cmdPopularizationTickets / internal/popularizationtickets | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak preflight` | adjudicate one tool call against a policy (ALLOW/DENY by structure, no model in the loop) | cmdPreflight / internal/abi, internal/adjudicator, internal/grammar, internal/ifc, internal/journal, internal/kernel, internal/policy | `case` arm of the dispatch switch in dispatchPrimaryVerb() | STRUCTURAL | `POLICY_BLOCK` | yes |
-| `fak process-guard` | the host process-resource guard: detect / reap runaway or leaking processes | cmdProcessGuard / internal/loopmgr, internal/looprecover, internal/procguard | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
+| `fak process-guard` | the host process-resource guard: detect / reap runaway or leaking processes | cmdProcessGuard / internal/dispatchaudit, internal/dispatchtick, internal/loopmgr, internal/looprecover, internal/procguard | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak product` | the product-direction Slack surface for #product | cmdProduct | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | yes |
 | `fak product-scorecard` | native product scorecard control-pane payload: standing chart, most-critical areas, coverage gaps | runProductScorecard / internal/productscorecard, internal/scorecardpane | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak profile` | host-aware profiler: capture CPU + allocation profiles of a package's benchmarks (Windows->WSL) | cmdProfile / internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | yes |
