@@ -113,7 +113,7 @@ var tier = map[string]int{
 	"workloadfit":            2, // purpose-specific fitness mechanism over stackresolve contracts; keeps soft ranking outside composition gates (#6893).
 	"stackpreflight":         3, // launch integrator joining dependency, workload-fitness, and support-evidence receipts (#6897).
 	"amdgpu":                 2, // AMD GPU fact probe and perf-counter JSON fold for Windows harness diagnostics; imports windowgate(1), off the hot path.
-	"accounts":               2, "accountobs": 1, "guardaudit": 2, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 2, "cacheobs": 1, "cachevalue": 2, "canon": 1, "compute": 2, "deletioncert": 1, "demoui": 2, "ggufload": 2, "gpulease": 2, "fleetreap": 2, "hfhub": 2, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 2, "model": 2, "orphanscan": 1, "pathlint": 1, "pathutil": 1, "privatepath": 2, "provenance": 1, "swebench": 2, "urllint": 1, "webbench": 2,
+	"accounts":               2, "accountobs": 1, "guardaudit": 2, "appversion": 2, "blob": 1, "boundarylint": 1, "cachemeta": 2, "cacheobs": 1, "cachevalue": 2, "canon": 1, "compute": 2, "deletioncert": 1, "demoui": 2, "ggufload": 2, "gpulease": 2, "fleetreap": 2, "hfhub": 2, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 2, "model": 2, "orphanscan": 1, "pathlint": 1, "pathutil": 1, "privatepath": 2, "provenance": 1, "swebench": 2, "urllint": 1, "webbench": 2,
 	// stdlib-only foundation leaves (import nothing internal); off the hot path.
 	"auditpane": 2, "bgloop": 1, "binstamp": 2, "cachewitness": 2, "cmdutil": 1, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "experiments": 2, "fleetaccounts": 2, "fleetbottleneck": 2, "flock": 1, "framevisibility": 1, "ghspam": 1, "issuecontractrepair": 2, "jsonlledger": 1, "kvbudget": 2, "maputil": 1, "mathx": 1, "newleaf": 1, "newmodel": 1, "numfmt": 1, "randhex": 1, "refutil": 2, "selfinstall": 2, "sessionaudit": 2, "strmatch": 1,
 	"sessiondiag":   2,                                                                            // bounded redacted Codex SQLite/log and process-incident classifier (#5992); stdlib-only, off the hot path.
@@ -136,7 +136,7 @@ var tier = map[string]int{
 	"commitlifecycle":      2,                // pure commit-to-ship lifecycle fold (#5989); stdlib-only, no git/filesystem/process I/O, off the hot path.
 	"wiplease":             2,                // live-WIP projection into laneadmit lease geometry; imports laneadmit(2)+wipattr(1), off the hot path.
 	"wipref":               2,                // append-only working-tree checkpoint ref store under refs/fak/wip/ read by fak wip (sibling of leaseref's refs/fak/locks); stdlib-only, imports nothing internal, off the hot path.
-	"wipattr":              1,                // pure dirty-hunk-to-checkpoint attribution fold (#3874); stdlib-only, imports nothing internal, off the hot path.
+	"wipattr":              2,                // dirty-hunk-to-checkpoint attribution fold (#3874); imports pathutil(1), off the hot path.
 	"wiprecon":             1,                // pure crashed-checkpoint reconciliation decision fold (#3875); stdlib-only, imports nothing internal, off the hot path.
 	"supportmaturityscore": 3,                // support-maturity scorecard over covmatrix + supportmaturity(2); off the hot path.
 	"supportmaturity":      3,                // support-maturity ladder + shipgate-gated promotion/drop rules (#1244/#1245); imports tier-1 support facts and shipgate(2), off the hot path.
@@ -423,7 +423,7 @@ var tier = map[string]int{
 	"wipfence":            3, // pure shared-trunk WIP build-fence text engine; no hot-path dependency.
 	"usagelog":            2, // durable, append-only, hash-chained CLI-invocation journal (epic #1601/#1608): one redacted row per top-level fak verb + the `fak usage` read fold; stdlib-only, imports nothing internal, off the hot path.
 	"promptaudit":         1, // scans system/developer/context prompt text for hidden control markers (apostrophe-alphabet / date-separator channels) before they cross a model or cache boundary; stdlib-only, imports nothing internal, off the hot path.
-	"corelocks":           1, // parses + validates the declarative core-lock taxonomy (#1681): classes hard-self/serial-core/soft-contract/shadow-learn/open-leaf and reason tokens, classifying a path to its lock class from an embedded fixture; data + validation only, stdlib-only, imports nothing internal, off the hot path.
+	"corelocks":           2, // parses + validates the declarative core-lock taxonomy (#1681): classes hard-self/serial-core/soft-contract/shadow-learn/open-leaf and reason tokens, classifying a path to its lock class from an embedded fixture; data + validation only, stdlib-only, imports nothing internal, off the hot path.
 	"corelockaudit":       2, // read-only changed-path core-lock audit fold (#1680): classifies changed paths via the corelocks(1) taxonomy into a closed-schema, deterministic Report (measurement-only warnings); imports only corelocks(1), shells to git in a thin off-hot-path I/O layer.
 	"frontierswe":         2, // typed FrontierSWE dataset spine (#1707, epic #1706): the Task model + Category enum + 17-task Catalog + hand-rolled task.toml/job.yaml/oracle.yaml loaders, mirroring internal/swebench's Instance; stdlib-only, imports nothing internal, off the hot path.
 	"fleetcap":            1, // Little's-law fleet-capacity calculator: required concurrent workers from target issue-rate + median session; stdlib-only, off the hot path.
@@ -476,7 +476,7 @@ var tier = map[string]int{
 	"godfileceiling":        2,
 	"microscaleeval":        1,
 	"microagent":            5,
-	"sessionmine":           1, // stdlib-only offline normalization and ranking of local session telemetry; no runtime kernel.
+	"sessionmine":           2, // offline normalization and ranking of local session telemetry; imports processalive(1), no runtime kernel.
 	"sessionsearch":         3, // witnessed cross-session recall (#2913): pure TF-IDF inverted index over the guard tool-process journal + cache-safe suffix injection proven byte-stable via cachemeta + a recall-usefulness witness; imports toolproc(2)+cachemeta(1), off the hot path.
 	"taskgraph":             3, // #2437: shared task journal pure-folded to a typed table with lease-gated claims (created/claimed/blocked/completed/abandoned); refuses a dead-lease claim, a tree-colliding claim, and a complete-over-open-blockers as closed reasons. Pure fold, imports only abi(0), off the hot path.
 	"toolshape":             4, // #2823 (epic #2822 C1): pure SHAPE fingerprint of one tool call — trajectory.Turn folded to closed-vocabulary ArgClass/buckets + Avro-style key-set signature, names-not-values; imports trajectory(3)+stdlib, off the hot path.
@@ -577,8 +577,8 @@ var tier = map[string]int{
 	"kvquantmeta":           1,
 	"ggufinterop":           2, // GGUF metadata adapter over ggufload into the neutral quantization contract (#6231).
 	"llamacppinterop":       2, // versioned external llama.cpp delegation adapter over quantization metadata (#6232).
-	"quantcompat":           1, // stdlib-only artifact/runtime/hardware compatibility contract (#6224).
-	"quantroute":            1, // stdlib-only ordered quantization compatibility routing contract (#6225).
+	"quantcompat":           2, // artifact/runtime/hardware compatibility contract (#6224); imports quantmeta(1).
+	"quantroute":            2, // ordered quantization compatibility routing contract (#6225); imports quantcompat(2).
 	"quantfixture":          1, // stdlib-only synthetic redistributable artifact fixtures and verifier (#6230).
 	"quantmeta":             1, // stdlib-only neutral quantization descriptor, parser, and typed adjudication contract (#6222).
 	"quantdetect":           1,
