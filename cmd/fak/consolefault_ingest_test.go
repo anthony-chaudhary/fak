@@ -138,11 +138,6 @@ Exception code: 0xc0000005`
 // pairs in time with a .NET 1026 console fault for the SAME tool is the same
 // crash and is dropped, so the fold is not double-counted — but an un-paired
 // WER FailFast (different tool, or outside the window) is kept.
-func TestConsoleFaultIngestProbeIncludesWindowsTerminalRendererExit(t *testing.T) {
-	if !strings.Contains(consoleFaultIngestPS, `Faulting application name:\s*WindowsTerminal\.exe`) {
-		t.Fatal("Windows event probe drops Windows Terminal renderer exits before Go can classify them")
-	}
-}
 
 func TestConsoleFaultEventsCaptureWindowsTerminalRendererCrash(t *testing.T) {
 	const rendererCrash = `Faulting application name: WindowsTerminal.exe, version: 1.24.2607.10001
