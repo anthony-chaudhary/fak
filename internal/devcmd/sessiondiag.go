@@ -45,6 +45,7 @@ func runSessionDiagWith(stdout, stderr io.Writer, args []string, query sessionDi
 	staleAfter := fs.Duration("stale-after", 10*time.Minute, "writer-lock/current-state staleness threshold")
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	inventory := fs.Bool("inventory", false, "join current Codex threads, turns, writer locks, processes, guard launch receipts, and spawn edges")
+	watchdogCandidates := fs.Bool("watchdog-candidates", false, "project typed watchdog candidates from inventory evidence")
 	hookProfile := fs.Bool("hook-profile", false, "diagnose the effective Codex hook profile through app-server hooks/list")
 	codexBin := fs.String("codex-bin", "", "Codex executable for --hook-profile (auto-detected by default)")
 	repoRoot := fs.String("repo", ".", "repository whose HEAD identifies the expected fak hook build")
@@ -120,6 +121,20 @@ func runSessionDiagWith(stdout, stderr io.Writer, args []string, query sessionDi
 			input.SourceErrors = append(input.SourceErrors, sessiondiag.SourceError{Source: "child_registrations", Code: "READ_FAILED"})
 		}
 		report := sessiondiag.ReconcileInventory(input, observedAt)
+		if *watchdogCandidates {
+			if !*jsonOut {
+				fmt.Fprintln(stderr, "fak sessiondiag: --watchdog-candidates requires --json")
+				return 2
+			}
+			projected := sessiondiag.ProjectWatchdogCandidates(report)
+			enc := json.NewEncoder(stdout)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(projected); err != nil {
+				fmt.Fprintln(stderr, "fak sessiondiag: encode watchdog candidates")
+				return 1
+			}
+			return 0
+		}
 		if *jsonOut {
 			enc := json.NewEncoder(stdout)
 			enc.SetIndent("", "  ")

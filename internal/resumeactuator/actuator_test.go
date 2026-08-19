@@ -43,7 +43,18 @@ func TestManagedArgvFailsClosedForUnknownHarness(t *testing.T) {
 	}
 }
 
-func TestCodexRequiresContinuationCoordinates(t *testing.T) {
+func TestCodexNativeResumeNeedsOnlySession(t *testing.T) {
+	got, err := (Request{Harness: "codex", Session: "s", Prompt: "continue", CodexExe: "codex-bin"}).ManagedArgv("fak", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"fak", "m", "--", "codex-bin", "exec", "resume", "--json", "--dangerously-bypass-approvals-and-sandbox", "s", "continue"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got=%q want=%q", got, want)
+	}
+}
+
+func TestCodexPartialDurableCoordinatesFailClosed(t *testing.T) {
 	_, err := (Request{Harness: "codex", Session: "s", Rollout: "r"}).ManagedArgv("fak", nil, nil)
 	if !errors.Is(err, ErrMissingCoordinate) {
 		t.Fatalf("error = %v, want ErrMissingCoordinate", err)

@@ -173,3 +173,26 @@ func TestRunSessionDiagInventoryLoadsRegistrationStore(t *testing.T) {
 		t.Fatalf("report=%+v", got)
 	}
 }
+
+func TestSessionDiagWatchdogCandidatesUsesInventoryClassifier(t *testing.T) {
+	now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
+	id := "10000000-0000-4000-8000-000000000001"
+	inventory := func(string, time.Duration, time.Time) (sessiondiag.InventoryInput, error) {
+		return sessiondiag.InventoryInput{
+			Threads: []sessiondiag.ThreadEvidence{{ThreadID: id, Source: "cli", CWD: "/repo", UpdatedAt: now.Add(-time.Hour)}},
+			Turns:   []sessiondiag.TurnEvidence{{ThreadID: id, Status: "inProgress", StartedAt: now.Add(-time.Hour)}},
+		}, nil
+	}
+	var out, errOut bytes.Buffer
+	code := runSessionDiagWith(&out, &errOut, []string{"--inventory", "--watchdog-candidates", "--json"}, nil, inventory, func() time.Time { return now })
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	var report sessiondiag.WatchdogCandidateReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Candidates) != 1 || report.Candidates[0].Session != id {
+		t.Fatalf("report=%+v", report)
+	}
+}

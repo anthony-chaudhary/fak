@@ -344,7 +344,7 @@ func rwActuatorRequest(p resume.WatchdogPlanRow, claudeExe string) resumeactuato
 	}
 	return resumeactuator.Request{
 		Harness: p.Harness, Session: p.Session, Rollout: p.Rollout,
-		GoalFile: p.GoalFile, ResultFile: p.ResultFile, CWD: rwResumeCWD(p), Prompt: prompt, ClaudeExe: claudeExe,
+		GoalFile: p.GoalFile, ResultFile: p.ResultFile, CWD: rwResumeCWD(p), Prompt: prompt, ClaudeExe: claudeExe, CodexExe: rwCodexExe(),
 	}
 }
 
@@ -366,6 +366,13 @@ func rwCodexResumeArgv(fakExe string, p resume.WatchdogPlanRow) []string {
 func validateCodexResumeCoordinates(p resume.WatchdogPlanRow) error {
 	_, err := rwActuatorRequest(p, "").ContinuationArgv("fak")
 	return err
+}
+
+func rwCodexExe() string {
+	if exe := strings.TrimSpace(os.Getenv("FLEET_CODEX_EXE")); exe != "" {
+		return exe
+	}
+	return "codex"
 }
 
 func rwResumeBrokerAttempt(fakExe, claudeExe string, p resume.WatchdogPlanRow, resumeCfg string, postureArgs []string, carry ...resume.DriveCarryRow) launchBrokerAttempt {

@@ -51,6 +51,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/resumebackoff"
 	"github.com/anthony-chaudhary/fak/internal/resumemetrics"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
+	"github.com/anthony-chaudhary/fak/internal/sessiondiag"
 	"github.com/anthony-chaudhary/fak/internal/sessionsignals"
 )
 
@@ -137,6 +138,13 @@ func runResumeWatchdogTick(stdout, stderr io.Writer, argv []string) int {
 		planPath = targetedPlan
 	}
 	plan := rwLoadPlan(planPath)
+	if targetedPlan == "" {
+		var candidateReport sessiondiag.WatchdogCandidateReport
+		plan, candidateReport = rwMergeSessiondiagCandidates(plan, *windowH)
+		if len(candidateReport.Candidates) > 0 || len(candidateReport.Exclusions) > 0 {
+			note("  candidates: included=%d excluded=%d source=sessiondiag", len(candidateReport.Candidates), len(candidateReport.Exclusions))
+		}
+	}
 	ledgerPath := filepath.Join(regDir, "resume_ledger.jsonl")
 	backoffHistory := rwBackoffHistory(ledgerPath)
 	for _, completed := range rwLoadCodexCompletions(plan) {

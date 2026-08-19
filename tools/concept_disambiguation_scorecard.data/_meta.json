@@ -4405,6 +4405,11 @@
           "token": "WatchdogExcludeKind",
           "category": "incidental",
           "reason": "Private typed watchdog candidate bridge implementation symbol."
+        },
+        {
+          "token": "UNSUPPORTED_SESSION_KIND",
+          "category": "incidental",
+          "reason": "Typed exclusion reason in watchdog candidate projection."
         }
       ],
       "id": "session-runtime",
@@ -4503,6 +4508,7 @@
         "SessionSupport",
         "SessionTerminalView",
         "SetSessionAffinity",
+        "UNSUPPORTED_SESSION_KIND",
         "VerifySessionMoveDestinationReceipt",
         "WatchdogExcludeKind",
         "WithAffinity",
@@ -8541,6 +8547,11 @@
           "token": "WatchdogExcludeKind",
           "category": "incidental",
           "reason": "Private typed watchdog candidate bridge implementation symbol."
+        },
+        {
+          "token": "UNSUPPORTED_SESSION_KIND",
+          "category": "incidental",
+          "reason": "Typed exclusion reason in watchdog candidate projection."
         }
       ],
       "id": "support-maturity",
@@ -8640,6 +8651,7 @@
         "UNSUPPORTED_COMBINATION",
         "UNSUPPORTED_FORMAT",
         "UNSUPPORTED_MEDIA_TYPE",
+        "UNSUPPORTED_SESSION_KIND",
         "VerdictParityOK",
         "VerdictSetupParityClean",
         "VerdictSetupParityFlagged",

@@ -28,6 +28,7 @@ type Request struct {
 	CWD        string
 	Prompt     string
 	ClaudeExe  string
+	CodexExe   string
 }
 
 // Harness normalizes the legacy empty value to Claude without guessing any other value.
@@ -62,18 +63,32 @@ func (r Request) ContinuationArgv(fakExe string) ([]string, error) {
 		}
 		return []string{exe, "--resume", r.Session, "-p", r.Prompt, "--dangerously-skip-permissions"}, nil
 	case HarnessCodex:
-		coordinates := []struct{ name, value string }{
-			{"session", r.Session}, {"rollout", r.Rollout}, {"goal_file", r.GoalFile}, {"result_file", r.ResultFile},
+		if strings.TrimSpace(r.Session) == "" {
+			return nil, fmt.Errorf("%w: codex session", ErrMissingCoordinate)
 		}
-		for _, coordinate := range coordinates {
-			if strings.TrimSpace(coordinate.value) == "" {
-				return nil, fmt.Errorf("%w: codex %s", ErrMissingCoordinate, coordinate.name)
+		if strings.TrimSpace(r.Rollout) != "" || strings.TrimSpace(r.GoalFile) != "" || strings.TrimSpace(r.ResultFile) != "" {
+			coordinates := []struct{ name, value string }{
+				{"rollout", r.Rollout}, {"goal_file", r.GoalFile}, {"result_file", r.ResultFile},
 			}
+			for _, coordinate := range coordinates {
+				if strings.TrimSpace(coordinate.value) == "" {
+					return nil, fmt.Errorf("%w: codex %s", ErrMissingCoordinate, coordinate.name)
+				}
+			}
+			if strings.TrimSpace(fakExe) == "" {
+				return nil, fmt.Errorf("%w: codex fak executable", ErrMissingCoordinate)
+			}
+			return []string{fakExe, "codex-resume", "--json", "--rollout", r.Rollout, "--cwd", r.CWD, "--prompt-file", r.GoalFile, "--result-file", r.ResultFile, r.Session}, nil
 		}
-		if strings.TrimSpace(fakExe) == "" {
-			return nil, fmt.Errorf("%w: codex fak executable", ErrMissingCoordinate)
+		exe := strings.TrimSpace(r.CodexExe)
+		if exe == "" {
+			exe = "codex"
 		}
-		return []string{fakExe, "codex-resume", "--json", "--rollout", r.Rollout, "--cwd", r.CWD, "--prompt-file", r.GoalFile, "--result-file", r.ResultFile, r.Session}, nil
+		argv := []string{exe, "exec", "resume", "--json", "--dangerously-bypass-approvals-and-sandbox", r.Session}
+		if strings.TrimSpace(r.Prompt) != "" {
+			argv = append(argv, r.Prompt)
+		}
+		return argv, nil
 	}
 	panic("unreachable")
 }
