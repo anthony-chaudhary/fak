@@ -31,6 +31,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/snapshot"
+	"github.com/anthony-chaudhary/fak/internal/trajctl"
 )
 
 type repeatedStringFlag []string
@@ -517,6 +518,25 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 	// in resolveSessionPlane, and for the stronger reason: without a matched keyset the
 	// gateway attributes the turn from the caller-asserted X-Fak-Principal header, so a
 	// silently-forgotten binding does not just mislabel a tenant, it lets one assert another.
+	trajctlMetricsFile := trajctl.NewMetricsFile(filepath.Join(repoRoot(), trajctl.DefaultLedgerRel))
+	trajctlMetrics := func() gateway.TrajctlMetrics {
+		m := trajctlMetricsFile.Snapshot()
+		out := gateway.TrajctlMetrics{Objectives: map[string]int{}, Scores: map[string]float64{}, Signals: map[string]int{}, Nudges: map[string]int{}}
+		for k, v := range m.Objectives {
+			out.Objectives[string(k)] = v
+		}
+		for k, v := range m.Scores {
+			out.Scores[k] = v
+		}
+		for k, v := range m.Signals {
+			out.Signals[string(k)] = v
+		}
+		for k, v := range m.Nudges {
+			out.Nudges[k] = v
+		}
+		return out
+	}
+
 	var orgAudit auditreceipt.Config
 	if enrollment, enrolled, loadErr := policy.LoadOrgEnrollment(""); loadErr != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: load organization enrollment: %v\n", loadErr)
@@ -567,6 +587,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		ControlSession:               controlSession,
 		SteerSession:                 steerSession,
 		ListSessions:                 listSessions,
+		TrajctlMetrics:               trajctlMetrics,
 		DecideSession:                decideSession,
 		DebitSession:                 debitSession,
 		ResetOnBudget:                resetOnBudgetHook(*sf.resetOnBudget, *sf.contextBudgetTokens),

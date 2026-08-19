@@ -531,6 +531,8 @@ type Config struct {
 	// into a live operator surface). Nil disables the route. Injected by cmd/fak so
 	// this package stays session-internals-blind, mirroring ObserveSession.
 	ListSessions SessionListFunc
+	// TrajctlMetrics projects bounded objective health onto /metrics. Nil is inert.
+	TrajctlMetrics TrajctlMetricsFunc
 	// DecideSession gates one served request at its session boundary. It is the
 	// mutating hot-path twin of ObserveSession: the host calls session.Table.Decide,
 	// so run-state refusal, TurnsLeft debit, budget exhaustion, and per-turn pace are
@@ -1298,6 +1300,7 @@ type Server struct {
 	controlSession SessionControlFunc
 	steerSession   SteerSessionFunc
 	listSessions   SessionListFunc
+	trajctlMetrics TrajctlMetricsFunc
 	decideSession  SessionDecideFunc
 	stopGate       StopGateFunc
 	debitSession   SessionDebitFunc
@@ -2093,6 +2096,7 @@ func New(cfg Config) (*Server, error) {
 		controlSession:               cfg.ControlSession,
 		steerSession:                 cfg.SteerSession,
 		listSessions:                 cfg.ListSessions,
+		trajctlMetrics:               cfg.TrajctlMetrics,
 		decideSession:                cfg.DecideSession,
 		stopGate:                     cfg.StopGate,
 		debitSession:                 cfg.DebitSession,

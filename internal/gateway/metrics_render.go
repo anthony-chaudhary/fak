@@ -310,6 +310,23 @@ func (s *Server) renderMetrics() string {
 	fmt.Fprintf(&b, "fak_org_audit_receipts_total{outcome=\"dropped\"} %d\n", audit.Dropped)
 	fmt.Fprintf(&b, "fak_org_audit_receipts_total{outcome=\"failed\"} %d\n", audit.Failed)
 	fmt.Fprintf(&b, "# HELP fak_org_audit_queue_depth Current organization audit receipt queue depth.\n# TYPE fak_org_audit_queue_depth gauge\nfak_org_audit_queue_depth %d\n", audit.QueueDepth)
+	traj := s.trajctlMetricsSnapshot()
+	fmt.Fprintf(&b, "# HELP fak_trajctl_objectives Trajectory objectives by lifecycle status.\n# TYPE fak_trajctl_objectives gauge\n")
+	for _, status := range []string{"abandoned", "active", "met", "paused"} {
+		fmt.Fprintf(&b, "fak_trajctl_objectives{status=%q} %d\n", status, traj.Objectives[status])
+	}
+	fmt.Fprintf(&b, "# HELP fak_trajctl_score Mean latest open-objective score by bounded objective kind.\n# TYPE fak_trajctl_score gauge\n")
+	for _, kind := range []string{"child", "root", "scorer"} {
+		fmt.Fprintf(&b, "fak_trajctl_score{objective_kind=%q} %g\n", kind, traj.Scores[kind])
+	}
+	fmt.Fprintf(&b, "# HELP fak_trajctl_signals Trajectory objectives by current health signal.\n# TYPE fak_trajctl_signals gauge\n")
+	for _, signal := range []string{"DRIFT", "HEALTHY", "STALL"} {
+		fmt.Fprintf(&b, "fak_trajctl_signals{signal=%q} %d\n", signal, traj.Signals[signal])
+	}
+	fmt.Fprintf(&b, "# HELP fak_trajctl_nudges_total Trajectory re-anchor nudges by delivery outcome.\n# TYPE fak_trajctl_nudges_total counter\n")
+	for _, outcome := range []string{"delivered", "failed"} {
+		fmt.Fprintf(&b, "fak_trajctl_nudges_total{outcome=%q} %d\n", outcome, traj.Nudges[outcome])
+	}
 	return b.String()
 }
 
