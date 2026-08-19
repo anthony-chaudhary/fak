@@ -575,6 +575,7 @@ var tier = map[string]int{
 	"lightgapport":          1,
 	"kvquantmeta":           1,
 	"quantcompat":           1, // stdlib-only artifact/runtime/hardware compatibility contract (#6224).
+	"quantroute":            1, // stdlib-only ordered quantization compatibility routing contract (#6225).
 	"quantmeta":             1, // stdlib-only neutral quantization descriptor, parser, and typed adjudication contract (#6222).
 	"quantdetect":           1,
 	"fp4runtime":            2, // stdlib-only FP4/microscaling runtime, GPU-architecture, and accumulator compatibility contract; no model kernel.
