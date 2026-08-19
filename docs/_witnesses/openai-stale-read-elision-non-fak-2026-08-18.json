@@ -1,0 +1,21 @@
+{
+  "schema": "fak.openai.stale-read-elision-witness.v1",
+  "captured_at": "2026-08-19T06:50:00Z",
+  "operator_local_date": "2026-08-18",
+  "workspace_kind": "temporary non-FAK git repository",
+  "behavioral_witness": {
+    "test": "TestDecodedStaleReadElisionReachesOpenAIPlannerInput",
+    "transcript": "OpenAI-compatible decoded Read call/result followed by a same-path Edit and a protected recent tail",
+    "effect": "the stale Read body is replaced before completeServed calls the planner; the caller transcript is not mutated",
+    "restore": "the exact original bytes are content-addressed and recoverable from fak_context_restore"
+  },
+  "safety_witness": {
+    "test": "TestDecodedStaleReadElisionProtectsRecentAndUneditedReads",
+    "effect": "recent-tail reads and reads without a later same-path edit remain unchanged"
+  },
+  "default": "guard and serve use gateway.DefaultElideStaleReads=true; --elide-stale-reads=false disables the decoded and Anthropic transforms",
+  "limitations": [
+    "The decoded path currently recognizes OpenAI function calls named Read, Edit, Write, MultiEdit, and NotebookEdit with file_path/path/notebook_path arguments.",
+    "Cold-tool deferral and cross-backend vCache signaling remain #8089 gaps."
+  ]
+}

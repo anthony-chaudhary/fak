@@ -2940,6 +2940,7 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 	// identity) unless CtxViewBudget > 0, so the default path is unchanged. The trace keys
 	// the persistent per-session planner so the rewrite is O(c·N), not O(N²), across turns.
 	fullHistory := messages
+	messages = s.maybeElideStaleReadMessages(trace, messages)
 	messages = s.maybePlanMessages(ctx, trace, messages)
 	if !decodedCtxViewSuppressed(ctx) {
 		s.observeDecodedCtxViewRewrite(trace, fullHistory, messages)

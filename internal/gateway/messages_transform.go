@@ -2,12 +2,81 @@ package gateway
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
+
+const defaultStaleProtectTail = 6
+
+// maybeElideStaleReadMessages applies stale-read semantics to decoded OpenAI-compatible
+// transcripts. Only a Read result with a later same-path edit is replaced, the newest
+// working set is protected, and fak_context_restore retains the exact original.
+func (s *Server) maybeElideStaleReadMessages(trace string, messages []agent.Message) []agent.Message {
+	if s == nil || !s.elideStaleReads || len(messages) <= defaultStaleProtectTail {
+		return messages
+	}
+	out := append([]agent.Message(nil), messages...)
+	readPath := make(map[string]string)
+	lastEdit := make(map[string]int)
+	for i, msg := range messages {
+		for _, call := range msg.ToolCalls {
+			path := decodedToolPath(call.Function.Arguments)
+			if path == "" {
+				continue
+			}
+			switch strings.ToLower(call.Function.Name) {
+			case "read":
+				readPath[call.ID] = path
+			case "edit", "write", "multiedit", "notebookedit":
+				lastEdit[strings.ToLower(filepath.Clean(path))] = i
+			}
+		}
+	}
+	limit := len(messages) - defaultStaleProtectTail
+	for i := 0; i < limit; i++ {
+		msg := messages[i]
+		if msg.Role != agent.RoleTool || msg.ToolCallID == "" || msg.Content == "" {
+			continue
+		}
+		path := readPath[msg.ToolCallID]
+		if path == "" || lastEdit[strings.ToLower(filepath.Clean(path))] <= i {
+			continue
+		}
+		body := []byte(msg.Content)
+		sum := sha256.Sum256(body)
+		id := hex.EncodeToString(sum[:])
+		excerpt := strings.TrimSpace(msg.Content)
+		if len(excerpt) > 160 {
+			excerpt = excerpt[:160]
+		}
+		s.stashRestore(trace, id, excerpt, body)
+		out[i].Content = fmt.Sprintf("...[fak: this Read of %s was superseded by a later in-session edit and its body was elided to stay within the context budget; recover via fak_context_restore restore_id=%s]...", path, id)
+	}
+	return out
+}
+
+func decodedToolPath(arguments string) string {
+	var args map[string]json.RawMessage
+	if json.Unmarshal([]byte(arguments), &args) != nil {
+		return ""
+	}
+	for _, key := range []string{"file_path", "path", "notebook_path"} {
+		var path string
+		if json.Unmarshal(args[key], &path) == nil && strings.TrimSpace(path) != "" {
+			return path
+		}
+	}
+	return ""
+}
 
 // anthropicServedRequest carries the results of the served-path request-side
 // transform pipeline back to handleAnthropicMessages.
