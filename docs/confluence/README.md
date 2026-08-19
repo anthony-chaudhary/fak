@@ -11,8 +11,11 @@ description: "How standalone Confluence page sources live in the fak repo as .co
 
 Standalone Confluence page sources live here as `*.confluence.xhtml`. They are pushed to the
 internal Confluence Data Center wiki with the **`confluence-helpers`** tool (a sibling repo at
-`../confluence-helpers`, console script `confluence`). This directory is the tracked, private home
-for those page sources — the fak repo is private, so page content committed here is not public.
+`../confluence-helpers`, console script `confluence`). This directory is the tracked home for those
+page sources — and **this repo is public**, so every byte committed here is published. Treat these
+files as external copy and scrub *before committing*, not before pushing: no credentials, no
+internal hostnames or addresses, no personal names, no unpublished internal figures. (The
+`confluence-meta` `space`/`page_id` values are part of the tracked contract below and belong here.)
 
 ## Why a bridge
 
