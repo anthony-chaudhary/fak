@@ -282,3 +282,21 @@ func writeRegistry(t *testing.T, dir string, m map[string]string) {
 		t.Fatal(err)
 	}
 }
+
+func TestEmbeddedQwen38Aliases(t *testing.T) {
+	want := map[string]string{
+		"qwen38":         "hf://unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_M.gguf",
+		"qwen38:27b":     "hf://unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_M.gguf",
+		"qwen38:27b-fp8": "hf://Qwen/Qwen3.8-27B-FP8",
+	}
+	for alias, target := range want {
+		t.Run(alias, func(t *testing.T) {
+			if got := Catalog[alias]; got != target {
+				t.Fatalf("Catalog[%q] = %q, want %q", alias, got, target)
+			}
+			if !IsCoding(alias) {
+				t.Fatalf("Qwen3.8 alias %q must be marked coding-capable", alias)
+			}
+		})
+	}
+}

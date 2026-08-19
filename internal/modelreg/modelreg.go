@@ -95,6 +95,12 @@ var Catalog = map[string]string{
 	"qwen2.5-coder:1.5b": "hf://bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF/Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf",
 	"qwen2.5-coder:3b":   "hf://bartowski/Qwen2.5-Coder-3B-Instruct-GGUF/Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf",
 	"qwen2.5-coder:7b":   "hf://bartowski/Qwen2.5-Coder-7B-Instruct-GGUF/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",
+	// Qwen3.8-27B is a dense multimodal hybrid (GDN + full attention).
+	// Q4_K_M is the portable default for Metal and CUDA prove-outs; the
+	// official FP8 checkpoint is exposed separately for A100-class engines.
+	"qwen38":         "hf://unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_M.gguf",
+	"qwen38:27b":     "hf://unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_M.gguf",
+	"qwen38:27b-fp8": "hf://Qwen/Qwen3.8-27B-FP8",
 	// Ornith 1.0 — DeepReinforce's MIT-licensed Qwen3.5-family agentic-coding models
 	// (released 2026-06-25, HF org deepreinforce-ai; the collection is exactly 7 public
 	// repos — 9B/35B/397B + GGUF/FP8 siblings, NO 31B). Bare "ornith" and "ornith:9b-gguf"
@@ -126,6 +132,9 @@ var codingAliases = map[string]bool{
 	"qwen2.5-coder:1.5b": true,
 	"qwen2.5-coder:3b":   true,
 	"qwen2.5-coder:7b":   true,
+	"qwen38":             true,
+	"qwen38:27b":         true,
+	"qwen38:27b-fp8":     true,
 }
 
 // DefaultLocalCodingAlias is the model `fak guard --local`/`--gguf` picks when the user
