@@ -135,3 +135,46 @@ func TestGoalBackfillRootRequiresWitnessAndAppliesExactRoot(t *testing.T) {
 		t.Fatalf("rows=%#v", rows)
 	}
 }
+
+func TestGoalTopologyCLIExposesExecutionRoots(t *testing.T) {
+	dir := t.TempDir()
+	goals, sessions := filepath.Join(dir, "goals.json"), filepath.Join(dir, "sessions.jsonl")
+	var create bytes.Buffer
+	if code := runGoal(&create, io.Discard, []string{"create", "--registry", goals, "--title", "Topology", "--actor", "operator", "--authority", "user"}); code != 0 {
+		t.Fatalf("create=%d", code)
+	}
+	var goal struct {
+		GoalID string `json:"goal_id"`
+	}
+	if err := json.Unmarshal(create.Bytes(), &goal); err != nil {
+		t.Fatal(err)
+	}
+	store := sessionregistry.Store{Path: sessions}
+	now := time.Unix(1700000000, 0).UTC()
+	for _, row := range []sessionregistry.Record{
+		{Schema: sessionregistry.Schema, RegistrationID: "claude-root", RootRegistrationID: "claude-root", GoalID: goal.GoalID, AttemptID: "a", LaunchKind: "guarded_tui", Identity: sessionregistry.Identity{Runtime: "claude", SessionID: "cs"}, State: sessionregistry.StateRegistered, CreatedAt: now},
+		{Schema: sessionregistry.Schema, RegistrationID: "codex-root", RootRegistrationID: "codex-root", GoalID: goal.GoalID, AttemptID: "b", LaunchKind: "guarded_tui", Identity: sessionregistry.Identity{Runtime: "codex", ThreadID: "ct"}, State: sessionregistry.StateRegistered, CreatedAt: now},
+		{Schema: sessionregistry.Schema, RegistrationID: "unbound", RootRegistrationID: "unbound", TaskID: "Topology", AttemptID: "c", LaunchKind: "guarded_tui", Identity: sessionregistry.Identity{Runtime: "codex"}, State: sessionregistry.StateRegistered, CreatedAt: now},
+	} {
+		if err := store.Register(row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var out bytes.Buffer
+	if code := runGoal(&out, io.Discard, []string{"topology", "--registry", goals, "--session-registry", sessions, "--id", goal.GoalID}); code != 0 {
+		t.Fatalf("topology=%d", code)
+	}
+	var got struct {
+		Schema         string `json:"schema"`
+		ExecutionRoots []struct {
+			RootRegistrationID string                   `json:"root_registration_id"`
+			Registrations      []sessionregistry.Record `json:"registrations"`
+		} `json:"execution_roots"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Schema != "fak-goal-topology/1" || len(got.ExecutionRoots) != 2 || got.ExecutionRoots[0].RootRegistrationID != "claude-root" || got.ExecutionRoots[1].Registrations[0].Identity.ThreadID != "ct" {
+		t.Fatalf("topology=%#v", got)
+	}
+}

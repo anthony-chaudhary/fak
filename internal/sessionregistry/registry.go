@@ -475,6 +475,41 @@ func isUnexpectedEnd(err error) bool {
 	return errors.Is(err, io.ErrUnexpectedEOF) || err != nil && err.Error() == "unexpected end of JSON input"
 }
 
+// GoalTopology returns explicitly attributed registrations grouped by execution root.
+func (s Store) GoalTopology(goalID string) ([][]Record, error) {
+	goalID = strings.TrimSpace(goalID)
+	if goalID == "" {
+		return nil, errors.New("goal ID is required")
+	}
+	rows, err := s.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+	byRoot := map[string][]Record{}
+	for _, row := range rows {
+		if row.GoalID == goalID {
+			byRoot[row.RootRegistrationID] = append(byRoot[row.RootRegistrationID], row)
+		}
+	}
+	roots := make([]string, 0, len(byRoot))
+	for root := range byRoot {
+		roots = append(roots, root)
+	}
+	sort.Strings(roots)
+	out := make([][]Record, 0, len(roots))
+	for _, root := range roots {
+		group := byRoot[root]
+		sort.Slice(group, func(i, j int) bool {
+			if group[i].CreatedAt.Equal(group[j].CreatedAt) {
+				return group[i].RegistrationID < group[j].RegistrationID
+			}
+			return group[i].CreatedAt.Before(group[j].CreatedAt)
+		})
+		out = append(out, group)
+	}
+	return out, nil
+}
+
 func (s Store) ReadAll() ([]Record, error) {
 	if s.usesJournal() {
 		return recordsFromJournal(sessionjournal.LoadFile(sessionjournal.DefaultPath())), nil

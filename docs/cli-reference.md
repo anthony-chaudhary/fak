@@ -34,6 +34,12 @@ fak goal bind --id goal_<hex> --namespace codex:goal  --external-id <codex-goal-
 fak goal resolve --namespace claude:goal --external-id <claude-goal-id>
 ```
 
+Inspect the exact execution topology behind a canonical goal without scanning the journal. The versioned JSON groups registrations by `root_registration_id` and preserves each runtime, session/thread, attempt, state, and witness field.
+
+```bash
+fak goal topology --id goal_<hex>
+```
+
 Historical roots stay unbound unless an operator supplies an independent witness. Preview the exact root records first, then apply; the command also records a typed `fak:session-root` binding in the canonical registry.
 
 ```bash
@@ -194,6 +200,19 @@ claim. (For speedup figures: 45× = Phase-0 batched-decode gate currently failin
 gain vs tuned warm-cache stack.) The vDSO hit-rate and token savings are reported
 as **soft UPSIDE secondaries**, never the gate. See `STATUS.md` §2 and `CLAIMS.md`
 (unit 82).
+
+## `fak ultracode`
+
+`fak ultracode` is the first-class front door for a bounded concurrent coding-agent fleet. It routes through the canonical orchestration runtime with the `ultracode` profile fixed: workers require lane leases, checkable effects require independent readback, and a lead reconciles the results. Planning does not launch a model or spend tokens.
+
+```bash
+fak ultracode --task-text "implement two disjoint checks and reconcile them"
+fak ultracode --task task.json --launch --json
+fak ultracode status --json
+fak ultracode --selfcheck
+```
+
+The offline selfcheck proves plan shape and safety invariants, not a speedup or intelligence gain. A real value claim needs paired single-agent and fleet runs over the same accepted-outcome workload, reporting wall time, billed/input/output/cache tokens, spend, and witness acceptance. Use `fak orchestration plan --profile off|auto|ultracode` when comparing profiles explicitly.
 
 ## `fak orchestration status`
 

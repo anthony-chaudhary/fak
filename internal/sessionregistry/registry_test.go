@@ -288,3 +288,27 @@ func TestBindGoalRootUpdatesOnlyWitnessedExecutionRoot(t *testing.T) {
 		t.Fatal("missing root accepted")
 	}
 }
+
+func TestGoalTopologyGroupsExactExplicitIdentity(t *testing.T) {
+	s := Store{Path: filepath.Join(t.TempDir(), "registry.jsonl")}
+	now := time.Unix(1700000000, 0).UTC()
+	rows := []Record{
+		{Schema: Schema, RegistrationID: "root-z", RootRegistrationID: "root-z", GoalID: "goal-one", TaskID: "same", AttemptID: "a", LaunchKind: "guarded_tui", Identity: Identity{Runtime: "claude", SessionID: "s1"}, State: StateRegistered, CreatedAt: now},
+		{Schema: Schema, RegistrationID: "child-z", ParentRegistrationID: "root-z", RootRegistrationID: "root-z", GoalID: "goal-one", TaskID: "same", AttemptID: "b", LaunchKind: "subagent", Identity: Identity{Runtime: "codex", SessionID: "s2"}, State: StateRegistered, CreatedAt: now.Add(time.Second)},
+		{Schema: Schema, RegistrationID: "root-a", RootRegistrationID: "root-a", GoalID: "goal-one", TaskID: "same", AttemptID: "c", LaunchKind: "guarded_tui", Identity: Identity{Runtime: "codex", SessionID: "s3"}, State: StateRegistered, CreatedAt: now},
+		{Schema: Schema, RegistrationID: "root-unbound", RootRegistrationID: "root-unbound", TaskID: "same", AttemptID: "d", LaunchKind: "guarded_tui", Identity: Identity{Runtime: "claude"}, State: StateRegistered, CreatedAt: now},
+		{Schema: Schema, RegistrationID: "root-other", RootRegistrationID: "root-other", GoalID: "goal-two", TaskID: "same", AttemptID: "e", LaunchKind: "guarded_tui", Identity: Identity{Runtime: "claude"}, State: StateRegistered, CreatedAt: now},
+	}
+	for _, row := range rows {
+		if err := s.Register(row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	groups, err := s.GoalTopology("goal-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 2 || groups[0][0].RootRegistrationID != "root-a" || groups[1][0].RootRegistrationID != "root-z" || len(groups[1]) != 2 {
+		t.Fatalf("groups=%#v", groups)
+	}
+}
