@@ -8,7 +8,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 )
 
-// TestDispatchPreflightFoldsForecastFloor is the #3368 live-producer witness for the
+// TestDispatchPreflightFoldsForecastFloor is the #3775 live-producer witness for the #3368
 // two-timescale worker floor. The slow predictive loop (a target issue-throughput rate an
 // operator/scheduler writes to FAK_FLEET_TARGET_IPH) is turned into a worker FLOOR through
 // fleetcap's Little's-law forecast; dispatchPreflight folds it into the input the FAST
@@ -102,6 +102,19 @@ func TestDispatchPreflightFoldsForecastFloor(t *testing.T) {
 	}
 	if _, ok := out["forecast_floor"]; ok {
 		t.Fatalf("malformed forecast must not attach a forecast_floor field; payload=%v", out)
+	}
+
+	// An active forecast that trails the reactive demand must not perturb the decision. Six
+	// issues/hour over a 10-minute session forecasts one worker, below the lease cap of 4: the
+	// forecast stays observable, but the lease remains limiting and cap/verdict stay unchanged.
+	t.Setenv("FAK_FLEET_TARGET_IPH", "6")
+	out = preflight(t)
+	if out["verdict"] != dispatchtick.PreflightOKVerdict || out["cap"] != 4 {
+		t.Fatalf("non-leading forecast verdict/cap = %v/%v, want SPAWN_OK/4; payload=%v", out["verdict"], out["cap"], out)
+	}
+	terms = capTerms(t, out)
+	if terms["limiting"] != "lease" || terms["worker_floor"] != 1 {
+		t.Fatalf("non-leading cap_terms = %v, want limiting=lease worker_floor=1", terms)
 	}
 
 	// Pre-warm: a target of 30 issues/hour over a 10-min median session forecasts
