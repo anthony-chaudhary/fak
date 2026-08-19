@@ -429,6 +429,8 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 		cmdAILuminate(args)
 	case "model":
 		cmdModel(args)
+	case "model-default":
+		os.Exit(runModelDefault(os.Stdout, os.Stderr, args))
 	case "new-model":
 		cmdNewModel(args)
 	case "architecture":

@@ -300,3 +300,20 @@ func TestEmbeddedQwen38Aliases(t *testing.T) {
 		})
 	}
 }
+
+func TestQwen38IsFirstClassDefault(t *testing.T) {
+	if DefaultAlias != "qwen38:27b" {
+		t.Fatalf("DefaultAlias = %q, want qwen38:27b", DefaultAlias)
+	}
+	want := "hf://unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_M.gguf"
+	if got := DefaultRef(); got != want {
+		t.Fatalf("DefaultRef() = %q, want %q", got, want)
+	}
+	got, expanded := Resolve("default")
+	if !expanded || got != want {
+		t.Fatalf("Resolve(default) = %q, %v; want %q, true", got, expanded, want)
+	}
+	if !IsCoding(DefaultAlias) {
+		t.Fatal("default model must retain coding/tool capability")
+	}
+}

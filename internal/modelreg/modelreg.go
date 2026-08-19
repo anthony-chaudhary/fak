@@ -144,7 +144,14 @@ var codingAliases = map[string]bool{
 // the 1.5B floor tool-calls but drops/garbles multi-call turns more often, and the 7B is
 // a heavier download than a "just works" default should pull. Callers must resolve this
 // through a Registry so a user registry.json override of the same alias still wins.
+// DefaultAlias is the exact first-class model for serving demos and local runs.
+// The smaller DefaultLocalCodingAlias remains available for memory-constrained hosts.
+const DefaultAlias = "qwen38:27b"
+
 const DefaultLocalCodingAlias = "qwen2.5-coder:3b"
+
+// DefaultRef returns the immutable catalog target behind DefaultAlias.
+func DefaultRef() string { return Catalog[DefaultAlias] }
 
 // IsCoding reports whether an alias is one of the curated coding / tool-call-capable
 // models. It checks the embedded set; a user-overlaid alias of the same name keeps the
@@ -225,6 +232,9 @@ func cacheRoot() string {
 // → hf://…". A nil receiver resolves against the embedded catalog only.
 func (r *Registry) Resolve(ref string) (string, bool) {
 	ref = strings.TrimSpace(ref)
+	if strings.EqualFold(ref, "default") {
+		ref = DefaultAlias
+	}
 	if hfhub.IsURI(ref) {
 		return ref, false
 	}

@@ -24,6 +24,26 @@ GDN/full-attention cadence, and a 262144-token configured context. It also has a
 vision tower. Qwen3.5 architecture compatibility is relevant, but does not
 replace exact Qwen3.8 acceptance.
 
+## First-class default
+
+Qwen3.8-27B Q4_K_M is fak's default model identity for serving demos and local runs.
+Inspect the exact identity without downloading weights:
+
+```console
+fak model-default
+fak model-default --json
+```
+
+The machine-readable form reports alias `qwen38:27b`, its exact `hf://` artifact, and
+coding/tool capability. `default` resolves through the same registry seam, so
+`fak run default` and `fak model pull default` remain aliases for that exact identity.
+Neither inspection nor listing starts a download. Hosts that cannot satisfy the roughly
+17 GB Q4_K_M artifact should select the explicitly bounded
+`qwen2.5-coder:3b` fallback rather than silently running Qwen3.8 on CPU. Promotion to a
+universal zero-argument run/serve default remains gated by the MacBook report in #8061
+and the cache-value campaign in #8127.
+
+
 ## Resolve and inspect
 
 ```console
