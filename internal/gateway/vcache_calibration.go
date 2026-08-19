@@ -17,6 +17,10 @@ type VCacheRuntimeCalibration struct {
 	MinPrefixMeasured bool
 	ReadMult          float64
 	ReadMultMeasured  bool
+	Write5mMult       float64
+	Write5mMeasured   bool
+	Write1hMult       float64
+	Write1hMeasured   bool
 }
 
 func cloneVCacheRuntimeCalibration(in *VCacheRuntimeCalibration) *VCacheRuntimeCalibration {
@@ -58,6 +62,12 @@ func (c *VCacheRuntimeCalibration) wantsExplicitOneHourTTL(model string) bool {
 func (c *VCacheRuntimeCalibration) ApplyCachePricing(p CachePricing) CachePricing {
 	if c != nil && c.ReadMultMeasured && c.ReadMult > 0 {
 		p.CacheReadMultiplier = c.ReadMult
+	}
+	if c != nil && c.Write5mMeasured && c.Write5mMult > 0 {
+		p.CacheWrite5mMultiplier = c.Write5mMult
+	}
+	if c != nil && c.Write1hMeasured && c.Write1hMult > 0 {
+		p.CacheWrite1hMultiplier = c.Write1hMult
 	}
 	return p
 }

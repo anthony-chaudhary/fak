@@ -1,6 +1,8 @@
 package vcachecalibration
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -86,5 +88,29 @@ func TestFreshRuntimeConstantsCarriesNewestModelWhenWireModelIsDynamic(t *testin
 	got, ok, _ := FreshRuntimeConstants(path, "anthropic", "", now, DefaultCalibrationTTL)
 	if !ok || got.Model != "claude-sonnet" || got.MinPrefixTokens != 2048 {
 		t.Fatalf("got=%+v ok=%v", got, ok)
+	}
+}
+
+func TestFreshRuntimeConstantsCarriesMeasuredWritePricing(t *testing.T) {
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "calibration.jsonl")
+	row := ProviderCalibration{
+		Schema: CalibrationSchema, TS: now.Format(time.RFC3339Nano), Provider: "anthropic", Model: "claude",
+		Source: "probe", Turns: 1, Predictions: 1, TrueCold: 1,
+		Write5mMult: 1.4, Write5mMeasured: true, Write1hMult: 2.2, Write1hMeasured: true,
+	}
+	b, err := json.Marshal(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(b, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, reason := FreshRuntimeConstants(path, "anthropic", "claude", now, DefaultCalibrationTTL)
+	if !ok {
+		t.Fatalf("FreshRuntimeConstants: %s", reason)
+	}
+	if got.Write5mMult != 1.4 || !got.Write5mMeasured || got.Write1hMult != 2.2 || !got.Write1hMeasured {
+		t.Fatalf("write constants = %+v", got)
 	}
 }

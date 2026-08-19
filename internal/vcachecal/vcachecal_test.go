@@ -347,3 +347,17 @@ func TestFitConcentrationEmptyIsDefeated(t *testing.T) {
 		t.Errorf("empty workload: defeated=%v measured=%v, want true/false", c.Defeated, c.Measured)
 	}
 }
+
+func TestFitCalibrationMeasuresWriteMultipliersByTTL(t *testing.T) {
+	cal := FitCalibration([]ProbeSample{
+		{Provider: "anthropic", ModelID: "claude", PrefixTokens: 1000, CachedTokens: 1000, WriteCostEquiv: 1300, WriteTTL: "5m"},
+		{Provider: "anthropic", ModelID: "claude", PrefixTokens: 2000, CachedTokens: 2000, WriteCostEquiv: 2600, WriteTTL: "5m"},
+		{Provider: "anthropic", ModelID: "claude", PrefixTokens: 1000, CachedTokens: 1000, WriteCostEquiv: 2100, WriteTTL: "1h"},
+	}, Hypothesis{})
+	if !cal.Write5mMeasured || cal.Write5mMult != 1.3 {
+		t.Fatalf("5m write = %g measured=%v, want 1.3/true", cal.Write5mMult, cal.Write5mMeasured)
+	}
+	if !cal.Write1hMeasured || cal.Write1hMult != 2.1 {
+		t.Fatalf("1h write = %g measured=%v, want 2.1/true", cal.Write1hMult, cal.Write1hMeasured)
+	}
+}

@@ -15,7 +15,8 @@ import (
 
 func TestRunVCacheCalibrateFitsProbeSamples(t *testing.T) {
 	samples := writeLines(t, "probe.jsonl",
-		`{"provider":"anthropic","model_id":"opus-4.8","endpoint":"messages","delay_millis":30000,"prefix_tokens":4096,"cached_tokens":10000,"read_cost_equiv":2000}`,
+		`{"provider":"anthropic","model_id":"opus-4.8","endpoint":"messages","delay_millis":30000,"prefix_tokens":4096,"cached_tokens":10000,"read_cost_equiv":2000,"write_cost_equiv":5734.4,"write_ttl":"5m"}`,
+		`{"provider":"anthropic","model_id":"opus-4.8","endpoint":"messages","delay_millis":30000,"prefix_tokens":4096,"cached_tokens":10000,"write_cost_equiv":9011.2,"write_ttl":"1h"}`,
 		`{"provider":"anthropic","model_id":"opus-4.8","endpoint":"messages","delay_millis":120000,"prefix_tokens":4096,"cached_tokens":10000}`,
 		`{"provider":"anthropic","model_id":"opus-4.8","endpoint":"messages","delay_millis":1200000,"prefix_tokens":2048,"cached_tokens":8000}`,
 		`{"provider":"anthropic","model_id":"opus-4.8","endpoint":"messages","delay_millis":1500000,"prefix_tokens":4096,"cached_tokens":0}`,
@@ -40,6 +41,9 @@ func TestRunVCacheCalibrateFitsProbeSamples(t *testing.T) {
 	}
 	if cal.ReadMult != 0.2 || !cal.ReadMultMeasured {
 		t.Fatalf("read mult = %g measured=%v, want 0.2/true", cal.ReadMult, cal.ReadMultMeasured)
+	}
+	if cal.Write5mMult != 1.4 || !cal.Write5mMeasured || cal.Write1hMult != 2.2 || !cal.Write1hMeasured {
+		t.Fatalf("write multipliers = %+v", cal)
 	}
 }
 

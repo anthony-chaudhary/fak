@@ -123,6 +123,9 @@ type CachePricing struct {
 	// CacheReadMultiplier overrides the provider default only when positive.
 	// Fresh measured calibration may set it; zero preserves the static table.
 	CacheReadMultiplier float64
+	// CacheWrite*Multiplier override the static provider tier only when positive.
+	CacheWrite5mMultiplier float64
+	CacheWrite1hMultiplier float64
 }
 
 // DefaultCachePricing resolves the small built-in price table used when a caller
@@ -179,6 +182,17 @@ func perToken(perMTok float64) float64 { return perMTok / 1_000_000 }
 // input at 1.0×, the cache read at 0.1×, the cache write at its TTL multiplier, plus
 // the output at the output price. This is what the turn DID cost given the cache hits
 // and misses the provider reported.
+func (p CachePricing) writeMultiplier(ttl CacheTTL) float64 {
+	if ttl == CacheTTL1h {
+		if p.CacheWrite1hMultiplier > 0 {
+			return p.CacheWrite1hMultiplier
+		}
+	} else if p.CacheWrite5mMultiplier > 0 {
+		return p.CacheWrite5mMultiplier
+	}
+	return ttl.WriteMultiplier()
+}
+
 func (p CachePricing) CostUSD(u CacheUsage) float64 {
 	in := perToken(p.InputPerMTokUSD)
 	cost := float64(u.InputTokens) * in
@@ -187,7 +201,7 @@ func (p CachePricing) CostUSD(u CacheUsage) float64 {
 		readMult = CacheReadMultiplier
 	}
 	cost += float64(u.CacheReadTokens) * in * readMult
-	cost += float64(u.CacheCreationTokens) * in * u.WriteTTL.WriteMultiplier()
+	cost += float64(u.CacheCreationTokens) * in * p.writeMultiplier(u.WriteTTL)
 	cost += float64(u.OutputTokens) * perToken(p.OutputPerMTokUSD)
 	return cost
 }

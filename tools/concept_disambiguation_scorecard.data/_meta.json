@@ -817,6 +817,16 @@
           "category": "incidental",
           "reason": "applies the established provider cache pricing calibration",
           "token": "ApplyCachePricing"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON input alias for provider probe write-cost evidence; not a new cache mechanism",
+          "token": "CacheWriteCost"
+        },
+        {
+          "category": "incidental",
+          "reason": "Serialized alias for provider probe write-cost evidence; not a new cache mechanism",
+          "token": "cache_write_cost_equiv"
         }
       ],
       "id": "cache",
@@ -841,6 +851,7 @@
         "CacheValueBaseline",
         "CacheValueFacts",
         "CacheValueGateDebtKey",
+        "CacheWriteCost",
         "CalibrationStatus",
         "CodeCacheScope",
         "CodeKVCache",
@@ -906,6 +917,7 @@
         "cache_trace_test",
         "cache_undecodable",
         "cache_unreadable",
+        "cache_write_cost_equiv",
         "cache_write_failed",
         "cacheable",
         "cachebreakevents",

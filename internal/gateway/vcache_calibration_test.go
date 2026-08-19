@@ -124,3 +124,22 @@ func TestUntrustedTTLCalibrationPreservesStaticTierDecision(t *testing.T) {
 		})
 	}
 }
+
+func TestMeasuredWriteMultipliersChangeServedSpendByTier(t *testing.T) {
+	base := CachePricing{InputPerMTokUSD: 1_000_000}
+	cal := &VCacheRuntimeCalibration{
+		Write5mMult: 1.4, Write5mMeasured: true,
+		Write1hMult: 2.2, Write1hMeasured: true,
+	}
+	pricing := cal.ApplyCachePricing(base)
+	if got := pricing.CostUSD(CacheUsage{CacheCreationTokens: 10, WriteTTL: CacheTTL5m}); got != 14 {
+		t.Fatalf("5m calibrated spend = %g, want 14", got)
+	}
+	if got := pricing.CostUSD(CacheUsage{CacheCreationTokens: 10, WriteTTL: CacheTTL1h}); got != 22 {
+		t.Fatalf("1h calibrated spend = %g, want 22", got)
+	}
+	unmeasured := (&VCacheRuntimeCalibration{Write5mMult: 9, Write1hMult: 9}).ApplyCachePricing(base)
+	if got := unmeasured.CostUSD(CacheUsage{CacheCreationTokens: 10, WriteTTL: CacheTTL5m}); got != 12.5 {
+		t.Fatalf("unmeasured 5m spend = %g, want static 12.5", got)
+	}
+}

@@ -1,0 +1,19 @@
+{
+  "schema": "fak.vcache.calibrated-write-pricing-witness.v1",
+  "captured_at": "2026-08-19T16:00:00Z",
+  "issue": 8090,
+  "behavior": {
+    "probe_fields": ["write_cost_equiv", "write_ttl"],
+    "tiers": ["5m", "1h"],
+    "fit": "write_cost_equiv / prefix_tokens, averaged independently per tier",
+    "runtime_gate": "fresh provider/model-matching ledger row with the tier measured bit set",
+    "fallback": "missing, stale, unmeasured, invalid, or model-mismatched evidence preserves the static multiplier"
+  },
+  "tests": [
+    "TestRunVCacheCalibrateFitsProbeSamples",
+    "TestFitCalibrationMeasuresWriteMultipliersByTTL",
+    "TestFreshRuntimeConstantsCarriesMeasuredWritePricing",
+    "TestMeasuredWriteMultipliersChangeServedSpendByTier"
+  ],
+  "effect": "fresh measured 5m and 1h write multipliers alter served-session cache-creation spend independently; source attribution records vcache-calibrated-write"
+}

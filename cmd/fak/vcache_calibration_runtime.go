@@ -20,5 +20,7 @@ func loadVCacheRuntimeCalibration(provider, model string) *gateway.VCacheRuntime
 		TTLMillis: cal.TTLMillis, TTLMeasured: cal.TTLMeasured,
 		MinPrefixTokens: cal.MinPrefixTokens, MinPrefixMeasured: cal.MinPrefixMeasured,
 		ReadMult: cal.ReadMult, ReadMultMeasured: cal.ReadMultMeasured,
+		Write5mMult: cal.Write5mMult, Write5mMeasured: cal.Write5mMeasured,
+		Write1hMult: cal.Write1hMult, Write1hMeasured: cal.Write1hMeasured,
 	}
 }

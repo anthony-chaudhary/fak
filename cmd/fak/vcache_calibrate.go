@@ -116,6 +116,12 @@ type vcacheProbeSampleInput struct {
 	ReadCostEquivCamel *float64 `json:"ReadCostEquiv"`
 	ReadCostEquivJSON  *float64 `json:"readCostEquiv"`
 	CachedReadCost     *float64 `json:"cached_read_cost_equiv"`
+
+	WriteCostEquiv      *float64 `json:"write_cost_equiv"`
+	WriteCostEquivCamel *float64 `json:"WriteCostEquiv"`
+	CacheWriteCost      *float64 `json:"cache_write_cost_equiv"`
+	WriteTTL            string   `json:"write_ttl"`
+	WriteTTLCamel       string   `json:"WriteTTL"`
 }
 
 func readVCacheProbeSamples(path string, stdin io.Reader) ([]vcachecal.ProbeSample, error) {
@@ -212,6 +218,8 @@ func normalizeVCacheProbeSample(row vcacheProbeSampleInput) (vcachecal.ProbeSamp
 		return vcachecal.ProbeSample{}, errors.New("cached_tokens is required")
 	}
 	readCost, _ := firstFloat64Ptr(row.ReadCostEquiv, row.ReadCostEquivCamel, row.ReadCostEquivJSON, row.CachedReadCost)
+	writeCost, _ := firstFloat64Ptr(row.WriteCostEquiv, row.WriteCostEquivCamel, row.CacheWriteCost)
+	writeTTL := firstNonEmpty(row.WriteTTL, row.WriteTTLCamel)
 	if delay < 0 {
 		return vcachecal.ProbeSample{}, errors.New("delay_millis must be non-negative")
 	}
@@ -224,14 +232,22 @@ func normalizeVCacheProbeSample(row vcacheProbeSampleInput) (vcachecal.ProbeSamp
 	if readCost < 0 {
 		return vcachecal.ProbeSample{}, errors.New("read_cost_equiv must be non-negative")
 	}
+	if writeCost < 0 {
+		return vcachecal.ProbeSample{}, errors.New("write_cost_equiv must be non-negative")
+	}
+	if writeTTL != "" && writeTTL != "5m" && writeTTL != "1h" {
+		return vcachecal.ProbeSample{}, errors.New("write_ttl must be 5m or 1h")
+	}
 	return vcachecal.ProbeSample{
-		Provider:      strings.TrimSpace(row.Provider),
-		ModelID:       firstNonEmpty(row.ModelID, derefString(row.ModelIDCamel), row.Model),
-		Endpoint:      strings.TrimSpace(row.Endpoint),
-		DelayMillis:   delay,
-		PrefixTokens:  prefix,
-		CachedTokens:  cached,
-		ReadCostEquiv: readCost,
+		Provider:       strings.TrimSpace(row.Provider),
+		ModelID:        firstNonEmpty(row.ModelID, derefString(row.ModelIDCamel), row.Model),
+		Endpoint:       strings.TrimSpace(row.Endpoint),
+		DelayMillis:    delay,
+		PrefixTokens:   prefix,
+		CachedTokens:   cached,
+		ReadCostEquiv:  readCost,
+		WriteCostEquiv: writeCost,
+		WriteTTL:       writeTTL,
 	}, nil
 }
 
@@ -268,6 +284,8 @@ func renderVCacheCalibration(w io.Writer, cal vcachecal.Calibration, samples []v
 	fmt.Fprintf(w, "ttl: %d ms (%s)\n", cal.TTLMillis, measuredLabel(cal.TTLMeasured))
 	fmt.Fprintf(w, "min prefix: %d tokens (%s)\n", cal.MinPrefixTokens, measuredLabel(cal.MinPrefixMeasured))
 	fmt.Fprintf(w, "cached-read multiplier: %.6g (%s)\n", cal.ReadMult, measuredLabel(cal.ReadMultMeasured))
+	fmt.Fprintf(w, "cache-write 5m multiplier: %.6g (%s)\n", cal.Write5mMult, measuredLabel(cal.Write5mMeasured))
+	fmt.Fprintf(w, "cache-write 1h multiplier: %.6g (%s)\n", cal.Write1hMult, measuredLabel(cal.Write1hMeasured))
 	if out != "" {
 		fmt.Fprintf(w, "calibration: %s\n", out)
 	}

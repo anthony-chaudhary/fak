@@ -1,5 +1,7 @@
 package vcachecal
 
+import "strings"
+
 // probe.go is the vCache offline-calibration probe harness — issue #716 scope 2 and
 // §11.4 Law D2 (calibrate-don't-assume). Provider TTL / minimum-prefix / read-discount
 // are version-dependent and undocumented for some providers, so vCache PROBES: send a
@@ -47,6 +49,11 @@ type ProbeSample struct {
 	PrefixTokens  int64
 	CachedTokens  int64
 	ReadCostEquiv float64
+	// WriteCostEquiv itemizes the billed token-equivalent cost of creating the
+	// prefix. WriteTTL identifies the provider tier (5m or 1h). Zero cost means
+	// the probe did not observe write pricing, so that tier remains unmeasured.
+	WriteCostEquiv float64
+	WriteTTL       string
 }
 
 // Calibration is the fitted per-(provider, model, endpoint) constant set every later
@@ -63,6 +70,10 @@ type Calibration struct {
 	MinPrefixMeasured bool    `json:"min_prefix_measured"`
 	ReadMult          float64 `json:"read_mult"`
 	ReadMultMeasured  bool    `json:"read_mult_measured"`
+	Write5mMult       float64 `json:"write_5m_mult,omitempty"`
+	Write5mMeasured   bool    `json:"write_5m_measured,omitempty"`
+	Write1hMult       float64 `json:"write_1h_mult,omitempty"`
+	Write1hMeasured   bool    `json:"write_1h_measured,omitempty"`
 }
 
 // FitCalibration fits T (TTL), M_min (minimum cacheable prefix), and r (read discount)
@@ -96,6 +107,8 @@ func FitCalibration(samples []ProbeSample, hypo Hypothesis) Calibration {
 	var minHitPrefix int64 = -1
 	var rSum float64
 	var rN int
+	var write5mSum, write1hSum float64
+	var write5mN, write1hN int
 	for _, s := range samples {
 		if s.CachedTokens <= 0 {
 			continue // a miss: bounds the constant from above, not a fit input.
@@ -110,6 +123,16 @@ func FitCalibration(samples []ProbeSample, hypo Hypothesis) Calibration {
 			rSum += s.ReadCostEquiv / float64(s.CachedTokens)
 			rN++
 		}
+		if s.WriteCostEquiv > 0 && s.PrefixTokens > 0 {
+			switch strings.ToLower(strings.TrimSpace(s.WriteTTL)) {
+			case "5m", "":
+				write5mSum += s.WriteCostEquiv / float64(s.PrefixTokens)
+				write5mN++
+			case "1h":
+				write1hSum += s.WriteCostEquiv / float64(s.PrefixTokens)
+				write1hN++
+			}
+		}
 	}
 	if maxHitDelay >= 0 {
 		c.TTLMillis = maxHitDelay
@@ -122,6 +145,14 @@ func FitCalibration(samples []ProbeSample, hypo Hypothesis) Calibration {
 	if rN > 0 {
 		c.ReadMult = rSum / float64(rN)
 		c.ReadMultMeasured = true
+	}
+	if write5mN > 0 {
+		c.Write5mMult = write5mSum / float64(write5mN)
+		c.Write5mMeasured = true
+	}
+	if write1hN > 0 {
+		c.Write1hMult = write1hSum / float64(write1hN)
+		c.Write1hMeasured = true
 	}
 	return c
 }

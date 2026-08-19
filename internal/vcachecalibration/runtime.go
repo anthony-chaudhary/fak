@@ -23,6 +23,10 @@ type RuntimeConstants struct {
 	MinPrefixMeasured bool    `json:"min_prefix_measured,omitempty"`
 	ReadMult          float64 `json:"read_mult,omitempty"`
 	ReadMultMeasured  bool    `json:"read_mult_measured,omitempty"`
+	Write5mMult       float64 `json:"write_5m_mult,omitempty"`
+	Write5mMeasured   bool    `json:"write_5m_measured,omitempty"`
+	Write1hMult       float64 `json:"write_1h_mult,omitempty"`
+	Write1hMeasured   bool    `json:"write_1h_measured,omitempty"`
 }
 
 // FreshRuntimeConstants selects the newest fresh row matching provider and model.
@@ -78,8 +82,10 @@ func FreshRuntimeConstants(path, provider, model string, now time.Time, ttl time
 		TTLMillis: best.TTLMillis, TTLMeasured: best.TTLMeasured,
 		MinPrefixTokens: best.MinPrefixTokens, MinPrefixMeasured: best.MinPrefixMeasured,
 		ReadMult: best.ReadMult, ReadMultMeasured: best.ReadMultMeasured,
+		Write5mMult: best.Write5mMult, Write5mMeasured: best.Write5mMeasured,
+		Write1hMult: best.Write1hMult, Write1hMeasured: best.Write1hMeasured,
 	}
-	if !out.TTLMeasured && !out.MinPrefixMeasured && !out.ReadMultMeasured {
+	if !out.TTLMeasured && !out.MinPrefixMeasured && !out.ReadMultMeasured && !out.Write5mMeasured && !out.Write1hMeasured {
 		return RuntimeConstants{}, false, "fresh row has no measured runtime constants"
 	}
 	return out, true, "fresh measured calibration"

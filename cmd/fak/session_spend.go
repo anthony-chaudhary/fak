@@ -79,6 +79,9 @@ func armServedSpendPricing(provider, context string) (string, bool) {
 		if cal.ReadMultMeasured {
 			source += "+vcache-calibrated-read"
 		}
+		if cal.Write5mMeasured || cal.Write1hMeasured {
+			source += "+vcache-calibrated-write"
+		}
 	}
 	servedSpend.mu.Lock()
 	defer servedSpend.mu.Unlock()

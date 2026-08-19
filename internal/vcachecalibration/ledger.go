@@ -47,6 +47,10 @@ type ProviderCalibration struct {
 	MinPrefixMeasured bool    `json:"min_prefix_measured,omitempty"`
 	ReadMult          float64 `json:"read_mult,omitempty"`
 	ReadMultMeasured  bool    `json:"read_mult_measured,omitempty"`
+	Write5mMult       float64 `json:"write_5m_mult,omitempty"`
+	Write5mMeasured   bool    `json:"write_5m_measured,omitempty"`
+	Write1hMult       float64 `json:"write_1h_mult,omitempty"`
+	Write1hMeasured   bool    `json:"write_1h_measured,omitempty"`
 }
 
 type CalibrationStatus struct {
@@ -99,6 +103,8 @@ func CalibrationFromProbe(cal vcachecal.Calibration, source string, samples int,
 		TTLMillis:      cal.TTLMillis, TTLMeasured: cal.TTLMeasured,
 		MinPrefixTokens: cal.MinPrefixTokens, MinPrefixMeasured: cal.MinPrefixMeasured,
 		ReadMult: cal.ReadMult, ReadMultMeasured: cal.ReadMultMeasured,
+		Write5mMult: cal.Write5mMult, Write5mMeasured: cal.Write5mMeasured,
+		Write1hMult: cal.Write1hMult, Write1hMeasured: cal.Write1hMeasured,
 	}
 	if row.Source == "" {
 		row.Source = "probe"
@@ -146,6 +152,12 @@ func ValidateCalibration(row ProviderCalibration) error {
 	}
 	if row.ReadMultMeasured && row.ReadMult <= 0 {
 		return errors.New("measured read_mult must be positive")
+	}
+	if row.Write5mMeasured && row.Write5mMult <= 0 {
+		return errors.New("measured write_5m_mult must be positive")
+	}
+	if row.Write1hMeasured && row.Write1hMult <= 0 {
+		return errors.New("measured write_1h_mult must be positive")
 	}
 	return nil
 }
