@@ -23,23 +23,25 @@ type Config struct {
 	EnableResidualHook bool
 	residualHook       ResidualHook
 
-	HiddenSize        int               `json:"hidden_size"`
-	NumLayers         int               `json:"num_hidden_layers"`
-	NumHeads          int               `json:"num_attention_heads"`
-	NumKVHeads        int               `json:"num_key_value_heads"`
-	HeadDim           int               `json:"head_dim"`
-	IntermediateSize  int               `json:"intermediate_size"`
-	VocabSize         int               `json:"vocab_size"`
-	RMSNormEps        float64           `json:"rms_norm_eps"`
-	RopeTheta         float64           `json:"rope_theta"`
-	TieWordEmbeddings bool              `json:"tie_word_embeddings"`
-	AttentionBias     bool              `json:"attention_bias"`
-	ModelType         string            `json:"model_type"`
-	Architectures     []string          `json:"architectures,omitempty"`
-	LayerTypes        []string          `json:"layer_types,omitempty"`
-	HiddenAct         string            `json:"hidden_act,omitempty"`
-	HiddenActivation  string            `json:"hidden_activation,omitempty"`
-	TensorAliases     map[string]string `json:"tensor_aliases,omitempty"`
+	HiddenSize        int     `json:"hidden_size"`
+	NumLayers         int     `json:"num_hidden_layers"`
+	NumHeads          int     `json:"num_attention_heads"`
+	NumKVHeads        int     `json:"num_key_value_heads"`
+	HeadDim           int     `json:"head_dim"`
+	IntermediateSize  int     `json:"intermediate_size"`
+	VocabSize         int     `json:"vocab_size"`
+	RMSNormEps        float64 `json:"rms_norm_eps"`
+	RopeTheta         float64 `json:"rope_theta"`
+	TieWordEmbeddings bool    `json:"tie_word_embeddings"`
+	AttentionBias     bool    `json:"attention_bias"`
+	ModelType         string  `json:"model_type"`
+	// Name preserves the exact checkpoint identity when the source declares one.
+	Name             string            `json:"-"`
+	Architectures    []string          `json:"architectures,omitempty"`
+	LayerTypes       []string          `json:"layer_types,omitempty"`
+	HiddenAct        string            `json:"hidden_act,omitempty"`
+	HiddenActivation string            `json:"hidden_activation,omitempty"`
+	TensorAliases    map[string]string `json:"tensor_aliases,omitempty"`
 
 	// EOSTokenID is the legacy scalar EOS id. EOSTokenIDs is the Llama-3.x form, where
 	// config.json emits eos_token_id as a LIST (e.g. [128001,128008,128009]); the custom

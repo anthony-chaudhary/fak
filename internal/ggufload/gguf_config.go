@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -178,6 +179,7 @@ func (f *File) Config() (model.Config, error) {
 		TieWordEmbeddings:     !f.hasTensor("output.weight") && !f.hasTensor("lm_head.weight"),
 		AttentionBias:         f.hasTensor("blk.0.attn_q.bias") || f.hasTensor("blk.0.attn_k.bias") || f.hasTensor("blk.0.attn_v.bias"),
 		ModelType:             canonicalGGUFArch(arch),
+		Name:                  stringMetaOr(f.Metadata, "general.name", ""),
 		EOSTokenID:            eos,
 		MaxPositionEmbeddings: intValueOrZero(f, p+"context_length"),
 		HiddenAct:             "silu",
@@ -626,6 +628,18 @@ func applyGLMMoeDsaConfig(f *File, p string, cfg *model.Config, ropeDim int) err
 			p+glmKeyIndexNHeads, cfg.IndexNHeads, len(cfg.IndexerTypes), cfg.NumLayers, p+glmKeyIndexerTypes)
 	}
 	return nil
+}
+
+func stringMetaOr(meta map[string]Value, key, fallback string) string {
+	value, ok := meta[key]
+	if !ok {
+		return fallback
+	}
+	text, ok := value.Value.(string)
+	if !ok || strings.TrimSpace(text) == "" {
+		return fallback
+	}
+	return text
 }
 
 func intValueOrZero(f *File, key string) int {
