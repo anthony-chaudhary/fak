@@ -27,6 +27,19 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 	journal := fs.String("journal", sessionjournal.DefaultPath(), "authoritative session lifecycle journal")
 	source := fs.String("source", "live", "row source: live, history, or union")
 	all := fs.Bool("all", false, "include terminal and stale rows")
+	stateFilter := fs.String("state", "", "exact lifecycle state filter")
+	livenessFilter := fs.String("liveness", "", "exact liveness filter")
+	ownerFilter := fs.String("owner", "", "exact owner/account filter")
+	hostFilter := fs.String("host", "", "exact host filter")
+	laneFilter := fs.String("lane", "", "exact lane filter")
+	groupFilter := fs.String("group", "", "exact group filter")
+	modelFilter := fs.String("model", "", "exact model filter")
+	providerFilter := fs.String("provider", "", "exact provider filter")
+	rootFilter := fs.String("root", "", "exact root identity filter")
+	parentFilter := fs.String("parent", "", "exact parent identity filter")
+	startedAfter := fs.String("started-after", "", "inclusive RFC3339 start lower bound")
+	startedBefore := fs.String("started-before", "", "inclusive RFC3339 start upper bound")
+	orderBy := fs.String("order-by", "elapsed_desc", "elapsed|progress_age|started|ended|cost|identity with _asc or _desc")
 	asJSON := fs.Bool("json", false, "emit fak-agents/1 JSON")
 	limit := fs.Int("limit", 200, "maximum returned rows")
 	historyWindowText := fs.String("history", "", "historical lookback window (for example 7d)")
@@ -48,12 +61,30 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak agents: positional arguments are not supported")
 		return 2
 	}
+	listFlagsSet := false
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "state", "liveness", "owner", "host", "lane", "group", "model", "provider", "root", "parent", "started-after", "started-before", "order-by":
+			listFlagsSet = true
+		}
+	})
 	if *source != "live" && *source != "history" && *source != "union" {
 		fmt.Fprintf(stderr, "fak agents: invalid --source %q (want live, history, or union)\n", *source)
 		return 2
 	}
 	if *limit < 1 || *limit > 10000 {
 		fmt.Fprintln(stderr, "fak agents: --limit must be between 1 and 10000")
+		return 2
+	}
+	listPlan := agentquery.ListPlan{Schema: agentquery.ListPlanSchema, State: *stateFilter, Liveness: *livenessFilter, Owner: *ownerFilter, Host: *hostFilter, Lane: *laneFilter, Group: *groupFilter, Model: *modelFilter, Provider: *providerFilter, RootID: *rootFilter, ParentID: *parentFilter, OrderBy: *orderBy, Limit: *limit}
+	if *startedAfter != "" {
+		listPlan.StartedAfter = agentStringPtr(*startedAfter)
+	}
+	if *startedBefore != "" {
+		listPlan.StartedBefore = agentStringPtr(*startedBefore)
+	}
+	if err := agentquery.ValidateListPlan(listPlan); err != nil {
+		fmt.Fprintf(stderr, "fak agents: list query rejected: %v\n", err)
 		return 2
 	}
 	historyWindow, historyErr := parseAgentHistoryWindow(*historyWindowText)
@@ -64,6 +95,10 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 	}
 	var queryPlan agentquery.QueryPlan
 	grouped := groupedFlags || *queryText != ""
+	if grouped && listFlagsSet {
+		fmt.Fprintln(stderr, "fak agents: grouped and list filter/sort flags cannot be combined")
+		return 2
+	}
 	if *queryText != "" {
 		var err error
 		queryPlan, err = agentquery.ParseQuery(*queryText)
@@ -110,6 +145,9 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 		}
 		*all = true
 	}
+	if !*all && listPlan.State == "" && listPlan.Liveness == "" {
+		listPlan.Liveness = "LIVE"
+	}
 	var live []agentquery.Row
 	if *source != "history" {
 		c := &sessionClient{base: strings.TrimRight(*addr, "/"), key: *key, hc: &http.Client{Timeout: 15 * time.Second}}
@@ -138,15 +176,22 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 		history = agentRowsFromHistory(events, foldNow)
 		historyHealth = agentHistoryHealth(health)
 	}
-	queryLimit := *limit
-	if grouped {
-		queryLimit = 10000
-	}
-	result := agentquery.Union(live, history, *source, !*all, queryLimit, now)
+	result := agentquery.Union(live, history, *source, false, 10000, now)
 	result.Metadata.History = historyHealth
 	if asOf != nil {
 		value := asOf.Format(time.RFC3339)
 		result.Metadata.AsOf = &value
+	}
+	if !grouped {
+		filtered, truncated, err := agentquery.ApplyListPlan(result.Rows, listPlan, now)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak agents: list query rejected: %v\n", err)
+			return 2
+		}
+		result.Rows = filtered
+		result.Metadata.Truncated = truncated
+		result.Metadata.Limit = listPlan.Limit
+		result.Metadata.ListPlan = &listPlan
 	}
 	if grouped {
 		groups := agentquery.GroupLaneStatePlan(result.Rows, queryPlan, now, *source, historyHealth)
@@ -257,6 +302,9 @@ func agentRowsFromHistory(events []sessionjournal.Event, now time.Time) []agentq
 		}
 		if s.Model != "" {
 			r.Model = agentStringPtr(s.Model)
+		}
+		if s.Account != "" {
+			r.Owner = agentStringPtr(s.Account)
 		}
 		if s.Agent != "" {
 			r.Provider = agentStringPtr(s.Agent)

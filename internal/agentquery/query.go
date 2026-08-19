@@ -15,6 +15,7 @@ type Row struct {
 	RootID           *string  `json:"root_id"`
 	ParentID         *string  `json:"parent_id"`
 	Group            *string  `json:"group"`
+	Owner            *string  `json:"owner"`
 	Lane             *string  `json:"lane"`
 	Host             *string  `json:"host"`
 	PID              *int     `json:"pid"`
@@ -59,6 +60,7 @@ type Metadata struct {
 	Deduplicated int           `json:"deduplicated"`
 	History      *SourceHealth `json:"history"`
 	AsOf         *string       `json:"as_of"`
+	ListPlan     *ListPlan     `json:"list_plan"`
 }
 type Result struct {
 	Metadata Metadata `json:"metadata"`

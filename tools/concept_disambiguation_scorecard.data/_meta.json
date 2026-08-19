@@ -7051,6 +7051,11 @@
           "category": "incidental",
           "reason": "launch-doctor adapter; it reports cache calibration and does not grant a capability",
           "token": "postureVCacheCalibration"
+        },
+        {
+          "category": "incidental",
+          "reason": "launch-posture renderer helper, not a new policy or capability concept",
+          "token": "postureDecodedContextView"
         }
       ],
       "exclude": [
@@ -7179,6 +7184,7 @@
         "policysourceselftestreport",
         "policysourceselftestschemaversion",
         "postureCodeTools",
+        "postureDecodedContextView",
         "postureOutputProfile",
         "postureShrink",
         "postureVCacheCalibration",
@@ -10443,6 +10449,26 @@
           "category": "incidental",
           "reason": "Constructor for the closed read-only aggregate AST, not an execution planner",
           "token": "GroupedPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Read-only list query value, not an agent execution plan",
+          "token": "listPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire schema for read-only list query metadata, not planning authority",
+          "token": "ListPlanSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Validator for bounded read-only filters and sorts, not execution planning",
+          "token": "ValidateListPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pure filter/sort executor over observed rows, not an agent execution plan",
+          "token": "ApplyListPlan"
         }
       ],
       "exclude": [
@@ -10454,6 +10480,7 @@
       ],
       "id": "plan",
       "ignore": [
+        "ApplyListPlan",
         "BaselineDecodeMicroseconds",
         "BaselineTaskAccuracy",
         "BuildSweepPlan",
@@ -10477,6 +10504,7 @@
         "KVPrefixPressureCandidate",
         "KVPrefixPressuredCandidates",
         "KindCandidate",
+        "ListPlanSchema",
         "MaintenanceSeconds",
         "MergePlan",
         "MotifCatalogPlanFanoutReconcile",
@@ -10511,6 +10539,7 @@
         "SweepPlanMain",
         "SweepPlanPairwise",
         "UncoveredCandidateClasses",
+        "ValidateListPlan",
         "WatchdogCandidate",
         "WatchdogCandidateExclusion",
         "WatchdogCandidateReport",
@@ -10543,6 +10572,7 @@
         "inKernelPlannerEPCoordinated",
         "indexPlanSteps",
         "indexedPlanStep",
+        "listPlan",
         "mergePlanDigest",
         "motifDetectPlanFanoutReconcile",
         "notplanned",

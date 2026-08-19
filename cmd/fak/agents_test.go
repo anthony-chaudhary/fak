@@ -268,3 +268,43 @@ func TestAgentsAsOfRejectsInvalidSourceAndFuture(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentsListFiltersPlanAndUnknownSort(t *testing.T) {
+	journal := filepath.Join(t.TempDir(), "sessions.jsonl")
+	events := []sessionjournal.Event{{Schema: sessionjournal.Schema, Kind: sessionjournal.KindOpen, ID: "wanted", TS: "2026-08-17T00:00:00Z", Host: "h1", Account: "alice", Model: "m", Agent: "provider", Registration: &sessionjournal.RegistrationCarry{Lane: "cmd", TaskID: "group", RootRegistrationID: "root", ParentRegistrationID: "parent"}}, {Schema: sessionjournal.Schema, Kind: sessionjournal.KindClose, ID: "wanted", TS: "2026-08-17T01:00:00Z", Reason: "done"}, {Schema: sessionjournal.Schema, Kind: sessionjournal.KindOpen, ID: "other", TS: "2026-08-16T00:00:00Z", Host: "h2"}}
+	var data bytes.Buffer
+	enc := json.NewEncoder(&data)
+	for _, e := range events {
+		if err := enc.Encode(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(journal, data.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"--journal", journal, "--source", "history", "--all", "--state", "closed", "--owner", "alice", "--host", "h1", "--lane", "cmd", "--group", "group", "--model", "m", "--provider", "provider", "--root", "root", "--parent", "parent", "--started-after", "2026-08-17T00:00:00Z", "--started-before", "2026-08-17T00:00:00Z", "--order-by", "identity_desc", "--json", "--now", "1787036400"}
+	var out, errout bytes.Buffer
+	if code := runAgents(&out, &errout, args); code != 0 {
+		t.Fatalf("code=%d err=%s", code, errout.String())
+	}
+	var got agentquery.Result
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Rows) != 1 || got.Rows[0].AgentID != "wanted" || got.Metadata.ListPlan == nil || got.Metadata.ListPlan.Owner != "alice" {
+		t.Fatalf("got=%+v", got)
+	}
+	out.Reset()
+	errout.Reset()
+	if code := runAgents(&out, &errout, []string{"--order-by", "unknown"}); code != 2 || !strings.Contains(errout.String(), "unsupported order-by") {
+		t.Fatalf("code=%d out=%s err=%s", code, out.String(), errout.String())
+	}
+}
+
+func TestAgentsRejectsGroupedListFlagMix(t *testing.T) {
+	var out, errout bytes.Buffer
+	code := runAgents(&out, &errout, []string{"--history", "7d", "--group-by", "lane,state", "--count", "--lane", "cmd"})
+	if code != 2 || !strings.Contains(errout.String(), "cannot be combined") {
+		t.Fatalf("code=%d out=%s err=%s", code, out.String(), errout.String())
+	}
+}
