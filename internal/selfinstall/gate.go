@@ -86,6 +86,10 @@ func ProvenanceFromCensus(copies []HotCopy) GateProvenance {
 		case RoleWorker:
 			p.WorkerPath, p.WorkerResolved, p.WorkerAttested = c.Path, c.Present, c.Attested
 			p.WorkerBuild = c.Build
+		case RolePath, RoleGoBin, RoleScheduled:
+			// These copies are census-only; spawn admission compares the gate and worker roles.
+		default:
+			// Future roles remain census-only until the gate explicitly adopts them.
 		}
 	}
 	return p

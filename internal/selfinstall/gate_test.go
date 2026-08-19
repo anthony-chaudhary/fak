@@ -17,6 +17,15 @@ const spawnOK = "SPAWN_OK"
 // adjudicating the spawn gate while a DIFFERENT, clean build fronts every worker it admits.
 // Before this fold, that exact state was measured, reported as FAK_BIN_DISAGREEMENT, and
 // admitted anyway: the tick answered SPAWN_OK, so unreviewed code kept deciding who may run.
+func TestProvenanceFromCensusIgnoresNonAdmissionRoles(t *testing.T) {
+	copies := []HotCopy{
+		{Role: RolePath, Path: "path"}, {Role: RoleGoBin, Path: "gobin"}, {Role: RoleScheduled, Path: "scheduled"},
+	}
+	if got := ProvenanceFromCensus(copies); got != (GateProvenance{Probed: true}) {
+		t.Fatalf("non-admission roles changed provenance: %+v", got)
+	}
+}
+
 func TestDivergentCopiesCannotReturnSpawnOK(t *testing.T) {
 	h, paths := hotHost(t, RoleGate, RoleWorker)
 	const worker = "793e38a87d719a0b1c2d3e4f5a6b7c8d9e0f1a2b"
