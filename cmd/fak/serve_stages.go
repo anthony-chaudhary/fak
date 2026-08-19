@@ -264,6 +264,12 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 	if rt.ep.sharded {
 		expertRanks = rt.ep.ranks
 	}
+	if *sf.ggufPath != "" && rt.chatBackend != nil && rt.chatBackend.Name() == "metal" {
+		if err := refuseOversubscribedMetalGGUF(*sf.ggufPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	}
 	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModel(*sf.ggufPath, rt.chatBackend, *sf.cpuOffloadExperts, *sf.contextBudgetTokens, expertShard, expertRanks)
 	if loadPhase.Name != "" {
 		rt.startupPhases = append(rt.startupPhases, loadPhase)

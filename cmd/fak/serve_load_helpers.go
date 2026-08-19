@@ -274,3 +274,38 @@ func resetOnBudgetHook(enabled bool, freshContextTokens int) gateway.ResetOnBudg
 	}
 	return resetServedSessionOnBudget(freshContextTokens)
 }
+
+// The 3.5x bound is the observed native-fak startup high-water mark from the
+// Qwen3.8-27B Q4_K_M campaign on an M3 Pro, not a GGUF steady-state estimate.
+const metalGGUFObservedPeakMultiplier = 3.5
+
+func metalGGUFPeakCapacity(backend string, steady, total int64, known bool) (peak int64, refuse bool) {
+	if backend != "metal" || steady <= 0 || total <= 0 || !known {
+		return 0, false
+	}
+	peakFloat := float64(steady) * metalGGUFObservedPeakMultiplier
+	if peakFloat >= float64(^uint64(0)>>1) {
+		return 0, false
+	}
+	peak = int64(peakFloat)
+	return peak, peak > total
+}
+
+func refuseOversubscribedMetalGGUF(path string) error {
+	ws, err := ggufload.OpenWeights(path)
+	if err != nil {
+		return err
+	}
+	defer ws.Close()
+	plan, err := ws.EstimateLoadMemoryPlan()
+	if err != nil {
+		return err
+	}
+	steady := plan.Total()
+	total, _, known := compute.HostSystemMemoryInfo()
+	peak, refuse := metalGGUFPeakCapacity("metal", steady, total, known)
+	if !refuse {
+		return nil
+	}
+	return fmt.Errorf("fak serve: METAL_GGUF_PEAK_TOO_BIG: estimated steady weights %.2f GiB, startup peak %.2f GiB, host has %.2f GiB; native Metal startup would overcommit unified memory before listener readiness; use a larger-memory Mac or a delegated quantized Metal engine", float64(steady)/(1<<30), float64(peak)/(1<<30), float64(total)/(1<<30))
+}
