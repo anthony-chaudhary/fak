@@ -742,6 +742,11 @@
           "category": "incidental",
           "reason": "Public cache-terminology fixture plumbing, not an additional cache mechanism",
           "token": "CacheSourceSelfTestReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prompt rendering is independent of cache storage and lookup",
+          "token": "renderinkernelchatmlrequest"
         }
       ],
       "id": "cache",
@@ -925,6 +930,7 @@
         "provider_cache_usage_not_reported",
         "pycache",
         "registerCacheLevers",
+        "renderinkernelchatmlrequest",
         "replaceMicroCacheWitness",
         "resetClaudeKeychainCache",
         "runCacheValueGateScore",
@@ -4392,24 +4398,29 @@
           "token": "InspectIndexHealth"
         },
         {
-          "token": "rwMergeSessiondiagCandidates",
           "category": "incidental",
-          "reason": "Private typed watchdog candidate bridge implementation symbol."
+          "reason": "Private typed watchdog candidate bridge implementation symbol.",
+          "token": "rwMergeSessiondiagCandidates"
         },
         {
-          "token": "rwSessiondiagCandidates",
           "category": "incidental",
-          "reason": "Private typed watchdog candidate bridge implementation symbol."
+          "reason": "Private typed watchdog candidate bridge implementation symbol.",
+          "token": "rwSessiondiagCandidates"
         },
         {
-          "token": "WatchdogExcludeKind",
           "category": "incidental",
-          "reason": "Private typed watchdog candidate bridge implementation symbol."
+          "reason": "Private typed watchdog candidate bridge implementation symbol.",
+          "token": "WatchdogExcludeKind"
         },
         {
-          "token": "UNSUPPORTED_SESSION_KIND",
           "category": "incidental",
-          "reason": "Typed exclusion reason in watchdog candidate projection."
+          "reason": "Typed exclusion reason in watchdog candidate projection.",
+          "token": "UNSUPPORTED_SESSION_KIND"
+        },
+        {
+          "category": "incidental",
+          "reason": "private test seam invoking the existing in-process session diagnostic command",
+          "token": "recoverySessionDiag"
         }
       ],
       "id": "session-runtime",
@@ -4597,6 +4608,7 @@
         "readSessionHandoffBlocks",
         "readSessionRows",
         "recoveryInventory",
+        "recoverySessionDiag",
         "refusalSafeSessionID",
         "renderSessionOpen",
         "repairMalformedLooseSessionRef",
@@ -6036,6 +6048,16 @@
           "category": "incidental",
           "reason": "Prometheus telemetry emitted by the existing gateway metrics renderer; it is not a distinct gateway or engine architecture concept.",
           "token": "fak_gateway_kv_prefix_tier_transfer_faults_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private in-kernel prompt renderer; not a gateway or engine boundary",
+          "token": "renderinkernelchatmlrequest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private prompt instruction helper; not a gateway or engine boundary",
+          "token": "inkernelresponseformatinstruction"
         }
       ],
       "id": "gateway-engine",
@@ -6094,6 +6116,7 @@
         "grepEngine",
         "inKernelPlannerEPCoordinated",
         "inKernelPrefixPressureBridge",
+        "inkernelresponseformatinstruction",
         "kernel32",
         "kernelSession",
         "kernelValue",
@@ -6108,6 +6131,7 @@
         "nativeReasonMessageRoleUnsupported",
         "newInKernelPrefixPressureBridge",
         "query_public_policy",
+        "renderinkernelchatmlrequest",
         "resolveCallEngine",
         "resolveSpawnEngine",
         "response_vdso_memo",
@@ -8544,14 +8568,14 @@
           "token": "partial_provider_coverage"
         },
         {
-          "token": "WatchdogExcludeKind",
           "category": "incidental",
-          "reason": "Private typed watchdog candidate bridge implementation symbol."
+          "reason": "Private typed watchdog candidate bridge implementation symbol.",
+          "token": "WatchdogExcludeKind"
         },
         {
-          "token": "UNSUPPORTED_SESSION_KIND",
           "category": "incidental",
-          "reason": "Typed exclusion reason in watchdog candidate projection."
+          "reason": "Typed exclusion reason in watchdog candidate projection.",
+          "token": "UNSUPPORTED_SESSION_KIND"
         }
       ],
       "id": "support-maturity",
@@ -9589,6 +9613,11 @@
           "category": "incidental",
           "reason": "Private string formatter for provider census rows, not a materialization operation.",
           "token": "renderProviders"
+        },
+        {
+          "category": "incidental",
+          "reason": "Renders a prompt string only; does not materialize persisted state",
+          "token": "renderinkernelchatmlrequest"
         }
       ],
       "id": "render-materialize",
@@ -9659,6 +9688,7 @@
         "renderWorkpattern",
         "rendered",
         "rendering",
+        "renderinkernelchatmlrequest",
         "renders",
         "rendertuioverviewsavingshero",
         "rendertuisessioncontrollegend",
@@ -10200,14 +10230,14 @@
           "token": "watchdogExclusionReason"
         },
         {
-          "token": "candidateReport",
           "category": "incidental",
-          "reason": "Private typed watchdog candidate bridge implementation symbol."
+          "reason": "Private typed watchdog candidate bridge implementation symbol.",
+          "token": "candidateReport"
         },
         {
-          "token": "watchdogCandidates",
           "category": "incidental",
-          "reason": "Private typed watchdog candidate bridge implementation symbol."
+          "reason": "Private typed watchdog candidate bridge implementation symbol.",
+          "token": "watchdogCandidates"
         }
       ],
       "exclude": [

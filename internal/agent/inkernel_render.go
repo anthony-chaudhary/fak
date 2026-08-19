@@ -59,6 +59,18 @@ const qwenNoThinkAssistantSeed = "<think>\n\n</think>\n\n"
 // spend their whole budget inside an unclosed <think> block; splitReasoning then correctly returns
 // empty visible content. FAK_INKERNEL_ENABLE_THINKING=1 keeps the raw reasoning mode for diagnosis.
 func renderInKernelChatMLTools(messages []Message, tools []ToolDef, cfg model.Config) string {
+	return renderInKernelChatMLRequest(messages, tools, cfg, nil)
+}
+
+// renderInKernelChatMLRequest carries request-level output constraints into the
+// same ChatML prompt the in-kernel model sees. Generic provider adapters carry
+// response_format upstream on the wire; the in-kernel path has no such second
+// channel, so dropping it here silently turns strict JSON into unconstrained prose.
+func renderInKernelChatMLRequest(messages []Message, tools []ToolDef, cfg model.Config, responseFormat json.RawMessage) string {
+	instruction := inKernelResponseFormatInstruction(responseFormat)
+	if instruction != "" {
+		messages = append([]Message{{Role: RoleSystem, Content: instruction}}, messages...)
+	}
 	chat := renderChatMLTools(messages, tools)
 	if inKernelSuppressQwenThinking(cfg) {
 		chat += qwenNoThinkAssistantSeed
@@ -180,6 +192,33 @@ func renderTranscriptTools(messages []Message, tools []ToolDef) string {
 		b.WriteString("<|im_end|>\n")
 	}
 	return b.String()
+}
+
+func inKernelResponseFormatInstruction(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var format struct {
+		Type       string `json:"type"`
+		JSONSchema struct {
+			Schema json.RawMessage `json:"schema"`
+		} `json:"json_schema"`
+	}
+	if json.Unmarshal(raw, &format) != nil {
+		return ""
+	}
+	switch strings.TrimSpace(format.Type) {
+	case "json_object":
+		return "Return only one valid JSON object. Do not use Markdown fences or explanatory prose."
+	case "json_schema":
+		schema := strings.TrimSpace(string(format.JSONSchema.Schema))
+		if schema == "" || !json.Valid([]byte(schema)) {
+			return "Return only one valid JSON object. Do not use Markdown fences or explanatory prose."
+		}
+		return "Return only one valid JSON object matching this schema exactly. Do not use Markdown fences or explanatory prose. JSON schema: " + schema
+	default:
+		return ""
+	}
 }
 
 func qwenToolResponseBlock(name, content string) string {

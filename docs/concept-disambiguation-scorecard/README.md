@@ -17,7 +17,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **281** (clarity 17 + coverage 264) |
 | **Crystal-clear concepts (and climbing)** | **460** crystal of 2173 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2323 / 2587** (89.8% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2322 / 2586** (89.8% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 192 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **61** of 2852 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
@@ -66,7 +66,7 @@ coverage by family (positioned / discovered):
   plan             #########################... 320/360
   session-runtime  ########################.... 214/250
   policy-capability ########################.... 159/182
-  render-materialize #########################... 177/198
+  render-materialize #########################... 176/197
   cache            ##########################.. 261/280
   context-ctx      ##########################.. 207/226
   witness-proof    #########################... 140/156
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [#############################...] 89.8%  (2323/2587 confusable tokens positioned)
+namespace coverage  [#############################...] 89.8%  (2322/2586 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 191
@@ -2466,7 +2466,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | plan | 320 | 360 | 40 |
 | session-runtime | 214 | 250 | 36 |
 | policy-capability | 159 | 182 | 23 |
-| render-materialize | 177 | 198 | 21 |
+| render-materialize | 176 | 197 | 21 |
 | cache | 261 | 280 | 19 |
 | context-ctx | 207 | 226 | 19 |
 | witness-proof | 140 | 156 | 16 |

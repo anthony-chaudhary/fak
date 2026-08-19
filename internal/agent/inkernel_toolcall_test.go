@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // These tests exercise the in-kernel planner's tool-call SEAM — the normalization that
@@ -179,5 +182,46 @@ func TestReasoningWithTruncatedToolCallFailsClosed(t *testing.T) {
 	}
 	if !comp.ToolCallsDropped {
 		t.Fatalf("a truncated <tool_call> after a reasoning block must still set ToolCallsDropped")
+	}
+}
+
+func TestToolSpecBlockMatchesQwen35Contract(t *testing.T) {
+	got := toolSpecBlock([]ToolDef{{Type: "function", Function: ToolDefFunction{Name: "record_probe", Description: "record", Parameters: json.RawMessage(`{"type":"object"}`)}}})
+	for _, want := range []string{
+		"You are provided with function signatures within <tools></tools> XML tags:",
+		"<tools>",
+		`{"type":"function","function":{"name":"record_probe"`,
+		"For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("tool preamble missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderInKernelChatMLRequestCarriesJSONSchema(t *testing.T) {
+	raw := json.RawMessage(`{"type":"json_schema","json_schema":{"name":"probe","strict":true,"schema":{"type":"object","properties":{"model":{"type":"string"},"ok":{"type":"boolean"}},"required":["model","ok"],"additionalProperties":false}}}`)
+	got := renderInKernelChatMLRequest([]Message{{Role: RoleUser, Content: "Return the probe."}}, nil, model.Config{}, raw)
+	for _, want := range []string{
+		"Return only one valid JSON object matching this schema exactly.",
+		`"required":["model","ok"]`,
+		"Do not use Markdown fences or explanatory prose.",
+		"<|im_start|>user\nReturn the probe.<|im_end|>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered prompt missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Index(got, "JSON schema:") > strings.Index(got, "<|im_start|>user") {
+		t.Fatalf("response-format instruction must precede user turn:\n%s", got)
+	}
+}
+
+func TestRenderInKernelChatMLRequestIgnoresMalformedResponseFormat(t *testing.T) {
+	messages := []Message{{Role: RoleUser, Content: "hello"}}
+	got := renderInKernelChatMLRequest(messages, nil, model.Config{}, json.RawMessage(`{"type":`))
+	want := renderInKernelChatMLTools(messages, nil, model.Config{})
+	if got != want {
+		t.Fatalf("malformed response_format changed prompt:\n got %q\nwant %q", got, want)
 	}
 }
