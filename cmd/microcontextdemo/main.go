@@ -22,6 +22,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/microagent"
+	"github.com/anthony-chaudhary/fak/internal/usagelog"
 )
 
 type config struct {
@@ -557,6 +558,22 @@ type demoOptions struct {
 }
 
 func main() {
+	started := time.Now()
+	if len(os.Args) > 1 && os.Args[1] == "usage-weekly" {
+		path := usagelog.DefaultPath()
+		if len(os.Args) > 2 {
+			path = os.Args[2]
+		}
+		rows, err := usagelog.ReadRows(path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fold := usagelog.FoldRows(rows, usagelog.FoldOptions{SinceUnixNano: time.Now().Add(-7 * 24 * time.Hour).UnixNano()})
+		_ = json.NewEncoder(os.Stdout).Encode(fold)
+		return
+	}
+	defer recordUsage(started, usagelog.DefaultPath())
 	var o demoOptions
 	registerDemoFlagsA(&o)
 	registerDemoFlagsB(&o)
@@ -1511,4 +1528,13 @@ func runVersionProbe(ctx context.Context, name string) (time.Duration, error) {
 	cmd.Stderr = io.Discard
 	err = cmd.Run()
 	return time.Since(start), err
+}
+
+func recordUsage(started time.Time, path string) {
+	log, err := usagelog.Open(path)
+	if err != nil {
+		return
+	}
+	defer log.Close()
+	_, _ = log.Append(usagelog.Row{Verb: "microcontextdemo", Argc: len(os.Args) - 1, ExitCode: 0, DurationMS: time.Since(started).Milliseconds()})
 }
