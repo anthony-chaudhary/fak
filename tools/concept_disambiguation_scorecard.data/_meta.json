@@ -7186,6 +7186,26 @@
           "category": "incidental",
           "reason": "Doctor command implementation for integrated defaults acceptance",
           "token": "runDoctorDefaultsSelfcheck"
+        },
+        {
+          "category": "incidental",
+          "reason": "Privacy package implementation symbol, not a separate policy/capability concept.",
+          "token": "PolicySchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Privacy package implementation symbol, not a separate policy/capability concept.",
+          "token": "SinkPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Privacy package implementation symbol, not a separate policy/capability concept.",
+          "token": "RetentionPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Privacy policy JSON parser implementation symbol.",
+          "token": "ParsePolicy"
         }
       ],
       "exclude": [
@@ -7225,16 +7245,19 @@
         "OrgPolicyCachePathEnv",
         "OrgPolicyURLEnv",
         "POLICY_CONFLICT",
+        "ParsePolicy",
         "PayloadPolicy",
         "PolicyHash",
         "PolicyMediaType",
         "PolicyOriginEvidencePath",
         "PolicyRevision",
+        "PolicySchema",
         "PreflightRefuseWIPLimit",
         "ProgressCallAdjudicated",
         "ReasonArmCapabilityBundled",
         "ReasonArmCapabilityUnnamed",
         "RefreshPolicy",
+        "RetentionPolicy",
         "RetryPolicy",
         "ReusePolicy",
         "ReviseForCapabilityFailure",
@@ -7242,6 +7265,7 @@
         "RunCIPreflight",
         "SIGNATURE_POLICY",
         "SessionCapabilityCorpusSchema",
+        "SinkPolicy",
         "SpawnPlacementPolicy",
         "StageAdjudicate",
         "StrengthToolPolicyGrammar",

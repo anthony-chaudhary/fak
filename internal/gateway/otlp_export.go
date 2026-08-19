@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/privacy"
 )
 
 type otlpSpan struct {
@@ -18,15 +20,16 @@ type otlpSpan struct {
 	Start, End                                         time.Time
 }
 type otlpExporter struct {
-	endpoint                            string
-	client                              *http.Client
-	queue                               chan otlpSpan
-	done                                chan struct{}
-	accepted, exported, dropped, failed uint64
+	privacy                                     privacy.Policy
+	endpoint                                    string
+	client                                      *http.Client
+	queue                                       chan otlpSpan
+	done                                        chan struct{}
+	accepted, exported, dropped, failed, denied uint64
 }
 type otlpStats struct {
-	Accepted, Exported, Dropped, Failed uint64
-	QueueDepth                          int
+	Accepted, Exported, Dropped, Failed, Denied uint64
+	QueueDepth                                  int
 }
 
 func newOTLPExporter(endpoint string, capacity int, timeout time.Duration) (*otlpExporter, error) {
@@ -47,12 +50,21 @@ func newOTLPExporter(endpoint string, capacity int, timeout time.Duration) (*otl
 	if timeout <= 0 || timeout > 5*time.Second {
 		return nil, fmt.Errorf("OTLP timeout must be within 1ns..5s")
 	}
-	e := &otlpExporter{endpoint: u.String(), client: &http.Client{Timeout: timeout}, queue: make(chan otlpSpan, capacity), done: make(chan struct{})}
+	policy := privacy.DefaultPolicy()
+	policy.LocalOnly = false
+	policy.Telemetry.Enabled = true
+	e := &otlpExporter{privacy: policy, endpoint: u.String(), client: &http.Client{Timeout: timeout}, queue: make(chan otlpSpan, capacity), done: make(chan struct{})}
 	go e.run()
 	return e, nil
 }
 func (e *otlpExporter) enqueue(span otlpSpan) {
 	if e == nil {
+		return
+	}
+	payload, _ := json.Marshal(span)
+	decision, err := e.privacy.Evaluate(privacy.SinkTelemetry, payload, time.Now())
+	if err != nil || decision.Receipt.Action == privacy.ActionDeny {
+		atomic.AddUint64(&e.denied, 1)
 		return
 	}
 	select {
@@ -100,7 +112,7 @@ func (e *otlpExporter) stats() otlpStats {
 	if e == nil {
 		return otlpStats{}
 	}
-	return otlpStats{atomic.LoadUint64(&e.accepted), atomic.LoadUint64(&e.exported), atomic.LoadUint64(&e.dropped), atomic.LoadUint64(&e.failed), len(e.queue)}
+	return otlpStats{Accepted: atomic.LoadUint64(&e.accepted), Exported: atomic.LoadUint64(&e.exported), Dropped: atomic.LoadUint64(&e.dropped), Failed: atomic.LoadUint64(&e.failed), Denied: atomic.LoadUint64(&e.denied), QueueDepth: len(e.queue)}
 }
 func (e *otlpExporter) close(ctx context.Context) error {
 	if e == nil {

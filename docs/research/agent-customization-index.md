@@ -22,7 +22,7 @@ The machine index currently records **21 independent axes**. This table is a com
 | Layer | Axes | Current fak gaps to prioritize |
 |---|---|---|
 | Authoring | instructions, routing, tools, skills, memory, delegation | Composition exists; projection into each native harness remains uneven. |
-| Execution | runtime, authority, hooks, persistence, economy, privacy | Portable session manifests now bind resume/fork/export lineage; explicit privacy/telemetry sink controls remain partial. |
+| Execution | runtime, authority, hooks, persistence, economy, privacy | Portable session manifests bind resume/fork/export lineage; one fail-closed privacy policy now governs local logging, bounded retention, redacted export, and telemetry opt-out receipts. |
 | Interpretation | source adapters, semantic events, derived signals, redaction | Codex, AG-UI, Claude Code, and OpenAI export adapters now feed canonical typed events; deterministic derived signals carry source-event and digest receipts. |
 | Presentation | audience, selection, visual language, live control, sharing | Declarative audience projections, pre-render redaction, control round trips, sharing bundles, and accessible renderer-neutral visual profiles now ship; full client applications remain outside this index spine. |
 

@@ -1,0 +1,8 @@
+{
+  "schema":"fak-privacy-policy/1",
+  "local_only":false,
+  "log":{"enabled":true},
+  "retain":{"enabled":true,"max_count":1000,"max_age_seconds":86400,"redact_fields":["secret"]},
+  "export":{"enabled":true,"redact_fields":["secret","token","authorization"]},
+  "telemetry":{"enabled":false}
+}
