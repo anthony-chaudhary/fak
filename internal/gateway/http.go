@@ -643,6 +643,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		// during generation; the resulting tool candidate still enters adjudication
 		// below. Each option is a no-op when its field is absent (bit-exact drop-in).
 		agent.WithResponseFormat(req.ResponseFormat),
+		agent.WithToolChoice(req.ToolChoice),
 		agent.WithLogitBias(req.LogitBias),
 		agent.WithGuidedDecode(req.GuidedDecodeFields()),
 		// Repetition-penalty passthrough (#1705): forward frequency_penalty/

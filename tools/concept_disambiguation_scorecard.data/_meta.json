@@ -6118,6 +6118,11 @@
           "category": "incidental",
           "reason": "Private prompt instruction helper; not a gateway or engine boundary",
           "token": "inkernelresponseformatinstruction"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private request-to-prompt instruction helper, not a gateway or engine boundary",
+          "token": "inkernelforcedtoolinstruction"
         }
       ],
       "id": "gateway-engine",
@@ -6176,6 +6181,7 @@
         "grepEngine",
         "inKernelPlannerEPCoordinated",
         "inKernelPrefixPressureBridge",
+        "inkernelforcedtoolinstruction",
         "inkernelresponseformatinstruction",
         "kernel32",
         "kernelSession",

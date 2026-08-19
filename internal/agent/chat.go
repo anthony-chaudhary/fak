@@ -418,6 +418,9 @@ type SampleParams struct {
 	// On the ride path it forwards verbatim so a ridden engine (vLLM/SGLang) enforces
 	// the schema; the whole-turn adjudication gate still runs on the constrained output.
 	ResponseFormat json.RawMessage
+	// ToolChoice carries an explicit OpenAI forced-function choice into native
+	// prompt rendering. Empty/auto leaves model choice unchanged.
+	ToolChoice json.RawMessage
 	// LogitBias is the OpenAI per-token logit-bias map (token id -> bias, the standard
 	// -100..100 mask). Empty => unset on the wire. Like ResponseFormat it rides verbatim
 	// to the upstream so the engine applies the mask at its own logit step; the native
