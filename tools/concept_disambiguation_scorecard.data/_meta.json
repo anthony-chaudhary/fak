@@ -4621,6 +4621,16 @@
           "category": "incidental",
           "reason": "Session-audit join result over existing objective curves, not a new session runtime state concept",
           "token": "SessionPanel"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI adapter for the sessionmine benchmark report, not a session runtime state concept",
+          "token": "runSessionHistoryBenchmark"
+        },
+        {
+          "category": "incidental",
+          "reason": "Benchmark storage-density measurement, not a session runtime budget or lifecycle concept",
+          "token": "BytesPerSession"
         }
       ],
       "id": "session-runtime",
@@ -4631,6 +4641,7 @@
         "AffinitySelection",
         "AttributeOutcomes",
         "BeginSessionEffect",
+        "BytesPerSession",
         "ConfigureSessionClientAuth",
         "ConfigureSessionMove",
         "CoveredSessions",
@@ -4836,6 +4847,7 @@
         "runSessionConPTY",
         "runSessionDiscoveryServe",
         "runSessionHistory",
+        "runSessionHistoryBenchmark",
         "runSessionHistoryRefresh",
         "runSessionHistoryStatus",
         "runSessionIndexHealth",

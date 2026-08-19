@@ -10,6 +10,9 @@ import (
 )
 
 func runSessionHistory(stdout, stderr io.Writer, args []string) int {
+	if len(args) > 0 && args[0] == "benchmark" {
+		return runSessionHistoryBenchmark(context.Background(), stdout, stderr, args[1:])
+	}
 	if len(args) > 0 && args[0] == "refresh" {
 		return runSessionHistoryRefresh(context.Background(), stdout, stderr, args[1:])
 	}

@@ -1,0 +1,8 @@
+{
+  "schema": "fak-sessionmine-real-corpus-summary/1",
+  "observed_at": "2026-08-19",
+  "source_command": "fak vcache session-mine --days 30 --min-support 2 --limit 1",
+  "privacy": "aggregate-only; normalized source labels; no transcript text, paths, session IDs, or candidate details",
+  "inputs": {"files_scanned": 406, "files_rejected": 0, "malformed_lines": 0},
+  "metrics": {"sessions": 404, "tool_calls": 5220, "tool_results": 5158, "tool_errors": 374, "user_turns": 5793, "assistant_turns": 6194}
+}

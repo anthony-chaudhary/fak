@@ -1,0 +1,113 @@
+{
+  "schema": "fak-sessionmine-refresh-benchmark/1",
+  "os": "linux",
+  "arch": "amd64",
+  "go_version": "go1.26.6",
+  "repetitions": 3,
+  "slo": {
+    "warm_p95_ms": 5000,
+    "changed_p95_ms": 5000,
+    "warm_reuse_ratio": 0.99,
+    "bytes_per_session": 4096,
+    "freshness_lag_ms": 60000
+  },
+  "scales": [
+    {
+      "sessions": 1000,
+      "index_bytes": 514126,
+      "bytes_per_session": 514.126,
+      "peak_heap_bytes": 9787088,
+      "phases": [
+        {
+          "name": "cold",
+          "p50_ms": 20.497,
+          "p95_ms": 23.451,
+          "reused": 0,
+          "rebuilt": 1000
+        },
+        {
+          "name": "unchanged",
+          "p50_ms": 9.82,
+          "p95_ms": 10.043,
+          "reused": 1000,
+          "rebuilt": 0
+        },
+        {
+          "name": "one_changed",
+          "p50_ms": 9.963,
+          "p95_ms": 10.132,
+          "reused": 999,
+          "rebuilt": 1,
+          "freshness_lag_ms": 10.85
+        }
+      ],
+      "pass": true,
+      "failures": []
+    },
+    {
+      "sessions": 10000,
+      "index_bytes": 5140126,
+      "bytes_per_session": 514.0126,
+      "peak_heap_bytes": 28587320,
+      "phases": [
+        {
+          "name": "cold",
+          "p50_ms": 165.246,
+          "p95_ms": 171.033,
+          "reused": 0,
+          "rebuilt": 10000
+        },
+        {
+          "name": "unchanged",
+          "p50_ms": 75.011,
+          "p95_ms": 76.017,
+          "reused": 10000,
+          "rebuilt": 0
+        },
+        {
+          "name": "one_changed",
+          "p50_ms": 74.722,
+          "p95_ms": 74.76,
+          "reused": 9999,
+          "rebuilt": 1,
+          "freshness_lag_ms": 76.038
+        }
+      ],
+      "pass": true,
+      "failures": []
+    },
+    {
+      "sessions": 100000,
+      "index_bytes": 51400126,
+      "bytes_per_session": 514.00126,
+      "peak_heap_bytes": 280003624,
+      "phases": [
+        {
+          "name": "cold",
+          "p50_ms": 1742.842,
+          "p95_ms": 1899.715,
+          "reused": 0,
+          "rebuilt": 100000
+        },
+        {
+          "name": "unchanged",
+          "p50_ms": 813.423,
+          "p95_ms": 831.854,
+          "reused": 100000,
+          "rebuilt": 0
+        },
+        {
+          "name": "one_changed",
+          "p50_ms": 818.706,
+          "p95_ms": 890.137,
+          "reused": 99999,
+          "rebuilt": 1,
+          "freshness_lag_ms": 822.477
+        }
+      ],
+      "pass": true,
+      "failures": []
+    }
+  ],
+  "pass": true
+}

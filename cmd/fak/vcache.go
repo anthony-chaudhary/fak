@@ -115,6 +115,7 @@ func vcacheUsage(w io.Writer) {
   fak vcache session-history --index FILE [--provider NAME] [--min-errors N]
                    [--limit N] [--session ID] [--tool STEP]
   fak vcache session-history refresh [--index FILE] [--once|--interval DURATION]
+  fak vcache session-history benchmark [--sizes 1000,10000,100000] [--repetitions 3]
                    [--max-runs N] [--days N]
   fak vcache context-witness [--json] [--snapshot FILE] [--fixture FILE]
                    [--wire openai|anthropic]
