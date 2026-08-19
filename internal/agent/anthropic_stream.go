@@ -143,6 +143,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		// place) or a 401 self-heal takes effect on the very next re-send — the same credential
 		// source the buffered/planner-stream paths use, folding in the anthropic-beta union.
 		call.applyHeaders(req)
+		ApplyTraceContext(req)
 		req.Header.Set("Accept", "text/event-stream")
 
 		r, derr := p.Client.Do(req)

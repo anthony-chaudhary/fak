@@ -940,6 +940,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			return nil, err
 		}
 		call.applyHeaders(req)
+		ApplyTraceContext(req)
 		if call.responsesStreamed {
 			req.Header.Set("Accept", "text/event-stream")
 		}

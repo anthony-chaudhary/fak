@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 func (m *gatewayMetrics) observeHTTP(route, method string, status int, dur time.Duration) {
@@ -331,6 +333,7 @@ func ensureHTTPTrace(s *Server, w http.ResponseWriter, r *http.Request) string {
 	}
 	r.Header.Set(traceHeader, ctx.TraceID)
 	r.Header.Set(traceparentHeader, ctx.String())
+	*r = *r.WithContext(agent.WithTraceContext(r.Context(), ctx.String(), r.Header.Get("tracestate")))
 	w.Header().Set(traceHeader, ctx.TraceID)
 	w.Header().Set(traceparentHeader, ctx.String())
 	return ctx.TraceID

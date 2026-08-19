@@ -7798,11 +7798,32 @@
           "category": "incidental",
           "reason": "W3C distributed tracing constructor, not model context memory.",
           "token": "newTraceContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "W3C distributed tracing carrier, not model context memory.",
+          "token": "ApplyTraceContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "W3C distributed tracing carrier, not model context memory.",
+          "token": "outboundTraceContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "W3C distributed tracing carrier, not model context memory.",
+          "token": "outboundTraceContextKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "W3C distributed tracing carrier, not model context memory.",
+          "token": "WithTraceContext"
         }
       ],
       "id": "context-ctx",
       "ignore": [
         "AffinityFromContext",
+        "ApplyTraceContext",
         "COMPACTION_THRASH",
         "CompactionCheckpointConflation",
         "CompactionContract",
@@ -7824,6 +7845,7 @@
         "SensitiveContext",
         "TerminationContextLimit",
         "WithAffinity",
+        "WithTraceContext",
         "affinityContextKey",
         "appendGuardCompactionWitnessTo",
         "callCtx",
@@ -7877,6 +7899,8 @@
         "newTraceContext",
         "noteCompactionContract",
         "noteCtxValueTTL1hScope",
+        "outboundTraceContext",
+        "outboundTraceContextKey",
         "postCtx",
         "probeCtx",
         "providerContext",

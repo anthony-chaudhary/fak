@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
@@ -397,6 +398,7 @@ func (p DeepSeekAnthropicProfile) PostMessages(ctx context.Context, client *http
 	for k, v := range p.headers() {
 		req.Header.Set(k, v)
 	}
+	agent.ApplyTraceContext(req)
 	if client == nil {
 		client = &http.Client{Timeout: durEnv("FAK_DEEPSEEK_ANTHROPIC_TIMEOUT_S", 120*time.Second)}
 	}
