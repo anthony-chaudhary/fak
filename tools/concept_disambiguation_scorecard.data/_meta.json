@@ -2597,6 +2597,16 @@
           "category": "incidental",
           "reason": "Private closed vocabulary slice, not a guard or gate concept.",
           "token": "fullAggregates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Selfcheck result field for the established measured minimum-prefix decision",
+          "token": "MinimumPrefixGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local request fixture used to prove minimum-prefix gating",
+          "token": "gatedReq"
         }
       ],
       "exclude": [
@@ -2662,6 +2672,7 @@
         "GuardedProcessTrees",
         "IsAggregate",
         "LifecycleGate",
+        "MinimumPrefixGate",
         "NewSessionAffinityGateway",
         "OutcomeDelegate",
         "OutcomeGuardRefusal",
@@ -2730,6 +2741,7 @@
         "gate_test",
         "gate_verbtier",
         "gated",
+        "gatedReq",
         "gatedly",
         "gateresult",
         "gates",
@@ -7154,6 +7166,26 @@
           "category": "incidental",
           "reason": "Schema descriptor prose field, not an enforcement policy.",
           "token": "PayloadPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local launch-posture fixture matrix in the defaults selfcheck",
+          "token": "postureOpts"
+        },
+        {
+          "category": "incidental",
+          "reason": "Output row schema for the defaults selfcheck",
+          "token": "defaultsSelfcheckRow"
+        },
+        {
+          "category": "incidental",
+          "reason": "Output report schema for the defaults selfcheck",
+          "token": "defaultsSelfcheckReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Doctor command implementation for integrated defaults acceptance",
+          "token": "runDoctorDefaultsSelfcheck"
         }
       ],
       "exclude": [
@@ -7236,6 +7268,8 @@
         "contractByCapability",
         "contractLeafByCapability",
         "counterfactualAdjudicator",
+        "defaultsSelfcheckReport",
+        "defaultsSelfcheckRow",
         "deriveLaunchPosture",
         "dispatchPreflightChurnState",
         "dispatchPreflightWIP",
@@ -7284,6 +7318,7 @@
         "policysourceselftestschemaversion",
         "postureCodeTools",
         "postureDecodedContextView",
+        "postureOpts",
         "postureOutputProfile",
         "postureShrink",
         "postureShrinkDecoded",
@@ -7298,6 +7333,7 @@
         "resolveUltracodePosture",
         "routingPolicyStat",
         "runCounterfactualAdjudicator",
+        "runDoctorDefaultsSelfcheck",
         "runDoctorLaunchPosture",
         "runLiveSemanticMatrix",
         "runRoutingPolicy",
@@ -9933,6 +9969,11 @@
           "category": "incidental",
           "reason": "CLI table formatting helper only; it neither materializes nor caches the relation",
           "token": "renderAgentGroups"
+        },
+        {
+          "category": "incidental",
+          "reason": "Human renderer for the defaults selfcheck report",
+          "token": "renderDefaultsSelfcheck"
         }
       ],
       "id": "render-materialize",
@@ -9984,6 +10025,7 @@
         "renderConcepts",
         "renderContrastIndex",
         "renderConversion",
+        "renderDefaultsSelfcheck",
         "renderFleetControl",
         "renderFleetGoalExposition",
         "renderFromGitTree",
@@ -10606,6 +10648,16 @@
           "category": "incidental",
           "reason": "Private validator helper; not a user-facing planning concept.",
           "token": "validateGroupedPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Deterministic scripted planner fixture used only by defaults acceptance",
+          "token": "defaultsCheckPlanner"
+        },
+        {
+          "category": "incidental",
+          "reason": "Behavioral acceptance helper for bounded repository tools",
+          "token": "RunCodeToolsSelfcheck"
         }
       ],
       "exclude": [
@@ -10668,6 +10720,7 @@
         "ReconcilePlan",
         "RecoveryReplan",
         "RemoteDrainCandidate",
+        "RunCodeToolsSelfcheck",
         "SetupSeconds",
         "SinkCandidate",
         "SinkCandidates",
@@ -10702,6 +10755,7 @@
         "candidatemean",
         "candidates",
         "dedupCandidate",
+        "defaultsCheckPlanner",
         "fitandplanserveggufexpertparallelpathondevice",
         "fixturePlanner",
         "foldCandidate",

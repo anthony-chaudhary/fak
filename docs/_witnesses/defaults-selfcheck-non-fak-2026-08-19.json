@@ -1,0 +1,508 @@
+{
+  "schema": "fak.defaults-selfcheck.v1",
+  "ok": true,
+  "workspace": "C:\\Users\\USER\\AppData\\Local\\Temp\\fak-defaults-nonfak-1274189151",
+  "non_fak": true,
+  "rows": [
+    {
+      "name": "bounded-repository-tools",
+      "state": "pass",
+      "evidence": "catalog=[Read Grep Write Edit Bash Glob] engine_calls=6 denies=1"
+    },
+    {
+      "name": "caveman-and-ponytail",
+      "state": "pass",
+      "evidence": "captured Claude append-system-prompt and Codex developer_instructions adapters"
+    },
+    {
+      "name": "compact-history",
+      "state": "pass",
+      "evidence": "Anthropic fixture request shortened through live compact transform"
+    },
+    {
+      "name": "stale-read-elision",
+      "state": "pass",
+      "evidence": "superseded Read body removed through live transform"
+    },
+    {
+      "name": "cold-tool-deferral",
+      "state": "pass",
+      "evidence": "cold custom tool deferred behind Anthropic ToolSearch"
+    },
+    {
+      "name": "vcache-anchor",
+      "state": "pass",
+      "evidence": "stable system prefix received cache_control"
+    },
+    {
+      "name": "minimum-prefix-steering",
+      "state": "pass",
+      "evidence": "measured floor suppressed uneconomic anchor authoring"
+    },
+    {
+      "name": "calibrated-read-pricing",
+      "state": "pass",
+      "evidence": "measured read multiplier changed spend"
+    },
+    {
+      "name": "calibrated-write-pricing",
+      "state": "pass",
+      "evidence": "measured 5m and 1h multipliers changed spend independently"
+    },
+    {
+      "name": "ttl-tier-steering",
+      "state": "pass",
+      "evidence": "measured provider retention suppressed paid 1h tier"
+    },
+    {
+      "name": "cross-backend-vcache-signals",
+      "state": "pass",
+      "evidence": "normalized cache-read usage reached live family window"
+    },
+    {
+      "name": "openai-cold-tool-deferral",
+      "state": "unsupported",
+      "evidence": "unsupported: Anthropic ToolSearch has no witnessed OpenAI-compatible discovery seam"
+    }
+  ],
+  "postures": [
+    {
+      "schema": "fak.launch-posture.v1",
+      "ok": false,
+      "entrypoint": "agent",
+      "wire": "non-anthropic-proxy",
+      "workspace": "C:\\Users\\USER\\AppData\\Local\\Temp\\fak-defaults-nonfak-1274189151",
+      "mechanisms": [
+        {
+          "name": "bounded-code-tools",
+          "configured": true,
+          "state": "active",
+          "reason": "the owned agent loop arms bounded repository tools at the selected workspace",
+          "disable": "--code-tools=false"
+        },
+        {
+          "name": "caveman-response-profile",
+          "configured": true,
+          "state": "active",
+          "reason": "the owned agent loop composes the selected governed response segment",
+          "disable": "set FAK_STYLE=full"
+        },
+        {
+          "name": "ponytail-work-profile",
+          "configured": true,
+          "state": "active",
+          "reason": "the owned agent loop composes the selected governed work segment",
+          "disable": "--work-profile standard"
+        },
+        {
+          "name": "compact-history",
+          "configured": true,
+          "state": "inert",
+          "reason": "configured on but runtime wire non-anthropic-proxy does not carry the Anthropic request-body seam",
+          "action": "use an Anthropic passthrough wire or set --provider anthropic",
+          "disable": "--compact-history-budget 0"
+        },
+        {
+          "name": "decoded-context-view",
+          "configured": true,
+          "state": "active",
+          "reason": "configured on; OpenAI-compatible and owned-model turns re-plan decoded history before the provider/model call",
+          "disable": "--ctx-view-budget 0"
+        },
+        {
+          "name": "stale-read-elision",
+          "configured": true,
+          "state": "active",
+          "reason": "decoded provider-neutral history elides superseded tool-read results before context planning",
+          "disable": "--elide-stale-reads=false"
+        },
+        {
+          "name": "cold-tool-deferral",
+          "configured": true,
+          "state": "inert",
+          "reason": "configured on but runtime wire non-anthropic-proxy does not carry the Anthropic request-body seam",
+          "action": "use an Anthropic passthrough wire or set --provider anthropic",
+          "disable": "--defer-cold-tools=false"
+        },
+        {
+          "name": "vcache-anchor",
+          "configured": true,
+          "state": "inert",
+          "reason": "configured on but runtime wire non-anthropic-proxy does not carry the Anthropic request-body seam",
+          "action": "use an Anthropic passthrough wire or set --provider anthropic",
+          "disable": "--vcache-anchor=false"
+        },
+        {
+          "name": "vcache-signals",
+          "configured": true,
+          "state": "active",
+          "reason": "normalized provider usage feeds cache-read/cache-write signals, warmth error, and per-family economics independently of request shaping"
+        },
+        {
+          "name": "vcache-calibration",
+          "configured": true,
+          "state": "inert",
+          "reason": "no live provider calibration row",
+          "action": "run a real fak guard/serve session through this provider"
+        }
+      ],
+      "summary": {
+        "active": 6,
+        "disabled": 0,
+        "inert": 4,
+        "unsupported": 0
+      }
+    },
+    {
+      "schema": "fak.launch-posture.v1",
+      "ok": false,
+      "entrypoint": "guard",
+      "harness": "claude",
+      "wire": "anthropic-passthrough",
+      "workspace": "C:\\Users\\USER\\AppData\\Local\\Temp\\fak-defaults-nonfak-1274189151",
+      "mechanisms": [
+        {
+          "name": "bounded-code-tools",
+          "configured": true,
+          "state": "active",
+          "reason": "the wrapped harness repository tools are admitted by the guard default policy",
+          "disable": "use --policy to narrow the tool floor"
+        },
+        {
+          "name": "caveman-response-profile",
+          "configured": true,
+          "state": "active",
+          "reason": "guard injects the selected governed segment through claude --append-system-prompt",
+          "disable": "set FAK_STYLE=full"
+        },
+        {
+          "name": "ponytail-work-profile",
+          "configured": true,
+          "state": "active",
+          "reason": "guard injects the selected governed work segment through claude --append-system-prompt",
+          "disable": "--work-profile standard"
+        },
+        {
+          "name": "compact-history",
+          "configured": true,
+          "state": "active",
+          "reason": "configured on and reached by the Anthropic passthrough request seam",
+          "disable": "--compact-history-budget 0"
+        },
+        {
+          "name": "decoded-context-view",
+          "configured": true,
+          "state": "active",
+          "reason": "configured on; buffered Anthropic turns re-plan through the decoded context-view seam after byte-preserving transforms",
+          "disable": "--ctx-view-budget 0"
+        },
+        {
+          "name": "stale-read-elision",
+          "configured": true,
+          "state": "active",
+          "reason": "Anthropic request bytes elide superseded tool-read results before forwarding",
+          "disable": "--elide-stale-reads=false"
+        },
+        {
+          "name": "cold-tool-deferral",
+          "configured": true,
+          "state": "active",
+          "reason": "configured on and reached by the Anthropic passthrough request seam",
+          "disable": "--defer-cold-tools=false"
+        },
+        {
+          "name": "vcache-anchor",
+          "configured": true,
+          "state": "active",
+          "reason": "configured on and reached by the Anthropic passthrough request seam",
+          "disable": "--vcache-anchor=false"
+        },
+        {
+          "name": "vcache-signals",
+          "configured": true,
+          "state": "active",
+          "reason": "normalized provider usage feeds cache-read/cache-write signals, warmth error, and per-family economics independently of request shaping"
+        },
+        {
+          "name": "vcache-calibration",
+          "configured": true,
+          "state": "inert",
+          "reason": "no live provider calibration row",
+          "action": "run a real fak guard/serve session through this provider"
+        }
+      ],
+      "summary": {
+        "active": 9,
+        "disabled": 0,
+        "inert": 1,
+        "unsupported": 0
+      }
+    },
+    {
+      "schema": "fak.launch-posture.v1",
+      "ok": false,
+      "entrypoint": "guard",
+      "harness": "codex",
+      "wire": "non-anthropic-proxy",
+      "workspace": "C:\\Users\\USER\\AppData\\Local\\Temp\\fak-defaults-nonfak-1274189151",
+      "mechanisms": [
+        {
+          "name": "bounded-code-tools",
+          "configured": true,
+          "state": "active",
+          "reason": "the wrapped harness repository tools are admitted by the guard default policy",
+          "disable": "use --policy to narrow the tool floor"
+        },
+        {
+          "name": "caveman-response-profile",
+          "configured": true,
+          "state": "active",
+          "reason": "guard injects the selected governed segment through codex -c developer_instructions",
+          "disable": "set FAK_STYLE=full"
+        },
+        {
+          "name": "ponytail-work-profile",
+          "configured": true,
+          "state": "active",
+          "reason": "guard injects the selected governed work segment through codex -c developer_instructions",
+          "disable": "--work-profile standard"
+        },
+        {
+          "name": "compact-history",
+          "configured": true,
+          "state": "inert",
+          "reason": "configured on but runtime wire non-anthropic-proxy does not carry the Anthropic request-body seam",
+          "action": "use an Anthropic passthrough wire or set --provider anthropic",
+          "disable": "--compact-history-budget 0"
+        },
+        {
+          "name": "decoded-context-view",
+          "configured": true,
+          "state": "active",
+          "reason": "configured on; OpenAI-compatible and owned-model turns re-plan decoded history before the provider/model call",
+          "disable": "--ctx-view-budget 0"
+        },
+        {
+          "name": "stale-read-elision",
+          "configured": true,
+          "state": "active",
+          "reason": "decoded provider-neutral history elides superseded tool-read results before context planning",
+          "disable": "--elide-stale-reads=false"
+        },
+        {
+          "name": "cold-tool-deferral",
+          "configured": true,
+          "state": "inert",
+          "reason": "configured on but runtime wire non-anthropic-proxy does not carry the Anthropic request-body seam",
+          "action": "use an Anthropic passthrough wire or set --provider anthropic",
+          "disable": "--defer-cold-tools=false"
+        },
+        {
+          "name": "vcache-anchor",
+          "configured": true,
+          "state": "inert",
+          "reason": "configured on but runtime wire non-anthropic-proxy does not carry the Anthropic request-body seam",
+          "action": "use an Anthropic passthrough wire or set --provider anthropic",
+          "disable": "--vcache-anchor=false"
+        },
+        {
+          "name": "vcache-signals",
+          "configured": true,
+          "state": "active",
+          "reason": "normalized provider usage feeds cache-read/cache-write signals, warmth error, and per-family economics independently of request shaping"
+        },
+        {
+          "name": "vcache-calibration",
+          "configured": true,
+          "state": "inert",
+          "reason": "no live provider calibration row",
+          "action": "run a real fak guard/serve session through this provider"
+        }
+      ],
+      "summary": {
+        "active": 6,
+        "disabled": 0,
+        "inert": 4,
+        "unsupported": 0
+      }
+    },
+    {
+      "schema": "fak.launch-posture.v1",
+      "ok": false,
+      "entrypoint": "serve",
+      "wire": "in-kernel",
+      "workspace": "C:\\Users\\USER\\AppData\\Local\\Temp\\fak-defaults-nonfak-1274189151",
+      "mechanisms": [
+        {
+          "name": "bounded-code-tools",
+          "configured": true,
+          "state": "active",
+          "reason": "native serve arms the bounded catalog at the selected workspace",
+          "disable": "--native-code-tools=false"
+        },
+        {
+          "name": "caveman-response-profile",
+          "configured": true,
+          "state": "inert",
+          "reason": "native serve does not map this doctor selection into FAK_STYLE",
+          "action": "set FAK_STYLE=caveman:native:medium before fak serve --native",
+          "disable": "set FAK_STYLE=full"
+        },
+        {
+          "name": "ponytail-work-profile",
+          "configured": true,
+          "state": "active",
+          "reason": "the owned native loop resolves the same default work profile",
+          "disable": "--work-profile standard"
+        },
+        {
+          "name": "compact-history",
+          "configured": true,
+          "state": "inert",
+          "reason": "configured on but runtime wire in-kernel does not carry the Anthropic request-body seam",
+          "action": "use an Anthropic passthrough wire or set --provider anthropic",
+          "disable": "--compact-history-budget 0"
+        },
+        {
+          "name": "decoded-context-view",
+          "configured": true,
+          "state": "active",
+          "reason": "configured on; OpenAI-compatible and owned-model turns re-plan decoded history before the provider/model call",
+          "disable": "--ctx-view-budget 0"
+        },
+        {
+          "name": "stale-read-elision",
+          "configured": true,
+          "state": "active",
+          "reason": "decoded provider-neutral history elides superseded tool-read results before context planning",
+          "disable": "--elide-stale-reads=false"
+        },
+        {
+          "name": "cold-tool-deferral",
+          "configured": true,
+          "state": "inert",
+          "reason": "configured on but runtime wire in-kernel does not carry the Anthropic request-body seam",
+          "action": "use an Anthropic passthrough wire or set --provider anthropic",
+          "disable": "--defer-cold-tools=false"
+        },
+        {
+          "name": "vcache-anchor",
+          "configured": true,
+          "state": "inert",
+          "reason": "configured on but runtime wire in-kernel does not carry the Anthropic request-body seam",
+          "action": "use an Anthropic passthrough wire or set --provider anthropic",
+          "disable": "--vcache-anchor=false"
+        },
+        {
+          "name": "vcache-signals",
+          "configured": true,
+          "state": "active",
+          "reason": "owned-model usage feeds the provider-neutral cache-signal and per-family economics surface"
+        },
+        {
+          "name": "vcache-calibration",
+          "configured": false,
+          "state": "unsupported",
+          "reason": "the selected native/offline wire has no provider cache-feedback calibration",
+          "action": "select anthropic, openai, gemini, or xai when provider-cache calibration is expected"
+        }
+      ],
+      "summary": {
+        "active": 5,
+        "disabled": 0,
+        "inert": 4,
+        "unsupported": 1
+      }
+    },
+    {
+      "schema": "fak.launch-posture.v1",
+      "ok": false,
+      "entrypoint": "serve",
+      "wire": "non-anthropic-proxy",
+      "workspace": "C:\\Users\\USER\\AppData\\Local\\Temp\\fak-defaults-nonfak-1274189151",
+      "mechanisms": [
+        {
+          "name": "bounded-code-tools",
+          "configured": true,
+          "state": "inert",
+          "reason": "the bounded catalog requires the owned native loop",
+          "action": "add --native or use the wrapped harness's witnessed repository tools",
+          "disable": "--native-code-tools=false"
+        },
+        {
+          "name": "caveman-response-profile",
+          "configured": false,
+          "state": "disabled",
+          "reason": "response shaping is off",
+          "action": "select caveman:medium",
+          "disable": "set FAK_STYLE=full"
+        },
+        {
+          "name": "ponytail-work-profile",
+          "configured": false,
+          "state": "disabled",
+          "reason": "work-policy shaping is off",
+          "action": "select ponytail:medium",
+          "disable": "--work-profile standard"
+        },
+        {
+          "name": "compact-history",
+          "configured": true,
+          "state": "inert",
+          "reason": "configured on but runtime wire non-anthropic-proxy does not carry the Anthropic request-body seam",
+          "action": "use an Anthropic passthrough wire or set --provider anthropic",
+          "disable": "--compact-history-budget 0"
+        },
+        {
+          "name": "decoded-context-view",
+          "configured": true,
+          "state": "active",
+          "reason": "configured on; OpenAI-compatible and owned-model turns re-plan decoded history before the provider/model call",
+          "disable": "--ctx-view-budget 0"
+        },
+        {
+          "name": "stale-read-elision",
+          "configured": true,
+          "state": "active",
+          "reason": "decoded provider-neutral history elides superseded tool-read results before context planning",
+          "disable": "--elide-stale-reads=false"
+        },
+        {
+          "name": "cold-tool-deferral",
+          "configured": true,
+          "state": "inert",
+          "reason": "configured on but runtime wire non-anthropic-proxy does not carry the Anthropic request-body seam",
+          "action": "use an Anthropic passthrough wire or set --provider anthropic",
+          "disable": "--defer-cold-tools=false"
+        },
+        {
+          "name": "vcache-anchor",
+          "configured": true,
+          "state": "inert",
+          "reason": "configured on but runtime wire non-anthropic-proxy does not carry the Anthropic request-body seam",
+          "action": "use an Anthropic passthrough wire or set --provider anthropic",
+          "disable": "--vcache-anchor=false"
+        },
+        {
+          "name": "vcache-signals",
+          "configured": true,
+          "state": "active",
+          "reason": "normalized provider usage feeds cache-read/cache-write signals, warmth error, and per-family economics independently of request shaping"
+        },
+        {
+          "name": "vcache-calibration",
+          "configured": true,
+          "state": "inert",
+          "reason": "no live provider calibration row",
+          "action": "run a real fak guard/serve session through this provider"
+        }
+      ],
+      "summary": {
+        "active": 3,
+        "disabled": 2,
+        "inert": 5,
+        "unsupported": 0
+      }
+    }
+  ]
+}
