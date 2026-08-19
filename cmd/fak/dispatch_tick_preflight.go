@@ -731,7 +731,9 @@ func dispatchPreflightSeat(root string, _ io.Writer, product string) dispatchtic
 	}
 	if product == "codex" {
 		total := dispatchCodexOAuthSessionCap()
-		live := dispatchAmbientCodexProcessCount()
+		// Capacity and seat admission must use the same attributable worker set.
+		// Ambient interactive Codex UIs consume neither fleet WIP nor guarded seats.
+		live := dispatchProductWorkerCount(root, product)
 		leased := live
 		if leased > total {
 			leased = total

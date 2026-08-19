@@ -364,27 +364,50 @@ func TestDispatchCodexProcessPIDsExcludeSidecarAncestorChild(t *testing.T) {
 	}
 }
 
-func TestDispatchCodexSeatIsAmbientOAuthBucket(t *testing.T) {
+func TestDispatchCodexSeatIgnoresAmbientUIProcesses(t *testing.T) {
 	t.Setenv("FAK_CODEX_OAUTH_SESSIONS", "10")
-	old := dispatchProbeCodexProcessRows
-	dispatchProbeCodexProcessRows = func() ([]dispatchCodexProcessRow, error) {
+	oldCodex, oldWorkers := dispatchProbeCodexProcessRows, dispatchProbeWorkerProcessRows
+	rows := func() ([]dispatchCodexProcessRow, error) {
 		return []dispatchCodexProcessRow{
-			{PID: 42, Name: "codex.exe"},
-			{PID: 43, Name: "codex.exe"},
-			{PID: 44, Name: "codex.exe"},
+			{PID: 42, Name: "codex.exe", Cmdline: `codex`},
+			{PID: 43, Name: "node.exe", Cmdline: `node C:\npm\@openai\codex\bin\codex.js`},
+			{PID: 44, PPID: 43, Name: "codex.exe", Cmdline: `codex`},
 		}, nil
 	}
-	t.Cleanup(func() { dispatchProbeCodexProcessRows = old })
+	dispatchProbeCodexProcessRows, dispatchProbeWorkerProcessRows = rows, rows
+	t.Cleanup(func() {
+		dispatchProbeCodexProcessRows, dispatchProbeWorkerProcessRows = oldCodex, oldWorkers
+	})
 
 	seat := dispatchPreflightSeat(t.TempDir(), io.Discard, "codex")
 	if seat.Total == nil || *seat.Total != 10 {
 		t.Fatalf("codex seat total = %v, want 10", seat.Total)
 	}
-	if seat.Free == nil || *seat.Free != 7 || seat.Leased == nil || *seat.Leased != 3 || seat.Depleted {
-		t.Fatalf("codex seat = %+v, want free=7 leased=3 not depleted", seat)
+	if seat.Free == nil || *seat.Free != 10 || seat.Leased == nil || *seat.Leased != 0 || seat.Depleted {
+		t.Fatalf("codex seat = %+v, want free=10 leased=0 not depleted", seat)
 	}
-	if got := dispatchProductWorkerCount(t.TempDir(), "codex"); got != 3 {
-		t.Fatalf("codex product worker count = %d, want ambient process to consume cap", got)
+	if got := dispatchProductWorkerCount(t.TempDir(), "codex"); got != 0 {
+		t.Fatalf("codex product worker count = %d, want ambient UI processes excluded", got)
+	}
+}
+
+func TestDispatchCodexSeatCountsMarkedWorker(t *testing.T) {
+	t.Setenv("FAK_CODEX_OAUTH_SESSIONS", "10")
+	oldCodex, oldWorkers := dispatchProbeCodexProcessRows, dispatchProbeWorkerProcessRows
+	rows := func() ([]dispatchCodexProcessRow, error) {
+		return []dispatchCodexProcessRow{
+			{PID: 42, Name: "codex.exe", Cmdline: `codex`},
+			{PID: 50, Name: "codex.exe", Cmdline: `codex exec resolve GitHub issue #7827`},
+		}, nil
+	}
+	dispatchProbeCodexProcessRows, dispatchProbeWorkerProcessRows = rows, rows
+	t.Cleanup(func() {
+		dispatchProbeCodexProcessRows, dispatchProbeWorkerProcessRows = oldCodex, oldWorkers
+	})
+
+	seat := dispatchPreflightSeat(t.TempDir(), io.Discard, "codex")
+	if seat.Free == nil || *seat.Free != 9 || seat.Leased == nil || *seat.Leased != 1 || seat.Depleted {
+		t.Fatalf("codex seat = %+v, want free=9 leased=1 not depleted", seat)
 	}
 }
 
