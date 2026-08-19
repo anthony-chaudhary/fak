@@ -36,7 +36,7 @@ func prepareGuardChildRegistration(meta guardChildSpawnMetadata, grant toolprocg
 	if parent != "" && root == "" {
 		root = parent
 	}
-	rec, err := sessionregistry.New(sessionregistry.NewInput{RegistrationID: firstGuardEnv(env, "FAK_CHILD_REGISTRATION_ID"), ParentRegistrationID: parent, ParentAttemptID: parentAttempt, RootRegistrationID: root, RootOutcome: firstGuardEnv(env, "FAK_ROOT_OUTCOME"), RootIssue: firstGuardEnv(env, "FAK_ROOT_ISSUE", "DISPATCH_ISSUE"), TaskID: firstGuardEnv(env, "FAK_TASK_ID", "DISPATCH_ISSUE"), AttemptID: attempt, ResumeOfAttemptID: firstGuardEnv(env, "FAK_RESUME_OF_ATTEMPT_ID"), LaunchKind: guardLaunchKind(env, grant), Scope: guardScope(env), Lane: firstGuardEnv(env, "FAK_LANE", "DISPATCH_LANE"), LeaseID: firstGuardEnv(env, "FAK_LEASE_ID"), Runtime: guardRuntime(grant), SessionID: firstGuardEnv(env, "FAK_SESSION_ID"), ThreadID: firstGuardEnv(env, "FAK_THREAD_ID"), HostID: firstGuardEnv(env, "COMPUTERNAME", "HOSTNAME")})
+	rec, err := sessionregistry.New(sessionregistry.NewInput{RegistrationID: firstGuardEnv(env, "FAK_CHILD_REGISTRATION_ID"), ParentRegistrationID: parent, ParentAttemptID: parentAttempt, RootRegistrationID: root, RootOutcome: firstGuardEnv(env, "FAK_ROOT_OUTCOME"), RootIssue: firstGuardEnv(env, "FAK_ROOT_ISSUE", "DISPATCH_ISSUE"), TaskID: firstGuardEnv(env, "FAK_TASK_ID", "DISPATCH_ISSUE"), GoalID: firstGuardEnv(env, "FAK_GOAL_ID"), AttemptID: attempt, ResumeOfAttemptID: firstGuardEnv(env, "FAK_RESUME_OF_ATTEMPT_ID"), LaunchKind: guardLaunchKind(env, grant), Scope: guardScope(env), Lane: firstGuardEnv(env, "FAK_LANE", "DISPATCH_LANE"), LeaseID: firstGuardEnv(env, "FAK_LEASE_ID"), Runtime: guardRuntime(grant), SessionID: firstGuardEnv(env, "FAK_SESSION_ID"), ThreadID: firstGuardEnv(env, "FAK_THREAD_ID"), HostID: firstGuardEnv(env, "COMPUTERNAME", "HOSTNAME")})
 	if err != nil {
 		return guardRegistration{}, err
 	}
@@ -57,6 +57,7 @@ func withGuardRegistrationEnv(g toolprocgate.SpawnGrant, reg guardRegistration) 
 	m["FAK_ROOT_OUTCOME"] = r.RootOutcome
 	m["FAK_ROOT_ISSUE"] = r.RootIssue
 	m["FAK_TASK_ID"] = r.TaskID
+	m["FAK_GOAL_ID"] = r.GoalID
 	g.Env = envVarsFromMap(m)
 	return g
 }

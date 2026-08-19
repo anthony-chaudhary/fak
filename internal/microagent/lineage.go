@@ -24,6 +24,7 @@ type Lineage struct {
 	RootRegistrationID   string
 	RootIssue            string
 	TaskID               string
+	GoalID               string
 	HostID               string
 	Now                  func() time.Time
 }
@@ -52,6 +53,7 @@ func LineageFromEnv() (*Lineage, error) {
 		RootRegistrationID:   root,
 		RootIssue:            firstLineageEnv("FAK_ROOT_ISSUE", "DISPATCH_ISSUE"),
 		TaskID:               firstLineageEnv("FAK_TASK_ID", "DISPATCH_ISSUE"),
+		GoalID:               firstLineageEnv("FAK_GOAL_ID"),
 		HostID:               firstLineageEnv("COMPUTERNAME", "HOSTNAME"),
 	}, nil
 }
@@ -134,6 +136,7 @@ func (a *lineageAgent) start() error {
 		RootRegistrationID:   a.lineage.RootRegistrationID,
 		RootIssue:            a.lineage.RootIssue,
 		TaskID:               a.lineage.TaskID,
+		GoalID:               a.lineage.GoalID,
 		LaunchKind:           "in_process_microagent",
 		Runtime:              "microagent",
 		SessionID:            microagentSessionID(a.lineage.ParentRegistrationID, a.id),

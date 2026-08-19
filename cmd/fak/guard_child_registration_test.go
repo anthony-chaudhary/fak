@@ -16,6 +16,7 @@ import (
 
 func TestGuardChildRegistrationPersistsBeforeLauncherAndTerminalizes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.jsonl")
+	t.Setenv("FAK_GOAL_ID", "goal_observe")
 	meta := guardChildSpawnMetadata{AgentRunID: "run", ToolCallID: "guard-child:run", Backend: "codex", PolicyDigest: "sha256:test", Envelope: toolprocgate.CapabilityEnvelope{Capabilities: []abi.Capability{toolprocgate.CapAgentRunSpawn}}, RegistryPath: path}
 	broker := toolprocgate.NewSpawnBroker()
 	launched := false
@@ -26,7 +27,7 @@ func TestGuardChildRegistrationPersistsBeforeLauncherAndTerminalizes(t *testing.
 			t.Fatalf("prelaunch rows=%+v err=%v", rows, err)
 		}
 		env := envMapFromGrant(g.Env)
-		if env["FAK_REGISTRATION_ID"] == "" || env["FAK_ATTEMPT_ID"] == "" {
+		if env["FAK_REGISTRATION_ID"] == "" || env["FAK_ATTEMPT_ID"] == "" || env["FAK_GOAL_ID"] != "goal_observe" {
 			t.Fatalf("lineage env=%+v", env)
 		}
 		if env["FAK_ATTEMPT_ID"] == env["FAK_PARENT_ATTEMPT_ID"] && env["FAK_PARENT_ATTEMPT_ID"] != "" {
@@ -55,7 +56,7 @@ func TestGuardChildRegistrationPersistsBeforeLauncherAndTerminalizes(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 || rows[0].State != sessionregistry.StateCompleted || rows[0].Identity.PID == 0 || rows[0].StartedAt.IsZero() {
+	if len(rows) != 1 || rows[0].State != sessionregistry.StateCompleted || rows[0].GoalID != "goal_observe" || rows[0].Identity.PID == 0 || rows[0].StartedAt.IsZero() {
 		t.Fatalf("rows=%+v", rows)
 	}
 }

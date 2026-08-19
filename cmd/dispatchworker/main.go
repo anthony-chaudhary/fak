@@ -81,7 +81,7 @@ func main() {
 	timeout, bounded := normalizeTimeout(*timeoutS)
 	guardAuditPruned := pruneGuardAuditTick(workspace, time.Now())
 	registration, regErr := sessionregistry.New(sessionregistry.NewInput{
-		RegistrationID: env["FAK_REGISTRATION_ID"], ParentRegistrationID: env["FAK_PARENT_REGISTRATION_ID"], ParentAttemptID: env["FAK_PARENT_ATTEMPT_ID"], RootRegistrationID: env["FAK_ROOT_REGISTRATION_ID"], RootOutcome: env["FAK_ROOT_OUTCOME"], RootIssue: firstEnv(env, "FAK_ROOT_ISSUE", "DISPATCH_ISSUE"), TaskID: firstEnv(env, "FAK_TASK_ID", "DISPATCH_ISSUE"), AttemptID: env["FAK_ATTEMPT_ID"], ResumeOfAttemptID: env["FAK_RESUME_OF_ATTEMPT_ID"], LaunchKind: "headless_worker", Scope: []string{workspace}, Lane: *lane, LeaseID: env["FAK_LEASE_ID"], Runtime: backend, HostID: env["COMPUTERNAME"],
+		RegistrationID: env["FAK_REGISTRATION_ID"], ParentRegistrationID: env["FAK_PARENT_REGISTRATION_ID"], ParentAttemptID: env["FAK_PARENT_ATTEMPT_ID"], RootRegistrationID: env["FAK_ROOT_REGISTRATION_ID"], RootOutcome: env["FAK_ROOT_OUTCOME"], RootIssue: firstEnv(env, "FAK_ROOT_ISSUE", "DISPATCH_ISSUE"), TaskID: firstEnv(env, "FAK_TASK_ID", "DISPATCH_ISSUE"), GoalID: firstEnv(env, "FAK_GOAL_ID"), AttemptID: env["FAK_ATTEMPT_ID"], ResumeOfAttemptID: env["FAK_RESUME_OF_ATTEMPT_ID"], LaunchKind: "headless_worker", Scope: []string{workspace}, Lane: *lane, LeaseID: env["FAK_LEASE_ID"], Runtime: backend, HostID: env["COMPUTERNAME"],
 	})
 	if regErr != nil {
 		emit(payload{Schema: workerSchema, OK: false, Lane: *lane, Backend: backend, Workspace: workspace, Command: command, Error: "child registration refused: " + regErr.Error()}, *asJSON)

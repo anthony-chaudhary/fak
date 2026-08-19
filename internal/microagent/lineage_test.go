@@ -26,14 +26,14 @@ func TestWithLineageRegistersNestedMicroagentUnderStartingGoal(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registrations.jsonl")
 	store := sessionregistry.Store{Path: path}
 	now := time.Date(2026, 8, 13, 18, 0, 0, 0, time.UTC)
-	root, err := sessionregistry.New(sessionregistry.NewInput{RegistrationID: "root", RootIssue: "6583", TaskID: "goal-fleet-lineage", LaunchKind: "guard", Runtime: "codex", SessionID: "top", Now: now})
+	root, err := sessionregistry.New(sessionregistry.NewInput{RegistrationID: "root", RootIssue: "6583", TaskID: "goal-fleet-lineage", GoalID: "goal_observe", LaunchKind: "guard", Runtime: "codex", SessionID: "top", Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Register(root); err != nil {
 		t.Fatal(err)
 	}
-	lineage := &Lineage{Store: store, ParentRegistrationID: root.RegistrationID, ParentAttemptID: root.AttemptID, RootRegistrationID: root.RootRegistrationID, RootIssue: root.RootIssue, TaskID: root.TaskID, Now: func() time.Time { return now.Add(time.Second) }}
+	lineage := &Lineage{Store: store, ParentRegistrationID: root.RegistrationID, ParentAttemptID: root.AttemptID, RootRegistrationID: root.RootRegistrationID, RootIssue: root.RootIssue, TaskID: root.TaskID, GoalID: root.GoalID, Now: func() time.Time { return now.Add(time.Second) }}
 
 	wrapped := WithLineage("shard-007", lineageTestAgent{}, lineage)
 	done, err := wrapped.Step(context.Background(), lineageTestGateway{})
@@ -51,7 +51,7 @@ func TestWithLineageRegistersNestedMicroagentUnderStartingGoal(t *testing.T) {
 	if child.ParentRegistrationID != root.RegistrationID || child.RootRegistrationID != root.RegistrationID {
 		t.Fatalf("lineage = parent %q root %q", child.ParentRegistrationID, child.RootRegistrationID)
 	}
-	if child.RootIssue != "6583" || child.TaskID != "goal-fleet-lineage" {
+	if child.RootIssue != "6583" || child.TaskID != "goal-fleet-lineage" || child.GoalID != "goal_observe" {
 		t.Fatalf("goal labels = issue %q task %q", child.RootIssue, child.TaskID)
 	}
 	if child.LaunchKind != "in_process_microagent" || child.Identity.Runtime != "microagent" || child.Identity.SessionID == "" {

@@ -972,7 +972,7 @@ func runRegisteredAccountsChild(stdout, stderr io.Writer, argv, env []string, re
 	if parent != "" && root == "" {
 		root = parent
 	}
-	rec, err := sessionregistry.New(sessionregistry.NewInput{RegistrationID: m["FAK_CHILD_REGISTRATION_ID"], ParentRegistrationID: parent, ParentAttemptID: parentAttempt, RootRegistrationID: root, RootOutcome: m["FAK_ROOT_OUTCOME"], RootIssue: firstGuardEnv(m, "FAK_ROOT_ISSUE", "DISPATCH_ISSUE"), TaskID: firstGuardEnv(m, "FAK_TASK_ID", "DISPATCH_ISSUE"), AttemptID: attempt, ResumeOfAttemptID: resumeOf, LaunchKind: "external_account_launch", Scope: []string{m["PWD"]}, Lane: firstGuardEnv(m, "FAK_LANE", "DISPATCH_LANE"), LeaseID: m["FAK_LEASE_ID"], Runtime: runtime, SessionID: m["FAK_SESSION_ID"], ThreadID: m["FAK_THREAD_ID"], HostID: firstGuardEnv(m, "COMPUTERNAME", "HOSTNAME")})
+	rec, err := sessionregistry.New(sessionregistry.NewInput{RegistrationID: m["FAK_CHILD_REGISTRATION_ID"], ParentRegistrationID: parent, ParentAttemptID: parentAttempt, RootRegistrationID: root, RootOutcome: m["FAK_ROOT_OUTCOME"], RootIssue: firstGuardEnv(m, "FAK_ROOT_ISSUE", "DISPATCH_ISSUE"), TaskID: firstGuardEnv(m, "FAK_TASK_ID", "DISPATCH_ISSUE"), GoalID: firstGuardEnv(m, "FAK_GOAL_ID"), AttemptID: attempt, ResumeOfAttemptID: resumeOf, LaunchKind: "external_account_launch", Scope: []string{m["PWD"]}, Lane: firstGuardEnv(m, "FAK_LANE", "DISPATCH_LANE"), LeaseID: m["FAK_LEASE_ID"], Runtime: runtime, SessionID: m["FAK_SESSION_ID"], ThreadID: m["FAK_THREAD_ID"], HostID: firstGuardEnv(m, "COMPUTERNAME", "HOSTNAME")})
 	if err != nil {
 		return launchRunResult{Code: 2, Stderr: "child registration refused: " + err.Error()}
 	}
@@ -989,6 +989,7 @@ func runRegisteredAccountsChild(stdout, stderr io.Writer, argv, env []string, re
 	m["FAK_ROOT_OUTCOME"] = rec.RootOutcome
 	m["FAK_ROOT_ISSUE"] = rec.RootIssue
 	m["FAK_TASK_ID"] = rec.TaskID
+	m["FAK_GOAL_ID"] = rec.GoalID
 	res := accountsLaunchRun(stdout, stderr, argv, envSliceFromMap(m))
 	res.RegistrationID = rec.RegistrationID
 	res.AttemptID = rec.AttemptID

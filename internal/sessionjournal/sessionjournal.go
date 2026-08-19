@@ -93,6 +93,7 @@ type RegistrationCarry struct {
 	RootOutcome          string   `json:"root_outcome,omitempty"`
 	RootIssue            string   `json:"root_issue,omitempty"`
 	TaskID               string   `json:"task_id,omitempty"`
+	GoalID               string   `json:"goal_id,omitempty"`
 	AttemptID            string   `json:"attempt_id,omitempty"`
 	ResumeOfAttemptID    string   `json:"resume_of_attempt_id,omitempty"`
 	LaunchKind           string   `json:"launch_kind,omitempty"`

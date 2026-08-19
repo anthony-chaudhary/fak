@@ -83,6 +83,7 @@ type NewInput struct {
 	RootOutcome          string
 	RootIssue            string
 	TaskID               string
+	GoalID               string
 	AttemptID            string
 	ResumeOfAttemptID    string
 	LaunchKind           string
@@ -139,7 +140,7 @@ func registrationCarry(r Record) sessionjournal.RegistrationCarry {
 	return sessionjournal.RegistrationCarry{
 		RegistrationID: r.RegistrationID, ParentRegistrationID: r.ParentRegistrationID,
 		ParentAttemptID: r.ParentAttemptID, RootRegistrationID: r.RootRegistrationID,
-		RootOutcome: r.RootOutcome, RootIssue: r.RootIssue, TaskID: r.TaskID, AttemptID: r.AttemptID,
+		RootOutcome: r.RootOutcome, RootIssue: r.RootIssue, TaskID: r.TaskID, GoalID: r.GoalID, AttemptID: r.AttemptID,
 		ResumeOfAttemptID: r.ResumeOfAttemptID, LaunchKind: r.LaunchKind, Scope: append([]string(nil), r.Scope...),
 		Lane: r.Lane, LeaseID: r.LeaseID, Runtime: r.Identity.Runtime, SessionID: r.Identity.SessionID,
 		ThreadID: r.Identity.ThreadID, PID: r.Identity.PID, ProcessStartedAt: formatTime(r.Identity.ProcessStartedAt), HostID: r.Identity.HostID,
@@ -165,7 +166,7 @@ func recordsFromJournal(events []sessionjournal.Event) []Record {
 func recordFromCarry(c sessionjournal.RegistrationCarry) Record {
 	return Record{Schema: Schema, RegistrationID: c.RegistrationID, ParentRegistrationID: c.ParentRegistrationID,
 		ParentAttemptID: c.ParentAttemptID, RootRegistrationID: c.RootRegistrationID, RootOutcome: c.RootOutcome,
-		RootIssue: c.RootIssue, TaskID: c.TaskID, AttemptID: c.AttemptID, ResumeOfAttemptID: c.ResumeOfAttemptID,
+		RootIssue: c.RootIssue, TaskID: c.TaskID, GoalID: c.GoalID, AttemptID: c.AttemptID, ResumeOfAttemptID: c.ResumeOfAttemptID,
 		LaunchKind: c.LaunchKind, Scope: append([]string(nil), c.Scope...), Lane: c.Lane, LeaseID: c.LeaseID,
 		Identity: Identity{Runtime: c.Runtime, SessionID: c.SessionID, ThreadID: c.ThreadID, PID: c.PID,
 			ProcessStartedAt: parseTime(c.ProcessStartedAt), HostID: c.HostID}, State: State(c.State), Reason: c.Reason,
@@ -201,7 +202,7 @@ func New(in NewInput) (Record, error) {
 		}
 		root = id
 	}
-	r := Record{Schema: Schema, RegistrationID: id, ParentRegistrationID: strings.TrimSpace(in.ParentRegistrationID), ParentAttemptID: strings.TrimSpace(in.ParentAttemptID), RootRegistrationID: root, RootOutcome: strings.TrimSpace(in.RootOutcome), RootIssue: strings.TrimSpace(in.RootIssue), TaskID: strings.TrimSpace(in.TaskID), AttemptID: attempt, ResumeOfAttemptID: strings.TrimSpace(in.ResumeOfAttemptID), LaunchKind: strings.TrimSpace(in.LaunchKind), Scope: compact(in.Scope), Lane: strings.TrimSpace(in.Lane), LeaseID: strings.TrimSpace(in.LeaseID), Identity: Identity{Runtime: strings.TrimSpace(in.Runtime), SessionID: strings.TrimSpace(in.SessionID), ThreadID: strings.TrimSpace(in.ThreadID), HostID: strings.TrimSpace(in.HostID)}, State: StateRegistered, CreatedAt: now}
+	r := Record{Schema: Schema, RegistrationID: id, ParentRegistrationID: strings.TrimSpace(in.ParentRegistrationID), ParentAttemptID: strings.TrimSpace(in.ParentAttemptID), RootRegistrationID: root, RootOutcome: strings.TrimSpace(in.RootOutcome), RootIssue: strings.TrimSpace(in.RootIssue), TaskID: strings.TrimSpace(in.TaskID), GoalID: strings.TrimSpace(in.GoalID), AttemptID: attempt, ResumeOfAttemptID: strings.TrimSpace(in.ResumeOfAttemptID), LaunchKind: strings.TrimSpace(in.LaunchKind), Scope: compact(in.Scope), Lane: strings.TrimSpace(in.Lane), LeaseID: strings.TrimSpace(in.LeaseID), Identity: Identity{Runtime: strings.TrimSpace(in.Runtime), SessionID: strings.TrimSpace(in.SessionID), ThreadID: strings.TrimSpace(in.ThreadID), HostID: strings.TrimSpace(in.HostID)}, State: StateRegistered, CreatedAt: now}
 	if err := Validate(r); err != nil {
 		return Record{}, err
 	}
