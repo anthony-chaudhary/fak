@@ -20,6 +20,8 @@ import (
 
 const Schema = "fak-goal-registry/1"
 
+const DefaultEvidencePolicy = "independent_witness_required"
+
 type Lifecycle string
 
 const (
@@ -42,30 +44,51 @@ type Relation struct {
 	GoalID string `json:"goal_id"`
 }
 
+type EvidenceClass string
+
+const (
+	HarnessAssertion    EvidenceClass = "harness_assertion"
+	AgentAssertion      EvidenceClass = "agent_assertion"
+	OperatorDeclaration EvidenceClass = "operator_declaration"
+	IndependentWitness  EvidenceClass = "independent_witness"
+)
+
+type OutcomeEvidence struct {
+	GoalID     string        `json:"goal_id"`
+	Lifecycle  Lifecycle     `json:"lifecycle"`
+	Class      EvidenceClass `json:"class"`
+	Author     string        `json:"author"`
+	Reference  string        `json:"reference"`
+	RecordedAt time.Time     `json:"recorded_at"`
+}
+
 type Goal struct {
-	GoalID     string     `json:"goal_id"`
-	Title      string     `json:"title"`
-	Summary    string     `json:"summary,omitempty"`
-	Lifecycle  Lifecycle  `json:"lifecycle"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
-	Provenance Provenance `json:"provenance"`
-	Relations  []Relation `json:"relations,omitempty"`
+	GoalID         string     `json:"goal_id"`
+	Title          string     `json:"title"`
+	Summary        string     `json:"summary,omitempty"`
+	Lifecycle      Lifecycle  `json:"lifecycle"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	Provenance     Provenance `json:"provenance"`
+	EvidencePolicy string     `json:"evidence_policy,omitempty"`
+	Relations      []Relation `json:"relations,omitempty"`
 }
 
 type Binding struct {
-	GoalID     string     `json:"goal_id"`
-	Namespace  string     `json:"namespace"`
-	ExternalID string     `json:"external_id"`
-	Revision   string     `json:"revision,omitempty"`
-	BoundAt    time.Time  `json:"bound_at"`
-	Provenance Provenance `json:"provenance"`
+	GoalID         string     `json:"goal_id"`
+	Namespace      string     `json:"namespace"`
+	ExternalID     string     `json:"external_id"`
+	Revision       string     `json:"revision,omitempty"`
+	BoundAt        time.Time  `json:"bound_at"`
+	Provenance     Provenance `json:"provenance"`
+	EvidencePolicy string     `json:"evidence_policy,omitempty"`
 }
 
 type Registry struct {
-	Schema   string    `json:"schema"`
-	Goals    []Goal    `json:"goals"`
-	Bindings []Binding `json:"bindings"`
+	Schema          string            `json:"schema"`
+	Goals           []Goal            `json:"goals"`
+	Bindings        []Binding         `json:"bindings"`
+	OutcomeEvidence []OutcomeEvidence `json:"outcome_evidence,omitempty"`
 }
 
 type Store struct {
@@ -108,7 +131,7 @@ func DefaultPath() string {
 }
 
 func (s Store) Load() (Registry, error) {
-	r := Registry{Schema: Schema, Goals: []Goal{}, Bindings: []Binding{}}
+	r := Registry{Schema: Schema, Goals: []Goal{}, Bindings: []Binding{}, OutcomeEvidence: []OutcomeEvidence{}}
 	b, err := os.ReadFile(s.Path)
 	if errors.Is(err, os.ErrNotExist) {
 		return r, nil
@@ -153,7 +176,7 @@ func (s Store) create(title, summary string, provenance Provenance, relations []
 		return Goal{}, err
 	}
 	now := s.now()
-	g := Goal{GoalID: id, Title: title, Summary: strings.TrimSpace(summary), Lifecycle: Active, CreatedAt: now, UpdatedAt: now, Provenance: provenance, Relations: relations}
+	g := Goal{GoalID: id, Title: title, Summary: strings.TrimSpace(summary), Lifecycle: Active, CreatedAt: now, UpdatedAt: now, Provenance: provenance, EvidencePolicy: DefaultEvidencePolicy, Relations: relations}
 	r, err := s.Load()
 	if err != nil {
 		return Goal{}, err
@@ -245,6 +268,9 @@ func (s Store) update(id, title, summary string, lifecycle Lifecycle) (Goal, err
 	if !validLifecycle(lifecycle) {
 		return Goal{}, fmt.Errorf("invalid lifecycle %q", lifecycle)
 	}
+	if lifecycle != Active && lifecycle != Paused {
+		return Goal{}, errors.New("terminal lifecycle requires typed outcome evidence; use Transition")
+	}
 	for i := range r.Goals {
 		if r.Goals[i].GoalID != id {
 			continue
@@ -253,6 +279,83 @@ func (s Store) update(id, title, summary string, lifecycle Lifecycle) (Goal, err
 		return r.Goals[i], s.save(r)
 	}
 	return Goal{}, fmt.Errorf("goal %q not found", id)
+}
+
+// Transition applies one evidence-bearing lifecycle decision. Terminal conflicts
+// require an explicit reopen first, preserving every prior report.
+func (s Store) Transition(goalID string, lifecycle Lifecycle, evidence OutcomeEvidence) (Goal, error) {
+	if !validLifecycle(lifecycle) {
+		return Goal{}, fmt.Errorf("invalid lifecycle %q", lifecycle)
+	}
+	if lifecycle == Active || lifecycle == Paused {
+		return Goal{}, errors.New("use Reopen for a non-terminal transition")
+	}
+	if evidence.Class != IndependentWitness {
+		return Goal{}, fmt.Errorf("policy %s requires independent_witness evidence", DefaultEvidencePolicy)
+	}
+	if strings.TrimSpace(evidence.Author) == "" || strings.TrimSpace(evidence.Reference) == "" {
+		return Goal{}, errors.New("evidence author and reference are required")
+	}
+	var out Goal
+	err := s.withWriteLock(func() error {
+		r, err := s.Load()
+		if err != nil {
+			return err
+		}
+		for i := range r.Goals {
+			if r.Goals[i].GoalID != goalID {
+				continue
+			}
+			if r.Goals[i].Lifecycle != Active && r.Goals[i].Lifecycle != Paused && r.Goals[i].Lifecycle != lifecycle {
+				return fmt.Errorf("terminal lifecycle conflict: goal is %s; reopen before %s", r.Goals[i].Lifecycle, lifecycle)
+			}
+			evidence.GoalID, evidence.Lifecycle, evidence.RecordedAt = goalID, lifecycle, s.now()
+			evidence.Author, evidence.Reference = strings.TrimSpace(evidence.Author), strings.TrimSpace(evidence.Reference)
+			r.OutcomeEvidence = append(r.OutcomeEvidence, evidence)
+			r.Goals[i].Lifecycle, r.Goals[i].UpdatedAt = lifecycle, s.now()
+			out = r.Goals[i]
+			return s.save(r)
+		}
+		return fmt.Errorf("goal %q not found", goalID)
+	})
+	return out, err
+}
+
+func (s Store) Reopen(goalID, author, reference string) (Goal, error) {
+	if strings.TrimSpace(author) == "" || strings.TrimSpace(reference) == "" {
+		return Goal{}, errors.New("reopen author and reference are required")
+	}
+	var out Goal
+	err := s.withWriteLock(func() error {
+		r, err := s.Load()
+		if err != nil {
+			return err
+		}
+		for i := range r.Goals {
+			if r.Goals[i].GoalID == goalID {
+				r.OutcomeEvidence = append(r.OutcomeEvidence, OutcomeEvidence{GoalID: goalID, Lifecycle: Active, Class: OperatorDeclaration, Author: strings.TrimSpace(author), Reference: strings.TrimSpace(reference), RecordedAt: s.now()})
+				r.Goals[i].Lifecycle, r.Goals[i].UpdatedAt = Active, s.now()
+				out = r.Goals[i]
+				return s.save(r)
+			}
+		}
+		return fmt.Errorf("goal %q not found", goalID)
+	})
+	return out, err
+}
+
+func (s Store) OutcomeEvidence(goalID string) ([]OutcomeEvidence, error) {
+	r, err := s.Load()
+	if err != nil {
+		return nil, err
+	}
+	var out []OutcomeEvidence
+	for _, e := range r.OutcomeEvidence {
+		if e.GoalID == goalID {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }
 
 // RequireGoal verifies that an opaque canonical goal already exists.

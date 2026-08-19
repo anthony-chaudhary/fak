@@ -178,3 +178,41 @@ func TestGoalTopologyCLIExposesExecutionRoots(t *testing.T) {
 		t.Fatalf("topology=%#v", got)
 	}
 }
+
+func TestGoalCLIShowsWitnessedLifecycleEvidence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "goals.json")
+	var create bytes.Buffer
+	if code := runGoal(&create, io.Discard, []string{"create", "--registry", path, "--title", "Witness", "--actor", "operator", "--authority", "user"}); code != 0 {
+		t.Fatalf("create=%d", code)
+	}
+	var goal struct {
+		GoalID string `json:"goal_id"`
+	}
+	if err := json.Unmarshal(create.Bytes(), &goal); err != nil {
+		t.Fatal(err)
+	}
+	base := []string{"transition", "--registry", path, "--id", goal.GoalID, "--lifecycle", "achieved", "--evidence-author", "judge", "--evidence-ref", "commit:green"}
+	if code := runGoal(io.Discard, io.Discard, append(base, "--evidence-class", "agent_assertion")); code != 1 {
+		t.Fatalf("agent assertion=%d", code)
+	}
+	if code := runGoal(io.Discard, io.Discard, append(base, "--evidence-class", "independent_witness")); code != 0 {
+		t.Fatalf("witness=%d", code)
+	}
+	var out bytes.Buffer
+	if code := runGoal(&out, io.Discard, []string{"show", "--registry", path, "--id", goal.GoalID}); code != 0 {
+		t.Fatalf("show=%d", code)
+	}
+	var got struct {
+		Goal            goalregistry.Goal              `json:"goal"`
+		OutcomeEvidence []goalregistry.OutcomeEvidence `json:"outcome_evidence"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Goal.Lifecycle != goalregistry.Achieved || len(got.OutcomeEvidence) != 1 || got.OutcomeEvidence[0].Reference != "commit:green" {
+		t.Fatalf("show=%#v", got)
+	}
+	if code := runGoal(io.Discard, io.Discard, []string{"reopen", "--registry", path, "--id", goal.GoalID, "--evidence-author", "operator", "--evidence-ref", "decision:retry"}); code != 0 {
+		t.Fatalf("reopen=%d", code)
+	}
+}

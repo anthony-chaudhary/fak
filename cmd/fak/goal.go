@@ -16,7 +16,7 @@ func cmdGoal(args []string) { os.Exit(runGoal(os.Stdout, os.Stderr, args)) }
 
 func runGoal(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak goal create|show|list|update|bind|resolve|topology|backfill-root|unbind ...")
+		fmt.Fprintln(stderr, "usage: fak goal create|show|list|update|transition|reopen|bind|resolve|topology|backfill-root|unbind ...")
 		return 2
 	}
 	fs := flag.NewFlagSet("goal "+args[0], flag.ContinueOnError)
@@ -35,6 +35,9 @@ func runGoal(stdout, stderr io.Writer, args []string) int {
 	sessionRegistry := fs.String("session-registry", sessionregistry.DefaultPath(), "session registry or journal path")
 	rootRegistrationID := fs.String("root-registration-id", "", "execution root to bind")
 	apply := fs.Bool("apply", false, "append the witnessed binding (default is dry-run)")
+	evidenceClass := fs.String("evidence-class", "", "harness_assertion|agent_assertion|operator_declaration|independent_witness")
+	evidenceAuthor := fs.String("evidence-author", "", "outcome evidence author")
+	evidenceRef := fs.String("evidence-ref", "", "durable outcome evidence reference")
 	parent := fs.String("parent-goal", "", "goal this intent decomposes from")
 	derived := fs.String("derived-from", "", "goal this intent derives from")
 	supersedes := fs.String("supersedes", "", "goal this intent supersedes")
@@ -73,10 +76,15 @@ func runGoal(stdout, stderr io.Writer, args []string) int {
 		if err != nil {
 			return fail(err)
 		}
+		evidence, err := s.OutcomeEvidence(*id)
+		if err != nil {
+			return fail(err)
+		}
 		_ = enc.Encode(struct {
-			Goal     goalregistry.Goal      `json:"goal"`
-			Bindings []goalregistry.Binding `json:"bindings"`
-		}{g, bindings})
+			Goal            goalregistry.Goal              `json:"goal"`
+			Bindings        []goalregistry.Binding         `json:"bindings"`
+			OutcomeEvidence []goalregistry.OutcomeEvidence `json:"outcome_evidence"`
+		}{g, bindings, evidence})
 	case "list":
 		goals, err := s.List()
 		if err != nil {
@@ -88,6 +96,24 @@ func runGoal(stdout, stderr io.Writer, args []string) int {
 			return fail(err)
 		}
 		g, err := s.Update(*id, *title, *summary, goalregistry.Lifecycle(*lifecycle))
+		if err != nil {
+			return fail(err)
+		}
+		_ = enc.Encode(g)
+	case "transition":
+		if err := requireID(); err != nil {
+			return fail(err)
+		}
+		g, err := s.Transition(*id, goalregistry.Lifecycle(*lifecycle), goalregistry.OutcomeEvidence{Class: goalregistry.EvidenceClass(*evidenceClass), Author: *evidenceAuthor, Reference: *evidenceRef})
+		if err != nil {
+			return fail(err)
+		}
+		_ = enc.Encode(g)
+	case "reopen":
+		if err := requireID(); err != nil {
+			return fail(err)
+		}
+		g, err := s.Reopen(*id, *evidenceAuthor, *evidenceRef)
 		if err != nil {
 			return fail(err)
 		}

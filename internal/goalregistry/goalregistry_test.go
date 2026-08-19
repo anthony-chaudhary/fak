@@ -65,7 +65,7 @@ func TestRelationsAreNotExecutionParentageAndLifecycleIsExplicit(t *testing.T) {
 		t.Fatal(err)
 	}
 	now = now.Add(time.Hour)
-	g, err = s.Update(g.GoalID, g.Title, g.Summary, Achieved)
+	g, err = s.Transition(g.GoalID, Achieved, OutcomeEvidence{Class: IndependentWitness, Author: "judge", Reference: "commit:abc"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,5 +117,56 @@ func TestResolveRequiresRevisionWhenBindingHistoryIsAmbiguous(t *testing.T) {
 	got, _, err := s.Resolve("codex:goal", "thread-goal", "r2")
 	if err != nil || got.GoalID != g.GoalID {
 		t.Fatalf("revision resolve = %#v, %v", got, err)
+	}
+}
+
+func TestLifecycleRequiresTypedWitnessAndPreservesHistory(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	s := Store{Path: filepath.Join(t.TempDir(), "goals.json"), Now: func() time.Time { return now }}
+	g, err := s.Create("Retry succeeds", "", Provenance{Actor: "operator", Authority: "user"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.EvidencePolicy != DefaultEvidencePolicy {
+		t.Fatalf("policy=%q", g.EvidencePolicy)
+	}
+	for _, class := range []EvidenceClass{HarnessAssertion, AgentAssertion, OperatorDeclaration} {
+		if _, err := s.Transition(g.GoalID, Achieved, OutcomeEvidence{Class: class, Author: "claimant", Reference: "run:failed-then-retry"}); err == nil {
+			t.Fatalf("%s terminalized goal", class)
+		}
+	}
+	g, err = s.Transition(g.GoalID, Achieved, OutcomeEvidence{Class: IndependentWitness, Author: "judge", Reference: "commit:success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Lifecycle != Achieved {
+		t.Fatalf("lifecycle=%s", g.Lifecycle)
+	}
+	if _, err := s.Transition(g.GoalID, Abandoned, OutcomeEvidence{Class: IndependentWitness, Author: "judge", Reference: "report:conflict"}); err == nil || !strings.Contains(err.Error(), "conflict") {
+		t.Fatalf("conflict=%v", err)
+	}
+	if _, err := s.Reopen(g.GoalID, "operator", "decision:continue"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Transition(g.GoalID, Superseded, OutcomeEvidence{Class: IndependentWitness, Author: "judge", Reference: "goal:replacement"}); err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := s.OutcomeEvidence(g.GoalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evidence) != 3 || evidence[0].Lifecycle != Achieved || evidence[1].Lifecycle != Active || evidence[2].Lifecycle != Superseded {
+		t.Fatalf("evidence=%#v", evidence)
+	}
+}
+
+func TestGenericUpdateCannotTerminalizeGoal(t *testing.T) {
+	s := Store{Path: filepath.Join(t.TempDir(), "goals.json")}
+	g, err := s.Create("No self certification", "", Provenance{Actor: "operator", Authority: "user"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Update(g.GoalID, g.Title, g.Summary, Achieved); err == nil {
+		t.Fatal("generic update terminalized goal")
 	}
 }

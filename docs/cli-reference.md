@@ -34,6 +34,14 @@ fak goal bind --id goal_<hex> --namespace codex:goal  --external-id <codex-goal-
 fak goal resolve --namespace claude:goal --external-id <claude-goal-id>
 ```
 
+Canonical lifecycle is separate from execution completion. New goals default to `independent_witness_required`: harness, agent, and operator assertions may be recorded elsewhere but cannot terminalize canonical truth. Supply a durable independent witness, and reopen explicitly before replacing an incompatible terminal outcome.
+
+```bash
+fak goal transition --id goal_<hex> --lifecycle achieved --evidence-class independent_witness --evidence-author <judge> --evidence-ref <artifact>
+fak goal reopen --id goal_<hex> --evidence-author operator --evidence-ref <decision-record>
+fak goal show --id goal_<hex> # includes append-only outcome_evidence
+```
+
 Inspect the exact execution topology behind a canonical goal without scanning the journal. The versioned JSON groups registrations by `root_registration_id` and preserves each runtime, session/thread, attempt, state, and witness field.
 
 ```bash

@@ -5979,6 +5979,16 @@
           "category": "incidental",
           "reason": "Report field counts structured worker witness outcomes; it does not introduce a new witness concept.",
           "token": "WitnessedShips"
+        },
+        {
+          "category": "incidental",
+          "reason": "Serialized value for the local lifecycle gate, not a new witness-proof primitive",
+          "token": "independent_witness_required"
+        },
+        {
+          "category": "incidental",
+          "reason": "Goal-registry record type carrying existing witness semantics, not a new witness system",
+          "token": "OutcomeEvidence"
         }
       ],
       "id": "witness-proof",
@@ -6000,6 +6010,7 @@
         "IngestResult",
         "MotifCatalogReproduceFixWitness",
         "NewTreeWitness",
+        "OutcomeEvidence",
         "POPULATION_LIFT_UNWITNESSED",
         "PROFILE_REQUIRES_WITNESS",
         "ParseWitness",
@@ -6083,6 +6094,7 @@
         "guardCompactionWitnessLedgerRel",
         "guardCompactionWitnessSchema",
         "held_axis_unwitnessed",
+        "independent_witness_required",
         "kpiWitnessedProgress",
         "latestGuardCompactionWitness",
         "liveTreeWitness",
@@ -7434,6 +7446,16 @@
           "category": "incidental",
           "reason": "Privacy policy JSON parser implementation symbol.",
           "token": "ParsePolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local goal-registry configuration constant, not a new capability-policy concept",
+          "token": "DefaultEvidencePolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Goal record field selecting lifecycle evidence handling, not a capability policy primitive",
+          "token": "EvidencePolicy"
         }
       ],
       "exclude": [
@@ -7456,10 +7478,12 @@
         "ConfigDescriptionCoverage",
         "ConfigMaxPostures",
         "ConfigPostures",
+        "DefaultEvidencePolicy",
         "DispositionCapability",
         "DispositionMultiCapability",
         "ErrNotAdjudicated",
         "EvidenceAdjudication",
+        "EvidencePolicy",
         "FAK_ORG_POLICY_CACHE_PATH",
         "FAK_ORG_POLICY_URL",
         "FAK_PREFLIGHT_ALLOW_BIN_SKEW",
