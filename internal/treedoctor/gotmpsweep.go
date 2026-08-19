@@ -166,6 +166,8 @@ func (r GoTmpReport) Summary() string {
 	var live, indeterminate, foreign int
 	for _, e := range r.Entries {
 		switch e.Verdict {
+		case GoTmpReap:
+			// Reap totals are derived by ReapCount and ReapedBytes below.
 		case GoTmpKeepLive:
 			live++
 		case GoTmpKeepIndeterminate:

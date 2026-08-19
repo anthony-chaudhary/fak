@@ -45,6 +45,19 @@ func ageDir(t *testing.T, path string, now time.Time, age time.Duration) {
 // TestPlanGoTmpDecisionTable pins the closed verdict vocabulary over hand-built entries.
 // Plan is the pure half — no clock, no filesystem — so every keep case can be stated
 // directly instead of being reproduced on disk.
+func TestGoTmpSummaryAccountsForEveryVerdict(t *testing.T) {
+	rep := GoTmpReport{Root: "/gotmp", Entries: []GoTmpEntry{
+		{Path: "/gotmp/go-build1", Verdict: GoTmpReap}, {Verdict: GoTmpKeepLive}, {Verdict: GoTmpKeepIndeterminate}, {Verdict: GoTmpKeepForeign},
+	}}
+	rep.Reaped = []string{"/gotmp/go-build1"}
+	got := rep.Summary()
+	for _, want := range []string{"reaped 1", "kept 1 live", "1 indeterminate", "1 foreign"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary %q missing %q", got, want)
+		}
+	}
+}
+
 func TestPlanGoTmpDecisionTable(t *testing.T) {
 	opts := GoTmpOptions{Root: "/gotmp", MinAge: 2 * time.Hour}
 
