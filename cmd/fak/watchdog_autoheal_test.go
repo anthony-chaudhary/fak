@@ -450,9 +450,13 @@ func TestWatchdogAutohealWarnAndOffModes(t *testing.T) {
 func TestWatchdogAutohealPlatformProjection(t *testing.T) {
 	win := watchdogAutohealServicesForGOOS("windows")
 	if !serviceProjectionHas(win, "taskscheduler", "FleetResumeWatchdog") ||
-		!serviceProjectionHas(win, "taskscheduler", "FleetSupervisorWatchdog") ||
 		!serviceProjectionHas(win, "taskscheduler", "FleetDOSDispatchWatchdog") {
 		t.Fatalf("windows projection missing expected Scheduled Tasks: %+v", win)
+	}
+	// #5096: the heartbeat/PID supervisor is tombstoned and superseded by DOS.
+	// Keeping it in autoheal would turn its deliberate disabled state into restart noise.
+	if serviceProjectionHas(win, "taskscheduler", "FleetSupervisorWatchdog") {
+		t.Fatalf("windows projection still autoheals tombstoned FleetSupervisorWatchdog: %+v", win)
 	}
 	if !serviceProjectionHas(win, "taskscheduler", "FleetStaleWorkGarden") {
 		t.Fatalf("windows projection missing stale-work garden task: %+v", win)
@@ -480,6 +484,9 @@ func TestWatchdogAutohealPlatformProjection(t *testing.T) {
 	linux := watchdogAutohealServicesForGOOS("linux")
 	if !serviceProjectionHas(linux, "systemd", "fleet-dos-dispatch-watchdog.timer") {
 		t.Fatalf("linux projection missing systemd dispatch watchdog timer: %+v", linux)
+	}
+	if serviceProjectionHas(linux, "systemd", "fleet-supervisor-watchdog.timer") {
+		t.Fatalf("linux projection still autoheals tombstoned fleet supervisor timer: %+v", linux)
 	}
 	if !serviceProjectionHas(linux, "systemd", "fleet-stale-work-garden.timer") {
 		t.Fatalf("linux projection missing systemd stale-work garden timer: %+v", linux)

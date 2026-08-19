@@ -128,11 +128,15 @@ if ($reg) {
   }
 } else { L "registry: (not yet generated -- run fleet_sessions.py registry)" }
 
-# supervisor
-try {
-  $sup = & 'C:\work\job\.venv\Scripts\python.exe' 'C:\work\job\scripts\supervise_now.py' --json 2>$null | ConvertFrom-Json
-  L ("supervisor: verdict={0} alive={1} pid={2} hb_age={3}s" -f $sup.verdict, $sup.process.alive, $sup.process.pid, $sup.process.heartbeat_age_s)
-} catch { L "supervisor: (status unavailable)" }
+# The heartbeat/PID supervisor is a tombstone (#5096). Preserve its task row below,
+# but only render process health if an operator has deliberately re-enabled it.
+$supervisorTask = Get-ScheduledTask -TaskName 'FleetSupervisorWatchdog' -ErrorAction SilentlyContinue
+if ($supervisorTask -and $supervisorTask.State -ne 'Disabled') {
+  try {
+    $sup = & 'C:\work\job\.venv\Scripts\python.exe' 'C:\work\job\scripts\supervise_now.py' --json 2>$null | ConvertFrom-Json
+    L ("supervisor: verdict={0} alive={1} pid={2} hb_age={3}s" -f $sup.verdict, $sup.process.alive, $sup.process.pid, $sup.process.heartbeat_age_s)
+  } catch { L "supervisor: (status unavailable)" }
+}
 
 # scheduled tasks + resume mode + ledger
 function TaskLine($name) {

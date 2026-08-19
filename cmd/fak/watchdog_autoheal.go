@@ -349,11 +349,12 @@ func defaultWatchdogAutohealStateDir() string {
 }
 
 func watchdogAutohealServicesForGOOS(goos string) []watchdogService {
+	// FleetSupervisorWatchdog is deliberately absent: the heartbeat/PID supervisor
+	// is tombstoned and DOS is the current fleet authority (#5096).
 	switch goos {
 	case "windows":
 		return []watchdogService{
 			{ID: "fleet-resume-watchdog", Manager: "taskscheduler", Unit: "FleetResumeWatchdog"},
-			{ID: "fleet-supervisor-watchdog", Manager: "taskscheduler", Unit: "FleetSupervisorWatchdog"},
 			{ID: "fleet-dos-dispatch-watchdog", Manager: "taskscheduler", Unit: "FleetDOSDispatchWatchdog"},
 			// The stale-work garden tick: runs `fak garden --check` on a cadence so orphaned
 			// runs, a forked loop ledger, expired leases, and a stale @latest are caught
@@ -382,7 +383,6 @@ func watchdogAutohealServicesForGOOS(goos string) []watchdogService {
 	case "linux":
 		return []watchdogService{
 			{ID: "fleet-resume-watchdog", Manager: "systemd", Unit: "fleet-resume-watchdog.timer"},
-			{ID: "fleet-supervisor-watchdog", Manager: "systemd", Unit: "fleet-supervisor-watchdog.timer"},
 			{ID: "fleet-dos-dispatch-watchdog", Manager: "systemd", Unit: "fleet-dos-dispatch-watchdog.timer"},
 			{ID: "fleet-stale-work-garden", Manager: "systemd", Unit: "fleet-stale-work-garden.timer"},
 		}
@@ -447,8 +447,6 @@ func watchdogActivityPathForService(goos string, svc watchdogService) string {
 	switch svc.ID {
 	case "fleet-resume-watchdog":
 		return filepath.Join(local, "Fleet", "watchdog", "resume_watchdog.log")
-	case "fleet-supervisor-watchdog":
-		return filepath.Join(local, "Fleet", "supervisor-watchdog", "supervisor-watchdog.log")
 	case "fleet-dos-dispatch-watchdog":
 		return filepath.Join(local, "Fleet", "dos-dispatch-watchdog", "dos-dispatch-watchdog.log")
 	default:
