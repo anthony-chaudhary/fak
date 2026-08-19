@@ -24,6 +24,7 @@ type Row struct {
 	Provider     string         `json:"provider,omitempty"`
 	Mechanism    string         `json:"mechanism,omitempty"`
 	Context      string         `json:"context"`
+	SessionID    string         `json:"session_id,omitempty"`
 	PID          int            `json:"pid"`
 	UnixMillis   int64          `json:"unix_millis"`
 	Turns        uint64         `json:"turns"`
@@ -57,6 +58,10 @@ func AppendLedgerLine(row Row) (string, error) {
 }
 
 func NewRow(sessionType, context string, stats cacheobs.Stats, now time.Time) Row {
+	return NewSessionRow(sessionType, context, "", stats, now)
+}
+
+func NewSessionRow(sessionType, context, sessionID string, stats cacheobs.Stats, now time.Time) Row {
 	return Row{
 		Schema:       Schema,
 		Date:         now.UTC().Format("2006-01-02"),
@@ -64,6 +69,7 @@ func NewRow(sessionType, context string, stats cacheobs.Stats, now time.Time) Ro
 		Provider:     "fak",
 		Mechanism:    "kv_prefix_reuse",
 		Context:      context,
+		SessionID:    strings.TrimSpace(sessionID),
 		PID:          os.Getpid(),
 		UnixMillis:   now.UnixMilli(),
 		Turns:        stats.Turns,
@@ -88,8 +94,12 @@ func normalizeRowDimensions(row *Row) {
 }
 
 func Append(sessionType, context, ledgerPath string, stats cacheobs.Stats) error {
+	return AppendSession(sessionType, context, "", ledgerPath, stats)
+}
+
+func AppendSession(sessionType, context, sessionID, ledgerPath string, stats cacheobs.Stats) error {
 	now := time.Now()
-	row := NewRow(sessionType, context, stats, now)
+	row := NewSessionRow(sessionType, context, sessionID, stats, now)
 	line, err := AppendLedgerLine(row)
 	if err != nil {
 		return err

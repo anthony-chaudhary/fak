@@ -677,10 +677,6 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 // synthetic-Zipf forecast (#1090). Best-effort: a write failure never fails the session.
 // It is the shared shutdown tail of the guard and serve (stdio + http) front doors.
 func persistCacheValueObservations(srv *gateway.Server, kind, name, provider string) {
-	stats := cacheobs.Default.Snapshot()
-	if stats.Turns > 0 {
-		_ = cachevalueledger.Append(kind, name, nightrunLedgerPath(cachevalueledger.DefaultLedgerRel), stats)
-	}
 	appendObservedCacheSavings(kind, provider, name, srv.AdjudicationSummary())
 	if turns, _ := srv.VCacheTurnsSnapshot(); len(turns) > 0 {
 		_, _, _ = writeConfiguredVCacheSnapshot(turns)
@@ -791,6 +787,10 @@ func gatewayUsageCounters(srv *gateway.Server) gatewayusageledger.Counters {
 // fleet exporter publishes an identified/unidentified census rather than assuming the
 // per-session drill-down covers the corpus.
 func persistGatewayUsageObservation(srv *gateway.Server, sessionType, context string, uptime time.Duration, sessionID string) {
+	stats := cacheobs.Default.Snapshot()
+	if stats.Turns > 0 {
+		_ = cachevalueledger.AppendSession(sessionType, context, sessionID, nightrunLedgerPath(cachevalueledger.DefaultLedgerRel), stats)
+	}
 	row := gatewayusageledger.NewRow("exit", sessionType, context, sessionID, uptime, gatewayUsageProvenance(srv), gatewayUsageCounters(srv), time.Now())
 	if err := gatewayusageledger.Append(nightrunLedgerPath(gatewayusageledger.DefaultLedgerRel), row); err != nil {
 		fmt.Fprintf(os.Stderr, "fak: gateway-usage ledger append failed (non-fatal): %v\n", err)

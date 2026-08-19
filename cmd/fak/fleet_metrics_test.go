@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/cacheobs"
+	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/providercost"
 	"github.com/anthony-chaudhary/fak/internal/session"
@@ -635,3 +637,31 @@ func TestFleetMetricsJoinsAuthoritativeProviderCostAndGatesCoverage(t *testing.T
 	}
 }
 func costAmount(v providercost.MicroUSD) *providercost.MicroUSD { return &v }
+
+func TestFleetMetricsJoinsCacheValueWithCoverage(t *testing.T) {
+	base := time.Date(2026, 8, 19, 1, 0, 0, 0, time.UTC)
+	regPath := filepath.Join(t.TempDir(), "registrations.jsonl")
+	store := sessionregistry.Store{Path: regPath}
+	for _, in := range []sessionregistry.NewInput{{RegistrationID: "root-a", RootIssue: "#A", TaskID: "goal-a", LaunchKind: "guard", Runtime: "codex", SessionID: "s-a", Now: base}, {RegistrationID: "x", LaunchKind: "guard", Runtime: "codex", SessionID: "amb", Now: base}, {RegistrationID: "y", LaunchKind: "guard", Runtime: "codex", SessionID: "amb", Now: base}} {
+		r, _ := sessionregistry.New(in)
+		if err := store.Register(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cachePath := filepath.Join(t.TempDir(), "cache.jsonl")
+	for _, row := range []cachevalueledger.Row{cachevalueledger.NewSessionRow("serve", "http", "s-a", cacheobs.Stats{Turns: 1, PromptTokens: 100, ReusedTokens: 80}, base), cachevalueledger.NewSessionRow("serve", "http", "amb", cacheobs.Stats{Turns: 1, PromptTokens: 50, ReusedTokens: 20}, base), cachevalueledger.NewRow("serve", "legacy", cacheobs.Stats{Turns: 1, PromptTokens: 10}, base)} {
+		line, _ := cachevalueledger.AppendLedgerLine(row)
+		f, err := os.OpenFile(cachePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = fmt.Fprintln(f, line)
+		_ = f.Close()
+	}
+	raw := fleetMetricsSources{registryPath: filepath.Join(t.TempDir(), "sessions.json"), registrationLedger: regPath, usageLedger: filepath.Join(t.TempDir(), "usage.jsonl"), cacheValueLedger: cachePath, maxSessions: 20, goalCoverageThreshold: 1, stderr: io.Discard}.render(base.Add(time.Hour))
+	for _, want := range []string{`fak_fleet_goal_cache_value_prompt_tokens_total{root_registration="root-a",root_issue="#A",task="goal-a"} 100`, `fak_fleet_goal_cache_value_reused_tokens_total{root_registration="root-a",root_issue="#A",task="goal-a"} 80`, `fak_fleet_goal_cache_value_reuse_ratio{root_registration="root-a",root_issue="#A",task="goal-a"} 0.8`, `fak_fleet_goal_cache_value_rows_total{attribution="missing"} 1`, `fak_fleet_goal_cache_value_rows_total{attribution="ambiguous"} 1`, `fak_fleet_goal_cache_value_attribution_ratio 0.3333333333333333`, `fak_fleet_goal_cache_value_efficiency_ready 0`} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("missing %q\n%s", want, raw)
+		}
+	}
+}

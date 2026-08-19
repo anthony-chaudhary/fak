@@ -842,6 +842,81 @@
           "category": "incidental",
           "reason": "Diagnostic label for established provider-neutral cache telemetry",
           "token": "vcache-signals"
+        },
+        {
+          "category": "incidental",
+          "reason": "Root-goal cache-value metrics adapter symbol; not a distinct cache mechanism or cache hierarchy concept",
+          "token": "cacheAmbiguous"
+        },
+        {
+          "category": "incidental",
+          "reason": "Root-goal cache-value metrics adapter symbol; not a distinct cache mechanism or cache hierarchy concept",
+          "token": "cacheAttributed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Root-goal cache-value metrics adapter symbol; not a distinct cache mechanism or cache hierarchy concept",
+          "token": "cacheMissing"
+        },
+        {
+          "category": "incidental",
+          "reason": "Root-goal cache-value metrics adapter symbol; not a distinct cache mechanism or cache hierarchy concept",
+          "token": "cacheRatio"
+        },
+        {
+          "category": "incidental",
+          "reason": "Root-goal cache-value metrics adapter symbol; not a distinct cache mechanism or cache hierarchy concept",
+          "token": "cacheRoots"
+        },
+        {
+          "category": "incidental",
+          "reason": "Root-goal cache-value metrics adapter symbol; not a distinct cache mechanism or cache hierarchy concept",
+          "token": "cacheRows"
+        },
+        {
+          "category": "incidental",
+          "reason": "Root-goal cache-value metrics adapter symbol; not a distinct cache mechanism or cache hierarchy concept",
+          "token": "cacheValueLedger"
+        },
+        {
+          "category": "incidental",
+          "reason": "Root-goal cache-value metrics adapter symbol; not a distinct cache mechanism or cache hierarchy concept",
+          "token": "fak_fleet_goal_cache_value_attribution_ratio"
+        },
+        {
+          "category": "incidental",
+          "reason": "Root-goal cache-value metrics adapter symbol; not a distinct cache mechanism or cache hierarchy concept",
+          "token": "fak_fleet_goal_cache_value_efficiency_ready"
+        },
+        {
+          "category": "incidental",
+          "reason": "Root-goal cache-value metrics adapter symbol; not a distinct cache mechanism or cache hierarchy concept",
+          "token": "fak_fleet_goal_cache_value_prompt_tokens_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Root-goal cache-value metrics adapter symbol; not a distinct cache mechanism or cache hierarchy concept",
+          "token": "fak_fleet_goal_cache_value_reused_tokens_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Root-goal cache-value metrics adapter symbol; not a distinct cache mechanism or cache hierarchy concept",
+          "token": "fak_fleet_goal_cache_value_rows"
+        },
+        {
+          "category": "incidental",
+          "reason": "Root-goal cache-value metrics adapter symbol; not a distinct cache mechanism or cache hierarchy concept",
+          "token": "fak_fleet_goal_cache_value_rows_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Root-goal cache-value metrics adapter symbol; not a distinct cache mechanism or cache hierarchy concept",
+          "token": "reuseRatio"
+        },
+        {
+          "category": "incidental",
+          "reason": "Root-goal cache-value metrics adapter symbol; not a distinct cache mechanism or cache hierarchy concept",
+          "token": "fak_fleet_goal_cache_value_reuse_ratio"
         }
       ],
       "id": "cache",
@@ -909,13 +984,20 @@
         "backtestCacheBurstPaysBack",
         "builtinCacheLevers",
         "cacheActivity",
+        "cacheAmbiguous",
+        "cacheAttributed",
         "cacheBurstBacktest",
         "cacheCreationSpanLabel",
+        "cacheMissing",
+        "cacheRatio",
         "cacheReceipt",
+        "cacheRoots",
+        "cacheRows",
         "cacheScopeConsistent",
         "cacheSeatFlags",
         "cacheStats",
         "cacheValueGateFactsFromReport",
+        "cacheValueLedger",
         "cacheWitnessReadback",
         "cacheWitnessServer",
         "cache_bytes",
@@ -990,6 +1072,13 @@
         "dogfoodCacheWitnessMaxAge",
         "droppedcachedtokens",
         "fak_fleet_goal_cache_read_tokens_total",
+        "fak_fleet_goal_cache_value_attribution_ratio",
+        "fak_fleet_goal_cache_value_efficiency_ready",
+        "fak_fleet_goal_cache_value_prompt_tokens_total",
+        "fak_fleet_goal_cache_value_reuse_ratio",
+        "fak_fleet_goal_cache_value_reused_tokens_total",
+        "fak_fleet_goal_cache_value_rows",
+        "fak_fleet_goal_cache_value_rows_total",
         "fak_fleet_goal_cache_write_tokens_total",
         "fakcachevalueinputpermtokusd",
         "flushcache",
@@ -1043,6 +1132,7 @@
         "renderinkernelchatmlrequest",
         "replaceMicroCacheWitness",
         "resetClaudeKeychainCache",
+        "reuseRatio",
         "runCacheValueGateScore",
         "runDisambiguationCacheSourceSelfTest",
         "runMicroCacheArm",
@@ -4631,6 +4721,16 @@
           "category": "incidental",
           "reason": "Benchmark storage-density measurement, not a session runtime budget or lifecycle concept",
           "token": "BytesPerSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Cache-value ledger compatibility helper carrying an opaque session join key; not a distinct session runtime concept",
+          "token": "NewSessionRow"
+        },
+        {
+          "category": "incidental",
+          "reason": "Cache-value ledger compatibility helper carrying an opaque session join key; not a distinct session runtime concept",
+          "token": "AppendSession"
         }
       ],
       "id": "session-runtime",
@@ -4639,6 +4739,7 @@
         "AffinityFromContext",
         "AffinityGatewayConfig",
         "AffinitySelection",
+        "AppendSession",
         "AttributeOutcomes",
         "BeginSessionEffect",
         "BytesPerSession",
@@ -4664,6 +4765,7 @@
         "MoveSession",
         "NarrowsSessions",
         "NewSessionAffinityGateway",
+        "NewSessionRow",
         "ObservedSessions",
         "OutcomeEvidence",
         "OutcomeSession",

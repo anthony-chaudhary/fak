@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/fleetmetrics"
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
@@ -70,6 +71,7 @@ func runFleetMetrics(stdout, stderr io.Writer, argv []string) int {
 	remote := fs.String("remote", "origin", "with --fleet, the git remote whose session refs are folded in")
 	stale := fs.Duration("stale", defaultSessionStaleWindow, "heartbeat window past which a running-family session reads STALLED")
 	usageLedger := fs.String("usage-ledger", gatewayusageledger.DefaultLedgerRel, "gateway-usage ledger folded into the historical fak_fleet_usage_* families")
+	cacheValueLedger := fs.String("cache-value-ledger", "", "fak-cache-value-ledger/1 JSONL with optional session_id (empty disables root cache-value metrics)")
 	providerCostLedger := fs.String("provider-cost-ledger", "", "authoritative fak-provider-cost-ledger/1 JSONL (empty disables cost metrics)")
 	since := fs.String("since", "", "fold only usage rows on or after this date (YYYY-MM-DD)")
 	maxSessions := fs.Int("max-sessions", defaultFleetMetricsMaxSessions, "cardinality bound on the per-session label (0 disables the per-session tier entirely)")
@@ -98,6 +100,7 @@ func runFleetMetrics(stdout, stderr io.Writer, argv []string) int {
 		staleWindow:           *stale,
 		usageLedger:           *usageLedger,
 		providerCostLedger:    *providerCostLedger,
+		cacheValueLedger:      *cacheValueLedger,
 		dispatchRunsDir:       filepath.Join(repoRoot(), ".dispatch-runs"),
 		since:                 *since,
 		maxSessions:           *maxSessions,
@@ -139,6 +142,7 @@ type fleetMetricsSources struct {
 	staleWindow           time.Duration
 	usageLedger           string
 	providerCostLedger    string
+	cacheValueLedger      string
 	dispatchRunsDir       string
 	registrationLedger    string
 	since                 string
@@ -173,7 +177,11 @@ func (s fleetMetricsSources) render(now time.Time) string {
 			costReport = providercost.Fold(rows, registrations)
 		}
 	}
-	renderFleetGoalExposition(w, registrations, usageFold, costReport, s.goalCoverageThreshold)
+	cacheRows := []cachevalueledger.Row{}
+	if s.cacheValueLedger != "" {
+		cacheRows = cachevalueledger.ReadLedgerFile(s.cacheValueLedger)
+	}
+	renderFleetGoalExposition(w, registrations, usageFold, costReport, cacheRows, s.goalCoverageThreshold)
 	writeRepoPulseMetrics(w, s.dispatchRunsDir)
 	w.gauge("fak_fleet_registration_registry_readable", "1 when the child-registration lineage ledger was read successfully; 0 means goal-level attribution is unavailable, not that the fleet has no goals.", boolGauge(registrationReadable))
 
@@ -213,7 +221,7 @@ type fleetGoalAgg struct {
 
 // renderFleetGoalExposition joins durable lineage to usage. A session is attributable
 // only when exactly one root claims it; unknown and cross-root claims stay visible.
-func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usage fleetUsageFold, cost providercost.Report, coverageThreshold float64) {
+func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usage fleetUsageFold, cost providercost.Report, cacheRows []cachevalueledger.Row, coverageThreshold float64) {
 	goals := map[string]*fleetGoalAgg{}
 	sessionRoots := map[string]string{}
 	ambiguous := map[string]bool{}
@@ -276,6 +284,37 @@ func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usa
 			}
 		}
 	}
+	type cacheRoot struct {
+		rows           int
+		prompt, reused uint64
+	}
+	cacheRoots := map[string]*cacheRoot{}
+	cacheAttributed, cacheMissing, cacheAmbiguous := 0, 0, 0
+	for _, row := range cacheRows {
+		sid := strings.TrimSpace(row.SessionID)
+		if sid == "" {
+			cacheMissing++
+			continue
+		}
+		if ambiguous[sid] {
+			cacheAmbiguous++
+			continue
+		}
+		root := sessionRoots[sid]
+		if root == "" {
+			cacheMissing++
+			continue
+		}
+		x := cacheRoots[root]
+		if x == nil {
+			x = &cacheRoot{}
+			cacheRoots[root] = x
+		}
+		x.rows++
+		x.prompt += row.PromptTokens
+		x.reused += row.ReusedTokens
+		cacheAttributed++
+	}
 	ids := make([]string, 0, len(goals))
 	for id := range goals {
 		ids = append(ids, id)
@@ -312,6 +351,16 @@ func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usa
 		w.gauge("fak_fleet_goal_tool_boundary_calls_total", "Historical kernel submissions explicitly attributed beneath this root goal; the governed tool boundary, not inferred provider calls.", float64(g.usage.Submits), labels...)
 		w.gauge("fak_fleet_goal_cache_read_tokens_total", "Observed provider cache-read prompt tokens explicitly attributed beneath this root goal.", float64(g.usage.CachedPromptTokens), labels...)
 		w.gauge("fak_fleet_goal_cache_write_tokens_total", "Observed provider cache-creation prompt tokens explicitly attributed beneath this root goal.", float64(g.usage.CacheCreationTokens), labels...)
+		if cv := cacheRoots[id]; cv != nil {
+			w.gauge("fak_fleet_goal_cache_value_prompt_tokens_total", "Cache-value ledger prompt tokens attributed to exactly one root goal.", float64(cv.prompt), labels...)
+			w.gauge("fak_fleet_goal_cache_value_reused_tokens_total", "Cache-value ledger reused tokens attributed to exactly one root goal.", float64(cv.reused), labels...)
+			reuseRatio := 0.0
+			if cv.prompt > 0 {
+				reuseRatio = float64(cv.reused) / float64(cv.prompt)
+			}
+			w.gauge("fak_fleet_goal_cache_value_reuse_ratio", "Reused cache-value tokens divided by prompt tokens attributed to exactly one root goal.", reuseRatio, labels...)
+			w.gauge("fak_fleet_goal_cache_value_rows", "Cache-value rows attributed to exactly one root goal.", float64(cv.rows), labels...)
+		}
 	}
 	attributed := fleetUsageAgg{}
 	for _, g := range goals {
@@ -324,6 +373,13 @@ func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usa
 	w.gauge("fak_fleet_goal_usage_attribution_ratio", "Fraction of usage rows attributable to exactly one root goal; 1 for an empty census.", ratio)
 	w.gauge("fak_fleet_goal_efficiency_coverage_threshold", "Configured minimum exact usage attribution ratio for broad root-goal efficiency readiness.", coverageThreshold)
 	w.gauge("fak_fleet_goal_efficiency_ready", "1 only when exact root-goal usage attribution meets the configured threshold and the lineage registry is readable.", boolGauge(ratio >= coverageThreshold))
+	cacheTotal := len(cacheRows)
+	w.gauge("fak_fleet_goal_cache_value_rows_total", "Cache-value rows by root-goal attribution outcome.", float64(cacheAttributed), "attribution", "attributed")
+	w.gauge("fak_fleet_goal_cache_value_rows_total", "Cache-value rows by root-goal attribution outcome.", float64(cacheMissing), "attribution", "missing")
+	w.gauge("fak_fleet_goal_cache_value_rows_total", "Cache-value rows by root-goal attribution outcome.", float64(cacheAmbiguous), "attribution", "ambiguous")
+	cacheRatio := coverageRatio(cacheAttributed, cacheTotal)
+	w.gauge("fak_fleet_goal_cache_value_attribution_ratio", "Fraction of cache-value rows attributed to exactly one root goal.", cacheRatio)
+	w.gauge("fak_fleet_goal_cache_value_efficiency_ready", "1 only when cache-value rows exist and exact attribution meets the configured threshold.", boolGauge(cacheTotal > 0 && cacheRatio >= coverageThreshold))
 	for _, root := range cost.Roots {
 		g := goals[root.RootRegistrationID]
 		if g == nil {

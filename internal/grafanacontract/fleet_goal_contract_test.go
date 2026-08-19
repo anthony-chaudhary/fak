@@ -35,7 +35,7 @@ func TestFleetOverviewCarriesRootGoalDrilldownContract(t *testing.T) {
 			all += q.Expr + "\n"
 		}
 	}
-	for _, want := range []string{"Starting goals", "fak_fleet_goal_info", "fak_fleet_goal_usage_attribution_ratio", "fak_fleet_goal_attempts_total", "fak_fleet_goal_provider_billed_micro_usd_total", "fak_fleet_goal_provider_cost_attribution_ratio", `fak_fleet_goal_usage_rows{attribution="unattributed"}`, "bounded to root_registration, root_issue, task, state, and outcome"} {
+	for _, want := range []string{"Starting goals", "fak_fleet_goal_info", "fak_fleet_goal_usage_attribution_ratio", "fak_fleet_goal_attempts_total", "fak_fleet_goal_provider_billed_micro_usd_total", "fak_fleet_goal_provider_cost_attribution_ratio", "fak_fleet_goal_cache_value_reused_tokens_total", "fak_fleet_goal_cache_value_reuse_ratio", "fak_fleet_goal_cache_value_attribution_ratio", `fak_fleet_goal_usage_rows{attribution="unattributed"}`, "bounded to root_registration, root_issue, task, state, and outcome"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("dashboard missing %q", want)
 		}

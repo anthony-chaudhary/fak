@@ -2,6 +2,7 @@ package cachevalueledger
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -345,5 +346,29 @@ func TestScoreLedgerEmpty(t *testing.T) {
 	}
 	if result.HasEnoughData() {
 		t.Errorf("empty ledger must not be gateable")
+	}
+}
+
+func TestSessionRowStampsOpaqueJoinKeyAndLegacyOmitsIt(t *testing.T) {
+	stats := cacheobs.Stats{Turns: 1}
+	now := time.Unix(1, 0).UTC()
+	row := NewSessionRow("serve", "http", " sess-1 ", stats, now)
+	if row.SessionID != "sess-1" {
+		t.Fatalf("session=%q", row.SessionID)
+	}
+	line, err := AppendLedgerLine(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(line, `"session_id":"sess-1"`) {
+		t.Fatal(line)
+	}
+	legacy := NewRow("serve", "http", stats, now)
+	line, err = AppendLedgerLine(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(line, "session_id") {
+		t.Fatalf("legacy shape changed: %s", line)
 	}
 }
