@@ -133,6 +133,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		cmdWindowgate(args)
 	case "conpty":
 		cmdConPTY(args)
+	case "agents":
+		cmdAgents(args)
 	case "ps":
 		cmdPS(args)
 	case "top":

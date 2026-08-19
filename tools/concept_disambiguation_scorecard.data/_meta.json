@@ -4495,6 +4495,11 @@
           "category": "incidental",
           "reason": "Attribution coverage ratio over historical rows, not a runtime session metric or lifecycle rate.",
           "token": "SessionRate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire-schema field naming only; the existing session runtime authority and lifecycle semantics are unchanged",
+          "token": "LogicalSessionID"
         }
       ],
       "id": "session-runtime",
@@ -4520,6 +4525,7 @@
         "ITERM_SESSION_ID",
         "IndexHealth",
         "InspectIndexHealth",
+        "LogicalSessionID",
         "MalformedSessionRef",
         "ModelSlotsDuringToolWait",
         "MoveSession",
@@ -9749,6 +9755,11 @@
           "category": "incidental",
           "reason": "Private renderer delegates to the canonical agent termination classifier; it does not define a separate rendering or materialization concept.",
           "token": "renderChatTermination"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI formatting helper only; it does not materialize or cache a read model",
+          "token": "renderAgents"
         }
       ],
       "id": "render-materialize",
@@ -9789,6 +9800,7 @@
         "metricsrender",
         "printWorkflowConcepts",
         "priorwtrendercrash",
+        "renderAgents",
         "renderAxisPartition",
         "renderCanonicalTerms",
         "renderChatTermination",
