@@ -81,6 +81,38 @@ func TestSessionsCodexLoopTreatsDistinctPlanTrafficAsProgress(t *testing.T) {
 	}
 }
 
+func TestSessionsCodexLoopDoesNotTreatSparseSuccessfulOutputCollisionsAsLoop(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "productive-session.jsonl")
+	var lines []string
+	lines = append(lines, `{"timestamp":"2026-08-19T07:00:00Z","type":"session_meta","payload":{"id":"productive-session","cwd":"C:/work/fak","model_provider":"fak","cli_version":"0.85.0","git":{"commit_hash":"abc123","branch":"main"}}}`)
+	for i := 0; i < 12; i++ {
+		callID := fmt.Sprintf("call-%d", i)
+		probeID := fmt.Sprintf("probe-%d", i)
+		lines = append(lines,
+			fmt.Sprintf(`{"timestamp":"2026-08-19T07:00:%02dZ","type":"response_item","payload":{"type":"function_call","name":"apply_patch","arguments":{"patch":"patch-%d"},"call_id":"%s"}}`, i*4+1, i, callID),
+			fmt.Sprintf(`{"timestamp":"2026-08-19T07:00:%02dZ","type":"response_item","payload":{"type":"function_call_output","call_id":"%s","output":"Success. Updated the following files:"}}`, i*4+2, callID),
+			fmt.Sprintf(`{"timestamp":"2026-08-19T07:00:%02dZ","type":"response_item","payload":{"type":"function_call","name":"shell_command","arguments":{"command":"echo %d"},"call_id":"%s"}}`, i*4+3, i, probeID),
+			fmt.Sprintf(`{"timestamp":"2026-08-19T07:00:%02dZ","type":"response_item","payload":{"type":"function_call_output","call_id":"%s","output":"probe-%d"}}`, i*4+4, probeID, i),
+		)
+	}
+	writeCodexLoopFixture(t, path, lines)
+
+	var stdout, stderr bytes.Buffer
+	if code := sessionsCodexLoop(&stdout, &stderr, []string{"--path", path, "--json"}); code != 0 {
+		t.Fatalf("sessions codex-loop code=%d stderr=%q", code, stderr.String())
+	}
+	var got codexLoopDiagnosis
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("decode report: %v", err)
+	}
+	if got.Verdict != "OK" {
+		t.Fatalf("verdict=%q reason=%q repeated=%+v", got.Verdict, got.Reason, got.RepeatedOutcomes)
+	}
+	if len(got.RepeatedOutcomes) == 0 || got.RepeatedOutcomes[0].LongestRun != 1 || got.RepeatedOutcomes[0].ArgsDigestCount != 12 {
+		t.Fatalf("expected collision evidence without a loop verdict, got %+v", got.RepeatedOutcomes)
+	}
+}
+
 func TestSessionsCodexLoopDiagnosesRepeatedGoalFailure(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rollout-2026-07-05T14-02-33-019f3417-0c8a-7da0-bf38-4ee9fd2354e4.jsonl")

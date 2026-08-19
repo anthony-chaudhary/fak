@@ -393,6 +393,11 @@ func codexTopLoopDrivingOutcome(outcomes []codexRepeatedOutcome) (codexRepeatedO
 		if codexOutcomeIsForwardProgress(o) {
 			continue
 		}
+		// Lifetime frequency alone is not a loop signal. Long productive sessions
+		// naturally accumulate identical wrapper output from unrelated calls.
+		if o.LongestRun < 3 && o.ArgsDigestCount >= o.Count {
+			continue
+		}
 		return o, true
 	}
 	return codexRepeatedOutcome{}, false
