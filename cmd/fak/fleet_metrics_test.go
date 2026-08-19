@@ -651,6 +651,49 @@ func TestFleetMetricsAggregatesExplicitCanonicalGoalAcrossRoots(t *testing.T) {
 	}
 }
 
+func TestFleetMetricsFoldsCanonicalGoalAuthoritativeCostAndCacheValue(t *testing.T) {
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	rows := []sessionregistry.Record{
+		{RegistrationID: "root-a", RootRegistrationID: "root-a", GoalID: "goal-1", Identity: sessionregistry.Identity{SessionID: "session-a"}},
+		{RegistrationID: "root-b", RootRegistrationID: "root-b", GoalID: "goal-1", Identity: sessionregistry.Identity{SessionID: "session-b"}},
+		{RegistrationID: "root-x", RootRegistrationID: "root-x", Identity: sessionregistry.Identity{SessionID: "session-x"}},
+	}
+	roots := map[string]*fleetGoalAgg{
+		"root-a": {rootID: "root-a", attempts: map[string]struct{}{}, states: map[sessionregistry.State]int{}, sessions: map[string]struct{}{"session-a": {}}},
+		"root-b": {rootID: "root-b", attempts: map[string]struct{}{}, states: map[sessionregistry.State]int{}, sessions: map[string]struct{}{"session-b": {}}},
+		"root-x": {rootID: "root-x", attempts: map[string]struct{}{}, states: map[sessionregistry.State]int{}, sessions: map[string]struct{}{"session-x": {}}},
+	}
+	cost := providercost.Report{Roots: []providercost.RootCost{
+		{RootRegistrationID: "root-a", Rows: 1, AmountRows: 1, BilledMicroUSD: 40},
+		{RootRegistrationID: "root-b", Rows: 2, AmountRows: 1, BilledMicroUSD: 60},
+		{RootRegistrationID: "root-x", Rows: 1, AmountRows: 1, BilledMicroUSD: 999},
+	}}
+	cacheRows := []cachevalueledger.Row{
+		cachevalueledger.NewSessionRow("guarded", "a", "session-a", cacheobs.Stats{Turns: 1, PromptTokens: 100, ReusedTokens: 80}, now),
+		cachevalueledger.NewSessionRow("guarded", "b", "session-b", cacheobs.Stats{Turns: 1, PromptTokens: 200, ReusedTokens: 100}, now),
+		cachevalueledger.NewSessionRow("guarded", "x", "session-x", cacheobs.Stats{Turns: 1, PromptTokens: 999, ReusedTokens: 999}, now),
+	}
+	w := newPromWriter()
+	renderFleetCanonicalGoalExposition(w, rows, roots, cost, cacheRows, 0.8)
+	got := w.String()
+	for _, want := range []string{
+		`fak_fleet_canonical_goal_provider_billed_micro_usd_total{goal_id="goal-1"} 100`,
+		`fak_fleet_canonical_goal_provider_cost_rows{goal_id="goal-1"} 3`,
+		`fak_fleet_canonical_goal_provider_cost_amount_rows{goal_id="goal-1"} 2`,
+		`fak_fleet_canonical_goal_cache_value_prompt_tokens_total{goal_id="goal-1"} 300`,
+		`fak_fleet_canonical_goal_cache_value_reused_tokens_total{goal_id="goal-1"} 180`,
+		`fak_fleet_canonical_goal_cache_value_reuse_ratio{goal_id="goal-1"} 0.6`,
+		`fak_fleet_canonical_goal_cache_value_rows{goal_id="goal-1"} 2`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "999") {
+		t.Fatalf("unbound root leaked into canonical totals:\n%s", got)
+	}
+}
+
 func TestFleetMetricsJoinsAuthoritativeProviderCostAndGatesCoverage(t *testing.T) {
 	base := time.Date(2026, 8, 19, 1, 0, 0, 0, time.UTC)
 	regPath := filepath.Join(t.TempDir(), "registrations.jsonl")

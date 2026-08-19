@@ -927,6 +927,41 @@
           "category": "incidental",
           "reason": "Canonical-goal fleet metrics adapter symbol; not a distinct mechanism in this concept family",
           "token": "fak_fleet_canonical_goal_cache_write_tokens_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Canonical-goal resource metrics adapter symbol; not a distinct mechanism in this concept family",
+          "token": "cachePrompt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Canonical-goal resource metrics adapter symbol; not a distinct mechanism in this concept family",
+          "token": "cacheReused"
+        },
+        {
+          "category": "incidental",
+          "reason": "Canonical-goal resource metrics adapter symbol; not a distinct mechanism in this concept family",
+          "token": "cacheReuseRatio"
+        },
+        {
+          "category": "incidental",
+          "reason": "Canonical-goal resource metrics adapter symbol; not a distinct mechanism in this concept family",
+          "token": "fak_fleet_canonical_goal_cache_value_prompt_tokens_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Canonical-goal resource metrics adapter symbol; not a distinct mechanism in this concept family",
+          "token": "fak_fleet_canonical_goal_cache_value_reuse_ratio"
+        },
+        {
+          "category": "incidental",
+          "reason": "Canonical-goal resource metrics adapter symbol; not a distinct mechanism in this concept family",
+          "token": "fak_fleet_canonical_goal_cache_value_reused_tokens_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Canonical-goal resource metrics adapter symbol; not a distinct mechanism in this concept family",
+          "token": "fak_fleet_canonical_goal_cache_value_rows"
         }
       ],
       "id": "cache",
@@ -999,8 +1034,11 @@
         "cacheBurstBacktest",
         "cacheCreationSpanLabel",
         "cacheMissing",
+        "cachePrompt",
         "cacheRatio",
         "cacheReceipt",
+        "cacheReuseRatio",
+        "cacheReused",
         "cacheRoots",
         "cacheRows",
         "cacheScopeConsistent",
@@ -1082,6 +1120,10 @@
         "dogfoodCacheWitnessMaxAge",
         "droppedcachedtokens",
         "fak_fleet_canonical_goal_cache_read_tokens_total",
+        "fak_fleet_canonical_goal_cache_value_prompt_tokens_total",
+        "fak_fleet_canonical_goal_cache_value_reuse_ratio",
+        "fak_fleet_canonical_goal_cache_value_reused_tokens_total",
+        "fak_fleet_canonical_goal_cache_value_rows",
         "fak_fleet_canonical_goal_cache_write_tokens_total",
         "fak_fleet_goal_cache_read_tokens_total",
         "fak_fleet_goal_cache_value_attribution_ratio",
@@ -4748,6 +4790,16 @@
           "category": "incidental",
           "reason": "Canonical-goal fleet metrics adapter symbol; not a distinct mechanism in this concept family",
           "token": "fak_fleet_canonical_goal_sessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Canonical-goal resource metrics adapter symbol; not a distinct mechanism in this concept family",
+          "token": "sessionAmbiguous"
+        },
+        {
+          "category": "incidental",
+          "reason": "Canonical-goal resource metrics adapter symbol; not a distinct mechanism in this concept family",
+          "token": "sessionRoot"
         }
       ],
       "id": "session-runtime",
@@ -5011,6 +5063,7 @@
         "serveSessionStateFile",
         "serveSessionStateOff",
         "sessionAffinity",
+        "sessionAmbiguous",
         "sessionBearer",
         "sessionCapabilityCorpus",
         "sessionCapabilityDefinition",
@@ -5040,6 +5093,7 @@
         "sessionProcess",
         "sessionRecoveryResult",
         "sessionRegistryRecoveryStage",
+        "sessionRoot",
         "sessionRoots",
         "session_compaction_thrash",
         "session_counters_reset",

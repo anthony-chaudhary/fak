@@ -402,18 +402,22 @@ func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usa
 	w.gauge("fak_fleet_goal_output_tokens_by_attribution_total", "Gateway output tokens by root-goal attribution.", float64(attributed.OutputTokens), "attribution", "attributed")
 
 	w.gauge("fak_fleet_goal_output_tokens_by_attribution_total", "Gateway output tokens by root-goal attribution.", float64(unattributed.OutputTokens), "attribution", "unattributed")
-	renderFleetCanonicalGoalExposition(w, rows, goals, coverageThreshold)
+	renderFleetCanonicalGoalExposition(w, rows, goals, cost, cacheRows, coverageThreshold)
 }
 
-func renderFleetCanonicalGoalExposition(w *promWriter, rows []sessionregistry.Record, roots map[string]*fleetGoalAgg, coverageThreshold float64) {
+func renderFleetCanonicalGoalExposition(w *promWriter, rows []sessionregistry.Record, roots map[string]*fleetGoalAgg, cost providercost.Report, cacheRows []cachevalueledger.Row, coverageThreshold float64) {
 	type canonicalAgg struct {
-		rootIDs                    map[string]struct{}
-		attempts                   map[string]struct{}
-		sessions                   map[string]struct{}
-		resumes, witnessed         int
-		wallSeconds, activeSeconds float64
-		usage                      fleetUsageAgg
-		completed, failed, other   int
+		rootIDs                          map[string]struct{}
+		attempts                         map[string]struct{}
+		sessions                         map[string]struct{}
+		resumes, witnessed               int
+		wallSeconds, activeSeconds       float64
+		usage                            fleetUsageAgg
+		completed, failed, other         int
+		providerRows, providerAmountRows int
+		providerBilledMicroUSD           int64
+		cacheRows                        int
+		cachePrompt, cacheReused         uint64
 	}
 	rootGoals := map[string]string{}
 	rootConflict := map[string]bool{}
@@ -466,6 +470,40 @@ func renderFleetCanonicalGoalExposition(w *promWriter, rows []sessionregistry.Re
 			c.other++
 		}
 	}
+
+	for _, rootCost := range cost.Roots {
+		goalID := rootGoals[rootCost.RootRegistrationID]
+		if goalID == "" || rootConflict[rootCost.RootRegistrationID] || canonical[goalID] == nil {
+			continue
+		}
+		c := canonical[goalID]
+		c.providerRows += rootCost.Rows
+		c.providerAmountRows += rootCost.AmountRows
+		c.providerBilledMicroUSD += int64(rootCost.BilledMicroUSD)
+	}
+	sessionRoot, sessionAmbiguous := map[string]string{}, map[string]bool{}
+	for _, r := range rows {
+		sid, root := strings.TrimSpace(r.Identity.SessionID), strings.TrimSpace(r.RootRegistrationID)
+		if sid == "" || root == "" {
+			continue
+		}
+		if prior := sessionRoot[sid]; prior != "" && prior != root {
+			sessionAmbiguous[sid] = true
+		} else {
+			sessionRoot[sid] = root
+		}
+	}
+	for _, row := range cacheRows {
+		root := sessionRoot[strings.TrimSpace(row.SessionID)]
+		goalID := rootGoals[root]
+		if root == "" || sessionAmbiguous[row.SessionID] || goalID == "" || rootConflict[root] || canonical[goalID] == nil {
+			continue
+		}
+		c := canonical[goalID]
+		c.cacheRows++
+		c.cachePrompt += row.PromptTokens
+		c.cacheReused += row.ReusedTokens
+	}
 	ids := make([]string, 0, len(canonical))
 	for id := range canonical {
 		ids = append(ids, id)
@@ -486,6 +524,17 @@ func renderFleetCanonicalGoalExposition(w *promWriter, rows []sessionregistry.Re
 		w.gauge("fak_fleet_canonical_goal_cache_read_tokens_total", "Cache-read tokens from sessions attributed to bound execution roots.", float64(c.usage.CachedPromptTokens), labels...)
 		w.gauge("fak_fleet_canonical_goal_cache_write_tokens_total", "Cache-write tokens from sessions attributed to bound execution roots.", float64(c.usage.CacheCreationTokens), labels...)
 		w.gauge("fak_fleet_canonical_goal_tool_boundary_calls_total", "Tool-boundary calls from sessions attributed to bound execution roots.", float64(c.usage.Submits), labels...)
+		w.gauge("fak_fleet_canonical_goal_provider_billed_micro_usd_total", "Authoritative provider-export billed micro-USD folded from explicitly bound execution roots.", float64(c.providerBilledMicroUSD), labels...)
+		w.gauge("fak_fleet_canonical_goal_provider_cost_rows", "Provider billing-export rows folded from explicitly bound execution roots.", float64(c.providerRows), labels...)
+		w.gauge("fak_fleet_canonical_goal_provider_cost_amount_rows", "Provider billing-export rows with known amounts folded from explicitly bound execution roots.", float64(c.providerAmountRows), labels...)
+		w.gauge("fak_fleet_canonical_goal_cache_value_prompt_tokens_total", "Cache-value prompt tokens folded from explicitly bound execution roots.", float64(c.cachePrompt), labels...)
+		w.gauge("fak_fleet_canonical_goal_cache_value_reused_tokens_total", "Cache-value reused tokens folded from explicitly bound execution roots.", float64(c.cacheReused), labels...)
+		cacheReuseRatio := 0.0
+		if c.cachePrompt > 0 {
+			cacheReuseRatio = float64(c.cacheReused) / float64(c.cachePrompt)
+		}
+		w.gauge("fak_fleet_canonical_goal_cache_value_reuse_ratio", "Reused cache-value tokens divided by prompt tokens across explicitly bound execution roots.", cacheReuseRatio, labels...)
+		w.gauge("fak_fleet_canonical_goal_cache_value_rows", "Cache-value rows folded from explicitly bound execution roots.", float64(c.cacheRows), labels...)
 		w.gauge("fak_fleet_canonical_goal_execution_roots_by_outcome", "Execution roots by terminal outcome class.", float64(c.completed), append(labels, "outcome", "completed")...)
 		w.gauge("fak_fleet_canonical_goal_execution_roots_by_outcome", "Execution roots by terminal outcome class.", float64(c.failed), append(labels, "outcome", "failed")...)
 		w.gauge("fak_fleet_canonical_goal_execution_roots_by_outcome", "Execution roots by terminal outcome class.", float64(c.other), append(labels, "outcome", "nonterminal_or_unknown")...)
