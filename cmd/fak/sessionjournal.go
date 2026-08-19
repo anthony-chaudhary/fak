@@ -142,6 +142,8 @@ func runSessionJournalReport(stdout, stderr io.Writer, argv []string) int {
 	staleMin := fs.Int("stale-after-min", 15, "same-boot last-seen older than this (minutes) -> STALE (0 disables)")
 	all := fs.Bool("all", false, "include CLOSED sessions")
 	crashedOnly := fs.Bool("crashed", false, "only the CRASHED (resume-candidate) set")
+	causes := fs.Bool("causes", false, "correlate CRASHED rows with Windows Event-1000 causes")
+	causeSince := fs.Duration("cause-since", 24*time.Hour, "Windows event-log lookback for crash causes")
 	bootOverride := fs.String("boot-time", "", "override the machine boot instant (RFC3339) — for folding a journal copied from a crashed box")
 	if !parseFlags(fs, argv) {
 		return 2
@@ -186,6 +188,15 @@ func runSessionJournalReport(stdout, stderr io.Writer, argv []string) int {
 	classified = filterClassified(classified, *all, *crashedOnly)
 	sortClassified(classified)
 	counts := sessionjournal.Counts(sessionjournal.Classify(sessions, cfg))
+	var crashCauses []event1000Cause
+	if *causes {
+		records, reason := readEvent1000Records(*causeSince)
+		if reason != "" {
+			fmt.Fprintln(stderr, "fak sessionjournal report:", reason)
+			return 1
+		}
+		crashCauses = matchEvent1000Crashes(classified, consoleFaultEventsFromWinRecords(records, now.UnixMilli()), event1000WindowMS)
+	}
 
 	if *asJSON {
 		return encodeJSONOrFail(stdout, stderr, map[string]any{
@@ -201,6 +212,7 @@ func runSessionJournalReport(stdout, stderr io.Writer, argv []string) int {
 				"closed":  counts[sessionjournal.StatusClosed],
 			},
 			"sessions": reportRows(classified),
+			"causes":   crashCauses,
 		}, "fak sessionjournal")
 	}
 
@@ -213,6 +225,9 @@ func runSessionJournalReport(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	renderSessionJournalTable(stdout, classified)
+	for _, cause := range crashCauses {
+		fmt.Fprintf(stdout, "CAUSE\t%s\t%s\t%s\t%s\n", cause.SessionID, cause.Cause, cause.Tool, cause.Detail)
+	}
 	if counts[sessionjournal.StatusCrashed] > 0 && !*crashedOnly {
 		fmt.Fprintln(stdout, "\nCRASHED rows are resume candidates — each carries the cwd and remaining drive (budget/spend/generation) to relaunch from; DRIVE=- means no carried drive (legacy row).")
 	}
