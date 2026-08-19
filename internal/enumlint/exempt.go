@@ -40,7 +40,10 @@ const ExemptDirective = "enumlint:exempt"
 // exemption is a stronger claim — "this site is CORRECT to be partial, forever"
 // — and every entry here has to earn it at its own site. Filling this table from
 // a baseline sweep would convert a measurement into a hundred unread assertions.
-var exemptions = map[string]string{}
+var exemptions = map[string]string{
+	"literal|internal/fp4meta|allCapabilities.ScaleFormats": "ScaleNone is deliberately excluded: the fixture describes FP4 hardware that requires explicit scaling.",
+	"literal|internal/kvquantmeta|testSupport.Precisions":   "FP16 and BF16 are unquantized controls, deliberately outside the quantized-support fixture.",
+}
 
 // LookupExemption is the default Config.Exempt. An entry with a blank reason is
 // not an exemption.
