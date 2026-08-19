@@ -716,6 +716,10 @@ type Config struct {
 	// that already carries a breakpoint bails already_set). Anthropic passthrough only; a zero
 	// value leaves the pre-flight gate OFF (the compaction/TTL placements are unaffected either way).
 	VCacheAnchor bool
+	// VCacheCalibration is an optional fresh, measured provider calibration. A
+	// measured minimum prefix gates cache_control authoring below the provider's
+	// observed cacheability floor; nil preserves the static default-on posture.
+	VCacheCalibration *VCacheRuntimeCalibration
 	// ToolFloorDenies, when non-nil, is the INBOUND twin of CompactHistoryBudget: the
 	// host's pure predicate "would the capability floor DEFAULT_DENY this tool name for
 	// every possible argument?" — true ONLY for a name the policy admits under no args
@@ -1748,7 +1752,8 @@ type Server struct {
 	// star-anchor pre-flight rewrite (maybeAnchorAnthropicRaw) by DEFAULT — hoisting volatile
 	// system blocks behind a byte-stable cacheable anchor and placing a breakpoint the caller did
 	// not send — DECOUPLED from compactHistoryBudget (#1493). false leaves the pre-flight gate off.
-	vcacheAnchor bool
+	vcacheAnchor      bool
+	vcacheCalibration *VCacheRuntimeCalibration
 
 	// toolFloorDenies mirrors Config.ToolFloorDenies: the INBOUND-half predicate over a
 	// tool name (true ⇔ the floor DEFAULT_DENYs it for every arg). When non-nil the
@@ -2090,6 +2095,7 @@ func New(cfg Config) (*Server, error) {
 		provider:                     strings.TrimSpace(cfg.Provider),
 		prefixGuard:                  cfg.PrefixGuard || envEnabled("FAK_ABLATE_PREFIX_GUARD"),
 		vcacheAnchor:                 cfg.VCacheAnchor || envEnabled("FAK_ABLATE_BP_PLAN"),
+		vcacheCalibration:            cloneVCacheRuntimeCalibration(cfg.VCacheCalibration),
 		toolFloorDenies:              cfg.ToolFloorDenies,
 		exposeAllow:                  exposeAllow,
 		deferMCPTools:                cfg.DeferMCPTools || envEnabled("FAK_DEFER_MCP_TOOLS"),

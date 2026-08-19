@@ -1012,7 +1012,8 @@ func cmdManageCommand(commandName string, argv []string) {
 		// system blocks behind a byte-stable anchor and splice a cache_control breakpoint the
 		// caller did NOT send — DECOUPLED from CompactHistoryBudget so --compact-history-budget=0
 		// no longer takes anchoring down with it. Fail-safe identity on any ambiguity.
-		VCacheAnchor: *vcacheAnchor,
+		VCacheAnchor:      *vcacheAnchor,
+		VCacheCalibration: loadVCacheRuntimeCalibration(up, gatewayModel),
 		// Inbound twin of #555: prune tool DEFINITIONS the floor can never admit from the
 		// Anthropic passthrough's tools[], cache-prefix-preserving. Default-ON because it is
 		// behavior-preserving by construction (a pruned tool stays DEFAULT_DENY at the kernel),

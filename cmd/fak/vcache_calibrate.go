@@ -10,8 +10,10 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
+	"github.com/anthony-chaudhary/fak/internal/vcachecalibration"
 )
 
 func runVCacheCalibrate(stdout, stderr io.Writer, argv []string) int {
@@ -21,6 +23,8 @@ func runVCacheCalibrate(stdout, stderr io.Writer, argv []string) int {
 	filePath := fs.String("file", "", "alias for --samples")
 	asJSON := fs.Bool("json", false, "emit the fitted calibration JSON")
 	out := fs.String("out", "", "write the fitted calibration JSON to this file")
+	ledger := fs.String("ledger", "", "append this fitted provider/model calibration to a runtime JSONL ledger")
+	source := fs.String("source", "probe:vcache-calibrate", "calibration source recorded with --ledger")
 	defaults := vcachecal.DefaultHypothesis()
 	ttlMillis := fs.Int64("ttl-ms", defaults.TTLMillis, "fallback TTL hypothesis when probes do not measure it")
 	minPrefix := fs.Int64("min-prefix-tokens", defaults.MinPrefixTokens, "fallback provider minimum prefix hypothesis")
@@ -59,6 +63,17 @@ func runVCacheCalibrate(stdout, stderr io.Writer, argv []string) int {
 	if strings.TrimSpace(*out) != "" {
 		if err := writeJSONFile(*out, cal); err != nil {
 			fmt.Fprintf(stderr, "fak vcache calibrate: write %q: %v\n", *out, err)
+			return 2
+		}
+	}
+	if strings.TrimSpace(*ledger) != "" {
+		row, err := vcachecalibration.CalibrationFromProbe(cal, *source, len(samples), time.Now())
+		if err != nil {
+			fmt.Fprintf(stderr, "fak vcache calibrate: runtime calibration: %v\n", err)
+			return 2
+		}
+		if err := vcachecalibration.AppendCalibration(*ledger, row); err != nil {
+			fmt.Fprintf(stderr, "fak vcache calibrate: append runtime calibration: %v\n", err)
 			return 2
 		}
 	}

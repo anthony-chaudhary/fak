@@ -120,6 +120,9 @@ type CacheUsage struct {
 type CachePricing struct {
 	InputPerMTokUSD  float64
 	OutputPerMTokUSD float64
+	// CacheReadMultiplier overrides the provider default only when positive.
+	// Fresh measured calibration may set it; zero preserves the static table.
+	CacheReadMultiplier float64
 }
 
 // DefaultCachePricing resolves the small built-in price table used when a caller
@@ -179,7 +182,11 @@ func perToken(perMTok float64) float64 { return perMTok / 1_000_000 }
 func (p CachePricing) CostUSD(u CacheUsage) float64 {
 	in := perToken(p.InputPerMTokUSD)
 	cost := float64(u.InputTokens) * in
-	cost += float64(u.CacheReadTokens) * in * CacheReadMultiplier
+	readMult := p.CacheReadMultiplier
+	if readMult <= 0 {
+		readMult = CacheReadMultiplier
+	}
+	cost += float64(u.CacheReadTokens) * in * readMult
 	cost += float64(u.CacheCreationTokens) * in * u.WriteTTL.WriteMultiplier()
 	cost += float64(u.OutputTokens) * perToken(p.OutputPerMTokUSD)
 	return cost

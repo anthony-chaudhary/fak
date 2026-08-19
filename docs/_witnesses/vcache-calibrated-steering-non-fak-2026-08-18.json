@@ -1,0 +1,41 @@
+{
+  "schema": "fak.vcache.calibrated-steering-witness.v1",
+  "captured_at": "2026-08-19T05:33:00Z",
+  "operator_local_date": "2026-08-18",
+  "workspace_kind": "temporary non-FAK git repository",
+  "probe": {
+    "provider": "openai",
+    "model": "gpt-test",
+    "ttl_millis": 30000,
+    "ttl_measured": true,
+    "min_prefix_tokens": 2048,
+    "min_prefix_measured": true,
+    "read_mult": 0.2,
+    "read_mult_measured": true
+  },
+  "runtime_witnesses": [
+    {
+      "test": "TestFreshMinimumPrefixCalibrationSteersAnchorWireDecision",
+      "effect": "the same Anthropic request is cache_control-authored with no calibration and remains byte-identical when a fresh measured minimum prefix exceeds its estimated tokens"
+    },
+    {
+      "test": "TestFreshReadMultiplierChangesRuntimePricingDecision",
+      "effect": "one million cached-read tokens at $10/MTok change from $1.00 under the static 0.1 multiplier to $2.50 under a fresh measured 0.25 multiplier; an unmeasured value stays $1.00"
+    },
+    {
+      "command": "fak doctor launch-posture --entrypoint guard --harness codex --provider openai --workspace TEMP_NON_FAK_REPO --json",
+      "effect": "vcache-calibration reports active and explicitly says fresh and steering with min-prefix=2048 and read-mult=0.2"
+    }
+  ],
+  "safety": {
+    "stale": "not loaded; static defaults preserved",
+    "observation_only": "not loaded; launch posture reports inert",
+    "model_mismatch": "does not steer another wire model"
+  },
+  "limitations": [
+    "The probe sample is deterministic fixture data, not a new live provider measurement.",
+    "The prior dated OpenAI live feedback witness remains docs/_witnesses/vcache-provider-calibration-live-2026-08-18.json.",
+    "TTL is persisted and freshness-gated but does not yet alter the provider TTL-tier decision.",
+    "Provider heartbeat warming and calibrated cache-write multipliers remain open in #1497."
+  ]
+}

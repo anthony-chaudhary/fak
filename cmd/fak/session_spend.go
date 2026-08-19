@@ -74,6 +74,12 @@ var servedSpend struct {
 // wins (same inputs resolve identically, so repeated boots are idempotent).
 func armServedSpendPricing(provider, context string) (string, bool) {
 	p, source, ok := resolveSpendPricing(provider, context)
+	if cal := loadVCacheRuntimeCalibration(provider, context); cal != nil {
+		p = cal.ApplyCachePricing(p)
+		if cal.ReadMultMeasured {
+			source += "+vcache-calibrated-read"
+		}
+	}
 	servedSpend.mu.Lock()
 	defer servedSpend.mu.Unlock()
 	servedSpend.armed = true

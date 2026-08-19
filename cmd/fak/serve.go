@@ -524,6 +524,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		BaseURL:                      *sf.baseURL,
 		ReplicaBaseURLs:              sf.replicaBaseURLs.Values(),
 		Provider:                     *sf.provider,
+		VCacheCalibration:            loadVCacheRuntimeCalibration(*sf.provider, *sf.model),
 		APIKey:                       rt.apiKey,
 		EngineCacheEngine:            *sf.engineCacheEngine,
 		EngineCacheBaseURL:           *sf.engineCacheBaseURL,

@@ -887,6 +887,12 @@ func (s *Server) maybeAnchorAnthropicRaw(req *agent.AnthropicMessagesRequest, tr
 	if !s.vcacheAnchor {
 		return false // configured OFF (--vcache-anchor=false)
 	}
+	// A fresh measured provider floor changes the wire decision: do not author a
+	// cache breakpoint for a request the provider cannot cache. Missing/stale or
+	// observation-only calibration is never wired here, preserving defaults.
+	if !s.vcacheCalibration.admitsAnchor(req.Model, agent.EstimateAnthropicTokens(req)) {
+		return false
+	}
 	placed, placement := agent.PlaceAnthropicCacheBreakpointWithOutcome(req.Raw)
 	req.Raw = placed
 	s.metrics.observePlacement(placement)

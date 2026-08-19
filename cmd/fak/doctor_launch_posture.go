@@ -190,8 +190,15 @@ func postureVCacheCalibration(opts launchPostureOptions, wire string) launchPost
 	status := statuses[0]
 	m := launchPostureMechanism{Name: "vcache-calibration", Configured: true}
 	if status.State == "fresh" {
-		m.State = "active"
-		m.Reason = fmt.Sprintf("dated %s calibration is fresh (predictions=%d, false-warm=%.4f)", provider, status.Row.Predictions, status.Row.FalseWarmRate)
+		runtime, steering, runtimeReason := vcachecalibration.FreshRuntimeConstants(path, provider, "", time.Now(), vcachecalibration.DefaultCalibrationTTL)
+		if steering {
+			m.State = "active"
+			m.Reason = fmt.Sprintf("dated %s calibration is fresh and steering (min-prefix=%d measured=%t, read-mult=%.4g measured=%t)", provider, runtime.MinPrefixTokens, runtime.MinPrefixMeasured, runtime.ReadMult, runtime.ReadMultMeasured)
+			return m
+		}
+		m.State = "inert"
+		m.Reason = "dated provider feedback is fresh but observational only: " + runtimeReason
+		m.Action = "run fak vcache calibrate --samples PROBES --ledger " + path + " with measured provider probes"
 		return m
 	}
 	m.State = "inert"

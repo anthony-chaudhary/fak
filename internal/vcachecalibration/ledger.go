@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
+	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 )
 
@@ -36,6 +37,16 @@ type ProviderCalibration struct {
 	FalseWarmRate  float64 `json:"false_warm_rate"`
 	FalseColdRate  float64 `json:"false_cold_rate"`
 	StaleAfterDays int     `json:"stale_after_days"`
+
+	// Probe-fitted constants are optional because ordinary guard/serve feedback only
+	// calibrates prediction error. Runtime steering trusts a constant only when its
+	// corresponding measured bit is true and the dated row is fresh.
+	TTLMillis         int64   `json:"ttl_millis,omitempty"`
+	TTLMeasured       bool    `json:"ttl_measured,omitempty"`
+	MinPrefixTokens   int64   `json:"min_prefix_tokens,omitempty"`
+	MinPrefixMeasured bool    `json:"min_prefix_measured,omitempty"`
+	ReadMult          float64 `json:"read_mult,omitempty"`
+	ReadMultMeasured  bool    `json:"read_mult_measured,omitempty"`
 }
 
 type CalibrationStatus struct {
@@ -76,9 +87,36 @@ func CalibrationFromTurns(provider, source string, turns []vcacheobserve.Turn, n
 	}, true
 }
 
+// CalibrationFromProbe turns fitted probe output into the same dated provider/model
+// ledger used by launch diagnostics. Assumed fallback values remain visible in the
+// row, but their measured bits keep runtime steering from silently trusting them.
+func CalibrationFromProbe(cal vcachecal.Calibration, source string, samples int, now time.Time) (ProviderCalibration, error) {
+	row := ProviderCalibration{
+		Schema: CalibrationSchema, TS: now.UTC().Format(time.RFC3339Nano),
+		Provider: strings.ToLower(strings.TrimSpace(cal.Provider)), Model: strings.TrimSpace(cal.ModelID),
+		Source: strings.TrimSpace(source), Turns: samples, Predictions: samples, TrueCold: samples,
+		StaleAfterDays: int(DefaultCalibrationTTL / (24 * time.Hour)),
+		TTLMillis:      cal.TTLMillis, TTLMeasured: cal.TTLMeasured,
+		MinPrefixTokens: cal.MinPrefixTokens, MinPrefixMeasured: cal.MinPrefixMeasured,
+		ReadMult: cal.ReadMult, ReadMultMeasured: cal.ReadMultMeasured,
+	}
+	if row.Source == "" {
+		row.Source = "probe"
+	}
+	if err := ValidateCalibration(row); err != nil {
+		return ProviderCalibration{}, err
+	}
+	return row, nil
+}
+
 func AppendCalibration(path string, row ProviderCalibration) error {
 	if err := ValidateCalibration(row); err != nil {
 		return err
+	}
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
 	}
 	b, err := json.Marshal(row)
 	if err != nil {
@@ -99,6 +137,15 @@ func ValidateCalibration(row ProviderCalibration) error {
 	}
 	if row.TrueWarm+row.FalseWarm+row.TrueCold+row.FalseCold != row.Predictions {
 		return errors.New("prediction class counts do not sum to predictions")
+	}
+	if row.TTLMeasured && row.TTLMillis <= 0 {
+		return errors.New("measured ttl_millis must be positive")
+	}
+	if row.MinPrefixMeasured && row.MinPrefixTokens <= 0 {
+		return errors.New("measured min_prefix_tokens must be positive")
+	}
+	if row.ReadMultMeasured && row.ReadMult <= 0 {
+		return errors.New("measured read_mult must be positive")
 	}
 	return nil
 }

@@ -132,14 +132,14 @@ func TestLaunchPostureFlagsMissingVCacheCalibration(t *testing.T) {
 	}
 }
 
-func TestLaunchPostureAcceptsFreshVCacheCalibration(t *testing.T) {
+func TestLaunchPostureAcceptsFreshSteeringVCacheCalibration(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv(ledgerRootEnv, root)
 	path := nightrunLedgerPath(vcachecalibration.DefaultCalibrationRel)
 	row := vcachecalibration.ProviderCalibration{
 		Schema: vcachecalibration.CalibrationSchema, TS: time.Now().UTC().Format(time.RFC3339Nano),
 		Provider: "openai", Model: "gpt-test", Source: "test", Turns: 2, Predictions: 1,
-		TrueWarm: 1, StaleAfterDays: 7,
+		TrueWarm: 1, StaleAfterDays: 7, MinPrefixTokens: 2048, MinPrefixMeasured: true,
 	}
 	if err := vcachecalibration.AppendCalibration(path, row); err != nil {
 		t.Fatal(err)
@@ -149,7 +149,28 @@ func TestLaunchPostureAcceptsFreshVCacheCalibration(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := postureByName(t, report, "vcache-calibration")
-	if got.State != "active" || !strings.Contains(got.Reason, "predictions=1") {
+	if got.State != "active" || !strings.Contains(got.Reason, "steering") {
 		t.Fatalf("calibration=%+v", got)
+	}
+}
+
+func TestLaunchPostureFlagsFreshObservationOnlyCalibration(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(ledgerRootEnv, root)
+	path := nightrunLedgerPath(vcachecalibration.DefaultCalibrationRel)
+	row := vcachecalibration.ProviderCalibration{
+		Schema: vcachecalibration.CalibrationSchema, TS: time.Now().UTC().Format(time.RFC3339Nano),
+		Provider: "openai", Model: "gpt-test", Source: "test", Turns: 2, Predictions: 1, TrueWarm: 1,
+	}
+	if err := vcachecalibration.AppendCalibration(path, row); err != nil {
+		t.Fatal(err)
+	}
+	report, err := deriveLaunchPosture(launchPostureOptions{entrypoint: "guard", harness: "codex", provider: "openai", workspace: t.TempDir(), compactHistory: gateway.DefaultCompactHistoryBudget, elideStaleReads: true, deferColdTools: true, vcacheAnchor: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := postureByName(t, report, "vcache-calibration")
+	if got.State != "inert" || !strings.Contains(got.Reason, "observational only") || report.OK {
+		t.Fatalf("calibration=%+v report.OK=%v", got, report.OK)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/vcachecal"
+	"github.com/anthony-chaudhary/fak/internal/vcachecalibration"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
 )
 
@@ -88,5 +89,25 @@ func TestRunVCacheCalibrateRejectsMissingRequiredFields(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "prefix_tokens is required") {
 		t.Fatalf("missing field error not actionable:\n%s", errb.String())
+	}
+}
+
+func TestRunVCacheCalibrateAppendsRuntimeLedger(t *testing.T) {
+	samples := writeLines(t, "runtime-probe.jsonl",
+		`{"provider":"anthropic","model_id":"claude-sonnet","endpoint":"messages","delay_millis":30000,"prefix_tokens":2048,"cached_tokens":1800,"read_cost_equiv":180}`,
+	)
+	ledger := filepath.Join(t.TempDir(), "runtime.jsonl")
+	var stdout, stderr bytes.Buffer
+	rc := runVCacheCalibrate(&stdout, &stderr, []string{"--samples", samples, "--ledger", ledger, "--source", "probe:test", "--json"})
+	if rc != 0 {
+		t.Fatalf("rc=%d stderr=%s", rc, stderr.String())
+	}
+	latest, err := vcachecalibration.ReadLatestCalibrations(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := latest["anthropic"]
+	if row.Model != "claude-sonnet" || !row.MinPrefixMeasured || row.MinPrefixTokens != 2048 || !row.ReadMultMeasured {
+		t.Fatalf("row=%+v", row)
 	}
 }

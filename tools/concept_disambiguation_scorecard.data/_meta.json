@@ -792,10 +792,36 @@
           "category": "incidental",
           "reason": "launch-doctor adapter that reads provider cache calibration status",
           "token": "postureVCacheCalibration"
+        },
+        {
+          "category": "incidental",
+          "reason": "provider calibration wiring reuses the established vCache calibration concept",
+          "token": "loadVCacheRuntimeCalibration"
+        },
+        {
+          "category": "incidental",
+          "reason": "provider calibration wiring reuses the established vCache calibration concept",
+          "token": "VCacheRuntimeCalibration"
+        },
+        {
+          "category": "incidental",
+          "reason": "provider calibration wiring reuses the established vCache calibration concept",
+          "token": "FreshRuntimeConstants"
+        },
+        {
+          "category": "incidental",
+          "reason": "copy helper for the established vCache calibration config",
+          "token": "cloneVCacheRuntimeCalibration"
+        },
+        {
+          "category": "incidental",
+          "reason": "applies the established provider cache pricing calibration",
+          "token": "ApplyCachePricing"
         }
       ],
       "id": "cache",
       "ignore": [
+        "ApplyCachePricing",
         "CACHE_SCOPE",
         "CacheCachedPromptTokens",
         "CacheControlWrites",
@@ -823,6 +849,7 @@
         "FAK_ORG_POLICY_CACHE_PATH",
         "FAK_TOKEN_CACHE",
         "FAK_TOKEN_CACHE_MAX_BYTES",
+        "FreshRuntimeConstants",
         "InputCached",
         "InputCachedPerMillion",
         "InputUncached",
@@ -847,6 +874,7 @@
         "UncachedMS",
         "UpgradeAnthropicStableCacheTTL1hHeadOnly",
         "UpgradeAnthropicStableCacheTTL1hWithMessagePrefixes",
+        "VCacheRuntimeCalibration",
         "VerdictNoCacheStateDelta",
         "WindowCache",
         "appendVCacheCalibration",
@@ -921,6 +949,7 @@
         "claudeKeychainCacheMu",
         "claudeKeychainCacheNow",
         "claudeKeychainCacheTTL",
+        "cloneVCacheRuntimeCalibration",
         "cmdCacheValueGateScore",
         "collectObservedCacheLedger",
         "compactcachereads",
@@ -952,6 +981,7 @@
         "lastcacherd",
         "liveMatrixPrefixCache",
         "loadCacheValueGateBaseline",
+        "loadVCacheRuntimeCalibration",
         "maybeUpgradeAnthropicCacheTTL1HScoped",
         "maybeupgradeanthropiccachettl1h",
         "microCacheArm",
