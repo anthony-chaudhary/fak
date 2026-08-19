@@ -1275,6 +1275,7 @@ type Server struct {
 	sessionFeed              *sessionFeed     // the drive-state revision feed (#630; host-pushed via PublishSessionRevision)
 	metrics                  *gatewayMetrics
 	otlp                     *otlpExporter
+	traceparentInvalid       uint64
 	// toolPages is the tool catalog's home (#2440): each advertised tool schema is a
 	// content-hashed read-only page owned by the ctxmmu, registered at the
 	// maybeCompactInboundTools seam. The page table — not the transcript — is the

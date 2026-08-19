@@ -326,6 +326,9 @@ func ensureHTTPTrace(s *Server, w http.ResponseWriter, r *http.Request) string {
 	if parsed, err := parseTraceparent(r.Header.Get(traceparentHeader)); err == nil {
 		ctx = newTraceContext(parsed.TraceID, parsed.Flags)
 	} else {
+		if strings.TrimSpace(r.Header.Get(traceparentHeader)) != "" && s != nil {
+			atomic.AddUint64(&s.traceparentInvalid, 1)
+		}
 		legacy := requestTraceID(r)
 		if len(legacy) == 32 {
 			if _, err := hex.DecodeString(legacy); err != nil {

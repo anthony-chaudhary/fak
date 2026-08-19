@@ -294,6 +294,7 @@ func (s *Server) renderMetrics() string {
 	writeCacheAttributionMetrics(&b, cacheSavings)
 
 	s.writeModelLoadMetrics(&b)
+	fmt.Fprintf(&b, "# HELP fak_traceparent_invalid_total Malformed inbound W3C traceparent headers.\n# TYPE fak_traceparent_invalid_total counter\nfak_traceparent_invalid_total %d\n", atomic.LoadUint64(&s.traceparentInvalid))
 	otlp := s.otlp.stats()
 	fmt.Fprintf(&b, "# HELP fak_otlp_spans_total OTLP spans by outcome.\n# TYPE fak_otlp_spans_total counter\n")
 	fmt.Fprintf(&b, "fak_otlp_spans_total{outcome=\"accepted\"} %d\n", otlp.Accepted)
