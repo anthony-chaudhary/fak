@@ -42,6 +42,9 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 	orderBy := fs.String("order-by", "elapsed_desc", "elapsed|progress_age|started|ended|cost|identity with _asc or _desc")
 	asJSON := fs.Bool("json", false, "emit versioned machine JSON")
 	showSchema := fs.Bool("schema", false, "emit the shared relation schema descriptor")
+	benchmark := fs.Bool("benchmark", false, "run the deterministic relation-path benchmark")
+	benchmarkSizes := fs.String("benchmark-sizes", "1000,10000,100000", "comma-separated even lifecycle-event counts")
+	benchmarkRepetitions := fs.Int("benchmark-repetitions", 5, "samples per benchmark path (1..20)")
 	limit := fs.Int("limit", 200, "maximum returned rows")
 	historyWindowText := fs.String("history", "", "historical lookback window (for example 7d)")
 	groupBy := fs.String("group-by", "", "aggregate grouping (currently lane,state)")
@@ -56,9 +59,37 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "       fak agents --query \"SELECT lane,state,count(*) AS agents,max(elapsed_ms) AS max_elapsed_ms FROM agents WHERE started_at >= now()-interval '7 day' GROUP BY lane,state ORDER BY max_elapsed_ms DESC\"")
 		fmt.Fprintln(stderr, "--query is a constrained read-only grammar, not arbitrary SQL")
 		fmt.Fprintf(stderr, "--schema --json emits %s\n", agentquery.DescriptorSchema)
+		fmt.Fprintf(stderr, "--benchmark --json emits %s\n", agentquery.BenchmarkSchema)
 	}
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
+	}
+	if *benchmark {
+		if !*asJSON {
+			fmt.Fprintf(stderr, "fak agents: --benchmark requires --json (%s)\n", agentquery.BenchmarkSchema)
+			return 2
+		}
+		counts, err := parseBenchmarkSizes(*benchmarkSizes)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak agents: benchmark sizes: %v\n", err)
+			return 2
+		}
+		now := time.Now().UTC()
+		if *nowUnix != 0 {
+			now = time.Unix(*nowUnix, 0).UTC()
+		}
+		report, err := agentquery.RunBenchmark(counts, *benchmarkRepetitions, now)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak agents: benchmark: %v\n", err)
+			return 1
+		}
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fmt.Fprintf(stderr, "fak agents: encode benchmark: %v\n", err)
+			return 1
+		}
+		return 0
 	}
 	if *showSchema {
 		if !*asJSON {
@@ -427,4 +458,20 @@ func nullableFloat(v *float64) string {
 		return "-"
 	}
 	return fmt.Sprintf("%.3f", *v)
+}
+
+func parseBenchmarkSizes(raw string) ([]int, error) {
+	parts := strings.Split(raw, ",")
+	if len(parts) == 0 || len(parts) > 10 {
+		return nil, fmt.Errorf("want 1..10 counts")
+	}
+	out := make([]int, 0, len(parts))
+	for _, part := range parts {
+		n, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil || n < 2 || n > 1_000_000 || n%2 != 0 {
+			return nil, fmt.Errorf("%q must be even and within 2..1000000", part)
+		}
+		out = append(out, n)
+	}
+	return out, nil
 }

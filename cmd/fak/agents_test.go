@@ -366,3 +366,23 @@ func TestAgentsFullAggregatesFlagsAndQueryEquivalent(t *testing.T) {
 		t.Fatalf("result=%+v", a)
 	}
 }
+
+func TestAgentsBenchmarkJSON(t *testing.T) {
+	var out, errout bytes.Buffer
+	code := runAgents(&out, &errout, []string{"--benchmark", "--benchmark-sizes", "10,100", "--benchmark-repetitions", "1", "--now", "1787140800", "--json"})
+	if code != 0 {
+		t.Fatalf("code=%d err=%s", code, errout.String())
+	}
+	var got agentquery.BenchmarkReport
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Schema != agentquery.BenchmarkSchema || len(got.Cases) != 2 || got.OS == "" {
+		t.Fatalf("got=%+v", got)
+	}
+	out.Reset()
+	errout.Reset()
+	if code := runAgents(&out, &errout, []string{"--benchmark"}); code != 2 || !strings.Contains(errout.String(), agentquery.BenchmarkSchema) {
+		t.Fatalf("code=%d err=%s", code, errout.String())
+	}
+}

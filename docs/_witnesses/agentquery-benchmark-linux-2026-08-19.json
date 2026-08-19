@@ -1,0 +1,125 @@
+{
+  "schema": "fak-agentquery-benchmark/1",
+  "os": "linux",
+  "arch": "amd64",
+  "go_version": "go1.26.6",
+  "observed_at": "2026-08-19T12:00:00Z",
+  "repetitions": 5,
+  "cases": [
+    {
+      "events": 1000,
+      "journal_bytes": 131777,
+      "paths": [
+        {
+          "name": "direct_in_process_fold",
+          "median_ns": 2373644,
+          "median_allocated_bytes": 3122144,
+          "result_digest": "sha256:51126a785495d4e2735f49d5f45b40b67b5c20095372ab5180951d8632299f43",
+          "process_starts": 0,
+          "operator_steps": 1,
+          "external_dependency": null,
+          "measurement_scope": "includes JSONL decode, authoritative fold, and aggregate"
+        },
+        {
+          "name": "ps_json_jq_pipeline",
+          "median_ns": 2890587,
+          "median_allocated_bytes": 4070424,
+          "result_digest": "sha256:51126a785495d4e2735f49d5f45b40b67b5c20095372ab5180951d8632299f43",
+          "process_starts": 2,
+          "operator_steps": 3,
+          "external_dependency": "jq",
+          "measurement_scope": "models fak ps JSON serialization plus jq-equivalent decode/fold; excludes OS process startup"
+        },
+        {
+          "name": "direct_jsonl_scan",
+          "median_ns": 2005620,
+          "median_allocated_bytes": 2644144,
+          "result_digest": "sha256:51126a785495d4e2735f49d5f45b40b67b5c20095372ab5180951d8632299f43",
+          "process_starts": 0,
+          "operator_steps": 2,
+          "external_dependency": null,
+          "measurement_scope": "single-pass JSONL decode and aggregate without authoritative fold"
+        }
+      ]
+    },
+    {
+      "events": 10000,
+      "journal_bytes": 1317791,
+      "paths": [
+        {
+          "name": "direct_in_process_fold",
+          "median_ns": 31486899,
+          "median_allocated_bytes": 35198496,
+          "result_digest": "sha256:056a0dbef7f0debf6bfbbb6191bb06aee4b113dd94ba54b56c10608f78ed5968",
+          "process_starts": 0,
+          "operator_steps": 1,
+          "external_dependency": null,
+          "measurement_scope": "includes JSONL decode, authoritative fold, and aggregate"
+        },
+        {
+          "name": "ps_json_jq_pipeline",
+          "median_ns": 42374814,
+          "median_allocated_bytes": 46920136,
+          "result_digest": "sha256:056a0dbef7f0debf6bfbbb6191bb06aee4b113dd94ba54b56c10608f78ed5968",
+          "process_starts": 2,
+          "operator_steps": 3,
+          "external_dependency": "jq",
+          "measurement_scope": "models fak ps JSON serialization plus jq-equivalent decode/fold; excludes OS process startup"
+        },
+        {
+          "name": "direct_jsonl_scan",
+          "median_ns": 34490225,
+          "median_allocated_bytes": 31044944,
+          "result_digest": "sha256:056a0dbef7f0debf6bfbbb6191bb06aee4b113dd94ba54b56c10608f78ed5968",
+          "process_starts": 0,
+          "operator_steps": 2,
+          "external_dependency": null,
+          "measurement_scope": "single-pass JSONL decode and aggregate without authoritative fold"
+        }
+      ]
+    },
+    {
+      "events": 100000,
+      "journal_bytes": 13177931,
+      "paths": [
+        {
+          "name": "direct_in_process_fold",
+          "median_ns": 428604921,
+          "median_allocated_bytes": 373005520,
+          "result_digest": "sha256:a04dc34e26c8b38e0aac39715f9a5dd2ebe0bd60f3566a42219f20fd7979178c",
+          "process_starts": 0,
+          "operator_steps": 1,
+          "external_dependency": null,
+          "measurement_scope": "includes JSONL decode, authoritative fold, and aggregate"
+        },
+        {
+          "name": "ps_json_jq_pipeline",
+          "median_ns": 524884142,
+          "median_allocated_bytes": 523013080,
+          "result_digest": "sha256:a04dc34e26c8b38e0aac39715f9a5dd2ebe0bd60f3566a42219f20fd7979178c",
+          "process_starts": 2,
+          "operator_steps": 3,
+          "external_dependency": "jq",
+          "measurement_scope": "models fak ps JSON serialization plus jq-equivalent decode/fold; excludes OS process startup"
+        },
+        {
+          "name": "direct_jsonl_scan",
+          "median_ns": 403087035,
+          "median_allocated_bytes": 332029824,
+          "result_digest": "sha256:a04dc34e26c8b38e0aac39715f9a5dd2ebe0bd60f3566a42219f20fd7979178c",
+          "process_starts": 0,
+          "operator_steps": 2,
+          "external_dependency": null,
+          "measurement_scope": "single-pass JSONL decode and aggregate without authoritative fold"
+        }
+      ]
+    }
+  ],
+  "index_decision": {
+    "use_index": false,
+    "reason": "bounded direct fold remains dependency-free; add an index only when the largest supported journal repeatedly exceeds the latency threshold",
+    "reopen_at_events": 200000,
+    "reopen_at_median_ms": 1000,
+    "largest_direct_median_ms": 428
+  }
+}
