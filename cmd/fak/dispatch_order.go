@@ -85,6 +85,8 @@ func runDispatch(stdout, stderr io.Writer, argv []string) int {
 		return runDispatchWorkerEvidence(stdout, stderr, argv[1:])
 	case "audit":
 		return runDispatchAudit(stdout, stderr, argv[1:])
+	case "trajectory-audit":
+		return runDispatchTrajectoryAudit(stdout, stderr, argv[1:])
 	case "closure-audit":
 		return runDispatchClosureAudit(stdout, stderr, argv[1:])
 	case "done-claim-audit":
@@ -311,6 +313,7 @@ func dispatchUsage(w io.Writer) {
   fak dispatch sessions [--runs-dir DIR] [--reg-dir DIR] [--now UNIX] [--json | --markdown]
   fak dispatch evidence [--runs-dir DIR] [--materialize] [--now UNIX] [--json]
   fak dispatch audit [--runs-dir DIR] [--json] [--file-issues]
+  fak dispatch trajectory-audit [--runs-dir DIR] [--window-h N | --since RFC3339] [--json]
   fak dispatch closure-audit [--workspace DIR] [--max-commits N] [--issue-limit N] [--resolve-acceptance] [--ref REF] [--acceptance-limit N] [--json | --markdown]
   fak dispatch acceptance-resolve (--issue N | --body-file FILE | --symbol SYM) [--workspace DIR] [--ref REF] [--json]
   fak dispatch scorecard [--workspace DIR] [--live-router] [--json]

@@ -2751,6 +2751,11 @@
           "category": "incidental",
           "reason": "Local request fixture used to prove minimum-prefix gating",
           "token": "gatedReq"
+        },
+        {
+          "category": "incidental",
+          "reason": "Audit signature label for repeated full-tree gate execution, not a new guard or gate.",
+          "token": "full_tree_gate_retry"
         }
       ],
       "exclude": [
@@ -2877,6 +2882,7 @@
         "fleetbarecommitguard",
         "formatGuardCompactionWitness",
         "fullAggregates",
+        "full_tree_gate_retry",
         "gateCommentQuality",
         "gateGitHygieneBypass",
         "gateProse",
@@ -4800,6 +4806,11 @@
           "category": "incidental",
           "reason": "Canonical-goal resource metrics adapter symbol; not a distinct mechanism in this concept family",
           "token": "sessionRoot"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local aggregation map keyed by trajectory signature, not a session runtime identity.",
+          "token": "frictionSessions"
         }
       ],
       "id": "session-runtime",
@@ -4957,6 +4968,7 @@
         "filterToolSchedulerSchema",
         "filterToolSchedulerTrials",
         "findcodexlooparchivemanifest",
+        "frictionSessions",
         "gemma4_session_test",
         "gen_session_effectiveness_svg",
         "groupsFromSessions",
@@ -5962,6 +5974,11 @@
           "category": "incidental",
           "reason": "Canonical-goal fleet metrics adapter symbol; not a distinct mechanism in this concept family",
           "token": "fak_fleet_canonical_goal_witnessed_registrations"
+        },
+        {
+          "category": "incidental",
+          "reason": "Report field counts structured worker witness outcomes; it does not introduce a new witness concept.",
+          "token": "WitnessedShips"
         }
       ],
       "id": "witness-proof",
@@ -6013,6 +6030,7 @@
         "WitnessRoute",
         "WitnessSHA256",
         "WitnessedProgressFloor",
+        "WitnessedShips",
         "WorkProfileWitness",
         "accepted_witness",
         "accepted_witness_rate",
@@ -10260,6 +10278,11 @@
           "category": "incidental",
           "reason": "Canonical-goal fleet metrics adapter symbol; not a distinct mechanism in this concept family",
           "token": "renderFleetCanonicalGoalExposition"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private CLI formatting helper, not a materialization lifecycle concept.",
+          "token": "renderDispatchTrajectoryAudit"
         }
       ],
       "id": "render-materialize",
@@ -10312,6 +10335,7 @@
         "renderContrastIndex",
         "renderConversion",
         "renderDefaultsSelfcheck",
+        "renderDispatchTrajectoryAudit",
         "renderFleetCanonicalGoalExposition",
         "renderFleetControl",
         "renderFleetGoalExposition",
@@ -10946,6 +10970,11 @@
           "category": "incidental",
           "reason": "Behavioral acceptance helper for bounded repository tools",
           "token": "RunCodeToolsSelfcheck"
+        },
+        {
+          "category": "incidental",
+          "reason": "Recommendation identifier for bounded audit planning, not a plan-state concept.",
+          "token": "bound_planning"
         }
       ],
       "exclude": [
@@ -11030,6 +11059,7 @@
         "WatchdogPlanRows",
         "WriteMergePlan",
         "auditDispatchWaveExecutionPlanBounded",
+        "bound_planning",
         "buildMainPlan",
         "buildreconciledissueplan",
         "bytes_per_candidate",
