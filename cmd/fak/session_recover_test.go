@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -19,6 +21,73 @@ type captureLauncher struct{ got []sessionrecovery.Request }
 func (c *captureLauncher) Launch(r sessionrecovery.Request) error {
 	c.got = append(c.got, r)
 	return nil
+}
+
+func TestRecoveryInventoryRunsSessionDiagInProcess(t *testing.T) {
+	old := recoverySessionDiag
+	defer func() { recoverySessionDiag = old }()
+	called := 0
+	recoverySessionDiag = func(stdout, stderr io.Writer, args []string) int {
+		called++
+		want := []string{"--inventory", "--json", "--since", "2h0m0s"}
+		if !reflect.DeepEqual(args, want) {
+			t.Fatalf("args=%q want=%q", args, want)
+		}
+		_, _ = io.WriteString(stdout, `{"sessions":[{"thread":{"id":"t1"}}]}`)
+		return 0
+	}
+	report, err := recoveryInventory(2 * time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if called != 1 || len(report.Sessions) != 1 || report.Sessions[0].Thread == nil || report.Sessions[0].Thread.ID != "t1" {
+		t.Fatalf("called=%d report=%+v", called, report)
+	}
+}
+
+func TestRecoveryInventoryReportsInProcessFailure(t *testing.T) {
+	old := recoverySessionDiag
+	defer func() { recoverySessionDiag = old }()
+	recoverySessionDiag = func(_ io.Writer, stderr io.Writer, _ []string) int {
+		_, _ = io.WriteString(stderr, "inventory unavailable")
+		return 2
+	}
+	if _, err := recoveryInventory(time.Hour); err == nil || !strings.Contains(err.Error(), "inventory unavailable") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestSessionRecoverPreviewNeedsNoFakDevExecutable(t *testing.T) {
+	if os.Getenv("FAK_RECOVERY_INSTALLED_HELPER") == "1" {
+		if _, err := exec.LookPath("fak-dev"); err == nil {
+			t.Fatal("fak-dev unexpectedly available on isolated PATH")
+		}
+		var out, er bytes.Buffer
+		code := runSessionRecover(&out, &er, []string{"--json", "--journal=false", "--since", "1h"})
+		if code != 0 {
+			t.Fatalf("code=%d stderr=%s", code, er.String())
+		}
+		var summary sessionrecovery.Summary
+		if err := json.Unmarshal(out.Bytes(), &summary); err != nil {
+			t.Fatal(err)
+		}
+		if summary.Schema != sessionrecovery.SummarySchema || summary.Mode != "preview" {
+			t.Fatalf("summary=%+v", summary)
+		}
+		return
+	}
+	python, err := exec.LookPath("python")
+	if err != nil {
+		t.Skip("Python is required by the current read-only SQLite inventory reader")
+	}
+	path := strings.Join([]string{filepath.Dir(os.Args[0]), filepath.Dir(python), os.Getenv("SystemRoot") + `\System32`, os.Getenv("SystemRoot")}, string(os.PathListSeparator))
+	cmd := exec.Command(os.Args[0], "-test.run=^TestSessionRecoverPreviewNeedsNoFakDevExecutable$", "-test.count=1")
+	cmd.Dir = t.TempDir()
+	cmd.Env = append(os.Environ(), "FAK_RECOVERY_INSTALLED_HELPER=1", "PATH="+path)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("installed-style preview: %v\n%s", err, output)
+	}
 }
 
 func TestSessionRecoverIsFirstClassAlias(t *testing.T) {

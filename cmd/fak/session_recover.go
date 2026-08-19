@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/devcmd"
 	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 	"github.com/anthony-chaudhary/fak/internal/sessionrecovery"
 )
@@ -29,13 +29,19 @@ func (v threadFlags) Set(s string) error {
 	return nil
 }
 
+var recoverySessionDiag = func(stdout, stderr io.Writer, args []string) int {
+	return devcmd.RunSessionDiag(stdout, stderr, args, nil)
+}
+
 var recoveryInventory = func(since time.Duration) (sessionrecovery.InventoryReport, error) {
-	var out bytes.Buffer
-	cmd := exec.Command("fak-dev", "sessiondiag", "--inventory", "--json", "--since", since.String())
-	cmd.Stdout = &out
-	cmd.Stderr = io.Discard
-	if err := cmd.Run(); err != nil {
-		return sessionrecovery.InventoryReport{}, fmt.Errorf("sessiondiag inventory: %w", err)
+	var out, er bytes.Buffer
+	args := []string{"--inventory", "--json", "--since", since.String()}
+	if code := recoverySessionDiag(&out, &er, args); code != 0 {
+		reason := strings.TrimSpace(er.String())
+		if reason == "" {
+			reason = fmt.Sprintf("exit %d", code)
+		}
+		return sessionrecovery.InventoryReport{}, fmt.Errorf("sessiondiag inventory: %s", reason)
 	}
 	var report sessionrecovery.InventoryReport
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
