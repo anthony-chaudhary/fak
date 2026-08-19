@@ -200,6 +200,35 @@ var admittedPostFreeze = []string{
 	// config surface together, or neither moves.
 	"OPENAI_BASE_URL",
 
+	// Third unwatched-red cleanup (#7211): these reads predate the live liveness failure and
+	// cannot remain unclassified while #2862 builds the destination config surface. Each is
+	// admitted by its actual role rather than absorbed into the generated baseline.
+	// FAK_ROOT_REGISTRATION_ID is lineage correlation metadata, not authentication material.
+	"FAK_ROOT_REGISTRATION_ID",
+	// ComSpec and SystemDrive are host-owned Windows discovery inputs.
+	"ComSpec",
+	"SystemDrive",
+	// FAK_MICRO_TASK and FAK_LEASE_ID carry explicit worker-launch context.
+	"FAK_MICRO_TASK",
+	"FAK_LEASE_ID",
+	// FAK_PROVIDER_ACCOUNT_IDENTITY selects an account-scoped benchmark observation.
+	"FAK_PROVIDER_ACCOUNT_IDENTITY",
+	// FAK_GUARD_REFUSAL_STATE_DIR and the tool-control pair override local state paths/mode.
+	"FAK_GUARD_REFUSAL_STATE_DIR",
+	"FAK_TOOLCALL_CONTROL_DIR",
+	"FAK_TOOLCALL_CONTROL_MODE",
+	// FAK_CLAUDE_SPEED selects the declared dispatch speed profile.
+	"FAK_CLAUDE_SPEED",
+	// GEMINI_CLI_SYSTEM_SETTINGS_PATH is a host-tool settings discovery path.
+	"GEMINI_CLI_SYSTEM_SETTINGS_PATH",
+	// FAK_WORK_EFFECT_CALIBRATION_JSON and FAK_EP_COORDINATED_DECODE are explicit
+	// experimental runtime overrides pending typed gateway/serve config in #2862.
+	"FAK_WORK_EFFECT_CALIBRATION_JSON",
+	"FAK_EP_COORDINATED_DECODE",
+	// FAK_DEV_EXE and FLEET_CODEX_EXE are executable discovery overrides for recovery.
+	"FAK_DEV_EXE",
+	"FLEET_CODEX_EXE",
+
 	// tools/videogen/trailer/main.go — the ffmpeg executable path, used as the DEFAULT VALUE of
 	// the tool's own `-ffmpeg` flag. A path to a binary; the flag that overrides it is already
 	// the config surface.

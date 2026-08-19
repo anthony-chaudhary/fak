@@ -171,6 +171,25 @@ func TestRatchetRedsOnASingleNewRead(t *testing.T) {
 //   - still actually READ in the committed non-test tree — once a read is relocated to the
 //     config surface (the #2862 endgame) its line must be DELETED here, not left behind.
 //     Without this check the list could never be observed to shrink, which is its whole job.
+func TestThirdUnwatchedCleanupIsExplicitlyAdmitted(t *testing.T) {
+	want := []string{
+		"FAK_ROOT_REGISTRATION_ID", "ComSpec", "FAK_MICRO_TASK", "FAK_LEASE_ID",
+		"FAK_PROVIDER_ACCOUNT_IDENTITY", "FAK_GUARD_REFUSAL_STATE_DIR", "FAK_CLAUDE_SPEED",
+		"GEMINI_CLI_SYSTEM_SETTINGS_PATH", "FAK_WORK_EFFECT_CALIBRATION_JSON",
+		"FAK_EP_COORDINATED_DECODE", "FAK_TOOLCALL_CONTROL_DIR", "FAK_TOOLCALL_CONTROL_MODE",
+		"SystemDrive", "FAK_DEV_EXE", "FLEET_CODEX_EXE",
+	}
+	admitted := map[string]bool{}
+	for _, name := range admittedPostFreeze {
+		admitted[name] = true
+	}
+	for _, name := range want {
+		if !admitted[name] {
+			t.Errorf("stale live offense %s is not explicitly admitted", name)
+		}
+	}
+}
+
 func TestAdmittedPostFreezeStaysHonest(t *testing.T) {
 	root := repoRoot(t)
 	matches, err := committedEnvReadMatches(root)
