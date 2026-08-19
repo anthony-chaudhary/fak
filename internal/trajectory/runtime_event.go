@@ -7,6 +7,21 @@ import (
 )
 
 const RuntimeEventSchema = "fak-runtime-event/1"
+const RuntimeEventDescriptorSchema = "fak-runtime-event-schema/1"
+
+type RuntimeEventKind = string
+
+const (
+	RuntimeTurnStarted     RuntimeEventKind = "turn_started"
+	RuntimeToolProposed    RuntimeEventKind = "tool_proposed"
+	RuntimeVerdict         RuntimeEventKind = "tool_verdict"
+	RuntimeToolResult      RuntimeEventKind = "tool_result_admitted"
+	RuntimeContextChanged  RuntimeEventKind = "context_changed"
+	RuntimeCostDebited     RuntimeEventKind = "cost_debited"
+	RuntimeTerminalWitness RuntimeEventKind = "terminal_witness"
+	RuntimeTerminal        RuntimeEventKind = "turn_terminal" // retained for tool-call wire compatibility
+	RuntimeError           RuntimeEventKind = "error"
+)
 
 type RuntimeSource struct {
 	Component string `json:"component"`
@@ -29,6 +44,54 @@ type RuntimeEvent struct {
 
 // ToolCallEvents emits the minimum canonical lifecycle for one tool decision.
 // A denied call has one verdict and no result; an admitted call has exactly one result.
+type RuntimeEventDescriptor struct {
+	Schema        string             `json:"schema"`
+	EventSchema   string             `json:"event_schema"`
+	Kinds         []RuntimeEventKind `json:"kinds"`
+	Required      []string           `json:"required"`
+	PayloadPolicy string             `json:"payload_policy"`
+	Transport     []string           `json:"transport"`
+}
+
+func RuntimeEventSchemaDescriptor() RuntimeEventDescriptor {
+	return RuntimeEventDescriptor{Schema: RuntimeEventDescriptorSchema, EventSchema: RuntimeEventSchema, Kinds: RuntimeEventKinds(), Required: []string{"event_id", "session_id", "turn_id", "trace_id", "sequence", "timestamp", "kind", "source", "payload"}, PayloadPolicy: "payload must be one valid JSON value; content-bearing payloads require upstream ctxmmu screening and taint stamping", Transport: []string{"ndjson", "sse-data-json"}}
+}
+
+func RuntimeEventKinds() []RuntimeEventKind {
+	return []RuntimeEventKind{RuntimeTurnStarted, RuntimeToolProposed, RuntimeVerdict, RuntimeToolResult, RuntimeContextChanged, RuntimeCostDebited, RuntimeTerminalWitness, RuntimeTerminal, RuntimeError}
+}
+
+func NewRuntimeEvent(eventID, sessionID, turnID, traceID string, sequence uint64, at time.Time, kind RuntimeEventKind, source RuntimeSource, payload json.RawMessage) (RuntimeEvent, error) {
+	e := RuntimeEvent{Schema: RuntimeEventSchema, EventID: eventID, SessionID: sessionID, TurnID: turnID, TraceID: traceID, Sequence: sequence, Timestamp: at, Kind: kind, Source: source, Payload: payload}
+	if err := ValidateRuntimeEvent(e); err != nil {
+		return RuntimeEvent{}, err
+	}
+	return e, nil
+}
+
+func ValidateRuntimeEvent(e RuntimeEvent) error {
+	if e.Schema != RuntimeEventSchema {
+		return fmt.Errorf("runtime event schema %q", e.Schema)
+	}
+	if e.EventID == "" || e.SessionID == "" || e.TurnID == "" || e.TraceID == "" || e.Source.Component == "" || e.Source.Instance == "" || e.Source.Runtime == "" || e.Timestamp.IsZero() || e.Sequence == 0 {
+		return fmt.Errorf("runtime event identity, source, sequence, and timestamp are required")
+	}
+	known := false
+	for _, kind := range RuntimeEventKinds() {
+		if e.Kind == kind {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return fmt.Errorf("unknown runtime event kind %q", e.Kind)
+	}
+	if len(e.Payload) == 0 || !json.Valid(e.Payload) {
+		return fmt.Errorf("runtime event payload must be valid JSON")
+	}
+	return nil
+}
+
 func ToolCallEvents(sessionID, turnID, traceID, callID, tool string, admitted bool, result json.RawMessage, at time.Time, source RuntimeSource) ([]RuntimeEvent, error) {
 	if sessionID == "" || turnID == "" || traceID == "" || callID == "" || tool == "" || source.Component == "" || source.Instance == "" || source.Runtime == "" || at.IsZero() {
 		return nil, fmt.Errorf("runtime event identity, source, and timestamp are required")
@@ -37,9 +100,9 @@ func ToolCallEvents(sessionID, turnID, traceID, callID, tool string, admitted bo
 		kind string
 		body any
 	}{
-		{"turn_started", map[string]any{}},
-		{"tool_proposed", map[string]any{"call_id": callID, "tool": tool}},
-		{"tool_verdict", map[string]any{"call_id": callID, "admitted": admitted}},
+		{RuntimeTurnStarted, map[string]any{}},
+		{RuntimeToolProposed, map[string]any{"call_id": callID, "tool": tool}},
+		{RuntimeVerdict, map[string]any{"call_id": callID, "admitted": admitted}},
 	}
 	if admitted {
 		if len(result) == 0 || !json.Valid(result) {
@@ -48,19 +111,23 @@ func ToolCallEvents(sessionID, turnID, traceID, callID, tool string, admitted bo
 		payloads = append(payloads, struct {
 			kind string
 			body any
-		}{"tool_result_admitted", map[string]any{"call_id": callID, "result": result}})
+		}{RuntimeToolResult, map[string]any{"call_id": callID, "result": result}})
 	}
 	payloads = append(payloads, struct {
 		kind string
 		body any
-	}{"turn_terminal", map[string]any{"status": map[bool]string{true: "completed", false: "denied"}[admitted]}})
+	}{RuntimeTerminal, map[string]any{"status": map[bool]string{true: "completed", false: "denied"}[admitted]}})
 	out := make([]RuntimeEvent, 0, len(payloads))
 	for i, p := range payloads {
 		b, err := json.Marshal(p.body)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, RuntimeEvent{Schema: RuntimeEventSchema, EventID: fmt.Sprintf("%s:%d", traceID, i+1), SessionID: sessionID, TurnID: turnID, TraceID: traceID, Sequence: uint64(i + 1), Timestamp: at.Add(time.Duration(i) * time.Nanosecond), Kind: p.kind, Source: source, Payload: b})
+		event, err := NewRuntimeEvent(fmt.Sprintf("%s:%d", traceID, i+1), sessionID, turnID, traceID, uint64(i+1), at.Add(time.Duration(i)*time.Nanosecond), p.kind, source, b)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, event)
 	}
 	return out, nil
 }
@@ -69,8 +136,8 @@ func ToolCallEvents(sessionID, turnID, traceID, callID, tool string, admitted bo
 func AsTrajectoryEvents(in []RuntimeEvent) ([]Event, error) {
 	out := make([]Event, 0, len(in))
 	for _, r := range in {
-		if r.Schema != RuntimeEventSchema {
-			return nil, fmt.Errorf("runtime event schema %q", r.Schema)
+		if err := ValidateRuntimeEvent(r); err != nil {
+			return nil, err
 		}
 		b, err := json.Marshal(r)
 		if err != nil {
