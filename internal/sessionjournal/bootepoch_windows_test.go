@@ -52,3 +52,16 @@ func TestBootTimePersistsExactWMIMarker(t *testing.T) {
 }
 
 func testNow() time.Time { return time.Now().UTC() }
+
+func TestWindowsBootTimeWMIHidesConsole(t *testing.T) {
+	// Source-level regression witness: windowsBootTimeWMI is the only PowerShell
+	// spawn in this package, and the push gate requires a no-window SysProcAttr.
+	b, err := os.ReadFile("bootepoch_windows.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	if !strings.Contains(text, "HideWindow: true") || !strings.Contains(text, "CreationFlags: 0x08000000") {
+		t.Fatal("WMI query must suppress the background console window")
+	}
+}

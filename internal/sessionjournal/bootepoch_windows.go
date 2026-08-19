@@ -35,6 +35,7 @@ func approximateWindowsBootTime(now time.Time) time.Time {
 func windowsBootTimeWMI() (time.Time, error) {
 	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
 		"(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
 	out, err := cmd.Output()
 	if err != nil {
 		return time.Time{}, err
