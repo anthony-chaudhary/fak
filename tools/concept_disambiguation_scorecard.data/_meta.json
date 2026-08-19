@@ -747,6 +747,46 @@
           "category": "incidental",
           "reason": "Prompt rendering is independent of cache storage and lookup",
           "token": "renderinkernelchatmlrequest"
+        },
+        {
+          "category": "incidental",
+          "reason": "persists a dated provider cache-feedback window after a live guard or serve session",
+          "token": "persistVCacheCalibration"
+        },
+        {
+          "category": "incidental",
+          "reason": "implements the vcache calibration-status CLI readout",
+          "token": "runVCacheCalibrationStatus"
+        },
+        {
+          "category": "incidental",
+          "reason": "implements the vcache calibration-record telemetry ingest CLI",
+          "token": "runVCacheCalibrationRecord"
+        },
+        {
+          "category": "incidental",
+          "reason": "injectable append seam used by calibration persistence tests",
+          "token": "appendVCacheCalibration"
+        },
+        {
+          "category": "incidental",
+          "reason": "ledger row type for dated provider warmth prediction measurements",
+          "token": "ProviderCalibration"
+        },
+        {
+          "category": "incidental",
+          "reason": "readout type describing fresh stale or missing provider calibration",
+          "token": "CalibrationStatus"
+        },
+        {
+          "category": "incidental",
+          "reason": "package namespace for the provider warmth calibration ledger",
+          "token": "vcachecalibration"
+        },
+        {
+          "category": "incidental",
+          "reason": "local boolean requiring observed provider cache feedback before appending a row",
+          "token": "cacheActivity"
         }
       ],
       "id": "cache",
@@ -770,6 +810,7 @@
         "CacheValueBaseline",
         "CacheValueFacts",
         "CacheValueGateDebtKey",
+        "CalibrationStatus",
         "CodeCacheScope",
         "CodeKVCache",
         "DefaultCacheBytes",
@@ -789,6 +830,7 @@
         "OrgPolicyCachePath",
         "OrgPolicyCachePathEnv",
         "ProviderCacheWriteTokens",
+        "ProviderCalibration",
         "ReasonCacheState",
         "RestartCacheHits",
         "RunCacheSourceSelfTest",
@@ -802,10 +844,12 @@
         "UpgradeAnthropicStableCacheTTL1hWithMessagePrefixes",
         "VerdictNoCacheStateDelta",
         "WindowCache",
+        "appendVCacheCalibration",
         "applyCacheControl",
         "applyinfocachemechclick",
         "backtestCacheBurstPaysBack",
         "builtinCacheLevers",
+        "cacheActivity",
         "cacheBurstBacktest",
         "cacheCreationSpanLabel",
         "cacheReceipt",
@@ -923,6 +967,7 @@
         "observecachettlupgrade",
         "parseCacheSeats",
         "persistMicroCacheWitness",
+        "persistVCacheCalibration",
         "prefixcachehits",
         "prefixcachequeries",
         "promptcachehittokens",
@@ -937,6 +982,8 @@
         "runDisambiguationCacheSourceSelfTest",
         "runMicroCacheArm",
         "runMicroCacheWitness",
+        "runVCacheCalibrationRecord",
+        "runVCacheCalibrationStatus",
         "selectorCacheKey",
         "shared_prefix_provider_cache_only",
         "strongMatrixCache",
@@ -948,7 +995,8 @@
         "turnCacheStatsMu",
         "turnCacheSummary",
         "uncached",
-        "usercachedir"
+        "usercachedir",
+        "vcachecalibration"
       ],
       "known_tokens": [],
       "min_files": 3,

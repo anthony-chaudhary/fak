@@ -647,6 +647,7 @@ func persistCacheValueObservations(srv *gateway.Server, kind, name, provider str
 	appendObservedCacheSavings(kind, provider, name, srv.AdjudicationSummary())
 	if turns, _ := srv.VCacheTurnsSnapshot(); len(turns) > 0 {
 		_, _, _ = writeConfiguredVCacheSnapshot(turns)
+		persistVCacheCalibration(provider, kind+":"+name, turns)
 	}
 }
 

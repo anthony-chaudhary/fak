@@ -1,0 +1,37 @@
+{
+  "schema": "fak.vcache.provider-calibration-live-witness.v1",
+  "captured_at": "2026-08-19T03:26:20Z",
+  "operator_local_date": "2026-08-18",
+  "workspace_kind": "temporary non-FAK git repository",
+  "provider": "openai",
+  "model": "gpt-5.6-sol",
+  "source": "probe:codex-non-fak-repo-2026-08-18",
+  "probe": {
+    "cold_result": "CODEX_JSON_COLD",
+    "warm_result": "CODEX_JSON_WARM",
+    "turns": [
+      {"input_tokens": 28473, "cached_input_tokens": 3456, "cache_write_input_tokens": 0},
+      {"input_tokens": 39739, "cached_input_tokens": 3456, "cache_write_input_tokens": 0}
+    ]
+  },
+  "calibration": {
+    "schema": "fak.vcache.provider-calibration.v1",
+    "provider": "openai",
+    "model": "gpt-5.6-sol",
+    "turns": 2,
+    "predictions": 2,
+    "true_warm": 1,
+    "false_warm": 0,
+    "true_cold": 0,
+    "false_cold": 1,
+    "false_warm_rate": 0,
+    "false_cold_rate": 1,
+    "stale_after_days": 7
+  },
+  "status": "fresh",
+  "limitations": [
+    "This witness calibrates OpenAI only; it does not claim an Anthropic row.",
+    "The provider reported cache reads but no cache writes in this two-turn window.",
+    "This row measures prediction error; it does not establish TTL or minimum-prefix constants."
+  ]
+}

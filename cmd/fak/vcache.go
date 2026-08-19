@@ -41,6 +41,10 @@ func runVCache(stdout, stderr io.Writer, argv []string) int {
 		return runVCacheObserve(stdout, stderr, argv[1:])
 	case "calibrate":
 		return runVCacheCalibrate(stdout, stderr, argv[1:])
+	case "calibration-status":
+		return runVCacheCalibrationStatus(stdout, stderr, argv[1:])
+	case "calibration-record":
+		return runVCacheCalibrationRecord(stdout, stderr, argv[1:])
 	case "context-join":
 		return runVCacheContextJoin(stdout, stderr, argv[1:])
 	case "actions":
