@@ -48,6 +48,7 @@ func TestCrossProcessAppendSerializesCompleteRows(t *testing.T) {
 	for i := range commands {
 		commands[i] = exec.Command(os.Args[0], "-test.run=^TestAppendHelperProcess$", "--", path, fmt.Sprintf("p-%02d", i))
 		commands[i].Env = append(os.Environ(), "FAK_SESSION_JOURNAL_APPEND_HELPER=1")
+		hideAppendHelperWindow(commands[i])
 		if err := commands[i].Start(); err != nil {
 			t.Fatal(err)
 		}
