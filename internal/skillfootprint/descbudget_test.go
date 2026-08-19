@@ -145,6 +145,13 @@ func TestSkillDescriptionBudgetFailsClosed(t *testing.T) {
 // ceiling must sit inside the ratchet band of the real measured floor. Raising the
 // constant without the growth that justifies it reds here just as surely as growth
 // without the raise does.
+func TestMeasuredDescriptionFloorSnapshot(t *testing.T) {
+	f := Measure(repoRootForTest(t))
+	if f.DescFloor != SkillDescriptionBudgetBytes {
+		t.Fatalf("measured description floor=%d, committed snapshot=%d", f.DescFloor, SkillDescriptionBudgetBytes)
+	}
+}
+
 func TestCommittedSkillBudgetMatchesMeasuredFloor(t *testing.T) {
 	fp := Measure(repoRootForTest(t))
 	if fp.DescFloor > SkillDescriptionBudgetBytes || fp.DescFloor < SkillDescriptionBudgetBytes-SkillDescriptionRatchetSlackBytes {
