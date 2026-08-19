@@ -4,19 +4,20 @@ import "encoding/json"
 
 // Contract describes the machine-readable public compatibility surface.
 type Contract struct {
-	SchemaVersion string               `json:"schema_version"`
-	GoImport      string               `json:"go_import"`
-	InternalRoot  string               `json:"internal_root"`
-	Planes        []ExtensionPlane     `json:"extension_planes"`
-	Lifecycle     []LifecycleState     `json:"lifecycle"`
-	Cancellation  string               `json:"cancellation"`
-	Streaming     string               `json:"streaming"`
-	Backpressure  string               `json:"backpressure"`
-	Errors        []Code               `json:"errors"`
-	Security      string               `json:"security_reachability"`
-	Compatibility string               `json:"compatibility"`
-	Ownership     map[string]Ownership `json:"resource_ownership"`
-	RunProtocol   ProtocolContract     `json:"run_protocol"`
+	SchemaVersion string                         `json:"schema_version"`
+	GoImport      string                         `json:"go_import"`
+	InternalRoot  string                         `json:"internal_root"`
+	Planes        []ExtensionPlane               `json:"extension_planes"`
+	Lifecycle     []LifecycleState               `json:"lifecycle"`
+	Cancellation  string                         `json:"cancellation"`
+	Streaming     string                         `json:"streaming"`
+	Backpressure  string                         `json:"backpressure"`
+	Errors        []Code                         `json:"errors"`
+	Security      string                         `json:"security_reachability"`
+	Compatibility string                         `json:"compatibility"`
+	Ownership     map[string]Ownership           `json:"resource_ownership"`
+	RunProtocol   ProtocolContract               `json:"run_protocol"`
+	Instructions  InstructionCompositionContract `json:"instruction_composition"`
 }
 
 // SupportedPlanes returns a fresh copy of all public extension planes.
@@ -40,6 +41,7 @@ func PublicContract() Contract {
 		Compatibility: "same schema_version is additive; removals or semantic changes require a new schema_version",
 		Ownership:     map[string]Ownership{"factory_runtime": OwnershipHost, "builder_inputs": OwnershipCaller, "service_inputs": OwnershipCaller},
 		RunProtocol:   PublicProtocolContract(),
+		Instructions:  PublicInstructionContract(),
 	}
 }
 

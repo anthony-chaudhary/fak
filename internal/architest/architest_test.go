@@ -574,6 +574,7 @@ var tier = map[string]int{
 	"lightgapscore":         1, // deterministic stdlib-only scorecard parser and renderer; off the hot path.
 	"lightgapport":          1,
 	"kvquantmeta":           1,
+	"quantcompat":           1, // stdlib-only artifact/runtime/hardware compatibility contract (#6224).
 	"quantmeta":             1, // stdlib-only neutral quantization descriptor, parser, and typed adjudication contract (#6222).
 	"quantdetect":           1,
 	"fp4runtime":            2, // stdlib-only FP4/microscaling runtime, GPU-architecture, and accumulator compatibility contract; no model kernel.
@@ -643,6 +644,7 @@ var tier = map[string]int{
 	"exclusivefile":         1, // stdlib-only O_EXCL PID/time marker creation shared by lock owners (#7051).
 	"wiplifecycle":          2, // lifecycle receipts depend on Git-backed WIP inventory collection (#7250).
 	"sessionrecovery":       2, // selects and witnesses bounded crash recovery without provider-private state (#8013).
+	"harnessinstructions":   2, // composes typed harness instructions onto the host-owned system-prompt base.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

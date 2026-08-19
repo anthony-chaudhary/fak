@@ -66,6 +66,9 @@ func TestPublicContractIsCompleteAndMachineReadable(t *testing.T) {
 	if got.Ownership["factory_runtime"] != OwnershipHost {
 		t.Fatalf("runtime ownership missing: %#v", got.Ownership)
 	}
+	if got.Instructions.SchemaVersion != InstructionContractVersion || got.Instructions.Ownership == "" || got.Instructions.Security == "" || got.Instructions.Cancellation == "" {
+		t.Fatalf("instruction composition contract missing: %#v", got.Instructions)
+	}
 }
 
 type testStream struct{ ch chan int }
