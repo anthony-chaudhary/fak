@@ -81,6 +81,11 @@ type Config struct {
 	Sessions *session.Table
 	// Audit is the host's ONE audit sink. Default: a no-op sink.
 	Audit AuditSink
+	// MaxTurns is the hard number of Step calls each agent may make. Values 1-3
+	// enforce the bounded-microagent envelope; zero preserves the unbounded
+	// compatibility posture. The host checks the limit before invoking Step, so
+	// neither retries nor an untrusted agent can widen it.
+	MaxTurns int
 	// MaxRetries enables evidence-grounded retries after a failed Step. Zero
 	// (the default) preserves the no-retry baseline. A retry is attempted only
 	// when the Microagent implements RetryFeedback, so a failure can never be
@@ -113,6 +118,7 @@ var (
 	ErrDraining    = errors.New("microagent: host is draining; no new spawns")
 	ErrClosed      = errors.New("microagent: host is closed")
 	ErrDuplicateID = errors.New("microagent: agent id is already live or retired (an id is one agent lifetime)")
+	ErrTurnBudget  = errors.New("microagent: hard turn budget exhausted")
 )
 
 // job is one accepted agent with its own cancelable context (derived from the
@@ -137,6 +143,7 @@ type Host struct {
 	gw         Gateway
 	sessions   *session.Table
 	audit      AuditSink
+	maxTurns   int
 	maxRetries int
 	verifier   Verifier
 	warm       *WarmBand
@@ -181,6 +188,7 @@ func NewHost(gw Gateway, cfg Config) (*Host, error) {
 		gw:         gw,
 		sessions:   sessions,
 		audit:      audit,
+		maxTurns:   max(0, cfg.MaxTurns),
 		maxRetries: max(0, cfg.MaxRetries),
 		verifier:   cfg.Verifier,
 		warm:       cfg.Warm,
@@ -341,6 +349,10 @@ func (h *Host) run(j *job) {
 	for {
 		if j.ctx.Err() != nil {
 			h.retire(j, steps, false, j.ctx.Err())
+			return
+		}
+		if h.maxTurns > 0 && steps >= h.maxTurns {
+			h.retire(j, steps, false, ErrTurnBudget)
 			return
 		}
 		m, err := h.acquire(j)

@@ -446,3 +446,57 @@ func TestErrorRetiresWithEventError(t *testing.T) {
 		t.Errorf("session boom: run=%v reason=%q, want Stopped/%q", st.Run, st.Reason, wantReason)
 	}
 }
+
+type turnBudgetAgent struct {
+	steps int
+	done  int
+}
+
+func (a *turnBudgetAgent) Step(context.Context, microagent.Gateway) (bool, error) {
+	a.steps++
+	return a.steps >= a.done, nil
+}
+
+func TestHostEnforcesHardTurnBudget(t *testing.T) {
+	tests := []struct {
+		name      string
+		maxTurns  int
+		doneAt    int
+		wantDone  bool
+		wantSteps int
+		wantErr   error
+	}{
+		{name: "one-turn-completion", maxTurns: 1, doneAt: 1, wantDone: true, wantSteps: 1},
+		{name: "three-turn-completion", maxTurns: 3, doneAt: 3, wantDone: true, wantSteps: 3},
+		{name: "over-budget-refusal", maxTurns: 3, doneAt: 4, wantSteps: 3, wantErr: microagent.ErrTurnBudget},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, err := microagent.NewHost(stubPlanner{}, microagent.Config{Workers: 1, MaxTurns: tt.maxTurns})
+			if err != nil {
+				t.Fatalf("NewHost: %v", err)
+			}
+			defer h.Close()
+			a := &turnBudgetAgent{done: tt.doneAt}
+			if err := h.Spawn("bounded", a); err != nil {
+				t.Fatalf("Spawn: %v", err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			if err := h.Drain(ctx); err != nil {
+				t.Fatalf("Drain: %v", err)
+			}
+			rs := h.Reap()
+			if len(rs) != 1 {
+				t.Fatalf("reaped %d results, want 1", len(rs))
+			}
+			r := rs[0]
+			if r.Done != tt.wantDone || r.Steps != tt.wantSteps || !errors.Is(r.Err, tt.wantErr) {
+				t.Fatalf("result: done=%v steps=%d err=%v, want done=%v steps=%d err=%v", r.Done, r.Steps, r.Err, tt.wantDone, tt.wantSteps, tt.wantErr)
+			}
+			if a.steps != tt.wantSteps {
+				t.Fatalf("agent Step called %d times, want hard ceiling %d", a.steps, tt.wantSteps)
+			}
+		})
+	}
+}
