@@ -102,6 +102,11 @@ func consoleFaultEventsFromWinRecords(recs []winEventRecord, fallbackMS int64) [
 		}
 		app, module, code := parseWERFields(r.Message)
 		class, ok := toolprocgate.ClassifyConsoleFaultWER(app, code)
+		surface := ""
+		if !ok && strings.EqualFold(strings.TrimSpace(app), "WindowsTerminal.exe") && strings.TrimSpace(code) != "" {
+			class, ok = toolprocgate.ConsoleRendererExit, true
+			surface = string(toolprocgate.ConsoleSurfaceRenderer)
+		}
 		if !ok {
 			continue
 		}
@@ -114,10 +119,10 @@ func consoleFaultEventsFromWinRecords(recs []winEventRecord, fallbackMS int64) [
 			Class: class,
 			AtMS:  at,
 			Tool:  tool,
-			// A WER banner witnesses a process-level FailFast, not a specific
-			// stdio surface, so Surface is left unset (unknown) rather than
-			// fabricated. See ClassifyConsoleFaultWER.
-			Detail: toolprocgate.BoundConsoleFaultDetail(werDetail(app, module, code)),
+			// A child FailFast has no attributable stdio surface. A Windows
+			// Terminal process exit does: the renderer-owned visible surface.
+			Surface: surface,
+			Detail:  toolprocgate.BoundConsoleFaultDetail(werDetail(app, module, code)),
 		})
 	}
 	return out

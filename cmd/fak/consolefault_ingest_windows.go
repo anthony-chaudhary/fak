@@ -19,11 +19,14 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // gatherWinConsoleFaultRecords collects the console-host-relevant crash records
 // from the last `since` window: .NET Runtime Event 1026 dumps AND WER Application
-// Error Event 1000 FailFasts, in one merged record array. Returns (records, "")
+// Error Event 1000 console-host FailFasts and Windows Terminal renderer exits,
+// in one merged record array. Returns (records, "")
 // on success or (nil, errmsg) on a probe failure; an empty log is (nil, "").
 func gatherWinConsoleFaultRecords(since time.Duration) ([]winEventRecord, string) {
 	days := int(since.Hours()/24) + 1
@@ -34,7 +37,10 @@ func gatherWinConsoleFaultRecords(since time.Duration) ([]winEventRecord, string
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
-	configureDispatchHelperCommand(cmd)
+	// Get-WinEvent returns an empty stream under DETACHED_PROCESS on this host.
+	// CREATE_NO_WINDOW keeps the probe invisible while retaining the console
+	// semantics Windows PowerShell needs to initialize its event-log pipeline.
+	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Sprintf("Get-WinEvent: %v", err)
@@ -75,7 +81,7 @@ foreach($e in $dn){
 }
 $wer = Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='Application Error'; Id=1000; StartTime=$since} -ErrorAction SilentlyContinue
 foreach($e in $wer){
-  if(($e.Message -match '(?i)pwsh\.exe|powershell\.exe|conhost\.exe|OpenConsole\.exe|cmd\.exe') -and ($e.Message -match '(?i)0xc0000409')){
+  if((($e.Message -match '(?i)pwsh\.exe|powershell\.exe|conhost\.exe|OpenConsole\.exe|cmd\.exe') -and ($e.Message -match '(?i)0xc0000409')) -or ($e.Message -match '(?i)Faulting application name:\s*WindowsTerminal\.exe')){
     $ms=[int64]([DateTimeOffset]$e.TimeCreated).ToUnixTimeMilliseconds()
     $rows += [pscustomobject]@{provider=[string]$e.ProviderName; id=[int]$e.Id; time_ms=$ms; message=[string]$e.Message}
   }

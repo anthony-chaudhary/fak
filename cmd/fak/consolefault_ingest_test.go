@@ -138,6 +138,40 @@ Exception code: 0xc0000005`
 // pairs in time with a .NET 1026 console fault for the SAME tool is the same
 // crash and is dropped, so the fold is not double-counted — but an un-paired
 // WER FailFast (different tool, or outside the window) is kept.
+func TestConsoleFaultIngestProbeIncludesWindowsTerminalRendererExit(t *testing.T) {
+	if !strings.Contains(consoleFaultIngestPS, `Faulting application name:\s*WindowsTerminal\.exe`) {
+		t.Fatal("Windows event probe drops Windows Terminal renderer exits before Go can classify them")
+	}
+}
+
+func TestConsoleFaultEventsCaptureWindowsTerminalRendererCrash(t *testing.T) {
+	const rendererCrash = `Faulting application name: WindowsTerminal.exe, version: 1.24.2607.10001
+Faulting module name: TerminalApp.dll, version: 1.24.2607.10001
+Exception code: 0xc0000005`
+	const terminalFailFast = `Faulting application name: WindowsTerminal.exe, version: 1.24.2607.10001
+Faulting module name: TerminalApp.dll, version: 1.24.2607.10001
+Exception code: 0xc000041d`
+
+	got := consoleFaultEventsFromWinRecords([]winEventRecord{
+		{Provider: "Application Error", ID: 1000, TimeMS: 1_700_000_000_000, Message: rendererCrash},
+		{Provider: "Application Error", ID: 1000, TimeMS: 1_700_000_007_000, Message: terminalFailFast},
+	}, 42)
+	if len(got) != 2 {
+		t.Fatalf("rows = %d, want 2 Windows Terminal renderer crashes: %#v", len(got), got)
+	}
+	for i, ev := range got {
+		if ev.Class != toolprocgate.ConsoleRendererExit {
+			t.Errorf("row %d class = %q, want %q", i, ev.Class, toolprocgate.ConsoleRendererExit)
+		}
+		if ev.Surface != string(toolprocgate.ConsoleSurfaceRenderer) {
+			t.Errorf("row %d surface = %q, want %q", i, ev.Surface, toolprocgate.ConsoleSurfaceRenderer)
+		}
+		if ev.Tool != "windowsterminal" {
+			t.Errorf("row %d tool = %q, want windowsterminal", i, ev.Tool)
+		}
+	}
+}
+
 func TestConsoleFaultWERDedup(t *testing.T) {
 	const inputCrash = `Application: pwsh.exe
 Exception Info: System.InvalidOperationException: Cannot read keys when either application does not have a console or when console input has been redirected.
