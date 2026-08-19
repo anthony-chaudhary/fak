@@ -20,17 +20,26 @@ type RefreshOptions struct {
 	MaxRuns   int
 }
 type RefreshReceipt struct {
-	Schema        string `json:"schema"`
-	Run           int    `json:"run"`
-	CompletedAt   string `json:"completed_at"`
-	Outcome       string `json:"outcome"`
-	ParsedFiles   int    `json:"parsed_files"`
-	ReusedFiles   int    `json:"reused_files"`
-	Sessions      int    `json:"sessions"`
-	Candidates    int    `json:"candidates"`
-	NewCandidates int    `json:"new_candidates"`
-	Error         string `json:"error,omitempty"`
+	Schema        string               `json:"schema"`
+	Run           int                  `json:"run"`
+	CompletedAt   string               `json:"completed_at"`
+	Outcome       string               `json:"outcome"`
+	ParsedFiles   int                  `json:"parsed_files"`
+	ReusedFiles   int                  `json:"reused_files"`
+	Sessions      int                  `json:"sessions"`
+	Candidates    int                  `json:"candidates"`
+	NewCandidates int                  `json:"new_candidates"`
+	Error         string               `json:"error,omitempty"`
+	Outcomes      RefreshOutcomeCounts `json:"outcomes"`
 }
+type RefreshOutcomeCounts struct {
+	OK            int `json:"ok"`
+	Error         int `json:"error"`
+	ParsedFiles   int `json:"parsed_files"`
+	ReusedFiles   int `json:"reused_files"`
+	NewCandidates int `json:"new_candidates"`
+}
+
 type refreshLock struct {
 	PID       int    `json:"pid"`
 	StartedAt string `json:"started_at"`
@@ -63,10 +72,18 @@ func RefreshIndex(ctx context.Context, opts RefreshOptions, emit func(RefreshRec
 		}
 		result, mineErr := MineIndexed(opts.Mine, opts.IndexPath)
 		release()
-		receipt := RefreshReceipt{Schema: "fak-session-history-refresh/1", Run: run, CompletedAt: time.Now().UTC().Format(time.RFC3339), Outcome: "ok", ParsedFiles: result.ParsedFiles, ReusedFiles: result.ReusedFiles, Sessions: result.Report.Metrics.Sessions, Candidates: len(result.Report.Candidates), NewCandidates: len(result.NewCandidates)}
+		previous, _ := loadRefreshReceipt(opts.IndexPath)
+		counts := previous.Outcomes
+		counts.ParsedFiles += result.ParsedFiles
+		counts.ReusedFiles += result.ReusedFiles
+		counts.NewCandidates += len(result.NewCandidates)
+		receipt := RefreshReceipt{Schema: "fak-session-history-refresh/1", Run: run, CompletedAt: time.Now().UTC().Format(time.RFC3339), Outcome: "ok", ParsedFiles: result.ParsedFiles, ReusedFiles: result.ReusedFiles, Sessions: result.Report.Metrics.Sessions, Candidates: len(result.Report.Candidates), NewCandidates: len(result.NewCandidates), Outcomes: counts}
 		if mineErr != nil {
+			receipt.Outcomes.Error++
 			receipt.Outcome = "error"
 			receipt.Error = mineErr.Error()
+		} else {
+			receipt.Outcomes.OK++
 		}
 		if err := writeRefreshReceipt(opts.IndexPath, receipt); err != nil {
 			return err
@@ -132,6 +149,17 @@ func acquireRefreshLock(index string, now time.Time) (func(), error) {
 		return nil, fmt.Errorf("session history refresh already active (pid %s)", owner)
 	}
 	return nil, errors.New("session history refresh lock unavailable")
+}
+func loadRefreshReceipt(index string) (RefreshReceipt, error) {
+	b, err := os.ReadFile(refreshReceiptPath(index))
+	if err != nil {
+		return RefreshReceipt{}, err
+	}
+	var r RefreshReceipt
+	if err := json.Unmarshal(b, &r); err != nil {
+		return RefreshReceipt{}, err
+	}
+	return r, nil
 }
 func writeRefreshReceipt(index string, r RefreshReceipt) error {
 	b, err := json.MarshalIndent(r, "", "  ")

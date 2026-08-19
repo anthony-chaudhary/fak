@@ -71,3 +71,27 @@ func TestRefreshIndexRefusesLiveLockAndReapsStaleLock(t *testing.T) {
 		t.Fatalf("stale lock was not reclaimed: %v", err)
 	}
 }
+
+func TestRefreshOutcomeCountersAccumulateAcrossRuns(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "codex")
+	if err := os.MkdirAll(src, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "s.jsonl"), []byte(`{"timestamp":"2026-08-19T00:00:00Z","type":"response_item","payload":{"type":"function_call","name":"read_file"}}`+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	idx := filepath.Join(root, "index.json")
+	var got []RefreshReceipt
+	err := RefreshIndex(context.Background(), RefreshOptions{Mine: Options{CodexRoot: src, MinSupport: 1, Limit: 1}, IndexPath: idx, Interval: time.Millisecond, MaxRuns: 2}, func(r RefreshReceipt) error { got = append(got, r); return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[1].Outcomes.OK != 2 || got[1].Outcomes.ParsedFiles != 1 || got[1].Outcomes.ReusedFiles != 1 {
+		t.Fatalf("receipts=%+v", got)
+	}
+	h := InspectIndexHealthWithOptions(IndexHealthOptions{IndexPath: idx, CodexRoot: src, Now: time.Now()})
+	if h.LastRefresh.Outcomes.OK != 2 {
+		t.Fatalf("health=%+v", h.LastRefresh)
+	}
+}

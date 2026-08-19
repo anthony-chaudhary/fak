@@ -25,11 +25,12 @@ type SourceHealth struct {
 }
 
 type RefreshHealth struct {
-	State       string `json:"state"`
-	CompletedAt string `json:"completed_at,omitempty"`
-	Outcome     string `json:"outcome,omitempty"`
-	ParsedFiles int    `json:"parsed_files,omitempty"`
-	ReusedFiles int    `json:"reused_files,omitempty"`
+	State       string               `json:"state"`
+	CompletedAt string               `json:"completed_at,omitempty"`
+	Outcome     string               `json:"outcome,omitempty"`
+	ParsedFiles int                  `json:"parsed_files,omitempty"`
+	ReusedFiles int                  `json:"reused_files,omitempty"`
+	Outcomes    RefreshOutcomeCounts `json:"outcomes"`
 }
 
 type ContentionHealth struct {
@@ -190,6 +191,7 @@ func inspectRefreshReceipt(index string) RefreshHealth {
 	out.Outcome = r.Outcome
 	out.ParsedFiles = r.ParsedFiles
 	out.ReusedFiles = r.ReusedFiles
+	out.Outcomes = r.Outcomes
 	return out
 }
 func inspectContention(index string) ContentionHealth {
