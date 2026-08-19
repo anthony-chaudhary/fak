@@ -27,6 +27,7 @@ type Mechanism struct {
 	Reason           string   `json:"reason,omitempty"`
 }
 
+//enumlint:exempt The shipped registry has no unavailable mechanism; unavailable is retained for honest future declarations.
 func Registry() []Mechanism {
 	return []Mechanism{
 		{ID: "provider_prompt_cache", Label: "provider prompt cache", Producer: "internal/gateway.AdjudicationSummary.CachedPromptTokens", Status: Accounted, Units: []string{"input_tokens"}, SourceID: "provider_cache", ExclusivityGroup: "input_token_equiv_owner/v1"},

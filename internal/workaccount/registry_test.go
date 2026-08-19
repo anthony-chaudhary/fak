@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+func TestRegistryHasNoUnavailableMechanisms(t *testing.T) {
+	for _, mechanism := range Registry() {
+		if mechanism.Status == Unavailable {
+			t.Fatalf("shipped mechanism %q remains unavailable", mechanism.ID)
+		}
+	}
+}
+
 func TestRegistryIsCompleteAndValid(t *testing.T) {
 	rows := Registry()
 	if err := Validate(rows); err != nil {
