@@ -117,6 +117,63 @@ func TestRunScoreHumanReadoutNamesTheAgingSet(t *testing.T) {
 	}
 }
 
+func TestRunScoreConcurrentDuplicateAnnouncementNamesPlannedOverlap(t *testing.T) {
+	root := scoreFixtureRepo(t)
+	issues := filepath.Join(root, "issues.json")
+	if err := os.WriteFile(issues, []byte(scoreFixtureIssues), 0o644); err != nil {
+		t.Fatalf("write issues fixture: %v", err)
+	}
+	for path, body := range map[string]string{
+		"a.go": "package fixture\nvar Collision int\n",
+		"b.go": "package fixture\nvar Collision string\n",
+		"c.go": "package fixture\nvar C int\n",
+		"d.go": "package fixture\nvar D int\n",
+		"e.go": "package fixture\nvar E int\n",
+		"f.go": "package fixture\nvar F int\n",
+		"g.go": "package fixture\nvar G int\n",
+		"h.go": "package fixture\nvar H int\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, path), []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := RunScore(context.Background(), &stdout, &stderr, []string{
+		"--issues-file", issues, "--touch", "a.go", "--touch", "not-recent.go",
+	}, root); code != 0 {
+		t.Fatalf("RunScore exit = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"8 source files", "recent paths:", "a.go", "planned-path overlap: a.go",
+		"mtime is a prompt to check, not proof that a peer session exists",
+		"duplicate top-level symbol \"Collision\"", "a.go, b.go",
+		"fak worktree worker prepare|land|reap",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("concurrent-authoring announcement omits %q:\n%s", want, out)
+		}
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := RunScore(context.Background(), &stdout, &stderr, []string{
+		"--json", "--issues-file", issues, "--touch", "a.go",
+	}, root); code != 0 {
+		t.Fatalf("RunScore JSON exit = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	var envelope struct {
+		Tree TreeWIP `json:"tree_wip"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode concurrent-authoring payload: %v\n%s", err, stdout.String())
+	}
+	if envelope.Tree.RecentWriters != 8 || len(envelope.Tree.RecentWriterPaths) != 8 ||
+		len(envelope.Tree.RecentWriterOverlaps) != 1 || len(envelope.Tree.DuplicateSymbols) != 1 {
+		t.Fatalf("structured tree_wip omitted concurrent detail: %+v", envelope.Tree)
+	}
+}
+
 // TestRunScoreRejectsStrayPositional keeps the verb's argv contract explicit: a
 // positional is a typo'd flag, and silently ignoring it would fold a corpus nobody
 // asked for while still printing an authoritative-looking reading.

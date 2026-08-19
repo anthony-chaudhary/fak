@@ -4,9 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/build"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -200,6 +205,14 @@ func GatherTree(ctx context.Context, root string, now time.Time) (TreeWIP, error
 		return t, fmt.Errorf("git status: %w", err)
 	}
 	cut := now.Add(-RecentWriterWindowMinutes * time.Minute)
+	type recentFile struct {
+		path string
+		when time.Time
+	}
+	var (
+		dirtyPaths []string
+		recent     []recentFile
+	)
 	for _, ent := range strings.Split(out, "\x00") {
 		if len(ent) < 4 {
 			continue
@@ -208,6 +221,8 @@ func GatherTree(ctx context.Context, root string, now time.Time) (TreeWIP, error
 		if path == "" || !isSource(path) {
 			continue
 		}
+		path = cleanRepoPath(path)
+		dirtyPaths = append(dirtyPaths, path)
 		untracked := code == "??"
 		if untracked {
 			t.UntrackedGo++
@@ -233,8 +248,22 @@ func GatherTree(ctx context.Context, root string, now time.Time) (TreeWIP, error
 		}
 		if info.ModTime().After(cut) {
 			t.RecentWriters++
+			recent = append(recent, recentFile{path: path, when: info.ModTime()})
 		}
 	}
+	sort.Slice(recent, func(i, j int) bool {
+		if recent[i].when.Equal(recent[j].when) {
+			return recent[i].path < recent[j].path
+		}
+		return recent[i].when.After(recent[j].when)
+	})
+	for i := 0; i < len(recent) && i < RecentWriterPathLimit; i++ {
+		t.RecentWriterPaths = append(t.RecentWriterPaths, recent[i].path)
+	}
+	for _, file := range recent {
+		t.recentWriterPaths = append(t.recentWriterPaths, file.path)
+	}
+	t.DuplicateSymbols = gatherDuplicateSymbols(base, dirtyPaths)
 
 	// Uncommitted churn, whitespace-insensitive so a line-ending rewrite is
 	// not counted as work.
@@ -256,6 +285,83 @@ func GatherTree(ctx context.Context, root string, now time.Time) (TreeWIP, error
 	}
 	t.Measured = true
 	return t, nil
+}
+
+// gatherDuplicateSymbols finds package-level declarations that cannot coexist
+// in the current build context. Methods, init functions, and files excluded by
+// build constraints are skipped because Go permits their names to repeat.
+func gatherDuplicateSymbols(base string, paths []string) []DuplicateSymbol {
+	type key struct {
+		dir, pkg, symbol string
+	}
+	seen := make(map[key]map[string]struct{})
+	for _, path := range paths {
+		matched, matchErr := build.Default.MatchFile(filepath.Join(base, filepath.Dir(path)), filepath.Base(path))
+		if matchErr != nil || !matched {
+			continue
+		}
+		file, _ := parser.ParseFile(token.NewFileSet(), filepath.Join(base, path), nil, parser.SkipObjectResolution)
+		if file == nil || file.Name == nil {
+			continue
+		}
+		for _, symbol := range packageSymbols(file) {
+			k := key{dir: filepath.Dir(path), pkg: file.Name.Name, symbol: symbol}
+			if seen[k] == nil {
+				seen[k] = make(map[string]struct{})
+			}
+			seen[k][path] = struct{}{}
+		}
+	}
+	var duplicates []DuplicateSymbol
+	for k, pathSet := range seen {
+		if len(pathSet) < 2 {
+			continue
+		}
+		paths := make([]string, 0, len(pathSet))
+		for path := range pathSet {
+			paths = append(paths, path)
+		}
+		sort.Strings(paths)
+		duplicates = append(duplicates, DuplicateSymbol{Package: k.pkg, Symbol: k.symbol, Paths: paths})
+	}
+	sort.Slice(duplicates, func(i, j int) bool {
+		if duplicates[i].Package != duplicates[j].Package {
+			return duplicates[i].Package < duplicates[j].Package
+		}
+		if duplicates[i].Symbol != duplicates[j].Symbol {
+			return duplicates[i].Symbol < duplicates[j].Symbol
+		}
+		return strings.Join(duplicates[i].Paths, "\x00") < strings.Join(duplicates[j].Paths, "\x00")
+	})
+	return duplicates
+}
+
+func packageSymbols(file *ast.File) []string {
+	var symbols []string
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			if d.Recv == nil && d.Name != nil && d.Name.Name != "init" {
+				symbols = append(symbols, d.Name.Name)
+			}
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				switch s := spec.(type) {
+				case *ast.TypeSpec:
+					if s.Name != nil && s.Name.Name != "_" {
+						symbols = append(symbols, s.Name.Name)
+					}
+				case *ast.ValueSpec:
+					for _, name := range s.Names {
+						if name.Name != "_" {
+							symbols = append(symbols, name.Name)
+						}
+					}
+				}
+			}
+		}
+	}
+	return symbols
 }
 
 // ProbeBuild runs `go build ./...` and records whether the shared tree compiles.

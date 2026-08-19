@@ -77,6 +77,9 @@ type Report struct {
 	Workspace  string         `json:"workspace,omitempty"`
 	Corpus     map[string]any `json:"corpus"`
 	KPIs       []KPI          `json:"kpis"`
+	// Tree is the structured working-tree census behind local_wip, including
+	// bounded recent paths, planned overlaps, and duplicate symbols.
+	Tree TreeWIP `json:"tree_wip"`
 
 	// Aging is the actionable list: started work nobody finished, oldest
 	// first, holding the same rows the aging_wip KPI counts. It is truncated
@@ -99,6 +102,9 @@ type Input struct {
 	// gathered" and its KPI is then reported as unmeasured rather than
 	// clean, so a missing gather can never look like a green tree.
 	Tree TreeWIP
+	// AboutToTouch names repository-relative paths the current session plans to
+	// edit, so the readout can distinguish a real overlap from general churn.
+	AboutToTouch []string
 	// Now anchors every age computation. Required: a zero Now would make
 	// every open issue look brand new.
 	Now time.Time
@@ -119,6 +125,7 @@ func Build(in Input) Report {
 		in.AgingLimit = 25
 	}
 	spans := BuildSpans(in.Issues, in.Commits)
+	tree := withRecentWriterOverlap(in.Tree, in.AboutToTouch)
 	byNumber := make(map[int]Issue, len(in.Issues))
 	for _, i := range in.Issues {
 		byNumber[i.Number] = i
@@ -143,7 +150,7 @@ func Build(in Input) Report {
 		kpiAtomicity(spans, since),
 		kpiArrivalVsService(spans, since, in.Now),
 		kpiWitnessedProgress(in.Issues, byNumber),
-		kpiLocalWIP(in.Tree),
+		kpiLocalWIP(tree),
 	)
 
 	debt := 0
@@ -154,6 +161,7 @@ func Build(in Input) Report {
 		Schema:     Schema,
 		Workspace:  in.Workspace,
 		KPIs:       kpis,
+		Tree:       tree,
 		Aging:      aging,
 		AgingTotal: len(stalled),
 		Curve:      WIPCurve(spans, since, in.Now),

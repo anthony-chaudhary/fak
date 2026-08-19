@@ -2,8 +2,10 @@ package flowmetrics
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -195,6 +197,70 @@ func TestGatherTreeResolvesPathsFromASubdirectory(t *testing.T) {
 	}
 }
 
+func TestConcurrentWriterPathsAreNewestFirstAndBounded(t *testing.T) {
+	root := tempRepo(t)
+	writeFile(t, root, "seed.go", "package p\n")
+	gitCommit(t, root, "chore: seed (fak flowmetrics)", "seed.go")
+
+	now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < RecentWriterPathLimit+1; i++ {
+		path := fmt.Sprintf("recent%02d.go", i)
+		writeFile(t, root, path, "package p\n")
+		when := now.Add(-time.Duration(i+1) * 10 * time.Second)
+		if err := os.Chtimes(filepath.Join(root, path), when, when); err != nil {
+			t.Fatalf("chtimes %s: %v", path, err)
+		}
+	}
+	writeFile(t, root, "old.go", "package p\n")
+	old := now.Add(-(RecentWriterWindowMinutes + 1) * time.Minute)
+	if err := os.Chtimes(filepath.Join(root, "old.go"), old, old); err != nil {
+		t.Fatalf("chtimes old.go: %v", err)
+	}
+
+	tree, err := GatherTree(context.Background(), root, now)
+	if err != nil {
+		t.Fatalf("GatherTree: %v", err)
+	}
+	if tree.RecentWriters != RecentWriterPathLimit+1 {
+		t.Fatalf("recent writers = %d, want %d", tree.RecentWriters, RecentWriterPathLimit+1)
+	}
+	if len(tree.RecentWriterPaths) != RecentWriterPathLimit {
+		t.Fatalf("recent paths = %v, want %d bounded rows", tree.RecentWriterPaths, RecentWriterPathLimit)
+	}
+	if tree.RecentWriterPaths[0] != "recent00.go" || tree.RecentWriterPaths[RecentWriterPathLimit-1] != "recent09.go" {
+		t.Fatalf("recent paths not newest-first: %v", tree.RecentWriterPaths)
+	}
+	annotated := withRecentWriterOverlap(tree, []string{"recent10.go"})
+	if !slices.Equal(annotated.RecentWriterOverlaps, []string{"recent10.go"}) {
+		t.Fatalf("planned overlap outside the emitted top %d was missed: %v", RecentWriterPathLimit, annotated.RecentWriterOverlaps)
+	}
+}
+
+func TestDuplicateTopLevelSymbolsAreNamedAcrossDirtyFilesOnly(t *testing.T) {
+	root := tempRepo(t)
+	writeFile(t, root, "seed.go", "package p\n")
+	gitCommit(t, root, "chore: seed (fak flowmetrics)", "seed.go")
+	writeFile(t, root, "a.go", "package p\nvar Collision int\nfunc Repeated() {}\nfunc init() {}\n")
+	writeFile(t, root, "b.go", "package p\nvar Collision string\nfunc Repeated() {}\nfunc init() {}\n")
+	writeFile(t, root, "other/c.go", "package p\nvar Collision bool\n")
+	writeFile(t, root, "external_test.go", "package p_test\nvar Collision bool\n")
+	writeFile(t, root, "platform_windows.go", "package p\nvar PlatformSplit int\n")
+	writeFile(t, root, "platform_linux.go", "package p\nvar PlatformSplit string\n")
+
+	tree, err := GatherTree(context.Background(), root, time.Now())
+	if err != nil {
+		t.Fatalf("GatherTree: %v", err)
+	}
+	if len(tree.DuplicateSymbols) != 2 {
+		t.Fatalf("duplicates = %+v, want Collision and Repeated only", tree.DuplicateSymbols)
+	}
+	for _, duplicate := range tree.DuplicateSymbols {
+		if duplicate.Package != "p" || !slices.Equal(duplicate.Paths, []string{"a.go", "b.go"}) {
+			t.Fatalf("duplicate crossed a directory/package boundary: %+v", duplicate)
+		}
+	}
+}
+
 func TestIsScratchNameRequiresASeparatorAfterZZ(t *testing.T) {
 	cases := map[string]bool{
 		"zz_probe.go": true,
@@ -318,6 +384,8 @@ func TestLiveGitGatherIsWellFormed(t *testing.T) {
 	if !tree.Measured || tree.Rev == "" {
 		t.Fatalf("live census must be Measured and rev-pinned: %+v", tree)
 	}
+	t.Logf("live concurrent-authoring census: recent=%d paths=%v duplicates=%v",
+		tree.RecentWriters, tree.RecentWriterPaths, tree.DuplicateSymbols)
 
 	// The whole fold must run on live git facts without panicking, and must
 	// emit a well-formed envelope even with no issue records at all.

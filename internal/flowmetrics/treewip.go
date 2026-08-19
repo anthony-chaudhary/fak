@@ -1,6 +1,18 @@
 package flowmetrics
 
-import "fmt"
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+)
+
+// DuplicateSymbol is one package-level name declared by more than one dirty
+// source file. Paths are repository-relative and sorted.
+type DuplicateSymbol struct {
+	Package string   `json:"package"`
+	Symbol  string   `json:"symbol"`
+	Paths   []string `json:"paths"`
+}
 
 // TreeWIP is the census of work that exists ONLY in the working tree: started,
 // not landed, and therefore invisible to every issue-based dashboard.
@@ -42,6 +54,21 @@ type TreeWIP struct {
 	// double-digit value means several sessions are writing one checkout
 	// concurrently, which is the collision regime.
 	RecentWriters int `json:"recent_writers"`
+	// RecentWriterPaths names the most recently written dirty source files,
+	// newest first. The list is bounded even though RecentWriters counts the
+	// whole window.
+	RecentWriterPaths []string `json:"recent_writer_paths,omitempty"`
+	// recentWriterPaths retains the whole window for exact planned-overlap
+	// checks; only the bounded public prefix is emitted.
+	recentWriterPaths []string
+	// RecentWriterOverlaps is the subset of RecentWriterPaths a caller declared
+	// it is about to touch. OverlapChecked distinguishes "none" from "not
+	// checked".
+	RecentWriterOverlaps []string `json:"recent_writer_overlaps,omitempty"`
+	OverlapChecked       bool     `json:"overlap_checked,omitempty"`
+	// DuplicateSymbols records the stronger collision shape: two dirty files
+	// in the same package declaring the same top-level name.
+	DuplicateSymbols []DuplicateSymbol `json:"duplicate_symbols,omitempty"`
 
 	// StatFailures counts dirty files whose mtime could not be read. It is
 	// surfaced rather than swallowed because the two mtime-derived fields above
@@ -63,6 +90,8 @@ const (
 	// Ten minutes is long enough to catch an active peer session between its
 	// edits and short enough that a finished session drops out quickly.
 	RecentWriterWindowMinutes = 10
+	// RecentWriterPathLimit bounds the announcement on a churning checkout.
+	RecentWriterPathLimit = 10
 
 	// UntrackedGoCeiling is how many unlanded source files are tolerable.
 	// AGENTS.md requires one issue to land as one commit, so a healthy tree
@@ -120,9 +149,25 @@ func kpiLocalWIP(t TreeWIP) KPI {
 			t.StatFailures))
 	}
 	if t.RecentWriters > RecentWritersCeiling {
+		paths := "recent paths unavailable"
+		if len(t.RecentWriterPaths) > 0 {
+			paths = "recent paths: " + strings.Join(t.RecentWriterPaths, ", ")
+		}
+		overlap := "planned-path overlap not checked; pass --touch <path> for every path this session will edit"
+		if t.OverlapChecked {
+			overlap = "planned-path overlap: none"
+			if len(t.RecentWriterOverlaps) > 0 {
+				overlap = "planned-path overlap: " + strings.Join(t.RecentWriterOverlaps, ", ")
+			}
+		}
 		k.Defects = append(k.Defects, fmt.Sprintf(
-			"local_wip: %d source files were written in the last %dm, above the %d expected of one session — multiple sessions are editing one checkout concurrently, so any build result is a snapshot of a moving tree; serialise through per-worker worktrees",
-			t.RecentWriters, RecentWriterWindowMinutes, RecentWritersCeiling))
+			"local_wip: %d source files were written in the last %dm, above the %d expected of one session; %s; %s — mtime is a prompt to check, not proof that a peer session exists; coordinate before writing and, when work is concurrent, use a detached per-worker worktree via fak worktree worker prepare|land|reap",
+			t.RecentWriters, RecentWriterWindowMinutes, RecentWritersCeiling, paths, overlap))
+	}
+	for _, dup := range t.DuplicateSymbols {
+		k.Defects = append(k.Defects, fmt.Sprintf(
+			"local_wip: duplicate top-level symbol %q in dirty package %s files %s — coordinate before either copy grows",
+			dup.Symbol, dup.Package, strings.Join(dup.Paths, ", ")))
 	}
 
 	// The score degrades on the dominant term rather than averaging, so one
@@ -135,6 +180,40 @@ func kpiLocalWIP(t TreeWIP) KPI {
 		k.Score = 0
 	}
 	return k
+}
+
+// withRecentWriterOverlap returns a census annotated with exact planned-path
+// overlaps. It preserves the newest-first order of RecentWriterPaths.
+func withRecentWriterOverlap(t TreeWIP, aboutToTouch []string) TreeWIP {
+	if len(aboutToTouch) == 0 {
+		return t
+	}
+	t.OverlapChecked = true
+	wanted := make(map[string]struct{}, len(aboutToTouch))
+	for _, path := range aboutToTouch {
+		if path = cleanRepoPath(path); path != "" {
+			wanted[path] = struct{}{}
+		}
+	}
+	recent := t.recentWriterPaths
+	if len(recent) == 0 {
+		recent = t.RecentWriterPaths
+	}
+	for _, path := range recent {
+		if _, ok := wanted[cleanRepoPath(path)]; ok {
+			t.RecentWriterOverlaps = append(t.RecentWriterOverlaps, path)
+		}
+	}
+	return t
+}
+
+func cleanRepoPath(path string) string {
+	path = filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+	path = strings.TrimPrefix(path, "./")
+	if path == "." {
+		return ""
+	}
+	return path
 }
 
 // firstLine trims a multi-line compiler error to its first line so a KPI detail

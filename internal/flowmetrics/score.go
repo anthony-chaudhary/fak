@@ -30,6 +30,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 )
 
@@ -51,6 +52,14 @@ func RunScore(ctx context.Context, stdout, stderr io.Writer, argv []string, defa
 	agingLimit := fs.Int("aging-limit", 0, "cap on the emitted aging-WIP list (0 = 25)")
 	probeBuild := fs.Bool("probe-build", false, "also compile the tree so the local-WIP axis can grade buildability")
 	workspace := fs.String("workspace", "", "workspace root (default: the repo root)")
+	var aboutToTouch []string
+	fs.Func("touch", "repository-relative path this session is about to edit (repeatable)", func(path string) error {
+		if path = strings.TrimSpace(path); path == "" {
+			return errors.New("--touch requires a non-empty path")
+		}
+		aboutToTouch = append(aboutToTouch, path)
+		return nil
+	})
 	if err := fs.Parse(argv); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -105,13 +114,14 @@ func RunScore(ctx context.Context, stdout, stderr io.Writer, argv []string, defa
 	}
 
 	rep := Build(Input{
-		Issues:     issues,
-		Commits:    commitRows,
-		Tree:       tree,
-		Now:        now,
-		WindowDays: *window,
-		AgingLimit: *agingLimit,
-		Workspace:  root,
+		Issues:       issues,
+		Commits:      commitRows,
+		Tree:         tree,
+		Now:          now,
+		WindowDays:   *window,
+		AgingLimit:   *agingLimit,
+		Workspace:    root,
+		AboutToTouch: aboutToTouch,
 	})
 
 	if *asJSON {

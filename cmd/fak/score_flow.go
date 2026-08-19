@@ -8,6 +8,8 @@ import (
 )
 
 // `fak score flow` is the READOUT hop for the eight flow KPIs (#6198, epic #6194).
+// Its local-WIP section also names recently written paths and duplicate symbols;
+// repeat --touch for planned edits to surface exact path overlap before authoring.
 //
 // internal/flowmetrics already folds issue rows against commit rows into started/closed
 // spans and grades eight Little's-Law axes, but nothing called it: the numbers were
