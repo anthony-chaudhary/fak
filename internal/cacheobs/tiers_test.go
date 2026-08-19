@@ -586,3 +586,18 @@ func TestObserveTierConcurrent(t *testing.T) {
 		t.Fatalf("local_prefix requests %d must equal turns %d (= %d)", local.Requests, snap.Turns, workers*perWorker)
 	}
 }
+
+func TestPublicVocabularyExcludesBoundSentinels(t *testing.T) {
+	if got := AllTiers(); len(got) != int(numCacheTiers) {
+		t.Fatalf("AllTiers length = %d, want bound %d", len(got), numCacheTiers)
+	}
+	if got := AllOps(); len(got) != int(numTierOps) {
+		t.Fatalf("AllOps length = %d, want bound %d", len(got), numTierOps)
+	}
+	if got := AllBackends(); len(got) != int(numBackendClasses) {
+		t.Fatalf("AllBackends length = %d, want bound %d", len(got), numBackendClasses)
+	}
+	if _, ok := defaultTierStatus()[numCacheTiers]; ok {
+		t.Fatal("default status includes exclusive tier bound sentinel")
+	}
+}
