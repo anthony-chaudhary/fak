@@ -232,11 +232,11 @@ func stripLineComment(text string) string {
 	return text
 }
 
-// dispatchVerbs returns the canonical verb tokens of cmd/fak/main.go's top-level
-// `switch os.Args[1]` — the first quoted token of each case, in dispatch order,
-// deduped. It is brace-scoped to that switch so a nested switch elsewhere in the
-// file cannot leak a spurious token. A missing/unreadable main.go yields nil (an
-// installed binary outside a repo), which makes Scan report no verbs rather than fail.
+// dispatchVerbs returns the canonical verb tokens from cmd/fak/main.go's dispatch
+// switches. The original router used one `switch os.Args[1]`; the split router uses
+// several `dispatch*Verb` functions with `switch name`. Both shapes are scanned so
+// splitting the god-file cannot silently zero this lint. A missing/unreadable main.go
+// yields nil (an installed binary outside a repo).
 func dispatchVerbs(mainPath string) ([]string, error) {
 	f, err := os.Open(mainPath)
 	if err != nil {
@@ -256,12 +256,9 @@ func dispatchVerbs(mainPath string) ([]string, error) {
 	for sc.Scan() {
 		text := sc.Text()
 		if !inSwitch {
-			// Match the switch on the CODE half only — a `//` comment that merely
-			// mentions `switch os.Args[1]` (the file documents its own dispatch switch
-			// a few lines above the real one) must not latch the walker onto a
-			// zero-depth comment line, which would break the scan before it ever
-			// reaches the real switch body.
-			if code := stripLineComment(text); strings.Contains(code, "switch os.Args[1]") {
+			// Match code only: comments in this file describe both router shapes.
+			code := strings.TrimSpace(stripLineComment(text))
+			if strings.HasPrefix(code, "switch os.Args[1]") || strings.HasPrefix(code, "switch name") {
 				inSwitch = true
 				depth = strings.Count(code, "{") - strings.Count(code, "}")
 			}
@@ -281,7 +278,7 @@ func dispatchVerbs(mainPath string) ([]string, error) {
 		code := stripLineComment(text)
 		depth += strings.Count(code, "{") - strings.Count(code, "}")
 		if depth <= 0 {
-			break // the switch closed
+			inSwitch = false // keep scanning: the split router has several switches
 		}
 	}
 	return tokens, sc.Err()

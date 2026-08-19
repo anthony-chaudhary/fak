@@ -19,6 +19,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/vcachesnapshot"
 )
 
+//fak:ctxplan verb=vcache enters="provider/session cache telemetry and persisted vCache snapshots selected by the subcommand" pages="status, proof, calibration, and cache-action reports to the operator; no model context is mutated" warms="provider warmth calibration and reusable cache-state evidence for later gateway decisions"
 func cmdVCache(argv []string) {
 	os.Exit(runVCache(os.Stdout, os.Stderr, argv))
 }

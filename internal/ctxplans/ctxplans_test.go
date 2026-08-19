@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -181,6 +182,40 @@ func TestLiveContextPlanFloorAndDebt(t *testing.T) {
 // that zero-depth comment line, see depth<=0 on the next line, and break before reaching
 // a single case — so the whole scan reported 0 verbs. The header match must skip the
 // comment half and only fire on the real switch statement.
+func TestDispatchVerbsScansSplitRouterSwitches(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "main.go")
+	src := `package main
+func dispatchA(name string) bool {
+ switch name {
+ case "memory":
+  return true
+ }
+ return false
+}
+func dispatchB(name string) bool {
+ switch name {
+ case "recall":
+  return true
+ case "memory":
+  return true
+ }
+ return false
+}
+`
+	if err := os.WriteFile(mainPath, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := dispatchVerbs(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"memory", "recall"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("dispatch verbs = %v, want %v", got, want)
+	}
+}
+
 func TestSwitchMentionedInCommentDoesNotDerailWalker(t *testing.T) {
 	dir := t.TempDir()
 	fakDir := filepath.Join(dir, "cmd", "fak")
