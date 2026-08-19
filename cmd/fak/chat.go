@@ -89,11 +89,16 @@ func runChat(in io.Reader, out io.Writer, planner agent.Planner, maxTurns int) {
 		// so pass nil and let RunArm skip it.
 		m, err := agent.RunArm(ctx(), planner, line, true, maxTurns, nil)
 		if err != nil {
-			fmt.Fprintf(out, "fak> turn failed: %v\n", err)
+			renderChatTermination(out, err)
 			continue
 		}
 		fmt.Fprintf(out, "fak> %s\n", strings.TrimSpace(m.FinalAnswer))
 		fmt.Fprintf(out, "     [turn %d: %d model turns, %d engine calls, %d denied, %d served]\n",
 			turn, m.Turns, m.EngineCalls, m.Denies, m.VDSOHits)
 	}
+}
+
+func renderChatTermination(out io.Writer, err error) {
+	t := agent.ClassifyTermination(err)
+	fmt.Fprintf(out, "fak> turn terminated [%s]: %s\n", t.Cause, t.Evidence)
 }

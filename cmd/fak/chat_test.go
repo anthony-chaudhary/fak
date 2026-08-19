@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -91,5 +93,14 @@ func TestRunChatTurnMetrics(t *testing.T) {
 	}
 	if !strings.Contains(m.FinalAnswer, "blocked") {
 		t.Fatalf("loop should have continued past the deny to a final answer, got %q", m.FinalAnswer)
+	}
+}
+
+func TestRenderChatTerminationUsesSharedSafeClassification(t *testing.T) {
+	var out bytes.Buffer
+	renderChatTermination(&out, errors.New("provider status 429: secret body"))
+	got := out.String()
+	if !strings.Contains(got, "[rate_limited]") || !strings.Contains(got, "provider reported rate limiting") || strings.Contains(got, "secret") {
+		t.Fatalf("%q", got)
 	}
 }

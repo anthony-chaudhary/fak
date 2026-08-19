@@ -7479,6 +7479,11 @@
           "category": "incidental",
           "reason": "Self-test result field proving context compaction is distinct from recovery checkpoint state",
           "token": "compaction_checkpoint_conflation_rejected"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed run-termination cause for provider context-window exhaustion, not a managed-context subsystem or context carrier.",
+          "token": "TerminationContextLimit"
         }
       ],
       "id": "context-ctx",
@@ -7502,6 +7507,7 @@
         "RetainedContextBytes",
         "SearchRecall",
         "SensitiveContext",
+        "TerminationContextLimit",
         "WithAffinity",
         "affinityContextKey",
         "appendGuardCompactionWitnessTo",
@@ -9618,6 +9624,11 @@
           "category": "incidental",
           "reason": "Renders a prompt string only; does not materialize persisted state",
           "token": "renderinkernelchatmlrequest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private renderer delegates to the canonical agent termination classifier; it does not define a separate rendering or materialization concept.",
+          "token": "renderChatTermination"
         }
       ],
       "id": "render-materialize",
@@ -9660,6 +9671,7 @@
         "priorwtrendercrash",
         "renderAxisPartition",
         "renderCanonicalTerms",
+        "renderChatTermination",
         "renderCheckpointWitness",
         "renderCommitDrainResult",
         "renderCommitVelocity",

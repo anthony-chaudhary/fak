@@ -223,10 +223,7 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		s.logf("gateway: native stream loop error (trace %s): %v", reqTrace, err)
 		closeText()
-		send("error", map[string]any{
-			"type":  "error",
-			"error": map[string]any{"type": "api_error", "message": "upstream model error"},
-		})
+		send("error", nativeTerminationError(err))
 		return
 	}
 	closeText()
@@ -303,6 +300,14 @@ func (s *Server) runNativeArmStream(ctx context.Context, req *agent.AnthropicMes
 
 // runNativeArmStreamSeed is the streamed twin of runNativeArmSeed: one already-converted
 // request, driven with the same wired conversation and request-scoped catalog.
+func nativeTerminationError(err error) map[string]any {
+	termination := agent.ClassifyTermination(err)
+	return map[string]any{
+		"type":  "error",
+		"error": map[string]any{"type": "terminated_run", "message": "run terminated", "cause": termination.Cause, "evidence": termination.Evidence},
+	}
+}
+
 func (s *Server) runNativeArmStreamSeed(ctx context.Context, seed nativeWireSeed, reqTrace string, sink agent.StreamSink, onProgress agent.ProgressObserver) (agent.ArmMetrics, error) {
 	ensureGovernedRungs()
 	opts, release := s.nativeRunOptions(ctx, reqTrace)
