@@ -278,3 +278,12 @@ func TestWitnessedPlatformCoverage(t *testing.T) {
 		t.Errorf("delegating fixtures cover %d arch(es) %v, want >= 2", len(arches), arches)
 	}
 }
+
+func TestClosedVocabulariesHaveExplicitSentinels(t *testing.T) {
+	if got := ReasonAdmitted.severity(); got != OutcomeDelegate {
+		t.Fatalf("admitted severity = %s, want %s", got, OutcomeDelegate)
+	}
+	if spec, ok := kernelSpecs[KernelUnknown]; !ok || len(spec.byArch) != 0 {
+		t.Fatalf("unknown kernel spec = %+v, present=%t; want terminal empty sentinel", spec, ok)
+	}
+}

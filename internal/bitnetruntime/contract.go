@@ -121,6 +121,8 @@ const (
 // other reading of the same report untrustworthy.
 func (r Reason) severity() Outcome {
 	switch r {
+	case ReasonAdmitted:
+		return OutcomeDelegate
 	case ReasonProbeConflict, ReasonPackingNarrowerThanKernel:
 		return OutcomeRefuse
 	case ReasonVersionTooOld, ReasonKernelNotBuilt, ReasonKernelArchMismatch,
@@ -235,9 +237,10 @@ type kernelSpec struct {
 // width the kernel's packing requires per weight: i2_s and tl1 index two bits
 // per weight, tl2 packs three ternary weights into five bits.
 var kernelSpecs = map[Kernel]kernelSpec{
-	KernelI2S: {storedBits: 2, byArch: map[string]string{"amd64": "avx2", "arm64": "neon"}},
-	KernelTL1: {storedBits: 2, byArch: map[string]string{"arm64": "neon"}},
-	KernelTL2: {storedBits: 5.0 / 3.0, byArch: map[string]string{"amd64": "avx2"}},
+	KernelI2S:     {storedBits: 2, byArch: map[string]string{"amd64": "avx2", "arm64": "neon"}},
+	KernelTL1:     {storedBits: 2, byArch: map[string]string{"arm64": "neon"}},
+	KernelTL2:     {storedBits: 5.0 / 3.0, byArch: map[string]string{"amd64": "avx2"}},
+	KernelUnknown: {}, // terminal no-selection sentinel; never dispatchable
 }
 
 // supportedOS is the set of platforms bitnet.cpp builds for. It is a closed set
