@@ -170,11 +170,9 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 					break
 				}
 				if deadlineReached {
-					if result.Status == "active" {
-						result.Status = "launched_unproven"
-						result.Reason = "verification deadline elapsed before a fresh turn was observed"
-						result.Remediation = sessionrecovery.Remediation(result)
-					}
+					// An exact guarded Codex tree proves the interactive resume is alive.
+					// A later fresh turn upgrades active to productive; it is not required
+					// merely to keep a usable, waiting TUI from being reported failed.
 					break
 				}
 				recoverySleep(*pollInterval)

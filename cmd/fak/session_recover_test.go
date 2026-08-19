@@ -196,6 +196,41 @@ func TestSessionRecoverPollsUntilProductiveAndPreservesObservedCardinality(t *te
 	}
 }
 
+func TestSessionRecoverKeepsExactGuardedTreeActiveWithoutFreshTurn(t *testing.T) {
+	oldInv, oldJournal, oldLaunch, oldSleep, oldNow := recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep, recoveryNow
+	defer func() {
+		recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep, recoveryNow = oldInv, oldJournal, oldLaunch, oldSleep, oldNow
+	}()
+	now := time.Date(2026, 8, 18, 1, 0, 0, 0, time.UTC)
+	recoveryNow = func() time.Time { return now }
+	recoverySleep = func(d time.Duration) { now = now.Add(d) }
+	calls := 0
+	recoveryInventory = func(time.Duration) (sessionrecovery.InventoryReport, error) {
+		calls++
+		s := sessionrecovery.Session{Thread: &sessionrecovery.Thread{ID: "t1", Source: "interactive_tui", CWD: `C:\work\fak`}, LatestTurn: &sessionrecovery.Turn{Status: "inProgress", StartedAt: "2026-08-18T01:00:00Z"}}
+		if calls > 1 {
+			s.ProcessTrees = []sessionrecovery.ProcessTree{{RootPID: 42, HasGuard: true, HasCodex: true}}
+			s.GuardReceipt = &sessionrecovery.GuardReceipt{RecordedAt: "2026-08-18T01:00:01Z"}
+		}
+		return sessionrecovery.InventoryReport{Sessions: []sessionrecovery.Session{s}}, nil
+	}
+	recoveryJournalCrashes = func(string, time.Time) ([]sessionjournal.Classified, error) { return nil, nil }
+	recoveryLaunch = &captureLauncher{}
+
+	var stdout, stderr bytes.Buffer
+	code := runSessionRecover(&stdout, &stderr, []string{"--apply", "--thread", "t1", "--json", "--journal=false", "--receipts", t.TempDir(), "--verify-timeout", "2s", "--poll-interval", "1s"})
+	if code != 0 {
+		t.Fatalf("runSessionRecover code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var summary sessionrecovery.Summary
+	if err := json.Unmarshal(stdout.Bytes(), &summary); err != nil {
+		t.Fatal(err)
+	}
+	if summary.Counts.Active != 1 || summary.Counts.LaunchedUnproven != 0 || summary.Counts.ExactCardinality != 1 {
+		t.Fatalf("counts = %+v, want active exact tree without fresh turn", summary.Counts)
+	}
+}
+
 func TestSessionRecoverFailsClosedOnDuplicateGuardedTrees(t *testing.T) {
 	oldInv, oldJournal, oldLaunch, oldSleep := recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep
 	defer func() {
