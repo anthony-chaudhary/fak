@@ -16,6 +16,7 @@ import (
 // testPolicy is the allowlist the adapter tests adjudicate against: one named Slack
 // destination and a wildcard Telegram platform, mirroring the shapes delivery_test.go
 // already exercises.
+//enumlint:exempt this fixture deliberately allows only Slack and Telegram to prove platform allowlisting.
 func testPolicy() egressfloor.DeliveryPolicy {
 	return egressfloor.DeliveryPolicy{Allow: map[egressfloor.Platform][]string{
 		egressfloor.PlatformSlack:    {"C0OPS"},
