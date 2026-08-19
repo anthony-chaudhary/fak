@@ -329,8 +329,9 @@ type infoViewState struct {
 	// select + copy the frame without the next tick's in-place redraw erasing it; toggled by 'c'.
 	// The loop (info.go) owns the side effects — disabling mouse reporting, suppressing the redraw,
 	// and making Ctrl-C forgiving here — while the renderer only swaps the tab bar for the banner.
-	copyMode  bool
-	launchWeb bool // one-shot request consumed by the interactive loop
+	copyMode     bool
+	launchWeb    bool   // one-shot request consumed by the interactive loop
+	launchNotice string // observable start/open/failure result shown beneath the action bar
 }
 
 // infoScrollPageStep is how many rows a PageUp/PageDown moves the active view. Fixed (not

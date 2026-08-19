@@ -29,12 +29,15 @@ func renderGuardInfoInteractiveBlock(state infoViewState, v guardInfoVars, tr *g
 		topRow = buildInfoCopyBanner(width) // frozen for copy: swap the tab bar for the how-to banner
 	}
 	rows := []string{topRow}
+	if state.launchNotice != "" {
+		rows = append(rows, state.launchNotice)
+	}
 
 	// bodyHeight is the room left under the tab bar; 0/negative height (unknown pane) means
 	// "roomy", so the body renders in full and the loop's own cap pins it.
 	bodyHeight := 0
 	if height > 0 {
-		bodyHeight = height - 1
+		bodyHeight = height - len(rows)
 	}
 	var body []string
 	if state.glossaryOpen {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -219,28 +220,57 @@ type guardInfoManagedCache = guardvars.ManagedCacheVars
 // decode cannot drift.
 type guardInfoCacheAttribution = guardvars.CacheAttributionVars
 
-var startInfoHarnessWeb = func() error {
+var infoHarnessWebURL = "http://127.0.0.1:8787"
+
+var infoHarnessWebHTTPClient = &http.Client{Timeout: 500 * time.Millisecond}
+var infoHarnessWebOpenURL = openURL
+
+var startInfoHarnessWeb = func() (string, error) {
+	if infoHarnessWebReady(infoHarnessWebURL, infoHarnessWebHTTPClient) {
+		if err := infoHarnessWebOpenURL(infoHarnessWebURL); err != nil {
+			return infoHarnessWebURL, fmt.Errorf("open existing web gateway: %w", err)
+		}
+		return infoHarnessWebURL, nil
+	}
 	exe, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("resolve fak executable: %w", err)
+		return "", fmt.Errorf("resolve fak executable: %w", err)
 	}
-	return launchInfoHarnessWeb(exe, func(cmd *exec.Cmd) error {
-		if err := cmd.Start(); err != nil {
-			return err
-		}
-		go func() { _ = cmd.Wait() }()
-		return nil
+	return launchInfoHarnessWeb(exe, infoHarnessWebURL, infoHarnessWebHTTPClient, infoHarnessWebOpenURL, func(cmd *exec.Cmd) error {
+		return cmd.Start()
 	})
 }
 
-func launchInfoHarnessWeb(executable string, start func(*exec.Cmd) error) error {
+func launchInfoHarnessWeb(executable, endpoint string, client *http.Client, openBrowser func(string) error, start func(*exec.Cmd) error) (string, error) {
 	cmd := exec.Command(executable, "harness", "web")
 	if err := start(cmd); err != nil {
-		return fmt.Errorf("start fak harness web: %w", err)
+		return "", fmt.Errorf("start fak harness web: %w", err)
 	}
-	return nil
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if infoHarnessWebReady(endpoint, client) {
+			if err := openBrowser(endpoint); err != nil {
+				return endpoint, fmt.Errorf("open web gateway: %w", err)
+			}
+			return endpoint, nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return endpoint, fmt.Errorf("web gateway did not become ready at %s", endpoint)
 }
 
+func infoHarnessWebReady(endpoint string, client *http.Client) bool {
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.Scheme != "http" || parsed.Hostname() == "" {
+		return false
+	}
+	resp, err := client.Get(endpoint)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode >= 200 && resp.StatusCode < 400
+}
 func writerIsTerminal(w io.Writer) bool {
 	f, ok := w.(interface{ Fd() uintptr })
 	return ok && term.IsTerminal(int(f.Fd()))
@@ -949,8 +979,16 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 				next := applyInfoInput(viewState, ev)
 				if next.launchWeb {
 					next.launchWeb = false
-					if err := startInfoHarnessWeb(); err != nil {
-						writeNote(stderr, "fak info: web gateway launch failed: "+err.Error())
+					next.launchNotice = "web gateway: starting…"
+					viewState = next
+					if haveSample {
+						writeFrame(lastSample)
+					}
+					endpoint, err := startInfoHarnessWeb()
+					if err != nil {
+						next.launchNotice = "web gateway: failed — " + err.Error()
+					} else {
+						next.launchNotice = "web gateway: opened " + endpoint
 					}
 				}
 				// A body click the tab/glossary layout did not claim may still land on a Cache-tab
