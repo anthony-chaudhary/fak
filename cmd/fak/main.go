@@ -1116,7 +1116,9 @@ func cmdAgent(argv []string) {
 	maxTurns := fs.Int("max-turns", 10, "max model turns per arm")
 	out := fs.String("out", "agent-report.json", "report output path")
 	logOut := fs.String("log", "", "optional path to write the per-call trace log")
-	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
+	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in floor plus bounded repository code tools when enabled; see `fak policy --dump`)")
+	codeTools := fs.Bool("code-tools", true, "arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the current repository; use --code-tools=false to disable")
+	codeWorkspace := fs.String("code-workspace", "", "override the workspace root for default-on bounded repository code tools")
 	routeManifest := fs.String("route-manifest", "", "model-routing policy to install for the fak arm; each tool call is classified and a single-model PICK binds abi.ToolCall.Engine before kernel submit")
 	routeAccounts := fs.String("route-accounts", "", "model-account roster used to resolve routed model ids to account-bound engine routes")
 	_ = fs.Parse(argv)
@@ -1150,6 +1152,17 @@ func cmdAgent(argv []string) {
 		fmt.Fprintf(os.Stderr, "fak agent: loaded model-routing policy from %s\n", *routeManifest)
 	}
 	announceAgentRouteAccounts(os.Stderr, *routeAccounts, loadedAccounts)
+	if *codeTools {
+		root := strings.TrimSpace(*codeWorkspace)
+		if root == "" {
+			root, err = os.Getwd()
+			must(err)
+		}
+		catalog, armErr := agent.ArmFocusedCodeTools(root)
+		must(armErr)
+		defer agent.DisarmCodeTools()
+		runOpts = append(runOpts, agent.WithToolCatalog(catalog))
+	}
 
 	var planner agent.Planner
 	if *offline || *baseURL == "" {

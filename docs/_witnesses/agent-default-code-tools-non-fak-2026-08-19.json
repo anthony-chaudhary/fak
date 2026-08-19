@@ -1,0 +1,31 @@
+{
+  "schema": "fak.agent.default-code-tools-witness.v1",
+  "captured_at": "2026-08-19T14:00:00Z",
+  "operator_local_date": "2026-08-19",
+  "workspace_kind": "temporary non-FAK repository",
+  "default": {
+    "entrypoint": "fak agent",
+    "workspace": "current working directory",
+    "catalog": ["Read", "Write", "Edit", "Bash", "Grep", "Glob"],
+    "override": "--code-workspace <directory>",
+    "opt_out": "--code-tools=false"
+  },
+  "catalog_witness": {
+    "test": "TestAgentDefaultCodeToolsArmInNonFakWorkspace",
+    "effect": "a temporary directory with no FAK metadata arms exactly the six bounded repository tools"
+  },
+  "execution_witness": {
+    "tests": [
+      "TestOwnedLoopDispatchesCodeToolsThroughKernelEngines",
+      "TestOwnedLoopRefusesOutOfTreeReadWithoutReadingIt",
+      "TestOwnedLoopMutatesScratchRepoThroughKernelEngines",
+      "TestOwnedLoopRunsBashThroughKernelEngine"
+    ],
+    "effect": "the owned agent loop executes repository operations through kernel engines, permits in-root mutation and focused Bash, and denies an escaping read before filesystem access"
+  },
+  "diagnostic_witness": {
+    "test": "TestAgentLaunchPostureReportsBoundedCodeToolsActive",
+    "effect": "doctor launch-posture reports bounded-code-tools active for the agent entrypoint and names the independent opt-out"
+  },
+  "safety_boundary": "Bash uses the focused code-tool command allowlist; this witness does not claim unrestricted shell execution."
+}

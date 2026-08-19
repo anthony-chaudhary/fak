@@ -225,6 +225,15 @@ func postureCodeTools(opts launchPostureOptions, workspace string) launchPosture
 		m.State, m.Reason, m.Disable = "active", "the wrapped harness repository tools are admitted by the guard default policy", "use --policy to narrow the tool floor"
 		return m
 	}
+	if opts.entrypoint == "agent" {
+		info, err := os.Stat(workspace)
+		if err != nil || !info.IsDir() {
+			m.State, m.Reason, m.Action = "inert", "the selected workspace is not a readable directory", "pass --workspace with an existing repository directory"
+			return m
+		}
+		m.State, m.Reason, m.Disable = "active", "the owned agent loop arms bounded repository tools at the selected workspace", "--code-tools=false"
+		return m
+	}
 	if opts.entrypoint == "serve" && opts.native {
 		info, err := os.Stat(workspace)
 		if err != nil || !info.IsDir() {
