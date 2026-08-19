@@ -38,6 +38,9 @@ func plantResolveSession(t *testing.T, runsDir, worker, header, body string, pid
 // age from the log mtime, and — the cross-plane join no other command does — the guard
 // session (handle/trace/audit) resolved from guard_sessions.jsonl by pid.
 func TestDispatchSessionsJoinsGuardAndOutcome(t *testing.T) {
+	oldStart := dispatchProcessStart
+	dispatchProcessStart = func(int) (time.Time, bool) { return time.Date(2026, 7, 8, 9, 30, 30, 0, time.UTC), true }
+	t.Cleanup(func() { dispatchProcessStart = oldStart })
 	runsDir := t.TempDir()
 	regDir := t.TempDir()
 
@@ -145,6 +148,9 @@ func TestDispatchSessionsCLIJSON(t *testing.T) {
 // cost, and cache-read share onto the row — and a scan with NO usage ledger leaves
 // all three at zero (byte-identical to the pre-accounting shape).
 func TestDispatchSessionsFoldsTokenAccounting(t *testing.T) {
+	oldStart := dispatchProcessStart
+	dispatchProcessStart = func(int) (time.Time, bool) { return time.Date(2026, 7, 8, 9, 30, 30, 0, time.UTC), true }
+	t.Cleanup(func() { dispatchProcessStart = oldStart })
 	runsDir := t.TempDir()
 	regDir := t.TempDir()
 
@@ -215,6 +221,9 @@ func plantLogOnly(t *testing.T, runsDir, worker, content string, mtime time.Time
 // deterministic (same inputs → identical snapshot), stably ordered (live first, then by
 // worker name), and joins/skips each fixture correctly.
 func TestDispatchSessionsDeterministicEdgeSweep(t *testing.T) {
+	oldStart := dispatchProcessStart
+	dispatchProcessStart = func(int) (time.Time, bool) { return time.Date(2026, 7, 8, 10, 15, 30, 0, time.UTC), true }
+	t.Cleanup(func() { dispatchProcessStart = oldStart })
 	runsDir := t.TempDir()
 	regDir := t.TempDir()
 	mtime := time.Date(2026, 7, 8, 10, 20, 0, 0, time.UTC)
@@ -351,5 +360,64 @@ func TestDispatchSessionsWatchBounded(t *testing.T) {
 	}
 	if strings.Contains(out, "watch 3") {
 		t.Fatalf("watch exceeded its iteration bound:\n%s", out)
+	}
+}
+
+func TestDispatchSessionsRejectsReusedPIDIdentity(t *testing.T) {
+	runs := t.TempDir()
+	reg := t.TempDir()
+	pid := os.Getpid()
+	logName := "resolve-8022-20260818-120000-codex.log"
+	if err := os.WriteFile(filepath.Join(runs, logName), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runs, strings.TrimSuffix(logName, ".log")+".pid"), []byte(strconv.Itoa(pid)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runs, strings.TrimSuffix(logName, ".log")+".backend"), []byte("codex\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runs, strings.TrimSuffix(logName, ".log")+".lease-scope.json"), []byte(`{"worker":"resolve-8022-20260818-120000-codex","lane":"cmd","lease_id":"lease-x","tree":"cmd/fak/**"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := guardsessions.Record(reg, guardsessions.Row{Handle: "wrong-guard", TraceID: "wrong-trace", PID: pid}); err != nil {
+		t.Fatal(err)
+	}
+	old := dispatchProcessStart
+	dispatchProcessStart = func(got int) (time.Time, bool) { return time.Date(2026, 8, 18, 13, 0, 0, 0, time.UTC), got == pid }
+	t.Cleanup(func() { dispatchProcessStart = old })
+
+	snap := dispatchSessionsScan(runs, reg, "", time.Date(2026, 8, 18, 13, 1, 0, 0, time.UTC))
+	if snap.LiveCount != 0 || len(snap.Sessions) != 1 {
+		t.Fatalf("unexpected snapshot: %+v", snap)
+	}
+	row := snap.Sessions[0]
+	if row.Live || !row.PIDAlive || row.PIDIdentity != "stale" || row.Guard != nil {
+		t.Fatalf("reused PID fabricated live/guard state: %+v", row)
+	}
+}
+
+func TestDispatchSessionsKeepsLaunchCompatiblePIDLive(t *testing.T) {
+	runs := t.TempDir()
+	reg := t.TempDir()
+	pid := os.Getpid()
+	logName := "resolve-8022-20260818-120000-codex.log"
+	base := strings.TrimSuffix(logName, ".log")
+	for name, data := range map[string]string{logName: "", base + ".pid": strconv.Itoa(pid), base + ".backend": "codex\n", base + ".lease-scope.json": `{"worker":"` + base + `","lane":"cmd","lease_id":"lease-x","tree":"cmd/fak/**"}`} {
+		if err := os.WriteFile(filepath.Join(runs, name), []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := guardsessions.Record(reg, guardsessions.Row{Handle: "guard-ok", TraceID: "trace-ok", PID: pid}); err != nil {
+		t.Fatal(err)
+	}
+	old := dispatchProcessStart
+	dispatchProcessStart = func(got int) (time.Time, bool) { return time.Date(2026, 8, 18, 12, 0, 30, 0, time.UTC), got == pid }
+	t.Cleanup(func() { dispatchProcessStart = old })
+
+	snap := dispatchSessionsScan(runs, reg, "", time.Date(2026, 8, 18, 12, 1, 0, 0, time.UTC))
+	row := snap.Sessions[0]
+	if !row.Live || row.PIDIdentity != "launch-confirmed" || row.Guard == nil || row.Guard.Handle != "guard-ok" {
+		t.Fatalf("matching PID identity lost live state: %+v", row)
 	}
 }

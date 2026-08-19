@@ -49,6 +49,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchaudit"
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/guardsessions"
+	"github.com/anthony-chaudhary/fak/internal/processstart"
 )
 
 const (
@@ -61,6 +62,8 @@ const (
 // started without reading the log body.
 var dispatchSessionStampRE = regexp.MustCompile(`^resolve-\d+-(\d{8}-\d{6})`)
 
+var dispatchProcessStart = processstart.Start
+
 // dispatchSessionGuard is the cross-plane join: the guard session a worker's pid
 // resolves to. Absent (nil) when no guard_sessions.jsonl row shares the pid.
 type dispatchSessionGuard struct {
@@ -72,22 +75,24 @@ type dispatchSessionGuard struct {
 // dispatchSessionRow is one dispatch worker session, unifying the runs-dir scope,
 // the audit outcome, and the guard session.
 type dispatchSessionRow struct {
-	Schema     string                `json:"schema"`
-	Issue      string                `json:"issue,omitempty"`
-	Lane       string                `json:"lane,omitempty"`
-	Backend    string                `json:"backend"`
-	Worker     string                `json:"worker"`
-	PID        int                   `json:"pid,omitempty"`
-	PIDAlive   bool                  `json:"pid_alive"`
-	Live       bool                  `json:"live"`
-	Outcome    string                `json:"outcome"`
-	Reason     string                `json:"reason,omitempty"`
-	Evidence   string                `json:"evidence,omitempty"`
-	AgeSeconds int64                 `json:"age_seconds"`
-	Started    string                `json:"started,omitempty"`
-	LeaseID    string                `json:"lease_id,omitempty"`
-	Tree       []string              `json:"tree,omitempty"`
-	Guard      *dispatchSessionGuard `json:"guard,omitempty"`
+	Schema      string                `json:"schema"`
+	Issue       string                `json:"issue,omitempty"`
+	Lane        string                `json:"lane,omitempty"`
+	Backend     string                `json:"backend"`
+	Worker      string                `json:"worker"`
+	PID         int                   `json:"pid,omitempty"`
+	PIDAlive    bool                  `json:"pid_alive"`
+	PIDIdentity string                `json:"pid_identity,omitempty"`
+	PIDReason   string                `json:"pid_reason,omitempty"`
+	Live        bool                  `json:"live"`
+	Outcome     string                `json:"outcome"`
+	Reason      string                `json:"reason,omitempty"`
+	Evidence    string                `json:"evidence,omitempty"`
+	AgeSeconds  int64                 `json:"age_seconds"`
+	Started     string                `json:"started,omitempty"`
+	LeaseID     string                `json:"lease_id,omitempty"`
+	Tree        []string              `json:"tree,omitempty"`
+	Guard       *dispatchSessionGuard `json:"guard,omitempty"`
 	// Token/cost accounting (#3329), folded from the gateway-usage ledger by the
 	// worker's guard trace-id. All three are omitempty: a session whose trace has no
 	// usage row (or a fleet with no ledger yet) carries none of them, so the snapshot
@@ -248,30 +253,35 @@ func dispatchSessionsScan(runsDir, regDir, usageLedgerPath string, now time.Time
 		c := dispatchaudit.Classify(w, dispatchaudit.DefaultThresholds())
 		stem := strings.TrimSuffix(w.Log, filepath.Ext(w.Log))
 
+		pidIdentity, pidReason := dispatchSessionPIDIdentity(w.PID, w.PIDAlive, dispatchSessionStartedTime(w.Log))
 		row := dispatchSessionRow{
-			Schema:     dispatchSessionSchema,
-			Issue:      w.Issue,
-			Lane:       w.Lane,
-			Backend:    string(c.Backend),
-			Worker:     stem,
-			PID:        w.PID,
-			PIDAlive:   w.PIDAlive,
-			Outcome:    string(c.Outcome),
-			Reason:     c.Reason,
-			Evidence:   c.EvidenceSummary,
-			AgeSeconds: dispatchSessionAgeSeconds(filepath.Join(runsDir, w.Log), now),
-			Started:    dispatchSessionStarted(w.Log),
+			Schema:      dispatchSessionSchema,
+			Issue:       w.Issue,
+			Lane:        w.Lane,
+			Backend:     string(c.Backend),
+			Worker:      stem,
+			PID:         w.PID,
+			PIDAlive:    w.PIDAlive,
+			PIDIdentity: pidIdentity,
+			PIDReason:   pidReason,
+			Outcome:     string(c.Outcome),
+			Reason:      c.Reason,
+			Evidence:    c.EvidenceSummary,
+			AgeSeconds:  dispatchSessionAgeSeconds(filepath.Join(runsDir, w.Log), now),
+			Started:     dispatchSessionStarted(w.Log),
 		}
 		if scope, ok := liveByWorker[stem]; ok {
-			row.Live = true
+			row.Live = pidIdentity != "stale"
 			if row.Lane == "" {
 				row.Lane = scope.Lane
 			}
 			row.LeaseID = scope.LeaseID
 			row.Tree = scope.Tree
-			live++
+			if row.Live {
+				live++
+			}
 		}
-		if w.PID > 0 {
+		if w.PID > 0 && pidIdentity != "stale" {
 			if g, ok := guardByPID[w.PID]; ok {
 				row.Guard = &dispatchSessionGuard{Handle: g.Handle, TraceID: g.TraceID, AuditPath: g.AuditPath}
 			}
@@ -311,6 +321,30 @@ func dispatchSessionsScan(runsDir, regDir, usageLedgerPath string, now time.Time
 // keeping the snapshot byte-identical to a fleet with no usage ledger yet. Rows are
 // cumulative counter snapshots, so the newest row per session already holds that
 // task's running total (mirrors budget.go's latestTaskRow).
+
+func dispatchSessionStartedTime(logName string) time.Time {
+	m := dispatchSessionStampRE.FindStringSubmatch(filepath.Base(logName))
+	if len(m) != 2 {
+		return time.Time{}
+	}
+	started, _ := time.Parse("20060102-150405", m[1])
+	return started.UTC()
+}
+
+func dispatchSessionPIDIdentity(pid int, alive bool, launched time.Time) (string, string) {
+	if pid <= 0 || !alive {
+		return "ended", "process is not alive"
+	}
+	started, ok := dispatchProcessStart(pid)
+	if !ok || launched.IsZero() {
+		return "unknown", "process-start identity is unavailable"
+	}
+	if started.UTC().After(launched.Add(2 * time.Minute)) {
+		return "stale", "live PID started after the recorded dispatch launch"
+	}
+	return "launch-confirmed", "process start is compatible with the dispatch launch"
+}
+
 func dispatchSessionUsageByTrace(ledgerPath string) map[string]gatewayusageledger.Counters {
 	if strings.TrimSpace(ledgerPath) == "" {
 		return nil
