@@ -191,7 +191,7 @@ func TestToolSpecBlockMatchesQwen35Contract(t *testing.T) {
 		"You are provided with function signatures within <tools></tools> XML tags:",
 		"<tools>",
 		`{"type":"function","function":{"name":"record_probe"`,
-		"For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:",
+		"If you choose to call a function ONLY reply in the following format with NO suffix:",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("tool preamble missing %q:\n%s", want, got)
@@ -223,5 +223,28 @@ func TestRenderInKernelChatMLRequestIgnoresMalformedResponseFormat(t *testing.T)
 	want := renderInKernelChatMLTools(messages, nil, model.Config{})
 	if got != want {
 		t.Fatalf("malformed response_format changed prompt:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestLiftTextToolCallsQwenFunctionParameterDialect(t *testing.T) {
+	m := LiftTextToolCalls(Message{Role: RoleAssistant, Content: `<tool_call>
+<function=record_probe>
+<parameter=hardware>
+A100-SXM4-40GB
+</parameter>
+<parameter=passed>
+true
+</parameter>
+</function>
+</tool_call>`})
+	if len(m.ToolCalls) != 1 {
+		t.Fatalf("tool calls = %d, want 1; content=%q", len(m.ToolCalls), m.Content)
+	}
+	got := m.ToolCalls[0].Function
+	if got.Name != "record_probe" || got.Arguments != `{"hardware":"A100-SXM4-40GB","passed":true}` {
+		t.Fatalf("tool call = %#v", got)
+	}
+	if strings.TrimSpace(m.Content) != "" {
+		t.Fatalf("lifted tool call remained in content: %q", m.Content)
 	}
 }

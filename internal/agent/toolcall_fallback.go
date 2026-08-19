@@ -109,6 +109,8 @@ func LiftTextToolCalls(m Message) Message {
 		return m
 	}
 
+	m.Content = normalizeQwenFunctionToolCalls(m.Content)
+
 	// First dialect that recovers at least one valid call wins (precedence order).
 	var blocks []liftedBlock
 	for _, d := range toolCallDialects {
@@ -141,6 +143,83 @@ func LiftTextToolCalls(m Message) Message {
 // {"function":{...}} tool call, applying the conservative posture shared by every
 // dialect: a malformed or nameless payload yields ok=false (the caller leaves the
 // block in the text rather than fabricate a call).
+
+func normalizeQwenFunctionToolCalls(content string) string {
+	const open, close = "<tool_call>", "</tool_call>"
+	var out strings.Builder
+	for cursor := 0; cursor < len(content); {
+		startRel := strings.Index(content[cursor:], open)
+		if startRel < 0 {
+			out.WriteString(content[cursor:])
+			break
+		}
+		start := cursor + startRel
+		out.WriteString(content[cursor:start])
+		endRel := strings.Index(content[start+len(open):], close)
+		if endRel < 0 {
+			out.WriteString(content[start:])
+			break
+		}
+		end := start + len(open) + endRel + len(close)
+		block := content[start:end]
+		if name, args, ok := parseQwenFunctionToolCall(block); ok {
+			encoded, _ := json.Marshal(struct {
+				Name      string         `json:"name"`
+				Arguments map[string]any `json:"arguments"`
+			}{name, args})
+			out.WriteString(open + "\n" + string(encoded) + "\n" + close)
+		} else {
+			out.WriteString(block)
+		}
+		cursor = end
+	}
+	return out.String()
+}
+
+func parseQwenFunctionToolCall(block string) (string, map[string]any, bool) {
+	fnStart := strings.Index(block, "<function=")
+	if fnStart < 0 {
+		return "", nil, false
+	}
+	nameEndRel := strings.Index(block[fnStart:], ">")
+	if nameEndRel < 0 {
+		return "", nil, false
+	}
+	nameEnd := fnStart + nameEndRel
+	name := strings.TrimSpace(block[fnStart+len("<function=") : nameEnd])
+	fnCloseRel := strings.Index(block[nameEnd+1:], "</function>")
+	if name == "" || fnCloseRel < 0 {
+		return "", nil, false
+	}
+	body := block[nameEnd+1 : nameEnd+1+fnCloseRel]
+	args := map[string]any{}
+	for {
+		start := strings.Index(body, "<parameter=")
+		if start < 0 {
+			break
+		}
+		endRel := strings.Index(body[start:], ">")
+		if endRel < 0 {
+			return "", nil, false
+		}
+		end := start + endRel
+		key := strings.TrimSpace(body[start+len("<parameter=") : end])
+		valueEndRel := strings.Index(body[end+1:], "</parameter>")
+		if key == "" || valueEndRel < 0 {
+			return "", nil, false
+		}
+		valueEnd := end + 1 + valueEndRel
+		raw := strings.TrimSpace(body[end+1 : valueEnd])
+		var value any
+		if json.Unmarshal([]byte(raw), &value) != nil {
+			value = raw
+		}
+		args[key] = value
+		body = body[valueEnd+len("</parameter>"):]
+	}
+	return name, args, true
+}
+
 func liftPayload(inner string) (ToolCall, bool) {
 	var p hermesToolCallPayload
 	if err := json.Unmarshal([]byte(inner), &p); err != nil {
