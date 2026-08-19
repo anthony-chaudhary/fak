@@ -82,6 +82,9 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	}
 	verb := argv[0]
 	args := argv[1:]
+	if verb == "new" {
+		return runSessionNew(stdout, stderr, args)
+	}
 	if verb == "open" {
 		return runSessionOpen(stdout, stderr, args)
 	}
@@ -892,6 +895,8 @@ func defaultSessionAddr() string {
 func sessionUsage(w io.Writer) {
 	fmt.Fprint(w, `fak session — read and control a served session's live DRIVE state
 
+  fak session new [--stdin|--clipboard] [--agent claude|codex] [TEXT]
+                                               launch a new guarded agent in a terminal
   fak session ls                              every recorded guard session from the local index
                                                (pid-liveness checked, each with its own gateway URL);
                                                with --addr/$FAK_ADDR, the live gateway snapshot
