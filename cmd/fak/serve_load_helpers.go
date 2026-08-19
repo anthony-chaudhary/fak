@@ -279,8 +279,8 @@ func resetOnBudgetHook(enabled bool, freshContextTokens int) gateway.ResetOnBudg
 // Qwen3.8-27B Q4_K_M campaign on an M3 Pro, not a GGUF steady-state estimate.
 const metalGGUFObservedPeakMultiplier = 3.5
 
-func metalGGUFPeakCapacity(backend string, steady, total int64, known bool) (peak int64, refuse bool) {
-	if backend != "metal" || steady <= 0 || total <= 0 || !known {
+func metalGGUFPeakCapacity(metal bool, steady, total int64, known bool) (peak int64, refuse bool) {
+	if !metal || steady <= 0 || total <= 0 || !known {
 		return 0, false
 	}
 	peakFloat := float64(steady) * metalGGUFObservedPeakMultiplier
@@ -303,7 +303,7 @@ func refuseOversubscribedMetalGGUF(path string) error {
 	}
 	steady := plan.Total()
 	total, _, known := compute.HostSystemMemoryInfo()
-	peak, refuse := metalGGUFPeakCapacity("metal", steady, total, known)
+	peak, refuse := metalGGUFPeakCapacity(true, steady, total, known)
 	if !refuse {
 		return nil
 	}

@@ -264,7 +264,7 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 	if rt.ep.sharded {
 		expertRanks = rt.ep.ranks
 	}
-	if *sf.ggufPath != "" && rt.chatBackend != nil && rt.chatBackend.Name() == "metal" {
+	if *sf.ggufPath != "" && rt.useMetal {
 		if err := refuseOversubscribedMetalGGUF(*sf.ggufPath); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
