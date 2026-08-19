@@ -924,6 +924,15 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	// gateway adjudicates nothing (it reads Message.ToolCalls) and the Anthropic wire never
 	// emits a tool_use block, so Claude Code's agent loop has nothing to execute.
 	comp = normalizeCompletionToolCalls(comp)
+	if len(comp.Message.ToolCalls) == 0 {
+		if name := inKernelForcedToolName(sp.ToolChoice); name != "" {
+			if args, ok := forcedToolArgumentsFromMessages(name, tools, messages); ok {
+				comp.Message.Content = ""
+				comp.Message.ToolCalls = []ToolCall{{ID: "call_forced_0", Type: "function", Function: Func{Name: name, Arguments: args}}}
+				comp.FinishReason = "tool_calls"
+			}
+		}
+	}
 	// Fail closed on a TRUNCATED tool call: the in-kernel finishReason is "stop"/"length"
 	// (never "tool_calls"), so normalizeCompletionToolCalls cannot infer a drop from the
 	// finish reason. If decode emitted an unclosed <tool_call> opener that the lift could

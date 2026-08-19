@@ -257,3 +257,11 @@ func TestRenderInKernelChatMLRequestPinsForcedTool(t *testing.T) {
 		t.Fatalf("forced tool instruction missing:\n%s", got)
 	}
 }
+
+func TestForcedToolArgumentsFromMessages(t *testing.T) {
+	tools := []ToolDef{{Type: "function", Function: ToolDefFunction{Name: "record_probe", Parameters: json.RawMessage(`{"type":"object","properties":{"hardware":{"type":"string"},"passed":{"type":"boolean"}},"required":["hardware","passed"]}`)}}}
+	got, ok := forcedToolArgumentsFromMessages("record_probe", tools, []Message{{Role: RoleUser, Content: "Set hardware to A100-SXM4-40GB. Set passed to the boolean true."}})
+	if !ok || got != `{"hardware":"A100-SXM4-40GB","passed":true}` {
+		t.Fatalf("got %q, %v", got, ok)
+	}
+}

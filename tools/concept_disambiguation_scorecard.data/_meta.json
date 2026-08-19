@@ -6158,6 +6158,11 @@
           "category": "incidental",
           "reason": "Private request field decoder used only by native prompt rendering",
           "token": "inkernelforcedtoolname"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private forced-choice recovery helper before normal gateway adjudication",
+          "token": "forcedtoolargumentsfrommessages"
         }
       ],
       "id": "gateway-engine",
@@ -6209,6 +6214,7 @@
         "fak_gateway_kv_prefix_tier_transfer_bytes_total",
         "fak_gateway_kv_prefix_tier_transfer_faults_total",
         "fak_gateway_kv_prefix_tier_transfer_latency_seconds_total",
+        "forcedtoolargumentsfrommessages",
         "gatewayPluginExecutor",
         "gatewayPluginFloor",
         "gateways",

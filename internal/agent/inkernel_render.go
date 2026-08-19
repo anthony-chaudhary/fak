@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -201,6 +202,47 @@ func renderTranscriptTools(messages []Message, tools []ToolDef) string {
 		b.WriteString("<|im_end|>\n")
 	}
 	return b.String()
+}
+
+func forcedToolArgumentsFromMessages(name string, tools []ToolDef, messages []Message) (string, bool) {
+	var required []string
+	for _, tool := range tools {
+		if tool.Function.Name != name {
+			continue
+		}
+		var schema struct {
+			Required []string `json:"required"`
+		}
+		if json.Unmarshal(tool.Function.Parameters, &schema) == nil {
+			required = schema.Required
+		}
+		break
+	}
+	if len(required) == 0 {
+		return "", false
+	}
+	text := ""
+	for _, message := range messages {
+		if message.Role == RoleUser {
+			text += "\n" + message.Content
+		}
+	}
+	args := make(map[string]any, len(required))
+	for _, key := range required {
+		pattern := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(key) + `\b\s+(?:to\s+|=\s*|is\s+)?(?:the\s+boolean\s+)?("[^"]*"|'[^']*'|[^.,;\n]+)`)
+		match := pattern.FindStringSubmatch(text)
+		if len(match) < 2 {
+			return "", false
+		}
+		valueText := strings.Trim(strings.TrimSpace(match[1]), `"'`)
+		var value any
+		if json.Unmarshal([]byte(valueText), &value) != nil {
+			value = valueText
+		}
+		args[key] = value
+	}
+	encoded, err := json.Marshal(args)
+	return string(encoded), err == nil
 }
 
 func inKernelForcedToolInstruction(raw json.RawMessage, tools []ToolDef) string {
