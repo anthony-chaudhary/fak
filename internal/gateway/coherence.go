@@ -1,7 +1,9 @@
 package gateway
 
 import (
+	"context"
 	"sync"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
@@ -165,6 +167,11 @@ func (s *Server) revoke(witness string) (evicted int, trustEpoch uint64) {
 // needs it (the process owns the bus for its lifetime); tests that construct many
 // Servers call it so subscriptions do not accumulate on the global vDSO.
 func (s *Server) Close() {
+	if s.otlp != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = s.otlp.close(ctx)
+		cancel()
+	}
 	if s.feed != nil {
 		s.feed.close()
 	}

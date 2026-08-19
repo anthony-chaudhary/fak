@@ -1,0 +1,3 @@
+response_traceparent=00-4bf92f3577b34da6a3ce929d0e0e4736-44c74b0dd318a8e6-01
+response_x_trace_id=4bf92f3577b34da6a3ce929d0e0e4736
+collector_payload={"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"fak-gateway"}}]},"scopeSpans":[{"scope":{"name":"github.com/anthony-chaudhary/fak/internal/gateway"},"spans":[{"attributes":[{"key":"http.request.method","value":{"stringValue":"GET"}},{"key":"http.route","value":{"stringValue":"/healthz"}},{"key":"http.response.status_code","value":{"intValue":"200"}}],"endTimeUnixNano":"1787132025933807700","kind":2,"name":"GET /healthz","parentSpanId":"","spanId":"44c74b0dd318a8e6","startTimeUnixNano":"1787132025933292000","status":{"code":1},"traceId":"4bf92f3577b34da6a3ce929d0e0e4736"}]}]}]}

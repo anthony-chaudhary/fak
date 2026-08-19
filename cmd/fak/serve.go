@@ -163,6 +163,7 @@ type serveFlags struct {
 	notifyWebhook                *string
 	notifySlack                  *string
 	debugStats                   *bool
+	otlpEndpoint                 *string
 	dojoMode                     *bool
 	native                       *bool
 	nativeMaxTurns               *int
@@ -241,6 +242,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.notifyNative = fs.Bool("notify-native", true, "emit a one-line native notification to stderr when a served session hits a PAUSED/DRAINING/STOPPED or budget boundary, carrying the closed stop-reason token — the SIGCHLD-equivalent so a waiting agent is never silent (#761); default on")
 	sf.notifyWebhook = fs.String("notify-webhook", "", "POST a JSON StopEvent to this URL on each served-session terminal/paused/budget boundary (#761), carrying the closed reason token; empty = off. Extends the #743 budget webhook to the full stop-reason vocabulary.")
 	sf.notifySlack = fs.String("notify-slack", "", "POST a Slack incoming-webhook payload ({\"text\":…}) on each served-session boundary (#761); empty = off")
+	sf.otlpEndpoint = fs.String("otlp-endpoint", "", "optional OTLP/HTTP endpoint; appends /v1/traces")
 	sf.debugStats = fs.Bool("debug-stats", false, "print ONE compact, payload-free line per served turn to stderr: request/cache_read/cache_creation tokens plus current/previous/average/median/high/low cache savings, the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). Independent of --log (#793); default off.")
 	sf.dojoMode = fs.Bool("dojo", false, "enable live dojo mode: write a start-marker for each serve session into the live-episode corpus (.dojo/live-episodes/ under the workspace root) for issue #956. NOTE: live-episode scoring is not yet wired into `fak dojo run` (which today scores Claude Code transcripts passed via --corpus), so this records the boundary but does not yet feed the scorer.")
 	sf.native = fs.Bool("native", false, "NATIVE HARNESS (#1316/#1837): drive fak's OWN agent loop for every /v1/messages turn instead of the single-shot proxy turn. Both buffered and `stream: true` requests stay on the owned native path; streaming drives agent.RunArmStream and renders its text deltas plus typed lifecycle progress as Anthropic SSE and does not fall through to the proxy. If streaming cannot be safely emitted â a response writer that cannot flush, a planner that does not support streaming, or an armed answer stop-gate (a rejected answer must never leak as a delta) â the request degrades to the buffered native handler — the same owned loop, one response instead of deltas. The in-kernel syscall boundary remains the sole tool path, and ArmMetrics ride on the response `fak.native_arm` extension. Off by default (the proxy path is byte-for-byte unchanged).")
@@ -520,6 +522,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 
 	srv, err := gateway.New(gateway.Config{
 		EngineID:                     *sf.engineID,
+		OTLPEndpoint:                 *sf.otlpEndpoint,
 		Model:                        *sf.model,
 		BaseURL:                      *sf.baseURL,
 		ReplicaBaseURLs:              sf.replicaBaseURLs.Values(),

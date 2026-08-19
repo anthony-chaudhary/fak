@@ -294,6 +294,13 @@ func (s *Server) renderMetrics() string {
 	writeCacheAttributionMetrics(&b, cacheSavings)
 
 	s.writeModelLoadMetrics(&b)
+	otlp := s.otlp.stats()
+	fmt.Fprintf(&b, "# HELP fak_otlp_spans_total OTLP spans by outcome.\n# TYPE fak_otlp_spans_total counter\n")
+	fmt.Fprintf(&b, "fak_otlp_spans_total{outcome=\"accepted\"} %d\n", otlp.Accepted)
+	fmt.Fprintf(&b, "fak_otlp_spans_total{outcome=\"exported\"} %d\n", otlp.Exported)
+	fmt.Fprintf(&b, "fak_otlp_spans_total{outcome=\"dropped\"} %d\n", otlp.Dropped)
+	fmt.Fprintf(&b, "fak_otlp_spans_total{outcome=\"failed\"} %d\n", otlp.Failed)
+	fmt.Fprintf(&b, "# HELP fak_otlp_queue_depth Current OTLP span queue depth.\n# TYPE fak_otlp_queue_depth gauge\nfak_otlp_queue_depth %d\n", otlp.QueueDepth)
 	return b.String()
 }
 

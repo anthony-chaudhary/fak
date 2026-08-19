@@ -160,6 +160,9 @@ func (s *Server) withMetrics(next http.Handler) http.Handler {
 			}
 			dur := time.Since(start)
 			s.metrics.observeHTTP(route, r.Method, status, dur)
+			if ctx, err := parseTraceparent(r.Header.Get(traceparentHeader)); err == nil {
+				s.otlp.enqueue(otlpSpan{TraceID: ctx.TraceID, SpanID: ctx.ParentID, Name: r.Method + " " + route, Route: route, Method: r.Method, Status: status, Start: start, End: start.Add(dur)})
+			}
 			s.logHTTPRequest(r, route, status, dur, rec.bytes, traceID)
 		}()
 		next.ServeHTTP(rec, r)

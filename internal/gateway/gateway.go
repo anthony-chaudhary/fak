@@ -273,6 +273,10 @@ const DefaultDeferColdTools = true
 // Config configures a gateway Server. The zero value is not valid — use New,
 // which fills defaults and validates against the registered ABI.
 type Config struct {
+	// OTLPEndpoint enables bounded asynchronous OTLP/HTTP JSON trace export. Empty disables it.
+	OTLPEndpoint      string
+	OTLPQueueCapacity int
+	OTLPTimeout       time.Duration
 	// EngineID selects the registered engine fak_syscall dispatches an ALLOWED
 	// call to (default "inkernel": the model fused into the kernel — a real
 	// in-kernel decode, synthetic checkpoint unless FAK_MODEL_DIR names an export).
@@ -1270,6 +1274,7 @@ type Server struct {
 	feed                     *coherenceFeed   // the cross-agent "what changed" feed (vdso coherence bus)
 	sessionFeed              *sessionFeed     // the drive-state revision feed (#630; host-pushed via PublishSessionRevision)
 	metrics                  *gatewayMetrics
+	otlp                     *otlpExporter
 	// toolPages is the tool catalog's home (#2440): each advertised tool schema is a
 	// content-hashed read-only page owned by the ctxmmu, registered at the
 	// maybeCompactInboundTools seam. The page table — not the transcript — is the
@@ -2041,6 +2046,19 @@ func New(cfg Config) (*Server, error) {
 		}
 	}
 
+	otlpCapacity := cfg.OTLPQueueCapacity
+	if otlpCapacity == 0 {
+		otlpCapacity = 256
+	}
+	otlpTimeout := cfg.OTLPTimeout
+	if otlpTimeout == 0 {
+		otlpTimeout = 2 * time.Second
+	}
+	otlp, err := newOTLPExporter(cfg.OTLPEndpoint, otlpCapacity, otlpTimeout)
+	if err != nil {
+		return nil, err
+	}
+
 	s := &Server{
 		k:                            k,
 		toolPlugins:                  append([]toolplugin.Plugin(nil), cfg.ToolPlugins...),
@@ -2108,6 +2126,7 @@ func New(cfg Config) (*Server, error) {
 		activity:                     newSessionActivity(),
 		toolPages:                    ctxmmu.NewToolPageTable(nil), // nil ⇒ the process-global MMU pager (#2440)
 		metrics:                      newGatewayMetrics(time.Now()),
+		otlp:                         otlp,
 		route:                        newRouteLive(cfg.RouteManifest),
 		roster:                       cfg.RouteAccounts,
 		native:                       cfg.Native,
