@@ -7,6 +7,21 @@ import (
 	"testing"
 )
 
+func TestPrefixCacheSweepHasNoFirstClassIntegrationArm(t *testing.T) {
+	for _, contract := range All() {
+		if contract.Capability != "prefix_cache_budget_sweep" {
+			continue
+		}
+		for _, alternative := range contract.Alternatives {
+			if alternative.Class == FirstClassIntegration {
+				t.Fatalf("unexpected first-class integration arm %q", alternative.Name)
+			}
+		}
+		return
+	}
+	t.Fatal("prefix cache sweep contract missing")
+}
+
 func TestRegistryHasComparisonContractsForInitialNativeCapabilities(t *testing.T) {
 	got := All()
 	if len(got) < 2 {

@@ -359,6 +359,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 		NativePath: "internal/cachesweep/cachesweep.go",
 		Workload:   "same timestamped exact-prefix and divergent-child trace, finite token budgets, unbounded ceiling, write-delay overlay, token-cost assumptions, eviction semantics, and independent reuse oracle across every arm",
 		Metrics:    []string{"hit_correctness", "reuse_ratio", "reused_tokens", "evictions", "roi_knee_error", "simulation_latency_ms", "throughput_accesses_per_second", "cpu_seconds", "peak_rss_bytes", "storage_bytes", "network_bytes", "total_cost"},
+		//enumlint:exempt This benchmark has no first-class external integration arm; it compares the native cache only with baseline and next-best simulators.
 		Alternatives: []Alternative{
 			{Name: "no prefix cache", Class: TunedBaseline, Source: "internal/cachesweep/compare.go"},
 			{Name: "libCacheSim", Class: NextBest, Source: "https://github.com/1a1a11a/libCacheSim"},
