@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -64,7 +65,10 @@ func cmdProcessGuard(args []string) {
 
 	// scan is the lightweight resource-level snapshot: the CPU dimension and the
 	// orphan modes are report-only (they need a second scan / a relation scan).
-	cpuEnabled := mode == "report" && *maxCPUPct > 0
+	// Hung dispatch-orphan detection also needs the CPU sample even when the
+	// resource CPU threshold itself is disabled.
+	cpuPinEnabled := mode == "report" && *maxCPUPct > 0
+	cpuSampled := mode == "report" && (cpuPinEnabled || *reapOrphans)
 	orphanEnabled := mode == "report" && (*reapOrphans || len(orphanPatterns) > 0 || *reapIdle)
 	deadOwnerEnabled := mode == "report" && *reapDeadOwner
 
@@ -74,13 +78,13 @@ func cmdProcessGuard(args []string) {
 	}
 
 	var streaksPrev map[string]int
-	if cpuEnabled {
+	if cpuPinEnabled {
 		streaksPrev = procguard.LoadCPUStreaks(dir)
 	}
 
 	var procs []procguard.Proc
 	var collectErr string
-	if cpuEnabled {
+	if cpuSampled {
 		procs, collectErr = procguard.CollectProcessesCPU(*cpuWindow, *cpuSamples, nil)
 	} else {
 		procs, collectErr = procguard.CollectProcesses()
@@ -98,11 +102,30 @@ func cmdProcessGuard(args []string) {
 		if orphanEnabled {
 			patterns := append([]string{}, procguard.DefaultOrphanPatterns...)
 			patterns = append(patterns, orphanPatterns...)
+			minAgeSec := max(0, *idleAgeMin) * 60
 			orphanRows = procguard.ClassifyOrphans(
 				relations, top.LivePIDs, top.ChildCounts,
-				patterns, procguard.DefaultIdleShellNames, max(0, *idleAgeMin)*60, *reapIdle,
+				patterns, procguard.DefaultIdleShellNames, minAgeSec, *reapIdle,
 				protectedPIDs, allowNames,
 			)
+			if *reapOrphans {
+				if cwd, err := os.Getwd(); err == nil {
+					root := findRepoRoot(cwd)
+					if _, err := os.Stat(filepath.Join(root, ".git")); err == nil {
+						orphanRows = append(orphanRows, classifyHungDispatchOrphans(
+							relations,
+							procs,
+							top,
+							dispatchLeasedWorkerPIDs(root),
+							minAgeSec,
+							protectedPIDs,
+							allowNames,
+						)...)
+					} else {
+						fmt.Fprintln(os.Stderr, "fak process-guard: hung dispatch-orphan mode skipped: no repository root, so live leases cannot be proven")
+					}
+				}
+			}
 		}
 		if deadOwnerEnabled {
 			// The lease lookup is fail-closed: if the loop ledger can't be read we
@@ -123,13 +146,13 @@ func cmdProcessGuard(args []string) {
 	}
 
 	th := procguard.Thresholds{MaxThreads: *maxThreads, MaxHandles: *maxHandles, MaxWSMB: *maxWSMB}
-	if cpuEnabled {
+	if cpuPinEnabled {
 		th.MaxCPUPct = *maxCPUPct
 	}
 
 	var killer func(int) (bool, string)
 	if *enact {
-		killer = procguard.KillPID
+		killer = verifiedTreeReaper(procguard.KillPID, dispatchPIDAlive, time.Sleep)
 	}
 
 	payload := procguard.Build(procs, procguard.Options{
@@ -146,7 +169,7 @@ func cmdProcessGuard(args []string) {
 		Killer:         killer,
 	})
 
-	if cpuEnabled {
+	if cpuPinEnabled {
 		procguard.SaveCPUStreaks(dir, payload.CPUStreaks)
 	}
 
@@ -158,6 +181,145 @@ func cmdProcessGuard(args []string) {
 	}
 	if !payload.OK {
 		os.Exit(1)
+	}
+}
+
+const (
+	hungDispatchOrphanKind = "hung-dispatch-orphan"
+	idleWorkerCPUCutoff    = 1.0
+	rootExitCheckAttempts  = 20
+	rootExitCheckInterval  = 100 * time.Millisecond
+)
+
+// classifyHungDispatchOrphans closes the third procguard predicate gap: a
+// dispatch-marked primary worker whose spawner is gone, whose seat lease is
+// absent, and whose sampled CPU has stayed idle past the existing age canary.
+// Reusing dispatchIsWorkerCmdline keeps the identity predicate byte-identical to
+// dispatch preflight; missing age, CPU, owner, or repo lease evidence skips the
+// row rather than risking a false reap.
+func classifyHungDispatchOrphans(
+	relations []procguard.Proc,
+	samples []procguard.Proc,
+	top procguard.RelationTopology,
+	leasedPIDs map[int]bool,
+	minAgeSec int,
+	protectedPIDs []int,
+	allowNames []string,
+) []procguard.Finding {
+	metrics := make(map[int]procguard.Proc, len(samples))
+	for _, p := range samples {
+		if p.PID > 0 {
+			metrics[p.PID] = p
+		}
+	}
+	protected := map[int]bool{}
+	for _, pid := range protectedPIDs {
+		protected[pid] = true
+	}
+	allow := map[string]bool{}
+	for _, name := range allowNames {
+		if stem := dispatchProcessNameStem(name); stem != "" {
+			allow[stem] = true
+		}
+	}
+
+	flagged := []procguard.Finding{}
+	for _, p := range relations {
+		if p.PID <= 0 || leasedPIDs[p.PID] || !dispatchIsWorkerCmdline(p.Cmdline) {
+			continue
+		}
+		stem := dispatchProcessNameStem(p.Name)
+		if stem == "" || allow[stem] {
+			continue
+		}
+		if p.PPID == nil || *p.PPID <= 0 || top.LivePIDs[*p.PPID] {
+			continue
+		}
+		if minAgeSec > 0 && (p.AgeSec == nil || *p.AgeSec < minAgeSec) {
+			continue
+		}
+		sample, ok := metrics[p.PID]
+		if !ok || sample.CPUPct == nil || *sample.CPUPct < 0 || *sample.CPUPct > idleWorkerCPUCutoff {
+			continue
+		}
+
+		age := 0
+		if p.AgeSec != nil {
+			age = *p.AgeSec
+		}
+		start := sample.Start
+		if start == "" {
+			start = p.Start
+		}
+		threads := sample.Threads
+		if threads == nil {
+			threads = p.Threads
+		}
+		handles := sample.Handles
+		if handles == nil {
+			handles = p.Handles
+		}
+		ws := sample.WSMB
+		if ws == nil {
+			ws = p.WSMB
+		}
+		flagged = append(flagged, procguard.Finding{
+			PID:        p.PID,
+			Name:       strings.TrimSpace(p.Name),
+			Threads:    threads,
+			Handles:    handles,
+			WSMB:       ws,
+			CPUPct:     sample.CPUPct,
+			PPID:       p.PPID,
+			ParentName: top.ParentNames[*p.PPID],
+			Start:      start,
+			Reasons: []string{fmt.Sprintf(
+				"hung dispatch orphan: marker present, owner pid %d not alive, no live lease, cpu %.2f%%, age %ds",
+				*p.PPID,
+				*sample.CPUPct,
+				age,
+			)},
+			Protected: protected[p.PID] || procguard.ProtectedNames[stem],
+			Kind:      hungDispatchOrphanKind,
+		})
+	}
+	sort.Slice(flagged, func(i, j int) bool { return flagged[i].PID < flagged[j].PID })
+	return flagged
+}
+
+// verifiedTreeReaper prevents a partial tree kill from being reported as a
+// success when the root survives (the session-0/elevation failure mode). KillPID
+// may return before termination becomes observable, so allow a short bounded
+// settling window; a still-live root is an explicit operator-action failure.
+func verifiedTreeReaper(
+	kill func(int) (bool, string),
+	alive func(int) bool,
+	sleep func(time.Duration),
+) func(int) (bool, string) {
+	return func(pid int) (bool, string) {
+		ok, detail := kill(pid)
+		if !ok {
+			return false, detail
+		}
+		if alive == nil {
+			if detail != "" {
+				detail += "; "
+			}
+			return false, detail + "root liveness unavailable"
+		}
+		for attempt := 0; attempt < rootExitCheckAttempts; attempt++ {
+			if !alive(pid) {
+				return true, detail
+			}
+			if attempt+1 < rootExitCheckAttempts && sleep != nil {
+				sleep(rootExitCheckInterval)
+			}
+		}
+		if detail != "" {
+			detail += "; "
+		}
+		detail += fmt.Sprintf("target pid %d still alive after reap; access denied or elevation required", pid)
+		return false, detail
 	}
 }
 
