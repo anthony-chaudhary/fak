@@ -223,6 +223,8 @@ type ProcessTree struct {
 
 type SessionRecord struct {
 	RecordID      string              `json:"record_id"`
+	Harness       string              `json:"harness,omitempty"`
+	HarnessSource string              `json:"harness_source,omitempty"`
 	Thread        *ThreadRecord       `json:"thread,omitempty"`
 	LatestTurn    *TurnRecord         `json:"latest_turn,omitempty"`
 	WriterLock    *WriterLockSignal   `json:"writer_lock,omitempty"`
@@ -311,6 +313,19 @@ func ReconcileInventory(in InventoryInput, now time.Time) InventoryReport {
 		}
 	}
 	turns := latestTurns(in.Turns)
+	harnessByThread := map[string]string{}
+	for _, registration := range in.Registrations {
+		harness := normalizedSessionHarness(registration.Identity.Runtime)
+		if harness == "" {
+			continue
+		}
+		if id := safeID(registration.Identity.ThreadID); id != "" {
+			harnessByThread[id] = harness
+		}
+		if id := safeID(registration.Identity.SessionID); id != "" {
+			harnessByThread[id] = harness
+		}
+	}
 	locks := make(map[string]WriterLockEvidence, len(in.WriterLocks))
 	for _, lock := range in.WriterLocks {
 		if id := safeID(lock.ThreadID); id != "" {
@@ -382,6 +397,12 @@ func ReconcileInventory(in InventoryInput, now time.Time) InventoryReport {
 		lock, hasLock := locks[id]
 		receipt, hasReceipt := receipts[id]
 		record := buildSessionRecord(id, thread, hasThread, turn, hasTurn, lock, hasLock, receipt, hasReceipt, treesByThread[id], childSet[id], parentIDs[id], childIDs[id], now, in.StaleAfter)
+		record.Harness = "codex"
+		record.HarnessSource = "legacy_codex_inventory"
+		if harness := harnessByThread[id]; harness != "" {
+			record.Harness = harness
+			record.HarnessSource = "session_registration"
+		}
 		sessions = append(sessions, record)
 		sessionByThread[id] = record
 	}
@@ -1040,6 +1061,15 @@ func inventoryRegistrations(rows []sessionregistry.Record, processes []ProcessEv
 	}
 	return out, unregistered
 }
+func normalizedSessionHarness(runtime string) string {
+	switch strings.ToLower(strings.TrimSpace(runtime)) {
+	case "claude", "codex", "opencode", "fak":
+		return strings.ToLower(strings.TrimSpace(runtime))
+	default:
+		return ""
+	}
+}
+
 func isAgentProcess(p ProcessEvidence) bool {
 	n := strings.ToLower(filepath.Base(p.Name))
 	c := strings.ToLower(p.CommandLine)

@@ -4421,6 +4421,16 @@
           "category": "incidental",
           "reason": "private test seam invoking the existing in-process session diagnostic command",
           "token": "recoverySessionDiag"
+        },
+        {
+          "category": "incidental",
+          "reason": "local normalization helper; not a new session runtime concept",
+          "token": "normalizedSessionHarness"
+        },
+        {
+          "category": "incidental",
+          "reason": "provenance wire value naming the existing sessionregistry source, not a runtime",
+          "token": "session_registration"
         }
       ],
       "id": "session-runtime",
@@ -4599,6 +4609,7 @@
         "member_sessions",
         "microagentSessionID",
         "modeled_from_observed_session_mean",
+        "normalizedSessionHarness",
         "observedSchedulerResult",
         "observedSessionIDs",
         "observed_session",
@@ -4705,6 +4716,7 @@
         "session_counters_reset_during_window",
         "session_lifecycle",
         "session_or_transcript_residue",
+        "session_registration",
         "session_registry_recovery",
         "session_total",
         "sessionids",

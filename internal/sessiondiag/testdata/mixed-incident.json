@@ -57,6 +57,8 @@
   "sessions": [
     {
       "record_id": "thread:10000001-0000-4000-8000-000000000001",
+      "harness": "codex",
+      "harness_source": "legacy_codex_inventory",
       "thread": {
         "id": "10000001-0000-4000-8000-000000000001",
         "source": "cli",
@@ -156,6 +158,8 @@
     },
     {
       "record_id": "thread:10000002-0000-4000-8000-000000000002",
+      "harness": "codex",
+      "harness_source": "legacy_codex_inventory",
       "thread": {
         "id": "10000002-0000-4000-8000-000000000002",
         "source": "cli",
@@ -254,6 +258,8 @@
     },
     {
       "record_id": "thread:10000003-0000-4000-8000-000000000003",
+      "harness": "codex",
+      "harness_source": "legacy_codex_inventory",
       "thread": {
         "id": "10000003-0000-4000-8000-000000000003",
         "source": "cli",
@@ -352,6 +358,8 @@
     },
     {
       "record_id": "thread:20000001-0000-4000-8000-000000000001",
+      "harness": "codex",
+      "harness_source": "legacy_codex_inventory",
       "thread": {
         "id": "20000001-0000-4000-8000-000000000001",
         "source": "exec",
@@ -420,6 +428,8 @@
     },
     {
       "record_id": "thread:20000002-0000-4000-8000-000000000002",
+      "harness": "codex",
+      "harness_source": "legacy_codex_inventory",
       "thread": {
         "id": "20000002-0000-4000-8000-000000000002",
         "source": "exec",
@@ -490,6 +500,8 @@
     },
     {
       "record_id": "thread:30000001-0000-4000-8000-000000000001",
+      "harness": "codex",
+      "harness_source": "legacy_codex_inventory",
       "thread": {
         "id": "30000001-0000-4000-8000-000000000001",
         "source": "cli",
@@ -574,6 +586,8 @@
     },
     {
       "record_id": "thread:30000002-0000-4000-8000-000000000002",
+      "harness": "codex",
+      "harness_source": "legacy_codex_inventory",
       "thread": {
         "id": "30000002-0000-4000-8000-000000000002",
         "source": "cli",
@@ -658,6 +672,8 @@
     },
     {
       "record_id": "thread:30000003-0000-4000-8000-000000000003",
+      "harness": "codex",
+      "harness_source": "legacy_codex_inventory",
       "thread": {
         "id": "30000003-0000-4000-8000-000000000003",
         "source": "cli",
@@ -742,6 +758,8 @@
     },
     {
       "record_id": "thread:60000001-0000-4000-8000-000000000001",
+      "harness": "codex",
+      "harness_source": "legacy_codex_inventory",
       "thread": {
         "id": "60000001-0000-4000-8000-000000000001",
         "source": "cli",
@@ -768,6 +786,8 @@
     },
     {
       "record_id": "thread:60000002-0000-4000-8000-000000000002",
+      "harness": "codex",
+      "harness_source": "legacy_codex_inventory",
       "thread": {
         "id": "60000002-0000-4000-8000-000000000002"
       },
@@ -786,6 +806,8 @@
     },
     {
       "record_id": "thread:70000001-0000-4000-8000-000000000001",
+      "harness": "codex",
+      "harness_source": "legacy_codex_inventory",
       "thread": {
         "id": "70000001-0000-4000-8000-000000000001",
         "source": "exec",
@@ -806,6 +828,8 @@
     },
     {
       "record_id": "thread:80000001-0000-4000-8000-000000000001",
+      "harness": "codex",
+      "harness_source": "legacy_codex_inventory",
       "thread": {
         "id": "80000001-0000-4000-8000-000000000001",
         "source": "exec",

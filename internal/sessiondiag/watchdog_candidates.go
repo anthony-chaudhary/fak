@@ -1,7 +1,10 @@
 // Package sessiondiag projects authoritative inventory evidence into typed watchdog candidates.
 package sessiondiag
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 const WatchdogCandidateSchema = "fak.sessiondiag.watchdog-candidates.v1"
 
@@ -11,6 +14,7 @@ const (
 	WatchdogExcludeKind              = "UNSUPPORTED_SESSION_KIND"
 	WatchdogExcludeTurn              = "TURN_NOT_IN_PROGRESS"
 	WatchdogExcludeHealth            = "CURRENT_OR_AMBIGUOUS_HEALTH"
+	WatchdogExcludeHarness           = "HARNESS_IDENTITY_UNAVAILABLE"
 )
 
 type WatchdogCandidate struct {
@@ -52,8 +56,9 @@ func (r WatchdogCandidateReport) WatchdogPlanRows() []map[string]any {
 
 // ProjectWatchdogCandidates is the shared classification boundary between
 // sessiondiag and recovery planners. It admits only locally resumable interactive
-// Codex threads whose last turn is in progress and whose diagnosis proves there is
-// no corroborated current process/lock evidence.
+// managed threads whose last turn is in progress and whose diagnosis proves there is
+// no corroborated current process/lock evidence. Harness identity comes from
+// managed-session registration; Codex is retained only for legacy inventory rows.
 func ProjectWatchdogCandidates(in InventoryReport) WatchdogCandidateReport {
 	out := WatchdogCandidateReport{Schema: WatchdogCandidateSchema, ObservedAt: in.ObservedAt, Candidates: []WatchdogCandidate{}, Exclusions: []WatchdogCandidateExclusion{}, Counts: map[string]int{}}
 	for _, session := range in.Sessions {
@@ -63,13 +68,21 @@ func ProjectWatchdogCandidates(in InventoryReport) WatchdogCandidateReport {
 			id = session.Thread.ID
 			cwd = session.Thread.CWD
 		}
+		harness := strings.ToLower(strings.TrimSpace(session.Harness))
+		if harness == "" && session.Thread != nil {
+			// Compatibility for callers that construct pre-registry Codex inventory rows.
+			harness = "codex"
+		}
 		reason := watchdogExclusionReason(session, id)
+		if reason == "" && harness == "" {
+			reason = WatchdogExcludeHarness
+		}
 		if reason != "" {
 			out.Exclusions = append(out.Exclusions, WatchdogCandidateExclusion{Session: id, Kind: session.Kind, Health: session.Health, Reason: reason})
 			out.Counts[reason]++
 			continue
 		}
-		out.Candidates = append(out.Candidates, WatchdogCandidate{Session: id, Harness: "codex", CWD: cwd, Reason: WatchdogIncludeAbruptInteractive})
+		out.Candidates = append(out.Candidates, WatchdogCandidate{Session: id, Harness: harness, CWD: cwd, Reason: WatchdogIncludeAbruptInteractive})
 		out.Counts[WatchdogIncludeAbruptInteractive]++
 	}
 	sort.Slice(out.Candidates, func(i, j int) bool { return out.Candidates[i].Session < out.Candidates[j].Session })
