@@ -235,7 +235,7 @@ var tier = map[string]int{
 	"preflight": 3, "vdso": 3, "plancfi": 3, "steward": 3, "witness": 3,
 	"cachevaluereport": 3, // weekly cache-value TREND roll-up (epic #1301 rung A, Track 1): pure Fold over cachevalueledger(1) into a by-week realized-reuse trend, #1066-fenced; imports cachevalueledger(1)+stdlib only, off the hot path.
 	"auditusage":       3, // cross-session audit usage rollup (#1612): folds sink rows from journal(2), loopmgr(1), dispatchaudit(1), and usage ledgers into one CLI report; off the hot path.
-	"harvest":          3, "shipgate": 3, "policy": 3, "privacy": 3, "auditreceipt": 3, "modelengine": 3, "ratelimit": 3,
+	"harvest":          3, "shipgate": 3, "policy": 3, "privacy": 3, "auditreceipt": 3, "providercost": 3, "modelengine": 3, "ratelimit": 3,
 	"launchshim": 2, // user-local launch configuration + direct-bypass policy; stdlib-only foundation consumed by cmd/fak.
 	"journal":    3, "gitgate": 3, "gitdaily": 3, "safecommit": 3, "patchcommit": 3,
 	"storedrv": 3, // content-addressed storage ROUTER: composes the blob/blobfs/blobhttp (tier-1) drivers into one namespace; the abi RegionBackend only when FAK_STORE opts in.

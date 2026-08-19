@@ -785,3 +785,4 @@ front page.
 - [`docs/notes/AGENTQUERY-INDEX-DECISION-2026-08-19.md`](docs/notes/AGENTQUERY-INDEX-DECISION-2026-08-19.md) — Cross-platform bounded-query benchmark and evidence-based no-index threshold.
 - [`docs/notes/OTLP-ZERO-DEPENDENCY-DECISION-2026-08-19.md`](docs/notes/OTLP-ZERO-DEPENDENCY-DECISION-2026-08-19.md) — OTLP exporter dependency, privacy, cardinality, and adoption-threshold decision.
 - [docs/notes/SESSION-HISTORY-REFRESH-SLO-2026-08-19.md](docs/notes/SESSION-HISTORY-REFRESH-SLO-2026-08-19.md) — Reproducible cold/warm/change-one session-history benchmark, default-on SLOs, and aggregate-only real-corpus witness.
+- [docs/provider-cost-reconciliation.md](docs/provider-cost-reconciliation.md) — Authoritative provider billing-export import, exact session-to-root attribution, coverage, and reconciliation contract.
