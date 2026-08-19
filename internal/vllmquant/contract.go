@@ -481,6 +481,7 @@ type methodRule struct {
 }
 
 var methodTable = map[Method]methodRule{
+	//enumlint:exempt Each method lists only its compatible kernel family, not every kernel in the global vocabulary.
 	MethodAWQ:          {weightBits: []int{4}, requiresGroupSize: true, kernels: []Kernel{KernelAWQ, KernelAWQMarlin}},
 	MethodGPTQ:         {weightBits: []int{2, 3, 4, 8}, requiresGroupSize: true, kernels: []Kernel{KernelGPTQ, KernelGPTQMarlin}},
 	MethodFP8:          {weightBits: []int{8}, requiresActivationScheme: true, kernels: []Kernel{KernelFP8}},

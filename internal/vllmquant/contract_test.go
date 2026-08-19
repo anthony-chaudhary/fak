@@ -17,10 +17,20 @@ func intp(v int) *int    { return &v }
 // preference between them — the ambiguous shape most of these cases start from.
 func awqServer() Server {
 	return Server{
-		Version:           "0.8.5",
+		Version: "0.8.5",
+		//enumlint:exempt This AWQ fixture intentionally advertises only the two AWQ-compatible kernels.
 		Kernels:           []Kernel{KernelAWQ, KernelAWQMarlin},
 		ComputeCapability: 80,
 		Dtype:             "float16",
+	}
+}
+
+func TestAWQServerAdvertisesOnlyCompatibleKernels(t *testing.T) {
+	want := map[Kernel]bool{KernelAWQ: true, KernelAWQMarlin: true}
+	for _, kernel := range awqServer().Kernels {
+		if !want[kernel] {
+			t.Fatalf("AWQ fixture advertises incompatible kernel %q", kernel)
+		}
 	}
 }
 
