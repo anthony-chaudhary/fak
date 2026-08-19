@@ -138,9 +138,13 @@ func (b Builtin) Invoke(ctx context.Context, r Request) Result {
 func NativeFAK() Adapter {
 	return Builtin{kind: "fak-harness", operations: []Operation{Prepare, Pause, Checkpoint, Restore, Resume, Readiness}, applicationCheckpoint: true}
 }
+
+//enumlint:exempt Codex has no application checkpoint/restore capability; Capabilities reports that boundary explicitly.
 func Codex() Adapter {
 	return Builtin{kind: "codex", operations: []Operation{Prepare, Pause, Resume, Readiness}, applicationCheckpoint: false}
 }
+
+//enumlint:exempt Claude has no application checkpoint/restore capability; Capabilities reports that boundary explicitly.
 func Claude() Adapter {
 	return Builtin{kind: "claude", operations: []Operation{Prepare, Pause, Resume, Readiness}, applicationCheckpoint: false}
 }
