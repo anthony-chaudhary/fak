@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/stallscan"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // runStallTool runs one probe command with a hard timeout. Local to this file
@@ -29,7 +30,9 @@ import (
 func runStallTool(timeout time.Duration, name string, args ...string) (string, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, name, args...).Output()
+	cmd := exec.CommandContext(ctx, name, args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return "", err.Error()
 	}

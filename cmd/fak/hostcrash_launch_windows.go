@@ -12,6 +12,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/anthony-chaudhary/fak/internal/hostresurrect"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func encodedPowerShellCommand(script string) string {
@@ -25,7 +26,9 @@ func encodedPowerShellCommand(script string) string {
 
 var runInteractiveBrokerTask = func(taskName string) error {
 	script := "Start-ScheduledTask -TaskName '" + strings.ReplaceAll(taskName, "'", "''") + "'"
-	return exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodedPowerShellCommand(script)).Run()
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodedPowerShellCommand(script))
+	windowgate.ConfigureBackgroundCommand(cmd)
+	return cmd.Run()
 }
 
 func hostRelaunchSpoolDir() string {

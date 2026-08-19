@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/hostfault"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func gatherHostCrashEvents(since time.Duration) ([]hostfault.ApplicationError1000, error) {
@@ -21,6 +22,7 @@ func gatherHostCrashEvents(since time.Duration) ([]hostfault.ApplicationError100
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.Output()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {

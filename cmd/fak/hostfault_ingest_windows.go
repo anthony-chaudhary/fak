@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/hostfault"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // winHostRecord is the JSON shape the probe emits per event-log record.
@@ -54,6 +55,7 @@ func gatherWinHostFaultRecords(since time.Duration, maxPerSource int) ([]hostfau
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {

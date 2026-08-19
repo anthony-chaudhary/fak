@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/terminalrisk"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func gatherTerminalRiskFacts(settingsPath string) (terminalrisk.Facts, error) {
@@ -23,6 +24,7 @@ func gatherTerminalRiskFacts(settingsPath string) (terminalrisk.Facts, error) {
 	defer cancel()
 	script := `$amd=@(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue|?{$_.Name -match '(?i)AMD|Radeon'}).Count -gt 0;$crash=@(Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='Application Error';Id=1000;StartTime=(Get-Date).AddDays(-30)} -ErrorAction SilentlyContinue|?{$_.Message -match '(?i)WindowsTerminal\.exe' -and $_.Message -match '(?i)Microsoft\.Terminal\.Control\.dll' -and $_.Message -match '0xc0000005'}).Count -gt 0;[pscustomobject]@{amd=$amd;crash=$crash}|ConvertTo-Json -Compress`
 	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+	windowgate.ConfigureBackgroundCommand(cmd)
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
