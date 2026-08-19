@@ -150,6 +150,7 @@ func goldenDescriptor(t *testing.T, name string) Descriptor {
 	return descriptor
 }
 
+//enumlint:exempt ScaleNone is deliberately excluded: this fixture describes FP4 hardware that requires explicit scaling.
 func allCapabilities() Capabilities {
 	return Capabilities{
 		Variants:     []Variant{VariantE2M1, VariantNVFP4, VariantMXFP4},

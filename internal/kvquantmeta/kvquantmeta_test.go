@@ -2,6 +2,7 @@ package kvquantmeta
 
 import "testing"
 
+//enumlint:exempt FP16 and BF16 are unquantized controls, deliberately outside this quantized-support fixture.
 var testSupport = Support{
 	Schemes:     map[string][]string{"kvq": {"1"}},
 	Precisions:  []Precision{PrecisionFP8, PrecisionINT8, PrecisionINT4, PrecisionINT2},
