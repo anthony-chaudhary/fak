@@ -7,6 +7,21 @@ import (
 	"time"
 )
 
+func TestIsTerminalCoversEveryState(t *testing.T) {
+	cases := map[State]bool{
+		StateRegistered: false, StateActive: false, StateCompleted: true, StateFailed: true,
+		StateCancelled: true, StateLost: true, StateReaped: true, StateUnknown: false,
+	}
+	for state, want := range cases {
+		if got := isTerminal(state); got != want {
+			t.Errorf("isTerminal(%q) = %v, want %v", state, got, want)
+		}
+	}
+	if isTerminal(State("future")) {
+		t.Fatal("unknown future state must not be treated as terminal")
+	}
+}
+
 func TestRegistrationChainAndTerminalReadback(t *testing.T) {
 	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
 	s := Store{Path: filepath.Join(t.TempDir(), "registry.jsonl")}

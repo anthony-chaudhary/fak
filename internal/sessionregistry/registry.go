@@ -628,8 +628,11 @@ func isTerminal(s State) bool {
 	switch s {
 	case StateCompleted, StateFailed, StateCancelled, StateLost, StateReaped:
 		return true
+	case StateRegistered, StateActive, StateUnknown:
+		return false
+	default:
+		return false
 	}
-	return false
 }
 func sameImmutable(a, b Record) bool {
 	return a.RegistrationID == b.RegistrationID && a.ParentRegistrationID == b.ParentRegistrationID && a.ParentAttemptID == b.ParentAttemptID && a.RootRegistrationID == b.RootRegistrationID && a.AttemptID == b.AttemptID && a.LaunchKind == b.LaunchKind && a.Identity.Runtime == b.Identity.Runtime
