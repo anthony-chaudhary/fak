@@ -3,6 +3,7 @@ package microagent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -93,6 +94,9 @@ type Config struct {
 	MaxRetries int
 	// Verifier independently checks completion. Nil preserves baseline behavior.
 	Verifier Verifier
+	// SpawnBudget is the host-owned admission envelope for recursive children.
+	// Nil refuses child requests while preserving ordinary top-level Spawn.
+	SpawnBudget *SpawnBudget
 	// Warm wires the two-watermark hibernation warm band (#5072, follow-on
 	// #4035) into the Step loop: an agent that also implements Restorable is
 	// enrolled on spawn (its fresh context frozen to disk, no goroutine held),
@@ -140,13 +144,14 @@ type job struct {
 // worker Step loop → retire (done / cancel / error) → Reap. Drain refuses new
 // spawns and waits for the fleet to finish; Close cancels everything.
 type Host struct {
-	gw         Gateway
-	sessions   *session.Table
-	audit      AuditSink
-	maxTurns   int
-	maxRetries int
-	verifier   Verifier
-	warm       *WarmBand
+	gw          Gateway
+	sessions    *session.Table
+	audit       AuditSink
+	maxTurns    int
+	maxRetries  int
+	verifier    Verifier
+	spawnBudget *SpawnBudget
+	warm        *WarmBand
 
 	queue chan *job
 
@@ -185,15 +190,16 @@ func NewHost(gw Gateway, cfg Config) (*Host, error) {
 		audit = nopSink{}
 	}
 	h := &Host{
-		gw:         gw,
-		sessions:   sessions,
-		audit:      audit,
-		maxTurns:   max(0, cfg.MaxTurns),
-		maxRetries: max(0, cfg.MaxRetries),
-		verifier:   cfg.Verifier,
-		warm:       cfg.Warm,
-		queue:      make(chan *job, queue),
-		live:       map[string]*job{},
+		gw:          gw,
+		sessions:    sessions,
+		audit:       audit,
+		maxTurns:    max(0, cfg.MaxTurns),
+		maxRetries:  max(0, cfg.MaxRetries),
+		verifier:    cfg.Verifier,
+		spawnBudget: cfg.SpawnBudget,
+		warm:        cfg.Warm,
+		queue:       make(chan *job, queue),
+		live:        map[string]*job{},
 	}
 	h.ctx, h.cancel = context.WithCancel(context.Background())
 	for i := 0; i < workers; i++ {
@@ -249,6 +255,22 @@ func (h *Host) Spawn(id string, m Microagent) error {
 	h.live[id] = j
 	h.pending.Add(1)
 	h.audit.Record(Event{Agent: id, Kind: EventSpawn})
+	return nil
+}
+
+// RequestChild routes recursive work through the host budget, queue, session,
+// and audit path without exposing the Host itself to the requesting agent.
+func (h *Host) RequestChild(request SpawnRequest, child Microagent) error {
+	if h.spawnBudget == nil {
+		return fmt.Errorf("%w: host has no recursive spawn budget", ErrSpawnBudget)
+	}
+	if err := h.spawnBudget.Admit(request); err != nil {
+		return err
+	}
+	if err := h.Spawn(request.ChildID, child); err != nil {
+		h.spawnBudget.release(request.ParentID)
+		return err
+	}
 	return nil
 }
 

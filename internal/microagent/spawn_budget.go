@@ -62,3 +62,12 @@ func (b *SpawnBudget) Descendants() int {
 	defer b.mu.Unlock()
 	return b.descendants
 }
+
+func (b *SpawnBudget) release(parentID string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.children[parentID] > 0 {
+		b.children[parentID]--
+		b.descendants--
+	}
+}
