@@ -751,6 +751,8 @@ demo corpus + `DefaultManifest` vs a one-frontier-model baseline; `--corpus` /
 edit. Every figure is a ROUGH lens, never a bill or a measured SLA. See
 [`docs/model-routing.md`](model-routing.md#the-offline-routing-benchmark-fak-routebench).
 
+`fak vcache calibration-record --provider NAME [--model NAME] --telemetry usage.jsonl` folds provider cache-feedback JSONL into the dated calibration ledger. `fak guard` and `fak serve` also append automatically when their gateway observes provider cache feedback. `fak vcache calibration-status [--providers anthropic,openai] [--max-age 168h] [--json]` returns `fresh`, `stale`, or `missing` per provider; stale and missing rows name the required live-session refresh. Prediction-error rates remain visible during the session at `/metrics` (`fak_vcache_warmth_false_warm_rate` and `fak_vcache_warmth_false_cold_rate`).
+
 `fak vcache status|prove|prove-telemetry` is the proof surface for the virtual
 provider-cache work. `status` reports the honest current state: the M5 Governor is up
 as a local, off-path policy engine, while provider calibration/warming/recall remain

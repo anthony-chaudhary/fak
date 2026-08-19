@@ -340,6 +340,7 @@ type ChatRequest struct {
 	// engine (vLLM `guided_json`/`response_format`, SGLang `json_schema`) enforces the
 	// constraint during generation. Absent => unset on the wire (bit-exact drop-in).
 	ResponseFormat json.RawMessage `json:"response_format,omitempty"`
+	ToolChoice     json.RawMessage `json:"tool_choice,omitempty"`
 	// LogitBias is the OpenAI per-token logit-bias map (token id -> bias, the standard
 	// -100..100 mask), forwarded verbatim to the upstream. Absent => unset on the wire.
 	LogitBias map[int]float64 `json:"logit_bias,omitempty"`

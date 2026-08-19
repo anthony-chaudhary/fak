@@ -201,7 +201,7 @@ func TestToolSpecBlockMatchesQwen35Contract(t *testing.T) {
 
 func TestRenderInKernelChatMLRequestCarriesJSONSchema(t *testing.T) {
 	raw := json.RawMessage(`{"type":"json_schema","json_schema":{"name":"probe","strict":true,"schema":{"type":"object","properties":{"model":{"type":"string"},"ok":{"type":"boolean"}},"required":["model","ok"],"additionalProperties":false}}}`)
-	got := renderInKernelChatMLRequest([]Message{{Role: RoleUser, Content: "Return the probe."}}, nil, model.Config{}, raw)
+	got := renderInKernelChatMLRequest([]Message{{Role: RoleUser, Content: "Return the probe."}}, nil, model.Config{}, raw, nil)
 	for _, want := range []string{
 		"Return only one valid JSON object matching this schema exactly.",
 		`"required":["model","ok"]`,
@@ -219,7 +219,7 @@ func TestRenderInKernelChatMLRequestCarriesJSONSchema(t *testing.T) {
 
 func TestRenderInKernelChatMLRequestIgnoresMalformedResponseFormat(t *testing.T) {
 	messages := []Message{{Role: RoleUser, Content: "hello"}}
-	got := renderInKernelChatMLRequest(messages, nil, model.Config{}, json.RawMessage(`{"type":`))
+	got := renderInKernelChatMLRequest(messages, nil, model.Config{}, json.RawMessage(`{"type":`), nil)
 	want := renderInKernelChatMLTools(messages, nil, model.Config{})
 	if got != want {
 		t.Fatalf("malformed response_format changed prompt:\n got %q\nwant %q", got, want)
@@ -246,5 +246,14 @@ true
 	}
 	if strings.TrimSpace(m.Content) != "" {
 		t.Fatalf("lifted tool call remained in content: %q", m.Content)
+	}
+}
+
+func TestRenderInKernelChatMLRequestPinsForcedTool(t *testing.T) {
+	choice := json.RawMessage(`{"type":"function","function":{"name":"record_probe"}}`)
+	got := renderInKernelChatMLRequest([]Message{{Role: RoleUser, Content: "run it"}}, []ToolDef{{Type: "function", Function: ToolDefFunction{Name: "record_probe"}}}, model.Config{}, nil, choice)
+	want := `You MUST call the function "record_probe" now. Do not call any other function and do not answer with prose.`
+	if !strings.Contains(got, want) {
+		t.Fatalf("forced tool instruction missing:\n%s", got)
 	}
 }

@@ -91,6 +91,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		// tool-bearing turn is generated under the ride engine's constraint and still
 		// adjudicated whole. No-op when absent (bit-exact drop-in).
 		agent.WithResponseFormat(req.ResponseFormat),
+		agent.WithToolChoice(req.ToolChoice),
 		agent.WithLogitBias(req.LogitBias),
 		agent.WithGuidedDecode(req.GuidedDecodeFields()),
 	}

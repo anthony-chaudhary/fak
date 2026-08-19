@@ -91,6 +91,15 @@ func WithResponseFormat(raw json.RawMessage) SampleOpt {
 	}
 }
 
+// WithToolChoice preserves an explicit OpenAI tool_choice for native prompt rendering.
+func WithToolChoice(raw json.RawMessage) SampleOpt {
+	return func(sp *SampleParams) {
+		if len(raw) > 0 {
+			sp.ToolChoice = raw
+		}
+	}
+}
+
 // WithLogitBias sets the per-request OpenAI `logit_bias` map (token id -> bias).
 // An empty/nil map is a no-op, so an omitted logit_bias stays absent from the wire.
 func WithLogitBias(bias map[int]float64) SampleOpt {
