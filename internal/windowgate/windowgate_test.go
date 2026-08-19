@@ -118,13 +118,17 @@ func TestClassifyLiveScheduledTasks(t *testing.T) {
 			Execute: "cmd.exe", Arguments: "/c C:\\work\\fak\\tools\\tick.bat",
 		},
 		{
+			TaskPath: "\\", TaskName: "VisibleFak", State: "Ready", LogonType: "InteractiveToken",
+			Execute: `C:\Users\USER\bin\fak.exe`, Arguments: "dispatch auto --live",
+		},
+		{
 			TaskPath: "\\GoogleUserPEH\\", TaskName: "ChromeHelper", State: "Ready", LogonType: "InteractiveToken",
 			Execute:   `"C:\Program Files\Google\Chrome\Application\PlatformExperienceHelper\platform_experience_helper.exe"`,
 			Arguments: "--chrome-upload-metrics",
 		},
 	})
-	if len(rep.Violations) != 1 {
-		t.Fatalf("violations = %d %v, want exactly the visible interactive task", len(rep.Violations), rep.Violations)
+	if len(rep.Violations) != 2 || !strings.Contains(strings.Join(rep.Violations, "\n"), "VisibleFak") {
+		t.Fatalf("violations = %d %v, want visible interactive cmd and fak tasks", len(rep.Violations), rep.Violations)
 	}
 	if len(rep.Watchlist) != 3 {
 		t.Fatalf("watchlist = %d %v, want hidden/headless/pythonw/disabled rows", len(rep.Watchlist), rep.Watchlist)

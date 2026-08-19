@@ -731,7 +731,7 @@ func liveTaskWindowless(task LiveScheduledTask) bool {
 func liveTaskConsoleProne(task LiveScheduledTask) bool {
 	exe := strings.ToLower(filepath.Base(strings.ReplaceAll(strings.Trim(task.Execute, `"`), "\\", "/")))
 	if candidateConsoleTools[exe] || exe == "bash.exe" || exe == "bash" || exe == "pythonw.exe" ||
-		exe == "conhost.exe" || exe == "powershell_ise.exe" {
+		exe == "conhost.exe" || exe == "powershell_ise.exe" || exe == "fak.exe" || exe == "fak-dev.exe" {
 		return true
 	}
 	return false
