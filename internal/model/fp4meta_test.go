@@ -38,6 +38,19 @@ func fp4MXFP4() FP4Metadata {
 	return m
 }
 
+func TestFP4FormatDefinitionCoversBareAndUnknownFormats(t *testing.T) {
+	bare := fp4NVFP4()
+	bare.Format = FP4FormatE2M1
+	if detail, ok := fp4FormatDefinition(bare); !ok {
+		t.Fatalf("bare e2m1 refused: %s", detail)
+	}
+	unknown := fp4NVFP4()
+	unknown.Format = FP4Format("future")
+	if detail, ok := fp4FormatDefinition(unknown); ok || !strings.Contains(detail, "unknown fp4 format") {
+		t.Fatalf("unknown format = ok %v, detail %q", ok, detail)
+	}
+}
+
 func TestAdjudicateFP4Metadata(t *testing.T) {
 	cases := []struct {
 		name   string

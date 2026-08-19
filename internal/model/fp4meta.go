@@ -300,10 +300,12 @@ func fp4FormatDefinition(m FP4Metadata) (string, bool) {
 		return fp4RequireBlock(m, FP4ScaleE4M3, 16, 2)
 	case FP4FormatMXFP4:
 		return fp4RequireBlock(m, FP4ScaleE8M0, 32, 1)
+	case FP4FormatE2M1:
+		// The bare element format pins no block geometry of its own; any coherent scale is valid.
+		return "", true
+	default:
+		return fmt.Sprintf("unknown fp4 format %q", m.Format), false
 	}
-	// The bare e2m1 element format pins no block geometry of its own — an artifact is free to
-	// carry any coherent scale, which fp4SelfContradiction already checked.
-	return "", true
 }
 
 func fp4RequireBlock(m FP4Metadata, enc FP4ScaleEncoding, elements uint32, levels uint8) (string, bool) {
