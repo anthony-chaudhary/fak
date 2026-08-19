@@ -44,10 +44,13 @@ func TestLaunchPostureNativeServeInNonFakRepository(t *testing.T) {
 	if report.Harness != "" {
 		t.Fatalf("native serve reported phantom harness %q", report.Harness)
 	}
-	for _, name := range []string{"compact-history", "stale-read-elision", "cold-tool-deferral", "vcache-anchor"} {
+	for _, name := range []string{"compact-history", "cold-tool-deferral", "vcache-anchor"} {
 		if got := postureByName(t, report, name); got.State != "inert" || !strings.Contains(got.Reason, "in-kernel") {
 			t.Fatalf("%s = %+v", name, got)
 		}
+	}
+	if got := postureByName(t, report, "stale-read-elision"); got.State != "active" || !strings.Contains(got.Reason, "decoded provider-neutral") {
+		t.Fatalf("stale-read-elision = %+v", got)
 	}
 }
 
@@ -121,7 +124,7 @@ func TestRunDoctorLaunchPostureJSONIsStableAndComplete(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.Schema != launchPostureSchema || len(report.Mechanisms) != 9 || report.Summary["active"] != 8 || report.Summary["inert"] != 1 {
+	if report.Schema != launchPostureSchema || len(report.Mechanisms) != 10 || report.Summary["active"] != 9 || report.Summary["inert"] != 1 {
 		t.Fatalf("report = %+v", report)
 	}
 }
@@ -189,5 +192,42 @@ func TestLaunchPostureDecodedContextViewOptOut(t *testing.T) {
 	got := postureByName(t, report, "decoded-context-view")
 	if got.State != "disabled" || got.Action == "" {
 		t.Fatalf("decoded context-view opt-out = %+v", got)
+	}
+}
+
+func TestLaunchPostureOpenAINamesDecodedStaleReadsAndCacheSignalsActive(t *testing.T) {
+	report, err := deriveLaunchPosture(launchPostureOptions{
+		entrypoint: "guard", harness: "codex", provider: "openai", baseURL: "https://api.openai.com/v1",
+		workspace: t.TempDir(), nativeCodeTools: true, outputProfile: "caveman:medium", workProfile: "ponytail:medium",
+		compactHistory: 32000, ctxViewBudget: agent.DefaultCtxViewBudget, elideStaleReads: true, deferColdTools: true, vcacheAnchor: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := postureByName(t, report, "stale-read-elision")
+	if stale.State != "active" || !strings.Contains(stale.Reason, "decoded provider-neutral") {
+		t.Fatalf("stale-read posture = %+v", stale)
+	}
+	signals := postureByName(t, report, "vcache-signals")
+	if signals.State != "active" || !strings.Contains(signals.Reason, "normalized provider usage") {
+		t.Fatalf("vcache signals posture = %+v", signals)
+	}
+	cold := postureByName(t, report, "cold-tool-deferral")
+	if cold.State != "inert" {
+		t.Fatalf("cold-tool posture must remain honest without an OpenAI discovery seam: %+v", cold)
+	}
+}
+
+func TestLaunchPosturePassthroughNamesClientOwnedTools(t *testing.T) {
+	report, err := deriveLaunchPosture(launchPostureOptions{
+		entrypoint: "serve", provider: "openai", baseURL: "https://api.openai.com/v1", workspace: t.TempDir(), nativeCodeTools: true,
+		outputProfile: "full", workProfile: "standard", ctxViewBudget: agent.DefaultCtxViewBudget, elideStaleReads: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := postureByName(t, report, "bounded-code-tools")
+	if tools.State != "inert" || !strings.Contains(tools.Reason, "owned native loop") {
+		t.Fatalf("passthrough tools posture = %+v", tools)
 	}
 }

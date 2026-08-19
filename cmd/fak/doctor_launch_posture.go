@@ -154,9 +154,10 @@ func deriveLaunchPosture(opts launchPostureOptions) (launchPostureReport, error)
 		postureWorkProfile(opts),
 		postureShrink("compact-history", opts.compactHistory > 0, wire, "--compact-history-budget 0", "use an Anthropic passthrough wire or set --provider anthropic"),
 		postureShrinkDecoded(opts, wire),
-		postureShrink("stale-read-elision", opts.elideStaleReads, wire, "--elide-stale-reads=false", "use an Anthropic passthrough wire or set --provider anthropic"),
+		postureStaleReadElision(opts, wire),
 		postureShrink("cold-tool-deferral", opts.deferColdTools, wire, "--defer-cold-tools=false", "use an Anthropic passthrough wire or set --provider anthropic"),
 		postureShrink("vcache-anchor", opts.vcacheAnchor, wire, "--vcache-anchor=false", "use an Anthropic passthrough wire or set --provider anthropic"),
+		postureVCacheSignals(opts, wire),
 		postureVCacheCalibration(opts, wire),
 	}
 	summary := map[string]int{"active": 0, "inert": 0, "disabled": 0, "unsupported": 0}
@@ -168,6 +169,35 @@ func deriveLaunchPosture(opts launchPostureOptions) (launchPostureReport, error)
 		}
 	}
 	return launchPostureReport{Schema: launchPostureSchema, OK: ok, Entrypoint: opts.entrypoint, Harness: opts.harness, Wire: wire, Workspace: root, Mechanisms: mechanisms, Summary: summary}, nil
+}
+
+func postureStaleReadElision(opts launchPostureOptions, wire string) launchPostureMechanism {
+	m := launchPostureMechanism{Name: "stale-read-elision", Configured: opts.elideStaleReads, Disable: "--elide-stale-reads=false"}
+	if !opts.elideStaleReads {
+		m.State, m.Reason, m.Action = "disabled", "stale-read elision was explicitly disabled", "remove --elide-stale-reads=false"
+		return m
+	}
+	if wire == shrinkWireAnthropicPassthrough {
+		m.State, m.Reason = "active", "Anthropic request bytes elide superseded tool-read results before forwarding"
+		return m
+	}
+	m.State, m.Reason = "active", "decoded provider-neutral history elides superseded tool-read results before context planning"
+	return m
+}
+
+func postureVCacheSignals(opts launchPostureOptions, wire string) launchPostureMechanism {
+	m := launchPostureMechanism{Name: "vcache-signals", Configured: true}
+	if opts.entrypoint == "serve" && opts.native {
+		m.State, m.Reason = "active", "owned-model usage feeds the provider-neutral cache-signal and per-family economics surface"
+		return m
+	}
+	provider := strings.ToLower(strings.TrimSpace(opts.provider))
+	if provider == "" && wire == shrinkWireMock {
+		m.State, m.Reason, m.Action = "unsupported", "offline mock usage has no provider cache counters", "select a live provider wire when provider-cache feedback is expected"
+		return m
+	}
+	m.State, m.Reason = "active", "normalized provider usage feeds cache-read/cache-write signals, warmth error, and per-family economics independently of request shaping"
+	return m
 }
 
 func postureVCacheCalibration(opts launchPostureOptions, wire string) launchPostureMechanism {

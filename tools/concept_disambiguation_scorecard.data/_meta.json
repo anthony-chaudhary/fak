@@ -832,6 +832,16 @@
           "category": "incidental",
           "reason": "Journal localization label for the established provider cache-read evidence boundary",
           "token": "provider_cache_read_boundary"
+        },
+        {
+          "category": "incidental",
+          "reason": "Launch-posture renderer for established provider-neutral cache telemetry",
+          "token": "postureVCacheSignals"
+        },
+        {
+          "category": "incidental",
+          "reason": "Diagnostic label for established provider-neutral cache telemetry",
+          "token": "vcache-signals"
         }
       ],
       "id": "cache",
@@ -1021,6 +1031,7 @@
         "persistMicroCacheWitness",
         "persistVCacheCalibration",
         "postureVCacheCalibration",
+        "postureVCacheSignals",
         "prefixcachehits",
         "prefixcachequeries",
         "promptcachehittokens",
@@ -1050,6 +1061,7 @@
         "turnCacheSummary",
         "uncached",
         "usercachedir",
+        "vcache-signals",
         "vcachecalibration"
       ],
       "known_tokens": [],
@@ -7109,6 +7121,16 @@
           "category": "incidental",
           "reason": "launch diagnostic helper for an existing configured context planner, not a policy capability",
           "token": "postureShrinkDecoded"
+        },
+        {
+          "category": "incidental",
+          "reason": "Launch-posture renderer for the established stale-read mechanism",
+          "token": "postureStaleReadElision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Launch-posture renderer for established provider-neutral cache telemetry",
+          "token": "postureVCacheSignals"
         }
       ],
       "exclude": [
@@ -7241,7 +7263,9 @@
         "postureOutputProfile",
         "postureShrink",
         "postureShrinkDecoded",
+        "postureStaleReadElision",
         "postureVCacheCalibration",
+        "postureVCacheSignals",
         "postureWorkProfile",
         "postures",
         "printGuardLaunchPostures",

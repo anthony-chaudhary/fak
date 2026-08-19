@@ -1,0 +1,20 @@
+{
+  "schema": "fak.launch-posture.cross-wire-witness.v1",
+  "captured_at": "2026-08-19T18:00:00Z",
+  "issue": 8089,
+  "openai_codex": {
+    "stale_read_elision": "active through decoded provider-neutral history",
+    "vcache_signals": "active through normalized provider usage",
+    "cold_tool_deferral": "inert: no witnessed OpenAI-compatible discovery seam"
+  },
+  "passthrough_serve": {
+    "bounded_code_tools": "inert because client owns tool execution",
+    "action": "use --native or a wrapped harness with witnessed repository tools"
+  },
+  "behavioral_tests": [
+    "TestDecodedStaleReadElisionReachesOpenAIPlannerInput",
+    "TestCodexResponsesUsageFeedsVCacheObservation",
+    "TestLaunchPostureOpenAINamesDecodedStaleReadsAndCacheSignalsActive",
+    "TestLaunchPosturePassthroughNamesClientOwnedTools"
+  ]
+}
