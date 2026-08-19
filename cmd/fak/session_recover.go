@@ -128,6 +128,7 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 			if err := recoveryLaunch.Launch(requests[i]); err != nil {
 				requests[i].Status = "launch_failed"
 				requests[i].Reason = err.Error()
+				_ = sessionrecovery.FinalizeReceipt(requests[i], requests[i].Status, requests[i].Reason, recoveryNow())
 				continue
 			}
 			requests[i].Status = "launched_unproven"
@@ -136,7 +137,10 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 			if err == nil {
 				requests[i].Status = sessionrecovery.Witness(before, after, requests[i].ThreadID)
 				before = after
+			} else {
+				requests[i].Reason = err.Error()
 			}
+			_ = sessionrecovery.FinalizeReceipt(requests[i], requests[i].Status, requests[i].Reason, recoveryNow())
 		}
 	}
 	enc := json.NewEncoder(stdout)

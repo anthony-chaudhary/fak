@@ -61,7 +61,9 @@ type Receipt struct {
 	CWD        string   `json:"cwd"`
 	Argv       []string `json:"argv"`
 	RecordedAt string   `json:"recorded_at"`
+	UpdatedAt  string   `json:"updated_at,omitempty"`
 	State      string   `json:"state"`
+	Reason     string   `json:"reason,omitempty"`
 }
 
 type Options struct {
@@ -205,6 +207,44 @@ func WriteReceipt(req Request, now time.Time) (bool, error) {
 		return false, encErr
 	}
 	return true, closeErr
+}
+
+func FinalizeReceipt(req Request, state, reason string, now time.Time) error {
+	if strings.TrimSpace(state) == "" || state == "launch_intent" {
+		return errors.New("receipt final state is required")
+	}
+	b, err := os.ReadFile(req.ReceiptPath)
+	if err != nil {
+		return err
+	}
+	var receipt Receipt
+	if err := json.Unmarshal(b, &receipt); err != nil {
+		return err
+	}
+	if receipt.Schema != ReceiptSchema || receipt.ThreadID != req.ThreadID {
+		return errors.New("receipt identity mismatch")
+	}
+	receipt.State = state
+	receipt.Reason = reason
+	receipt.UpdatedAt = now.UTC().Format(time.RFC3339Nano)
+	tmp, err := os.CreateTemp(filepath.Dir(req.ReceiptPath), ".session-recovery-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := json.NewEncoder(tmp).Encode(receipt); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, req.ReceiptPath)
 }
 
 type Launcher interface{ Launch(Request) error }

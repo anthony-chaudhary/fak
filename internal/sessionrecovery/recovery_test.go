@@ -65,6 +65,28 @@ func TestReceiptIsLedgerFirstAndIdempotent(t *testing.T) {
 		t.Fatalf("receipt=%s", b)
 	}
 }
+func TestFinalizeReceiptPersistsTerminalState(t *testing.T) {
+	dir := t.TempDir()
+	req := Select(InventoryReport{Sessions: []Session{candidate(dir)}}, Options{Limit: 1, ReceiptDir: dir})[0]
+	if wrote, err := WriteReceipt(req, time.Unix(1, 0)); err != nil || !wrote {
+		t.Fatalf("write receipt: wrote=%v err=%v", wrote, err)
+	}
+	if err := FinalizeReceipt(req, "launch_failed", "terminal missing", time.Unix(2, 0)); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(req.ReceiptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Receipt
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.State != "launch_failed" || got.Reason != "terminal missing" || got.UpdatedAt == "" {
+		t.Fatalf("receipt=%+v", got)
+	}
+}
+
 func TestWitnessRequiresProcessGuardAndNewTurn(t *testing.T) {
 	before := InventoryReport{Sessions: []Session{candidate(`C:\x`)}}
 	after := InventoryReport{Sessions: []Session{candidate(`C:\x`)}}

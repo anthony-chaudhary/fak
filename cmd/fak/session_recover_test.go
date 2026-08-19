@@ -76,7 +76,7 @@ func TestSessionRecoverPromptAndCWD(t *testing.T) {
 	recoveryLaunch = cap
 	recoverySleep = func(time.Duration) {}
 	var out, er bytes.Buffer
-	code := runSessionRecover(&out, &er, []string{"--apply", "--cwd", `C:\work\fak`, "--prompt", "continue this exact task", "--receipts", t.TempDir(), "--settle", "0"})
+	code := runSessionRecover(&out, &er, []string{"--apply", "--all", "--cwd", `C:\work\fak`, "--prompt", "continue this exact task", "--receipts", t.TempDir(), "--settle", "0"})
 	if code != 0 {
 		t.Fatalf("code=%d err=%s", code, er.String())
 	}
