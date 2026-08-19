@@ -6,7 +6,10 @@ import (
 	"strings"
 )
 
-type outboundTraceContext struct{ traceparent, tracestate string }
+type outboundTraceContext struct {
+	traceparent, tracestate string
+	begin                   func(*http.Request) func(int, error)
+}
 type outboundTraceContextKey struct{}
 
 // WithTraceContext carries validated W3C context from an ingress adapter to provider calls.
@@ -32,4 +35,25 @@ func ApplyTraceContext(req *http.Request) {
 	if c.tracestate != "" && len(c.tracestate) <= 512 {
 		req.Header.Set("tracestate", c.tracestate)
 	}
+}
+
+// WithProviderSpanHook installs the gateway-owned provider child-span boundary.
+func WithProviderSpanHook(ctx context.Context, begin func(*http.Request) func(int, error)) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	carrier, _ := ctx.Value(outboundTraceContextKey{}).(outboundTraceContext)
+	carrier.begin = begin
+	return context.WithValue(ctx, outboundTraceContextKey{}, carrier)
+}
+
+// BeginProviderCall stamps trace headers and returns a completion hook.
+func BeginProviderCall(req *http.Request) func(int, error) {
+	ApplyTraceContext(req)
+	if req != nil {
+		if carrier, ok := req.Context().Value(outboundTraceContextKey{}).(outboundTraceContext); ok && carrier.begin != nil {
+			return carrier.begin(req)
+		}
+	}
+	return func(int, error) {}
 }

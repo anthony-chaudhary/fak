@@ -940,11 +940,16 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			return nil, err
 		}
 		call.applyHeaders(req)
-		ApplyTraceContext(req)
+		finishProvider := BeginProviderCall(req)
 		if call.responsesStreamed {
 			req.Header.Set("Accept", "text/event-stream")
 		}
 		resp, err := p.Client.Do(req)
+		providerStatus := 0
+		if resp != nil {
+			providerStatus = resp.StatusCode
+		}
+		finishProvider(providerStatus, err)
 		if err != nil {
 			// A deterministic dial-time failure (refused / NXDOMAIN / TLS) will not
 			// resolve on retry — retrying only adds ~8s of backoff latency to what is a

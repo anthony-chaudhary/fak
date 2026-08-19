@@ -549,9 +549,14 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 			return nil, err
 		}
 		call.applyHeaders(req)
-		ApplyTraceContext(req)
+		finishProvider := BeginProviderCall(req)
 		req.Header.Set("Accept", "text/event-stream")
 		r, err := p.Client.Do(req)
+		providerStatus := 0
+		if r != nil {
+			providerStatus = r.StatusCode
+		}
+		finishProvider(providerStatus, err)
 		if err != nil {
 			if uerr := classifyDoError(err, &rs); uerr != nil {
 				return nil, uerr

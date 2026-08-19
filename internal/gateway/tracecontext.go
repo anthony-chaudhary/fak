@@ -1,10 +1,15 @@
 package gateway
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 const traceparentHeader = "traceparent"
@@ -57,4 +62,22 @@ func newTraceContext(traceID string, flags byte) traceContext {
 		traceID = randomHex(16)
 	}
 	return traceContext{TraceID: strings.ToLower(traceID), ParentID: randomHex(8), Flags: flags}
+}
+
+func providerSpanContext(ctx context.Context, exporter *otlpExporter) context.Context {
+	return agent.WithProviderSpanHook(ctx, func(req *http.Request) func(int, error) {
+		parent, err := parseTraceparent(req.Header.Get(traceparentHeader))
+		if err != nil {
+			return func(int, error) {}
+		}
+		child := newTraceContext(parent.TraceID, parent.Flags)
+		req.Header.Set(traceparentHeader, child.String())
+		start := time.Now()
+		return func(status int, callErr error) {
+			if callErr != nil && status == 0 {
+				status = 500
+			}
+			exporter.enqueue(otlpSpan{TraceID: child.TraceID, SpanID: child.ParentID, ParentSpanID: parent.ParentID, Name: "provider " + req.Method, Route: "provider", Method: req.Method, Status: status, Start: start, End: time.Now()})
+		}
+	})
 }

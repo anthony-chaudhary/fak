@@ -143,10 +143,15 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		// place) or a 401 self-heal takes effect on the very next re-send — the same credential
 		// source the buffered/planner-stream paths use, folding in the anthropic-beta union.
 		call.applyHeaders(req)
-		ApplyTraceContext(req)
+		finishProvider := BeginProviderCall(req)
 		req.Header.Set("Accept", "text/event-stream")
 
 		r, derr := p.Client.Do(req)
+		providerStatus := 0
+		if r != nil {
+			providerStatus = r.StatusCode
+		}
+		finishProvider(providerStatus, derr)
 		if derr != nil {
 			// A deterministic dial failure (refused/NXDOMAIN/TLS) cannot be retried away —
 			// fail fast and tagged. A transient transport error (timeout, mid-flight reset)

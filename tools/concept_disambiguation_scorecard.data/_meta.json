@@ -7818,6 +7818,11 @@
           "category": "incidental",
           "reason": "W3C distributed tracing carrier, not model context memory.",
           "token": "WithTraceContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "W3C tracing child-span carrier, not model context memory.",
+          "token": "providerSpanContext"
         }
       ],
       "id": "context-ctx",
@@ -7904,6 +7909,7 @@
         "postCtx",
         "probeCtx",
         "providerContext",
+        "providerSpanContext",
         "readGuardCompactionWitnesses",
         "recalled",
         "recalling",
