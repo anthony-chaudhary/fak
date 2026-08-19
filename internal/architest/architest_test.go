@@ -574,6 +574,8 @@ var tier = map[string]int{
 	"lightgapscore":         1, // deterministic stdlib-only scorecard parser and renderer; off the hot path.
 	"lightgapport":          1,
 	"kvquantmeta":           1,
+	"ggufinterop":           2, // GGUF metadata adapter over ggufload into the neutral quantization contract (#6231).
+	"llamacppinterop":       2, // versioned external llama.cpp delegation adapter over quantization metadata (#6232).
 	"quantcompat":           1, // stdlib-only artifact/runtime/hardware compatibility contract (#6224).
 	"quantroute":            1, // stdlib-only ordered quantization compatibility routing contract (#6225).
 	"quantfixture":          1, // stdlib-only synthetic redistributable artifact fixtures and verifier (#6230).
