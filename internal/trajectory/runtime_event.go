@@ -24,6 +24,7 @@ const (
 )
 
 type RuntimeSource struct {
+	Rung      string `json:"rung"`
 	Component string `json:"component"`
 	Instance  string `json:"instance"`
 	Runtime   string `json:"runtime"`
@@ -62,6 +63,9 @@ func RuntimeEventKinds() []RuntimeEventKind {
 }
 
 func NewRuntimeEvent(eventID, sessionID, turnID, traceID string, sequence uint64, at time.Time, kind RuntimeEventKind, source RuntimeSource, payload json.RawMessage) (RuntimeEvent, error) {
+	if source.Rung == "" {
+		source.Rung = source.Component
+	}
 	e := RuntimeEvent{Schema: RuntimeEventSchema, EventID: eventID, SessionID: sessionID, TurnID: turnID, TraceID: traceID, Sequence: sequence, Timestamp: at, Kind: kind, Source: source, Payload: payload}
 	if err := ValidateRuntimeEvent(e); err != nil {
 		return RuntimeEvent{}, err
@@ -73,7 +77,7 @@ func ValidateRuntimeEvent(e RuntimeEvent) error {
 	if e.Schema != RuntimeEventSchema {
 		return fmt.Errorf("runtime event schema %q", e.Schema)
 	}
-	if e.EventID == "" || e.SessionID == "" || e.TurnID == "" || e.TraceID == "" || e.Source.Component == "" || e.Source.Instance == "" || e.Source.Runtime == "" || e.Timestamp.IsZero() || e.Sequence == 0 {
+	if e.EventID == "" || e.SessionID == "" || e.TurnID == "" || e.TraceID == "" || e.Source.Rung == "" || e.Source.Component == "" || e.Source.Instance == "" || e.Source.Runtime == "" || e.Timestamp.IsZero() || e.Sequence == 0 {
 		return fmt.Errorf("runtime event identity, source, sequence, and timestamp are required")
 	}
 	known := false

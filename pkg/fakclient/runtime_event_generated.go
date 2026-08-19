@@ -23,6 +23,7 @@ const (
 )
 
 type RuntimeSource struct {
+	Rung      string `json:"rung"`
 	Component string `json:"component"`
 	Instance  string `json:"instance"`
 	Runtime   string `json:"runtime"`

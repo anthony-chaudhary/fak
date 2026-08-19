@@ -23,6 +23,9 @@ type RuntimeObserver struct {
 }
 
 func NewRuntimeObserver(w io.Writer, transport trajectory.RuntimeTransport, sessionID, traceID string, source trajectory.RuntimeSource) (*RuntimeObserver, error) {
+	if source.Rung == "" {
+		source.Rung = "owned-agent-loop"
+	}
 	if w == nil || sessionID == "" || traceID == "" || source.Component == "" || source.Instance == "" || source.Runtime == "" {
 		return nil, fmt.Errorf("runtime observer writer, identity, and source are required")
 	}

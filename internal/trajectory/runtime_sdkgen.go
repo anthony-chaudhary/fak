@@ -23,7 +23,7 @@ func GenerateGoRuntimeSDK(packageName string) ([]byte, error) {
 		fmt.Fprintf(&b, "RuntimeKind%s RuntimeEventKind = %q\n", goKindName(kind), kind)
 	}
 	fmt.Fprintln(&b, ")")
-	fmt.Fprintln(&b, `type RuntimeSource struct { Component string `+"`json:\"component\"`"+`; Instance string `+"`json:\"instance\"`"+`; Runtime string `+"`json:\"runtime\"`"+` }`)
+	fmt.Fprintln(&b, `type RuntimeSource struct { Rung string `+"`json:\"rung\"`"+`; Component string `+"`json:\"component\"`"+`; Instance string `+"`json:\"instance\"`"+`; Runtime string `+"`json:\"runtime\"`"+` }`)
 	fmt.Fprintln(&b, `type RuntimeEvent struct { Schema string `+"`json:\"schema\"`"+`; EventID string `+"`json:\"event_id\"`"+`; SessionID string `+"`json:\"session_id\"`"+`; TurnID string `+"`json:\"turn_id\"`"+`; TraceID string `+"`json:\"trace_id\"`"+`; Sequence uint64 `+"`json:\"sequence\"`"+`; Timestamp time.Time `+"`json:\"timestamp\"`"+`; Kind RuntimeEventKind `+"`json:\"kind\"`"+`; Source RuntimeSource `+"`json:\"source\"`"+`; Payload json.RawMessage `+"`json:\"payload\"`"+` }`)
 	fmt.Fprintln(&b, `type RuntimeAdmission struct { Screened bool `+"`json:\"screened\"`"+`; Taint string `+"`json:\"taint\"`"+`; Screen string `+"`json:\"screen\"`"+` }`)
 	fmt.Fprintln(&b, `type RuntimeWireEvent struct { Schema string `+"`json:\"schema\"`"+`; Event RuntimeEvent `+"`json:\"event\"`"+`; Admission RuntimeAdmission `+"`json:\"admission\"`"+` }`)
