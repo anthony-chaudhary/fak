@@ -2,7 +2,7 @@
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 962  
+parsed files: 963  
 rows: 1037  
 unverified rows: 0 / 1037  
 source-only rows absent from help: 806
