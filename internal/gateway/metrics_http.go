@@ -170,7 +170,7 @@ func (s *Server) withMetrics(next http.Handler) http.Handler {
 }
 
 func (s *Server) logHTTPRequest(r *http.Request, route string, status int, dur time.Duration, bytes int64, traceID string) {
-	if s == nil || s.logf == nil {
+	if s.logf == nil {
 		return
 	}
 	ev := map[string]any{
@@ -207,7 +207,7 @@ func (s *Server) logHTTPRequest(r *http.Request, route string, status int, dur t
 // prior prose line. Called only from withMetrics' recover, i.e. at most once per
 // served turn.
 func (s *Server) logRecoveredPanic(r *http.Request, route, traceID, origin string, p any) {
-	if s == nil || s.logf == nil {
+	if s.logf == nil {
 		return
 	}
 	ev := map[string]any{
@@ -285,7 +285,17 @@ func panicOriginFrame() string {
 }
 
 func (s *Server) logGatewayOperation(operation, traceID, tool string, v WireVerdict, opErr error, dur time.Duration) {
-	if s == nil || s.logf == nil {
+	if s == nil {
+		return
+	}
+	if operation == "adjudicate" && s.orgAudit != nil {
+		verdict := v.Kind
+		if opErr != nil {
+			verdict = "ERROR"
+		}
+		s.orgAudit.Emit(tool, verdict, v.Reason, map[string]int64{})
+	}
+	if s.logf == nil {
 		return
 	}
 	verdict := v.Kind

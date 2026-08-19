@@ -36,6 +36,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -649,5 +650,26 @@ func TestOrgTrustAnchorCarriesRunningFacts(t *testing.T) {
 		t.Fatalf("an envelope requiring a newer binary was accepted")
 	} else if got := reasonOf(t, err); got != abi.ReasonPolicyBlock {
 		t.Fatalf("min_version refusal reason = %s, want POLICY_BLOCK", abi.ReasonName(got))
+	}
+}
+
+func TestEnrollOrgPersistsOptInAuditEndpoint(t *testing.T) {
+	path := enrollPath(t)
+	_, err := EnrollOrg(path, OrgEnrollRequest{OrgURL: "https://org.example/policy", Issuer: "org.example", RootKey: func() ed25519.PublicKey { p, _ := testKey(t, 0xa1); return p }(), DeviceID: "dev-1", AuditURL: "https://audit.example/receipts", Now: time.Unix(100, 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := LoadOrgEnrollment(path)
+	if err != nil || !ok {
+		t.Fatalf("load ok=%v err=%v", ok, err)
+	}
+	if got.AuditURL != "https://audit.example/receipts" {
+		t.Fatalf("audit_url=%q", got.AuditURL)
+	}
+}
+func TestEnrollOrgRejectsMalformedAuditEndpoint(t *testing.T) {
+	_, err := EnrollOrg(enrollPath(t), OrgEnrollRequest{OrgURL: "https://org.example/policy", Issuer: "org.example", RootKey: func() ed25519.PublicKey { p, _ := testKey(t, 0xa1); return p }(), DeviceID: "dev-1", AuditURL: "file:///secret", Now: time.Unix(100, 0)})
+	if err == nil {
+		t.Fatal("expected malformed audit URL refusal")
 	}
 }

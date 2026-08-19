@@ -172,6 +172,11 @@ func (s *Server) Close() {
 		_ = s.otlp.close(ctx)
 		cancel()
 	}
+	if s.orgAudit != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = s.orgAudit.Close(ctx)
+		cancel()
+	}
 	if s.feed != nil {
 		s.feed.close()
 	}

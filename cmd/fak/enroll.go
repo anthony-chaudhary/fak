@@ -42,6 +42,7 @@ func runEnroll(stdout, stderr io.Writer, argv []string) int {
 	orgURL := fs.String("org", "", "org policy URL to enroll with")
 	rootKey := fs.String("root-key", "", "org root Ed25519 public key, base64 or a file holding it (required to enroll)")
 	issuer := fs.String("issuer", "", "pin the signing identity (default: the --org URL host)")
+	auditURL := fs.String("audit-url", "", "organization audit receipt endpoint (opt-in; absolute http/https)")
 	device := fs.String("device", "", "device identity to bind grants to (default: this host's name)")
 	user := fs.String("user", "", "user identity to bind grants to (default: $USER / $USERNAME)")
 	groups := fs.String("groups", "", "comma-separated group identities to bind grants to")
@@ -77,6 +78,7 @@ func runEnroll(stdout, stderr io.Writer, argv []string) int {
 		Issuer:   strings.TrimSpace(*issuer),
 		RootKey:  key,
 		DeviceID: strings.TrimSpace(*device),
+		AuditURL: strings.TrimSpace(*auditURL),
 		User:     strings.TrimSpace(*user),
 		Groups:   splitCSV(*groups),
 		Now:      time.Now(),
@@ -166,6 +168,9 @@ func runEnrollStatus(stdout, stderr io.Writer, asJSON bool, store string) int {
 func writeEnrollmentDetail(stdout io.Writer, store string, rec policy.OrgEnrollment) {
 	fmt.Fprintf(stdout, "  issuer:   %s\n", rec.Issuer)
 	fmt.Fprintf(stdout, "  device:   %s\n", rec.DeviceID)
+	if rec.AuditURL != "" {
+		fmt.Fprintf(stdout, "  audit:    %s\n", rec.AuditURL)
+	}
 	if rec.User != "" {
 		fmt.Fprintf(stdout, "  user:     %s\n", rec.User)
 	}
@@ -188,6 +193,7 @@ func enrollJSON(stdout, stderr io.Writer, store string, rec policy.OrgEnrollment
 		"org_url":          rec.OrgURL,
 		"issuer":           rec.Issuer,
 		"device_id":        rec.DeviceID,
+		"audit_url":        rec.AuditURL,
 		"user":             rec.User,
 		"groups":           append([]string{}, rec.Groups...),
 		"enrolled_at":      rec.EnrolledAt,

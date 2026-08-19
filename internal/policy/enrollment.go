@@ -61,6 +61,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -97,6 +98,7 @@ type OrgEnrollment struct {
 	Issuer     string   `json:"issuer"`
 	RootKeys   []string `json:"root_keys"` // base64 std-encoded Ed25519 PUBLIC keys
 	DeviceID   string   `json:"device_id"`
+	AuditURL   string   `json:"audit_url,omitempty"`
 	User       string   `json:"user,omitempty"`
 	Groups     []string `json:"groups,omitempty"`
 	EnrolledAt int64    `json:"enrolled_at"`
@@ -111,6 +113,7 @@ type OrgEnrollRequest struct {
 	Issuer   string
 	RootKey  ed25519.PublicKey
 	DeviceID string
+	AuditURL string
 	User     string
 	Groups   []string
 	Now      time.Time
@@ -132,6 +135,9 @@ func enrollmentIdentity(e OrgEnrollment) string {
 	write(e.OrgURL)
 	write(e.Issuer)
 	write(e.DeviceID)
+	if e.AuditURL != "" {
+		write(e.AuditURL)
+	}
 	write(e.User)
 	// Sorted copies: the pin is a SET of keys and a SET of groups, so re-running
 	// the same enroll with a differently-ordered slice is the same pin. Widening
@@ -168,6 +174,11 @@ func enrollmentSum(e OrgEnrollment) string {
 // when set, else a fak-owned file under the user config dir, else under the home
 // directory. The final fallback is relative so a box with neither still resolves
 // to something explicit rather than an empty path a caller might treat as "off".
+// OrgAuditBufferPath stores privacy-screened receipts beside the enrollment anchor.
+func OrgAuditBufferPath() string {
+	return orgStatePath("FAK_ORG_AUDIT_BUFFER_PATH", "org-audit-buffer.jsonl")
+}
+
 func OrgEnrollmentPath() string {
 	return orgStatePath(OrgEnrollmentPathEnv, "org-enrollment.json")
 }
@@ -372,6 +383,13 @@ func enrollmentFromRequest(req OrgEnrollRequest) (OrgEnrollment, error) {
 		return OrgEnrollment{}, fail(abi.ReasonMalformed, "enrollment_issuer",
 			errors.New("enrollment carries no issuer"))
 	}
+	auditURL := strings.TrimSpace(req.AuditURL)
+	if auditURL != "" {
+		u, err := url.Parse(auditURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return OrgEnrollment{}, fail(abi.ReasonMalformed, "audit_url", errors.New("audit URL must be absolute http/https"))
+		}
+	}
 	deviceID := strings.TrimSpace(req.DeviceID)
 	if deviceID == "" {
 		return OrgEnrollment{}, fail(abi.ReasonMalformed, "enrollment_device",
@@ -397,6 +415,7 @@ func enrollmentFromRequest(req OrgEnrollRequest) (OrgEnrollment, error) {
 		Issuer:     issuer,
 		RootKeys:   []string{base64.StdEncoding.EncodeToString(req.RootKey)},
 		DeviceID:   deviceID,
+		AuditURL:   auditURL,
 		User:       strings.TrimSpace(req.User),
 		Groups:     groups,
 		EnrolledAt: now.Unix(),

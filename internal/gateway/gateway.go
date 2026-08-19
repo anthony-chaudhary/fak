@@ -40,6 +40,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/auditreceipt"
 	"github.com/anthony-chaudhary/fak/internal/bgloop"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -277,6 +278,8 @@ type Config struct {
 	OTLPEndpoint      string
 	OTLPQueueCapacity int
 	OTLPTimeout       time.Duration
+	// OrgAudit enables enrolled, privacy-screened adjudication receipts. Zero disables it.
+	OrgAudit auditreceipt.Config
 	// EngineID selects the registered engine fak_syscall dispatches an ALLOWED
 	// call to (default "inkernel": the model fused into the kernel — a real
 	// in-kernel decode, synthetic checkpoint unless FAK_MODEL_DIR names an export).
@@ -1275,6 +1278,7 @@ type Server struct {
 	sessionFeed              *sessionFeed     // the drive-state revision feed (#630; host-pushed via PublishSessionRevision)
 	metrics                  *gatewayMetrics
 	otlp                     *otlpExporter
+	orgAudit                 *auditreceipt.Exporter
 	traceparentInvalid       uint64
 	// toolPages is the tool catalog's home (#2440): each advertised tool schema is a
 	// content-hashed read-only page owned by the ctxmmu, registered at the
@@ -2059,6 +2063,10 @@ func New(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	orgAudit, err := auditreceipt.New(cfg.OrgAudit)
+	if err != nil {
+		return nil, err
+	}
 
 	s := &Server{
 		k:                            k,
@@ -2128,6 +2136,7 @@ func New(cfg Config) (*Server, error) {
 		toolPages:                    ctxmmu.NewToolPageTable(nil), // nil ⇒ the process-global MMU pager (#2440)
 		metrics:                      newGatewayMetrics(time.Now()),
 		otlp:                         otlp,
+		orgAudit:                     orgAudit,
 		route:                        newRouteLive(cfg.RouteManifest),
 		roster:                       cfg.RouteAccounts,
 		native:                       cfg.Native,

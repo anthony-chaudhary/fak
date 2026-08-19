@@ -15,6 +15,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/auditreceipt"
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
@@ -27,6 +28,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
+	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/snapshot"
 )
@@ -515,6 +517,15 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 	// in resolveSessionPlane, and for the stronger reason: without a matched keyset the
 	// gateway attributes the turn from the caller-asserted X-Fak-Principal header, so a
 	// silently-forgotten binding does not just mislabel a tenant, it lets one assert another.
+	var orgAudit auditreceipt.Config
+	if enrollment, enrolled, loadErr := policy.LoadOrgEnrollment(""); loadErr != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: load organization enrollment: %v\n", loadErr)
+		os.Exit(2)
+	} else if enrolled && strings.TrimSpace(enrollment.AuditURL) != "" {
+		redact := adjudicator.Default.PolicySnapshot().RedactFields
+		orgAudit = auditreceipt.Config{Endpoint: enrollment.AuditURL, DeviceID: enrollment.DeviceID, BufferPath: policy.OrgAuditBufferPath(), RedactFields: redact}
+	}
+
 	keyPrincipals, keysetOK := serveKeyPrincipals(sf.keyPrincipal.Values(), os.Getenv, os.Stderr)
 	if !keysetOK {
 		os.Exit(2)
@@ -523,6 +534,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 	srv, err := gateway.New(gateway.Config{
 		EngineID:                     *sf.engineID,
 		OTLPEndpoint:                 *sf.otlpEndpoint,
+		OrgAudit:                     orgAudit,
 		Model:                        *sf.model,
 		BaseURL:                      *sf.baseURL,
 		ReplicaBaseURLs:              sf.replicaBaseURLs.Values(),

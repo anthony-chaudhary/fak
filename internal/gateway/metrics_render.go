@@ -302,6 +302,14 @@ func (s *Server) renderMetrics() string {
 	fmt.Fprintf(&b, "fak_otlp_spans_total{outcome=\"dropped\"} %d\n", otlp.Dropped)
 	fmt.Fprintf(&b, "fak_otlp_spans_total{outcome=\"failed\"} %d\n", otlp.Failed)
 	fmt.Fprintf(&b, "# HELP fak_otlp_queue_depth Current OTLP span queue depth.\n# TYPE fak_otlp_queue_depth gauge\nfak_otlp_queue_depth %d\n", otlp.QueueDepth)
+	audit := s.orgAudit.Stats()
+	fmt.Fprintf(&b, "# HELP fak_org_audit_receipts_total Organization audit receipts by outcome.\n# TYPE fak_org_audit_receipts_total counter\n")
+	fmt.Fprintf(&b, "fak_org_audit_receipts_total{outcome=\"accepted\"} %d\n", audit.Accepted)
+	fmt.Fprintf(&b, "fak_org_audit_receipts_total{outcome=\"exported\"} %d\n", audit.Exported)
+	fmt.Fprintf(&b, "fak_org_audit_receipts_total{outcome=\"buffered\"} %d\n", audit.Buffered)
+	fmt.Fprintf(&b, "fak_org_audit_receipts_total{outcome=\"dropped\"} %d\n", audit.Dropped)
+	fmt.Fprintf(&b, "fak_org_audit_receipts_total{outcome=\"failed\"} %d\n", audit.Failed)
+	fmt.Fprintf(&b, "# HELP fak_org_audit_queue_depth Current organization audit receipt queue depth.\n# TYPE fak_org_audit_queue_depth gauge\nfak_org_audit_queue_depth %d\n", audit.QueueDepth)
 	return b.String()
 }
 
