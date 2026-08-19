@@ -2281,3 +2281,17 @@ The Go constant naming the reason for refusing an FP4 document whose field tuple
 The wire value of the unsupported-combination refusal: the literal reason string emitted when an FP4 document's tuple contradicts the published definition of the format it names. Callers match on this code to distinguish a permanently invalid artifact from one this build merely cannot read yet.
 
 **Distinct from:** The emitted string rather than the Go constant FP4ReasonUnsupportedCombination, and distinct from the malformed code: malformed means the document contradicts ITSELF, while this means the document is coherent but describes a format combination that does not exist.
+
+
+### session intent
+
+A provider-neutral declaration of when a session may start, how much active or elapsed effort it should receive, what terminal evidence or limits stop it, and which bounded lifecycle reactions apply.
+
+**Distinct from:** Unlike SessionBudget, session intent includes activation, completion, recurrence, and lifecycle policy; unlike NativeScheduler, it grants no authority and performs no scheduling or work.
+
+
+### session stop decision
+
+A deterministic verdict over session intent and measured progress: continue, eligible, complete, timeout, failed, or cancelled, with a receipt-ready reason.
+
+**Distinct from:** Unlike a kernel authorization Decision, this evaluates lifecycle timing and completion only and grants no tool capability; unlike a scheduler Decision, it does not choose work placement.

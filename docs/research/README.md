@@ -15,6 +15,8 @@ description: "Index of fak research notes and captured stage witnesses, with the
 
 ## Active focus
 
+- [Structured session intent](structured-session-intent-2026-08-18.md) — own-prompt inventory plus recent scheduler/hook research, with a validated minimum/target/maximum, trigger, recurrence, and lifecycle-hook declaration spine.
+
 - [Micro-context fabrics for 100–10,000 parallel agents](micro-context-fabrics.md) — split one cached agent base into many bounded logical contexts; includes the runnable 10k synthetic spine and controlled-kernel/API-only research ladder.
 - [Micro-context operators for general large-input LLM work](micro-context-large-input-operators.md) — partition record/field/group inputs, adaptively select filters or tools, emit typed facts, fold with provenance, and stop only under an answer-safe contract.
 - [Micro-window routing across filters and tool calls](micro-context-filter-tool-routing.md) — typed value-of-information routing over deterministic filters, semantic windows, read tools, widen/stop/escalate, with kernel-owned authority and budgets (#6105/#6106).

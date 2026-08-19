@@ -645,6 +645,7 @@ var tier = map[string]int{
 	"wiplifecycle":          2, // lifecycle receipts depend on Git-backed WIP inventory collection (#7250).
 	"sessionrecovery":       2, // selects and witnesses bounded crash recovery without provider-private state (#8013).
 	"harnessinstructions":   2, // composes typed harness instructions onto the host-owned system-prompt base.
+	"sessionintent":         1, // stdlib-only session control declarations and deterministic stop evaluation (#7352).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

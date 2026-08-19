@@ -412,7 +412,8 @@
       "definition": "gateway.SessionBudget is the wire form of internal/session.Budget, carrying TurnsLeft, TokensLeft, and ContextTokensLeft for one session.",
       "distinction": "Not the internal session.Budget it mirrors: SessionBudget is the gateway DTO crossing the HTTP boundary, keeping the gateway session-internals-blind.",
       "distinct_from": [
-        "budget"
+        "budget",
+        "session-intent"
       ],
       "aliases": [],
       "grounding": "sessionbudget",
@@ -488,7 +489,8 @@
       "distinction": "Not the session.Scheduler (DRIVE-state slot picker): NativeScheduler is the decode-side engine loop that batches token generation, not the run-state admission scheduler.",
       "distinct_from": [
         "scheduler",
-        "BatchSession (batched decode)"
+        "BatchSession (batched decode)",
+        "session-intent"
       ],
       "aliases": [],
       "grounding": "nativescheduler",

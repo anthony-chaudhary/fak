@@ -1,0 +1,43 @@
+{
+  "rows": [
+    {
+      "id": "session-intent",
+      "canonical": "session intent",
+      "family": "session-runtime",
+      "kind": "artifact",
+      "definition": "A provider-neutral declaration of when a session may start, how much active or elapsed effort it should receive, what terminal evidence or limits stop it, and which bounded lifecycle reactions apply.",
+      "distinction": "Unlike SessionBudget, session intent includes activation, completion, recurrence, and lifecycle policy; unlike NativeScheduler, it grants no authority and performs no scheduling or work.",
+      "distinct_from": [
+        "x-session-runtime-sessionbudget",
+        "x-session-runtime-nativescheduler"
+      ],
+      "aliases": [],
+      "grounding": "sessionintent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "session-stop-decision",
+      "canonical": "session stop decision",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "A deterministic verdict over session intent and measured progress: continue, eligible, complete, timeout, failed, or cancelled, with a receipt-ready reason.",
+      "distinction": "Unlike a kernel authorization Decision, this evaluates lifecycle timing and completion only and grants no tool capability; unlike a scheduler Decision, it does not choose work placement.",
+      "distinct_from": [
+        "decision-kernel",
+        "decision-scheduler"
+      ],
+      "aliases": [],
+      "grounding": "StopDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
