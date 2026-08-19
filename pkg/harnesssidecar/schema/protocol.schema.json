@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "fak.harness-sidecar/v1",
+  "title": "fak harness sidecar frame",
+  "type": "object",
+  "required": [
+    "kind"
+  ],
+  "properties": {
+    "kind": {
+      "enum": [
+        "handshake",
+        "request",
+        "response",
+        "cancel"
+      ]
+    },
+    "handshake": {
+      "$ref": "#/$defs/handshake"
+    },
+    "request": {
+      "$ref": "#/$defs/request"
+    },
+    "response": {
+      "$ref": "#/$defs/response"
+    },
+    "cancel_id": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "identity": {
+      "type": "object",
+      "required": [
+        "name",
+        "version",
+        "digest"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "limits": {
+      "type": "object",
+      "required": [
+        "max_frame",
+        "max_inflight",
+        "cancel_grace"
+      ],
+      "properties": {
+        "max_frame": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_inflight": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cancel_grace": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "handshake": {
+      "type": "object",
+      "required": [
+        "protocol",
+        "identity",
+        "capabilities",
+        "limits"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "fak.harness-sidecar/v1"
+        },
+        "identity": {
+          "$ref": "#/$defs/identity"
+        },
+        "capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "limits": {
+          "$ref": "#/$defs/limits"
+        }
+      },
+      "additionalProperties": false
+    },
+    "request": {
+      "type": "object",
+      "required": [
+        "id",
+        "method"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "payload": {},
+        "deadline_unix_nano": {
+          "type": "integer"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "capability_token": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "required": [
+        "id",
+        "done"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "payload": {},
+        "error": {
+          "type": "string"
+        },
+        "done": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
