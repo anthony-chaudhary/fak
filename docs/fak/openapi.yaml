@@ -1400,6 +1400,74 @@ paths:
         '405':
           description: Wrong HTTP method (GET only).
 
+  /v1/fak/discovery/{session_id}:
+    get:
+      tags: [fak-native]
+      summary: Resolve a capability-scoped session relay descriptor
+      description: |
+        Returns the current relay descriptor for a published session. The caller
+        supplies the one-time publication token as an HTTP Bearer capability;
+        expired, revoked, unauthorized, and stale-execution descriptors fail
+        closed with typed errors.
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: Authorization
+          in: header
+          required: true
+          schema: { type: string }
+          description: "Bearer capability returned by the publish operation."
+      responses:
+        '200':
+          description: Current public relay descriptor for the session.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionDiscoveryRecord' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: No publication exists for the session.
+        '409':
+          description: The descriptor belongs to a stale execution epoch.
+    post:
+      tags: [fak-native]
+      summary: Publish or revoke a session relay descriptor
+      description: |
+        POST to `/v1/fak/discovery/{session_id}/publish` creates a bounded-lived
+        capability and descriptor. POST to
+        `/v1/fak/discovery/{session_id}/revoke` invalidates it. Both operations
+        require the gateway's session-client authorization.
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                relay_url: { type: string, format: uri }
+                ttl_seconds: { type: integer, format: int64, minimum: 1 }
+      responses:
+        '200':
+          description: Existing publication revoked.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '201':
+          description: Descriptor and bearer capability created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionDiscoveryPublication' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: No publication exists to revoke.
+
   /v1/fak/sharedtask/{task_id}:
     get:
       tags: [fak-native]
@@ -2573,7 +2641,27 @@ components:
         message: { type: string }
 
      # ----- Error envelope (OpenAI-style) -------------------------------------
-     ErrorResponse:
+     SessionDiscoveryRecord:
+      type: object
+      required: [schema, session_id, relay_url, execution_epoch, generation, expires_at]
+      properties:
+        schema: { type: string, enum: [fak.session-discovery.v1] }
+        session_id: { type: string }
+        relay_url: { type: string, format: uri }
+        execution_epoch: { type: integer, format: uint64 }
+        generation: { type: integer, format: uint64 }
+        expires_at: { type: string, format: date-time }
+
+    SessionDiscoveryPublication:
+      type: object
+      required: [record, capability_token]
+      properties:
+        record: { $ref: '#/components/schemas/SessionDiscoveryRecord' }
+        capability_token:
+          type: string
+          description: Bearer capability returned only at publication time.
+
+    ErrorResponse:
        type: object
        description: The OpenAI-style error envelope used by every route except `/mcp`.
        properties:

@@ -62,6 +62,7 @@ var specPathFor = map[string]string{
 	"/v1/fak/sharedtask/":           "/v1/fak/sharedtask/{task_id}",
 	"/v1/fak/agent/sessions":        "/v1/fak/agent/sessions",
 	"/v1/fak/account/rehome":        "/v1/fak/account/rehome",
+	"/v1/fak/discovery/":            "/v1/fak/discovery/{session_id}",
 	"/v1/models":                    "/v1/models",
 	// Multi-node dev-server read plane (#2297).
 	"/v1/leases": "/v1/leases",
