@@ -600,4 +600,7 @@ func TestPublicVocabularyExcludesBoundSentinels(t *testing.T) {
 	if _, ok := defaultTierStatus()[numCacheTiers]; ok {
 		t.Fatal("default status includes exclusive tier bound sentinel")
 	}
+	if numTierOutcomes.valid() {
+		t.Fatal("exclusive outcome bound sentinel is valid")
+	}
 }

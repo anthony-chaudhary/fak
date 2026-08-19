@@ -442,6 +442,7 @@ func (o *Observer) observeTierLocked(a TierAccess) {
 		o.tierRows[k] = row
 	}
 	row.requests = saturatingAddU64(row.requests, 1)
+	//enumlint:exempt numTierOutcomes is the exclusive bound sentinel rejected by TierAccess.valid.
 	switch a.Outcome {
 	case OutcomeHit:
 		row.hits = saturatingAddU64(row.hits, 1)
