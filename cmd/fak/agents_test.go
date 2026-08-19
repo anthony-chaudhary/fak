@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -172,6 +173,20 @@ func TestAgentsGroupedSevenDayLaneStateQuery(t *testing.T) {
 	if got.Rows[2].Lane != nil {
 		t.Fatalf("unknown lane not last/null: %+v", got.Rows)
 	}
+	flagResult := got
+	query := "SELECT lane, state, count(*) AS agents, max(elapsed_ms) AS max_elapsed_ms FROM agents WHERE started_at >= now()-interval '7 day' GROUP BY lane,state ORDER BY max_elapsed_ms DESC"
+	out.Reset()
+	errout.Reset()
+	if code := runAgents(&out, &errout, []string{"--journal", journal, "--query", query, "--json", "--now", "1787011200"}); code != 0 {
+		t.Fatalf("query code=%d stderr=%s", code, errout.String())
+	}
+	var queryResult agentquery.GroupResult
+	if err := json.Unmarshal(out.Bytes(), &queryResult); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(flagResult, queryResult) {
+		t.Fatalf("flag/query mismatch\nflag=%+v\nquery=%+v", flagResult, queryResult)
+	}
 	out.Reset()
 	errout.Reset()
 	args[7] = "false" // invalid positional-like count value must fail closed
@@ -187,5 +202,16 @@ func TestParseAgentHistoryWindowDays(t *testing.T) {
 	}
 	if _, err := parseAgentHistoryWindow("0d"); err == nil {
 		t.Fatal("expected invalid window")
+	}
+}
+
+func TestAgentsQueryTextFailsClosed(t *testing.T) {
+	cases := []string{"DELETE FROM agents", "SELECT * FROM agents", "SELECT lane,state,count(*) AS agents,max(cost) AS max_elapsed_ms FROM agents WHERE started_at >= now()-interval '7 day' GROUP BY lane,state ORDER BY max_elapsed_ms DESC"}
+	for _, q := range cases {
+		var out, errout bytes.Buffer
+		code := runAgents(&out, &errout, []string{"--query", q, "--json"})
+		if code != 2 || !strings.Contains(errout.String(), "query rejected") || out.Len() != 0 {
+			t.Errorf("q=%q code=%d stdout=%s stderr=%s", q, code, out.String(), errout.String())
+		}
 	}
 }

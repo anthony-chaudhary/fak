@@ -23,6 +23,7 @@ type GroupMetadata struct {
 	InputRows   int           `json:"input_rows"`
 	MatchedRows int           `json:"matched_rows"`
 	History     *SourceHealth `json:"history"`
+	Plan        QueryPlan     `json:"plan"`
 }
 
 type GroupResult struct {
@@ -33,6 +34,13 @@ type GroupResult struct {
 // GroupLaneState folds rows started within [since, observed] into deterministic lane/state groups.
 // Missing lane remains a typed null and sorts after named lanes.
 func GroupLaneState(rows []Row, since, observed time.Time, source string, health *SourceHealth) GroupResult {
+	plan, _ := GroupedPlan(observed.Sub(since))
+	return GroupLaneStatePlan(rows, plan, observed, source, health)
+}
+
+// GroupLaneStatePlan executes the validated closed plan used by both flags and query text.
+func GroupLaneStatePlan(rows []Row, plan QueryPlan, observed time.Time, source string, health *SourceHealth) GroupResult {
+	since := observed.Add(-plan.Window())
 	type key struct {
 		lane, state string
 		hasLane     bool
@@ -40,11 +48,15 @@ func GroupLaneState(rows []Row, since, observed time.Time, source string, health
 	groups := map[key]*GroupRow{}
 	matched := 0
 	for _, r := range rows {
-		if r.StartedAt == nil {
+		timeValue := r.StartedAt
+		if plan.TimeColumn == "observed_at" {
+			timeValue = &r.ObservedAt
+		}
+		if timeValue == nil {
 			continue
 		}
-		started, err := time.Parse(time.RFC3339, *r.StartedAt)
-		if err != nil || started.Before(since) || started.After(observed) {
+		rowTime, err := time.Parse(time.RFC3339, *timeValue)
+		if err != nil || rowTime.Before(since) || rowTime.After(observed) {
 			continue
 		}
 		k := key{state: r.State}
@@ -84,5 +96,5 @@ func GroupLaneState(rows []Row, since, observed time.Time, source string, health
 		}
 		return out[i].State < out[j].State
 	})
-	return GroupResult{Metadata: GroupMetadata{Schema: GroupSchema, GroupBy: []string{"lane", "state"}, Source: source, Since: since.UTC().Format(time.RFC3339), ObservedAt: observed.UTC().Format(time.RFC3339), InputRows: len(rows), MatchedRows: matched, History: health}, Rows: out}
+	return GroupResult{Metadata: GroupMetadata{Schema: GroupSchema, GroupBy: plan.GroupBy, Source: source, Since: since.UTC().Format(time.RFC3339), ObservedAt: observed.UTC().Format(time.RFC3339), InputRows: len(rows), MatchedRows: matched, History: health, Plan: plan}, Rows: out}
 }

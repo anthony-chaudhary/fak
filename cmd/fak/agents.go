@@ -32,10 +32,13 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 	historyWindowText := fs.String("history", "", "historical lookback window (for example 7d)")
 	groupBy := fs.String("group-by", "", "aggregate grouping (currently lane,state)")
 	count := fs.Bool("count", false, "include group row counts")
+	queryText := fs.String("query", "", "constrained read-only grouped query text")
 	nowUnix := fs.Int64("now", 0, "observation Unix timestamp (tests/replay)")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: fak agents [--source live|history|union] [--journal FILE] [--all] [--json]")
 		fmt.Fprintln(stderr, "       fak agents --history 168h --group-by lane,state --count [--json]")
+		fmt.Fprintln(stderr, "       fak agents --query \"SELECT lane,state,count(*) AS agents,max(elapsed_ms) AS max_elapsed_ms FROM agents WHERE started_at >= now()-interval '7 day' GROUP BY lane,state ORDER BY max_elapsed_ms DESC\"")
+		fmt.Fprintln(stderr, "--query is a constrained read-only grammar, not arbitrary SQL")
 	}
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
@@ -53,13 +56,34 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	historyWindow, historyErr := parseAgentHistoryWindow(*historyWindowText)
-	grouped := *groupBy != "" || *historyWindowText != "" || *count
-	if grouped && (historyErr != nil || *groupBy != "lane,state" || !*count || historyWindow <= 0) {
-		fmt.Fprintln(stderr, "fak agents: grouped query requires --history DURATION --group-by lane,state --count")
+	groupedFlags := *groupBy != "" || *historyWindowText != "" || *count
+	if groupedFlags && *queryText != "" {
+		fmt.Fprintln(stderr, "fak agents: --query cannot be combined with grouped flags")
 		return 2
 	}
+	var queryPlan agentquery.QueryPlan
+	grouped := groupedFlags || *queryText != ""
+	if *queryText != "" {
+		var err error
+		queryPlan, err = agentquery.ParseQuery(*queryText)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak agents: query rejected: %v\n", err)
+			return 2
+		}
+	} else if groupedFlags {
+		if historyErr != nil || *groupBy != "lane,state" || !*count || historyWindow <= 0 {
+			fmt.Fprintln(stderr, "fak agents: grouped query requires --history DURATION --group-by lane,state --count")
+			return 2
+		}
+		var err error
+		queryPlan, err = agentquery.GroupedPlan(historyWindow)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak agents: grouped query rejected: %v\n", err)
+			return 2
+		}
+	}
 	if grouped {
-		*source = "history"
+		*source = queryPlan.Source
 		*all = true
 	}
 	now := time.Now().UTC()
@@ -94,7 +118,7 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 	result := agentquery.Union(live, history, *source, !*all, queryLimit, now)
 	result.Metadata.History = historyHealth
 	if grouped {
-		groups := agentquery.GroupLaneState(result.Rows, now.Add(-historyWindow), now, *source, historyHealth)
+		groups := agentquery.GroupLaneStatePlan(result.Rows, queryPlan, now, *source, historyHealth)
 		if *asJSON {
 			enc := json.NewEncoder(stdout)
 			enc.SetIndent("", "  ")
