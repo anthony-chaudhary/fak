@@ -1,0 +1,9 @@
+=== ndjson ===
+{"schema":"fak-runtime-event-wire/1","event":{"schema":"fak-runtime-event/1","event_id":"event-1","session_id":"session-1","turn_id":"turn-1","trace_id":"trace-1","sequence":1,"timestamp":"2026-08-19T12:00:00Z","kind":"tool_proposed","source":{"component":"loop","instance":"one","runtime":"fak"},"payload":{"call_id":"call-1","tool":"lookup"}},"admission":{"screened":true,"taint":"tainted","screen":"ctxmmu/1"}}
+=== sse ===
+id: event-1
+event: tool_proposed
+data: {"schema":"fak-runtime-event-wire/1","event":{"schema":"fak-runtime-event/1","event_id":"event-1","session_id":"session-1","turn_id":"turn-1","trace_id":"trace-1","sequence":1,"timestamp":"2026-08-19T12:00:00Z","kind":"tool_proposed","source":{"component":"loop","instance":"one","runtime":"fak"},"payload":{"call_id":"call-1","tool":"lookup"}},"admission":{"screened":true,"taint":"tainted","screen":"ctxmmu/1"}}
+
+=== rejected ===
+error=runtime event rejected by ctxmmu: 5 bytes=0
