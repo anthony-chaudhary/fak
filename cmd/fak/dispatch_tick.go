@@ -909,6 +909,9 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	// re-deriving a present-tense answer about a finished slot. No-op when either could not
 	// be named, and when the seam is off nothing was resolved and nothing is written.
 	writeDispatchPlacementSidecars(spawned.Log, payload)
+	if path := writeDispatchWorktypeSidecar(spawned.Log, prompt); path != "" {
+		payload["worktype_sidecar"] = path
+	}
 	if reason, failed := dispatchEarlyExitFailureReason(opts.Backend, spawned.PID, target, spawned.EarlyExit); failed {
 		payload["ok"] = false
 		payload["action"] = "spawn_failed"

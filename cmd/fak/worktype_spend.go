@@ -11,6 +11,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/worktype"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -100,6 +101,23 @@ func joinWorktypeSpend(usage, classes, outcomes string) ([]worktype.SpendRow, er
 }
 func scanSpendJSONL(path string, fn func([]byte) error) error {
 	if path == "" {
+		return nil
+	}
+	info, e := os.Stat(path)
+	if e != nil {
+		return e
+	}
+	if info.IsDir() {
+		matches, e := filepath.Glob(filepath.Join(path, "*.worktype.json"))
+		if e != nil {
+			return e
+		}
+		sort.Strings(matches)
+		for _, match := range matches {
+			if e := scanSpendJSONL(match, fn); e != nil {
+				return e
+			}
+		}
 		return nil
 	}
 	f, e := os.Open(path)

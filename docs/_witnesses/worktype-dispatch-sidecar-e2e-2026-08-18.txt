@@ -1,0 +1,3 @@
+worktype attribution — covered 1/1 sessions, 120/120 tokens (no extrapolation)
+highest spend: wp.spec-to-feature cost=120.00 input_token_equivalent accepted-witness=0.0%
+source: deterministic fak-worktype/1 dispatch sidecar trace-feature.worktype.json
