@@ -18,6 +18,7 @@ import (
 func reservedRosterFixture() Roster {
 	return Roster{
 		Version: RosterVersion,
+		//enumlint:exempt This reservation fixture needs one pooled OpenAI and one manual Anthropic account; other provider kinds are irrelevant.
 		Accounts: []Account{
 			{ID: "oa-personal", Kind: KindOpenAI, CredEnv: "OPENAI_API_KEY"},
 			{
