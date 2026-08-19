@@ -605,6 +605,52 @@ func TestFleetMetricsConsumesInProcessMicroagentRegistrations(t *testing.T) {
 	}
 }
 
+func TestFleetMetricsAggregatesExplicitCanonicalGoalAcrossRoots(t *testing.T) {
+	dir := t.TempDir()
+	regPath, usagePath := filepath.Join(dir, "registrations.jsonl"), filepath.Join(dir, "usage.jsonl")
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	regs := []sessionregistry.Record{
+		{Schema: sessionregistry.Schema, RegistrationID: "root-claude", RootRegistrationID: "root-claude", GoalID: "goal-observe", TaskID: "same-title", AttemptID: "attempt-1", LaunchKind: "guarded_tui", Identity: sessionregistry.Identity{Runtime: "claude", SessionID: "session-claude"}, State: sessionregistry.StateCompleted, WitnessRef: "commit:a", CreatedAt: now.Add(-10 * time.Second), StartedAt: now.Add(-8 * time.Second), TerminalAt: now},
+		{Schema: sessionregistry.Schema, RegistrationID: "root-codex", RootRegistrationID: "root-codex", GoalID: "goal-observe", TaskID: "same-title", AttemptID: "attempt-1", ResumeOfAttemptID: "prior", LaunchKind: "guarded_tui", Identity: sessionregistry.Identity{Runtime: "codex", SessionID: "session-codex"}, State: sessionregistry.StateFailed, CreatedAt: now.Add(-20 * time.Second), StartedAt: now.Add(-15 * time.Second), TerminalAt: now},
+		{Schema: sessionregistry.Schema, RegistrationID: "root-unbound", RootRegistrationID: "root-unbound", TaskID: "same-title", AttemptID: "attempt-1", LaunchKind: "guarded_tui", Identity: sessionregistry.Identity{Runtime: "codex", SessionID: "session-unbound"}, State: sessionregistry.StateCompleted, CreatedAt: now.Add(-5 * time.Second), TerminalAt: now},
+	}
+	store := sessionregistry.Store{Path: regPath}
+	for _, rec := range regs {
+		if err := store.Register(rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	usage := []gatewayusageledger.Row{
+		{Schema: gatewayusageledger.Schema, SessionID: "session-claude", UnixMillis: now.UnixMilli(), Counters: gatewayusageledger.Counters{InputTokens: 100, OutputTokens: 10, CachedPromptTokens: 40, CacheCreationTokens: 5, Submits: 2}},
+		{Schema: gatewayusageledger.Schema, SessionID: "session-codex", UnixMillis: now.UnixMilli(), Counters: gatewayusageledger.Counters{InputTokens: 200, OutputTokens: 20, CachedPromptTokens: 80, CacheCreationTokens: 10, Submits: 3}},
+		{Schema: gatewayusageledger.Schema, SessionID: "session-unbound", UnixMillis: now.UnixMilli(), Counters: gatewayusageledger.Counters{InputTokens: 999, OutputTokens: 99, Submits: 9}},
+	}
+	writeFleetJSONL(t, usagePath, usage)
+	got := (fleetMetricsSources{registrationLedger: regPath, usageLedger: usagePath, goalCoverageThreshold: 0.8, stderr: io.Discard}).render(now)
+	for _, want := range []string{
+		`fak_fleet_canonical_goal_info{goal_id="goal-observe"} 1`,
+		`fak_fleet_canonical_goal_execution_roots{goal_id="goal-observe"} 2`,
+		`fak_fleet_canonical_goal_attempts_total{goal_id="goal-observe"} 2`,
+		`fak_fleet_canonical_goal_resumes_total{goal_id="goal-observe"} 1`,
+		`fak_fleet_canonical_goal_sessions{goal_id="goal-observe"} 2`,
+		`fak_fleet_canonical_goal_prompt_tokens_total{goal_id="goal-observe"} 300`,
+		`fak_fleet_canonical_goal_output_tokens_total{goal_id="goal-observe"} 30`,
+		`fak_fleet_canonical_goal_cache_read_tokens_total{goal_id="goal-observe"} 120`,
+		`fak_fleet_canonical_goal_tool_boundary_calls_total{goal_id="goal-observe"} 5`,
+		`fak_fleet_canonical_goal_execution_roots_total{attribution="bound"} 2`,
+		`fak_fleet_canonical_goal_execution_roots_total{attribution="execution_root_only"} 1`,
+		`fak_fleet_canonical_goal_binding_ratio 0.6666666666666666`,
+		`fak_fleet_canonical_goal_efficiency_ready 0`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, `goal_id="root-unbound"`) || strings.Contains(got, `goal_id="same-title"`) {
+		t.Fatalf("inferred canonical identity from root/task:\n%s", got)
+	}
+}
+
 func TestFleetMetricsJoinsAuthoritativeProviderCostAndGatesCoverage(t *testing.T) {
 	base := time.Date(2026, 8, 19, 1, 0, 0, 0, time.UTC)
 	regPath := filepath.Join(t.TempDir(), "registrations.jsonl")
@@ -663,5 +709,21 @@ func TestFleetMetricsJoinsCacheValueWithCoverage(t *testing.T) {
 		if !strings.Contains(raw, want) {
 			t.Fatalf("missing %q\n%s", want, raw)
 		}
+	}
+}
+
+func writeFleetJSONL[T any](t *testing.T, path string, rows []T) {
+	t.Helper()
+	var out strings.Builder
+	for _, row := range rows {
+		b, err := json.Marshal(row)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out.Write(b)
+		out.WriteByte('\n')
+	}
+	if err := os.WriteFile(path, []byte(out.String()), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -917,6 +917,16 @@
           "category": "incidental",
           "reason": "Root-goal cache-value metrics adapter symbol; not a distinct cache mechanism or cache hierarchy concept",
           "token": "fak_fleet_goal_cache_value_reuse_ratio"
+        },
+        {
+          "category": "incidental",
+          "reason": "Canonical-goal fleet metrics adapter symbol; not a distinct mechanism in this concept family",
+          "token": "fak_fleet_canonical_goal_cache_read_tokens_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "Canonical-goal fleet metrics adapter symbol; not a distinct mechanism in this concept family",
+          "token": "fak_fleet_canonical_goal_cache_write_tokens_total"
         }
       ],
       "id": "cache",
@@ -1071,6 +1081,8 @@
         "dogfoodCacheLedgerRow",
         "dogfoodCacheWitnessMaxAge",
         "droppedcachedtokens",
+        "fak_fleet_canonical_goal_cache_read_tokens_total",
+        "fak_fleet_canonical_goal_cache_write_tokens_total",
         "fak_fleet_goal_cache_read_tokens_total",
         "fak_fleet_goal_cache_value_attribution_ratio",
         "fak_fleet_goal_cache_value_efficiency_ready",
@@ -4731,6 +4743,11 @@
           "category": "incidental",
           "reason": "Cache-value ledger compatibility helper carrying an opaque session join key; not a distinct session runtime concept",
           "token": "AppendSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Canonical-goal fleet metrics adapter symbol; not a distinct mechanism in this concept family",
+          "token": "fak_fleet_canonical_goal_sessions"
         }
       ],
       "id": "session-runtime",
@@ -4879,6 +4896,7 @@
         "epFollowerSessionFactory",
         "episodes",
         "exact-filter",
+        "fak_fleet_canonical_goal_sessions",
         "fak_fleet_goal_sessions",
         "fak_gateway_compaction_thrash_sessions_total",
         "filterToolSchedulerFold",
@@ -5885,6 +5903,11 @@
           "category": "incidental",
           "reason": "Runtime event wire kind; not proof machinery.",
           "token": "terminal_witness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Canonical-goal fleet metrics adapter symbol; not a distinct mechanism in this concept family",
+          "token": "fak_fleet_canonical_goal_witnessed_registrations"
         }
       ],
       "id": "witness-proof",
@@ -5980,6 +6003,7 @@
         "dogfoodWitnessOutcome",
         "done_not_witnessed",
         "durableWitnessRecords",
+        "fak_fleet_canonical_goal_witnessed_registrations",
         "fak_fleet_goal_witnessed_registrations",
         "formatGuardCompactionWitness",
         "freshWitnessRecords",
@@ -10177,6 +10201,11 @@
           "category": "incidental",
           "reason": "Private markdown helper for the trajectory panel, not a new rendering architecture concept",
           "token": "renderTrajectory"
+        },
+        {
+          "category": "incidental",
+          "reason": "Canonical-goal fleet metrics adapter symbol; not a distinct mechanism in this concept family",
+          "token": "renderFleetCanonicalGoalExposition"
         }
       ],
       "id": "render-materialize",
@@ -10229,6 +10258,7 @@
         "renderContrastIndex",
         "renderConversion",
         "renderDefaultsSelfcheck",
+        "renderFleetCanonicalGoalExposition",
         "renderFleetControl",
         "renderFleetGoalExposition",
         "renderFromGitTree",

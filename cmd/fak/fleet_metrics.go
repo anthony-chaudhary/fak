@@ -400,7 +400,103 @@ func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usa
 	w.gauge("fak_fleet_goal_input_tokens_by_attribution_total", "Gateway input tokens by root-goal attribution.", float64(attributed.InputTokens), "attribution", "attributed")
 	w.gauge("fak_fleet_goal_input_tokens_by_attribution_total", "Gateway input tokens by root-goal attribution.", float64(unattributed.InputTokens), "attribution", "unattributed")
 	w.gauge("fak_fleet_goal_output_tokens_by_attribution_total", "Gateway output tokens by root-goal attribution.", float64(attributed.OutputTokens), "attribution", "attributed")
+
 	w.gauge("fak_fleet_goal_output_tokens_by_attribution_total", "Gateway output tokens by root-goal attribution.", float64(unattributed.OutputTokens), "attribution", "unattributed")
+	renderFleetCanonicalGoalExposition(w, rows, goals, coverageThreshold)
+}
+
+func renderFleetCanonicalGoalExposition(w *promWriter, rows []sessionregistry.Record, roots map[string]*fleetGoalAgg, coverageThreshold float64) {
+	type canonicalAgg struct {
+		rootIDs                    map[string]struct{}
+		attempts                   map[string]struct{}
+		sessions                   map[string]struct{}
+		resumes, witnessed         int
+		wallSeconds, activeSeconds float64
+		usage                      fleetUsageAgg
+		completed, failed, other   int
+	}
+	rootGoals := map[string]string{}
+	rootConflict := map[string]bool{}
+	for _, r := range rows {
+		root, goalID := strings.TrimSpace(r.RootRegistrationID), strings.TrimSpace(r.GoalID)
+		if root == "" || goalID == "" {
+			continue
+		}
+		if prior := rootGoals[root]; prior != "" && prior != goalID {
+			rootConflict[root] = true
+		} else {
+			rootGoals[root] = goalID
+		}
+	}
+	canonical := map[string]*canonicalAgg{}
+	boundRoots, conflictingRoots := 0, 0
+	for root, g := range roots {
+		if rootConflict[root] {
+			conflictingRoots++
+			continue
+		}
+		goalID := rootGoals[root]
+		if goalID == "" {
+			continue
+		}
+		boundRoots++
+		c := canonical[goalID]
+		if c == nil {
+			c = &canonicalAgg{rootIDs: map[string]struct{}{}, attempts: map[string]struct{}{}, sessions: map[string]struct{}{}}
+			canonical[goalID] = c
+		}
+		c.rootIDs[root] = struct{}{}
+		for attempt := range g.attempts {
+			c.attempts[root+"\x00"+attempt] = struct{}{}
+		}
+		for session := range g.sessions {
+			c.sessions[session] = struct{}{}
+		}
+		c.resumes += g.resumes
+		c.witnessed += g.witnessed
+		c.wallSeconds += g.wallSeconds
+		c.activeSeconds += g.activeSeconds
+		c.usage.merge(g.usage)
+		switch g.rootState {
+		case sessionregistry.StateCompleted:
+			c.completed++
+		case sessionregistry.StateFailed, sessionregistry.StateCancelled, sessionregistry.StateLost, sessionregistry.StateReaped:
+			c.failed++
+		default:
+			c.other++
+		}
+	}
+	ids := make([]string, 0, len(canonical))
+	for id := range canonical {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		c, labels := canonical[id], []string{"goal_id", id}
+		w.gauge("fak_fleet_canonical_goal_info", "Canonical goal with at least one explicitly bound execution root.", 1, labels...)
+		w.gauge("fak_fleet_canonical_goal_execution_roots", "Execution roots explicitly bound to this canonical goal.", float64(len(c.rootIDs)), labels...)
+		w.gauge("fak_fleet_canonical_goal_attempts_total", "Distinct root-qualified attempts across bound execution roots.", float64(len(c.attempts)), labels...)
+		w.gauge("fak_fleet_canonical_goal_resumes_total", "Resume registrations across bound execution roots.", float64(c.resumes), labels...)
+		w.gauge("fak_fleet_canonical_goal_sessions", "Distinct sessions across bound execution roots.", float64(len(c.sessions)), labels...)
+		w.gauge("fak_fleet_canonical_goal_witnessed_registrations", "Witnessed registrations across bound execution roots.", float64(c.witnessed), labels...)
+		w.gauge("fak_fleet_canonical_goal_wall_seconds", "Summed registration wall seconds across bound execution roots.", c.wallSeconds, labels...)
+		w.gauge("fak_fleet_canonical_goal_active_seconds", "Summed registration active seconds across bound execution roots.", c.activeSeconds, labels...)
+		w.gauge("fak_fleet_canonical_goal_prompt_tokens_total", "Prompt tokens from sessions attributed to bound execution roots.", float64(c.usage.InputTokens), labels...)
+		w.gauge("fak_fleet_canonical_goal_output_tokens_total", "Output tokens from sessions attributed to bound execution roots.", float64(c.usage.OutputTokens), labels...)
+		w.gauge("fak_fleet_canonical_goal_cache_read_tokens_total", "Cache-read tokens from sessions attributed to bound execution roots.", float64(c.usage.CachedPromptTokens), labels...)
+		w.gauge("fak_fleet_canonical_goal_cache_write_tokens_total", "Cache-write tokens from sessions attributed to bound execution roots.", float64(c.usage.CacheCreationTokens), labels...)
+		w.gauge("fak_fleet_canonical_goal_tool_boundary_calls_total", "Tool-boundary calls from sessions attributed to bound execution roots.", float64(c.usage.Submits), labels...)
+		w.gauge("fak_fleet_canonical_goal_execution_roots_by_outcome", "Execution roots by terminal outcome class.", float64(c.completed), append(labels, "outcome", "completed")...)
+		w.gauge("fak_fleet_canonical_goal_execution_roots_by_outcome", "Execution roots by terminal outcome class.", float64(c.failed), append(labels, "outcome", "failed")...)
+		w.gauge("fak_fleet_canonical_goal_execution_roots_by_outcome", "Execution roots by terminal outcome class.", float64(c.other), append(labels, "outcome", "nonterminal_or_unknown")...)
+	}
+	totalRoots, unboundRoots := len(roots), len(roots)-boundRoots-conflictingRoots
+	w.gauge("fak_fleet_canonical_goal_execution_roots_total", "Execution roots by explicit canonical-goal binding outcome.", float64(boundRoots), "attribution", "bound")
+	w.gauge("fak_fleet_canonical_goal_execution_roots_total", "Execution roots by explicit canonical-goal binding outcome.", float64(unboundRoots), "attribution", "execution_root_only")
+	w.gauge("fak_fleet_canonical_goal_execution_roots_total", "Execution roots by explicit canonical-goal binding outcome.", float64(conflictingRoots), "attribution", "conflicting")
+	ratio := coverageRatio(boundRoots, totalRoots)
+	w.gauge("fak_fleet_canonical_goal_binding_ratio", "Fraction of execution roots carrying one explicit canonical goal identity.", ratio)
+	w.gauge("fak_fleet_canonical_goal_efficiency_ready", "1 only when execution roots exist and explicit canonical-goal binding meets the configured threshold.", boolGauge(totalRoots > 0 && ratio >= coverageThreshold))
 }
 func sumGoalStates(m map[sessionregistry.State]int) int {
 	n := 0
