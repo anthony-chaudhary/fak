@@ -241,7 +241,7 @@ class WavePlanAdmissionTest(unittest.TestCase):
         self.assertEqual(plan["shortfall"], 4)        # was: 0
         self.assertEqual(plan["reasons"], {LA.REASON_RATE: 4})
         self.assertIsNotNone(plan["retry_after"])     # an honest "come back at"
-        self.assertEqual([l["verdict"] for l in plan["lanes"]], [LA.VERDICT_DEFER] * 4)
+        self.assertEqual([lane["verdict"] for lane in plan["lanes"]], [LA.VERDICT_DEFER] * 4)
 
     def test_global_cap_mismatch_is_also_planned(self):
         # The second reported report: fresh accounts, but the FLEET is at its cap.
@@ -261,7 +261,7 @@ class WavePlanAdmissionTest(unittest.TestCase):
                              max_per_account=3, window_min=5, global_cap=50)
         self.assertEqual(plan["granted"], 3)          # exactly the ceiling
         self.assertEqual(plan["shortfall"], 2)
-        self.assertEqual([l["verdict"] for l in plan["lanes"]],
+        self.assertEqual([lane["verdict"] for lane in plan["lanes"]],
                          [LA.VERDICT_ADMIT] * 3 + [LA.VERDICT_DEFER] * 2)
 
     def test_clear_fleet_still_plans_the_full_grant(self):

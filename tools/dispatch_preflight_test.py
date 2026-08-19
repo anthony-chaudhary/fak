@@ -970,7 +970,7 @@ class WorkerCountTest(unittest.TestCase):
         self.assertEqual(p["verdict"], mod.REFUSE_NO_SEAT)
 
     def test_fak_command_prefers_installed_binary_over_repo_artifact(self) -> None:
-        mod = load_module()
+        mod = load()
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             (root / ("fak.exe" if os.name == "nt" else "fak")).write_text(
@@ -983,7 +983,7 @@ class WorkerCountTest(unittest.TestCase):
                 self.assertEqual(mod._fak_command(root), [str(installed)])
 
     def test_fak_command_explicit_override_still_wins(self) -> None:
-        mod = load_module()
+        mod = load()
         with mock.patch.dict(mod.os.environ, {"FAK_BIN": "C:/pinned/fak.exe"}, clear=False):
             self.assertEqual(mod._fak_command(ROOT), ["C:/pinned/fak.exe"])
 

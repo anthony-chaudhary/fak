@@ -923,7 +923,8 @@ def aggregate(sessions):
         b = s.get("behavior") or {}
         h = s.get("hooks") or {}
         hook_outcomes.update(h.get("outcomes") or {})
-        for event, values in (h.get("durations_ms") or {}).items(): hook_durations[event].extend(values)
+        for event, values in (h.get("durations_ms") or {}).items():
+            hook_durations[event].extend(values)
         for failure in h.get("failures") or []:
             key = (failure.get("event", "unknown"), failure.get("outcome", "unknown"), failure.get("signature", ""))
             hook_failures[key] += failure.get("count", 0)
@@ -1502,7 +1503,8 @@ def _dos_hook_lens(agg):
         outcomes = ", ".join(f"{k}={v:,}" for k, v in row.get("outcomes", {}).items())
         exits = ", ".join(f"{k}={v:,}" for k, v in row.get("exits", {}).items())
         dur = row.get("duration_ms") or {}
-        ms = lambda value: "—" if value is None else f"{value:,.1f} ms"
+        def ms(value):
+            return "—" if value is None else f"{value:,.1f} ms"
         L.append(f"| {verb} | {row.get('count', 0):,} | {outcomes} | {exits} | "
                  f"{ms(dur.get('p90'))} | {ms(dur.get('p99'))} | {ms(dur.get('max'))} | "
                  f"{dur.get('over_100ms', 0)} | {dur.get('over_500ms', 0)} | "
@@ -1636,7 +1638,8 @@ def _hook_stream_lens(stream):
         outcomes = collections.Counter(row["outcome"] for row in rows)
         exits = collections.Counter(str(row["exit_code"]) for row in rows)
         durations = [row["duration_ms"] for row in rows if row.get("duration_ms") is not None]
-        fmt = lambda value: "—" if value is None else f"{value:,.1f} ms"
+        def fmt(value):
+            return "—" if value is None else f"{value:,.1f} ms"
         L.append(f"| {event} | {len(rows):,} | "
                  f"{', '.join(f'{k}={v}' for k, v in outcomes.items())} | "
                  f"{', '.join(f'{k}={v}' for k, v in exits.items())} | "
@@ -1654,13 +1657,15 @@ def _hook_lens(agg):
     hooks = agg.get("hooks") or {}
     events = hooks.get("events") or {}
     L = ["## Hook execution lens — outcomes and latency\n"]
-    if not events: return L + ["- No transcript-native hook outcome attachments were observed.\n"]
+    if not events:
+        return L + ["- No transcript-native hook outcome attachments were observed.\n"]
     L += ["| Event | Records | Success | Context | Non-blocking error | Cancelled | p90 | Max |",
           "|---|---:|---:|---:|---:|---:|---:|"]
     for event, row in sorted(events.items()):
         outcomes = row.get("outcomes") or {}
         dur = row.get("duration_ms") or {}
-        ms = lambda v: "—" if v is None else f"{v:,} ms"
+        def ms(value):
+            return "—" if value is None else f"{value:,} ms"
         L.append(f"| {event} | {row.get('total', 0):,} | {outcomes.get('success', 0):,} | {outcomes.get('additional_context', 0):,} | {outcomes.get('non_blocking_error', 0):,} | {outcomes.get('cancelled', 0):,} | {ms(dur.get('p90'))} | {ms(dur.get('max'))} |")
     L += ["", f"- **Hook failures/cancellations:** {hooks.get('failure_total', 0):,}"]
     if hooks.get("failures"):
