@@ -1,0 +1,84 @@
+{
+  "schema": "fak.modelaccept.report/2",
+  "corpus": {
+    "id": "qwen38-hardware-acceptance-2026-08-19",
+    "tasks": [
+      {
+        "id": "text",
+        "tier": 0,
+        "repetitions": 1,
+        "expected": "Q38"
+      },
+      {
+        "id": "json",
+        "tier": 0,
+        "repetitions": 1,
+        "expected": "JSON_OK"
+      },
+      {
+        "id": "tool",
+        "tier": 0,
+        "repetitions": 1,
+        "tool_required": true,
+        "min_tool_calls": 1,
+        "expected": "TOOL_OK"
+      }
+    ],
+    "declared_at": "2026-08-19T07:29:18Z",
+    "thresholds": {
+      "min_success_rate": 1,
+      "max_provider_error_rate": 0,
+      "max_invalid_tool_rate": 0,
+      "max_p95_latency_ms": 5000,
+      "max_average_input_tokens": 1000,
+      "max_average_cost_usd": 0.001
+    }
+  },
+  "models": [
+    {
+      "model": "qwen38:27b-fp8",
+      "family": "qwen38",
+      "requested_tier": 0,
+      "generation": "3.8",
+      "lifecycle": "latest"
+    }
+  ],
+  "runs": [
+    {
+      "model": "qwen38:27b-fp8",
+      "task": "text",
+      "repetition": 1,
+      "actual_model": "qwen38:27b-fp8",
+      "result": "Q38",
+      "latency_ms": 476,
+      "input_tokens": 71,
+      "cost_usd": 0,
+      "observed_at": "2026-08-19T07:29:18Z"
+    },
+    {
+      "model": "qwen38:27b-fp8",
+      "task": "json",
+      "repetition": 1,
+      "actual_model": "qwen38:27b-fp8",
+      "result": "JSON_OK",
+      "latency_ms": 1723,
+      "input_tokens": 71,
+      "cost_usd": 0,
+      "observed_at": "2026-08-19T07:29:18Z"
+    },
+    {
+      "model": "qwen38:27b-fp8",
+      "task": "tool",
+      "repetition": 1,
+      "actual_model": "qwen38:27b-fp8",
+      "result": "TOOL_OK",
+      "latency_ms": 1467,
+      "input_tokens": 343,
+      "cost_usd": 0,
+      "tool_valid": true,
+      "tool_calls": 1,
+      "tool_turns": 1,
+      "observed_at": "2026-08-19T07:29:18Z"
+    }
+  ]
+}
