@@ -36,37 +36,35 @@ go test ./internal/skillfootprint   # the enforcing test; -v logs the same figur
 ## Baseline (measured)
 
 ```
-skill footprint [interactive]: 59 skill(s); resident floor = 47821 bytes (~11955 tokens);
-  description floor = 47821 B; name-only floor = 797 B; at-rest card floor = 14449 bytes
-  at-rest intent slice (#5560): 10759 B (~2689 tokens) across 59 skill(s)
+skill footprint [interactive]: 64 skill(s); resident floor = 48109 bytes (~12027 tokens);
+  description floor = 48109 B; name-only floor = 866 B; at-rest card floor = 15426 bytes
+  at-rest intent slice (#5560): 11439 B (~2860 tokens) across 64 skill(s)
 ```
 
 Heaviest resident descriptions — the trim targets:
 
 | rank | bytes | skill |
 |-----:|------:|-------|
-| 1 | 1877 | study-repo |
+| 1 | 1629 | scout-loop |
 | 2 | 1599 | resume-watchdog-audit |
-| 3 | 1471 | scout-loop |
-| 4 | 1359 | super-loop |
-| 5 | 1332 | field-borrow |
-| 6 | 1270 | trajectory-control |
-| 7 | 1231 | disambiguation-score |
-| 8 | 1223 | stability-score |
+| 3 | 1270 | trajectory-control |
+| 4 | 1231 | disambiguation-score |
+| 5 | 1223 | stability-score |
+| 6 | 1220 | industry-score |
+| 7 | 1190 | milestone-score |
+| 8 | 1183 | operator-heaviness-score |
 
-The full 59-skill breakdown is what `fak skill footprint --top 0` prints; only the
+The full 64-skill breakdown is what `fak skill footprint --top 0` prints; only the
 head is pinned here so a drift is legible in review.
 
-`name-only floor = 797 B` is the size of the headroom: **47.0 kB of the 47.8 kB
+`name-only floor = 797 B` is the size of the headroom: **47.2 kB of the 48.1 kB
 resident floor is description prose**, and every skill stays invocable by name
 without a single byte of it.
 
-**Last re-pin: 47236 → 47821 B (+585, 58 → 59 skills)** — the `fleet-wave` skill
-(the goal-shaped wave door over `super-loop`/`wave-harvest`). It is the worked
-example of the "prefer trimming first" rule below: drafted at **1296 B** it would
-have entered the table at rank 6, so the description was cut to the trigger
-sentence — *when* to load it, not what it does — and only the residual 585 B was
-banked. The body kept the detail; the resident tax did not.
+**Last re-pin: 47821 → 48109 B (+288, 59 → 64 skills)** — five new
+resident skill cards landed while their descriptions stayed compact enough that total
+growth was only 288 bytes. The gate records that measured floor rather than masking the
+new catalog surface; future growth retains the same narrow ratchet band.
 
 ## Provenance (Law A2 — every value carries its provenance)
 
@@ -74,7 +72,7 @@ This floor is denominated in **bytes of frontmatter `description` text**, as par
 by `internal/capindex`'s `SkillResolver`. Two things follow, and neither may be
 quietly dropped when the number is quoted:
 
-- **The `~11809 tokens` figure is an ESTIMATE**, at the house ~4 bytes/token divisor
+- **The `~12027 tokens` figure is an ESTIMATE**, at the house ~4 bytes/token divisor
   (`skillfootprint.BytesPerTokenEstimate`, the same walk as
   `EstimateAnthropicTokens`). It is not a provider-billed count and must never be
   compared against one.
@@ -96,7 +94,7 @@ in the twenty days that followed, the measured floor grew from 36,237 B to 47,23
 and taste lost 30% in three weeks.
 
 `internal/skillfootprint.CheckDescriptions` gates the measured floor against a
-committed ceiling, `SkillDescriptionBudgetBytes` (currently **47821**), as a one-way
+committed ceiling, `SkillDescriptionBudgetBytes` (currently **48109**), as a one-way
 ratchet:
 
 | Direction | Reason | What it means |
