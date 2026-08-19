@@ -128,10 +128,11 @@ var tier = map[string]int{
 	"chatrelay":            2,                // pure Slack chat-relay client (the inbound complement to the scoreboard publishers): posts/reads a channel via the shared slackenv resolver; rides slackwire(1) for transport, off the hot path.
 	"evebridge":            1,                // Eve preflight connection gates (auth/allowlist/approval, #2602): pure request-shape screening for the Eve bridge; stdlib-only, imports nothing internal, off the hot path.
 	"sessionsignals":       1,                // shared closed vocabulary of terminal-turn transcript signals (limit-reset banners, auth/credit/access walls, transient API errors) ported from tools/fleet_session_signals.py; the one taxonomy the resume sweep/stopped/watchdog family classifies with. Stdlib-only, imports nothing internal, off the hot path.
-	"sessiondesc":          1,                // pure session-descriptor join schema (fak.session.descriptor.v1, #2214): folds gateway drive-state / leaseref / harness-identity rows into one exact-join record with a closed absence vocabulary; stdlib-only, imports nothing internal, off the hot path.
+	"sessiondesc":          2,                // deterministic session descriptor fold plus durable journal adapter over sessionjournal(2).
 	"watchdoghealth":       2,                // pure health-digest for the DEFAULT watchdog monitors (fak.watchdog-health.v1): folds the live probe + persisted autoheal heal-state into a closed per-monitor status vocabulary + a worst-of fleet rollup for `fak watchdog status`; stdlib-only, imports nothing internal, off the hot path.
 	"resumemetrics":        1,                // in-process expvar metrics for the resume/heal watchdog (#3803): expvar counters + strings only; imports nothing internal, off the hot path.
 	"resumebackoff":        2,                // pure resume signature backoff and cross-session park fold (#3584); stdlib only.
+	"resumeactuator":       1,                // stdlib-only managed continuation-command rendering primitive (#8060).
 	"commitlifecycle":      2,                // pure commit-to-ship lifecycle fold (#5989); stdlib-only, no git/filesystem/process I/O, off the hot path.
 	"wiplease":             2,                // live-WIP projection into laneadmit lease geometry; imports laneadmit(2)+wipattr(1), off the hot path.
 	"wipref":               2,                // append-only working-tree checkpoint ref store under refs/fak/wip/ read by fak wip (sibling of leaseref's refs/fak/locks); stdlib-only, imports nothing internal, off the hot path.
@@ -649,7 +650,7 @@ var tier = map[string]int{
 	"exclusivefile":         1, // stdlib-only O_EXCL PID/time marker creation shared by lock owners (#7051).
 	"wiplifecycle":          2, // lifecycle receipts depend on Git-backed WIP inventory collection (#7250).
 	"sessionrecovery":       2, // selects and witnesses bounded crash recovery without provider-private state (#8013).
-	"harnessinstructions":   2, // composes typed harness instructions onto the host-owned system-prompt base.
+	"harnessinstructions":   3, // tier-3 adapter composing public harness instructions through the host-owned system-prompt MMU.
 	"sessionintent":         1, // stdlib-only session control declarations and deterministic stop evaluation (#7352).
 	"subtractiveprofile":    1, // stdlib-only deterministic capability subtraction algebra (#6791).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the

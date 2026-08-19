@@ -17,6 +17,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	"github.com/anthony-chaudhary/fak/internal/resume"
+	"github.com/anthony-chaudhary/fak/internal/resumeactuator"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -336,31 +337,53 @@ func rwHarness(p resume.WatchdogPlanRow) string {
 	}
 }
 
+func rwActuatorRequest(p resume.WatchdogPlanRow, claudeExe string) resumeactuator.Request {
+	prompt := resumeWatchdogPrompt
+	if block := rwResumeAnchor(p.Session).Prompt(); block != "" {
+		prompt = block + "\n\n" + prompt
+	}
+	return resumeactuator.Request{
+		Harness: p.Harness, Session: p.Session, Rollout: p.Rollout,
+		GoalFile: p.GoalFile, ResultFile: p.ResultFile, CWD: rwResumeCWD(p), Prompt: prompt, ClaudeExe: claudeExe,
+	}
+}
+
+func rwManagedResumeArgv(fakExe, claudeExe string, p resume.WatchdogPlanRow, postureArgs []string, carry ...resume.DriveCarryRow) ([]string, error) {
+	var budget []string
+	if len(carry) > 0 {
+		if spec := rwDriveCarryEnvelope(carry[0]); spec != "" {
+			budget = []string{"--budget-envelope", spec}
+		}
+	}
+	return rwActuatorRequest(p, claudeExe).ManagedArgv(fakExe, postureArgs, budget)
+}
+
 func rwCodexResumeArgv(fakExe string, p resume.WatchdogPlanRow) []string {
-	return []string{fakExe, "codex-resume", "--json", "--rollout", p.Rollout, "--cwd", rwResumeCWD(p), "--prompt-file", p.GoalFile, "--result-file", p.ResultFile, p.Session}
+	argv, _ := rwActuatorRequest(p, "").ContinuationArgv(fakExe)
+	return argv
 }
 
 func validateCodexResumeCoordinates(p resume.WatchdogPlanRow) error {
-	if strings.TrimSpace(p.Session) == "" || strings.TrimSpace(p.Rollout) == "" || strings.TrimSpace(p.GoalFile) == "" || strings.TrimSpace(p.ResultFile) == "" {
-		return fmt.Errorf("codex resume requires session, rollout, goal_file, and result_file")
-	}
-	return nil
+	_, err := rwActuatorRequest(p, "").ContinuationArgv("fak")
+	return err
 }
 
 func rwResumeBrokerAttempt(fakExe, claudeExe string, p resume.WatchdogPlanRow, resumeCfg string, postureArgs []string, carry ...resume.DriveCarryRow) launchBrokerAttempt {
-	if rwHarness(p) == "codex" {
-		return newLaunchBrokerAttempt("resume_watchdog", "codex", rwCodexResumeArgv(fakExe, p), envMap(resume.CodexWatchdogChildEnv(os.Environ())), rwResumeCWD(p))
+	argv, err := rwManagedResumeArgv(fakExe, claudeExe, p, postureArgs, carry...)
+	if err != nil {
+		argv = nil
 	}
-	return newLaunchBrokerAttempt("resume_watchdog", "claude", rwResumeArgv(fakExe, claudeExe, p.Session, postureArgs, carry...),
-		rwResumeChildEnv(p.Session, resumeCfg), rwResumeCWD(p))
+	return newLaunchBrokerAttempt("resume_watchdog", rwHarness(p), argv,
+		rwChildEnvironment(p, resumeCfg), rwResumeCWD(p))
 }
 
-// rwResumeChildEnv builds the resumed child's env map: the stripped-and-repinned
-// WatchdogChildEnv base plus the transcript's derived cache-affinity route (#4140) —
-// RelaunchCacheAffinityEnv=RelaunchCacheAffinityKey(session) — so the warm provider
-// cache route survives the OS relaunch instead of every relaunch starting cold. The
-// key derives from the transcript UUID alone, so every relaunch of one transcript
-// carries the SAME route. A blank session derives no key and sets nothing.
+func rwChildEnvironment(p resume.WatchdogPlanRow, resumeCfg string) map[string]string {
+	if rwHarness(p) == resumeactuator.HarnessCodex {
+		return envMap(resume.CodexWatchdogChildEnv(os.Environ()))
+	}
+	return rwResumeChildEnv(p.Session, resumeCfg)
+}
+
 func rwResumeChildEnv(session, resumeCfg string) map[string]string {
 	env := envMap(resume.WatchdogChildEnv(os.Environ(), resumeCfg))
 	if key := resume.RelaunchCacheAffinityKey(session); key != "" {
@@ -374,17 +397,8 @@ var rwResumeAnchor = func(session string) resume.ResumeAnchor {
 	return resume.BuildResumeAnchor(session, trajctl.Fold(trajctl.ReadLedgerFile(path)))
 }
 
-// rwResumeArgv is the argv that resumes one dead session. Default (no managed-cache posture
-// configured, or fak unresolved): a bare `claude --resume … -p <prompt>
-// --dangerously-skip-permissions`, byte-identical to before the posture knob existed. When the
-// operator configured a posture (FAK_MANAGED_CACHE / FAK_GUARD_API_KEY_ENV, resolved ONCE per tick
-// into postureArgs) AND fak is resolvable, FRONT the child with its OWN `fak guard <posture> --`:
-// the resumed child binds its own in-process gateway on its own CLAUDE_CONFIG_DIR seat, prints its
-// own posture banner, and reaches the ACTIVE 1h-TTL upgrade when API-key-billed — inheriting no
-// wire from this watchdog (the WatchdogChildEnv strip at the spawn site still holds). Guard
-// auto-detects claude -> --provider anthropic, so the shape matches the other launchers (posture
-// flags BEFORE `--`, agent after). Mirrors tools/fleet_resume_watchdog.py:resume_child_argv and
-// the .ps1 spawn block (#2178 / #3779).
+// rwResumeArgv retains the legacy Claude helper shape for compatibility callers.
+// The watchdog broker uses rwManagedResumeArgv, which always fronts launches with fak m.
 func rwResumeArgv(fakExe, claudeExe, session string, postureArgs []string, carry ...resume.DriveCarryRow) []string {
 	prompt := resumeWatchdogPrompt
 	anchor := rwResumeAnchor(session)
@@ -416,7 +430,11 @@ func rwResumeCWD(p resume.WatchdogPlanRow) string {
 }
 
 func rwSpawnResume(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir string, grant launchBrokerGrant) (int, error) {
-	if rwHarness(p) == "codex" {
+	harness, err := rwActuatorRequest(p, claudeExe).HarnessName()
+	if err != nil {
+		return 0, err
+	}
+	if harness == resumeactuator.HarnessCodex {
 		if err := validateCodexResumeCoordinates(p); err != nil {
 			return 0, err
 		}

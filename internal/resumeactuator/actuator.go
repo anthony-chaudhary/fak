@@ -1,0 +1,96 @@
+// Package resumeactuator renders harness continuation commands inside FAK's managed-agent envelope.
+package resumeactuator
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
+
+const (
+	HarnessClaude = "claude"
+	HarnessCodex  = "codex"
+)
+
+var (
+	ErrUnknownAdapter    = errors.New("unsupported resume harness")
+	ErrMissingCoordinate = errors.New("missing resume coordinate")
+)
+
+// Request contains the harness-neutral identity plus the small set of coordinates
+// required by the currently supported continuation adapters.
+type Request struct {
+	Harness    string
+	Session    string
+	Rollout    string
+	GoalFile   string
+	ResultFile string
+	CWD        string
+	Prompt     string
+	ClaudeExe  string
+}
+
+// Harness normalizes the legacy empty value to Claude without guessing any other value.
+func (r Request) HarnessName() (string, error) {
+	h := strings.ToLower(strings.TrimSpace(r.Harness))
+	if h == "" {
+		return HarnessClaude, nil
+	}
+	switch h {
+	case HarnessClaude, HarnessCodex:
+		return h, nil
+	default:
+		return "", fmt.Errorf("%w: %s", ErrUnknownAdapter, h)
+	}
+}
+
+// ContinuationArgv renders only the harness-specific continuation command. FAK's
+// management envelope is deliberately added separately by ManagedArgv.
+func (r Request) ContinuationArgv(fakExe string) ([]string, error) {
+	h, err := r.HarnessName()
+	if err != nil {
+		return nil, err
+	}
+	switch h {
+	case HarnessClaude:
+		if strings.TrimSpace(r.Session) == "" {
+			return nil, fmt.Errorf("%w: claude session", ErrMissingCoordinate)
+		}
+		exe := strings.TrimSpace(r.ClaudeExe)
+		if exe == "" {
+			exe = "claude"
+		}
+		return []string{exe, "--resume", r.Session, "-p", r.Prompt, "--dangerously-skip-permissions"}, nil
+	case HarnessCodex:
+		coordinates := []struct{ name, value string }{
+			{"session", r.Session}, {"rollout", r.Rollout}, {"goal_file", r.GoalFile}, {"result_file", r.ResultFile},
+		}
+		for _, coordinate := range coordinates {
+			if strings.TrimSpace(coordinate.value) == "" {
+				return nil, fmt.Errorf("%w: codex %s", ErrMissingCoordinate, coordinate.name)
+			}
+		}
+		if strings.TrimSpace(fakExe) == "" {
+			return nil, fmt.Errorf("%w: codex fak executable", ErrMissingCoordinate)
+		}
+		return []string{fakExe, "codex-resume", "--json", "--rollout", r.Rollout, "--cwd", r.CWD, "--prompt-file", r.GoalFile, "--result-file", r.ResultFile, r.Session}, nil
+	}
+	panic("unreachable")
+}
+
+// ManagedArgv makes fak manage the invariant outer process. Harness adapters only
+// supply the continuation command after the separator.
+func (r Request) ManagedArgv(fakExe string, postureArgs, budgetArgs []string) ([]string, error) {
+	if strings.TrimSpace(fakExe) == "" {
+		return nil, fmt.Errorf("%w: fak management executable", ErrMissingCoordinate)
+	}
+	child, err := r.ContinuationArgv(fakExe)
+	if err != nil {
+		return nil, err
+	}
+	argv := []string{fakExe, "m"}
+	argv = append(argv, postureArgs...)
+	argv = append(argv, budgetArgs...)
+	argv = append(argv, "--")
+	return append(argv, child...), nil
+}
