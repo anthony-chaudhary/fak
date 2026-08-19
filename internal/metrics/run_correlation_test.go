@@ -158,6 +158,14 @@ func TestCorrelateRunSeriesTypedRefusals(t *testing.T) {
 	}
 }
 
+func TestCorrelationRefusalsExcludeAcceptedOutcome(t *testing.T) {
+	for _, refusal := range CorrelationRefusals() {
+		if refusal == CorrelationRefusalNone {
+			t.Fatal("accepted correlation must not appear in refusal vocabulary")
+		}
+	}
+}
+
 func TestRunCorrelationRefusalWrapsSentinel(t *testing.T) {
 	err := CorrelateRunSeries(nil).RefusalError()
 	if !errors.Is(err, ErrRunCorrelationRefused) {

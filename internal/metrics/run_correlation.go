@@ -103,6 +103,7 @@ const (
 // CorrelationRefusals returns every typed refusal the contract can emit, in
 // the order CorrelateRunSeries checks them.
 func CorrelationRefusals() []CorrelationRefusal {
+	//enumlint:exempt CorrelationRefusalNone is the accepted outcome, not a refusal.
 	return []CorrelationRefusal{
 		CorrelationRefusalNoSeries,
 		CorrelationRefusalUnnamedStream,
