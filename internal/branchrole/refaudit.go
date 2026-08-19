@@ -189,9 +189,16 @@ func hardcodedRefLine(line string) bool {
 // switch arms — e.g. the branch-regime docs stay audit-doc, not the docs/ historical
 // family a prefix rule would assign.
 var refClassByExactPath = map[string]string{
-	"docs/branch-regime-hardcoded-ref-audit.md": RefClassAuditDoc,
-	"docs/branch-regime.md":                     RefClassAuditDoc,
-	"docs/ci/workflow-branch-audit.md":          RefClassAuditDoc,
+	"cmd/fak/codex_freshness.go":                         RefClassDevelopmentSource,
+	"cmd/fak/stallscan_skew.go":                          RefClassDevelopmentSource,
+	"cmd/fak/sweep_parked.go":                            RefClassDevelopmentSource,
+	"cmd/microcontextdemo/natural_multitool.go":          RefClassFixture,
+	"internal/devcmd/ci_preflight.go":                    RefClassDevelopmentSource,
+	"internal/selfinstall/roles.go":                      RefClassPublicFrontDoor,
+	"internal/workdelivery/testdata/e2e/happy-path.json": RefClassFixture,
+	"docs/branch-regime-hardcoded-ref-audit.md":          RefClassAuditDoc,
+	"docs/branch-regime.md":                              RefClassAuditDoc,
+	"docs/ci/workflow-branch-audit.md":                   RefClassAuditDoc,
 
 	".github/branch-integration-closeout.md": RefClassHistorical,
 	"BENCHMARK-GOVERNANCE.md":                RefClassHistorical,

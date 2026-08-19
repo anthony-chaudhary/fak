@@ -129,6 +129,23 @@ func TestAuditHardcodedRefsScansOnlyWhatGitTracks(t *testing.T) {
 	}
 }
 
+func TestCurrentOperationalAndFixtureRefsAreClassified(t *testing.T) {
+	want := map[string]string{
+		"cmd/fak/codex_freshness.go":                         RefClassDevelopmentSource,
+		"cmd/fak/stallscan_skew.go":                          RefClassDevelopmentSource,
+		"cmd/fak/sweep_parked.go":                            RefClassDevelopmentSource,
+		"cmd/microcontextdemo/natural_multitool.go":          RefClassFixture,
+		"internal/devcmd/ci_preflight.go":                    RefClassDevelopmentSource,
+		"internal/selfinstall/roles.go":                      RefClassPublicFrontDoor,
+		"internal/workdelivery/testdata/e2e/happy-path.json": RefClassFixture,
+	}
+	for path, class := range want {
+		if got := ClassifyHardcodedRef(path, "origin/main"); got != class {
+			t.Errorf("ClassifyHardcodedRef(%q)=%q, want %q", path, got, class)
+		}
+	}
+}
+
 func TestHardcodedRefAuditCurrentTreeClassified(t *testing.T) {
 	root := repoRootForRefAudit(t)
 	findings, err := AuditHardcodedRefs(root)
