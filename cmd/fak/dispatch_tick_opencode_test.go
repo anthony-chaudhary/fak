@@ -44,3 +44,21 @@ func TestUnwrapOpencodeNpmShimTargetsRealExecutable(t *testing.T) {
 		t.Fatalf("non-opencode shim unwrapped to %q", got)
 	}
 }
+
+func TestUnwrapCodexNpmShim(t *testing.T) {
+	npm := t.TempDir()
+	target := filepath.Join(npm, "node_modules", "@openai", "codex", "node_modules", "@openai", "codex-win32-x64", "vendor", "x86_64-pc-windows-msvc", "bin", "codex.exe")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("native"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got := unwrapCodexNpmShim(filepath.Join(npm, "codex.cmd"))
+	if got != target {
+		t.Fatalf("unwrap codex = %q, want %q", got, target)
+	}
+	if got := unwrapCodexNpmShim(filepath.Join(npm, "opencode.cmd")); got != "" {
+		t.Fatalf("unrelated shim resolved to %q", got)
+	}
+}

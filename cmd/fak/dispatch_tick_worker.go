@@ -387,12 +387,36 @@ func resolveDispatchWorkerExecutable(backend, name string) string {
 	if p, err := exec.LookPath(exe); err == nil {
 		exe = p
 	}
-	if backend == "opencode" && runtime.GOOS == "windows" {
-		if target := unwrapOpencodeNpmShim(exe); target != "" {
-			return target
+	if runtime.GOOS == "windows" {
+		switch backend {
+		case "opencode":
+			if target := unwrapOpencodeNpmShim(exe); target != "" {
+				return target
+			}
+		case "codex":
+			if target := unwrapCodexNpmShim(exe); target != "" {
+				return target
+			}
 		}
 	}
 	return exe
+}
+
+func unwrapCodexNpmShim(exe string) string {
+	switch strings.ToLower(filepath.Base(exe)) {
+	case "codex", "codex.cmd", "codex.bat", "codex.ps1":
+	default:
+		return ""
+	}
+	dir := filepath.Dir(exe)
+	if dir == "" || dir == "." {
+		return ""
+	}
+	target := filepath.Join(dir, "node_modules", "@openai", "codex", "node_modules", "@openai", "codex-win32-x64", "vendor", "x86_64-pc-windows-msvc", "bin", "codex.exe")
+	if st, err := os.Stat(target); err == nil && !st.IsDir() {
+		return target
+	}
+	return ""
 }
 
 func unwrapOpencodeNpmShim(exe string) string {
