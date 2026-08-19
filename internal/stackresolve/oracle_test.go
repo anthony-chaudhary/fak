@@ -114,6 +114,10 @@ func oracleSatisfiable(components []Component, roots []string) bool {
 					if provides[relation.Target] {
 						valid = false
 					}
+				case Recommends, Optional:
+					// Advisory relations do not constrain satisfiability.
+				default:
+					valid = false
 				}
 			}
 		}
