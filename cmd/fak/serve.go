@@ -167,6 +167,7 @@ type serveFlags struct {
 	native                       *bool
 	nativeMaxTurns               *int
 	nativeCodeWorkspace          *string
+	nativeCodeTools              *bool
 	nativeSpeculate              *bool
 	vdsoProxyFill                *bool
 	metricsSnapshot              *time.Duration
@@ -244,7 +245,8 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.dojoMode = fs.Bool("dojo", false, "enable live dojo mode: write a start-marker for each serve session into the live-episode corpus (.dojo/live-episodes/ under the workspace root) for issue #956. NOTE: live-episode scoring is not yet wired into `fak dojo run` (which today scores Claude Code transcripts passed via --corpus), so this records the boundary but does not yet feed the scorer.")
 	sf.native = fs.Bool("native", false, "NATIVE HARNESS (#1316/#1837): drive fak's OWN agent loop for every /v1/messages turn instead of the single-shot proxy turn. Both buffered and `stream: true` requests stay on the owned native path; streaming drives agent.RunArmStream and renders its text deltas plus typed lifecycle progress as Anthropic SSE and does not fall through to the proxy. If streaming cannot be safely emitted â a response writer that cannot flush, a planner that does not support streaming, or an armed answer stop-gate (a rejected answer must never leak as a delta) â the request degrades to the buffered native handler — the same owned loop, one response instead of deltas. The in-kernel syscall boundary remains the sole tool path, and ArmMetrics ride on the response `fak.native_arm` extension. Off by default (the proxy path is byte-for-byte unchanged).")
 	sf.nativeMaxTurns = fs.Int("native-max-turns", gateway.DefaultNativeMaxTurns, "with --native: cap the owned loop's model round-trips per served request (<=0 uses the built-in default)")
-	sf.nativeCodeWorkspace = fs.String("native-code-workspace", "", "arm kernel Read/Write/Edit/Bash/Grep/Glob under this workspace root (requires --native)")
+	sf.nativeCodeWorkspace = fs.String("native-code-workspace", "", "override the workspace root for default-on kernel Read/Write/Edit/Bash/Grep/Glob (requires --native)")
+	sf.nativeCodeTools = fs.Bool("native-code-tools", true, "with --native, arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the current workspace; use --native-code-tools=false to disable")
 	sf.nativeSpeculate = fs.Bool("native-speculate", false, "enable effect-free coding speculation (requires --native-code-workspace)")
 	sf.vdsoProxyFill = fs.Bool("vdso-proxy-fill", false, "warm the vDSO from ADMITTED inbound tool_result blocks on the proxy path: an allowed, read-only-shaped result the client sends back fills (tool,args)->result so a LATER identical read is served inline (no client re-execution). Off by default — sound only when the principal is named and writes that touch the same resource reach fak (a proxy-closed world), so it is an explicit operator opt-in. Scoped per-principal; never fills a Shareable or write-shaped tool.")
 	sf.metricsSnapshot = fs.Duration("metrics-snapshot", 0, "periodically append an interim gateway-usage counter snapshot (internal/gatewayusageledger, .fak/nightrun/gateway-usage.jsonl) while this long-lived `fak serve` is up, so a crash before a clean exit still leaves a trail (#1610). 0 (default) disables periodic snapshots; the exit-time snapshot is always written regardless of this flag.")
@@ -351,6 +353,13 @@ func cmdServe(argv []string) {
 	if !admitServeShrinkLevers(fs, sf, os.Stderr) {
 		os.Exit(2)
 	}
+
+	resolvedCodeWorkspace, err := resolveNativeCodeWorkspace(*sf.native, *sf.nativeCodeTools, *sf.nativeCodeWorkspace)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(1)
+	}
+	*sf.nativeCodeWorkspace = resolvedCodeWorkspace
 
 	// Install the capability floor fail-loud: a bad manifest aborts startup rather
 	// than silently falling back to a more permissive default. Time it as the first
