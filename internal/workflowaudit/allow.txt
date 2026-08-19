@@ -47,6 +47,7 @@ cachevalue-weekly.yml:master
 dispatch-session-audit-feed.yml:master
 fanout-cadence.yml:master
 issue-lane-router.yml:master
+maturity-continuity.yml:master
 negframe-ratchet.yml:master
 
 # --- `fak-v0.1`: the legacy compatibility release branch ---

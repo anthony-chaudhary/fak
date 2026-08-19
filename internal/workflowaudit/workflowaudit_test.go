@@ -1,6 +1,7 @@
 package workflowaudit
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -193,9 +194,13 @@ func TestFreshDetectsDrift(t *testing.T) {
 	if !Fresh(spliced, rep) {
 		t.Fatal("a freshly spliced doc must be Fresh")
 	}
-	// Mutate a token that only appears inside the generated block (the verdict line),
-	// never in the Scaffold header prose, so the drift is genuinely inside the markers.
-	stale := strings.Replace(spliced, "ALL CLASSIFIED", "ALL_MUTATED", 1)
+	// Mutate the rendered verdict inside the generated block. Derive it from the
+	// report so this drift witness remains valid even when the live tree is red.
+	verdict := "ALL CLASSIFIED"
+	if !rep.Clean() {
+		verdict = fmt.Sprintf("%d UNCLASSIFIED", len(rep.Unclassified))
+	}
+	stale := strings.Replace(spliced, verdict, "VERDICT_MUTATED", 1)
 	if stale == spliced {
 		t.Fatal("expected the verdict token inside the spliced block")
 	}
