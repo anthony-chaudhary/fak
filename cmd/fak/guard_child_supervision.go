@@ -108,7 +108,9 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
+		lifecycle := startCrashJournalPulse(guardTraceID, child.Process.Pid)
 		runErr := child.Wait()
+		lifecycle.finish(runErr == nil)
 		_ = job.Close()
 		terminalGuardChild(child, runErr, "")
 		if rec, parked := guardGoalParked(); parked {
@@ -269,8 +271,10 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
+		lifecycle := startCrashJournalPulse(guardTraceID, child.Process.Pid)
 		go func() {
 			runErr := child.Wait()
+			lifecycle.finish(runErr == nil)
 			terminalGuardChild(child, runErr, "")
 			_ = job.Close()
 			wait <- runErr
