@@ -225,6 +225,11 @@ func dispatchCoreVerbB(name string, args []string) bool {
 		cmdQuantwatch(args)
 	case "work-delivery":
 		cmdWorkDelivery(args)
+	case "worktype":
+		if len(args) > 0 && args[0] == "attribution" {
+			os.Exit(runWorktypeSpend(os.Stdout, os.Stderr, args[1:]))
+		}
+		os.Exit(2)
 	case "workpattern":
 		if err := cmdWorkpattern(args); err != nil {
 			fmt.Fprintln(os.Stderr, "fak workpattern:", err)

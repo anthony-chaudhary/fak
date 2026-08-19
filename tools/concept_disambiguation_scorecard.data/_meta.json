@@ -4490,6 +4490,11 @@
           "category": "incidental",
           "reason": "Coverage denominator count in a spend report, not a runtime session identity or lifecycle.",
           "token": "CoveredSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Attribution coverage ratio over historical rows, not a runtime session metric or lifecycle rate.",
+          "token": "SessionRate"
         }
       ],
       "id": "session-runtime",
@@ -4581,6 +4586,7 @@
         "SessionMoveTransition",
         "SessionOutcome",
         "SessionPlacement",
+        "SessionRate",
         "SessionRecoveryScenarios",
         "SessionShellErrorRate",
         "SessionSourceResolution",
@@ -5618,6 +5624,11 @@
           "category": "incidental",
           "reason": "Outcome bucket label for an independently accepted session witness, not a new witness mechanism.",
           "token": "accepted_witness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Aggregate outcome ratio in a spend report, not a witness mechanism or proof artifact.",
+          "token": "accepted_witness_rate"
         }
       ],
       "id": "witness-proof",
@@ -5670,6 +5681,7 @@
         "WitnessedProgressFloor",
         "WorkProfileWitness",
         "accepted_witness",
+        "accepted_witness_rate",
         "addDebtWitnesses",
         "appendGuardCompactionWitnessTo",
         "benchFleetWitnessSeconds",
@@ -8678,6 +8690,11 @@
           "category": "incidental",
           "reason": "Typed exclusion reason in watchdog candidate projection.",
           "token": "UNSUPPORTED_SESSION_KIND"
+        },
+        {
+          "category": "incidental",
+          "reason": "Numerical attribution coverage denominators, not capability support or maturity state.",
+          "token": "SpendCoverage"
         }
       ],
       "id": "support-maturity",
@@ -8764,6 +8781,7 @@
         "SessionSupport",
         "SetupParityBlocks",
         "SetupParityReport",
+        "SpendCoverage",
         "SupportFull",
         "SupportInactive",
         "SupportLocalOnly",
