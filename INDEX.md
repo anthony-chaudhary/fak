@@ -265,6 +265,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Learning observation lineage](docs/learning-observation.md) — content-addressed source/candidate/witness/verdict records and closed-enum edges; separate from witness-gated admission.
 
 ## Notes & research (`docs/notes/`)
+- [Harness model-set dependencies and compatibility resolution research](docs/notes/HARNESS-MODEL-SET-DEPENDENCIES-RESEARCH-2026-08-19.md) -- auto-indexed dated note.
 - [Session-history refresh SLO — 2026-08-19](docs/notes/SESSION-HISTORY-REFRESH-SLO-2026-08-19.md) -- auto-indexed dated note.
 - [Agent relation index decision � 2026-08-19](docs/notes/AGENTQUERY-INDEX-DECISION-2026-08-19.md) -- auto-indexed dated note.
 - [Native UI scrolling is session state, not terminal residue — 2026-08-18](docs/notes/NATIVE-UI-SCROLLING-FIRST-CLASS-2026-08-18.md) -- auto-indexed dated note.
