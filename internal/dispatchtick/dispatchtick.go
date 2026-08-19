@@ -363,7 +363,14 @@ func GuardedLaunchCommand(command []string, fakBin, lane, backend, workspace, ba
 	if len(command) == 0 || strings.TrimSpace(fakBin) == "" {
 		return append([]string(nil), command...), false
 	}
-	args := []string{fakBin, "guard", "--provider", GuardProvider(backend)}
+	args := []string{fakBin, "guard"}
+	// Dispatch already audits Codex loop posture before spawn. Carry that decision into
+	// the child guard so it does not re-audit unrelated historical sessions and turn an
+	// admitted worker into a banner-only stub.
+	if backend == "codex" {
+		args = append(args, "--codex-loop-gate", "off")
+	}
+	args = append(args, "--provider", GuardProvider(backend))
 	if backend != "claude" {
 		if strings.TrimSpace(baseURL) == "" {
 			return append([]string(nil), command...), false

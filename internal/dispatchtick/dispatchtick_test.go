@@ -250,6 +250,11 @@ func TestGuardedLaunchCommand(t *testing.T) {
 	if guarded || opencode[0] != "opencode" {
 		t.Fatalf("opencode without base URL must not be guarded, got %#v guarded=%v", opencode, guarded)
 	}
+
+	codex, guarded := GuardedLaunchCommand([]string{"codex", "exec", "-"}, "fak", "docs", "codex", "/repo", "http://127.0.0.1:18080/v1")
+	if !guarded || !strings.Contains(strings.Join(codex, " "), "guard --codex-loop-gate off --provider openai") {
+		t.Fatalf("codex dispatch must carry the already-evaluated loop-gate decision: %v", codex)
+	}
 }
 
 func TestLaunchCommandShapeRedactsSensitiveFields(t *testing.T) {
