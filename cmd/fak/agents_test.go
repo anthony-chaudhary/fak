@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agentquery"
 	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
@@ -129,5 +130,62 @@ func TestAgentsExplicitUnreadableHistoryFailsClosed(t *testing.T) {
 	code := runAgents(&out, &errout, []string{"--journal", missing, "--source", "history", "--json"})
 	if code != 1 || !strings.Contains(errout.String(), "history source not_found") || strings.Contains(errout.String(), "private-history-name") || out.Len() != 0 {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errout.String())
+	}
+}
+
+func TestAgentsGroupedSevenDayLaneStateQuery(t *testing.T) {
+	journal := filepath.Join(t.TempDir(), "sessions.jsonl")
+	events := []sessionjournal.Event{
+		{Schema: sessionjournal.Schema, Kind: sessionjournal.KindOpen, ID: "cmd-a", TS: "2026-08-17T00:00:00Z", Registration: &sessionjournal.RegistrationCarry{Lane: "cmd"}},
+		{Schema: sessionjournal.Schema, Kind: sessionjournal.KindClose, ID: "cmd-a", TS: "2026-08-17T00:10:00Z", Reason: "done"},
+		{Schema: sessionjournal.Schema, Kind: sessionjournal.KindOpen, ID: "cmd-b", TS: "2026-08-16T00:00:00Z", Registration: &sessionjournal.RegistrationCarry{Lane: "cmd"}},
+		{Schema: sessionjournal.Schema, Kind: sessionjournal.KindClose, ID: "cmd-b", TS: "2026-08-16T00:20:00Z", Reason: "done"},
+		{Schema: sessionjournal.Schema, Kind: sessionjournal.KindOpen, ID: "docs-a", TS: "2026-08-15T00:00:00Z", Registration: &sessionjournal.RegistrationCarry{Lane: "docs"}},
+		{Schema: sessionjournal.Schema, Kind: sessionjournal.KindOpen, ID: "unknown", TS: "2026-08-14T00:00:00Z"},
+		{Schema: sessionjournal.Schema, Kind: sessionjournal.KindOpen, ID: "old", TS: "2026-08-10T23:59:59Z", Registration: &sessionjournal.RegistrationCarry{Lane: "old"}},
+	}
+	var data bytes.Buffer
+	enc := json.NewEncoder(&data)
+	for _, e := range events {
+		if err := enc.Encode(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(journal, data.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"--journal", journal, "--history", "7d", "--group-by", "lane,state", "--count", "--json", "--now", "1787011200"}
+	var out, errout bytes.Buffer
+	if code := runAgents(&out, &errout, args); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errout.String())
+	}
+	var got agentquery.GroupResult
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Metadata.Schema != agentquery.GroupSchema || got.Metadata.MatchedRows != 4 || len(got.Rows) != 3 {
+		t.Fatalf("got=%+v", got)
+	}
+	if got.Rows[0].Lane == nil || *got.Rows[0].Lane != "cmd" || got.Rows[0].Count != 2 || got.Rows[0].MaxElapsedMS == nil || *got.Rows[0].MaxElapsedMS != 1200000 {
+		t.Fatalf("first=%+v", got.Rows[0])
+	}
+	if got.Rows[2].Lane != nil {
+		t.Fatalf("unknown lane not last/null: %+v", got.Rows)
+	}
+	out.Reset()
+	errout.Reset()
+	args[7] = "false" // invalid positional-like count value must fail closed
+	if code := runAgents(&out, &errout, args); code != 2 {
+		t.Fatalf("invalid grouped contract code=%d out=%s err=%s", code, out.String(), errout.String())
+	}
+}
+
+func TestParseAgentHistoryWindowDays(t *testing.T) {
+	d, err := parseAgentHistoryWindow("7d")
+	if err != nil || d != 7*24*time.Hour {
+		t.Fatalf("d=%v err=%v", d, err)
+	}
+	if _, err := parseAgentHistoryWindow("0d"); err == nil {
+		t.Fatal("expected invalid window")
 	}
 }

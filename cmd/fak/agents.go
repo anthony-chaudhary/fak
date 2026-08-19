@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -28,9 +29,13 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 	all := fs.Bool("all", false, "include terminal and stale rows")
 	asJSON := fs.Bool("json", false, "emit fak-agents/1 JSON")
 	limit := fs.Int("limit", 200, "maximum returned rows")
+	historyWindowText := fs.String("history", "", "historical lookback window (for example 7d)")
+	groupBy := fs.String("group-by", "", "aggregate grouping (currently lane,state)")
+	count := fs.Bool("count", false, "include group row counts")
 	nowUnix := fs.Int64("now", 0, "observation Unix timestamp (tests/replay)")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: fak agents [--source live|history|union] [--journal FILE] [--all] [--json]")
+		fmt.Fprintln(stderr, "       fak agents --history 168h --group-by lane,state --count [--json]")
 	}
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
@@ -46,6 +51,16 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 	if *limit < 1 || *limit > 10000 {
 		fmt.Fprintln(stderr, "fak agents: --limit must be between 1 and 10000")
 		return 2
+	}
+	historyWindow, historyErr := parseAgentHistoryWindow(*historyWindowText)
+	grouped := *groupBy != "" || *historyWindowText != "" || *count
+	if grouped && (historyErr != nil || *groupBy != "lane,state" || !*count || historyWindow <= 0) {
+		fmt.Fprintln(stderr, "fak agents: grouped query requires --history DURATION --group-by lane,state --count")
+		return 2
+	}
+	if grouped {
+		*source = "history"
+		*all = true
 	}
 	now := time.Now().UTC()
 	if *nowUnix != 0 {
@@ -72,8 +87,26 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 		history = agentRowsFromHistory(events, now)
 		historyHealth = agentHistoryHealth(health)
 	}
-	result := agentquery.Union(live, history, *source, !*all, *limit, now)
+	queryLimit := *limit
+	if grouped {
+		queryLimit = 10000
+	}
+	result := agentquery.Union(live, history, *source, !*all, queryLimit, now)
 	result.Metadata.History = historyHealth
+	if grouped {
+		groups := agentquery.GroupLaneState(result.Rows, now.Add(-historyWindow), now, *source, historyHealth)
+		if *asJSON {
+			enc := json.NewEncoder(stdout)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(groups); err != nil {
+				fmt.Fprintf(stderr, "fak agents: encode: %v\n", err)
+				return 1
+			}
+			return 0
+		}
+		renderAgentGroups(stdout, groups)
+		return 0
+	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -85,6 +118,25 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 	}
 	renderAgents(stdout, result)
 	return 0
+}
+
+func parseAgentHistoryWindow(raw string) (time.Duration, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	if strings.HasSuffix(raw, "d") {
+		days, err := strconv.Atoi(strings.TrimSuffix(raw, "d"))
+		if err != nil || days <= 0 || days > 3650 {
+			return 0, fmt.Errorf("invalid day window")
+		}
+		return time.Duration(days) * 24 * time.Hour, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("invalid duration")
+	}
+	return d, nil
 }
 
 func agentHistoryHealth(h sessionjournal.ParseHealth) *agentquery.SourceHealth {
@@ -209,6 +261,27 @@ func renderAgents(w io.Writer, result agentquery.Result) {
 			elapsed = compactDuration(*r.ElapsedMS / 1000)
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.AgentID, r.State, r.Liveness, elapsed, agentField(r.Lane), agentField(r.Host), r.Source)
+	}
+	tw.Flush()
+}
+
+func renderAgentGroups(w io.Writer, result agentquery.GroupResult) {
+	fmt.Fprintf(w, "agent groups source=%s since=%s matched=%d input=%d observed=%s\n", result.Metadata.Source, result.Metadata.Since, result.Metadata.MatchedRows, result.Metadata.InputRows, result.Metadata.ObservedAt)
+	if h := result.Metadata.History; h != nil {
+		fmt.Fprintf(w, "history status=%s accepted=%d rejected=%d\n", h.Status, h.AcceptedRows, h.MalformedRows+h.WrongSchemaRows+h.MissingIDRows)
+	}
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "LANE\tSTATE\tCOUNT\tMAX ELAPSED")
+	for _, r := range result.Rows {
+		lane := "-"
+		if r.Lane != nil {
+			lane = *r.Lane
+		}
+		elapsed := "-"
+		if r.MaxElapsedMS != nil {
+			elapsed = compactDuration(*r.MaxElapsedMS / 1000)
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\n", lane, r.State, r.Count, elapsed)
 	}
 	tw.Flush()
 }

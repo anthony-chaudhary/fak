@@ -9790,6 +9790,11 @@
           "category": "incidental",
           "reason": "CLI formatting helper only; it does not materialize or cache a read model",
           "token": "renderAgents"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI table formatting helper only; it neither materializes nor caches the relation",
+          "token": "renderAgentGroups"
         }
       ],
       "id": "render-materialize",
@@ -9830,6 +9835,7 @@
         "metricsrender",
         "printWorkflowConcepts",
         "priorwtrendercrash",
+        "renderAgentGroups",
         "renderAgents",
         "renderAxisPartition",
         "renderCanonicalTerms",
@@ -10412,6 +10418,11 @@
           "category": "incidental",
           "reason": "Private typed watchdog candidate bridge implementation symbol.",
           "token": "watchdogCandidates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Read-only aggregation helper; it is not an execution plan or planning authority",
+          "token": "GroupLaneState"
         }
       ],
       "exclude": [
@@ -10440,6 +10451,7 @@
         "GoCandidateKind",
         "GoCandidateSymbol",
         "GoSourceCandidate",
+        "GroupLaneState",
         "KVPrefixPressureCandidate",
         "KVPrefixPressuredCandidates",
         "KindCandidate",
