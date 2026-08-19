@@ -33,6 +33,7 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 	groupBy := fs.String("group-by", "", "aggregate grouping (currently lane,state)")
 	count := fs.Bool("count", false, "include group row counts")
 	queryText := fs.String("query", "", "constrained read-only grouped query text")
+	asOfText := fs.String("as-of", "", "historical state at RFC3339 instant")
 	nowUnix := fs.Int64("now", 0, "observation Unix timestamp (tests/replay)")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: fak agents [--source live|history|union] [--journal FILE] [--all] [--json]")
@@ -90,6 +91,25 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 	if *nowUnix != 0 {
 		now = time.Unix(*nowUnix, 0).UTC()
 	}
+	var asOf *time.Time
+	if strings.TrimSpace(*asOfText) != "" {
+		t, err := time.Parse(time.RFC3339, strings.TrimSpace(*asOfText))
+		if err != nil {
+			fmt.Fprintln(stderr, "fak agents: --as-of must be RFC3339")
+			return 2
+		}
+		t = t.UTC()
+		if t.After(now) {
+			fmt.Fprintln(stderr, "fak agents: --as-of cannot be in the future")
+			return 2
+		}
+		asOf = &t
+		if *source != "history" || grouped {
+			fmt.Fprintln(stderr, "fak agents: --as-of requires --source history and cannot be grouped")
+			return 2
+		}
+		*all = true
+	}
 	var live []agentquery.Row
 	if *source != "history" {
 		c := &sessionClient{base: strings.TrimRight(*addr, "/"), key: *key, hc: &http.Client{Timeout: 15 * time.Second}}
@@ -108,7 +128,14 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak agents: history source %s\n", health.ReadError)
 			return 1
 		}
-		history = agentRowsFromHistory(events, now)
+		if asOf != nil {
+			events = sessionjournal.EventsAsOf(events, *asOf)
+		}
+		foldNow := now
+		if asOf != nil {
+			foldNow = *asOf
+		}
+		history = agentRowsFromHistory(events, foldNow)
 		historyHealth = agentHistoryHealth(health)
 	}
 	queryLimit := *limit
@@ -117,6 +144,10 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 	}
 	result := agentquery.Union(live, history, *source, !*all, queryLimit, now)
 	result.Metadata.History = historyHealth
+	if asOf != nil {
+		value := asOf.Format(time.RFC3339)
+		result.Metadata.AsOf = &value
+	}
 	if grouped {
 		groups := agentquery.GroupLaneStatePlan(result.Rows, queryPlan, now, *source, historyHealth)
 		if *asJSON {
@@ -269,7 +300,11 @@ func agentField(p *string) string {
 	return *p
 }
 func renderAgents(w io.Writer, result agentquery.Result) {
-	fmt.Fprintf(w, "agents source=%s rows=%d live=%d history=%d deduplicated=%d observed=%s\n", result.Metadata.Source, len(result.Rows), result.Metadata.LiveRows, result.Metadata.HistoryRows, result.Metadata.Deduplicated, result.Metadata.ObservedAt)
+	fmt.Fprintf(w, "agents source=%s rows=%d live=%d history=%d deduplicated=%d observed=%s", result.Metadata.Source, len(result.Rows), result.Metadata.LiveRows, result.Metadata.HistoryRows, result.Metadata.Deduplicated, result.Metadata.ObservedAt)
+	if result.Metadata.AsOf != nil {
+		fmt.Fprintf(w, " as_of=%s", *result.Metadata.AsOf)
+	}
+	fmt.Fprintln(w)
 	if h := result.Metadata.History; h != nil {
 		fmt.Fprintf(w, "history status=%s accepted=%d rejected=%d malformed=%d wrong_schema=%d missing_id=%d\n", h.Status, h.AcceptedRows, h.MalformedRows+h.WrongSchemaRows+h.MissingIDRows, h.MalformedRows, h.WrongSchemaRows, h.MissingIDRows)
 	}

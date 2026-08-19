@@ -58,6 +58,7 @@ type Metadata struct {
 	HistoryRows  int           `json:"history_rows"`
 	Deduplicated int           `json:"deduplicated"`
 	History      *SourceHealth `json:"history"`
+	AsOf         *string       `json:"as_of"`
 }
 type Result struct {
 	Metadata Metadata `json:"metadata"`

@@ -284,6 +284,19 @@ func LoadFile(path string) []Event {
 }
 
 // Session is the folded lifecycle state of one recorded session — the input to Classify.
+// EventsAsOf returns authoritative events whose valid RFC3339 timestamp is at or before
+// the requested instant. Invalid timestamps are excluded rather than treated as ancient facts.
+func EventsAsOf(events []Event, asOf time.Time) []Event {
+	out := make([]Event, 0, len(events))
+	for _, ev := range events {
+		t, err := time.Parse(time.RFC3339, strings.TrimSpace(ev.TS))
+		if err == nil && !t.After(asOf) {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
 type Session struct {
 	ID           string             `json:"id"`
 	Boot         string             `json:"boot,omitempty"`

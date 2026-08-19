@@ -215,3 +215,56 @@ func TestAgentsQueryTextFailsClosed(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentsAsOfReconstructsPreAndPostClose(t *testing.T) {
+	journal := filepath.Join(t.TempDir(), "sessions.jsonl")
+	events := []sessionjournal.Event{{Schema: sessionjournal.Schema, Kind: sessionjournal.KindOpen, ID: "epoch-a", TS: "2026-08-18T01:00:00Z", Boot: "boot-a"}, {Schema: sessionjournal.Schema, Kind: sessionjournal.KindBeat, ID: "epoch-a", TS: "2026-08-18T01:59:00Z"}, {Schema: sessionjournal.Schema, Kind: sessionjournal.KindClose, ID: "epoch-a", TS: "2026-08-18T02:00:00Z", Reason: "done"}}
+	var data bytes.Buffer
+	enc := json.NewEncoder(&data)
+	for _, e := range events {
+		if err := enc.Encode(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(journal, data.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run := func(at string) agentquery.Result {
+		var out, errout bytes.Buffer
+		code := runAgents(&out, &errout, []string{"--journal", journal, "--source", "history", "--as-of", at, "--json", "--now", "1787036400"})
+		if code != 0 {
+			t.Fatalf("at=%s code=%d stderr=%s", at, code, errout.String())
+		}
+		var got agentquery.Result
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	before := run("2026-08-18T00:59:59Z")
+	if len(before.Rows) != 0 {
+		t.Fatalf("before=%+v", before)
+	}
+	atOpen := run("2026-08-18T01:00:00Z")
+	if len(atOpen.Rows) != 1 || atOpen.Rows[0].Liveness != "LIVE" || atOpen.Metadata.AsOf == nil || *atOpen.Metadata.AsOf != "2026-08-18T01:00:00Z" {
+		t.Fatalf("at open=%+v", atOpen)
+	}
+	preClose := run("2026-08-18T01:59:59Z")
+	if preClose.Rows[0].Liveness != "LIVE" {
+		t.Fatalf("pre close=%+v", preClose)
+	}
+	atClose := run("2026-08-18T02:00:00Z")
+	if atClose.Rows[0].Liveness != "CLOSED" || atClose.Rows[0].EndedAt == nil {
+		t.Fatalf("at close=%+v", atClose)
+	}
+}
+
+func TestAgentsAsOfRejectsInvalidSourceAndFuture(t *testing.T) {
+	cases := [][]string{{"--as-of", "bad", "--source", "history"}, {"--as-of", "2026-08-19T00:00:00Z", "--source", "history", "--now", "1787036400"}, {"--as-of", "2026-08-18T00:00:00Z", "--source", "live", "--now", "1787036400"}}
+	for _, args := range cases {
+		var out, errout bytes.Buffer
+		if code := runAgents(&out, &errout, args); code != 2 || out.Len() != 0 {
+			t.Errorf("args=%v code=%d out=%s err=%s", args, code, out.String(), errout.String())
+		}
+	}
+}
