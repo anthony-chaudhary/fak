@@ -17,6 +17,7 @@ func TestResumeWatchdogBrokerUsesFakManagedEnvelopeForEveryHarness(t *testing.T)
 	}{
 		{name: "claude", plan: resume.WatchdogPlanRow{Session: "claude-session"}, want: "fak-bin m -- claude-bin --resume claude-session"},
 		{name: "codex", plan: resume.WatchdogPlanRow{Harness: "codex", Session: "codex-session", Rollout: "rollout.jsonl", GoalFile: "goal.json", ResultFile: "result.json"}, want: "fak-bin m -- fak-bin codex-resume"},
+		{name: "opencode", plan: resume.WatchdogPlanRow{Harness: "opencode", Session: "opencode-session"}, want: "fak-bin m -- opencode run --session opencode-session"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -29,7 +30,7 @@ func TestResumeWatchdogBrokerUsesFakManagedEnvelopeForEveryHarness(t *testing.T)
 }
 
 func TestResumeWatchdogManagedArgvRejectsUnsupportedHarness(t *testing.T) {
-	_, err := rwManagedResumeArgv("fak", "claude", resume.WatchdogPlanRow{Harness: "opencode", Session: "s"}, nil)
+	_, err := rwManagedResumeArgv("fak", "claude", resume.WatchdogPlanRow{Harness: "gemini", Session: "s"}, nil)
 	if !errors.Is(err, resumeactuator.ErrUnknownAdapter) {
 		t.Fatalf("error = %v, want ErrUnknownAdapter", err)
 	}

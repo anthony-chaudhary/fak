@@ -22,6 +22,11 @@ func TestManagedArgvKeepsFAKOuterAndHarnessAdjustmentSmall(t *testing.T) {
 			req:  Request{Harness: "CoDeX", Session: "codex-session", Rollout: "rollout.jsonl", GoalFile: "goal.json", ResultFile: "result.json", CWD: "repo"},
 			want: []string{"fak-bin", "m", "--provider", "anthropic", "--budget-envelope", "{}", "--", "fak-bin", "codex-resume", "--json", "--rollout", "rollout.jsonl", "--cwd", "repo", "--prompt-file", "goal.json", "--result-file", "result.json", "codex-session"},
 		},
+		{
+			name: "opencode",
+			req:  Request{Harness: "OpenCode", Session: "opencode-session", Prompt: "continue", OpenCodeExe: "opencode-bin"},
+			want: []string{"fak-bin", "m", "--provider", "anthropic", "--budget-envelope", "{}", "--", "opencode-bin", "run", "--session", "opencode-session", "continue"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -37,7 +42,7 @@ func TestManagedArgvKeepsFAKOuterAndHarnessAdjustmentSmall(t *testing.T) {
 }
 
 func TestManagedArgvFailsClosedForUnknownHarness(t *testing.T) {
-	_, err := (Request{Harness: "opencode", Session: "s"}).ManagedArgv("fak", nil, nil)
+	_, err := (Request{Harness: "gemini", Session: "s"}).ManagedArgv("fak", nil, nil)
 	if !errors.Is(err, ErrUnknownAdapter) {
 		t.Fatalf("error = %v, want ErrUnknownAdapter", err)
 	}
@@ -56,6 +61,13 @@ func TestCodexNativeResumeNeedsOnlySession(t *testing.T) {
 
 func TestCodexPartialDurableCoordinatesFailClosed(t *testing.T) {
 	_, err := (Request{Harness: "codex", Session: "s", Rollout: "r"}).ManagedArgv("fak", nil, nil)
+	if !errors.Is(err, ErrMissingCoordinate) {
+		t.Fatalf("error = %v, want ErrMissingCoordinate", err)
+	}
+}
+
+func TestOpenCodeResumeRequiresSession(t *testing.T) {
+	_, err := (Request{Harness: HarnessOpenCode}).ManagedArgv("fak", nil, nil)
 	if !errors.Is(err, ErrMissingCoordinate) {
 		t.Fatalf("error = %v, want ErrMissingCoordinate", err)
 	}

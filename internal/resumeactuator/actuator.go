@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	HarnessClaude = "claude"
-	HarnessCodex  = "codex"
+	HarnessClaude   = "claude"
+	HarnessCodex    = "codex"
+	HarnessOpenCode = "opencode"
 )
 
 var (
@@ -20,15 +21,16 @@ var (
 // Request contains the harness-neutral identity plus the small set of coordinates
 // required by the currently supported continuation adapters.
 type Request struct {
-	Harness    string
-	Session    string
-	Rollout    string
-	GoalFile   string
-	ResultFile string
-	CWD        string
-	Prompt     string
-	ClaudeExe  string
-	CodexExe   string
+	Harness     string
+	Session     string
+	Rollout     string
+	GoalFile    string
+	ResultFile  string
+	CWD         string
+	Prompt      string
+	ClaudeExe   string
+	CodexExe    string
+	OpenCodeExe string
 }
 
 // Harness normalizes the legacy empty value to Claude without guessing any other value.
@@ -38,7 +40,7 @@ func (r Request) HarnessName() (string, error) {
 		return HarnessClaude, nil
 	}
 	switch h {
-	case HarnessClaude, HarnessCodex:
+	case HarnessClaude, HarnessCodex, HarnessOpenCode:
 		return h, nil
 	default:
 		return "", fmt.Errorf("%w: %s", ErrUnknownAdapter, h)
@@ -85,6 +87,19 @@ func (r Request) ContinuationArgv(fakExe string) ([]string, error) {
 			exe = "codex"
 		}
 		argv := []string{exe, "exec", "resume", "--json", "--dangerously-bypass-approvals-and-sandbox", r.Session}
+		if strings.TrimSpace(r.Prompt) != "" {
+			argv = append(argv, r.Prompt)
+		}
+		return argv, nil
+	case HarnessOpenCode:
+		if strings.TrimSpace(r.Session) == "" {
+			return nil, fmt.Errorf("%w: opencode session", ErrMissingCoordinate)
+		}
+		exe := strings.TrimSpace(r.OpenCodeExe)
+		if exe == "" {
+			exe = "opencode"
+		}
+		argv := []string{exe, "run", "--session", r.Session}
 		if strings.TrimSpace(r.Prompt) != "" {
 			argv = append(argv, r.Prompt)
 		}
