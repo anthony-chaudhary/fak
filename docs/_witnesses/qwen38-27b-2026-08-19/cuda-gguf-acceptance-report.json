@@ -1,0 +1,32 @@
+{
+  "schema": "fak.modelaccept.report/2",
+  "verdict": "PASS",
+  "corpus_id": "qwen38-hardware-acceptance-2026-08-19",
+  "models": [
+    {
+      "model": "qwen38:27b",
+      "family": "qwen38",
+      "generation": "3.8",
+      "lifecycle": "latest",
+      "requested_tier": 0,
+      "verdict": "PASS",
+      "samples": 3,
+      "success_rate": 1,
+      "provider_error_rate": 0,
+      "invalid_tool_rate": 0,
+      "p50_latency_ms": 23494,
+      "p95_latency_ms": 33583,
+      "p95_input_tokens": 148,
+      "p95_cost_usd": 0,
+      "refusal_rate": 0,
+      "retry_rate": 0,
+      "recovery_rate": 0,
+      "tool_calls": 1,
+      "tool_turns": 1,
+      "tool_calls_per_tool_turn": 1,
+      "average_input_tokens": 90.33333333333333,
+      "average_cost_usd": 0,
+      "reasons": null
+    }
+  ]
+}

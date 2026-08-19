@@ -1,0 +1,24 @@
+{
+  "schema": "fak.modelaccept.inventory/1",
+  "verdict": "PASS",
+  "corpus_id": "qwen38-hardware-acceptance-2026-08-19",
+  "rows": [
+    {
+      "model": "qwen38:27b",
+      "family": "qwen38",
+      "generation": "3.8",
+      "lifecycle": "latest",
+      "capability_gate": "PASS",
+      "requested_tier": 0,
+      "witnessed_tier": 0,
+      "corpus_id": "qwen38-hardware-acceptance-2026-08-19",
+      "declared_at": "2026-08-19T05:15:34Z",
+      "observed_first": "2026-08-19T05:18:41Z",
+      "observed_last": "2026-08-19T05:19:33Z",
+      "samples": 3,
+      "artifact": "_scratch/qwen38-8011/qwen38-a100-v10.tgz",
+      "artifact_revision": "internal/model@r444+g607a8a2924"
+    }
+  ]
+}
+
