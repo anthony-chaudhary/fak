@@ -75,6 +75,14 @@ func TestScanAnalyticsCorpus_TypedTotalsReconcile(t *testing.T) {
 	}
 }
 
+func TestFoldResumeCohortKeepsLiveNonTerminal(t *testing.T) {
+	c := ResumeCohort{FailureReasons: map[string]int{}}
+	foldResumeCohort(&c, RolloutAnalytics{Tasks: []TaskAnalytics{{Outcome: Live}}})
+	if c.Started != 1 || c.Completed != 0 || c.Crashed != 0 || c.Superseded != 0 {
+		t.Fatalf("live cohort = %+v", c)
+	}
+}
+
 func TestAnalyticsCorpus_FreshHeadlessResumeCohort(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)

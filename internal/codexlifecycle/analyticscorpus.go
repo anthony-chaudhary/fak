@@ -290,6 +290,8 @@ func foldResumeCohort(c *ResumeCohort, ra RolloutAnalytics) {
 			c.Completed++
 		case Superseded:
 			c.Superseded++
+		case Live:
+			// Started already captures the still-running cohort member; it is not terminal.
 		case Aborted, ProcessDeath:
 			c.Crashed++
 			stage := "before_useful_work"
