@@ -95,6 +95,8 @@ func ClassifyEnd(ev Event) EndOutcome {
 	switch fallbackStatus(ev.Status, StatusClaimedDone) {
 	case StatusFailed, StatusCanceled:
 		return OutcomeFailure
+	default:
+		// Every non-failure status continues through the reason/effect partition.
 	}
 	if ev.Reason == ReasonNoFuel {
 		return OutcomeNoFuel

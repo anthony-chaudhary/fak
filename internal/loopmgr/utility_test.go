@@ -159,6 +159,16 @@ func TestClassifyEnd_Partition(t *testing.T) {
 		{"bare exit 0", Event{Kind: EventEnd, Status: StatusClaimedDone}, OutcomeUnattributed},
 		{"absent status falls back to claimed-done", Event{Kind: EventEnd}, OutcomeUnattributed},
 	}
+	for _, status := range []RunStatus{
+		StatusAdmitted, StatusRefused, StatusRunning, StatusClaimedDone,
+		StatusWitnessedDone, StatusWitnessRefused, StatusWitnessUnavailable,
+	} {
+		cases = append(cases, struct {
+			name string
+			ev   Event
+			want EndOutcome
+		}{"nonfailure status " + string(status), Event{Kind: EventEnd, Status: status}, OutcomeUnattributed})
+	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := ClassifyEnd(tc.ev); got != tc.want {
