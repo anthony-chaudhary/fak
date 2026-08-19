@@ -2547,6 +2547,26 @@
           "category": "incidental",
           "reason": "Private helper counting guarded process trees for recovery cardinality.",
           "token": "guardedTreeCount"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI flag variable, not a guard or gate concept.",
+          "token": "allAggregates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private slice membership helper, not a guard or gate concept.",
+          "token": "hasAggregate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private closed vocabulary slice, not a guard or gate concept.",
+          "token": "baseAggregates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private closed vocabulary slice, not a guard or gate concept.",
+          "token": "fullAggregates"
         }
       ],
       "exclude": [
@@ -2609,6 +2629,7 @@
         "GatewaySeat",
         "GuardClauses",
         "GuardJoined",
+        "GuardedProcessTrees",
         "IsAggregate",
         "LifecycleGate",
         "NewSessionAffinityGateway",
@@ -2632,8 +2653,10 @@
         "aggregateLive",
         "aggregateTail",
         "aggregate_complexity",
+        "allAggregates",
         "appendGuardCompactionWitnessTo",
         "armbenchPonytailGates",
+        "baseAggregates",
         "bindGuardRegistration",
         "buildguardchild",
         "cacheValueGateFactsFromReport",
@@ -2668,6 +2691,7 @@
         "fleetDogfoodGuardBaseURL",
         "fleetbarecommitguard",
         "formatGuardCompactionWitness",
+        "fullAggregates",
         "gateCommentQuality",
         "gateGitHygieneBypass",
         "gateProse",
@@ -2813,6 +2837,7 @@
         "guardbuildskewassessment",
         "guarddefaultaccountsregistrypath",
         "guarded",
+        "guardedTreeCount",
         "guarding",
         "guardinjectedenv",
         "guardoperatordirectedeffectivemode",
@@ -2827,6 +2852,7 @@
         "guardtaskhandoffeffectivemode",
         "guardtrajectorywarningline",
         "guardwireretryhop",
+        "hasAggregate",
         "injectGuardProfiles",
         "installguardmcpregistration",
         "latestGuardCompactionWitness",
@@ -2885,9 +2911,7 @@
         "unguarded",
         "verifyGateCheckout",
         "withGuardRegistrationEnv",
-        "worker_guard",
-        "GuardedProcessTrees",
-        "guardedTreeCount"
+        "worker_guard"
       ],
       "known_tokens": [],
       "min_files": 3,

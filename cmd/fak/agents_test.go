@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -325,5 +326,43 @@ func TestAgentsSchemaDescriptorJSON(t *testing.T) {
 	errout.Reset()
 	if code := runAgents(&out, &errout, []string{"--schema"}); code != 2 || !strings.Contains(errout.String(), agentquery.DescriptorSchema) {
 		t.Fatalf("code=%d out=%s err=%s", code, out.String(), errout.String())
+	}
+}
+
+func TestAgentsFullAggregatesFlagsAndQueryEquivalent(t *testing.T) {
+	journal := filepath.Join(t.TempDir(), "sessions.jsonl")
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	rows := []string{
+		`{"schema":"fak.sessionjournal.v1","kind":"open","id":"a","ts":"2026-08-19T11:59:59.990Z","registration":{"registration_id":"a","lane":"cmd"}}`,
+		`{"schema":"fak.sessionjournal.v1","kind":"close","id":"a","ts":"2026-08-19T12:00:00Z"}`,
+		`{"schema":"fak.sessionjournal.v1","kind":"open","id":"b","ts":"2026-08-19T11:59:59.980Z","registration":{"registration_id":"b","lane":"cmd"}}`,
+		`{"schema":"fak.sessionjournal.v1","kind":"close","id":"b","ts":"2026-08-19T12:00:00Z"}`,
+	}
+	if err := os.WriteFile(journal, []byte(strings.Join(rows, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	flags := []string{"--journal", journal, "--history", "168h", "--group-by", "lane,state", "--count", "--all-aggregates", "--now", strconv.FormatInt(now.Unix(), 10), "--json"}
+	query := "SELECT lane,state,count(*) AS agents,min(elapsed_ms) AS min_elapsed_ms,max(elapsed_ms) AS max_elapsed_ms,sum(elapsed_ms) AS sum_elapsed_ms,avg(elapsed_ms) AS avg_elapsed_ms FROM agents WHERE started_at >= now()-interval '7 day' GROUP BY lane,state ORDER BY max_elapsed_ms DESC"
+	queryArgs := []string{"--journal", journal, "--query", query, "--now", strconv.FormatInt(now.Unix(), 10), "--json"}
+	var flagsOut, queryOut, errout bytes.Buffer
+	if code := runAgents(&flagsOut, &errout, flags); code != 0 {
+		t.Fatalf("flags code=%d err=%s", code, errout.String())
+	}
+	errout.Reset()
+	if code := runAgents(&queryOut, &errout, queryArgs); code != 0 {
+		t.Fatalf("query code=%d err=%s", code, errout.String())
+	}
+	var a, b agentquery.GroupResult
+	if err := json.Unmarshal(flagsOut.Bytes(), &a); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(queryOut.Bytes(), &b); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(a, b) {
+		t.Fatalf("flags=%s query=%s", flagsOut.String(), queryOut.String())
+	}
+	if len(a.Rows) != 1 || a.Rows[0].SumElapsedMS == nil || *a.Rows[0].SumElapsedMS != 30 || a.Rows[0].AvgElapsedMS == nil || *a.Rows[0].AvgElapsedMS != 15 {
+		t.Fatalf("result=%+v", a)
 	}
 }

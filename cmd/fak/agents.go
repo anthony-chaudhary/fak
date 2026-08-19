@@ -46,12 +46,13 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 	historyWindowText := fs.String("history", "", "historical lookback window (for example 7d)")
 	groupBy := fs.String("group-by", "", "aggregate grouping (currently lane,state)")
 	count := fs.Bool("count", false, "include group row counts")
+	allAggregates := fs.Bool("all-aggregates", false, "include min/max/sum/avg elapsed_ms")
 	queryText := fs.String("query", "", "constrained read-only grouped query text")
 	asOfText := fs.String("as-of", "", "historical state at RFC3339 instant")
 	nowUnix := fs.Int64("now", 0, "observation Unix timestamp (tests/replay)")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: fak agents [--source live|history|union] [--journal FILE] [--all] [--json]")
-		fmt.Fprintln(stderr, "       fak agents --history 168h --group-by lane,state --count [--json]")
+		fmt.Fprintln(stderr, "       fak agents --history 168h --group-by lane,state --count [--all-aggregates] [--json]")
 		fmt.Fprintln(stderr, "       fak agents --query \"SELECT lane,state,count(*) AS agents,max(elapsed_ms) AS max_elapsed_ms FROM agents WHERE started_at >= now()-interval '7 day' GROUP BY lane,state ORDER BY max_elapsed_ms DESC\"")
 		fmt.Fprintln(stderr, "--query is a constrained read-only grammar, not arbitrary SQL")
 		fmt.Fprintf(stderr, "--schema --json emits %s\n", agentquery.DescriptorSchema)
@@ -103,7 +104,7 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	historyWindow, historyErr := parseAgentHistoryWindow(*historyWindowText)
-	groupedFlags := *groupBy != "" || *historyWindowText != "" || *count
+	groupedFlags := *groupBy != "" || *historyWindowText != "" || *count || *allAggregates
 	if groupedFlags && *queryText != "" {
 		fmt.Fprintln(stderr, "fak agents: --query cannot be combined with grouped flags")
 		return 2
@@ -128,6 +129,9 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 		}
 		var err error
 		queryPlan, err = agentquery.GroupedPlan(historyWindow)
+		if err == nil && *allAggregates {
+			queryPlan.Aggregates = []string{"count", "min_elapsed_ms", "max_elapsed_ms", "sum_elapsed_ms", "avg_elapsed_ms"}
+		}
 		if err != nil {
 			fmt.Fprintf(stderr, "fak agents: grouped query rejected: %v\n", err)
 			return 2
@@ -401,17 +405,26 @@ func renderAgentGroups(w io.Writer, result agentquery.GroupResult) {
 		fmt.Fprintf(w, "history status=%s accepted=%d rejected=%d\n", h.Status, h.AcceptedRows, h.MalformedRows+h.WrongSchemaRows+h.MissingIDRows)
 	}
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "LANE\tSTATE\tCOUNT\tMAX ELAPSED")
+	fmt.Fprintln(tw, "LANE\tSTATE\tCOUNT\tMIN MS\tMAX MS\tSUM MS\tAVG MS")
 	for _, r := range result.Rows {
 		lane := "-"
 		if r.Lane != nil {
 			lane = *r.Lane
 		}
-		elapsed := "-"
-		if r.MaxElapsedMS != nil {
-			elapsed = compactDuration(*r.MaxElapsedMS / 1000)
-		}
-		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\n", lane, r.State, r.Count, elapsed)
+		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\t%s\t%s\n", lane, r.State, r.Count, nullableInt(r.MinElapsedMS), nullableInt(r.MaxElapsedMS), nullableInt(r.SumElapsedMS), nullableFloat(r.AvgElapsedMS))
 	}
 	tw.Flush()
+}
+
+func nullableInt(v *int64) string {
+	if v == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%d", *v)
+}
+func nullableFloat(v *float64) string {
+	if v == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%.3f", *v)
 }

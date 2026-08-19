@@ -1,17 +1,21 @@
 package agentquery
 
 import (
+	"math"
 	"sort"
 	"time"
 )
 
-const GroupSchema = "fak-agent-groups/1"
+const GroupSchema = "fak-agent-groups/2"
 
 type GroupRow struct {
-	Lane         *string `json:"lane"`
-	State        string  `json:"state"`
-	Count        int     `json:"count"`
-	MaxElapsedMS *int64  `json:"max_elapsed_ms"`
+	Lane         *string  `json:"lane"`
+	State        string   `json:"state"`
+	Count        int      `json:"count"`
+	MinElapsedMS *int64   `json:"min_elapsed_ms"`
+	MaxElapsedMS *int64   `json:"max_elapsed_ms"`
+	SumElapsedMS *int64   `json:"sum_elapsed_ms"`
+	AvgElapsedMS *float64 `json:"avg_elapsed_ms"`
 }
 
 type GroupMetadata struct {
@@ -46,6 +50,7 @@ func GroupLaneStatePlan(rows []Row, plan QueryPlan, observed time.Time, source s
 		hasLane     bool
 	}
 	groups := map[key]*GroupRow{}
+	numericCounts := map[key]int64{}
 	matched := 0
 	for _, r := range rows {
 		timeValue := r.StartedAt
@@ -75,13 +80,48 @@ func GroupLaneStatePlan(rows []Row, plan QueryPlan, observed time.Time, source s
 		}
 		g.Count++
 		matched++
-		if r.ElapsedMS != nil && (g.MaxElapsedMS == nil || *r.ElapsedMS > *g.MaxElapsedMS) {
+		if r.ElapsedMS != nil {
 			v := *r.ElapsedMS
-			g.MaxElapsedMS = &v
+			if g.MinElapsedMS == nil || v < *g.MinElapsedMS {
+				x := v
+				g.MinElapsedMS = &x
+			}
+			if g.MaxElapsedMS == nil || v > *g.MaxElapsedMS {
+				x := v
+				g.MaxElapsedMS = &x
+			}
+			if numericCounts[k] < 0 {
+				// A prior overflow keeps sum and average typed null.
+			} else if g.SumElapsedMS == nil {
+				x := v
+				g.SumElapsedMS = &x
+			} else if (v > 0 && *g.SumElapsedMS > math.MaxInt64-v) || (v < 0 && *g.SumElapsedMS < math.MinInt64-v) {
+				g.SumElapsedMS = nil
+				numericCounts[k] = -1
+			} else if numericCounts[k] >= 0 {
+				x := *g.SumElapsedMS + v
+				g.SumElapsedMS = &x
+			}
+			if numericCounts[k] >= 0 {
+				numericCounts[k]++
+			}
 		}
 	}
 	out := make([]GroupRow, 0, len(groups))
-	for _, g := range groups {
+	for k, g := range groups {
+		if n := numericCounts[k]; n > 0 && g.SumElapsedMS != nil {
+			avg := float64(*g.SumElapsedMS) / float64(n)
+			g.AvgElapsedMS = &avg
+		}
+		if !hasAggregate(plan, "min_elapsed_ms") {
+			g.MinElapsedMS = nil
+		}
+		if !hasAggregate(plan, "sum_elapsed_ms") {
+			g.SumElapsedMS = nil
+		}
+		if !hasAggregate(plan, "avg_elapsed_ms") {
+			g.AvgElapsedMS = nil
+		}
 		out = append(out, *g)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -97,4 +137,13 @@ func GroupLaneStatePlan(rows []Row, plan QueryPlan, observed time.Time, source s
 		return out[i].State < out[j].State
 	})
 	return GroupResult{Metadata: GroupMetadata{Schema: GroupSchema, GroupBy: plan.GroupBy, Source: source, Since: since.UTC().Format(time.RFC3339), ObservedAt: observed.UTC().Format(time.RFC3339), InputRows: len(rows), MatchedRows: matched, History: health, Plan: plan}, Rows: out}
+}
+
+func hasAggregate(plan QueryPlan, want string) bool {
+	for _, aggregate := range plan.Aggregates {
+		if aggregate == want {
+			return true
+		}
+	}
+	return false
 }

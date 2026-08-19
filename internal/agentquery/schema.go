@@ -32,7 +32,7 @@ type Descriptor struct {
 }
 
 func SchemaDescriptor() Descriptor {
-	return Descriptor{Schema: DescriptorSchema, RelationSchema: Schema, GroupSchema: GroupSchema, ListPlanSchema: ListPlanSchema, QueryPlanSchema: QueryPlanSchema, Fields: rowFieldDescriptors(), Sources: []string{"live", "history", "union"}, Filters: []string{"state", "liveness", "owner", "host", "lane", "group", "model", "provider", "root_id", "parent_id", "started_after", "started_before"}, Sorts: []string{"elapsed_desc", "elapsed_asc", "progress_age_desc", "progress_age_asc", "started_desc", "started_asc", "ended_desc", "ended_asc", "cost_desc", "cost_asc", "identity_asc", "identity_desc"}, Aggregates: []string{"count", "max_elapsed_ms"}, MaxRows: 10000, QueryMaxBytes: 4096}
+	return Descriptor{Schema: DescriptorSchema, RelationSchema: Schema, GroupSchema: GroupSchema, ListPlanSchema: ListPlanSchema, QueryPlanSchema: QueryPlanSchema, Fields: rowFieldDescriptors(), Sources: []string{"live", "history", "union"}, Filters: []string{"state", "liveness", "owner", "host", "lane", "group", "model", "provider", "root_id", "parent_id", "started_after", "started_before"}, Sorts: []string{"elapsed_desc", "elapsed_asc", "progress_age_desc", "progress_age_asc", "started_desc", "started_asc", "ended_desc", "ended_asc", "cost_desc", "cost_asc", "identity_asc", "identity_desc"}, Aggregates: []string{"count", "min_elapsed_ms", "max_elapsed_ms", "sum_elapsed_ms", "avg_elapsed_ms"}, MaxRows: 10000, QueryMaxBytes: 4096}
 }
 func rowFieldDescriptors() []FieldDescriptor {
 	t := reflect.TypeOf(Row{})
@@ -139,7 +139,7 @@ func ValidateGroupResult(r GroupResult) error {
 
 func validateGroupedPlan(p QueryPlan) error {
 	if p.Schema != QueryPlanSchema || p.Source != "history" || p.HistoryWindowSeconds < 1 || p.HistoryWindowSeconds > int64((3650*24*time.Hour)/time.Second) ||
-		!reflect.DeepEqual(p.GroupBy, []string{"lane", "state"}) || !reflect.DeepEqual(p.Aggregates, []string{"count", "max_elapsed_ms"}) ||
+		!reflect.DeepEqual(p.GroupBy, []string{"lane", "state"}) || (!reflect.DeepEqual(p.Aggregates, baseAggregates) && !reflect.DeepEqual(p.Aggregates, fullAggregates)) ||
 		p.OrderBy != "max_elapsed_ms_desc" || (p.TimeColumn != "started_at" && p.TimeColumn != "observed_at") {
 		return fmt.Errorf("invalid grouped query plan")
 	}

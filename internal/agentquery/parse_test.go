@@ -32,3 +32,16 @@ func TestParseQueryAcceptsDocumentedObservedAtAlias(t *testing.T) {
 		t.Fatalf("plan=%+v err=%v", p, err)
 	}
 }
+
+func TestParseQueryFullAggregatePlan(t *testing.T) {
+	query := "SELECT lane,state,count(*) AS agents,min(elapsed_ms) AS min_elapsed_ms,max(elapsed_ms) AS max_elapsed_ms,sum(elapsed_ms) AS sum_elapsed_ms,avg(elapsed_ms) AS avg_elapsed_ms FROM agents WHERE started_at >= now()-interval '7 day' GROUP BY lane,state ORDER BY max_elapsed_ms DESC"
+	got, err := ParseQuery(query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := GroupedPlan(7 * 24 * time.Hour)
+	want.Aggregates = append([]string(nil), fullAggregates...)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got=%+v want=%+v", got, want)
+	}
+}
