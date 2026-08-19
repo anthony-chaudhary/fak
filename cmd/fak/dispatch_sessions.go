@@ -131,6 +131,8 @@ func runDispatchSessions(stdout, stderr io.Writer, argv []string) int {
 	watchInterval := fs.Duration("watch-interval", 2*time.Second, "with --watch: delay between re-renders")
 	watchIterations := fs.Int("watch-iterations", 0, "with --watch: number of renders before returning (0 = run until interrupted)")
 	tail := fs.String("tail", "", "print the secret-scrubbed transcript tail of the worker whose guard handle or trace-id has this prefix")
+	demo := fs.Bool("demo", false, "render a deterministic unified-session fixture without reading host state")
+	selfcheck := fs.Bool("selfcheck", false, "with --demo: verify human and JSON projections before rendering")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -141,6 +143,33 @@ func runDispatchSessions(stdout, stderr io.Writer, argv []string) int {
 	if *asJSON && *asMarkdown {
 		fmt.Fprintln(stderr, "fak dispatch sessions: choose at most one of --json or --markdown")
 		return 2
+	}
+	if *selfcheck && !*demo {
+		fmt.Fprintln(stderr, "fak dispatch sessions: --selfcheck requires --demo")
+		return 2
+	}
+	if *demo {
+		snap := dispatchSessionsSnapshot{
+			Schema: dispatchSessionsSchema, RunsDir: "<demo>", RegDir: "<demo>",
+			SessionCount: 1, LiveCount: 1,
+			Sessions: []dispatchSessionRow{{Worker: "worker-demo", Issue: "3330", Lane: "cmd", Backend: "codex", PID: 3330, PIDAlive: true, Live: true, Outcome: "running", Reason: "launch-confirmed", Guard: &dispatchSessionGuard{Handle: "demo-guard", TraceID: "demo-trace"}}},
+		}
+		if *selfcheck {
+			if snap.Schema != dispatchSessionsSchema || snap.SessionCount != 1 || snap.LiveCount != 1 || !strings.Contains(renderDispatchSessions(snap), "#3330") {
+				fmt.Fprintln(stderr, "fak dispatch sessions: selfcheck failed")
+				return 1
+			}
+			fmt.Fprintln(stderr, "dispatch sessions selfcheck OK")
+		}
+		if *asJSON {
+			return encodeJSONOrFail(stdout, stderr, snap, "fak dispatch sessions")
+		}
+		if *asMarkdown {
+			fmt.Fprint(stdout, renderDispatchSessionsMarkdown(snap))
+			return 0
+		}
+		fmt.Fprint(stdout, renderDispatchSessions(snap))
+		return 0
 	}
 
 	now := time.Now().UTC()

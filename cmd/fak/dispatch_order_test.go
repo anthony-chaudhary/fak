@@ -44,6 +44,38 @@ func twentyFiveForX(t *testing.T, now int64) string {
 	return writeCandidates(t, string(b))
 }
 
+func TestDispatchDefaultSurfacesUnifiedSessions(t *testing.T) {
+	runsDir := t.TempDir()
+	regDir := t.TempDir()
+	out, errb, code := runDispatchAt("--runs-dir", runsDir, "--reg-dir", regDir, "--now", "2000000")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+	}
+	if !strings.Contains(out, "dispatch sessions — 0 session(s), 0 live") || !strings.Contains(out, "no dispatch worker sessions") {
+		t.Fatalf("bare dispatch did not render unified sessions:\n%s", out)
+	}
+}
+
+func TestDispatchDefaultDemoSelfcheck(t *testing.T) {
+	out, errb, code := runDispatchAt("--demo", "--selfcheck")
+	if code != 0 || !strings.Contains(out, "#3330") || !strings.Contains(errb, "selfcheck OK") {
+		t.Fatalf("demo exit=%d stdout=%q stderr=%q", code, out, errb)
+	}
+}
+func TestDispatchDefaultJSONIsMachineReadableSessionView(t *testing.T) {
+	out, errb, code := runDispatchAt("--runs-dir", t.TempDir(), "--reg-dir", t.TempDir(), "--now", "2000000", "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+	}
+	var got dispatchSessionsSnapshot
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("default JSON is invalid: %v\n%s", err, out)
+	}
+	if got.Schema != dispatchSessionsSchema || got.SessionCount != 0 {
+		t.Fatalf("default JSON = %#v", got)
+	}
+}
+
 // TestDispatchOrderJSONSupersede is the headline scenario through the CLI: 25 tasks for the same
 // target collapse to the freshest; --json reports 1 keep, 24 superseded, and that pick.
 func TestDispatchOrderJSONSupersede(t *testing.T) {

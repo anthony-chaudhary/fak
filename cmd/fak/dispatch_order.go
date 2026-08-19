@@ -41,9 +41,10 @@ func cmdDispatch(argv []string) { os.Exit(runDispatch(os.Stdout, os.Stderr, argv
 // runDispatch is the testable core: it returns the process exit code (0 ok, 1 a runtime error,
 // 2 a usage error) and takes its streams explicitly so a test drives it without a process.
 func runDispatch(stdout, stderr io.Writer, argv []string) int {
-	if len(argv) == 0 {
-		dispatchUsage(stderr)
-		return 2
+	// The default surface is the identity-safe unified session view. Flags are
+	// forwarded so `fak dispatch --json` is useful without knowing a subcommand.
+	if len(argv) == 0 || strings.HasPrefix(argv[0], "-") {
+		return runDispatchSessions(stdout, stderr, argv)
 	}
 	switch argv[0] {
 	case "auto":
