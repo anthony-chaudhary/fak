@@ -16,6 +16,7 @@ var testSupport = Support{
 	Recipes:    map[string][]string{"awq": {"0.2.6"}},
 	Runtimes:   map[string][]string{"vllm": {"0.10.0"}, "external-engine": {"4.1.0"}},
 	Precisions: []string{"fp16", "int8", "int4"},
+	//enumlint:exempt OutcomeRefused is represented by absence from the support table, not by a supported combination.
 	Combinations: []Combination{
 		{Artifact: "safetensors@1.0.0", Recipe: "awq@0.2.6", Runtime: "vllm@0.10.0", Outcome: OutcomeSupported},
 		{Artifact: "safetensors@1.0.0", Recipe: "awq@0.2.6", Runtime: "external-engine@4.1.0", Outcome: OutcomeDelegate},
@@ -33,6 +34,14 @@ func loadFixture(t *testing.T, name string) Descriptor {
 		t.Fatal(err)
 	}
 	return d
+}
+
+func TestSupportTableOmitsRefusedCombinations(t *testing.T) {
+	for _, combination := range testSupport.Combinations {
+		if combination.Outcome == OutcomeRefused {
+			t.Fatal("refused combinations must be represented by absence from support table")
+		}
+	}
 }
 
 func TestGoldenFixturesCoverSupportedUnsupportedAndDelegate(t *testing.T) {
