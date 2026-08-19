@@ -150,6 +150,9 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	if verb == "audit" {
 		return runSessionAuditAlias(stdout, stderr, args)
 	}
+	if verb == "recover" {
+		return runSessionRecover(stdout, stderr, args)
+	}
 	// compact-audit (#4763) mines native Codex rollout JSONL for compaction health —
 	// offline, streaming, no gateway — so it dispatches with the other offline verbs.
 	if verb == "compact-audit" {
@@ -921,6 +924,8 @@ func sessionUsage(w io.Writer) {
                                                handle: drain its drive-state revisions after the
                                                cursor (lossless across a controller disconnect)
   fak session priority <id> <N>               re-set the scheduling rank (lower yields first)
+  fak session recover [--thread ID] [--limit N] [--apply]
+                                               preview crashed Codex sessions; --apply restores each once in a guarded tab
   fak session audit [summary|actions|discover|audit|deep] [--days N] [--json] [--fail-on high]
                                                offline recent transcript audit; defaults to summary --here
   fak session observe [--days N] [--json] [--all-workspaces]

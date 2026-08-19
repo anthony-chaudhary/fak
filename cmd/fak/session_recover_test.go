@@ -20,6 +20,21 @@ func (c *captureLauncher) Launch(r sessionrecovery.Request) error {
 	return nil
 }
 
+func TestSessionRecoverIsFirstClassAlias(t *testing.T) {
+	oldInv := recoveryInventory
+	defer func() { recoveryInventory = oldInv }()
+	recoveryInventory = func(time.Duration) (sessionrecovery.InventoryReport, error) {
+		return sessionrecovery.InventoryReport{}, nil
+	}
+	var out, er bytes.Buffer
+	if code := runSession(&out, &er, []string{"recover", "--journal=false"}); code != 0 {
+		t.Fatalf("code=%d err=%s", code, er.String())
+	}
+	if got := out.String(); got != "[]\n" {
+		t.Fatalf("output=%q", got)
+	}
+}
+
 func TestSessionRecoverPromptAndCWD(t *testing.T) {
 	oldInv, oldJournal, oldLaunch, oldSleep := recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep
 	defer func() {
