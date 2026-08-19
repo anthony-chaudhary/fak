@@ -41,6 +41,7 @@ const ExemptDirective = "enumlint:exempt"
 // — and every entry here has to earn it at its own site. Filling this table from
 // a baseline sweep would convert a measurement into a hundred unread assertions.
 var exemptions = map[string]string{
+	"literal|internal/nativebench|contracts.Alternatives":   "Each benchmark declares only applicable comparison classes; a first-class integration arm does not exist for every capability.",
 	"literal|internal/fp4meta|allCapabilities.ScaleFormats": "ScaleNone is deliberately excluded: the fixture describes FP4 hardware that requires explicit scaling.",
 	"literal|internal/kvquantmeta|testSupport.Precisions":   "FP16 and BF16 are unquantized controls, deliberately outside the quantized-support fixture.",
 }
