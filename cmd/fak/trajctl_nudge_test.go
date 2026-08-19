@@ -9,7 +9,9 @@ package main
 // the same runTrajctl entry main.go's dispatch case invokes.
 
 import (
+	"bytes"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -166,5 +168,28 @@ func assertNudgeNext(t *testing.T, outcome trajctlNudgeOutcome, applied bool) {
 	}
 	if n.Move.Payload != outcome.Packet {
 		t.Fatalf("next payload = %q, want decision packet %q", n.Move.Payload, outcome.Packet)
+	}
+}
+
+func TestTrajctlFleetJSONAndHuman(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "trajctl.jsonl")
+	obj := trajctl.Objective{ID: "epic", Statement: "fleet epic", Status: trajctl.StatusActive}
+	if err := trajctl.Append(ledger, trajctl.ObjectiveRecord(obj)); err != nil {
+		t.Fatal(err)
+	}
+	if err := trajctl.Append(ledger, trajctl.ScoreRecord(trajctl.ScoreRow{ObjectiveID: "epic", Method: trajctl.CommitScorerMethod, Version: "v1", Value: .4, Witness: trajctl.W3, SessionID: "s1"})); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if rc := runTrajctl(&out, &errOut, []string{"fleet", "--ledger", ledger, "--json"}); rc != 0 {
+		t.Fatalf("rc=%d err=%s", rc, errOut.String())
+	}
+	if !strings.Contains(out.String(), trajctl.FleetSchema) || !strings.Contains(out.String(), `"sessions": 1`) {
+		t.Fatalf("json=%s", out.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if rc := runTrajctl(&out, &errOut, []string{"fleet", "--ledger", ledger}); rc != 0 || !strings.Contains(out.String(), "fleet objectives (worst-first)") {
+		t.Fatalf("human=%s err=%s", out.String(), errOut.String())
 	}
 }

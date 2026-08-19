@@ -151,6 +151,8 @@ func runTrajctl(stdout, stderr io.Writer, argv []string) int {
 		return runTrajctlList(stdout, stderr, rest)
 	case "curve":
 		return runTrajctlCurve(stdout, stderr, rest)
+	case "fleet":
+		return runTrajctlFleet(stdout, stderr, rest)
 	case "score":
 		return runTrajctlScore(stdout, stderr, rest)
 	case "scorers":
@@ -472,6 +474,31 @@ func trajctlRenderCurve(stdout io.Writer, rep trajctl.CurveReport, path, objecti
 // runTrajctlScorers renders the scorer calibration leaderboard (#2566): per scorer
 // method+version, how well its numbers correlate with the W3 witnessed outcome, ranked
 // best-first so the worst-calibrated (repair-target) scorer sits at the bottom.
+
+func runTrajctlFleet(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak trajctl fleet", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	ledger := fs.String("ledger", "", "ledger path override (default: <root>/"+trajctl.DefaultLedgerRel+")")
+	asJSON := fs.Bool("json", false, "emit "+trajctl.FleetSchema+" JSON")
+	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
+		return code
+	}
+	path := trajctlLedgerPath(*ledger)
+	rep := trajctl.Fold(trajctl.ReadLedgerFile(path)).Fleet()
+	if *asJSON {
+		return trajctlEmitJSON(stdout, stderr, rep)
+	}
+	if len(rep.Objectives) == 0 {
+		fmt.Fprintf(stdout, "no fleet objectives in %s\n", path)
+		return 0
+	}
+	fmt.Fprintln(stdout, "fleet objectives (worst-first):")
+	for _, o := range rep.Objectives {
+		fmt.Fprintf(stdout, "  %-24s %-14s progress=%.3f sessions=%d open=%d  %s\n", o.ObjectiveID, o.Signal, o.Progress, o.Sessions, o.OpenDescendants, o.Title)
+	}
+	return 0
+}
+
 func runTrajctlScorers(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak trajctl scorers", flag.ContinueOnError)
 	fs.SetOutput(stderr)
