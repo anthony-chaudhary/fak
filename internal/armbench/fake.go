@@ -62,6 +62,8 @@ func (p *FakeProvider) Complete(_ context.Context, req Request) (Response, error
 	wall := 900.0
 	cache := CacheCounters{Misses: 1}
 	switch req.ArmKind {
+	case ArmBaseline:
+		// Defaults above define the untreated control explicitly.
 	case ArmUpstreamTreatment:
 		// The comparator's treatment: fewer output tokens, more system prompt in.
 		inTok, outTok = 1340, 520

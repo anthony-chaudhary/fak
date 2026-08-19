@@ -53,6 +53,19 @@ func TestSelfcheckMissingEvidenceWitnessIsStable(t *testing.T) {
 
 // TestSpineRunsAllFourArmKinds covers baseline + upstream treatment + fak
 // passthrough + one isolated fak capability end to end on the fake provider.
+func TestFakeProviderHandlesEveryArmKind(t *testing.T) {
+	p := &FakeProvider{}
+	for _, kind := range KnownArmKinds() {
+		resp, err := p.Complete(context.Background(), Request{ArmID: "arm", ArmKind: kind, TaskID: "task"})
+		if err != nil {
+			t.Fatalf("%s: %v", kind, err)
+		}
+		if resp.Usage.InputTokens == 0 || resp.Usage.OutputTokens == 0 {
+			t.Errorf("%s produced empty usage: %+v", kind, resp.Usage)
+		}
+	}
+}
+
 func TestSpineRunsAllFourArmKinds(t *testing.T) {
 	m, corpus := DemoManifest(), DemoCorpus()
 	run, err := Execute(context.Background(), m, corpus, &FakeProvider{SetupWallMS: 1000}, &FakeGrader{}, Options{})
