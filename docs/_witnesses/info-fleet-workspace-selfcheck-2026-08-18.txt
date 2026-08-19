@@ -1,0 +1,8 @@
+[w web gateway]   [1 overview] [2 agents] «3 fleet» [4 accounts] [5 cache] [6 safety]   [? glossary]
+FLEET WORKSPACE · read-only
+⊘action · 2 machines~ · 1 action~
+4 sessions~
+loops · READY · configured 2 · showing 2 · source fleetpane @ 2026-08-18T20:00:00Z
+stuck-loop · ACTION · no progress age=48m · next: fak fleetpane loop-check stuck-loop
+healthy-loop · OK · fresh progress age=2m · next: none
+SELFCHECK OK — Fleet workspace is read-only, attention-first, and every action has an existing CLI next step

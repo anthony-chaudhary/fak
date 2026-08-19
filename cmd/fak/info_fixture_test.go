@@ -132,6 +132,7 @@ func TestInfoViewByName(t *testing.T) {
 		{"overview", viewOverview, true},
 		{"", viewOverview, true}, // empty defaults to overview
 		{"agents", viewAgents, true},
+		{"fleet", viewFleet, true},
 		{"accounts", viewEndpoints, true},
 		{"endpoints", viewEndpoints, true}, // internal alias accepted
 		{"cache", viewCache, true},

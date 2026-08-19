@@ -135,9 +135,9 @@ func TestApplyInfoInputTabs(t *testing.T) {
 		t.Fatalf("prev from first view = %d, want last (%d)", s.active, infoViewCount()-1)
 	}
 	// A digit jumps directly; an out-of-range digit is ignored.
-	s = applyInfoInput(infoViewState{}, infoInput{Kind: infoInputTabSelect, Index: 4})
+	s = applyInfoInput(infoViewState{}, infoInput{Kind: infoInputTabSelect, Index: 5})
 	if s.active != viewCache {
-		t.Fatalf("select 4 = %d, want cache", s.active)
+		t.Fatalf("select 5 = %d, want cache", s.active)
 	}
 	s = applyInfoInput(infoViewState{active: viewCache}, infoInput{Kind: infoInputTabSelect, Index: 9})
 	if s.active != viewCache {
@@ -275,10 +275,20 @@ func TestApplyInfoClickTabBar(t *testing.T) {
 			gloss = r
 		}
 	}
-	if safety.end == 0 || gloss.end == 0 {
-		t.Fatalf("tab bar missing safety/glossary regions: %+v", bar.regions)
+	var fleet infoTabRegion
+	for _, r := range bar.regions {
+		if r.view == viewFleet {
+			fleet = r
+		}
 	}
-	s := applyInfoInput(infoViewState{active: viewOverview}, infoInput{Kind: infoInputMouseClick, X: safety.start, Y: 1})
+	if safety.end == 0 || fleet.end == 0 || gloss.end == 0 {
+		t.Fatalf("tab bar missing fleet/safety/glossary regions: %+v", bar.regions)
+	}
+	s := applyInfoInput(infoViewState{active: viewOverview}, infoInput{Kind: infoInputMouseClick, X: fleet.start, Y: 1})
+	if s.active != viewFleet {
+		t.Fatalf("click on Fleet tab = %d, want fleet", s.active)
+	}
+	s = applyInfoInput(infoViewState{active: viewOverview}, infoInput{Kind: infoInputMouseClick, X: safety.start, Y: 1})
 	if s.active != viewSafety {
 		t.Fatalf("click on the safety tab = %d, want safety", s.active)
 	}

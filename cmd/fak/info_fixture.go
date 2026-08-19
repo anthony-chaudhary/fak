@@ -28,6 +28,8 @@ func infoViewByName(name string) (infoView, bool) {
 		return viewOverview, true
 	case "agents":
 		return viewAgents, true
+	case "fleet":
+		return viewFleet, true
 	case "accounts", "endpoints":
 		// "accounts" is the tab label; "endpoints" is the internal view name — accept both so a
 		// caller reading either the UI or the code lands on the same frame.

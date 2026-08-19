@@ -96,6 +96,8 @@ func infoViewFullRows(view infoView, ctx guardInfoPanelCtx) (full []string, pinn
 	switch view {
 	case viewAgents:
 		return renderInfoAgentsView(ctx.v), 0
+	case viewFleet:
+		return fleetWorkspaceRows(ctx.v), 0
 	case viewEndpoints:
 		return renderInfoEndpointsView(ctx), 0
 	case viewCache:

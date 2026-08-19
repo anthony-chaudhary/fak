@@ -34,6 +34,7 @@ type infoView int
 const (
 	viewOverview infoView = iota
 	viewAgents
+	viewFleet
 	viewEndpoints
 	viewCache
 	viewSafety
@@ -54,6 +55,8 @@ func infoViewName(v infoView) string {
 		return "overview"
 	case viewAgents:
 		return "agents"
+	case viewFleet:
+		return "fleet"
 	case viewEndpoints:
 		return "accounts"
 	case viewCache:

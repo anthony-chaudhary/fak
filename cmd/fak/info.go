@@ -137,8 +137,9 @@ type guardInfoVars struct {
 	// the gateway's own shape (info.go already imports gateway). Pointer, like VCache, so
 	// a gateway that set no provider — a fak serve gateway, or the accounts half of a
 	// non-subscription guard session — omits it rather than fabricating an empty roster.
-	Endpoints *gateway.SessionEndpoints `json:"endpoints"`
-	Fleet     *gateway.SessionFleet     `json:"fleet,omitempty"`
+	Endpoints      *gateway.SessionEndpoints `json:"endpoints"`
+	Fleet          *gateway.SessionFleet     `json:"fleet,omitempty"`
+	FleetWorkspace *infoFleetWorkspace       `json:"fleet_workspace,omitempty"`
 	// Adjudication is the verdict roll-up promoted from the guard EXIT summary — the
 	// HONEST source for the live safety word, because kernel.Counters (the Kernel block
 	// above) is structurally ~0 on the guard Decide proxy. Nil on a cold gateway that has
@@ -288,6 +289,7 @@ func fetchGuardInfoVars(c *claudeMacDebugClient, stderr io.Writer) (guardInfoVar
 		fmt.Fprintln(stderr, guardInfoFetchErrorLine(c.base, err))
 		return v, false
 	}
+	v.FleetWorkspace = collectInfoFleetWorkspace("", fleetPaneRunner, time.Now().UTC())
 	v.WorkDone = ptrGuardInfoWorkDone(guardInfoWorkDoneFromVars(v))
 	c.decorateWorkHistory(&v)
 	return v, true
@@ -366,8 +368,9 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	maxIdle := fs.Duration("max-idle", 0, "issue #2340: in watch mode, self-exit (with a closing line) after the gateway has been unreachable for about this long WITHOUT ever answering — a self-terminating backstop so an auto-spawned pane (e.g. from `fak guard --split`) whose gateway never comes up cannot poll a dead URL forever and leak a terminal pane. 0 (default) polls indefinitely, the manual-run behavior. Ignored with --once/--json. Rounds up to a whole --interval tick.")
 	prefixTranscript := fs.String("prefix-transcript", "", "issue #1602: score the managed-context prefix-stability of a recorded Claude Code / GLM transcript (JSONL) turn-by-turn, offline, and exit — no gateway needed")
 	fromFixture := fs.String("from-fixture", "", "render the overlay OFFLINE from a recorded /debug/vars JSON snapshot (the shape `fak info --json` emits) instead of polling a live gateway — no gateway needed. The deterministic capture path (the twin of `fak console guard --journal`): pairs with --tab and --frame to draw a single static frame for docs/media. See visuals/info-overlay-capture.md.")
+	fleetSelfcheck := fs.Bool("fleet-selfcheck", false, "render the deterministic read-only Fleet workspace proof and exit")
 	receiptFile := fs.String("receipt", "", "render a fak-micro-selfcheck/2 execution receipt read-only in the Info/Fleet row format and exit")
-	tab := fs.String("tab", "cache", "with --from-fixture: which tab to render — overview, agents, accounts, cache, or safety")
+	tab := fs.String("tab", "cache", "with --from-fixture: which tab to render — overview, agents, fleet, accounts, cache, or safety")
 	frame := fs.Bool("frame", true, "with --from-fixture: render ONE static frame and exit (no watch loop, no cursor control). The only mode --from-fixture supports today; kept as an explicit flag so a future replay mode can turn it off.")
 	width := fs.Int("width", 0, "with --from-fixture: render at this fixed pane width in cells (0 = the overlay's roomy default). A fixed width makes the captured frame byte-deterministic across terminals.")
 	height := fs.Int("height", 0, "with --from-fixture: render at this fixed pane height in rows (0 = roomy — the body renders in full). A fixed height crops/fits the frame exactly as a live pane of that size would.")
@@ -434,6 +437,9 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	}
 	if *prefixTranscript != "" {
 		return runInfoPrefixTranscript(stdout, stderr, *prefixTranscript, *asJSON)
+	}
+	if *fleetSelfcheck {
+		return runInfoFleetSelfcheck(stdout, *width, *height)
 	}
 	if *fromFixture != "" {
 		return runInfoFixtureFrame(stdout, stderr, *fromFixture, *tab, *frame, *width, *height)
@@ -899,6 +905,7 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 		}
 		sawHealthy = true
 		misses = 0
+		v.FleetWorkspace = collectInfoFleetWorkspace("", fleetPaneRunner, time.Now().UTC())
 		v.WorkDone = ptrGuardInfoWorkDone(guardInfoWorkDoneFromVars(v))
 		c.decorateWorkHistory(&v)
 		if viewState.copyMode {
