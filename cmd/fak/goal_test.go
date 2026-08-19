@@ -6,6 +6,9 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/goalregistry"
@@ -76,5 +79,59 @@ func TestGoalResolveEmitsCanonicalLaunchEnvironment(t *testing.T) {
 	var stderr bytes.Buffer
 	if code := runGoal(io.Discard, &stderr, []string{"resolve", "--registry", path, "--namespace", "codex:goal", "--external-id", "missing"}); code != 1 || !strings.Contains(stderr.String(), "binding not found") {
 		t.Fatalf("missing code=%d stderr=%q", code, stderr.String())
+	}
+}
+
+func TestGoalBackfillRootRequiresWitnessAndAppliesExactRoot(t *testing.T) {
+	dir := t.TempDir()
+	goals, sessions := filepath.Join(dir, "goals.json"), filepath.Join(dir, "sessions.jsonl")
+	var create bytes.Buffer
+	if code := runGoal(&create, io.Discard, []string{"create", "--registry", goals, "--title", "Observe", "--actor", "operator", "--authority", "user"}); code != 0 {
+		t.Fatalf("create=%d", code)
+	}
+	var goal struct {
+		GoalID string `json:"goal_id"`
+	}
+	if err := json.Unmarshal(create.Bytes(), &goal); err != nil {
+		t.Fatal(err)
+	}
+	store := sessionregistry.Store{Path: sessions}
+	now := time.Unix(1700000000, 0).UTC()
+	for _, row := range []sessionregistry.Record{
+		{Schema: sessionregistry.Schema, RegistrationID: "root-a", RootRegistrationID: "root-a", TaskID: "same", AttemptID: "a", LaunchKind: "guarded_tui", Identity: sessionregistry.Identity{Runtime: "claude"}, State: sessionregistry.StateRegistered, CreatedAt: now},
+		{Schema: sessionregistry.Schema, RegistrationID: "root-b", RootRegistrationID: "root-b", TaskID: "same", AttemptID: "b", LaunchKind: "guarded_tui", Identity: sessionregistry.Identity{Runtime: "codex"}, State: sessionregistry.StateRegistered, CreatedAt: now.Add(time.Second)},
+	} {
+		if err := store.Register(row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := []string{"backfill-root", "--registry", goals, "--session-registry", sessions, "--id", goal.GoalID, "--root-registration-id", "root-a"}
+	if code := runGoal(io.Discard, io.Discard, base); code != 1 {
+		t.Fatalf("missing witness=%d", code)
+	}
+	var preview bytes.Buffer
+	if code := runGoal(&preview, io.Discard, append(base, "--witness", "operator-ledger:17")); code != 0 {
+		t.Fatalf("preview=%d", code)
+	}
+	var result struct {
+		Schema          string   `json:"schema"`
+		Applied         bool     `json:"applied"`
+		RegistrationIDs []string `json:"registration_ids"`
+	}
+	if err := json.Unmarshal(preview.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Schema != "fak-goal-root-backfill/1" || result.Applied || len(result.RegistrationIDs) != 1 {
+		t.Fatalf("preview=%#v", result)
+	}
+	if code := runGoal(io.Discard, io.Discard, append(base, "--witness", "operator-ledger:17", "--actor", "operator", "--authority", "operator-declared", "--apply")); code != 0 {
+		t.Fatalf("apply=%d", code)
+	}
+	rows, err := store.ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows[0].GoalID != goal.GoalID || rows[1].GoalID != "" {
+		t.Fatalf("rows=%#v", rows)
 	}
 }

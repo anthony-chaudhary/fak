@@ -255,6 +255,24 @@ func (s Store) update(id, title, summary string, lifecycle Lifecycle) (Goal, err
 	return Goal{}, fmt.Errorf("goal %q not found", id)
 }
 
+// RequireGoal verifies that an opaque canonical goal already exists.
+func (s Store) RequireGoal(goalID string) (Goal, error) {
+	goalID = strings.TrimSpace(goalID)
+	if goalID == "" {
+		return Goal{}, errors.New("goal ID is required")
+	}
+	r, err := s.Load()
+	if err != nil {
+		return Goal{}, err
+	}
+	for _, g := range r.Goals {
+		if g.GoalID == goalID {
+			return g, nil
+		}
+	}
+	return Goal{}, fmt.Errorf("goal %q not found", goalID)
+}
+
 func (s Store) Bind(goalID, namespace, externalID, revision string, provenance Provenance) (Binding, error) {
 	var out Binding
 	err := s.withWriteLock(func() error {

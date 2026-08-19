@@ -34,6 +34,13 @@ fak goal bind --id goal_<hex> --namespace codex:goal  --external-id <codex-goal-
 fak goal resolve --namespace claude:goal --external-id <claude-goal-id>
 ```
 
+Historical roots stay unbound unless an operator supplies an independent witness. Preview the exact root records first, then apply; the command also records a typed `fak:session-root` binding in the canonical registry.
+
+```bash
+fak goal backfill-root --id goal_<hex> --root-registration-id <root-id> --witness <artifact-ref> --actor operator --authority operator-declared
+fak goal backfill-root --id goal_<hex> --root-registration-id <root-id> --witness <artifact-ref> --actor operator --authority operator-declared --apply
+```
+
 The same lookup contract supports explicitly witnessed `fak:trajctl`, `github:issue`, and `dos:unit` bindings. An optional `--revision` selects one external revision; omitting it fails closed if several revisions match. Fak does not introspect Claude or Codex state automatically. If a harness supplies no stable identity, launch without `FAK_GOAL_ID` and the execution root remains explicitly unbound.
 
 ## `microcontextdemo`: bounded logical-context fabric

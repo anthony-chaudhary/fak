@@ -9,13 +9,14 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/goalregistry"
+	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 )
 
 func cmdGoal(args []string) { os.Exit(runGoal(os.Stdout, os.Stderr, args)) }
 
 func runGoal(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak goal create|show|list|update|bind|resolve|unbind ...")
+		fmt.Fprintln(stderr, "usage: fak goal create|show|list|update|bind|resolve|backfill-root|unbind ...")
 		return 2
 	}
 	fs := flag.NewFlagSet("goal "+args[0], flag.ContinueOnError)
@@ -31,6 +32,9 @@ func runGoal(stdout, stderr io.Writer, args []string) int {
 	actor := fs.String("actor", "", "provenance actor")
 	authority := fs.String("authority", "", "provenance authority")
 	witness := fs.String("witness", "", "optional provenance witness reference")
+	sessionRegistry := fs.String("session-registry", sessionregistry.DefaultPath(), "session registry or journal path")
+	rootRegistrationID := fs.String("root-registration-id", "", "execution root to bind")
+	apply := fs.Bool("apply", false, "append the witnessed binding (default is dry-run)")
 	parent := fs.String("parent-goal", "", "goal this intent decomposes from")
 	derived := fs.String("derived-from", "", "goal this intent derives from")
 	supersedes := fs.String("supersedes", "", "goal this intent supersedes")
@@ -109,6 +113,42 @@ func runGoal(stdout, stderr io.Writer, args []string) int {
 			Binding goalregistry.Binding `json:"binding"`
 			Env     map[string]string    `json:"env"`
 		}{"fak-goal-resolution/1", g.GoalID, g, b, map[string]string{"FAK_GOAL_ID": g.GoalID}})
+	case "backfill-root":
+		if err := requireID(); err != nil {
+			return fail(err)
+		}
+		if strings.TrimSpace(*witness) == "" {
+			return fail(fmt.Errorf("--witness is required; canonical identity is never inferred"))
+		}
+		if _, err := s.RequireGoal(*id); err != nil {
+			return fail(err)
+		}
+		rootStore := sessionregistry.Store{Path: *sessionRegistry}
+		rows, err := rootStore.BindGoalRoot(*rootRegistrationID, *id, false)
+		if err != nil {
+			return fail(err)
+		}
+		if *apply {
+			if _, err := s.Bind(*id, "fak:session-root", *rootRegistrationID, "", p); err != nil {
+				return fail(err)
+			}
+			rows, err = rootStore.BindGoalRoot(*rootRegistrationID, *id, true)
+			if err != nil {
+				return fail(err)
+			}
+		}
+		ids := make([]string, 0, len(rows))
+		for _, row := range rows {
+			ids = append(ids, row.RegistrationID)
+		}
+		_ = enc.Encode(struct {
+			Schema             string   `json:"schema"`
+			Applied            bool     `json:"applied"`
+			GoalID             string   `json:"goal_id"`
+			RootRegistrationID string   `json:"root_registration_id"`
+			Witness            string   `json:"witness"`
+			RegistrationIDs    []string `json:"registration_ids"`
+		}{"fak-goal-root-backfill/1", *apply, *id, *rootRegistrationID, strings.TrimSpace(*witness), ids})
 	case "unbind":
 		if err := requireID(); err != nil {
 			return fail(err)

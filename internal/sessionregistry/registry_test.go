@@ -243,3 +243,48 @@ func TestLegacyRegistrationOmitsCanonicalGoalIdentity(t *testing.T) {
 		t.Fatalf("legacy row changed shape: %s", b)
 	}
 }
+
+func TestBindGoalRootUpdatesOnlyWitnessedExecutionRoot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.jsonl")
+	s := Store{Path: path}
+	now := time.Unix(1700000000, 0).UTC()
+	rows := []Record{
+		{Schema: Schema, RegistrationID: "root-a", RootRegistrationID: "root-a", TaskID: "same-title", AttemptID: "a", LaunchKind: "guarded_tui", Identity: Identity{Runtime: "claude"}, State: StateRegistered, CreatedAt: now},
+		{Schema: Schema, RegistrationID: "child-a", ParentRegistrationID: "root-a", RootRegistrationID: "root-a", TaskID: "same-title", AttemptID: "b", LaunchKind: "subagent", Identity: Identity{Runtime: "codex"}, State: StateRegistered, CreatedAt: now.Add(time.Second)},
+		{Schema: Schema, RegistrationID: "root-b", RootRegistrationID: "root-b", TaskID: "same-title", AttemptID: "c", LaunchKind: "guarded_tui", Identity: Identity{Runtime: "codex"}, State: StateRegistered, CreatedAt: now.Add(2 * time.Second)},
+	}
+	for _, row := range rows {
+		if err := s.Register(row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	preview, err := s.BindGoalRoot("root-a", "goal-observe", false)
+	if err != nil || len(preview) != 2 {
+		t.Fatalf("preview=%#v err=%v", preview, err)
+	}
+	before, _ := s.ReadAll()
+	if before[0].GoalID != "" {
+		t.Fatal("dry-run mutated registry")
+	}
+	if _, err := s.BindGoalRoot("root-a", "goal-observe", true); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range after {
+		if row.RootRegistrationID == "root-a" && row.GoalID != "goal-observe" {
+			t.Fatalf("bound row = %#v", row)
+		}
+		if row.RootRegistrationID == "root-b" && row.GoalID != "" {
+			t.Fatalf("same-title root inferred = %#v", row)
+		}
+	}
+	if _, err := s.BindGoalRoot("root-a", "goal-other", true); err == nil || !strings.Contains(err.Error(), "conflicting") {
+		t.Fatalf("conflict=%v", err)
+	}
+	if _, err := s.BindGoalRoot("missing", "goal-observe", true); err == nil {
+		t.Fatal("missing root accepted")
+	}
+}

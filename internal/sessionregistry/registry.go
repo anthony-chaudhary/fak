@@ -280,6 +280,72 @@ func (s Store) registerLocked(r Record) error {
 	return s.append(r)
 }
 
+// BindGoalRoot returns the records in one execution root and, when apply is
+// true, appends updated projections carrying the explicitly witnessed goal ID.
+// It never discovers identity from task, title, issue, or session metadata.
+func (s Store) BindGoalRoot(rootRegistrationID, goalID string, apply bool) ([]Record, error) {
+	rootRegistrationID = strings.TrimSpace(rootRegistrationID)
+	goalID = strings.TrimSpace(goalID)
+	if rootRegistrationID == "" || goalID == "" {
+		return nil, errors.New("root registration ID and goal ID are required")
+	}
+	bind := func(rows []Record) ([]Record, error) {
+		var selected []Record
+		rootExists := false
+		for _, row := range rows {
+			if row.RegistrationID == rootRegistrationID && row.RootRegistrationID == rootRegistrationID {
+				rootExists = true
+			}
+			if row.RootRegistrationID != rootRegistrationID {
+				continue
+			}
+			if row.GoalID != "" && row.GoalID != goalID {
+				return nil, fmt.Errorf("execution root %q already carries conflicting goal %q", rootRegistrationID, row.GoalID)
+			}
+			row.GoalID = goalID
+			selected = append(selected, row)
+		}
+		if !rootExists {
+			return nil, fmt.Errorf("execution root %q not found", rootRegistrationID)
+		}
+		return selected, nil
+	}
+	if s.usesJournal() {
+		rows, err := s.ReadAll()
+		if err != nil {
+			return nil, err
+		}
+		selected, err := bind(rows)
+		if err != nil || !apply {
+			return selected, err
+		}
+		for _, row := range selected {
+			if err := appendJournalRecord(row); err != nil {
+				return nil, err
+			}
+		}
+		return selected, nil
+	}
+	var selected []Record
+	err := s.withLock(func() error {
+		rows, err := s.readAllUnlocked()
+		if err != nil {
+			return err
+		}
+		selected, err = bind(rows)
+		if err != nil || !apply {
+			return err
+		}
+		for _, row := range selected {
+			if err := s.append(row); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return selected, err
+}
+
 func (s Store) Start(id string, pid int, started time.Time) (Record, error) {
 	return s.update(id, func(r *Record) {
 		r.State = StateActive
