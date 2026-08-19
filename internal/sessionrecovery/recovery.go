@@ -85,7 +85,15 @@ func Select(report InventoryReport, opts Options) []Request {
 		opts.ManagerBin = "fak"
 	}
 	rows := append([]Session(nil), report.Sessions...)
-	sort.Slice(rows, func(i, j int) bool { return rows[i].Thread.ID < rows[j].Thread.ID })
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].Thread == nil {
+			return false
+		}
+		if rows[j].Thread == nil {
+			return true
+		}
+		return rows[i].Thread.ID < rows[j].Thread.ID
+	})
 	out := make([]Request, 0, opts.Limit)
 	for _, row := range rows {
 		if len(out) >= opts.Limit || row.Thread == nil || row.LatestTurn == nil || len(row.ProcessTrees) != 0 {

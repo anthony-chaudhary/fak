@@ -17,6 +17,19 @@ import (
 func candidate(cwd string) Session {
 	return Session{Thread: &Thread{ID: "t1", Source: "interactive_tui", CWD: cwd}, LatestTurn: &Turn{Status: "inProgress", StartedAt: "2026-08-18T01:00:00Z"}}
 }
+
+func TestSelectIgnoresInventoryRowsWithoutThreads(t *testing.T) {
+	report := InventoryReport{Sessions: []Session{
+		{},
+		candidate(`C:\work\fak`),
+		{LatestTurn: &Turn{Status: "inProgress"}},
+	}}
+	got := Select(report, Options{Limit: 1, ReceiptDir: t.TempDir()})
+	if len(got) != 1 || got[0].ThreadID != "t1" {
+		t.Fatalf("requests=%+v", got)
+	}
+}
+
 func TestSelectPreservesPromptAsOneArg(t *testing.T) {
 	got := Select(InventoryReport{Sessions: []Session{candidate(`C:\work\fak`)}}, Options{Limit: 1, Prompt: "continue the exact task", ReceiptDir: t.TempDir()})
 	want := []string{"fak", "guard", "--", "codex", "resume", "t1", "continue the exact task"}
