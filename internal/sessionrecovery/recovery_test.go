@@ -18,6 +18,37 @@ func candidate(cwd string) Session {
 	return Session{Thread: &Thread{ID: "t1", Source: "interactive_tui", CWD: cwd}, LatestTurn: &Turn{Status: "inProgress", StartedAt: "2026-08-18T01:00:00Z"}}
 }
 
+func TestSelectExplicitDeadExecIsCandidate(t *testing.T) {
+	report := InventoryReport{Sessions: []Session{{Thread: &Thread{ID: "exec-1", Source: "exec", CWD: `C:\work\fak`}, LatestTurn: &Turn{Status: "inProgress"}}}}
+	got := Select(report, Options{ManagerBin: `C:\bin\fak.exe`, Threads: map[string]bool{"exec-1": true}, Limit: 1, ReceiptDir: t.TempDir()})
+	if len(got) != 1 || got[0].Status != "candidate" || got[0].Source != "exec" || got[0].Reason != "explicit_dead_exec" {
+		t.Fatalf("requests=%+v", got)
+	}
+}
+
+func TestSelectExplicitDeadExecWithoutLatestTurnIsCandidate(t *testing.T) {
+	report := InventoryReport{Sessions: []Session{{Thread: &Thread{ID: "exec-crashed", Source: "exec", CWD: `\\?\C:\work\fak\_scratch\session-recovery-live-drill`}}}}
+	got := Select(report, Options{ManagerBin: `C:\bin\fak.exe`, Threads: map[string]bool{"exec-crashed": true}, Limit: 1, ReceiptDir: t.TempDir()})
+	if len(got) != 1 || got[0].Status != "candidate" || got[0].Reason != "explicit_dead_exec_no_turn" {
+		t.Fatalf("explicit dead exec without latest turn = %#v, want one explained candidate", got)
+	}
+}
+
+func TestSelectBroadPreviewStillExcludesDeadExec(t *testing.T) {
+	report := InventoryReport{Sessions: []Session{{Thread: &Thread{ID: "exec-1", Source: "exec", CWD: `C:\work\fak`}, LatestTurn: &Turn{Status: "inProgress"}}}}
+	if got := Select(report, Options{Limit: 1, ReceiptDir: t.TempDir()}); len(got) != 0 {
+		t.Fatalf("requests=%+v", got)
+	}
+}
+
+func TestSelectExplicitIneligibleAndMissingThreadsReturnReasons(t *testing.T) {
+	report := InventoryReport{Sessions: []Session{{Thread: &Thread{ID: "done", Source: "interactive_tui", CWD: `C:\work\fak`}, LatestTurn: &Turn{Status: "completed"}}}}
+	got := Select(report, Options{Threads: map[string]bool{"done": true, "missing": true}, Limit: 2})
+	if len(got) != 2 || got[0].ThreadID != "done" || got[0].Reason != "latest_turn_completed" || got[1].ThreadID != "missing" || got[1].Reason != "thread_not_found" {
+		t.Fatalf("requests=%+v", got)
+	}
+}
+
 func TestSelectIgnoresInventoryRowsWithoutThreads(t *testing.T) {
 	report := InventoryReport{Sessions: []Session{
 		{},

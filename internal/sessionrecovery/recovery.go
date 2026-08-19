@@ -98,25 +98,31 @@ func Select(report InventoryReport, opts Options) []Request {
 		return rows[i].Thread.ID < rows[j].Thread.ID
 	})
 	out := make([]Request, 0, opts.Limit)
+	found := make(map[string]bool, len(opts.Threads))
 	for _, row := range rows {
-		if len(out) >= opts.Limit || row.Thread == nil || row.LatestTurn == nil || len(row.ProcessTrees) != 0 {
+		if len(out) >= opts.Limit || row.Thread == nil {
 			continue
 		}
 		id := row.Thread.ID
-		if len(opts.Threads) > 0 && !opts.Threads[id] {
+		explicit := len(opts.Threads) > 0 && opts.Threads[id]
+		if len(opts.Threads) > 0 && !explicit {
 			continue
 		}
-		if row.Thread.Source != "interactive_tui" && row.Thread.Source != "resume_wrapper" {
-			continue
+		if explicit {
+			found[id] = true
 		}
-		if !strings.EqualFold(row.LatestTurn.Status, "inProgress") {
-			continue
-		}
+		status, reason := recoveryEligibility(row, explicit)
 		cwd := strings.TrimSpace(row.Thread.CWD)
 		if opts.CWDOverride != "" {
 			cwd = opts.CWDOverride
 		}
-		req := Request{ThreadID: id, CWD: cwd}
+		req := Request{ThreadID: id, CWD: cwd, Source: row.Thread.Source, Status: status, Reason: reason}
+		if status != "candidate" {
+			if explicit {
+				out = append(out, req)
+			}
+			continue
+		}
 		if cwd == "" {
 			req.Status = "refused"
 			req.Reason = "cwd_unknown"
@@ -127,11 +133,54 @@ func Select(report InventoryReport, opts Options) []Request {
 		if opts.Prompt != "" {
 			req.Argv = append(req.Argv, opts.Prompt)
 		}
-		req.Status = "candidate"
 		req.ReceiptPath = filepath.Join(opts.ReceiptDir, receiptName(id, cwd, req.Argv)+".json")
 		out = append(out, req)
 	}
+	if len(opts.Threads) > 0 && len(out) < opts.Limit {
+		ids := make([]string, 0, len(opts.Threads))
+		for id := range opts.Threads {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			if len(out) >= opts.Limit {
+				break
+			}
+			if !found[id] {
+				out = append(out, Request{ThreadID: id, Status: "refused", Reason: "thread_not_found"})
+			}
+		}
+	}
 	return out
+}
+
+func recoveryEligibility(row Session, explicit bool) (string, string) {
+	if len(row.ProcessTrees) != 0 {
+		return "already_active", "live_process_tree"
+	}
+	if row.LatestTurn == nil {
+		// An explicit exec recovery is operator-directed and process-tree gated.
+		// Exec history can omit latest_turn after an abrupt process kill even when
+		// the inventory retains the thread ID and authoritative working directory.
+		if explicit && row.Thread.Source == "exec" {
+			return "candidate", "explicit_dead_exec_no_turn"
+		}
+		return "refused", "latest_turn_unknown"
+	}
+	if !strings.EqualFold(row.LatestTurn.Status, "inProgress") {
+		return "refused", "latest_turn_" + strings.ToLower(strings.TrimSpace(row.LatestTurn.Status))
+	}
+	switch row.Thread.Source {
+	case "interactive_tui", "resume_wrapper":
+		return "candidate", ""
+	case "exec":
+		if explicit {
+			return "candidate", "explicit_dead_exec"
+		}
+		return "refused", "exec_requires_explicit_thread"
+	default:
+		return "refused", "source_not_resumable:" + row.Thread.Source
+	}
 }
 
 // MergeJournalCrashes adds machine-reboot and dead-process candidates from the
