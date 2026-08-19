@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -418,8 +419,30 @@ func completeDispatchTickEvaluation(root, runsDir string, opts dispatchTickOptio
 		return finish(payload), nil
 	}
 
+	gates := map[string]any{}
+	var preflightReq dispatchWorkerPreflightRequest
+	var workerPreflight *dispatchWorkerPreflightResult
+	if opts.Backend == "codex" {
+		preflightReq = newDispatchWorkerPreflightRequest(root, opts, account, launch, launchPreview, guardedPreview)
+		ctx, cancel := context.WithTimeout(context.Background(), dispatchWorkerPreflightTimeout)
+		result := dispatchWorkerPreflight(ctx, preflightReq, time.Now().UTC())
+		cancel()
+		workerPreflight = &result
+		payload["worker_preflight"] = result.Map()
+		gates["worker_identity"] = result.Map()
+		if !result.Ready {
+			payload["ok"] = false
+			payload["action"] = "worker_preflight_refused"
+			payload["verdict"] = result.Verdict
+			payload["reason"] = result.Reason
+			payload["admitted_workers"] = 0
+			payload["launch_checks"] = gates
+			return finish(payload), nil
+		}
+	}
+
 	providerCheck := dispatchProviderReachabilityCheck(launchPreview)
-	gates := map[string]any{"provider_reachability": providerCheck}
+	gates["provider_reachability"] = providerCheck
 	payload["launch_checks"] = gates
 	if evaluated, _ := providerCheck["evaluated"].(bool); evaluated {
 		if ok, _ := providerCheck["ok"].(bool); !ok {
@@ -484,5 +507,5 @@ func completeDispatchTickEvaluation(root, runsDir string, opts dispatchTickOptio
 	}
 
 	spawnStart = time.Now()
-	return dispatchTickLiveSpawn(root, runsDir, opts, pick, pickRes.leaseID, account, launch, target, promptRec, payload, finish)
+	return dispatchTickLiveSpawn(root, runsDir, opts, pick, pickRes.leaseID, account, launch, preflightReq, workerPreflight, target, promptRec, payload, finish)
 }

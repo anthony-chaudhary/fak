@@ -251,7 +251,8 @@ func dispatchSpawnFailureTick(t *testing.T, root, backend string, broker func(la
 	opts := dispatchTickOptions{Backend: backend, Live: true, WorkerTimeoutS: 1200}
 	pick := dispatchLanePick{Lane: "gateway", Tree: []string{"internal/gateway/**"}}
 	return dispatchTickLiveSpawn(root, filepath.Join(root, dispatchtick.RunsDirName), opts, pick,
-		"resolve-gateway", dispatchtick.Account{Tag: "seat-a"}, dispatchtick.WorkerLaunch{}, 5565,
+		"resolve-gateway", dispatchtick.Account{Tag: "seat-a"}, dispatchtick.WorkerLaunch{},
+		dispatchWorkerPreflightRequest{}, nil, 5565,
 		map[string]any{"prompt": "resolve #5565"}, map[string]any{},
 		func(p map[string]any) map[string]any { return p })
 }

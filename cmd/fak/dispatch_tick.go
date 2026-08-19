@@ -702,6 +702,12 @@ func prepareDispatchWorkerCommand(root string, opts dispatchTickOptions, pick di
 		Ultracode: modelPolicy.Ultracode,
 		Speed:     resolveClaudeSpeed(opts.Backend, opts.WorkKind, opts.WorkerSpeed, modelPolicy.Ultracode),
 	}
+	// A guarded Codex launch otherwise lets guard resolve its default only after the
+	// dispatch dry-run. Pin that same canonical default here so account/model
+	// preflight and the eventual child argv name one immutable combination.
+	if opts.Backend == "codex" && strings.TrimSpace(launch.Model) == "" {
+		launch.Model = guardCodexDefaultModelID
+	}
 	if opts.Backend == "opencode" {
 		launch.AccountTag = account.Tag
 		launch.AccountDir = account.Dir
@@ -754,7 +760,22 @@ func dispatchStampMs(m map[string]int64, name string, start time.Time) {
 // the lane lease (refused → LANE_LEASE_HELD), build the guarded worker command + env, spawn
 // the issue-resolution worker, and record the SPAWNED / SPAWN_FAILED payload. It mutates and
 // returns the shared payload through finish, mirroring the dry-run return sites it splits off.
-func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick dispatchLanePick, leaseID string, account dispatchtick.Account, launch dispatchtick.WorkerLaunch, target int, promptRec, payload map[string]any, finish func(map[string]any) map[string]any) (map[string]any, error) {
+func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick dispatchLanePick, leaseID string, account dispatchtick.Account, launch dispatchtick.WorkerLaunch, preflightReq dispatchWorkerPreflightRequest, preflight *dispatchWorkerPreflightResult, target int, promptRec, payload map[string]any, finish func(map[string]any) map[string]any) (map[string]any, error) {
+	// Compare-and-swap the short-lived admission evidence before creating the lane
+	// lease. Any account/model/route/workspace/deadline drift forces a fresh preflight
+	// rather than launching a combination the dry-run never checked.
+	if preflight != nil && (!preflight.Binds(preflightReq, time.Now().UTC()) ||
+		strings.TrimSpace(preflightReq.Account.Tag) != strings.TrimSpace(account.Tag) ||
+		dispatchPreflightCleanPath(preflightReq.Account.Dir) != dispatchPreflightCleanPath(account.Dir) ||
+		strings.TrimSpace(preflightReq.Model) != strings.TrimSpace(launch.Model)) {
+		payload["ok"] = false
+		payload["action"] = "worker_preflight_refused"
+		payload["verdict"] = dispatchWorkerPreflightTransientUpstream
+		payload["reason"] = "worker preflight evidence expired or no longer matches the launch identity"
+		payload["admitted_workers"] = 0
+		recordDispatchPayload(runsDir, opts.Backend, payload)
+		return finish(payload), nil
+	}
 	lease := acquireDispatchLaneLease(root, leaseID, pick.Lane, pick.Tree, opts.WorkerTimeoutS+dispatchtick.LeaseTTLMarginS, opts.Goal)
 	payload["lease"] = lease
 	if bundle := mapAt(payload, "startup_bundle"); len(bundle) > 0 {
@@ -789,6 +810,11 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		return nil, err
 	}
 	env["FLEET_RESOLVE_ISSUE"] = strconv.Itoa(target)
+	if preflight != nil {
+		env["FAK_WORKER_PREFLIGHT_EVIDENCE"] = preflight.Evidence
+		env["FAK_WORKER_PREFLIGHT_MODEL"] = preflight.Model
+		env["FAK_WORKER_PREFLIGHT_SEAT"] = preflight.SeatToken
+	}
 	if opts.Membership != nil {
 		for k, v := range dispatchtick.WaveMembershipEnv(*opts.Membership) {
 			env[k] = v

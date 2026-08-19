@@ -31,6 +31,7 @@ const (
 
 func withDispatchJSONHelper(t *testing.T, fn func(root string, args ...string) (map[string]any, error)) {
 	t.Helper()
+	installReadyDispatchWorkerPreflightProbe(t)
 	// Pin the per-worker host budgets to their built-in defaults. The resource PROBE is
 	// stubbed below, but the budgets the cap fold divides those resources BY are read from
 	// the environment, and a live dogfood session exports a hand-calibrated set (e.g.
