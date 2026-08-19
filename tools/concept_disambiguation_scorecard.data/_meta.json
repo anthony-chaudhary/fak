@@ -787,6 +787,11 @@
           "category": "incidental",
           "reason": "local boolean requiring observed provider cache feedback before appending a row",
           "token": "cacheActivity"
+        },
+        {
+          "category": "incidental",
+          "reason": "launch-doctor adapter that reads provider cache calibration status",
+          "token": "postureVCacheCalibration"
         }
       ],
       "id": "cache",
@@ -968,6 +973,7 @@
         "parseCacheSeats",
         "persistMicroCacheWitness",
         "persistVCacheCalibration",
+        "postureVCacheCalibration",
         "prefixcachehits",
         "prefixcachequeries",
         "promptcachehittokens",
@@ -6123,6 +6129,11 @@
           "category": "incidental",
           "reason": "Private request-to-prompt instruction helper, not a gateway or engine boundary",
           "token": "inkernelforcedtoolinstruction"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private request field decoder used only by native prompt rendering",
+          "token": "inkernelforcedtoolname"
         }
       ],
       "id": "gateway-engine",
@@ -6182,6 +6193,7 @@
         "inKernelPlannerEPCoordinated",
         "inKernelPrefixPressureBridge",
         "inkernelforcedtoolinstruction",
+        "inkernelforcedtoolname",
         "inkernelresponseformatinstruction",
         "kernel32",
         "kernelSession",
@@ -6968,6 +6980,11 @@
           "category": "incidental",
           "reason": "Private profile-state formatter for the default-on launch diagnostic; not a new policy or capability concept.",
           "token": "postureWorkProfile"
+        },
+        {
+          "category": "incidental",
+          "reason": "launch-doctor adapter; it reports cache calibration and does not grant a capability",
+          "token": "postureVCacheCalibration"
         }
       ],
       "exclude": [
@@ -7098,6 +7115,7 @@
         "postureCodeTools",
         "postureOutputProfile",
         "postureShrink",
+        "postureVCacheCalibration",
         "postureWorkProfile",
         "postures",
         "printGuardLaunchPostures",

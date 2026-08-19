@@ -68,7 +68,7 @@ func renderInKernelChatMLTools(messages []Message, tools []ToolDef, cfg model.Co
 // channel, so dropping it here silently turns strict JSON into unconstrained prose.
 func renderInKernelChatMLRequest(messages []Message, tools []ToolDef, cfg model.Config, responseFormat, toolChoice json.RawMessage) string {
 	instruction := inKernelResponseFormatInstruction(responseFormat)
-	if forced := inKernelForcedToolInstruction(toolChoice); forced != "" {
+	if forced := inKernelForcedToolInstruction(toolChoice, tools); forced != "" {
 		if instruction != "" {
 			instruction += "\n"
 		}
@@ -76,6 +76,9 @@ func renderInKernelChatMLRequest(messages []Message, tools []ToolDef, cfg model.
 	}
 	if instruction != "" {
 		messages = append([]Message{{Role: RoleSystem, Content: instruction}}, messages...)
+	}
+	if inKernelForcedToolName(toolChoice) != "" {
+		tools = nil
 	}
 	chat := renderChatMLTools(messages, tools)
 	if inKernelSuppressQwenThinking(cfg) {
@@ -200,7 +203,40 @@ func renderTranscriptTools(messages []Message, tools []ToolDef) string {
 	return b.String()
 }
 
-func inKernelForcedToolInstruction(raw json.RawMessage) string {
+func inKernelForcedToolInstruction(raw json.RawMessage, tools []ToolDef) string {
+	name := inKernelForcedToolName(raw)
+	if name == "" {
+		return ""
+	}
+	parameters := json.RawMessage(`{"type":"object"}`)
+	for _, tool := range tools {
+		if tool.Function.Name == name && len(tool.Function.Parameters) > 0 {
+			parameters = tool.Function.Parameters
+			break
+		}
+	}
+	schema, _ := json.Marshal(struct {
+		Type       string `json:"type"`
+		Properties struct {
+			Name struct {
+				Const string `json:"const"`
+			} `json:"name"`
+			Arguments json.RawMessage `json:"arguments"`
+		} `json:"properties"`
+		Required             []string `json:"required"`
+		AdditionalProperties bool     `json:"additionalProperties"`
+	}{Type: "object", Properties: struct {
+		Name struct {
+			Const string `json:"const"`
+		} `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	}{Name: struct {
+		Const string `json:"const"`
+	}{Const: name}, Arguments: parameters}, Required: []string{"name", "arguments"}, AdditionalProperties: false})
+	return "Return only one valid JSON object matching this schema exactly. Do not use XML, Markdown, reasoning, or prose. JSON schema: " + string(schema)
+}
+
+func inKernelForcedToolName(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
@@ -210,10 +246,10 @@ func inKernelForcedToolInstruction(raw json.RawMessage) string {
 			Name string `json:"name"`
 		} `json:"function"`
 	}
-	if json.Unmarshal(raw, &choice) != nil || choice.Type != "function" || strings.TrimSpace(choice.Function.Name) == "" {
+	if json.Unmarshal(raw, &choice) != nil || choice.Type != "function" {
 		return ""
 	}
-	return "You MUST call the function " + strconv.Quote(strings.TrimSpace(choice.Function.Name)) + " now. Do not call any other function and do not answer with prose."
+	return strings.TrimSpace(choice.Function.Name)
 }
 
 func inKernelResponseFormatInstruction(raw json.RawMessage) string {

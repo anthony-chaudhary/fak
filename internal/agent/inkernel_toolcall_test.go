@@ -252,7 +252,7 @@ true
 func TestRenderInKernelChatMLRequestPinsForcedTool(t *testing.T) {
 	choice := json.RawMessage(`{"type":"function","function":{"name":"record_probe"}}`)
 	got := renderInKernelChatMLRequest([]Message{{Role: RoleUser, Content: "run it"}}, []ToolDef{{Type: "function", Function: ToolDefFunction{Name: "record_probe"}}}, model.Config{}, nil, choice)
-	want := `You MUST call the function "record_probe" now. Do not call any other function and do not answer with prose.`
+	want := `"const":"record_probe"`
 	if !strings.Contains(got, want) {
 		t.Fatalf("forced tool instruction missing:\n%s", got)
 	}
