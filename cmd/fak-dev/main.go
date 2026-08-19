@@ -56,6 +56,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunCodexHookCensus(stdout, stderr, argv[1:])
 	case "codex-plugin-sync":
 		return devcmd.RunCodexPluginSync(stdout, stderr, argv[1:])
+	case "codex-stop-acceptance":
+		return devcmd.RunCodexStopAcceptance(stdout, stderr, argv[1:])
 	case "codex-hook-gate":
 		return devcmd.RunCodexHookRecurrence(stdout, stderr, argv[1:])
 	case "refactor-verify":
