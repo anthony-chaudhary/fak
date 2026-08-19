@@ -66,21 +66,15 @@ response=caveman:native:medium
 work=ponytail:native:high
 ```
 
-The Ponytail work profile is tracked in [#6700](https://github.com/anthony-chaudhary/fak/issues/6700); general repeated-profile composition is tracked in [#6707](https://github.com/anthony-chaudhary/fak/issues/6707). Until those ship, `fak agent --output-style` affects response shape only.
+`fak agent` and guarded Claude compose these axes independently. Both default to the native medium profiles; `--output-style full` / `--output-profile full` disables response shaping, while `--work-profile standard` disables Ponytail work policy.
 
 ## External guarded harnesses
 
-`fak guard --output-profile <selection> -- claude ...` resolves the same profile catalog
-before launch and injects its exact governed bytes through Claude's owned
-`--append-system-prompt` seam. The pre-launch capture records canonical family,
-implementation/intensity, fragment digest, harness, activation seam, source provenance when
-applicable, and the disable command. Omitting the flag (or selecting `full`) leaves child
-arguments byte-identical to the prior launch path.
+`fak guard -- claude ...` defaults to `caveman:medium` plus `ponytail:medium` and injects one composed governed fragment through Claude's owned `--append-system-prompt` seam. This matches the owned `fak agent` posture without requiring configuration in the repository being worked on.
 
-Claude is currently the only witnessed external harness. Codex, Cursor, and other wrapped
-commands refuse a non-full profile with `RESPONSE_PROFILE_UNSUPPORTED_HARNESS` rather than
-claim activation from environment inheritance. Unknown profiles likewise fail before child
-launch. This feature is prompt shaping; it does not reuse or overload Stop-output lint.
+The axes remain independent: `--output-profile full` disables Caveman and `--work-profile standard` disables Ponytail. Explicit profile selections resolve before launch. The capture records both canonical profiles and digests, the composite digest, harness, activation seam, whether activation came from defaults, and the disable command.
+
+Claude is currently the only witnessed external injection seam. Default launches of Codex, Cursor, and other wrapped commands remain byte-identical rather than claiming activation. Explicit non-off selections on an unsupported harness fail before child launch with `PROFILE_UNSUPPORTED_HARNESS`. Unknown response or work profiles likewise fail before launch.
 
 ## Troubleshooting
 

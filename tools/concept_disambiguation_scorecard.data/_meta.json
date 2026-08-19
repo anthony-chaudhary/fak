@@ -2425,6 +2425,26 @@
           "category": "incidental",
           "reason": "Enum member naming a vocabulary role in the disambiguation fixture, not a hook gate mechanism",
           "token": "VocabularyGateClass"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation symbol for composing existing typed response/work profiles at the guard harness seam; not a new guard or gate concept.",
+          "token": "guardProfileCapture"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation symbol for composing existing typed response/work profiles at the guard harness seam; not a new guard or gate concept.",
+          "token": "guardProfilesDisableCommand"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation symbol for composing existing typed response/work profiles at the guard harness seam; not a new guard or gate concept.",
+          "token": "injectGuardProfiles"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation symbol for composing existing typed response/work profiles at the guard harness seam; not a new guard or gate concept.",
+          "token": "marshalGuardProfileCapture"
         }
       ],
       "exclude": [
@@ -2648,6 +2668,8 @@
         "guardOperatorQuestionNormalizedOrWarn",
         "guardOperatorQuestionOptionLabels",
         "guardPolicyOriginEvidencePath",
+        "guardProfileCapture",
+        "guardProfilesDisableCommand",
         "guardQuarantinedReadRecovery",
         "guardReadPath",
         "guardRegistration",
@@ -2703,6 +2725,7 @@
         "guardtaskhandoffeffectivemode",
         "guardtrajectorywarningline",
         "guardwireretryhop",
+        "injectGuardProfiles",
         "installguardmcpregistration",
         "latestGuardCompactionWitness",
         "launchGuardedCodexOrchestrationWorker",
@@ -2711,6 +2734,7 @@
         "loadGuardSelfTightenOverlay",
         "mapBehaviorProbe",
         "markGuardChildTerminalIntent",
+        "marshalGuardProfileCapture",
         "nativeReasonMessageRoleUnsupported",
         "newGuardCompactionWitness",
         "newguardlaunchnonce",
@@ -8322,6 +8346,11 @@
           "category": "incidental",
           "reason": "Local self-test error variable for rejecting a cross-ladder maturity spelling, not a new maturity concept.",
           "token": "errMaturity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed pre-launch refusal code for the existing profile adapter; not a new support-maturity concept.",
+          "token": "PROFILE_UNSUPPORTED_HARNESS"
         }
       ],
       "id": "support-maturity",
@@ -8361,6 +8390,7 @@
         "NATIVE_MESSAGE_ROLE_UNSUPPORTED",
         "NonCacheParity",
         "OutcomeSupported",
+        "PROFILE_UNSUPPORTED_HARNESS",
         "ParityAhead",
         "ParityAtParity",
         "ParityBehind",

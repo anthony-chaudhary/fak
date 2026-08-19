@@ -101,7 +101,7 @@ var guardFlagGroups = []guardFlagGroup{
 	}},
 	{"Child-harness wiring (Claude / Codex)", []string{
 		"codex-config", "codex-home", "codex-loop-gate", "codex-loop-gate-limit",
-		"codex-loop-gate-since-hours", "mcp-register", "pi-extension", "expose-profile", "output-profile",
+		"codex-loop-gate-since-hours", "mcp-register", "pi-extension", "expose-profile", "output-profile", "work-profile",
 	}},
 	{"Fleet control bus", []string{
 		"fleet-bus", "fleet-bus-dir", "fleet-bus-id", "fleet-bus-interval",
