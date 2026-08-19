@@ -1,6 +1,6 @@
 # Response profiles: concise, Caveman-compatible, and composable
 
-Response profiles are an **opt-in presentation control** for fak's owned agent loop. They let a user ask for shorter answers without changing tool authorization, work scope, tests, diagnostics, or evidence requirements.
+Response profiles are a **presentation control** for fak's owned agent loop; `caveman:medium` is default-on and `full` is its explicit ablation. They let a user ask for shorter answers without changing tool authorization, work scope, tests, diagnostics, or evidence requirements.
 They compose independently with [work profiles](work-profiles.md): Caveman can shape the response while Ponytail shapes implementation decisions, and neither selection implies the other.
 
 ## Start here
@@ -21,10 +21,10 @@ fak agent --output-style caveman:medium --task "Explain this failure and propose
 Disable all response shaping:
 
 ```bash
-fak agent --output-style full
+fak agent --output-style full  # ablate the default caveman:medium profile
 ```
 
-`full` is the default. Nothing enables itself.
+`caveman:medium` is the default for the owned `fak agent` loop. `full` is the explicit ablation arm; harnesses that do not launch through `fak agent` remain unchanged.
 
 ## Choosing an intensity
 

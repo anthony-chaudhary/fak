@@ -11,6 +11,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
 )
 
+const agentDefaultOutputStyle = "caveman:medium"
+
 func resolveAgentOutputStyle(raw string) (syspromptmmu.StyleReadout, error) {
 	style := syspromptmmu.DescribeStyle(raw)
 	if !style.Known {
@@ -50,7 +52,7 @@ func agentOutputProfiles() []agentOutputProfile {
 		{Selection: "native:medium", Canonical: "native:medium", Family: "native", Implementation: "native", Intensity: "medium", Status: "shipped", Meaning: "Answer directly; keep only needed explanation."},
 		{Selection: "native:high", Canonical: "native:high", Family: "native", Implementation: "native", Intensity: "high", Status: "shipped", Meaning: "Essential content only; no preamble or recap."},
 		{Selection: "caveman:low", Canonical: "caveman:native:low", Family: "caveman", Implementation: "native", Intensity: "low", Status: "shipped", Meaning: "Caveman-compatible shape using fak-authored safe bytes."},
-		{Selection: "caveman:medium", Canonical: "caveman:native:medium", Family: "caveman", Implementation: "native", Intensity: "medium", Status: "shipped", Meaning: "Recommended Caveman-compatible balance."},
+		{Selection: "caveman:medium", Canonical: "caveman:native:medium", Family: "caveman", Implementation: "native", Intensity: "medium", Status: "default", Meaning: "Default concise response shape with correctness carve-outs."},
 		{Selection: "caveman:high", Canonical: "caveman:native:high", Family: "caveman", Implementation: "native", Intensity: "high", Status: "shipped", Meaning: "Strong Caveman-compatible response compression."},
 		{Selection: "caveman:original:*", Family: "caveman", Implementation: "original", Intensity: "low|medium|high", Status: "not-yet", Meaning: "Reserved for a pinned, attributed upstream adapter (#6706)."},
 	}
@@ -82,7 +84,7 @@ func printAgentOutputProfiles(w io.Writer, argv []string) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(profiles)
 	}
-	fmt.Fprintln(w, "Response profiles (opt-in; default is full):")
+	fmt.Fprintln(w, "Response profiles (independent axis; default is caveman:medium):")
 	for _, p := range profiles {
 		fmt.Fprintf(w, "  %-24s %-8s %s\n", p.Selection, p.Status, p.Meaning)
 	}

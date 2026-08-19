@@ -44,7 +44,7 @@ func TestAgentOutputProfilesUserReadout(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := out.String()
-	for _, want := range []string{"caveman:medium", "caveman:original:*", "not-yet", "--output-style full", "independent axis"} {
+	for _, want := range []string{"default is caveman:medium", "caveman:original:*", "not-yet", "--output-style full", "independent axis"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("profiles readout missing %q:\n%s", want, text)
 		}
@@ -60,7 +60,17 @@ func TestAgentOutputProfilesJSON(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) < 8 || got[5].Selection != "caveman:medium" || got[5].Canonical != "caveman:native:medium" || got[7].Status != "not-yet" {
+	if len(got) < 8 || got[5].Selection != "caveman:medium" || got[5].Canonical != "caveman:native:medium" || got[5].Status != "default" || got[7].Status != "not-yet" {
 		t.Fatalf("profile JSON = %+v", got)
+	}
+}
+
+func TestAgentDefaultOutputStyleIsCavemanMedium(t *testing.T) {
+	got, err := resolveAgentOutputStyle(agentDefaultOutputStyle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Style != "caveman:native:medium" || got.Level != 2 {
+		t.Fatalf("default style = %+v", got)
 	}
 }

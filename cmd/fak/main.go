@@ -1098,7 +1098,7 @@ func cmdAgent(argv []string) {
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
 	verbFlagUsage(fs, "agent")
 	task := fs.String("task", agent.DefaultTask, "the user task the agent must complete")
-	outputStyle := fs.String("output-style", "full", "response shape: full|native:{low|medium|high}|caveman:{low|medium|high}; caveman:* is safe native shorthand (see `fak agent profiles`)")
+	outputStyle := fs.String("output-style", agentDefaultOutputStyle, "response shape: full|native:{low|medium|high}|caveman:{low|medium|high}; defaults to caveman:medium, full disables it (see `fak agent profiles`)")
 	workProfile := fs.String("work-profile", agentDefaultWorkProfile, "implementation policy: ponytail:{low|medium|high}|standard; defaults to ponytail:medium, standard disables it (see `fak agent profiles`)")
 	provider := fs.String("provider", "openai", "provider transcript wire: openai, anthropic, gemini, or xai")
 	baseURL := fs.String("base-url", "", "provider base URL (OpenAI-compatible: .../v1; Gemini native: .../v1beta; Anthropic native: https://api.anthropic.com)")
