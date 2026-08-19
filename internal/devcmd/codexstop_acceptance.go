@@ -217,6 +217,7 @@ func runStopAcceptance(ctx context.Context, t appServerTransport, home, workspac
 	}
 	started := map[string]hookNotification{}
 	completed := map[string]hookNotification{}
+	blockedObserved := false
 	turnDone := false
 	for !turnDone {
 		m, err := t.Receive(ctx)
@@ -264,6 +265,7 @@ func runStopAcceptance(ctx context.Context, t appServerTransport, home, workspac
 		} else {
 			completed[key] = n
 			if expect == "blocked" && strings.EqualFold(n.Params.Run.Status, "blocked") {
+				blockedObserved = true
 				// A blocked Stop intentionally keeps the turn alive, so no
 				// turn/completed notification follows. The typed blocked run is
 				// the terminal acceptance witness for this probe.
@@ -275,8 +277,13 @@ func runStopAcceptance(ctx context.Context, t appServerTransport, home, workspac
 		if _, ok := completed[key]; !ok {
 			r.Stop.Denominator++
 			r.Stop.Attempted++
-			r.Stop.Unknown++
-			r.Runs = append(r.Runs, stopRow(n, "unknown"))
+			if blockedObserved {
+				r.Stop.Skipped++
+				r.Runs = append(r.Runs, stopRow(n, "stopped"))
+			} else {
+				r.Stop.Unknown++
+				r.Runs = append(r.Runs, stopRow(n, "unknown"))
+			}
 		}
 	}
 	for _, n := range completed {
