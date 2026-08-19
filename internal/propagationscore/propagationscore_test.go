@@ -177,7 +177,16 @@ func TestGapActionItemsAreDispatchable(t *testing.T) {
 	for _, g := range gaps {
 		item := g.ToActionItem("fak propagation-scorecard --json")
 		c := issuepolicy.Candidate{
-			Schema: issuepolicy.Schema, Key: item.Key, Title: item.Title,
+			Schema: issuepolicy.Schema, ProblemFrame: issuepolicy.ProblemFrame{
+				Schema: issuepolicy.ProblemFrameSchema, Ready: true, Enforced: true,
+				Centrality: issuepolicy.CentralityStewardship, CentralityTarget: "scorecard-family consistency",
+				Checks: map[string]issuepolicy.ProblemCheck{
+					"p1": {ID: "p1", Status: issuepolicy.ProblemCheckPreserved, Valid: true},
+					"p2": {ID: "p2", Status: issuepolicy.ProblemCheckAdvanced, Valid: true},
+					"p3": {ID: "p3", Status: issuepolicy.ProblemCheckPreserved, Valid: true},
+					"p4": {ID: "p4", Status: issuepolicy.ProblemCheckAdvanced, Valid: true},
+				},
+			}, Key: item.Key, Title: item.Title,
 			ParentRef: item.ParentRef, CurrentState: item.CurrentState, WhyNow: item.WhyNow,
 			WorkingSpine: item.WorkingSpine, WorkUnit: item.WorkUnit, ExpectedSteps: item.ExpectedSteps,
 			Assumptions: item.Assumptions, ConfusionRisks: item.ConfusionRisks, Coordination: item.Coordination,
