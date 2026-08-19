@@ -263,6 +263,12 @@ func runStopAcceptance(ctx context.Context, t appServerTransport, home, workspac
 			started[key] = n
 		} else {
 			completed[key] = n
+			if expect == "blocked" && strings.EqualFold(n.Params.Run.Status, "blocked") {
+				// A blocked Stop intentionally keeps the turn alive, so no
+				// turn/completed notification follows. The typed blocked run is
+				// the terminal acceptance witness for this probe.
+				turnDone = true
+			}
 		}
 	}
 	for key, n := range started {

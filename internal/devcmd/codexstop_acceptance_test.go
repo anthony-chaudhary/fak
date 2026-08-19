@@ -60,6 +60,17 @@ func TestRunStopAcceptanceIntentionalBlock(t *testing.T) {
 	}
 }
 
+func TestRunStopAcceptanceIntentionalBlockDoesNotRequireTurnCompleted(t *testing.T) {
+	messages := baseMessages(
+		lifecycle("hook/started", "stop:6:C:/plugin/hooks.json", "running"),
+		lifecycle("hook/completed", "stop:6:C:/plugin/hooks.json", "blocked"),
+	)
+	s := &scriptedAppServer{messages: messages[:4]}
+	r := runStopAcceptance(context.Background(), s, "home", "workspace", "blocked", "prompt", "codex")
+	if r.Verdict != "PASS" || r.Stop.Blocked != 1 {
+		t.Fatalf("report=%+v", r)
+	}
+}
 func TestRunStopAcceptanceFailsOnHandlerFailureAndInvalidJSON(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
