@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-18T13:30:00-07:00",
+  "updated_at": "2026-08-18T14:10:00-07:00",
   "methodology": "Harness-related repositories absent by exact owner/name from tracked fak docs were ranked by direct seam relevance, current development activity, adoption signal, and license clarity. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -93,6 +93,18 @@
       "stars_at_check": 18903,
       "last_push_at_check": "2026-08-16T17:45:50Z",
       "study_note": "docs/research/agent-zero-study-2026-08-18.md"
+    },
+    {
+      "repository": "llm-d/llm-d",
+      "url": "https://github.com/llm-d/llm-d",
+      "status": "studied",
+      "priority": 9,
+      "why": "Kubernetes-native distributed-inference assembly deeply studied for pluginized endpoint routing, exact KV-event locality, flow control, P/D topology, workload-variant autoscaling, and executable guide contracts. FAK should interoperate rather than duplicate its control plane; the surviving gaps are an ownership-explicit v0.9 integration refresh and a live compatibility witness.",
+      "last_checked": "2026-08-18",
+      "checked_revision": "48fa8c0a76012038c76f30936fff9727c2e6909d",
+      "stars_at_check": 4051,
+      "last_push_at_check": "2026-08-18T18:05:57Z",
+      "study_note": "docs/research/llm-d-study-2026-08-18.md"
     }
   ]
 }
