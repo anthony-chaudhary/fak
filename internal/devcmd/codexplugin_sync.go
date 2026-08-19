@@ -257,8 +257,17 @@ func syncCodexPlugin(home, source, destination, workspace string, ops codexPlugi
 func prepareCodexPluginStage(destination string, ops codexPluginSyncOps) (string, error) {
 	parent := filepath.Dir(destination)
 	stage := filepath.Join(parent, ".fak-plugin-stage-current")
-	if err := ops.remove(stage); err != nil {
-		return "", fmt.Errorf("clear retained plugin stage: %w", err)
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return "", fmt.Errorf("list retained plugin stages: %w", err)
+	}
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), ".fak-plugin-stage-") {
+			continue
+		}
+		if err := ops.remove(filepath.Join(parent, entry.Name())); err != nil {
+			return "", fmt.Errorf("clear retained plugin stage %s: %w", entry.Name(), err)
+		}
 	}
 	if err := os.Mkdir(stage, 0o755); err != nil {
 		return "", fmt.Errorf("create plugin stage: %w", err)

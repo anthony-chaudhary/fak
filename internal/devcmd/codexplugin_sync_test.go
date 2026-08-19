@@ -58,10 +58,17 @@ func TestPrepareCodexPluginStageReusesBoundedPath(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	legacy := filepath.Join(filepath.Dir(destination), ".fak-plugin-stage-123")
+	if err := os.Mkdir(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	ops := codexPluginSyncOps{remove: os.RemoveAll}
 	first, err := prepareCodexPluginStage(destination, ops)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if pathExists(legacy) {
+		t.Fatal("legacy stage was not reaped")
 	}
 	if err := os.WriteFile(filepath.Join(first, "stale"), []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
