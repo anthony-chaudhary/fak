@@ -19,6 +19,23 @@ in-process, served from a local **tool vDSO** when possible, screened by a
 **pre-flight + grammar ladder** before it fires, and admitted through a
 **context-MMU** before tool results enter model context.
 
+## `goal`: canonical intent across harnesses
+
+`fak goal` keeps durable user intent separate from an execution root or session. Bind only stable identities explicitly supplied by a harness; never derive identity from a title, prompt, task, issue text, or registration ID.
+
+```bash
+# Create one canonical goal, then bind harness-native identities to it.
+fak goal create --title "Improve fleet observability" --actor operator --authority user
+fak goal bind --id goal_<hex> --namespace claude:goal --external-id <claude-goal-id> --actor claude --authority harness
+fak goal bind --id goal_<hex> --namespace codex:goal  --external-id <codex-goal-id>  --actor codex  --authority harness
+
+# Resolve at a launch boundary. Read env.FAK_GOAL_ID from the versioned JSON and
+# export it for the child; an unknown or ambiguous binding exits nonzero.
+fak goal resolve --namespace claude:goal --external-id <claude-goal-id>
+```
+
+The same lookup contract supports explicitly witnessed `fak:trajctl`, `github:issue`, and `dos:unit` bindings. An optional `--revision` selects one external revision; omitting it fails closed if several revisions match. Fak does not introspect Claude or Codex state automatically. If a harness supplies no stable identity, launch without `FAK_GOAL_ID` and the execution root remains explicitly unbound.
+
 ## `microcontextdemo`: bounded logical-context fabric
 
 `microcontextdemo` is the research/demo CLI for one immutable agent base serving bounded physical model slots across 100, 1,000, and 10,000 logical contexts. It is a separate demo binary, so invoke it with `go run ./cmd/microcontextdemo` rather than as a `fak` subcommand.

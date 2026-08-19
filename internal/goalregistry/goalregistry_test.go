@@ -73,3 +73,49 @@ func TestRelationsAreNotExecutionParentageAndLifecycleIsExplicit(t *testing.T) {
 		t.Fatalf("updated goal = %+v", g)
 	}
 }
+
+func TestResolveExplicitHarnessBindings(t *testing.T) {
+	s := Store{Path: filepath.Join(t.TempDir(), "goals.json"), Now: func() time.Time { return time.Unix(1700000000, 0).UTC() }}
+	g, err := s.Create("Observe fleet", "", Provenance{Actor: "operator", Authority: "user"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range []struct{ namespace, externalID string }{
+		{"claude:goal", "claude-goal-7"}, {"codex:goal", "codex-goal-9"},
+		{"fak:trajctl", "objective-11"}, {"github:issue", "6662"}, {"dos:unit", "unit-4"},
+	} {
+		if _, err := s.Bind(g.GoalID, b.namespace, b.externalID, "", Provenance{Actor: "adapter", Authority: "harness"}); err != nil {
+			t.Fatal(err)
+		}
+		got, binding, err := s.Resolve(b.namespace, b.externalID, "")
+		if err != nil {
+			t.Fatalf("resolve %s: %v", b.namespace, err)
+		}
+		if got.GoalID != g.GoalID || binding.GoalID != g.GoalID {
+			t.Fatalf("resolve %s = %#v %#v", b.namespace, got, binding)
+		}
+	}
+	if _, _, err := s.Resolve("codex:goal", "unbound", ""); err == nil {
+		t.Fatal("unbound identity resolved")
+	}
+}
+
+func TestResolveRequiresRevisionWhenBindingHistoryIsAmbiguous(t *testing.T) {
+	s := Store{Path: filepath.Join(t.TempDir(), "goals.json")}
+	g, err := s.Create("Rev", "", Provenance{Actor: "operator", Authority: "user"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, revision := range []string{"r1", "r2"} {
+		if _, err := s.Bind(g.GoalID, "codex:goal", "thread-goal", revision, Provenance{Actor: "adapter", Authority: "harness"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := s.Resolve("codex:goal", "thread-goal", ""); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("ambiguity = %v", err)
+	}
+	got, _, err := s.Resolve("codex:goal", "thread-goal", "r2")
+	if err != nil || got.GoalID != g.GoalID {
+		t.Fatalf("revision resolve = %#v, %v", got, err)
+	}
+}

@@ -162,6 +162,40 @@ func (s Store) create(title, summary string, provenance Provenance, relations []
 	return g, s.save(r)
 }
 
+// Resolve returns the single explicitly recorded external binding. An omitted
+// revision is a wildcard only when it identifies exactly one binding; callers
+// must name the revision when external history would otherwise be ambiguous.
+func (s Store) Resolve(namespace, externalID, revision string) (Goal, Binding, error) {
+	namespace = strings.TrimSpace(namespace)
+	externalID = strings.TrimSpace(externalID)
+	revision = strings.TrimSpace(revision)
+	if namespace == "" || externalID == "" {
+		return Goal{}, Binding{}, errors.New("namespace and external ID are required")
+	}
+	r, err := s.Load()
+	if err != nil {
+		return Goal{}, Binding{}, err
+	}
+	var matches []Binding
+	for _, b := range r.Bindings {
+		if b.Namespace == namespace && b.ExternalID == externalID && (revision == "" || b.Revision == revision) {
+			matches = append(matches, b)
+		}
+	}
+	if len(matches) == 0 {
+		return Goal{}, Binding{}, fmt.Errorf("binding not found: %s:%s revision %q", namespace, externalID, revision)
+	}
+	if len(matches) != 1 {
+		return Goal{}, Binding{}, fmt.Errorf("binding is ambiguous: %s:%s matches %d revisions; specify --revision", namespace, externalID, len(matches))
+	}
+	for _, g := range r.Goals {
+		if g.GoalID == matches[0].GoalID {
+			return g, matches[0], nil
+		}
+	}
+	return Goal{}, Binding{}, fmt.Errorf("binding references missing goal %q", matches[0].GoalID)
+}
+
 func (s Store) Show(id string) (Goal, []Binding, error) {
 	r, err := s.Load()
 	if err != nil {

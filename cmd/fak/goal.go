@@ -15,7 +15,7 @@ func cmdGoal(args []string) { os.Exit(runGoal(os.Stdout, os.Stderr, args)) }
 
 func runGoal(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak goal create|show|list|update|bind|unbind ...")
+		fmt.Fprintln(stderr, "usage: fak goal create|show|list|update|bind|resolve|unbind ...")
 		return 2
 	}
 	fs := flag.NewFlagSet("goal "+args[0], flag.ContinueOnError)
@@ -97,6 +97,18 @@ func runGoal(stdout, stderr io.Writer, args []string) int {
 			return fail(err)
 		}
 		_ = enc.Encode(b)
+	case "resolve":
+		g, b, err := s.Resolve(*namespace, *externalID, *revision)
+		if err != nil {
+			return fail(err)
+		}
+		_ = enc.Encode(struct {
+			Schema  string               `json:"schema"`
+			GoalID  string               `json:"goal_id"`
+			Goal    goalregistry.Goal    `json:"goal"`
+			Binding goalregistry.Binding `json:"binding"`
+			Env     map[string]string    `json:"env"`
+		}{"fak-goal-resolution/1", g.GoalID, g, b, map[string]string{"FAK_GOAL_ID": g.GoalID}})
 	case "unbind":
 		if err := requireID(); err != nil {
 			return fail(err)
