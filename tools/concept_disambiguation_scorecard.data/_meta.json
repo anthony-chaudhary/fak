@@ -4485,6 +4485,11 @@
           "category": "incidental",
           "reason": "provenance wire value naming the existing sessionregistry source, not a runtime",
           "token": "session_registration"
+        },
+        {
+          "category": "incidental",
+          "reason": "Coverage denominator count in a spend report, not a runtime session identity or lifecycle.",
+          "token": "CoveredSessions"
         }
       ],
       "id": "session-runtime",
@@ -4497,6 +4502,7 @@
         "BeginSessionEffect",
         "ConfigureSessionClientAuth",
         "ConfigureSessionMove",
+        "CoveredSessions",
         "DiagnoseHistoryIndex",
         "ErrSessionNotFound",
         "FAK_SESSION_CLIENT_TOKEN",
@@ -5607,6 +5613,11 @@
           "category": "incidental",
           "reason": "Private compatibility token for a launcher terminal reason, not a new witness/proof concept.",
           "token": "dispatchWitnessDiedBeforeEpilogue"
+        },
+        {
+          "category": "incidental",
+          "reason": "Outcome bucket label for an independently accepted session witness, not a new witness mechanism.",
+          "token": "accepted_witness"
         }
       ],
       "id": "witness-proof",
@@ -5658,6 +5669,7 @@
         "WitnessSHA256",
         "WitnessedProgressFloor",
         "WorkProfileWitness",
+        "accepted_witness",
         "addDebtWitnesses",
         "appendGuardCompactionWitnessTo",
         "benchFleetWitnessSeconds",

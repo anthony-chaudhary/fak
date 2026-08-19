@@ -8,10 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
+	"github.com/anthony-chaudhary/fak/internal/vcachecalibration"
 )
 
 const launchPostureSchema = "fak.launch-posture.v1"
@@ -151,6 +153,7 @@ func deriveLaunchPosture(opts launchPostureOptions) (launchPostureReport, error)
 		postureShrink("stale-read-elision", opts.elideStaleReads, wire, "--elide-stale-reads=false", "use an Anthropic passthrough wire or set --provider anthropic"),
 		postureShrink("cold-tool-deferral", opts.deferColdTools, wire, "--defer-cold-tools=false", "use an Anthropic passthrough wire or set --provider anthropic"),
 		postureShrink("vcache-anchor", opts.vcacheAnchor, wire, "--vcache-anchor=false", "use an Anthropic passthrough wire or set --provider anthropic"),
+		postureVCacheCalibration(opts, wire),
 	}
 	summary := map[string]int{"active": 0, "inert": 0, "disabled": 0, "unsupported": 0}
 	ok := true
@@ -163,6 +166,39 @@ func deriveLaunchPosture(opts launchPostureOptions) (launchPostureReport, error)
 	return launchPostureReport{Schema: launchPostureSchema, OK: ok, Entrypoint: opts.entrypoint, Harness: opts.harness, Wire: wire, Workspace: root, Mechanisms: mechanisms, Summary: summary}, nil
 }
 
+func postureVCacheCalibration(opts launchPostureOptions, wire string) launchPostureMechanism {
+	provider := strings.ToLower(strings.TrimSpace(opts.provider))
+	if provider == "" {
+		provider = strings.ToLower(strings.TrimSpace(wire))
+	}
+	if provider == "" || provider == "native" || provider == "owned-model" {
+		return launchPostureMechanism{
+			Name: "vcache-calibration", State: "unsupported",
+			Reason: "the selected native/offline wire has no provider cache-feedback calibration",
+			Action: "select anthropic, openai, gemini, or xai when provider-cache calibration is expected",
+		}
+	}
+	path := nightrunLedgerPath(vcachecalibration.DefaultCalibrationRel)
+	statuses, err := vcachecalibration.CalibrationStatuses(path, []string{provider}, time.Now(), vcachecalibration.DefaultCalibrationTTL)
+	if err != nil {
+		return launchPostureMechanism{
+			Name: "vcache-calibration", Configured: true, State: "inert",
+			Reason: "the provider calibration ledger cannot be read: " + err.Error(),
+			Action: "repair the ledger, then run a live provider probe and fak vcache calibration-status",
+		}
+	}
+	status := statuses[0]
+	m := launchPostureMechanism{Name: "vcache-calibration", Configured: true}
+	if status.State == "fresh" {
+		m.State = "active"
+		m.Reason = fmt.Sprintf("dated %s calibration is fresh (predictions=%d, false-warm=%.4f)", provider, status.Row.Predictions, status.Row.FalseWarmRate)
+		return m
+	}
+	m.State = "inert"
+	m.Reason = status.Reason
+	m.Action = status.Action
+	return m
+}
 func postureCodeTools(opts launchPostureOptions, workspace string) launchPostureMechanism {
 	m := launchPostureMechanism{Name: "bounded-code-tools", Configured: opts.nativeCodeTools, Disable: "--native-code-tools=false"}
 	if !opts.nativeCodeTools {

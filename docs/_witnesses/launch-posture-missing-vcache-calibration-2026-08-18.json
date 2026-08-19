@@ -1,0 +1,78 @@
+{
+  "schema": "fak.launch-posture.v1",
+  "ok": false,
+  "entrypoint": "guard",
+  "harness": "codex",
+  "wire": "non-anthropic-proxy",
+  "workspace": "C:\\Users\\USER\\AppData\\Local\\Temp\\non-fak-posture-a9521616f0b54e10a851c138a9fdb360",
+  "mechanisms": [
+    {
+      "name": "bounded-code-tools",
+      "configured": true,
+      "state": "active",
+      "reason": "the wrapped harness repository tools are admitted by the guard default policy",
+      "disable": "use --policy to narrow the tool floor"
+    },
+    {
+      "name": "caveman-response-profile",
+      "configured": true,
+      "state": "unsupported",
+      "reason": "the wrapped harness has no witnessed response-profile injection seam",
+      "action": "use Claude, set --output-profile full, or add a witnessed adapter",
+      "disable": "set FAK_STYLE=full"
+    },
+    {
+      "name": "ponytail-work-profile",
+      "configured": true,
+      "state": "unsupported",
+      "reason": "the wrapped harness has no witnessed work-profile injection seam",
+      "action": "use Claude, set --work-profile standard, or add a witnessed adapter",
+      "disable": "--work-profile standard"
+    },
+    {
+      "name": "compact-history",
+      "configured": true,
+      "state": "inert",
+      "reason": "configured on but runtime wire non-anthropic-proxy does not carry the Anthropic request-body seam",
+      "action": "use an Anthropic passthrough wire or set --provider anthropic",
+      "disable": "--compact-history-budget 0"
+    },
+    {
+      "name": "stale-read-elision",
+      "configured": true,
+      "state": "inert",
+      "reason": "configured on but runtime wire non-anthropic-proxy does not carry the Anthropic request-body seam",
+      "action": "use an Anthropic passthrough wire or set --provider anthropic",
+      "disable": "--elide-stale-reads=false"
+    },
+    {
+      "name": "cold-tool-deferral",
+      "configured": true,
+      "state": "inert",
+      "reason": "configured on but runtime wire non-anthropic-proxy does not carry the Anthropic request-body seam",
+      "action": "use an Anthropic passthrough wire or set --provider anthropic",
+      "disable": "--defer-cold-tools=false"
+    },
+    {
+      "name": "vcache-anchor",
+      "configured": true,
+      "state": "inert",
+      "reason": "configured on but runtime wire non-anthropic-proxy does not carry the Anthropic request-body seam",
+      "action": "use an Anthropic passthrough wire or set --provider anthropic",
+      "disable": "--vcache-anchor=false"
+    },
+    {
+      "name": "vcache-calibration",
+      "configured": true,
+      "state": "inert",
+      "reason": "no live provider calibration row",
+      "action": "run a real fak guard/serve session through this provider"
+    }
+  ],
+  "summary": {
+    "active": 1,
+    "disabled": 0,
+    "inert": 5,
+    "unsupported": 2
+  }
+}

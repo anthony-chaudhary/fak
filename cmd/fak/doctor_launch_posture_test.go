@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/vcachecalibration"
 )
 
 func postureByName(t *testing.T, report launchPostureReport, name string) launchPostureMechanism {
@@ -106,14 +108,48 @@ func TestLaunchPostureDisabledOverridesAreExplicit(t *testing.T) {
 func TestRunDoctorLaunchPostureJSONIsStableAndComplete(t *testing.T) {
 	var out, errOut bytes.Buffer
 	rc := runDoctorLaunchPosture(&out, &errOut, []string{"--entrypoint", "guard", "--harness", "claude", "--workspace", t.TempDir(), "--json"})
-	if rc != 0 || errOut.Len() != 0 {
+	if rc != 1 || errOut.Len() != 0 {
 		t.Fatalf("rc=%d stderr=%s", rc, errOut.String())
 	}
 	var report launchPostureReport
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.Schema != launchPostureSchema || len(report.Mechanisms) != 7 || report.Summary["active"] != 7 {
+	if report.Schema != launchPostureSchema || len(report.Mechanisms) != 8 || report.Summary["active"] != 7 || report.Summary["inert"] != 1 {
 		t.Fatalf("report = %+v", report)
+	}
+}
+
+func TestLaunchPostureFlagsMissingVCacheCalibration(t *testing.T) {
+	t.Setenv(ledgerRootEnv, t.TempDir())
+	report, err := deriveLaunchPosture(launchPostureOptions{entrypoint: "guard", harness: "codex", provider: "openai", workspace: t.TempDir(), compactHistory: gateway.DefaultCompactHistoryBudget, elideStaleReads: true, deferColdTools: true, vcacheAnchor: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := postureByName(t, report, "vcache-calibration")
+	if got.State != "inert" || got.Action == "" || report.OK {
+		t.Fatalf("calibration=%+v report.OK=%v", got, report.OK)
+	}
+}
+
+func TestLaunchPostureAcceptsFreshVCacheCalibration(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(ledgerRootEnv, root)
+	path := nightrunLedgerPath(vcachecalibration.DefaultCalibrationRel)
+	row := vcachecalibration.ProviderCalibration{
+		Schema: vcachecalibration.CalibrationSchema, TS: time.Now().UTC().Format(time.RFC3339Nano),
+		Provider: "openai", Model: "gpt-test", Source: "test", Turns: 2, Predictions: 1,
+		TrueWarm: 1, StaleAfterDays: 7,
+	}
+	if err := vcachecalibration.AppendCalibration(path, row); err != nil {
+		t.Fatal(err)
+	}
+	report, err := deriveLaunchPosture(launchPostureOptions{entrypoint: "guard", harness: "codex", provider: "openai", workspace: t.TempDir(), compactHistory: gateway.DefaultCompactHistoryBudget, elideStaleReads: true, deferColdTools: true, vcacheAnchor: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := postureByName(t, report, "vcache-calibration")
+	if got.State != "active" || !strings.Contains(got.Reason, "predictions=1") {
+		t.Fatalf("calibration=%+v", got)
 	}
 }
