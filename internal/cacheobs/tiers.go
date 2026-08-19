@@ -82,6 +82,7 @@ func (t CacheTier) valid() bool { return t >= 0 && t < numCacheTiers }
 
 // AllTiers returns the closed tier vocabulary in report order. A report always carries a row
 // for every entry — that is what makes an unsupported tier explicit rather than absent.
+//
 //enumlint:exempt numCacheTiers is the exclusive bound sentinel, not a reportable tier.
 func AllTiers() []CacheTier {
 	return []CacheTier{TierLocalPrefix, TierSharedStore, TierProviderManaged}
@@ -116,6 +117,7 @@ func (op TierOp) String() string {
 func (op TierOp) valid() bool { return op >= 0 && op < numTierOps }
 
 // AllOps returns the closed operation vocabulary in report order.
+//
 //enumlint:exempt numTierOps is the exclusive bound sentinel, not a reportable operation.
 func AllOps() []TierOp { return []TierOp{OpRead, OpWrite} }
 
@@ -186,6 +188,7 @@ func (b BackendClass) String() string {
 func (b BackendClass) valid() bool { return b >= 0 && b < numBackendClasses }
 
 // AllBackends returns the closed backend-class vocabulary in report order.
+//
 //enumlint:exempt numBackendClasses is the exclusive bound sentinel, not a backend.
 func AllBackends() []BackendClass { return []BackendClass{BackendMemory, BackendDisk, BackendRemote} }
 
@@ -389,6 +392,7 @@ type TierReport struct {
 // its structurally-zero external-transfer bucket. An actual observation on either promotes
 // it to supported at snapshot time (evidence beats declaration), so the day a tap lands the
 // report tells the truth without this table being edited first.
+//
 //enumlint:exempt numCacheTiers is the exclusive bound sentinel, not a status-bearing tier.
 func defaultTierStatus() map[CacheTier]TierStatus {
 	return map[CacheTier]TierStatus{
