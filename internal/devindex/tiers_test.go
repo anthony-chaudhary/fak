@@ -114,6 +114,17 @@ func TestVerbTiersNameOnlyLiveVerbs(t *testing.T) {
 // outcome-language queries such as "token savings" and "turn control" without
 // requiring the separately built maintainer executable. This is the discovery
 // front door for the other 26 verbs, not another specialist operation.
+func TestCurrentDispatchedVerbTiersStayClassified(t *testing.T) {
+	for _, name := range []string{"architecture", "catchup", "codex-resume", "component", "config", "fanout", "harness", "progress", "quantbench", "stale-work", "test-quality", "windows-setup", "work-delivery"} {
+		if got, ok := TierOf(name); !ok || got != TierDev {
+			t.Errorf("TierOf(%q)=(%q,%v), want dev", name, got, ok)
+		}
+	}
+	if got, ok := TierOf("resume"); !ok || got != TierDev {
+		t.Errorf("TierOf(resume)=(%q,%v), want dev recovery control", got, ok)
+	}
+}
+
 func TestFrontdoorTierStaysSmall(t *testing.T) {
 	const ceiling = 27
 	var front []string
