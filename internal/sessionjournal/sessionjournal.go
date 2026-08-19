@@ -201,39 +201,86 @@ func appendEvent(path string, ev Event) error {
 	})
 }
 
-// ParseEvents scans JSONL content into events, skipping blank lines, malformed lines,
-// and rows carrying the wrong schema or no id. Tolerant by design: a recovery journal
-// favors availability over strict integrity, so a torn line from a crash-at-write is
-// skipped, never fatal (contrast toolproc's fail-closed fold).
-func ParseEvents(content string) []Event {
+// ParseHealth is content-free integrity evidence for one journal scan.
+// Counts never retain source lines, paths, arguments, or transcript content.
+type ParseHealth struct {
+	TotalRows       int    `json:"total_rows"`
+	BlankRows       int    `json:"blank_rows"`
+	AcceptedRows    int    `json:"accepted_rows"`
+	MalformedRows   int    `json:"malformed_rows"`
+	WrongSchemaRows int    `json:"wrong_schema_rows"`
+	MissingIDRows   int    `json:"missing_id_rows"`
+	ScanError       string `json:"scan_error,omitempty"`
+	ReadError       string `json:"read_error,omitempty"`
+}
+
+// Degraded reports whether any nonblank source row could not enter the fold.
+func (h ParseHealth) Degraded() bool {
+	return h.MalformedRows > 0 || h.WrongSchemaRows > 0 || h.MissingIDRows > 0 || h.ScanError != "" || h.ReadError != ""
+}
+
+// ParseEventsReport scans JSONL into events and returns content-free rejection counts.
+// Recovery remains tolerant: valid rows survive a torn tail, while callers can now expose
+// that degradation rather than presenting a partial fold as silently complete.
+func ParseEventsReport(content string) ([]Event, ParseHealth) {
 	var out []Event
+	var health ParseHealth
 	sc := bufio.NewScanner(strings.NewReader(content))
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for sc.Scan() {
+		health.TotalRows++
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
+			health.BlankRows++
 			continue
 		}
 		var ev Event
 		if json.Unmarshal([]byte(line), &ev) != nil {
+			health.MalformedRows++
 			continue
 		}
-		if ev.Schema != Schema || strings.TrimSpace(ev.ID) == "" {
+		if ev.Schema != Schema {
+			health.WrongSchemaRows++
+			continue
+		}
+		if strings.TrimSpace(ev.ID) == "" {
+			health.MissingIDRows++
 			continue
 		}
 		out = append(out, ev)
+		health.AcceptedRows++
 	}
-	return out
+	if err := sc.Err(); err != nil {
+		health.ScanError = "row_too_large"
+	}
+	return out, health
 }
 
-// LoadFile reads and parses the journal at path; a missing/unreadable file yields no
-// events (an absent journal is simply no recorded sessions), never an error.
-func LoadFile(path string) []Event {
+// ParseEvents preserves the tolerant recovery API while ParseEventsReport serves
+// observability consumers that must distinguish complete from degraded folds.
+func ParseEvents(content string) []Event {
+	events, _ := ParseEventsReport(content)
+	return events
+}
+
+// LoadFileReport reads and parses one journal. ReadError is a bounded class rather than
+// the raw OS error, so paths and host details never cross the observability boundary.
+func LoadFileReport(path string) ([]Event, ParseHealth) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return nil
+		kind := "unreadable"
+		if os.IsNotExist(err) {
+			kind = "not_found"
+		}
+		return nil, ParseHealth{ReadError: kind}
 	}
-	return ParseEvents(string(b))
+	return ParseEventsReport(string(b))
+}
+
+// LoadFile preserves the recovery API: a missing/unreadable journal yields no events.
+func LoadFile(path string) []Event {
+	events, _ := LoadFileReport(path)
+	return events
 }
 
 // Session is the folded lifecycle state of one recorded session — the input to Classify.

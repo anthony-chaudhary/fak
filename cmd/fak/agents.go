@@ -62,10 +62,18 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 		live = agentRowsFromLive(list, now)
 	}
 	var history []agentquery.Row
+	var historyHealth *agentquery.SourceHealth
 	if *source != "live" {
-		history = agentRowsFromHistory(sessionjournal.LoadFile(*journal), now)
+		events, health := sessionjournal.LoadFileReport(*journal)
+		if health.ReadError != "" {
+			fmt.Fprintf(stderr, "fak agents: history source %s\n", health.ReadError)
+			return 1
+		}
+		history = agentRowsFromHistory(events, now)
+		historyHealth = agentHistoryHealth(health)
 	}
 	result := agentquery.Union(live, history, *source, !*all, *limit, now)
+	result.Metadata.History = historyHealth
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -77,6 +85,14 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 	}
 	renderAgents(stdout, result)
 	return 0
+}
+
+func agentHistoryHealth(h sessionjournal.ParseHealth) *agentquery.SourceHealth {
+	status := "ok"
+	if h.Degraded() {
+		status = "degraded"
+	}
+	return &agentquery.SourceHealth{Status: status, TotalRows: h.TotalRows, BlankRows: h.BlankRows, AcceptedRows: h.AcceptedRows, MalformedRows: h.MalformedRows, WrongSchemaRows: h.WrongSchemaRows, MissingIDRows: h.MissingIDRows, ScanError: h.ScanError, ReadError: h.ReadError}
 }
 
 func agentRowsFromLive(list gateway.SessionListResponse, now time.Time) []agentquery.Row {
@@ -178,6 +194,9 @@ func agentField(p *string) string {
 }
 func renderAgents(w io.Writer, result agentquery.Result) {
 	fmt.Fprintf(w, "agents source=%s rows=%d live=%d history=%d deduplicated=%d observed=%s\n", result.Metadata.Source, len(result.Rows), result.Metadata.LiveRows, result.Metadata.HistoryRows, result.Metadata.Deduplicated, result.Metadata.ObservedAt)
+	if h := result.Metadata.History; h != nil {
+		fmt.Fprintf(w, "history status=%s accepted=%d rejected=%d malformed=%d wrong_schema=%d missing_id=%d\n", h.Status, h.AcceptedRows, h.MalformedRows+h.WrongSchemaRows+h.MissingIDRows, h.MalformedRows, h.WrongSchemaRows, h.MissingIDRows)
+	}
 	if len(result.Rows) == 0 {
 		fmt.Fprintln(w, "no matching agents")
 		return

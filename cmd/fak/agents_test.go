@@ -92,3 +92,42 @@ func TestAgentsRejectsUnboundedLimit(t *testing.T) {
 		t.Fatalf("code=%d err=%s", code, errout.String())
 	}
 }
+
+func TestAgentsHistoryTornTailIsExplicitlyDegraded(t *testing.T) {
+	journal := filepath.Join(t.TempDir(), "sessions.jsonl")
+	valid := `{"schema":"fak.sessionjournal.v1","kind":"open","id":"survivor","ts":"2026-08-18T00:00:00Z"}`
+	if err := os.WriteFile(journal, []byte(valid+"\n"+`{"schema":"fak.sessionjournal.v1","kind":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errout bytes.Buffer
+	code := runAgents(&out, &errout, []string{"--journal", journal, "--source", "history", "--all", "--json", "--now", "1787011800"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errout.String())
+	}
+	var got agentquery.Result
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Rows) != 1 || got.Rows[0].AgentID != "survivor" || got.Metadata.History == nil || got.Metadata.History.Status != "degraded" || got.Metadata.History.AcceptedRows != 1 || got.Metadata.History.MalformedRows != 1 {
+		t.Fatalf("got=%+v", got)
+	}
+	if strings.Contains(out.String(), `"kind":`) {
+		t.Fatalf("source content leaked into health output: %s", out.String())
+	}
+
+	out.Reset()
+	errout.Reset()
+	code = runAgents(&out, &errout, []string{"--journal", journal, "--source", "history", "--all", "--now", "1787011800"})
+	if code != 0 || !strings.Contains(out.String(), "history status=degraded accepted=1 rejected=1") {
+		t.Fatalf("code=%d stderr=%s out=%s", code, errout.String(), out.String())
+	}
+}
+
+func TestAgentsExplicitUnreadableHistoryFailsClosed(t *testing.T) {
+	var out, errout bytes.Buffer
+	missing := filepath.Join(t.TempDir(), "private-history-name.jsonl")
+	code := runAgents(&out, &errout, []string{"--journal", missing, "--source", "history", "--json"})
+	if code != 1 || !strings.Contains(errout.String(), "history source not_found") || strings.Contains(errout.String(), "private-history-name") || out.Len() != 0 {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out.String(), errout.String())
+	}
+}

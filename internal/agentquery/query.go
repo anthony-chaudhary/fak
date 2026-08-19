@@ -35,16 +35,29 @@ type Row struct {
 	SourceVersion    string   `json:"source_version"`
 	Stale            bool     `json:"stale"`
 }
+type SourceHealth struct {
+	Status          string `json:"status"`
+	TotalRows       int    `json:"total_rows"`
+	BlankRows       int    `json:"blank_rows"`
+	AcceptedRows    int    `json:"accepted_rows"`
+	MalformedRows   int    `json:"malformed_rows"`
+	WrongSchemaRows int    `json:"wrong_schema_rows"`
+	MissingIDRows   int    `json:"missing_id_rows"`
+	ScanError       string `json:"scan_error,omitempty"`
+	ReadError       string `json:"read_error,omitempty"`
+}
+
 type Metadata struct {
-	Schema       string `json:"schema"`
-	Source       string `json:"source"`
-	ObservedAt   string `json:"observed_at"`
-	Freshness    string `json:"freshness"`
-	Truncated    bool   `json:"truncated"`
-	Limit        int    `json:"limit"`
-	LiveRows     int    `json:"live_rows"`
-	HistoryRows  int    `json:"history_rows"`
-	Deduplicated int    `json:"deduplicated"`
+	Schema       string        `json:"schema"`
+	Source       string        `json:"source"`
+	ObservedAt   string        `json:"observed_at"`
+	Freshness    string        `json:"freshness"`
+	Truncated    bool          `json:"truncated"`
+	Limit        int           `json:"limit"`
+	LiveRows     int           `json:"live_rows"`
+	HistoryRows  int           `json:"history_rows"`
+	Deduplicated int           `json:"deduplicated"`
+	History      *SourceHealth `json:"history"`
 }
 type Result struct {
 	Metadata Metadata `json:"metadata"`
