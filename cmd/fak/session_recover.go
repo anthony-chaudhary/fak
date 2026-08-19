@@ -59,6 +59,7 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 	since := fs.Duration("since", 24*time.Hour, "candidate evidence window")
 	limit := fs.Int("limit", 1, "maximum launches per wave")
 	apply := fs.Bool("apply", false, "write receipts and launch visible resumes")
+	all := fs.Bool("all", false, "with --apply, confirm every selected candidate instead of one explicit --thread")
 	cwd := fs.String("cwd", "", "explicit override for cwd_unknown candidates")
 	prompt := fs.String("prompt", "", "optional resume prompt passed as one exact argv element")
 	journal := fs.Bool("journal", true, "include crash candidates from the session journal")
@@ -71,7 +72,15 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 		return 2
 	}
 	if fs.NArg() != 0 || *since <= 0 || *limit <= 0 || *settle < 0 {
-		fmt.Fprintln(stderr, "usage: fak session recover [--thread ID] [--since 24h] [--limit 1] [--cwd DIR] [--prompt TEXT] [--apply] [--settle 5s]")
+		fmt.Fprintln(stderr, "usage: fak session recover [--thread ID] [--since 24h] [--limit 1] [--cwd DIR] [--prompt TEXT] [--apply (--thread ID | --all)] [--settle 5s]")
+		return 2
+	}
+	if *apply && len(threads) == 0 && !*all {
+		fmt.Fprintln(stderr, "fak session recover: --apply requires an explicit --thread ID or --all after reviewing the preview")
+		return 2
+	}
+	if *all && len(threads) > 0 {
+		fmt.Fprintln(stderr, "fak session recover: --all cannot be combined with --thread")
 		return 2
 	}
 	if *receipts == "" {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +33,26 @@ func TestSessionRecoverIsFirstClassAlias(t *testing.T) {
 	}
 	if got := out.String(); got != "[]\n" {
 		t.Fatalf("output=%q", got)
+	}
+}
+
+func TestSessionRecoverApplyRequiresExplicitConfirmation(t *testing.T) {
+	var out, er bytes.Buffer
+	if code := runSessionRecover(&out, &er, []string{"--apply", "--journal=false"}); code != 2 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+	if got := er.String(); !strings.Contains(got, "requires an explicit --thread ID or --all") {
+		t.Fatalf("error=%q", got)
+	}
+}
+
+func TestSessionRecoverAllAndThreadAreMutuallyExclusive(t *testing.T) {
+	var out, er bytes.Buffer
+	if code := runSessionRecover(&out, &er, []string{"--apply", "--all", "--thread", "t1", "--journal=false"}); code != 2 {
+		t.Fatalf("code=%d output=%s", code, out.String())
+	}
+	if got := er.String(); !strings.Contains(got, "--all cannot be combined with --thread") {
+		t.Fatalf("error=%q", got)
 	}
 }
 
