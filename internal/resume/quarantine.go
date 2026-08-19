@@ -148,6 +148,8 @@ const (
 // ActingRecoveryActions is every class that can put work back on the fleet — the exact
 // set target 0 must refuse. Exported so a caller (and the regression witness) can
 // enumerate the gate's obligation instead of re-listing it by hand.
+//
+//enumlint:exempt RecoveryStatusRead is read-only by definition and therefore excluded from acting actions.
 var ActingRecoveryActions = []RecoveryAction{
 	RecoveryResumeSession,
 	RecoveryEnableDispatchTask,

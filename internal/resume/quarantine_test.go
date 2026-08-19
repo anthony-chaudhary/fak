@@ -9,6 +9,14 @@ import (
 // operator's declared population at 0, EVERY acting class — reset, resume, re-enable,
 // restart, stranded recovery, refill — is refused with the quarantine token. Before the
 // gate existed each of these paths carried its own target and none read the operator's.
+func TestActingRecoveryActionsExcludeStatusRead(t *testing.T) {
+	for _, action := range ActingRecoveryActions {
+		if action == RecoveryStatusRead {
+			t.Fatal("read-only status action appears in acting recovery vocabulary")
+		}
+	}
+}
+
 func TestTargetZeroRefusesEveryActingRecoveryPath(t *testing.T) {
 	p := DeclaredFleetTarget(0, "dos loop --target", "operator quarantine 2026-08-11")
 	for _, act := range ActingRecoveryActions {
