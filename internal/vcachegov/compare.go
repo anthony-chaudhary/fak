@@ -25,6 +25,7 @@ type ComparisonResult struct {
 	Arms     []ComparisonArm `json:"arms"`
 }
 
+//enumlint:exempt Secret candidates are refused before scheduling and therefore excluded from the schedulable comparison fixture.
 func comparisonFixture() (RateLimit, float64, int64, []WarmCandidate) {
 	return RateLimit{TierRPM: 10, RealRPM: 8, TierTPM: 20000, RealTPM: 10000}, 1000, 60000, []WarmCandidate{
 		{Key: "hot-large", Frequency: 8, Size: 2000, ReuseDensity: 4, Secret: Cacheable},

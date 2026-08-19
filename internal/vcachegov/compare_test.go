@@ -2,6 +2,15 @@ package vcachegov
 
 import "testing"
 
+func TestComparisonFixtureExcludesSecretCandidates(t *testing.T) {
+	_, _, _, candidates := comparisonFixture()
+	for _, candidate := range candidates {
+		if candidate.Secret == Secret {
+			t.Fatalf("secret candidate %q entered scheduling fixture", candidate.Key)
+		}
+	}
+}
+
 func TestCompareLocalKeepsWarmSchedulingAlternativesExplicit(t *testing.T) {
 	got := CompareLocal()
 	want := []struct{ name, kind string }{
