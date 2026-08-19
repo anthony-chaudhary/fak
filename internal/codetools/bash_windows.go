@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"syscall"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func configureProcessTree(cmd *exec.Cmd) {
@@ -15,7 +17,9 @@ func configureProcessTree(cmd *exec.Cmd) {
 		if cmd.Process == nil {
 			return nil
 		}
-		_ = exec.Command("taskkill.exe", "/T", "/F", "/PID", fmt.Sprint(cmd.Process.Pid)).Run()
+		killCmd := exec.Command("taskkill.exe", "/T", "/F", "/PID", fmt.Sprint(cmd.Process.Pid))
+		windowgate.ConfigureBackgroundCommand(killCmd)
+		_ = killCmd.Run()
 		return cmd.Process.Kill()
 	}
 	cmd.WaitDelay = 2 * time.Second
