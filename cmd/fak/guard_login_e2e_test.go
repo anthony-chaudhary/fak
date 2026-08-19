@@ -52,6 +52,19 @@ func TestMain(m *testing.M) {
 	// Keep console-pane tests hermetic. The production default reads ~/.fak/console.json;
 	// a developer's local preference file must not change package test behavior.
 	_ = os.Setenv("FAK_CONSOLE_FILE", filepath.Join(os.TempDir(), "fak-test-missing-console.json"))
+	// Keep registered agent launches off the machine-global journal. Linux CI cannot write
+	// /var/lib/fak, and package tests must never publish real session registrations.
+	registryDir, err := os.MkdirTemp("", "fak-test-session-registry-")
+	if err != nil {
+		panic(err)
+	}
+	defer os.RemoveAll(registryDir)
+	_ = os.Setenv("FAK_SESSION_REGISTRY", filepath.Join(registryDir, "sessions.jsonl"))
+	// The developer shell may itself be guarded. Package tests start a fresh registry, so
+	// inherited lineage would point at a parent absent from that registry.
+	for _, name := range []string{"FAK_REGISTRATION_ID", "FAK_PARENT_REGISTRATION_ID", "FAK_ATTEMPT_ID", "FAK_PARENT_ATTEMPT_ID", "FAK_ROOT_REGISTRATION_ID"} {
+		_ = os.Unsetenv(name)
+	}
 	// Keep the enroll path's OAuth token-family divorce hermetic. It runs by DEFAULT on every
 	// `add --adopt` / `enroll-current`, so without this stub each adopt test would exec a real
 	// `claude -p` against a fixture dir. A no-op spawn is the truthful stand-in for a tree with no
