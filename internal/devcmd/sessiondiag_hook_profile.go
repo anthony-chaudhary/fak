@@ -302,10 +302,11 @@ func buildCodexHookProfile(input codexHookProfileBuildInput) codexHookProfileRep
 func duplicateHostHandlerDiagnoses(hooks []codexEffectiveHook) []codexHookDiagnosis {
 	byEvent := make(map[string][]codexEffectiveHook)
 	for _, hook := range hooks {
-		if !hook.Enabled || strings.TrimSpace(hook.EventName) == "" {
+		event := strings.TrimSpace(hook.EventName)
+		if !hook.Enabled || !requiresSingularHostVerdict(event) {
 			continue
 		}
-		byEvent[hook.EventName] = append(byEvent[hook.EventName], hook)
+		byEvent[event] = append(byEvent[event], hook)
 	}
 	var events []string
 	for event, declarations := range byEvent {
@@ -329,6 +330,13 @@ func duplicateHostHandlerDiagnoses(hooks []codexEffectiveHook) []codexHookDiagno
 		})
 	}
 	return diagnoses
+}
+
+// requiresSingularHostVerdict names decision checkpoints whose independently
+// visible handlers can produce competing host outcomes. Observer cardinality
+// alone is not a defect; add events only with a witnessed singular-verdict contract.
+func requiresSingularHostVerdict(event string) bool {
+	return strings.EqualFold(strings.TrimSpace(event), "stop")
 }
 
 func diagnoseEffectiveHook(hook codexEffectiveHook, trunkHead string, diagnoses []codexHookDiagnosis) (string, []codexHookDiagnosis) {

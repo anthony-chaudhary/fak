@@ -274,6 +274,16 @@ func TestDuplicateHostHandlerDiagnosesGroupsEnabledHandlersByEvent(t *testing.T)
 	}
 }
 
+func TestDuplicateHostHandlerDiagnosesAllowsMultipleObservers(t *testing.T) {
+	hooks := []codexEffectiveHook{
+		{Key: "project:prompt:0", EventName: "userPromptSubmit", Enabled: true},
+		{Key: "plugin:prompt:0", EventName: "userPromptSubmit", Enabled: true},
+	}
+	if diagnoses := duplicateHostHandlerDiagnoses(hooks); len(diagnoses) != 0 {
+		t.Fatalf("observer-only handlers diagnosed as competing verdicts: %+v", diagnoses)
+	}
+}
+
 func TestDuplicateHostHandlerDiagnosesAcceptsSingleFanInAdapter(t *testing.T) {
 	hooks := []codexEffectiveHook{{Key: "plugin:stop:0", EventName: "stop", Enabled: true}}
 	if diagnoses := duplicateHostHandlerDiagnoses(hooks); len(diagnoses) != 0 {
