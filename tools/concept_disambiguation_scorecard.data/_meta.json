@@ -7056,6 +7056,11 @@
           "category": "incidental",
           "reason": "launch-posture renderer helper, not a new policy or capability concept",
           "token": "postureDecodedContextView"
+        },
+        {
+          "category": "incidental",
+          "reason": "launch diagnostic helper for an existing configured context planner, not a policy capability",
+          "token": "postureShrinkDecoded"
         }
       ],
       "exclude": [
@@ -7187,6 +7192,7 @@
         "postureDecodedContextView",
         "postureOutputProfile",
         "postureShrink",
+        "postureShrinkDecoded",
         "postureVCacheCalibration",
         "postureWorkProfile",
         "postures",

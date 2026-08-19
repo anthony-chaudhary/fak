@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
@@ -49,6 +50,7 @@ type launchPostureOptions struct {
 	outputProfile   string
 	workProfile     string
 	compactHistory  int
+	ctxViewBudget   int
 	elideStaleReads bool
 	deferColdTools  bool
 	vcacheAnchor    bool
@@ -66,7 +68,8 @@ func runDoctorLaunchPosture(stdout, stderr io.Writer, argv []string) int {
 	nativeCodeTools := fs.Bool("native-code-tools", true, "model bounded native code tools enabled")
 	outputProfile := fs.String("output-profile", agentDefaultOutputStyle, "modeled response profile")
 	workProfile := fs.String("work-profile", agentDefaultWorkProfile, "modeled work profile")
-	compactHistory := fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "modeled resident history budget; 0 disables")
+	compactHistory := fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "modeled Anthropic byte-preserving history budget; 0 disables")
+	ctxViewBudget := fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget, "modeled provider-neutral decoded context-view budget; 0 disables")
 	elideStaleReads := fs.Bool("elide-stale-reads", gateway.DefaultElideStaleReads, "model stale-read elision")
 	deferColdTools := fs.Bool("defer-cold-tools", gateway.DefaultDeferColdTools, "model cold-tool deferral")
 	vcacheAnchor := fs.Bool("vcache-anchor", gateway.DefaultVCacheAnchor, "model provider-cache anchoring")
@@ -81,7 +84,7 @@ func runDoctorLaunchPosture(stdout, stderr io.Writer, argv []string) int {
 	report, err := deriveLaunchPosture(launchPostureOptions{
 		entrypoint: *entrypoint, harness: *harness, provider: *provider, baseURL: *baseURL,
 		workspace: *workspace, native: *native, nativeCodeTools: *nativeCodeTools,
-		outputProfile: *outputProfile, workProfile: *workProfile, compactHistory: *compactHistory,
+		outputProfile: *outputProfile, workProfile: *workProfile, compactHistory: *compactHistory, ctxViewBudget: *ctxViewBudget,
 		elideStaleReads: *elideStaleReads, deferColdTools: *deferColdTools, vcacheAnchor: *vcacheAnchor,
 	})
 	if err != nil {
@@ -150,6 +153,7 @@ func deriveLaunchPosture(opts launchPostureOptions) (launchPostureReport, error)
 		postureOutputProfile(opts),
 		postureWorkProfile(opts),
 		postureShrink("compact-history", opts.compactHistory > 0, wire, "--compact-history-budget 0", "use an Anthropic passthrough wire or set --provider anthropic"),
+		postureShrinkDecoded(opts, wire),
 		postureShrink("stale-read-elision", opts.elideStaleReads, wire, "--elide-stale-reads=false", "use an Anthropic passthrough wire or set --provider anthropic"),
 		postureShrink("cold-tool-deferral", opts.deferColdTools, wire, "--defer-cold-tools=false", "use an Anthropic passthrough wire or set --provider anthropic"),
 		postureShrink("vcache-anchor", opts.vcacheAnchor, wire, "--vcache-anchor=false", "use an Anthropic passthrough wire or set --provider anthropic"),
@@ -304,6 +308,20 @@ func postureWorkProfile(opts launchPostureOptions) launchPostureMechanism {
 	default:
 		m.State, m.Reason, m.Action = "unsupported", "passthrough serve does not own the upstream harness work policy", "configure the client harness or use fak guard -- claude"
 	}
+	return m
+}
+
+func postureShrinkDecoded(opts launchPostureOptions, wire string) launchPostureMechanism {
+	m := launchPostureMechanism{Name: "decoded-context-view", Configured: opts.ctxViewBudget > 0, Disable: "--ctx-view-budget 0"}
+	if opts.ctxViewBudget <= 0 {
+		m.State, m.Reason, m.Action = "disabled", "provider-neutral decoded context planning was explicitly disabled", "remove --ctx-view-budget 0"
+		return m
+	}
+	if wire == shrinkWireAnthropicPassthrough {
+		m.State, m.Reason = "active", "configured on; buffered Anthropic turns re-plan through the decoded context-view seam after byte-preserving transforms"
+		return m
+	}
+	m.State, m.Reason = "active", "configured on; OpenAI-compatible and owned-model turns re-plan decoded history before the provider/model call"
 	return m
 }
 

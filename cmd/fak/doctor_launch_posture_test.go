@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/vcachecalibration"
 )
@@ -32,7 +33,7 @@ func TestLaunchPostureNativeServeInNonFakRepository(t *testing.T) {
 	report, err := deriveLaunchPosture(launchPostureOptions{
 		entrypoint: "serve", provider: "native", workspace: repo, native: true, nativeCodeTools: true,
 		outputProfile: agentDefaultOutputStyle, workProfile: agentDefaultWorkProfile,
-		compactHistory: gateway.DefaultCompactHistoryBudget, elideStaleReads: true, deferColdTools: true, vcacheAnchor: true,
+		compactHistory: gateway.DefaultCompactHistoryBudget, ctxViewBudget: agent.DefaultCtxViewBudget, elideStaleReads: true, deferColdTools: true, vcacheAnchor: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +52,7 @@ func TestLaunchPostureNativeServeInNonFakRepository(t *testing.T) {
 }
 
 func TestLaunchPostureGuardClaudeDefaultsActive(t *testing.T) {
-	report, err := deriveLaunchPosture(launchPostureOptions{entrypoint: "guard", harness: "claude", workspace: t.TempDir(), nativeCodeTools: true, outputProfile: agentDefaultOutputStyle, workProfile: agentDefaultWorkProfile, compactHistory: gateway.DefaultCompactHistoryBudget, elideStaleReads: true, deferColdTools: true, vcacheAnchor: true})
+	report, err := deriveLaunchPosture(launchPostureOptions{entrypoint: "guard", harness: "claude", workspace: t.TempDir(), nativeCodeTools: true, outputProfile: agentDefaultOutputStyle, workProfile: agentDefaultWorkProfile, compactHistory: gateway.DefaultCompactHistoryBudget, ctxViewBudget: agent.DefaultCtxViewBudget, elideStaleReads: true, deferColdTools: true, vcacheAnchor: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,7 @@ func TestLaunchPostureGuardClaudeDefaultsActive(t *testing.T) {
 }
 
 func TestLaunchPostureGuardCodexNamesActiveProfilesAndInertWire(t *testing.T) {
-	report, err := deriveLaunchPosture(launchPostureOptions{entrypoint: "guard", harness: "codex", provider: "openai", baseURL: "https://api.openai.example", workspace: t.TempDir(), nativeCodeTools: true, outputProfile: agentDefaultOutputStyle, workProfile: agentDefaultWorkProfile, compactHistory: gateway.DefaultCompactHistoryBudget, elideStaleReads: true, deferColdTools: true, vcacheAnchor: true})
+	report, err := deriveLaunchPosture(launchPostureOptions{entrypoint: "guard", harness: "codex", provider: "openai", baseURL: "https://api.openai.example", workspace: t.TempDir(), nativeCodeTools: true, outputProfile: agentDefaultOutputStyle, workProfile: agentDefaultWorkProfile, compactHistory: gateway.DefaultCompactHistoryBudget, ctxViewBudget: agent.DefaultCtxViewBudget, elideStaleReads: true, deferColdTools: true, vcacheAnchor: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,12 +80,15 @@ func TestLaunchPostureGuardCodexNamesActiveProfilesAndInertWire(t *testing.T) {
 		}
 	}
 	if got := postureByName(t, report, "compact-history"); got.State != "inert" || got.Action == "" {
-		t.Fatalf("compaction = %+v", got)
+		t.Fatalf("anthropic compaction = %+v", got)
+	}
+	if got := postureByName(t, report, "decoded-context-view"); got.State != "active" || !strings.Contains(got.Reason, "OpenAI-compatible") {
+		t.Fatalf("provider-neutral context view = %+v", got)
 	}
 }
 
 func TestLaunchPostureAnthropicServeHasActiveShrinkStack(t *testing.T) {
-	report, err := deriveLaunchPosture(launchPostureOptions{entrypoint: "serve", provider: "anthropic", workspace: t.TempDir(), nativeCodeTools: true, outputProfile: agentDefaultOutputStyle, workProfile: agentDefaultWorkProfile, compactHistory: gateway.DefaultCompactHistoryBudget, elideStaleReads: true, deferColdTools: true, vcacheAnchor: true})
+	report, err := deriveLaunchPosture(launchPostureOptions{entrypoint: "serve", provider: "anthropic", workspace: t.TempDir(), nativeCodeTools: true, outputProfile: agentDefaultOutputStyle, workProfile: agentDefaultWorkProfile, compactHistory: gateway.DefaultCompactHistoryBudget, ctxViewBudget: agent.DefaultCtxViewBudget, elideStaleReads: true, deferColdTools: true, vcacheAnchor: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,14 +121,14 @@ func TestRunDoctorLaunchPostureJSONIsStableAndComplete(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.Schema != launchPostureSchema || len(report.Mechanisms) != 8 || report.Summary["active"] != 7 || report.Summary["inert"] != 1 {
+	if report.Schema != launchPostureSchema || len(report.Mechanisms) != 9 || report.Summary["active"] != 8 || report.Summary["inert"] != 1 {
 		t.Fatalf("report = %+v", report)
 	}
 }
 
 func TestLaunchPostureFlagsMissingVCacheCalibration(t *testing.T) {
 	t.Setenv(ledgerRootEnv, t.TempDir())
-	report, err := deriveLaunchPosture(launchPostureOptions{entrypoint: "guard", harness: "codex", provider: "openai", workspace: t.TempDir(), compactHistory: gateway.DefaultCompactHistoryBudget, elideStaleReads: true, deferColdTools: true, vcacheAnchor: true})
+	report, err := deriveLaunchPosture(launchPostureOptions{entrypoint: "guard", harness: "codex", provider: "openai", workspace: t.TempDir(), compactHistory: gateway.DefaultCompactHistoryBudget, ctxViewBudget: agent.DefaultCtxViewBudget, elideStaleReads: true, deferColdTools: true, vcacheAnchor: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +150,7 @@ func TestLaunchPostureAcceptsFreshSteeringVCacheCalibration(t *testing.T) {
 	if err := vcachecalibration.AppendCalibration(path, row); err != nil {
 		t.Fatal(err)
 	}
-	report, err := deriveLaunchPosture(launchPostureOptions{entrypoint: "guard", harness: "codex", provider: "openai", workspace: t.TempDir(), compactHistory: gateway.DefaultCompactHistoryBudget, elideStaleReads: true, deferColdTools: true, vcacheAnchor: true})
+	report, err := deriveLaunchPosture(launchPostureOptions{entrypoint: "guard", harness: "codex", provider: "openai", workspace: t.TempDir(), compactHistory: gateway.DefaultCompactHistoryBudget, ctxViewBudget: agent.DefaultCtxViewBudget, elideStaleReads: true, deferColdTools: true, vcacheAnchor: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,12 +171,23 @@ func TestLaunchPostureFlagsFreshObservationOnlyCalibration(t *testing.T) {
 	if err := vcachecalibration.AppendCalibration(path, row); err != nil {
 		t.Fatal(err)
 	}
-	report, err := deriveLaunchPosture(launchPostureOptions{entrypoint: "guard", harness: "codex", provider: "openai", workspace: t.TempDir(), compactHistory: gateway.DefaultCompactHistoryBudget, elideStaleReads: true, deferColdTools: true, vcacheAnchor: true})
+	report, err := deriveLaunchPosture(launchPostureOptions{entrypoint: "guard", harness: "codex", provider: "openai", workspace: t.TempDir(), compactHistory: gateway.DefaultCompactHistoryBudget, ctxViewBudget: agent.DefaultCtxViewBudget, elideStaleReads: true, deferColdTools: true, vcacheAnchor: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := postureByName(t, report, "vcache-calibration")
 	if got.State != "inert" || !strings.Contains(got.Reason, "observational only") || report.OK {
 		t.Fatalf("calibration=%+v report.OK=%v", got, report.OK)
+	}
+}
+
+func TestLaunchPostureDecodedContextViewOptOut(t *testing.T) {
+	report, err := deriveLaunchPosture(launchPostureOptions{entrypoint: "guard", harness: "codex", provider: "openai", workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := postureByName(t, report, "decoded-context-view")
+	if got.State != "disabled" || got.Action == "" {
+		t.Fatalf("decoded context-view opt-out = %+v", got)
 	}
 }

@@ -1,0 +1,26 @@
+{
+  "schema": "fak.openai-decoded-context-view-default-witness.v1",
+  "captured_at": "2026-08-19T06:35:00Z",
+  "operator_local_date": "2026-08-18",
+  "workspace_kind": "temporary non-FAK git repository",
+  "mechanism": {
+    "name": "decoded-context-view",
+    "default_budget_tokens": 8000,
+    "entrypoints": ["guard", "serve"],
+    "provider_wires": ["OpenAI-compatible", "owned model", "buffered Anthropic after byte-preserving transforms"],
+    "disable": "--ctx-view-budget 0"
+  },
+  "behavioral_witness": {
+    "test": "TestCtxViewHTTPOnPlansHistoryOnTheWire",
+    "effect": "the live OpenAI upstream receives fewer messages and fewer estimated tokens than the full transcript while preserving pinned system, tool-call, and latest-user spans",
+    "metrics": "CtxValueReport records one current decoded context-view event"
+  },
+  "diagnostic_witness": {
+    "test": "TestLaunchPostureGuardCodexNamesActiveProfilesAndInertWire",
+    "effect": "launch posture names decoded-context-view active on guarded Codex/OpenAI even while Anthropic-only compact-history remains inert"
+  },
+  "limitations": [
+    "This provider-neutral mechanism is decoded context planning, not byte-identical Anthropic compact-history.",
+    "Provider-neutral stale-read elision, cold-tool deferral, and vCache signaling remain #8089 acceptance gaps."
+  ]
+}
