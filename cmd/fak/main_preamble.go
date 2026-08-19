@@ -57,6 +57,10 @@ func resolveEarlyDispatch(verb *string, argv *[]string, start time.Time) bool {
 		cmdOrchestration(os.Args[2:])
 		return true
 	}
+	if os.Args[1] == "ultracode" {
+		cmdUltracode(os.Args[2:])
+		return true
+	}
 	if os.Args[1] == "dev" {
 		code := runDevHandoff(os.Stdin, os.Stdout, os.Stderr, os.Args[2:])
 		recordUsage(*verb, *argv, code, start)

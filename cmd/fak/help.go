@@ -48,6 +48,7 @@ var overviewGroups = []struct {
 		{"manage", "wrap an agent harness: manage every tool call in-process ('fak m'; legacy: guard)"},
 		{"serve", "the OpenAI-compatible gateway in front of a local or remote model"},
 		{"agent", "the offline proof: run one managed-agent task end to end ('fak agent --offline')"},
+		{"ultracode", "plan, launch, and observe a bounded concurrent coding-agent fleet"},
 		{"run", "run an agent turn (or a recorded trace / 'fak replay') through the kernel"},
 		{"codex", "launch OpenAI Codex routed through the kernel"},
 	}},

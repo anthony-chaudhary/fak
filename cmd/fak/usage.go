@@ -224,6 +224,11 @@ const usageCoreText = `usage:
                  per-firing latency_ms into p50/p90/p99 per verb, judge the tail
                  against the declared budget; a breach names GATE_LATENCY_REGRESSION
                  and exits 1, a thin sample abstains  -  #1993)
+  fak ultracode [status] [--task FILE | --task-text TEXT] [--launch] [--json] [--selfcheck]
+  fak ultracode is the first-class bounded concurrent coding-agent workflow.
+                It fixes the canonical profile to ultracode: leases, independent
+                effect readback, and reconciliation remain mandatory. Planning and
+                --selfcheck are offline; --launch starts resolved harness workers.
   fak agent     [--task STR] [--provider openai|anthropic|gemini|xai]
                 [--base-url URL --model M --api-key-env VAR | --offline]
                 [--max-turns N] [--out agent-report.json] [--policy FILE]
