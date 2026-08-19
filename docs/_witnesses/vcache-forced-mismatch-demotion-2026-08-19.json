@@ -1,0 +1,18 @@
+{
+  "schema": "fak.vcache.false-warm-demotion-witness.v1",
+  "captured_at": "2026-08-19T17:00:00Z",
+  "issue": 8090,
+  "forced_sequence": [
+    {"turn": 1, "cache_read_tokens": 40000, "effect": "belief becomes resident"},
+    {"turn": 2, "cache_read_tokens": 0, "effect": "false-warm classification demotes belief to expired"},
+    {"turn": 3, "cache_read_tokens": 40000, "effect": "prediction remains cold until provider evidence re-establishes warmth"}
+  ],
+  "journal": {
+    "action": "mark_belief_cold",
+    "reason": "false_warm",
+    "divergence_probe": "provider_cache_read_boundary",
+    "divergent_prefix_turn": 2,
+    "integrity": "hash chained"
+  },
+  "metrics": ["fak_vcache_warmth_demotions_total", "fak_vcache_warmth_false_warm_rate"]
+}

@@ -33,6 +33,7 @@ type vcacheWarmthDemotionRecord struct {
 	StateBefore         string `json:"state_before"`
 	StateAfter          string `json:"state_after"`
 	DivergenceProbe     string `json:"divergence_probe"`
+	DivergentPrefixTurn int    `json:"divergent_prefix_turn,omitempty"`
 	PrevHash            string `json:"prev_hash"`
 	Hash                string `json:"hash"`
 }
@@ -45,6 +46,7 @@ type vcacheWarmthDemotionObservation struct {
 	CacheCreationTokens int64
 	StateBefore         cachemeta.EntryState
 	StateAfter          cachemeta.EntryState
+	DivergentPrefixTurn int
 }
 
 type vcacheWarmthDemotionJournal struct {
@@ -80,7 +82,8 @@ func (j *vcacheWarmthDemotionJournal) record(obs vcacheWarmthDemotionObservation
 		ActualWarm:          false,
 		StateBefore:         string(obs.StateBefore),
 		StateAfter:          string(obs.StateAfter),
-		DivergenceProbe:     "not_wired",
+		DivergenceProbe:     "provider_cache_read_boundary",
+		DivergentPrefixTurn: obs.DivergentPrefixTurn,
 		PrevHash:            j.lastHash,
 	}
 	r.Hash = hashVCacheWarmthDemotion(r.PrevHash, r)
@@ -175,6 +178,7 @@ func vcacheWarmthDemotionForLatestTurn(family string, tsUnixMillis int64, turns 
 				CacheCreationTokens: t.CacheCreation,
 				StateBefore:         before,
 				StateAfter:          belief.Lifecycle.State,
+				DivergentPrefixTurn: i + 1,
 			}, true
 		}
 		started = true
@@ -184,7 +188,7 @@ func vcacheWarmthDemotionForLatestTurn(family string, tsUnixMillis int64, turns 
 
 func hashVCacheWarmthDemotion(prev string, r vcacheWarmthDemotionRecord) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\x1f%s\x1f%d\x1f%d\x1f%s\x1f%s\x1f%s\x1f%d\x1f%d\x1f%d\x1f%t\x1f%t\x1f%s\x1f%s\x1f%s",
+	fmt.Fprintf(h, "%s\x1f%s\x1f%d\x1f%d\x1f%s\x1f%s\x1f%s\x1f%d\x1f%d\x1f%d\x1f%t\x1f%t\x1f%s\x1f%s\x1f%s\x1f%d",
 		prev,
 		r.Schema,
 		r.Seq,
@@ -200,6 +204,7 @@ func hashVCacheWarmthDemotion(prev string, r vcacheWarmthDemotionRecord) string 
 		r.StateBefore,
 		r.StateAfter,
 		r.DivergenceProbe,
+		r.DivergentPrefixTurn,
 	)
 	return hex.EncodeToString(h.Sum(nil))
 }

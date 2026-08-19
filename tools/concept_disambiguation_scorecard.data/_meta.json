@@ -827,6 +827,11 @@
           "category": "incidental",
           "reason": "Serialized alias for provider probe write-cost evidence; not a new cache mechanism",
           "token": "cache_write_cost_equiv"
+        },
+        {
+          "category": "incidental",
+          "reason": "Journal localization label for the established provider cache-read evidence boundary",
+          "token": "provider_cache_read_boundary"
         }
       ],
       "id": "cache",
@@ -1020,6 +1025,7 @@
         "prefixcachequeries",
         "promptcachehittokens",
         "promptcachemisstokens",
+        "provider_cache_read_boundary",
         "provider_cache_usage_not_reported",
         "pycache",
         "registerCacheLevers",

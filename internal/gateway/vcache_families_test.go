@@ -410,8 +410,8 @@ func TestVCacheWarmthBeliefMetrics(t *testing.T) {
 	if r.InputTokens != 100 || r.CacheReadTokens != 0 || r.CacheCreationTokens != 0 {
 		t.Fatalf("unexpected demotion token counters: %+v", r)
 	}
-	if r.DivergenceProbe != "not_wired" {
-		t.Fatalf("divergence probe = %q, want explicit not_wired scope", r.DivergenceProbe)
+	if r.DivergenceProbe != "provider_cache_read_boundary" || r.DivergentPrefixTurn != 2 {
+		t.Fatalf("divergence localization = %q turn=%d, want provider boundary at turn 2", r.DivergenceProbe, r.DivergentPrefixTurn)
 	}
 	if r.PrevHash != "" || r.Hash == "" {
 		t.Fatalf("bad demotion hash chain genesis: %+v", r)
