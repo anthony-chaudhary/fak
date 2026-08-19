@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -316,15 +317,23 @@ func (s *Server) logGatewayOperation(operation, traceID, tool string, v WireVerd
 const traceHeader = "X-Trace-Id"
 
 func ensureHTTPTrace(s *Server, w http.ResponseWriter, r *http.Request) string {
-	traceID := requestTraceID(r)
-	if traceID == "" && s != nil {
-		traceID = s.traceFor("")
-		r.Header.Set(traceHeader, traceID)
+	var ctx traceContext
+	if parsed, err := parseTraceparent(r.Header.Get(traceparentHeader)); err == nil {
+		ctx = newTraceContext(parsed.TraceID, parsed.Flags)
+	} else {
+		legacy := requestTraceID(r)
+		if len(legacy) == 32 {
+			if _, err := hex.DecodeString(legacy); err != nil {
+				legacy = ""
+			}
+		}
+		ctx = newTraceContext(legacy, 0)
 	}
-	if traceID != "" {
-		w.Header().Set(traceHeader, traceID)
-	}
-	return traceID
+	r.Header.Set(traceHeader, ctx.TraceID)
+	r.Header.Set(traceparentHeader, ctx.String())
+	w.Header().Set(traceHeader, ctx.TraceID)
+	w.Header().Set(traceparentHeader, ctx.String())
+	return ctx.TraceID
 }
 
 func requestTraceID(r *http.Request) string {

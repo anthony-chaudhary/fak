@@ -7788,6 +7788,16 @@
           "category": "incidental",
           "reason": "Runtime event vocabulary token; not a context-memory subsystem concept.",
           "token": "context_changed"
+        },
+        {
+          "category": "incidental",
+          "reason": "W3C distributed tracing carrier, not model context memory.",
+          "token": "traceContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "W3C distributed tracing constructor, not model context memory.",
+          "token": "newTraceContext"
         }
       ],
       "id": "context-ctx",
@@ -7864,6 +7874,7 @@
         "guardSourceReadRecoverySchema",
         "latestGuardCompactionWitness",
         "newGuardCompactionWitness",
+        "newTraceContext",
         "noteCompactionContract",
         "noteCtxValueTTL1hScope",
         "postCtx",
@@ -7881,6 +7892,7 @@
         "setGuardCompactionAnchorMode",
         "shedOldContext",
         "takeCompactionContract",
+        "traceContext",
         "wctx"
       ],
       "known_tokens": [],
