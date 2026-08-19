@@ -144,6 +144,25 @@ func f(hash string, verbs []string) bool {
 // fails only when a NEW file (not in the baseline) introduces a change-detector — the
 // same shrink-only ratchet as internal/pythongate. That stops the fast-growing suite
 // from accreting new change-detectors while the backlog is burned down over time.
+func TestCurrentChangeDetectorBaselineSnapshot(t *testing.T) {
+	set := changeDetectorBaselineSet()
+	for _, path := range []string{
+		"cmd/disambiguationdemo/main_test.go",
+		"internal/archreport/report_test.go",
+		"internal/sessionrecovery/recovery_test.go",
+		"internal/workaccount/registry_test.go",
+	} {
+		if !set[path] {
+			t.Errorf("current grandfathered change-detector file %q missing from baseline", path)
+		}
+	}
+	for _, stale := range []string{"internal/ggufload/gemma4_test.go", "internal/selfinstall/reap_test.go"} {
+		if set[stale] {
+			t.Errorf("stale change-detector baseline entry %q was not retired", stale)
+		}
+	}
+}
+
 func TestTestSuitePolicy(t *testing.T) {
 	root := repoRoot(t)
 	// The fail path is the shared ratchet entrypoint: only NEW (non-grandfathered)
