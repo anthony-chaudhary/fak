@@ -524,10 +524,9 @@ func TestDispatchVerbsParsesOnlyMainSwitch(t *testing.T) {
 	}
 }
 
-// The real cmd/fak/main.go splits its routing table: main() delegates most verbs to
-// dispatchPrimaryVerb, which switches on the same verb name. Verbs routed there resolve
-// at runtime just as much as main()'s own cases, so dispatchVerbs must parse both — and
-// still keep a subcommand switch (cmdPolicy's argv[0] switch) out.
+// The real cmd/fak/main.go splits its routing table across several helpers that switch
+// on the same top-level verb name. Verbs routed there resolve at runtime just as much as
+// main()'s own cases, while subcommand switches such as cmdPolicy must stay excluded.
 func TestDispatchVerbsParsesPrimaryVerbSplit(t *testing.T) {
 	const fixture = `package main
 
@@ -541,6 +540,46 @@ func main() {
 	default:
 		usage()
 	}
+}
+
+func dispatchCoreVerbA(name string, args []string) bool {
+	switch name {
+	case "agent":
+		cmdAgent(args)
+	default:
+		return false
+	}
+	return true
+}
+
+func dispatchCoreVerbB(name string, args []string) bool {
+	switch name {
+	case "hooks":
+		cmdHooks(args)
+	default:
+		return false
+	}
+	return true
+}
+
+func dispatchExtendedVerbA(name string, args []string) bool {
+	switch name {
+	case "guard":
+		cmdGuard(args)
+	default:
+		return false
+	}
+	return true
+}
+
+func dispatchExtendedVerbB(name string, args []string) bool {
+	switch name {
+	case "score":
+		cmdScore(args)
+	default:
+		return false
+	}
+	return true
 }
 
 func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *string) bool {
@@ -567,7 +606,7 @@ func cmdPolicy(argv []string) {
 }
 `
 	verbs := dispatchVerbs(fixture)
-	for _, v := range []string{"serve", "preflight", "commit", "worktree"} {
+	for _, v := range []string{"serve", "agent", "hooks", "guard", "score", "preflight", "commit", "worktree"} {
 		if !verbs[v] {
 			t.Errorf("dispatchVerbs missing routed verb %q: %v", v, verbs)
 		}

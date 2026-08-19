@@ -551,16 +551,23 @@ func codexRecipeGaps(text string, present bool) []string {
 }
 
 // dispatchVerbFns names the top-level verb-routing functions main() delegates to in
-// cmd/fak/main.go. main() switches on os.Args[1]; dispatchPrimaryVerb switches on the
-// same verb name (it is a routing-table split of that switch, not a subcommand switch
+// cmd/fak/main.go. Each listed helper switches on the same top-level verb name; they
+// are routing-table splits, not subcommand switches
 // like cmdPolicy's argv[0] switch — those must NOT leak in). If the routing table is
 // split across a new helper, add its `func <name>(` header here so real verbs keep
 // resolving.
-var dispatchVerbFns = []string{"func main()", "func dispatchPrimaryVerb("}
+var dispatchVerbFns = []string{
+	"func main()",
+	"func dispatchCoreVerbA(",
+	"func dispatchCoreVerbB(",
+	"func dispatchExtendedVerbA(",
+	"func dispatchExtendedVerbB(",
+	"func dispatchPrimaryVerb(",
+}
 
 // dispatchVerbs is the set of top-level verbs the binary dispatches, parsed from every
-// top-level routing switch in cmd/fak/main.go (func main() plus the dispatchPrimaryVerb
-// routing-table split main() delegates to).
+// top-level routing switch in cmd/fak/main.go (func main() plus the routing-table
+// helpers it delegates to).
 func dispatchVerbs(mainGoText string) map[string]bool {
 	verbs := map[string]bool{}
 	if mainGoText == "" {
