@@ -1,0 +1,9 @@
+{
+  "schema": "fak.conversation-profile/v1",
+  "id": "support-default",
+  "settings": {
+    "response.detail": {"value": "brief", "fidelity": "required"},
+    "interaction.questions": {"value": "when_blocked", "fidelity": "required"},
+    "tone": {"value": "warm", "fidelity": "optional"}
+  }
+}
