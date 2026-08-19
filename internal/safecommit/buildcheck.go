@@ -73,8 +73,11 @@ func (o BuildCheckOutcome) Compiled() bool {
 	switch o {
 	case BuildCheckPassed, BuildCheckFailed, BuildCheckHeadRed:
 		return true
+	case BuildCheckNotApplicable, BuildCheckDisabled, BuildCheckSkippedTimeout, BuildCheckSkippedInfra:
+		return false
+	default:
+		return false
 	}
-	return false
 }
 
 // BuildCheckResult is the gate's outcome as it appears on Result.BuildCheck in --json.

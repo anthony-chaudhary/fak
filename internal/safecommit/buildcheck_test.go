@@ -16,6 +16,21 @@ import (
 // TestTimedOutGateIsDistinguishableFromPassed is the regression the issue names. It compares
 // the two results the way a --json consumer actually does: over the serialized bytes, over the
 // outcome token, and over the one boolean a naive parser would read.
+func TestBuildCheckOutcomeCompiledCoversVocabulary(t *testing.T) {
+	cases := map[BuildCheckOutcome]bool{
+		BuildCheckNotApplicable: false, BuildCheckDisabled: false, BuildCheckPassed: true,
+		BuildCheckFailed: true, BuildCheckHeadRed: true, BuildCheckSkippedTimeout: false, BuildCheckSkippedInfra: false,
+	}
+	for outcome, want := range cases {
+		if got := outcome.Compiled(); got != want {
+			t.Errorf("%s.Compiled() = %v, want %v", outcome, got, want)
+		}
+	}
+	if BuildCheckOutcome("future").Compiled() {
+		t.Fatal("unknown outcome must fail closed as not compiled")
+	}
+}
+
 func TestTimedOutGateIsDistinguishableFromPassed(t *testing.T) {
 	timedOut, admit, reason := DecideBuildCheck(BuildCheckSkippedTimeout, "archive timed out after 2m0s", true /* operator opted into fail-open */)
 	if !admit || reason != "" {
