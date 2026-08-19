@@ -38,6 +38,9 @@ func TestLaunchPostureNativeServeInNonFakRepository(t *testing.T) {
 	if got := postureByName(t, report, "bounded-code-tools"); got.State != "active" || report.Workspace != repo {
 		t.Fatalf("code tools = %+v, workspace=%q", got, report.Workspace)
 	}
+	if report.Harness != "" {
+		t.Fatalf("native serve reported phantom harness %q", report.Harness)
+	}
 	for _, name := range []string{"compact-history", "stale-read-elision", "cold-tool-deferral", "vcache-anchor"} {
 		if got := postureByName(t, report, name); got.State != "inert" || !strings.Contains(got.Reason, "in-kernel") {
 			t.Fatalf("%s = %+v", name, got)

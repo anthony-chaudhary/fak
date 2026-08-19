@@ -110,7 +110,9 @@ func deriveLaunchPosture(opts launchPostureOptions) (launchPostureReport, error)
 	if opts.harness == "" && opts.entrypoint == "guard" {
 		opts.harness = "claude"
 	}
-	opts.harness = strings.ToLower(strings.TrimSuffix(filepath.Base(strings.TrimSpace(opts.harness)), ".exe"))
+	if opts.harness != "" {
+		opts.harness = strings.ToLower(strings.TrimSuffix(filepath.Base(strings.TrimSpace(opts.harness)), ".exe"))
+	}
 	if opts.provider == "" {
 		switch {
 		case opts.entrypoint == "guard" && opts.harness == "claude":
