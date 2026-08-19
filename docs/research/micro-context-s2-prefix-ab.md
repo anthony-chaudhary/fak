@@ -71,7 +71,7 @@ fak claim-check \
 ```
 
 The command returns `net-true` for the scoped concurrency statement. It does **not** grade
-a cache win; the artifact directly falsifies that claim on this endpoint.
+an OBSERVED provider prefix-cache win; the artifact directly falsifies that claim on this endpoint.
 
 ## Implications
 
