@@ -74,15 +74,35 @@ func TestInjectGuardProfilesIndependentOptOuts(t *testing.T) {
 	}
 }
 
-func TestInjectGuardProfilesNonClaudeDefaultIsByteIdentical(t *testing.T) {
+func TestInjectGuardProfilesDefaultsIntoCodexDeveloperInstructions(t *testing.T) {
 	command := []string{"codex", "exec", "hello"}
 	got, capture, err := injectGuardProfiles(command, agentDefaultOutputStyle, agentDefaultWorkProfile, false)
-	if err != nil || capture != nil || !reflect.DeepEqual(got, command) {
+	if err != nil || capture == nil {
 		t.Fatalf("default codex = (%#v, %+v, %v)", got, capture, err)
+	}
+	if len(got) != 5 || got[1] != "-c" || !strings.HasPrefix(got[2], "developer_instructions=") {
+		t.Fatalf("codex injection argv = %#v", got)
+	}
+	if !strings.Contains(got[2], "<fak:steering v1>") || !strings.Contains(got[2], "<fak:work-profile>") {
+		t.Fatalf("codex developer instructions missing profiles: %q", got[2])
+	}
+	if !reflect.DeepEqual(got[3:], command[1:]) {
+		t.Fatalf("codex child args changed: %#v", got)
+	}
+	if capture.Harness != "codex" || capture.ActivationSeam != "codex -c developer_instructions" || !capture.DefaultActivation {
+		t.Fatalf("codex capture = %+v", capture)
+	}
+}
+
+func TestInjectGuardProfilesUnsupportedHarnessPreservesDefaults(t *testing.T) {
+	command := []string{"other-agent", "hello"}
+	got, capture, err := injectGuardProfiles(command, agentDefaultOutputStyle, agentDefaultWorkProfile, false)
+	if err != nil || capture != nil || !reflect.DeepEqual(got, command) {
+		t.Fatalf("default unsupported = (%#v, %+v, %v)", got, capture, err)
 	}
 	got, capture, err = injectGuardProfiles(command, "caveman:high", agentDefaultWorkProfile, true)
 	if err == nil || !strings.Contains(err.Error(), "PROFILE_UNSUPPORTED_HARNESS") || got != nil || capture != nil {
-		t.Fatalf("explicit codex = (%#v, %+v, %v)", got, capture, err)
+		t.Fatalf("explicit unsupported = (%#v, %+v, %v)", got, capture, err)
 	}
 }
 

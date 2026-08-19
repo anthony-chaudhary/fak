@@ -1,0 +1,42 @@
+{
+  "schema": "fak.guard-codex-profiles-witness.v1",
+  "captured_at": "2026-08-19T06:19:51.7864291Z",
+  "operator_local_date": "2026-08-18",
+  "workspace_kind": "temporary non-FAK git repository",
+  "workspace_fixture": [
+    "benchmark.txt",
+    ".git"
+  ],
+  "tests": {
+    "command": "go test -vet=off ./cmd/fak -run 'TestInjectGuardProfilesDefaultsIntoCodexDeveloperInstructions|TestLaunchPostureGuardCodexNamesActiveProfilesAndInertWire' -count=1",
+    "exit_code": 0,
+    "output": "ok  \tgithub.com/anthony-chaudhary/fak/cmd/fak\t0.130s"
+  },
+  "runtime": {
+    "codex_version": "codex-cli 0.147.0",
+    "activation_seam": "codex -c developer_instructions=<TOML quoted fragment>",
+    "profile_states": [
+      {
+        "name": "caveman-response-profile",
+        "configured": true,
+        "state": "active",
+        "reason": "guard injects the selected governed segment through codex -c developer_instructions",
+        "disable": "set FAK_STYLE=full"
+      },
+      {
+        "name": "ponytail-work-profile",
+        "configured": true,
+        "state": "active",
+        "reason": "guard injects the selected governed work segment through codex -c developer_instructions",
+        "disable": "--work-profile standard"
+      }
+    ],
+    "doctor_exit": 1,
+    "doctor_exit_reason": "OpenAI request-body mechanisms and missing calibration remain inert; profiles themselves are active"
+  },
+  "safety": [
+    "output and work profiles retain independent opt-outs",
+    "unsupported harness defaults remain byte-identical",
+    "explicit unsupported profile requests fail before launch"
+  ]
+}

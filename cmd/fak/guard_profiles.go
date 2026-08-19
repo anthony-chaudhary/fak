@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
@@ -43,7 +44,7 @@ func injectGuardProfiles(command []string, outputSelection, workSelection string
 	}
 
 	harness := strings.ToLower(strings.TrimSuffix(filepath.Base(command[0]), ".exe"))
-	if harness != "claude" {
+	if harness != "claude" && harness != "codex" {
 		if explicit {
 			return nil, nil, fmt.Errorf("PROFILE_UNSUPPORTED_HARNESS: %s has no witnessed profile injection seam; %s", harness, guardProfilesDisableCommand)
 		}
@@ -59,16 +60,23 @@ func injectGuardProfiles(command []string, outputSelection, workSelection string
 	}
 	fragment := strings.Join(segments, "\n\n")
 	sum := sha256.Sum256([]byte(fragment))
+	activationSeam := "claude --append-system-prompt"
+	injected := make([]string, 0, len(command)+2)
+	switch harness {
+	case "claude":
+		injected = append(injected, command[0], "--append-system-prompt", fragment)
+	case "codex":
+		activationSeam = "codex -c developer_instructions"
+		injected = append(injected, command[0], "-c", "developer_instructions="+strconv.Quote(fragment))
+	}
+	injected = append(injected, command[1:]...)
 	capture := &guardProfileCapture{
 		Schema: "fak.guard-profiles.v2", OutputProfile: output.Style, WorkProfile: work.Profile,
 		OutputDigest: output.Witness, WorkDigest: work.Witness,
 		CompositeDigest: "sha256:" + hex.EncodeToString(sum[:]), Harness: harness,
-		ActivationSeam: "claude --append-system-prompt", DisableCommand: guardProfilesDisableCommand,
+		ActivationSeam: activationSeam, DisableCommand: guardProfilesDisableCommand,
 		DefaultActivation: !explicit,
 	}
-	injected := make([]string, 0, len(command)+2)
-	injected = append(injected, command[0], "--append-system-prompt", fragment)
-	injected = append(injected, command[1:]...)
 	return injected, capture, nil
 }
 

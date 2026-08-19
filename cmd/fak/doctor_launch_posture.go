@@ -267,8 +267,10 @@ func postureOutputProfile(opts launchPostureOptions) launchPostureMechanism {
 		m.State, m.Reason = "active", "the owned agent loop composes the selected governed response segment"
 	case opts.entrypoint == "guard" && opts.harness == "claude":
 		m.State, m.Reason = "active", "guard injects the selected governed segment through claude --append-system-prompt"
+	case opts.entrypoint == "guard" && opts.harness == "codex":
+		m.State, m.Reason = "active", "guard injects the selected governed segment through codex -c developer_instructions"
 	case opts.entrypoint == "guard":
-		m.State, m.Reason, m.Action = "unsupported", "the wrapped harness has no witnessed response-profile injection seam", "use Claude, set --output-profile full, or add a witnessed adapter"
+		m.State, m.Reason, m.Action = "unsupported", "the wrapped harness has no witnessed response-profile injection seam", "use Claude or Codex, set --output-profile full, or add a witnessed adapter"
 	case opts.entrypoint == "serve" && opts.native:
 		m.State, m.Reason, m.Action = "inert", "native serve does not map this doctor selection into FAK_STYLE", "set FAK_STYLE="+profile.Style+" before fak serve --native"
 	default:
@@ -293,8 +295,10 @@ func postureWorkProfile(opts launchPostureOptions) launchPostureMechanism {
 		m.State, m.Reason = "active", "the owned agent loop composes the selected governed work segment"
 	case opts.entrypoint == "guard" && opts.harness == "claude":
 		m.State, m.Reason = "active", "guard injects the selected governed work segment through claude --append-system-prompt"
+	case opts.entrypoint == "guard" && opts.harness == "codex":
+		m.State, m.Reason = "active", "guard injects the selected governed work segment through codex -c developer_instructions"
 	case opts.entrypoint == "guard":
-		m.State, m.Reason, m.Action = "unsupported", "the wrapped harness has no witnessed work-profile injection seam", "use Claude, set --work-profile standard, or add a witnessed adapter"
+		m.State, m.Reason, m.Action = "unsupported", "the wrapped harness has no witnessed work-profile injection seam", "use Claude or Codex, set --work-profile standard, or add a witnessed adapter"
 	case opts.entrypoint == "serve" && opts.native:
 		m.State, m.Reason = "active", "the owned native loop resolves the same default work profile"
 	default:

@@ -68,13 +68,15 @@ func TestLaunchPostureGuardClaudeDefaultsActive(t *testing.T) {
 	}
 }
 
-func TestLaunchPostureGuardCodexNamesUnsupportedProfilesAndInertWire(t *testing.T) {
+func TestLaunchPostureGuardCodexNamesActiveProfilesAndInertWire(t *testing.T) {
 	report, err := deriveLaunchPosture(launchPostureOptions{entrypoint: "guard", harness: "codex", provider: "openai", baseURL: "https://api.openai.example", workspace: t.TempDir(), nativeCodeTools: true, outputProfile: agentDefaultOutputStyle, workProfile: agentDefaultWorkProfile, compactHistory: gateway.DefaultCompactHistoryBudget, elideStaleReads: true, deferColdTools: true, vcacheAnchor: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := postureByName(t, report, "caveman-response-profile"); got.State != "unsupported" || got.Action == "" {
-		t.Fatalf("output profile = %+v", got)
+	for _, name := range []string{"caveman-response-profile", "ponytail-work-profile"} {
+		if got := postureByName(t, report, name); got.State != "active" || !strings.Contains(got.Reason, "developer_instructions") {
+			t.Fatalf("%s = %+v", name, got)
+		}
 	}
 	if got := postureByName(t, report, "compact-history"); got.State != "inert" || got.Action == "" {
 		t.Fatalf("compaction = %+v", got)
