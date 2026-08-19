@@ -153,7 +153,7 @@ func syncCodexPlugin(home, source, destination, workspace string, ops codexPlugi
 		r.FailureStage, r.Detail = "stage", err.Error()
 		return r, err
 	}
-	stage, err := os.MkdirTemp(parent, ".fak-plugin-stage-")
+	stage, err := prepareCodexPluginStage(destination, ops)
 	if err != nil {
 		r.FailureStage, r.Detail = "stage", err.Error()
 		return r, err
@@ -254,6 +254,17 @@ func syncCodexPlugin(home, source, destination, workspace string, ops codexPlugi
 	return r, nil
 }
 
+func prepareCodexPluginStage(destination string, ops codexPluginSyncOps) (string, error) {
+	parent := filepath.Dir(destination)
+	stage := filepath.Join(parent, ".fak-plugin-stage-current")
+	if err := ops.remove(stage); err != nil {
+		return "", fmt.Errorf("clear retained plugin stage: %w", err)
+	}
+	if err := os.Mkdir(stage, 0o755); err != nil {
+		return "", fmt.Errorf("create plugin stage: %w", err)
+	}
+	return stage, nil
+}
 func codexPluginBackupPath(destination string, now time.Time) string {
 	parent := filepath.Dir(destination)
 	name := filepath.Base(destination)

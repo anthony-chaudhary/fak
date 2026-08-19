@@ -52,6 +52,31 @@ func TestCodexPluginBackupPathIsHiddenVersionSibling(t *testing.T) {
 		t.Fatalf("backup %q remains discoverable as a 0.30.0 plugin version", got)
 	}
 }
+func TestPrepareCodexPluginStageReusesBoundedPath(t *testing.T) {
+	root := t.TempDir()
+	destination := filepath.Join(root, "dos-kernel", "0.30.0")
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ops := codexPluginSyncOps{remove: os.RemoveAll}
+	first, err := prepareCodexPluginStage(destination, ops)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(first, "stale"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := prepareCodexPluginStage(destination, ops)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second || filepath.Base(second) != ".fak-plugin-stage-current" {
+		t.Fatalf("stages first=%q second=%q", first, second)
+	}
+	if pathExists(filepath.Join(second, "stale")) {
+		t.Fatal("reused stage retained stale content")
+	}
+}
 func TestSyncCodexPluginLockedDestinationRetainsCoherentStage(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
