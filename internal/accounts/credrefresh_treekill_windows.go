@@ -5,6 +5,8 @@ package accounts
 import (
 	"os/exec"
 	"strconv"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // setRefreshSysProcAttr is a no-op on Windows: containment comes from the
@@ -18,5 +20,7 @@ func refreshKillTree(pid int) error {
 	if pid <= 0 {
 		return nil
 	}
-	return exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/T", "/F").Run()
+	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/T", "/F")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	return cmd.Run()
 }
