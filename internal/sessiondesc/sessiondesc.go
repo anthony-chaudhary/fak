@@ -3,6 +3,8 @@ package sessiondesc
 import (
 	"fmt"
 	"sort"
+
+	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 )
 
 // SchemaVersion is the wire schema tag every Descriptor carries. Version bumps
@@ -237,4 +239,33 @@ func (d Descriptor) BoundCount() int {
 		}
 	}
 	return n
+}
+
+// FoldJournal builds the durable descriptor view from the lifecycle journal's
+// folded registrations. Unlike the old ref projection, this view does not infer
+// liveness from a TTL or a process scan; lifecycle OPEN/BEAT/CLOSE rows are the
+// source of truth.
+func FoldJournal(events []sessionjournal.Event) []Descriptor {
+	sessions := sessionjournal.FoldEvents(events)
+	out := make([]Descriptor, 0, len(sessions))
+	for _, session := range sessions {
+		registration := session.Registration
+		if registration == nil {
+			continue
+		}
+		identity := registration.SessionID
+		if identity == "" {
+			identity = registration.ThreadID
+		}
+		out = append(out, Descriptor{
+			Schema:  SchemaVersion,
+			ID:      registration.RegistrationID,
+			Drive:   DriveKey{Presence: AbsentNotObserved},
+			Ref:     RefKey{Presence: AbsentNotObserved},
+			Harness: HarnessKey{Presence: Bound, Agent: registration.Runtime, Identity: identity},
+			Census:  CensusKey{Presence: AbsentNotObserved},
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
 }

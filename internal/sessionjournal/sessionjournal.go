@@ -82,24 +82,58 @@ type DriveCarry struct {
 
 // Event is one appended lifecycle row. Forward-extensible: a row with extra keys still
 // decodes, so later rungs can add fields without breaking this reader.
+// RegistrationCarry is the discoverability/lineage projection persisted on the
+// lifecycle journal. It keeps the journal package independent of sessionregistry
+// while allowing that registry to rebuild its exact latest-record view.
+type RegistrationCarry struct {
+	RegistrationID       string   `json:"registration_id"`
+	ParentRegistrationID string   `json:"parent_registration_id,omitempty"`
+	ParentAttemptID      string   `json:"parent_attempt_id,omitempty"`
+	RootRegistrationID   string   `json:"root_registration_id,omitempty"`
+	RootOutcome          string   `json:"root_outcome,omitempty"`
+	RootIssue            string   `json:"root_issue,omitempty"`
+	TaskID               string   `json:"task_id,omitempty"`
+	AttemptID            string   `json:"attempt_id,omitempty"`
+	ResumeOfAttemptID    string   `json:"resume_of_attempt_id,omitempty"`
+	LaunchKind           string   `json:"launch_kind,omitempty"`
+	Scope                []string `json:"scope,omitempty"`
+	Lane                 string   `json:"lane,omitempty"`
+	LeaseID              string   `json:"lease_id,omitempty"`
+	Runtime              string   `json:"runtime,omitempty"`
+	SessionID            string   `json:"session_id,omitempty"`
+	ThreadID             string   `json:"thread_id,omitempty"`
+	PID                  int      `json:"pid,omitempty"`
+	ProcessStartedAt     string   `json:"process_started_at,omitempty"`
+	HostID               string   `json:"host_id,omitempty"`
+	State                string   `json:"state,omitempty"`
+	Reason               string   `json:"reason,omitempty"`
+	WitnessRef           string   `json:"witness_ref,omitempty"`
+	CreatedAt            string   `json:"created_at,omitempty"`
+	StartedAt            string   `json:"started_at,omitempty"`
+	HeartbeatAt          string   `json:"heartbeat_at,omitempty"`
+	TerminalAt           string   `json:"terminal_at,omitempty"`
+}
+
 type Event struct {
-	Schema       string      `json:"schema"`
-	Kind         Kind        `json:"kind"`
-	ID           string      `json:"id"` // session / trace id — the join + fold key
-	TS           string      `json:"ts"` // RFC3339 UTC event time
-	Boot         string      `json:"boot,omitempty"`
-	PID          int         `json:"pid,omitempty"`
-	Host         string      `json:"host,omitempty"`
-	CWD          string      `json:"cwd,omitempty"`
-	Model        string      `json:"model,omitempty"`
-	Agent        string      `json:"agent,omitempty"`
-	Account      string      `json:"account,omitempty"` // config dir / seat
-	Argv         []string    `json:"argv,omitempty"`
-	StartSHA     string      `json:"start_sha,omitempty"`
-	Gateway      string      `json:"gateway,omitempty"`
-	Drive        *DriveCarry `json:"drive,omitempty"`         // remaining drive-state to resume at (nil = none)
-	Reason       string      `json:"reason,omitempty"`        // close reason
-	SourceDigest string      `json:"source_digest,omitempty"` // denied-source identity; raw source is never recorded
+	Schema       string             `json:"schema"`
+	Kind         Kind               `json:"kind"`
+	ID           string             `json:"id"` // session / trace id — the join + fold key
+	TS           string             `json:"ts"` // RFC3339 UTC event time
+	Boot         string             `json:"boot,omitempty"`
+	PID          int                `json:"pid,omitempty"`
+	ParentPID    int                `json:"parent_pid,omitempty"`
+	Host         string             `json:"host,omitempty"`
+	CWD          string             `json:"cwd,omitempty"`
+	Model        string             `json:"model,omitempty"`
+	Agent        string             `json:"agent,omitempty"`
+	Account      string             `json:"account,omitempty"` // config dir / seat
+	Argv         []string           `json:"argv,omitempty"`
+	StartSHA     string             `json:"start_sha,omitempty"`
+	Gateway      string             `json:"gateway,omitempty"`
+	Drive        *DriveCarry        `json:"drive,omitempty"`         // remaining drive-state to resume at (nil = none)
+	Registration *RegistrationCarry `json:"registration,omitempty"`  // latest discoverability/lineage record
+	Reason       string             `json:"reason,omitempty"`        // close reason
+	SourceDigest string             `json:"source_digest,omitempty"` // denied-source identity; raw source is never recorded
 }
 
 // DefaultPath resolves the journal path: the explicit override, otherwise the
@@ -204,22 +238,24 @@ func LoadFile(path string) []Event {
 
 // Session is the folded lifecycle state of one recorded session — the input to Classify.
 type Session struct {
-	ID          string      `json:"id"`
-	Boot        string      `json:"boot,omitempty"`
-	PID         int         `json:"pid,omitempty"`
-	Host        string      `json:"host,omitempty"`
-	CWD         string      `json:"cwd,omitempty"`
-	Model       string      `json:"model,omitempty"`
-	Agent       string      `json:"agent,omitempty"`
-	Account     string      `json:"account,omitempty"`
-	Argv        []string    `json:"argv,omitempty"`
-	StartSHA    string      `json:"start_sha,omitempty"`
-	Gateway     string      `json:"gateway,omitempty"`
-	StartedAt   time.Time   `json:"started_at"`
-	LastSeen    time.Time   `json:"last_seen"`
-	Closed      bool        `json:"closed"`
-	CloseReason string      `json:"close_reason,omitempty"`
-	Drive       *DriveCarry `json:"drive,omitempty"` // the newest carried drive-state (nil = none)
+	ID           string             `json:"id"`
+	Boot         string             `json:"boot,omitempty"`
+	PID          int                `json:"pid,omitempty"`
+	ParentPID    int                `json:"parent_pid,omitempty"`
+	Host         string             `json:"host,omitempty"`
+	CWD          string             `json:"cwd,omitempty"`
+	Model        string             `json:"model,omitempty"`
+	Agent        string             `json:"agent,omitempty"`
+	Account      string             `json:"account,omitempty"`
+	Argv         []string           `json:"argv,omitempty"`
+	StartSHA     string             `json:"start_sha,omitempty"`
+	Gateway      string             `json:"gateway,omitempty"`
+	StartedAt    time.Time          `json:"started_at"`
+	LastSeen     time.Time          `json:"last_seen"`
+	Closed       bool               `json:"closed"`
+	CloseReason  string             `json:"close_reason,omitempty"`
+	Drive        *DriveCarry        `json:"drive,omitempty"` // the newest carried drive-state (nil = none)
+	Registration *RegistrationCarry `json:"registration,omitempty"`
 }
 
 // FoldEvents folds the lifecycle log to one Session per id, applying events in event-time
@@ -253,6 +289,7 @@ func FoldEvents(events []Event) []Session {
 		case KindBeat:
 			applyProvenance(s, ev)
 		case KindClose:
+			applyProvenance(s, ev)
 			s.Closed = true
 			s.CloseReason = ev.Reason
 		}
@@ -278,6 +315,9 @@ func applyProvenance(s *Session, ev Event) {
 	if ev.PID != 0 {
 		s.PID = ev.PID
 	}
+	if ev.ParentPID != 0 {
+		s.ParentPID = ev.ParentPID
+	}
 	if ev.Host != "" {
 		s.Host = ev.Host
 	}
@@ -301,6 +341,11 @@ func applyProvenance(s *Session, ev Event) {
 	}
 	if ev.Gateway != "" {
 		s.Gateway = ev.Gateway
+	}
+	if ev.Registration != nil {
+		r := *ev.Registration
+		r.Scope = append([]string(nil), ev.Registration.Scope...)
+		s.Registration = &r
 	}
 	if ev.Drive != nil {
 		// Last non-nil carry wins (same last-write-wins fold as the scalar fields

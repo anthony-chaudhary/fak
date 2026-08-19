@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/flock"
+	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 )
 
 const Schema = "fak-child-registration/1"
@@ -100,11 +101,84 @@ func DefaultPath() string {
 	if v := strings.TrimSpace(os.Getenv("FAK_SESSION_REGISTRY")); v != "" {
 		return v
 	}
-	if d, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(d, "fak", "child-registrations.jsonl")
-	}
-	return filepath.Join(".fak", "child-registrations.jsonl")
+	return sessionjournal.DefaultPath()
 }
+
+func (s Store) usesJournal() bool {
+	return strings.TrimSpace(os.Getenv("FAK_SESSION_REGISTRY")) == "" && filepath.Clean(s.Path) == filepath.Clean(sessionjournal.DefaultPath())
+}
+
+func appendJournalRecord(r Record) error {
+	carry := registrationCarry(r)
+	kind := sessionjournal.KindBeat
+	if r.State == StateRegistered {
+		kind = sessionjournal.KindOpen
+	}
+	if isTerminal(r.State) {
+		kind = sessionjournal.KindClose
+	}
+	return sessionjournal.Append("", sessionjournal.Event{
+		Schema: sessionjournal.Schema, Kind: kind, ID: r.RegistrationID,
+		PID: r.Identity.PID, TS: journalEventTime(r).Format(time.RFC3339Nano),
+		Host: r.Identity.HostID, Agent: r.Identity.Runtime, Registration: &carry,
+		Reason: r.Reason,
+	})
+}
+
+func journalEventTime(r Record) time.Time {
+	for _, at := range []time.Time{r.TerminalAt, r.HeartbeatAt, r.StartedAt, r.CreatedAt} {
+		if !at.IsZero() {
+			return at.UTC()
+		}
+	}
+	return time.Now().UTC()
+}
+
+func registrationCarry(r Record) sessionjournal.RegistrationCarry {
+	return sessionjournal.RegistrationCarry{
+		RegistrationID: r.RegistrationID, ParentRegistrationID: r.ParentRegistrationID,
+		ParentAttemptID: r.ParentAttemptID, RootRegistrationID: r.RootRegistrationID,
+		RootOutcome: r.RootOutcome, RootIssue: r.RootIssue, TaskID: r.TaskID, AttemptID: r.AttemptID,
+		ResumeOfAttemptID: r.ResumeOfAttemptID, LaunchKind: r.LaunchKind, Scope: append([]string(nil), r.Scope...),
+		Lane: r.Lane, LeaseID: r.LeaseID, Runtime: r.Identity.Runtime, SessionID: r.Identity.SessionID,
+		ThreadID: r.Identity.ThreadID, PID: r.Identity.PID, ProcessStartedAt: formatTime(r.Identity.ProcessStartedAt), HostID: r.Identity.HostID,
+		State: string(r.State), Reason: r.Reason, WitnessRef: r.WitnessRef, CreatedAt: formatTime(r.CreatedAt),
+		StartedAt: formatTime(r.StartedAt), HeartbeatAt: formatTime(r.HeartbeatAt), TerminalAt: formatTime(r.TerminalAt),
+	}
+}
+
+func recordsFromJournal(events []sessionjournal.Event) []Record {
+	sessions := sessionjournal.FoldEvents(events)
+	out := make([]Record, 0, len(sessions))
+	for _, folded := range sessions {
+		if folded.Registration == nil {
+			continue
+		}
+		r := recordFromCarry(*folded.Registration)
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out
+}
+
+func recordFromCarry(c sessionjournal.RegistrationCarry) Record {
+	return Record{Schema: Schema, RegistrationID: c.RegistrationID, ParentRegistrationID: c.ParentRegistrationID,
+		ParentAttemptID: c.ParentAttemptID, RootRegistrationID: c.RootRegistrationID, RootOutcome: c.RootOutcome,
+		RootIssue: c.RootIssue, TaskID: c.TaskID, AttemptID: c.AttemptID, ResumeOfAttemptID: c.ResumeOfAttemptID,
+		LaunchKind: c.LaunchKind, Scope: append([]string(nil), c.Scope...), Lane: c.Lane, LeaseID: c.LeaseID,
+		Identity: Identity{Runtime: c.Runtime, SessionID: c.SessionID, ThreadID: c.ThreadID, PID: c.PID,
+			ProcessStartedAt: parseTime(c.ProcessStartedAt), HostID: c.HostID}, State: State(c.State), Reason: c.Reason,
+		WitnessRef: c.WitnessRef, CreatedAt: parseTime(c.CreatedAt), StartedAt: parseTime(c.StartedAt),
+		HeartbeatAt: parseTime(c.HeartbeatAt), TerminalAt: parseTime(c.TerminalAt)}
+}
+
+func formatTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
+}
+func parseTime(v string) time.Time { t, _ := time.Parse(time.RFC3339Nano, v); return t.UTC() }
 
 func New(in NewInput) (Record, error) {
 	now := in.Now.UTC()
@@ -164,6 +238,9 @@ func Validate(r Record) error {
 }
 
 func (s Store) Register(r Record) error {
+	if s.usesJournal() {
+		return appendJournalRecord(r)
+	}
 	return s.withLock(func() error { return s.registerLocked(r) })
 }
 
@@ -220,6 +297,22 @@ func (s Store) Terminal(id string, state State, reason, witness string, at time.
 	})
 }
 func (s Store) update(id string, fn func(*Record)) (Record, error) {
+	if s.usesJournal() {
+		rows, err := s.ReadAll()
+		if err != nil {
+			return Record{}, err
+		}
+		for _, row := range rows {
+			if row.RegistrationID == id {
+				fn(&row)
+				if err := appendJournalRecord(row); err != nil {
+					return Record{}, err
+				}
+				return row, nil
+			}
+		}
+		return Record{}, fmt.Errorf("registration %s not found", id)
+	}
 	var updated Record
 	err := s.withLock(func() error {
 		var err error
@@ -312,6 +405,9 @@ func isUnexpectedEnd(err error) bool {
 }
 
 func (s Store) ReadAll() ([]Record, error) {
+	if s.usesJournal() {
+		return recordsFromJournal(sessionjournal.LoadFile(sessionjournal.DefaultPath())), nil
+	}
 	var rows []Record
 	err := s.withLock(func() error {
 		var err error
