@@ -145,6 +145,9 @@ func TestProfileTierInference(t *testing.T) {
 	if glm.LoginStatus == nil || *glm.LoginStatus != "ready" || glm.CanServe == nil || !*glm.CanServe {
 		t.Fatalf("opencode readiness = %v/%v, want ready/true", glm.LoginStatus, glm.CanServe)
 	}
+	if glm.Reason != "configured opencode account; serving requires active inference probe" {
+		t.Fatalf("opencode readiness reason = %q", glm.Reason)
+	}
 	if glm.ModelTier == nil || *glm.ModelTier != 2 {
 		t.Errorf("opencode glm: tier = %v want 2", glm.ModelTier)
 	}

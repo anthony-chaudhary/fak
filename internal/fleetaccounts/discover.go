@@ -435,7 +435,7 @@ func classifyRow(acctDir, product, account string, pol Policy, acctIdx accountsR
 	label := "real offered account"
 	switch product {
 	case "opencode":
-		label = "real offered opencode account"
+		label = "configured opencode account; serving requires active inference probe"
 	case "codex":
 		label = "real offered Codex account"
 	}

@@ -498,8 +498,8 @@ def _resolver(base="http://127.0.0.1:18080/v1", model="zai-coding-plan/glm-4.5-a
 
 
 def _connector(result):
-    def _c(base_url, *, timeout):
-        return dict(result, _base=base_url)
+    def _c(base_url, *, model, timeout):
+        return dict(result, _base=base_url, _model=model)
     return _c
 
 
@@ -512,10 +512,28 @@ class ClassifyOpencodeProbeTest(unittest.TestCase):
         self.assertEqual(v["block_kind"], "gateway")
         self.assertIn("connection refused", v["block_reason"])
 
-    def test_2xx_is_ok(self) -> None:
+    def test_2xx_with_generated_text_is_ok(self) -> None:
         v = account_probe.classify_opencode_probe(
-            {"reachable": True, "status": 200, "body": '{"data":[]}', "error": ""})
+            {"reachable": True, "status": 200, "body": "{}",
+             "generated_text": "O", "error": ""})
         self.assertEqual(v["status"], "OK")
+
+    def test_list_success_without_generation_text_fails_closed(self) -> None:
+        v = account_probe.classify_opencode_probe(
+            {"reachable": True, "status": 200,
+             "body": '{"data":[{"id":"configured-model"}]}', "error": ""})
+        self.assertEqual(v["status"], "GATEWAY_DOWN")
+        self.assertEqual(v["block_kind"], "provider_endpoint")
+
+    def test_retired_generation_endpoint_fails_closed(self) -> None:
+        for status in (404, 410):
+            with self.subTest(status=status):
+                v = account_probe.classify_opencode_probe(
+                    {"reachable": True, "status": status,
+                     "body": "Function not found", "error": ""})
+                self.assertEqual(v["status"], "GATEWAY_DOWN")
+                self.assertEqual(v["block_kind"], "provider_endpoint")
+                self.assertIn(str(status), v["block_reason"])
 
     def test_429_is_limit(self) -> None:
         v = account_probe.classify_opencode_probe(
@@ -571,12 +589,19 @@ class ProbeOpencodeAccountTest(unittest.TestCase):
         self.assertEqual(v["tag"], "zai-coding-plan")
 
     def test_ok_verdict(self) -> None:
+        seen = {}
+
+        def connector(base_url, *, model, timeout):
+            seen.update(base_url=base_url, model=model, timeout=timeout)
+            return {"reachable": True, "status": 200, "body": "{}",
+                    "generated_text": "O", "error": ""}
+
         v = account_probe.probe_opencode_account(
             opencode_row(),
-            connector=_connector({"reachable": True, "status": 200, "body": "{}",
-                                  "error": ""}),
+            connector=connector,
             target_resolver=_resolver())
         self.assertEqual(v["status"], "OK")
+        self.assertEqual(seen["model"], "zai-coding-plan/glm-4.5-air")
 
     def test_no_base_url_is_transport_not_gateway_down(self) -> None:
         # An unconfigured base URL is a local config gap, not a down gateway.

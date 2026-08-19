@@ -429,7 +429,8 @@ def opencode_guard_target(row: dict[str, Any], *,
     return model, base
 
 
-def _default_opencode_connector(base_url: str, *, timeout: float) -> dict[str, Any]:
+def _default_opencode_connector(base_url: str, *, model: str,
+                                timeout: float) -> dict[str, Any]:
     """Exercise the guard->gateway hop: TCP-connect the base URL, then (only when the
     port answers) a tiny HTTP ``GET <base>/models`` through the gateway. Returns a
     structured ``{reachable, status, body, error}``.
@@ -450,15 +451,31 @@ def _default_opencode_connector(base_url: str, *, timeout: float) -> dict[str, A
         return {"reachable": False, "status": None, "body": "", "error": str(exc)}
     import urllib.error
     import urllib.request
-    url = base_url.rstrip("/") + "/models"
+    url = base_url.rstrip("/") + "/chat/completions"
+    payload = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": "Reply OK"}],
+        "max_tokens": 1,
+    }).encode("utf-8")
     try:
         with urllib.request.urlopen(
-                urllib.request.Request(url, headers={"Accept": "application/json"}),
+                urllib.request.Request(
+                    url, data=payload,
+                    headers={"Accept": "application/json",
+                             "Content-Type": "application/json"}),
                 timeout=timeout) as resp:
             body = resp.read(4096).decode("utf-8", "replace")
+            generated_text = ""
+            try:
+                choices = json.loads(body).get("choices") or []
+                if choices:
+                    generated_text = str(
+                        (choices[0].get("message") or {}).get("content") or "")
+            except (AttributeError, TypeError, ValueError):
+                pass
             return {"reachable": True,
                     "status": getattr(resp, "status", None) or resp.getcode(),
-                    "body": body, "error": ""}
+                    "body": body, "generated_text": generated_text, "error": ""}
     except urllib.error.HTTPError as exc:
         body = ""
         try:
@@ -468,7 +485,7 @@ def _default_opencode_connector(base_url: str, *, timeout: float) -> dict[str, A
         return {"reachable": True, "status": exc.code, "body": body, "error": ""}
     except (urllib.error.URLError, OSError) as exc:
         # The port accepted the TCP connection but the HTTP request could not complete:
-        # the gateway is up but not answering the models route -- transient, not down.
+        # the gateway is up but not answering generation -- transient, not down.
         return {"reachable": True, "status": None, "body": "", "error": str(exc)}
 
 
@@ -488,6 +505,10 @@ def classify_opencode_probe(result: dict[str, Any], *, base_url: str = "",
                 "reset": None, "weekly": None}
     status = result.get("status")
     body = result.get("body") or ""
+    if status in (404, 410):
+        return {"status": "GATEWAY_DOWN", "block_kind": "provider_endpoint",
+                "block_reason": f"provider generation endpoint retired (HTTP {status})",
+                "reset": None, "weekly": None}
     windows = fleet_session_signals.limit_resets(body)
     if status == 429 or "limit exhausted" in body.lower() or windows:
         reset = None
@@ -515,15 +536,20 @@ def classify_opencode_probe(result: dict[str, Any], *, base_url: str = "",
                   else f"gateway returned HTTP {status}")
         return {"status": st, "block_kind": kind, "block_reason": reason,
                 "reset": None, "weekly": None}
-    if isinstance(status, int) and 200 <= status < 300:
+    if (isinstance(status, int) and 200 <= status < 300
+            and str(result.get("generated_text") or "").strip()):
         return {"status": "OK", "block_kind": None, "block_reason": "",
+                "reset": None, "weekly": None}
+    if isinstance(status, int) and 200 <= status < 300:
+        return {"status": "GATEWAY_DOWN", "block_kind": "provider_endpoint",
+                "block_reason": "provider generation returned no model text",
                 "reset": None, "weekly": None}
     if isinstance(status, int) and status >= 500:
         return {"status": "APIERR", "block_kind": "apierr",
                 "block_reason": f"gateway returned HTTP {status}",
                 "reset": None, "weekly": None}
     # Reachable but the exercise was inconclusive (no HTTP status / odd body): transient,
-    # never a hard block -- we do not sideline a seat on a flaky models route.
+    # never a hard block -- we do not sideline a seat on a flaky generation request.
     err = result.get("error") or (f"HTTP {status}" if status else "no response")
     return {"status": "APIERR", "block_kind": "apierr",
             "block_reason": f"gateway reachable but probe inconclusive: {err}",
@@ -536,7 +562,7 @@ def probe_opencode_account(row: dict[str, Any], *, timeout: float = DEFAULT_TIME
                            workspace: str | os.PathLike[str] | None = None,
                            runs_dir: str | os.PathLike[str] | None = None,
                            ) -> dict[str, Any]:
-    """Actively probe one opencode/glm seat by pinging the guard base URL its worker uses.
+    """Actively probe one opencode/glm seat with one token through its worker guard URL.
 
     ``connector`` and ``target_resolver`` are injectable for hermetic tests (no socket, no
     dispatch import). The verdict shares the closed status vocabulary + the fleet_sessions
@@ -564,7 +590,7 @@ def probe_opencode_account(row: dict[str, Any], *, timeout: float = DEFAULT_TIME
         else:
             conn = connector or _default_opencode_connector
             try:
-                result = conn(base, timeout=timeout)
+                result = conn(base, model=model, timeout=timeout)
             except Exception as exc:  # a raising connector is transport, not a block
                 result = {"reachable": False, "status": None, "body": "",
                           "error": f"connector raised: {exc}"}
