@@ -2,6 +2,7 @@ package sessionmine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -36,5 +37,37 @@ func TestRefreshIndexStopsOnCancellation(t *testing.T) {
 func TestRefreshIndexValidatesBounds(t *testing.T) {
 	if err := RefreshIndex(context.Background(), RefreshOptions{IndexPath: "x", MaxRuns: 2}, nil); err == nil {
 		t.Fatal("expected interval error")
+	}
+}
+
+func TestRefreshIndexWritesDurableReceiptAndReleasesLock(t *testing.T) {
+	index := filepath.Join(t.TempDir(), "nested", "index.json")
+	if err := RefreshIndex(context.Background(), RefreshOptions{IndexPath: index, MaxRuns: 1}, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := inspectRefreshReceipt(index)
+	if got.State != "recorded" || got.Outcome != "ok" || got.CompletedAt == "" {
+		t.Fatalf("%+v", got)
+	}
+	if _, err := os.Stat(refreshLockPath(index)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("lock remains: %v", err)
+	}
+}
+
+func TestRefreshIndexRefusesLiveLockAndReapsStaleLock(t *testing.T) {
+	index := filepath.Join(t.TempDir(), "index.json")
+	live, _ := json.Marshal(refreshLock{PID: os.Getpid(), StartedAt: time.Now().Format(time.RFC3339)})
+	if err := os.WriteFile(refreshLockPath(index), live, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RefreshIndex(context.Background(), RefreshOptions{IndexPath: index, MaxRuns: 1}, nil); err == nil {
+		t.Fatal("expected live contention")
+	}
+	stale, _ := json.Marshal(refreshLock{PID: 2147483647, StartedAt: time.Now().Format(time.RFC3339)})
+	if err := os.WriteFile(refreshLockPath(index), stale, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RefreshIndex(context.Background(), RefreshOptions{IndexPath: index, MaxRuns: 1}, nil); err != nil {
+		t.Fatalf("stale lock was not reclaimed: %v", err)
 	}
 }
