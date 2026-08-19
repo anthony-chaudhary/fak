@@ -403,6 +403,8 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 		cmdUsage(args)
 	case "provider-cost":
 		cmdProviderCost(args)
+	case "goal":
+		cmdGoal(args)
 	case "headroom":
 		cmdHeadroom(args)
 	case "vcache":
