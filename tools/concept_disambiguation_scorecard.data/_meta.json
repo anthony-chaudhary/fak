@@ -10475,6 +10475,11 @@
           "category": "incidental",
           "reason": "Pure filter/sort executor over observed rows, not an agent execution plan",
           "token": "ApplyListPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private validator helper; not a user-facing planning concept.",
+          "token": "validateGroupedPlan"
         }
       ],
       "exclude": [
@@ -10611,6 +10616,7 @@
         "seedCandidate",
         "seen_candidates",
         "stablePlanID",
+        "validateGroupedPlan",
         "watchdogCandidates",
         "watchdogExclusionReason",
         "wipLandOptions",

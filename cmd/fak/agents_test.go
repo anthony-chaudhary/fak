@@ -308,3 +308,22 @@ func TestAgentsRejectsGroupedListFlagMix(t *testing.T) {
 		t.Fatalf("code=%d out=%s err=%s", code, out.String(), errout.String())
 	}
 }
+
+func TestAgentsSchemaDescriptorJSON(t *testing.T) {
+	var out, errout bytes.Buffer
+	if code := runAgents(&out, &errout, []string{"--schema", "--json"}); code != 0 {
+		t.Fatalf("code=%d err=%s", code, errout.String())
+	}
+	var got agentquery.Descriptor
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Schema != agentquery.DescriptorSchema || got.RelationSchema != agentquery.Schema || len(got.Fields) == 0 || got.MaxRows != 10000 {
+		t.Fatalf("got=%+v", got)
+	}
+	out.Reset()
+	errout.Reset()
+	if code := runAgents(&out, &errout, []string{"--schema"}); code != 2 || !strings.Contains(errout.String(), agentquery.DescriptorSchema) {
+		t.Fatalf("code=%d out=%s err=%s", code, out.String(), errout.String())
+	}
+}

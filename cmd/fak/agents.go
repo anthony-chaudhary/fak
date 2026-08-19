@@ -40,7 +40,8 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 	startedAfter := fs.String("started-after", "", "inclusive RFC3339 start lower bound")
 	startedBefore := fs.String("started-before", "", "inclusive RFC3339 start upper bound")
 	orderBy := fs.String("order-by", "elapsed_desc", "elapsed|progress_age|started|ended|cost|identity with _asc or _desc")
-	asJSON := fs.Bool("json", false, "emit fak-agents/1 JSON")
+	asJSON := fs.Bool("json", false, "emit versioned machine JSON")
+	showSchema := fs.Bool("schema", false, "emit the shared relation schema descriptor")
 	limit := fs.Int("limit", 200, "maximum returned rows")
 	historyWindowText := fs.String("history", "", "historical lookback window (for example 7d)")
 	groupBy := fs.String("group-by", "", "aggregate grouping (currently lane,state)")
@@ -53,9 +54,23 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "       fak agents --history 168h --group-by lane,state --count [--json]")
 		fmt.Fprintln(stderr, "       fak agents --query \"SELECT lane,state,count(*) AS agents,max(elapsed_ms) AS max_elapsed_ms FROM agents WHERE started_at >= now()-interval '7 day' GROUP BY lane,state ORDER BY max_elapsed_ms DESC\"")
 		fmt.Fprintln(stderr, "--query is a constrained read-only grammar, not arbitrary SQL")
+		fmt.Fprintf(stderr, "--schema --json emits %s\n", agentquery.DescriptorSchema)
 	}
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
+	}
+	if *showSchema {
+		if !*asJSON {
+			fmt.Fprintf(stderr, "fak agents: --schema requires --json (%s)\n", agentquery.DescriptorSchema)
+			return 2
+		}
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(agentquery.SchemaDescriptor()); err != nil {
+			fmt.Fprintf(stderr, "fak agents: encode schema: %v\n", err)
+			return 1
+		}
+		return 0
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintln(stderr, "fak agents: positional arguments are not supported")
@@ -195,6 +210,10 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 	}
 	if grouped {
 		groups := agentquery.GroupLaneStatePlan(result.Rows, queryPlan, now, *source, historyHealth)
+		if err := agentquery.ValidateGroupResult(groups); err != nil {
+			fmt.Fprintf(stderr, "fak agents: invalid grouped result: %v\n", err)
+			return 1
+		}
 		if *asJSON {
 			enc := json.NewEncoder(stdout)
 			enc.SetIndent("", "  ")
@@ -206,6 +225,10 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 		}
 		renderAgentGroups(stdout, groups)
 		return 0
+	}
+	if err := agentquery.ValidateResult(result); err != nil {
+		fmt.Fprintf(stderr, "fak agents: invalid result: %v\n", err)
+		return 1
 	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
