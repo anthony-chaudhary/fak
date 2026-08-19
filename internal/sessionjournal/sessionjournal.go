@@ -102,18 +102,16 @@ type Event struct {
 	SourceDigest string      `json:"source_digest,omitempty"` // denied-source identity; raw source is never recorded
 }
 
-// DefaultPath resolves the journal path: the env override, else <UserConfigDir>/fak/…,
-// else a repo-local .fak/…. Mirrors defaultSessionRegistryPath so the two durable
-// session stores live side by side (C7 unifies them).
+// DefaultPath resolves the journal path: the explicit override, otherwise the
+// machine-global store shared by every account on the host.
 func DefaultPath() string {
 	if p := strings.TrimSpace(os.Getenv(EnvPath)); p != "" {
 		return p
 	}
-	if dir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(dir) != "" {
-		return filepath.Join(dir, "fak", FileName)
-	}
-	return filepath.Join(".fak", FileName)
+	return hostJournalPath()
 }
+
+func bootMarkerPath() string { return filepath.Join(filepath.Dir(DefaultPath()), "boot-marker.json") }
 
 // Append writes one event as a single JSONL line, creating the dir and file as needed.
 // The append is one Write of one line, so concurrent session starts interleave at line
@@ -147,22 +145,26 @@ func appendEvent(path string, ev Event) error {
 	if strings.TrimSpace(path) == "" {
 		path = DefaultPath()
 	}
-	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+	return withJournalLock(path, func() error {
+		if dir := filepath.Dir(path); dir != "" && dir != "." {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return err
+			}
+		}
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
 			return err
 		}
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	b, err := json.Marshal(ev)
-	if err != nil {
-		return err
-	}
-	_, err = f.Write(append(b, '\n'))
-	return err
+		defer f.Close()
+		b, err := json.Marshal(ev)
+		if err != nil {
+			return err
+		}
+		if _, err = f.Write(append(b, '\n')); err != nil {
+			return err
+		}
+		return f.Sync()
+	})
 }
 
 // ParseEvents scans JSONL content into events, skipping blank lines, malformed lines,
