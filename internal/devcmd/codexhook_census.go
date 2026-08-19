@@ -2,6 +2,7 @@ package devcmd
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -13,12 +14,14 @@ import (
 	"time"
 )
 
-const codexHookCensusSchema = "fak/codex-hook-census/v1"
+const codexHookCensusSchema = "fak/codex-hook-census/v2"
 
 type lifecycleCounts struct {
 	Denominator int    `json:"denominator"`
 	Attempted   int    `json:"attempted"`
 	Succeeded   int    `json:"succeeded"`
+	Blocked     int    `json:"blocked,omitempty"`
+	InvalidJSON int    `json:"invalid_json,omitempty"`
 	Failed      int    `json:"failed"`
 	Skipped     int    `json:"skipped"`
 	Disabled    int    `json:"disabled"`
@@ -27,21 +30,27 @@ type lifecycleCounts struct {
 }
 
 type hookCensusReport struct {
-	Schema           string          `json:"schema"`
-	GeneratedAt      time.Time       `json:"generated_at"`
-	Window           string          `json:"window"`
-	CodexHome        string          `json:"codex_home"`
-	LogStore         string          `json:"log_store"`
-	ObservationStore string          `json:"observation_store"`
-	ProfileMatch     bool            `json:"profile_match"`
-	DispatchedCalls  int             `json:"dispatched_calls"`
-	DispatchSource   string          `json:"dispatch_source"`
-	PreToolUse       lifecycleCounts `json:"pre_tool_use"`
-	PostToolUse      lifecycleCounts `json:"post_tool_use"`
-	TelemetryFresh   bool            `json:"telemetry_fresh"`
-	NewestReceipt    time.Time       `json:"newest_receipt,omitempty"`
-	Verdict          string          `json:"verdict"`
-	Reasons          []string        `json:"reasons,omitempty"`
+	Schema           string             `json:"schema"`
+	GeneratedAt      time.Time          `json:"generated_at"`
+	Window           string             `json:"window"`
+	CodexHome        string             `json:"codex_home"`
+	LogStore         string             `json:"log_store"`
+	Workspace        string             `json:"workspace"`
+	ObservationStore string             `json:"observation_store"`
+	ProfileMatch     bool               `json:"profile_match"`
+	DispatchedCalls  int                `json:"dispatched_calls"`
+	DispatchSource   string             `json:"dispatch_source"`
+	PreToolUse       lifecycleCounts    `json:"pre_tool_use"`
+	PostToolUse      lifecycleCounts    `json:"post_tool_use"`
+	Stop             lifecycleCounts    `json:"stop"`
+	StopFailure      lifecycleCounts    `json:"stop_failure"`
+	SubagentStop     lifecycleCounts    `json:"subagent_stop"`
+	StopSource       string             `json:"stop_source,omitempty"`
+	StopRuns         []stopLifecycleRow `json:"stop_runs,omitempty"`
+	TelemetryFresh   bool               `json:"telemetry_fresh"`
+	NewestReceipt    time.Time          `json:"newest_receipt,omitempty"`
+	Verdict          string             `json:"verdict"`
+	Reasons          []string           `json:"reasons,omitempty"`
 }
 
 type hookObservation struct {
@@ -61,6 +70,196 @@ type dispatchedCall struct {
 	Workspace string
 }
 
+type stopLifecycleRow struct {
+	ThreadID    string `json:"thread_id"`
+	TurnID      string `json:"turn_id,omitempty"`
+	RunID       string `json:"run_id"`
+	EventName   string `json:"event_name"`
+	HandlerType string `json:"handler_type,omitempty"`
+	Source      string `json:"source,omitempty"`
+	SourcePath  string `json:"source_path,omitempty"`
+	Order       int    `json:"display_order"`
+	Status      string `json:"status"`
+	StatusText  string `json:"status_message,omitempty"`
+	StartedAt   int64  `json:"started_at,omitempty"`
+	CompletedAt int64  `json:"completed_at,omitempty"`
+}
+
+type hookNotification struct {
+	Method string `json:"method"`
+	Params struct {
+		ThreadID string `json:"threadId"`
+		TurnID   string `json:"turnId"`
+		Run      struct {
+			ID            string `json:"id"`
+			EventName     string `json:"eventName"`
+			HandlerType   string `json:"handlerType"`
+			Source        string `json:"source"`
+			SourcePath    string `json:"sourcePath"`
+			DisplayOrder  int    `json:"displayOrder"`
+			Status        string `json:"status"`
+			StatusMessage string `json:"statusMessage"`
+			StartedAt     int64  `json:"startedAt"`
+			CompletedAt   int64  `json:"completedAt"`
+			Entries       []struct {
+				Kind string `json:"kind"`
+				Text string `json:"text"`
+			} `json:"entries"`
+		} `json:"run"`
+	} `json:"params"`
+}
+
+func addStopLifecycle(report *hookCensusReport, path string, after time.Time, threadID string) error {
+	abs, _ := filepath.Abs(path)
+	report.StopSource = abs
+	f, err := os.Open(abs)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	started := map[string]hookNotification{}
+	completed := map[string]hookNotification{}
+	invalid := map[string]int{"stop": 0, "stopFailure": 0, "subagentStop": 0}
+	s := bufio.NewScanner(f)
+	s.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	for s.Scan() {
+		line := bytes.TrimSpace(s.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var n hookNotification
+		if err := json.Unmarshal(line, &n); err != nil {
+			// Only malformed rows that claim to be hook lifecycle evidence enter the denominator.
+			lower := strings.ToLower(string(line))
+			if strings.Contains(lower, "hook/") && strings.Contains(lower, "stop") {
+				invalid["stop"]++
+			}
+			continue
+		}
+		if n.Method != "hook/started" && n.Method != "hook/completed" {
+			continue
+		}
+		event := n.Params.Run.EventName
+		if event != "stop" && event != "stopFailure" && event != "subagentStop" {
+			continue
+		}
+		if threadID != "" && n.Params.ThreadID != threadID {
+			continue
+		}
+		when := n.Params.Run.StartedAt
+		if n.Params.Run.CompletedAt > 0 {
+			when = n.Params.Run.CompletedAt
+		}
+		if when > 0 && hookRunTime(when).Before(after) {
+			continue
+		}
+		key := n.Params.ThreadID + "\x00" + n.Params.Run.ID
+		if n.Params.Run.ID == "" {
+			invalid[event]++
+			continue
+		}
+		key = stopRunKey(n)
+		if n.Method == "hook/started" {
+			started[key] = n
+		} else {
+			completed[key] = n
+		}
+	}
+	if err := s.Err(); err != nil {
+		return err
+	}
+	for key, n := range started {
+		if _, ok := completed[key]; ok {
+			continue
+		}
+		c := stopCounts(report, n.Params.Run.EventName)
+		c.Denominator++
+		c.Attempted++
+		c.Unknown++
+		report.StopRuns = append(report.StopRuns, stopRow(n, "unknown"))
+	}
+	for _, n := range completed {
+		c := stopCounts(report, n.Params.Run.EventName)
+		c.Denominator++
+		c.Attempted++
+		status := strings.ToLower(n.Params.Run.Status)
+		switch status {
+		case "completed":
+			c.Succeeded++
+		case "blocked":
+			c.Blocked++
+		case "failed":
+			if invalidHookOutput(n) {
+				c.InvalidJSON++
+			} else {
+				c.Failed++
+			}
+		case "stopped":
+			c.Skipped++
+		default:
+			c.Unknown++
+		}
+		report.StopRuns = append(report.StopRuns, stopRow(n, status))
+	}
+	for event, n := range invalid {
+		if n == 0 {
+			continue
+		}
+		c := stopCounts(report, event)
+		c.Denominator += n
+		c.Attempted += n
+		c.InvalidJSON += n
+	}
+	for _, c := range []*lifecycleCounts{&report.Stop, &report.StopFailure, &report.SubagentStop} {
+		c.Source = abs
+	}
+	sort.Slice(report.StopRuns, func(i, j int) bool {
+		if report.StopRuns[i].StartedAt != report.StopRuns[j].StartedAt {
+			return report.StopRuns[i].StartedAt < report.StopRuns[j].StartedAt
+		}
+		return report.StopRuns[i].Order < report.StopRuns[j].Order
+	})
+	return nil
+}
+
+func invalidHookOutput(n hookNotification) bool {
+	for _, entry := range n.Params.Run.Entries {
+		text := strings.ToLower(entry.Text)
+		if strings.Contains(text, "invalid json") || strings.Contains(text, "invalid-json") || strings.Contains(text, "json parse") {
+			return true
+		}
+	}
+	return false
+}
+
+func hookRunTime(v int64) time.Time {
+	// Codex HookRunSummary uses Unix seconds despite the historical field comment saying milliseconds.
+	if v < 100_000_000_000 {
+		return time.Unix(v, 0)
+	}
+	return time.UnixMilli(v)
+}
+
+func stopRunKey(n hookNotification) string {
+	return n.Params.ThreadID + "\x00" + n.Params.Run.ID
+}
+
+func stopCounts(r *hookCensusReport, event string) *lifecycleCounts {
+	switch event {
+	case "stopFailure":
+		return &r.StopFailure
+	case "subagentStop":
+		return &r.SubagentStop
+	default:
+		return &r.Stop
+	}
+}
+
+func stopRow(n hookNotification, status string) stopLifecycleRow {
+	r := n.Params.Run
+	return stopLifecycleRow{ThreadID: n.Params.ThreadID, TurnID: n.Params.TurnID, RunID: r.ID, EventName: r.EventName, HandlerType: r.HandlerType, Source: r.Source, SourcePath: r.SourcePath, Order: r.DisplayOrder, Status: status, StatusText: r.StatusMessage, StartedAt: r.StartedAt, CompletedAt: r.CompletedAt}
+}
+
 type rolloutRow struct {
 	Timestamp time.Time `json:"timestamp"`
 	Type      string    `json:"type"`
@@ -78,11 +277,12 @@ func RunCodexHookCensus(stdout, stderr io.Writer, args []string) int {
 	workspace := fs.String("workspace", ".", "workspace whose calls are counted")
 	threadID := fs.String("thread-id", os.Getenv("CODEX_THREAD_ID"), "Codex thread whose calls are counted (empty counts workspace)")
 	observations := fs.String("observations", filepath.Join(".dos", "metrics", "observations.jsonl"), "hook observation JSONL")
+	stopEvents := fs.String("stop-events", "", "Codex app-server hook notification JSONL")
 	since := fs.Duration("since", 24*time.Hour, "lookback window")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	nowText := fs.String("now", "", "fixed RFC3339 clock (tests/captures)")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *since <= 0 {
-		fmt.Fprintln(stderr, "usage: fak-dev codex-hook-census [--codex-home DIR] [--log-home DIR] [--observations FILE] [--since 24h] [--json]")
+		fmt.Fprintln(stderr, "usage: fak-dev codex-hook-census [--codex-home DIR] [--log-home DIR] [--observations FILE] [--stop-events FILE] [--since 24h] [--json]")
 		return 2
 	}
 	now := time.Now().UTC()
@@ -112,6 +312,13 @@ func RunCodexHookCensus(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stderr, "codex-hook-census: %v\n", err)
 		return 1
 	}
+	if *stopEvents != "" {
+		if err := addStopLifecycle(&report, *stopEvents, now.Add(-*since), *threadID); err != nil {
+			fmt.Fprintf(stderr, "codex-hook-census: stop events: %v\n", err)
+			return 1
+		}
+	}
+	finalizeCensusVerdict(&report)
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -138,7 +345,7 @@ func buildHookCensus(home, logHome, workspace, threadID, observations string, si
 	if err != nil {
 		return hookCensusReport{}, err
 	}
-	r := hookCensusReport{Schema: codexHookCensusSchema, GeneratedAt: now, Window: since.String(), CodexHome: absHome, LogStore: absLog, ObservationStore: absObs, ProfileMatch: samePath(absHome, absLog), DispatchedCalls: len(calls), DispatchSource: filepath.Join(absLog, "sessions"), NewestReceipt: newest, TelemetryFresh: !newest.IsZero() && now.Sub(newest) <= 5*time.Minute}
+	r := hookCensusReport{Schema: codexHookCensusSchema, GeneratedAt: now, Window: since.String(), CodexHome: absHome, LogStore: absLog, Workspace: absWork, ObservationStore: absObs, ProfileMatch: samePath(absHome, absLog), DispatchedCalls: len(calls), DispatchSource: filepath.Join(absLog, "sessions"), NewestReceipt: newest, TelemetryFresh: !newest.IsZero() && now.Sub(newest) <= 5*time.Minute}
 	r.PreToolUse = phaseCountsForCalls(calls, receipts["pretool"], absHome, absWork, absObs)
 	r.PostToolUse = phaseCountsForCalls(calls, receipts["posttool"], absHome, absWork, absObs)
 	if !r.TelemetryFresh {
@@ -150,22 +357,56 @@ func buildHookCensus(home, logHome, workspace, threadID, observations string, si
 	if len(calls) == 0 {
 		r.Reasons = append(r.Reasons, "DISPATCH_DENOMINATOR_UNOBSERVED")
 	}
-	if r.PreToolUse.Unknown > 0 {
-		r.Reasons = append(r.Reasons, "PRE_TOOL_USE_UNKNOWN")
-	}
-	if r.PostToolUse.Unknown > 0 {
-		r.Reasons = append(r.Reasons, "POST_TOOL_USE_UNKNOWN")
-	}
-	if r.PreToolUse.Failed > 0 || r.PostToolUse.Failed > 0 {
-		r.Reasons = append(r.Reasons, "HOOK_FAILURES_PRESENT")
-	}
-	if len(r.Reasons) == 0 {
-		r.Verdict = "HEALTHY"
-	} else {
-		r.Verdict = "UNHEALTHY"
-	}
+	finalizeCensusVerdict(&r)
 	return r, nil
 }
+
+func finalizeCensusVerdict(r *hookCensusReport) {
+	reasons := append([]string(nil), r.Reasons...)
+	if r.PreToolUse.Unknown > 0 {
+		reasons = append(reasons, "PRE_TOOL_USE_UNKNOWN")
+	}
+	if r.PostToolUse.Unknown > 0 {
+		reasons = append(reasons, "POST_TOOL_USE_UNKNOWN")
+	}
+	if r.PreToolUse.Failed > 0 || r.PostToolUse.Failed > 0 {
+		reasons = append(reasons, "HOOK_FAILURES_PRESENT")
+	}
+	for _, stop := range []struct {
+		name string
+		c    lifecycleCounts
+	}{
+		{"STOP", r.Stop}, {"STOP_FAILURE", r.StopFailure}, {"SUBAGENT_STOP", r.SubagentStop},
+	} {
+		if stop.c.InvalidJSON > 0 {
+			reasons = append(reasons, stop.name+"_INVALID_JSON")
+		}
+		if stop.c.Failed > 0 {
+			reasons = append(reasons, stop.name+"_FAILED")
+		}
+		if stop.c.Unknown > 0 {
+			reasons = append(reasons, stop.name+"_UNKNOWN")
+		}
+	}
+	r.Reasons = uniqueStrings(reasons)
+	r.Verdict = "HEALTHY"
+	if len(r.Reasons) > 0 {
+		r.Verdict = "UNHEALTHY"
+	}
+}
+
+func uniqueStrings(in []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 func samePath(a, b string) bool { return strings.EqualFold(filepath.Clean(a), filepath.Clean(b)) }
 func phaseCounts(den int, obs []hookObservation, source string) lifecycleCounts {
 	c := lifecycleCounts{Denominator: den, Source: source}

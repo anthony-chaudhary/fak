@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -122,5 +124,60 @@ func TestPhaseCountsForCallsRejectsWorkspaceMismatch(t *testing.T) {
 	got := phaseCountsForCalls(calls, obs, profile, workspace, "fixture")
 	if got.Unknown != 1 || got.Succeeded != 0 {
 		t.Fatalf("counts=%+v", got)
+	}
+}
+
+func TestStopLifecycleClassifiesAllStatesAndIgnoresEchoes(t *testing.T) {
+	d := t.TempDir()
+	path := filepath.Join(d, "hooks.jsonl")
+	rows := []string{
+		`{"method":"hook/started","params":{"threadId":"thread-a","turnId":"turn-1","run":{"id":"run-ok","eventName":"stop","handlerType":"command","source":"plugin","sourcePath":"C:/plugin/hooks.json","displayOrder":6,"status":"running","startedAt":1787098500000}}}`,
+		`{"method":"hook/completed","params":{"threadId":"thread-a","turnId":"turn-1","run":{"id":"run-ok","eventName":"stop","handlerType":"command","source":"plugin","sourcePath":"C:/plugin/hooks.json","displayOrder":6,"status":"completed","startedAt":1787098500000,"completedAt":1787098500100}}}`,
+		`{"method":"hook/completed","params":{"threadId":"thread-a","turnId":"turn-1","run":{"id":"run-block","eventName":"stop","displayOrder":7,"status":"blocked","startedAt":1787098500200,"completedAt":1787098500300}}}`,
+		`{"method":"hook/completed","params":{"threadId":"thread-a","turnId":"turn-1","run":{"id":"run-fail","eventName":"stopFailure","displayOrder":8,"status":"failed","statusMessage":"exit 1","startedAt":1787098500400,"completedAt":1787098500500}}}`,
+		`{"method":"hook/started","params":{"threadId":"thread-a","turnId":"turn-1","run":{"id":"run-missing","eventName":"subagentStop","displayOrder":9,"status":"running","startedAt":1787098500600}}}`,
+		`{"type":"agent_message","text":"hook/completed Stop failed is only an echo"}`,
+		`{"method":"hook/completed","params":{"threadId":"other","run":{"id":"ignored","eventName":"stop","status":"failed","startedAt":1787098500000}}}`,
+		`{"method":"hook/completed","params":{"threadId":"thread-a","run":{"id":"old","eventName":"stop","status":"failed","startedAt":1}}}`,
+		`{"method":"hook/completed","params":{"threadId":"thread-a","run":{"id":"bad","eventName":"stop"`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(rows, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := hookCensusReport{}
+	after := time.Date(2026, 8, 18, 23, 0, 0, 0, time.UTC)
+	if err := addStopLifecycle(&r, path, after, "thread-a"); err != nil {
+		t.Fatal(err)
+	}
+	finalizeCensusVerdict(&r)
+	if r.Stop.Denominator != 3 || r.Stop.Succeeded != 1 || r.Stop.Blocked != 1 || r.Stop.InvalidJSON != 1 {
+		t.Fatalf("stop=%+v", r.Stop)
+	}
+	if r.StopFailure.Failed != 1 || r.StopFailure.Denominator != 1 {
+		t.Fatalf("stopFailure=%+v", r.StopFailure)
+	}
+	if r.SubagentStop.Unknown != 1 || r.SubagentStop.Attempted != 1 {
+		t.Fatalf("subagentStop=%+v", r.SubagentStop)
+	}
+	if len(r.StopRuns) != 4 {
+		t.Fatalf("runs=%d %+v", len(r.StopRuns), r.StopRuns)
+	}
+	if r.Verdict != "UNHEALTHY" || !slices.Contains(r.Reasons, "STOP_INVALID_JSON") || !slices.Contains(r.Reasons, "STOP_FAILURE_FAILED") || !slices.Contains(r.Reasons, "SUBAGENT_STOP_UNKNOWN") {
+		t.Fatalf("verdict=%s reasons=%v", r.Verdict, r.Reasons)
+	}
+}
+
+func TestStopLifecycleDuplicateCompletedRunCountsOnce(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "hooks.jsonl")
+	row := `{"method":"hook/completed","params":{"threadId":"t","run":{"id":"same","eventName":"stop","status":"completed","startedAt":1787098500000,"completedAt":1787098500100}}}`
+	if err := os.WriteFile(p, []byte(row+"\n"+row+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := hookCensusReport{}
+	if err := addStopLifecycle(&r, p, time.Time{}, "t"); err != nil {
+		t.Fatal(err)
+	}
+	if r.Stop.Denominator != 1 || r.Stop.Succeeded != 1 {
+		t.Fatalf("stop=%+v", r.Stop)
 	}
 }

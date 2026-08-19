@@ -43,6 +43,7 @@ func RunCodexHookRecurrence(stdout, stderr io.Writer, args []string) int {
 	maxFailures := fs.Int("max-hook-failures", 0, "permitted real hook failures")
 	maxUnexpected := fs.Int("max-unexpected", 0, "permitted unexpected outcomes")
 	jsonOut := fs.Bool("json", false, "emit JSON")
+	stopEvents := fs.String("stop-events", "", "Codex app-server hook notification JSONL")
 	if fs.Parse(args) != nil || fs.NArg() != 0 || *since <= 0 || *maxFailures < 0 || *maxUnexpected < 0 {
 		fmt.Fprintln(stderr, "usage: fak-dev codex-hook-gate [--since 15m] [--max-hook-failures 0] [--max-unexpected 0] [--json]")
 		return 2
@@ -62,6 +63,13 @@ func RunCodexHookRecurrence(stdout, stderr io.Writer, args []string) int {
 	if e != nil {
 		fmt.Fprintf(stderr, "codex-hook-gate: census: %v\n", e)
 		return 1
+	}
+	if *stopEvents != "" {
+		if e := addStopLifecycle(&c, *stopEvents, now.Add(-*since), os.Getenv("CODEX_THREAD_ID")); e != nil {
+			fmt.Fprintf(stderr, "codex-hook-gate: stop events: %v\n", e)
+			return 1
+		}
+		finalizeCensusVerdict(&c)
 	}
 	p, e := inspectCodexHookProfile(*home, *workspace, "")
 	if e != nil {
@@ -95,7 +103,7 @@ func evaluateHookRecurrence(c hookCensusReport, p hookProfileReport, o codexTool
 	if len(g.TopCauses) > 5 {
 		g.TopCauses = g.TopCauses[:5]
 	}
-	failures := c.PreToolUse.Failed + c.PostToolUse.Failed
+	failures := c.PreToolUse.Failed + c.PostToolUse.Failed + c.Stop.Failed + c.StopFailure.Failed + c.SubagentStop.Failed
 	switch {
 	case !c.ProfileMatch:
 		g.Reasons = append(g.Reasons, "PROFILE_MISMATCH")
@@ -105,11 +113,17 @@ func evaluateHookRecurrence(c hookCensusReport, p hookProfileReport, o codexTool
 	if !c.TelemetryFresh {
 		g.Reasons = append(g.Reasons, "STALE_TELEMETRY")
 	}
+	if expectedStopHooks(p) > 0 && c.StopSource == "" {
+		g.Reasons = append(g.Reasons, "STOP_TELEMETRY_UNOBSERVED")
+	}
 	if c.DispatchedCalls == 0 {
 		g.Reasons = append(g.Reasons, "DENOMINATOR_ZERO")
 	}
-	if c.PreToolUse.Unknown > 0 || c.PostToolUse.Unknown > 0 {
+	if c.PreToolUse.Unknown > 0 || c.PostToolUse.Unknown > 0 || c.Stop.Unknown > 0 || c.StopFailure.Unknown > 0 || c.SubagentStop.Unknown > 0 {
 		g.Reasons = append(g.Reasons, "UNKNOWN_LIFECYCLE_ROWS")
+	}
+	if c.Stop.InvalidJSON > 0 || c.StopFailure.InvalidJSON > 0 || c.SubagentStop.InvalidJSON > 0 {
+		g.Reasons = append(g.Reasons, "STOP_INVALID_JSON")
 	}
 	if c.PreToolUse.Disabled > 0 || c.PostToolUse.Disabled > 0 {
 		g.Reasons = append(g.Reasons, "EXPECTED_PHASE_DISABLED")
@@ -125,6 +139,19 @@ func evaluateHookRecurrence(c hookCensusReport, p hookProfileReport, o codexTool
 	}
 	return g
 }
+func expectedStopHooks(p hookProfileReport) int {
+	n := 0
+	for _, h := range p.Hooks {
+		switch normalizeHookEvent(h.EventName) {
+		case "stop", "stop_failure", "subagent_stop":
+			if h.Enabled {
+				n++
+			}
+		}
+	}
+	return n
+}
+
 func writeHookRecurrence(w io.Writer, g recurrenceReport) {
 	fmt.Fprintf(w, "Codex hook recurrence gate: %s\nwindow=%s unexpected=%d/%d max=%d hook-failures=%d/%d max=%d telemetry-fresh=%t\n", g.Verdict, g.Window, g.UnexpectedNumerator, g.UnexpectedDenominator, g.Thresholds.MaxUnexpectedOutcomes, g.Census.PreToolUse.Failed+g.Census.PostToolUse.Failed, g.Census.DispatchedCalls, g.Thresholds.MaxHookFailures, g.Census.TelemetryFresh)
 	fmt.Fprintf(w, "pre: attempted=%d succeeded=%d failed=%d skipped=%d disabled=%d unknown=%d denominator=%d\n", g.Census.PreToolUse.Attempted, g.Census.PreToolUse.Succeeded, g.Census.PreToolUse.Failed, g.Census.PreToolUse.Skipped, g.Census.PreToolUse.Disabled, g.Census.PreToolUse.Unknown, g.Census.PreToolUse.Denominator)
