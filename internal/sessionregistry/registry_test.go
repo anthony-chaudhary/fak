@@ -1,8 +1,10 @@
 package sessionregistry
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -182,5 +184,62 @@ func TestRegisterRepairsInterruptedFinalAppend(t *testing.T) {
 	}
 	if len(rows) != 2 {
 		t.Fatalf("got %d rows, want repaired root and child", len(rows))
+	}
+}
+
+func TestCanonicalGoalIdentityPropagatesWithoutInference(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registrations.jsonl")
+	s := Store{Path: path}
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	rootA := Record{Schema: Schema, RegistrationID: "root-a", RootRegistrationID: "root-a", TaskID: "same-title", GoalID: "goal_observe", AttemptID: "a", LaunchKind: "guarded_tui", Identity: Identity{Runtime: "claude"}, State: StateRegistered, CreatedAt: now}
+	rootB := rootA
+	rootB.RegistrationID, rootB.RootRegistrationID, rootB.AttemptID, rootB.Identity.Runtime = "root-b", "root-b", "b", "codex"
+	for _, root := range []Record{rootA, rootB} {
+		if err := s.Register(root); err != nil {
+			t.Fatal(err)
+		}
+	}
+	child := Record{Schema: Schema, RegistrationID: "child-a", ParentRegistrationID: "root-a", RootRegistrationID: "root-a", TaskID: "same-title", GoalID: "goal_observe", AttemptID: "c", LaunchKind: "subagent", Identity: Identity{Runtime: "codex"}, State: StateRegistered, CreatedAt: now}
+	if err := s.Register(child); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 || rows[2].GoalID != "goal_observe" {
+		t.Fatalf("rows = %+v", rows)
+	}
+}
+
+func TestCanonicalGoalIdentityCannotChangeWithinExecutionLineage(t *testing.T) {
+	for _, tc := range []struct{ name, parentGoal, childGoal string }{
+		{"change", "goal_a", "goal_b"},
+		{"drop", "goal_a", ""},
+		{"inject_into_legacy", "", "goal_a"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := Store{Path: filepath.Join(t.TempDir(), "registrations.jsonl")}
+			now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+			root := Record{Schema: Schema, RegistrationID: "root", RootRegistrationID: "root", TaskID: "same-title", GoalID: tc.parentGoal, AttemptID: "a", LaunchKind: "guarded_tui", Identity: Identity{Runtime: "codex"}, State: StateRegistered, CreatedAt: now}
+			if err := s.Register(root); err != nil {
+				t.Fatal(err)
+			}
+			child := Record{Schema: Schema, RegistrationID: "child", ParentRegistrationID: "root", RootRegistrationID: "root", TaskID: "same-title", GoalID: tc.childGoal, AttemptID: "b", LaunchKind: "subagent", Identity: Identity{Runtime: "codex"}, State: StateRegistered, CreatedAt: now}
+			if err := s.Register(child); err == nil || !strings.Contains(err.Error(), "goal_id differ") {
+				t.Fatalf("want goal lineage refusal, got %v", err)
+			}
+		})
+	}
+}
+
+func TestLegacyRegistrationOmitsCanonicalGoalIdentity(t *testing.T) {
+	r := Record{Schema: Schema, RegistrationID: "legacy", RootRegistrationID: "legacy", TaskID: "same-title", AttemptID: "a", LaunchKind: "guarded_tui", Identity: Identity{Runtime: "codex"}, State: StateRegistered, CreatedAt: time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)}
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "goal_id") {
+		t.Fatalf("legacy row changed shape: %s", b)
 	}
 }

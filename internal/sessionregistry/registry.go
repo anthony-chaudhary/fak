@@ -52,6 +52,7 @@ type Record struct {
 	RootOutcome          string    `json:"root_outcome,omitempty"`
 	RootIssue            string    `json:"root_issue,omitempty"`
 	TaskID               string    `json:"task_id,omitempty"`
+	GoalID               string    `json:"goal_id,omitempty"`
 	AttemptID            string    `json:"attempt_id"`
 	ResumeOfAttemptID    string    `json:"resume_of_attempt_id,omitempty"`
 	LaunchKind           string    `json:"launch_kind"`
@@ -264,6 +265,9 @@ func (s Store) registerLocked(r Record) error {
 				found = true
 				if old.RootRegistrationID != r.RootRegistrationID {
 					return errors.New("parent and child root_registration_id differ")
+				}
+				if old.GoalID != r.GoalID {
+					return errors.New("parent and child goal_id differ")
 				}
 				break
 			}
