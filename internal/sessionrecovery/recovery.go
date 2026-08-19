@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 )
 
 const ReceiptSchema = "fak-session-recovery-receipt/1"
@@ -46,6 +48,7 @@ type ProcessTree struct {
 type Request struct {
 	ThreadID    string   `json:"thread_id"`
 	CWD         string   `json:"cwd,omitempty"`
+	Source      string   `json:"source,omitempty"`
 	Argv        []string `json:"argv"`
 	Status      string   `json:"status"`
 	Reason      string   `json:"reason,omitempty"`
@@ -62,6 +65,7 @@ type Receipt struct {
 }
 
 type Options struct {
+	ManagerBin  string
 	Threads     map[string]bool
 	Limit       int
 	CWDOverride string
@@ -76,6 +80,9 @@ func Select(report InventoryReport, opts Options) []Request {
 	}
 	if opts.CodexBin == "" {
 		opts.CodexBin = "codex"
+	}
+	if opts.ManagerBin == "" {
+		opts.ManagerBin = "fak"
 	}
 	rows := append([]Session(nil), report.Sessions...)
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Thread.ID < rows[j].Thread.ID })
@@ -105,7 +112,7 @@ func Select(report InventoryReport, opts Options) []Request {
 			out = append(out, req)
 			continue
 		}
-		req.Argv = []string{opts.CodexBin, "resume", id}
+		req.Argv = []string{opts.ManagerBin, "guard", "--", opts.CodexBin, "resume", id}
 		if opts.Prompt != "" {
 			req.Argv = append(req.Argv, opts.Prompt)
 		}
@@ -114,6 +121,55 @@ func Select(report InventoryReport, opts Options) []Request {
 		out = append(out, req)
 	}
 	return out
+}
+
+// MergeJournalCrashes adds machine-reboot and dead-process candidates from the
+// durable session journal. Journal records are authoritative for cwd: unlike transcript
+// project slugs, the recorded path is reversible and survives a machine reboot.
+func MergeJournalCrashes(requests []Request, classified []sessionjournal.Classified, opts Options) []Request {
+	merged := make([]Request, 0, opts.Limit)
+	seen := make(map[string]bool, len(requests))
+	for _, row := range classified {
+		if len(merged) >= opts.Limit || row.Status != sessionjournal.StatusCrashed || seen[row.Session.ID] {
+			continue
+		}
+		if len(opts.Threads) > 0 && !opts.Threads[row.Session.ID] {
+			continue
+		}
+		cwd := row.Session.CWD
+		if cwd == "" {
+			cwd = opts.CWDOverride
+		}
+		req := Request{ThreadID: row.Session.ID, CWD: cwd, Source: "session_journal", Status: "candidate", Reason: row.Reason}
+		if cwd == "" {
+			req.Status = "skipped"
+			req.Reason = "cwd_unknown"
+		} else {
+			managerBin := opts.ManagerBin
+			if managerBin == "" {
+				managerBin = "fak"
+			}
+			codexBin := opts.CodexBin
+			if codexBin == "" {
+				codexBin = "codex"
+			}
+			req.Argv = []string{managerBin, "guard", "--", codexBin, "resume", row.Session.ID}
+			if opts.Prompt != "" {
+				req.Argv = append(req.Argv, opts.Prompt)
+			}
+			req.ReceiptPath = filepath.Join(opts.ReceiptDir, receiptName(req.ThreadID, req.CWD, req.Argv)+".json")
+		}
+		merged = append(merged, req)
+		seen[row.Session.ID] = true
+	}
+	for _, req := range requests {
+		if len(merged) >= opts.Limit || seen[req.ThreadID] {
+			continue
+		}
+		merged = append(merged, req)
+		seen[req.ThreadID] = true
+	}
+	return merged
 }
 
 func receiptName(id, cwd string, argv []string) string {
@@ -147,12 +203,19 @@ type Launcher interface{ Launch(Request) error }
 type VisibleLauncher struct{ TerminalBin string }
 
 func (l VisibleLauncher) Launch(req Request) error {
+	if len(req.Argv) == 0 {
+		return errors.New("visible launch: empty argv")
+	}
+	command, err := exec.LookPath(req.Argv[0])
+	if err != nil {
+		return fmt.Errorf("visible launch: resolve %q: %w", req.Argv[0], err)
+	}
 	bin := l.TerminalBin
 	if bin == "" {
 		bin = "wt.exe"
 	}
-	args := []string{"-w", "new", "new-tab", "--startingDirectory", req.CWD, "--"}
-	args = append(args, req.Argv...)
+	args := []string{"-w", "new", "new-tab", "--startingDirectory", req.CWD, "--", command}
+	args = append(args, req.Argv[1:]...)
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = req.CWD
 	if err := cmd.Start(); err != nil {

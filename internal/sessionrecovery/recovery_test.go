@@ -6,8 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 )
 
 func candidate(cwd string) Session {
@@ -15,7 +19,7 @@ func candidate(cwd string) Session {
 }
 func TestSelectPreservesPromptAsOneArg(t *testing.T) {
 	got := Select(InventoryReport{Sessions: []Session{candidate(`C:\work\fak`)}}, Options{Limit: 1, Prompt: "continue the exact task", ReceiptDir: t.TempDir()})
-	want := []string{"codex", "resume", "t1", "continue the exact task"}
+	want := []string{"fak", "guard", "--", "codex", "resume", "t1", "continue the exact task"}
 	if len(got) != 1 || !reflect.DeepEqual(got[0].Argv, want) {
 		t.Fatalf("argv=%q want %q", got[0].Argv, want)
 	}
@@ -77,5 +81,32 @@ func TestSelectTwentySessionCohort(t *testing.T) {
 		if req.Status != "candidate" {
 			t.Fatalf("request=%+v", req)
 		}
+	}
+}
+
+func TestMergeJournalCrashesUsesRecordedCWDAndDeduplicates(t *testing.T) {
+	classified := []sessionjournal.Classified{
+		{Session: sessionjournal.Session{ID: "already", CWD: `C:\authoritative`}, Status: sessionjournal.StatusCrashed, Reason: "MACHINE_REBOOT"},
+		{Session: sessionjournal.Session{ID: "journal", CWD: `D:\repos\real tree`}, Status: sessionjournal.StatusCrashed, Reason: "MACHINE_REBOOT"},
+		{Session: sessionjournal.Session{ID: "live", CWD: `D:\repos\live`}, Status: sessionjournal.StatusLive},
+	}
+	got := MergeJournalCrashes([]Request{{ThreadID: "already", CWD: `C:\slug-recovered`}}, classified, Options{Limit: 3, Prompt: "resume safely", ReceiptDir: t.TempDir()})
+	if len(got) != 2 {
+		t.Fatalf("requests=%+v", got)
+	}
+	if got[0].ThreadID != "already" || got[0].CWD != `C:\authoritative` || got[0].Source != "session_journal" {
+		t.Fatalf("journal did not replace reconstructed cwd: %+v", got[0])
+	}
+	wantArgv := []string{"fak", "guard", "--", "codex", "resume", "journal", "resume safely"}
+	if got[1].CWD != `D:\repos\real tree` || got[1].Source != "session_journal" || !reflect.DeepEqual(got[1].Argv, wantArgv) {
+		t.Fatalf("journal request=%+v", got[1])
+	}
+}
+
+func TestVisibleLauncherRefusesMissingCommandBeforeTerminalSpawn(t *testing.T) {
+	launcher := VisibleLauncher{TerminalBin: filepath.Join(t.TempDir(), "terminal-that-must-not-run.exe")}
+	err := launcher.Launch(Request{CWD: t.TempDir(), Argv: []string{"definitely-missing-session-recovery-command"}})
+	if err == nil || !strings.Contains(err.Error(), "resolve") {
+		t.Fatalf("err=%v want command-resolution refusal", err)
 	}
 }

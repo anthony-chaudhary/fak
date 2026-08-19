@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 	"github.com/anthony-chaudhary/fak/internal/sessionrecovery"
 )
 
@@ -41,6 +42,11 @@ var recoveryInventory = func(since time.Duration) (sessionrecovery.InventoryRepo
 	}
 	return report, nil
 }
+var recoveryJournalCrashes = func(path string, now time.Time) ([]sessionjournal.Classified, error) {
+	boot, _ := sessionjournal.BootTime(now)
+	sessions := sessionjournal.FoldEvents(sessionjournal.LoadFile(path))
+	return sessionjournal.Classify(sessions, sessionjournal.ClassifyConfig{Now: now, BootTime: boot}), nil
+}
 var recoveryLaunch sessionrecovery.Launcher = sessionrecovery.VisibleLauncher{}
 var recoveryNow = time.Now
 var recoverySleep = time.Sleep
@@ -55,6 +61,8 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 	apply := fs.Bool("apply", false, "write receipts and launch visible resumes")
 	cwd := fs.String("cwd", "", "explicit override for cwd_unknown candidates")
 	prompt := fs.String("prompt", "", "optional resume prompt passed as one exact argv element")
+	journal := fs.Bool("journal", true, "include crash candidates from the session journal")
+	journalPath := fs.String("journal-path", "", "session journal path (default machine journal)")
 	settle := fs.Duration("settle", 5*time.Second, "delay before post-launch witness")
 	receipts := fs.String("receipts", "", "receipt directory")
 	threads := threadFlags{}
@@ -79,7 +87,20 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, "fak session recover:", err)
 		return 2
 	}
-	requests := sessionrecovery.Select(before, sessionrecovery.Options{Threads: threads, Limit: *limit, CWDOverride: *cwd, Prompt: *prompt, ReceiptDir: *receipts})
+	managerPath, exeErr := os.Executable()
+	if exeErr != nil {
+		fmt.Fprintln(stderr, "fak session recover: resolve current executable:", exeErr)
+		return 2
+	}
+	requests := sessionrecovery.Select(before, sessionrecovery.Options{ManagerBin: managerPath, Threads: threads, Limit: *limit, CWDOverride: *cwd, Prompt: *prompt, ReceiptDir: *receipts})
+	if *journal {
+		classified, journalErr := recoveryJournalCrashes(*journalPath, recoveryNow())
+		if journalErr != nil {
+			fmt.Fprintln(stderr, "fak session recover: session journal:", journalErr)
+			return 2
+		}
+		requests = sessionrecovery.MergeJournalCrashes(requests, classified, sessionrecovery.Options{ManagerBin: managerPath, Threads: threads, Limit: *limit, CWDOverride: *cwd, Prompt: *prompt, ReceiptDir: *receipts})
+	}
 	if *apply {
 		for i := range requests {
 			if requests[i].Status != "candidate" {
