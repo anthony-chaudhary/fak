@@ -1,0 +1,12 @@
+{
+  "schema": "fak-agentquery-restart-witness/1",
+  "observed_at": "2026-08-19T12:00:00Z",
+  "fixture": {"journal_rows": 2, "content_free": true, "identities": ["durable", "future"], "future_event_policy": "exclude events after observed_at"},
+  "before": {"process": "clean subprocess 1", "source": "union", "live_endpoint": "available", "exit_code": 0, "rows": [{"agent_id": "durable", "source": "live"}]},
+  "after": {"process": "clean subprocess 2", "source": "history", "live_endpoint": "closed", "exit_code": 0, "rows": [{"agent_id": "durable", "source": "history"}]},
+  "join": {"key": "exact agent/session identity", "pid_join": false, "live_precedence_before_restart": true},
+  "platforms": [
+    {"os": "windows", "command": "go test ./cmd/fak -run TestAgentsCleanProcessRestartAndFutureClockSkew -count=1", "result": "pass"},
+    {"os": "linux", "command": "go test ./cmd/fak -run TestAgentsCleanProcessRestartAndFutureClockSkew -count=1", "result": "pass"}
+  ]
+}

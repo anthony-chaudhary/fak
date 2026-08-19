@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -384,5 +385,58 @@ func TestAgentsBenchmarkJSON(t *testing.T) {
 	errout.Reset()
 	if code := runAgents(&out, &errout, []string{"--benchmark"}); code != 2 || !strings.Contains(errout.String(), agentquery.BenchmarkSchema) {
 		t.Fatalf("code=%d err=%s", code, errout.String())
+	}
+}
+
+func TestAgentsSubprocessHelper(t *testing.T) {
+	if os.Getenv("FAK_AGENTS_SUBPROCESS") != "1" {
+		return
+	}
+	var out, errout bytes.Buffer
+	args := os.Args[1:]
+	for i, arg := range args {
+		if arg == "--" {
+			args = args[i+1:]
+			break
+		}
+	}
+	code := runAgents(&out, &errout, args)
+	_, _ = os.Stdout.Write(out.Bytes())
+	_, _ = os.Stderr.Write(errout.Bytes())
+	os.Exit(code)
+}
+
+func TestAgentsCleanProcessRestartAndFutureClockSkew(t *testing.T) {
+	journal := filepath.Join(t.TempDir(), "sessions.jsonl")
+	rows := []string{
+		`{"schema":"fak.sessionjournal.v1","kind":"open","id":"durable","ts":"2026-08-19T11:00:00Z","registration":{"registration_id":"durable","lane":"cmd"}}`,
+		`{"schema":"fak.sessionjournal.v1","kind":"open","id":"future","ts":"2026-08-20T11:00:00Z","registration":{"registration_id":"future","lane":"cmd"}}`,
+	}
+	if err := os.WriteFile(journal, []byte(strings.Join(rows, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	live := `{"count":1,"sessions":[{"trace_id":"durable","run":"running","time":{"elapsed_seconds":3600}}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(live)) }))
+	run := func(args ...string) agentquery.Result {
+		cmd := exec.Command(os.Args[0], append([]string{"-test.run=TestAgentsSubprocessHelper", "--"}, args...)...)
+		cmd.Env = append(os.Environ(), "FAK_AGENTS_SUBPROCESS=1")
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("subprocess %v: %v", args, err)
+		}
+		var result agentquery.Result
+		if err := json.Unmarshal(out, &result); err != nil {
+			t.Fatalf("decode %s: %v", out, err)
+		}
+		return result
+	}
+	before := run("--addr", srv.URL, "--journal", journal, "--source", "union", "--all", "--now", "1787140800", "--json")
+	srv.Close()
+	after := run("--journal", journal, "--source", "history", "--all", "--now", "1787140800", "--json")
+	if len(before.Rows) != 1 || before.Rows[0].AgentID != "durable" || before.Rows[0].Source != "live" {
+		t.Fatalf("before=%+v", before)
+	}
+	if len(after.Rows) != 1 || after.Rows[0].AgentID != "durable" || after.Rows[0].Source != "history" {
+		t.Fatalf("after=%+v", after)
 	}
 }

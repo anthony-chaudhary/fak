@@ -216,9 +216,11 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak agents: history source %s\n", health.ReadError)
 			return 1
 		}
+		cutoff := now
 		if asOf != nil {
-			events = sessionjournal.EventsAsOf(events, *asOf)
+			cutoff = *asOf
 		}
+		events = sessionjournal.EventsAsOf(events, cutoff)
 		foldNow := now
 		if asOf != nil {
 			foldNow = *asOf
