@@ -106,13 +106,16 @@ var (
 // WitnessRecord is one finished worker slot's graded verdict — the row the sweep
 // appends to the payload buckets and writes as the .witness sidecar.
 type WitnessRecord struct {
-	Issue   int
-	Log     string
-	SHA     string
-	Claim   string
-	Verdict string
-	Witness string
-	Reason  string
+	// SessionID and RegistrationID bind the independently graded attempt to a durable session identity.
+	SessionID      string
+	RegistrationID string
+	Issue          int
+	Log            string
+	SHA            string
+	Claim          string
+	Verdict        string
+	Witness        string
+	Reason         string
 	// Model is the primary model the finished slot was PINNED to (Layer 5b), scraped
 	// from the worker's .model sidecar. Empty when the slot ran on the seat/agent
 	// default (no --model pin) — the historical floor. Layer-2 downgrade re-dispatch
@@ -150,6 +153,12 @@ func (r WitnessRecord) Map() map[string]any {
 		"claim":   r.Claim,
 		"verdict": nil,
 		"witness": nil,
+	}
+	if r.SessionID != "" {
+		out["session_id"] = r.SessionID
+	}
+	if r.RegistrationID != "" {
+		out["registration_id"] = r.RegistrationID
 	}
 	if r.SHA != "" {
 		out["sha"] = r.SHA

@@ -5348,6 +5348,26 @@ class WitnessExitedWorkersTest(unittest.TestCase):
             self.assertEqual(len(out["witnessed"]), 1)
             self.assertEqual(out["witnessed"][0]["claim"], "CLAIM_WITNESSED")
 
+    def test_witness_carries_exact_lease_session_identity(self) -> None:
+        import json
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            log = self._mk(runs, 3330, "20260629-120125", pid=4244)
+            log.with_suffix(".lease").write_text(json.dumps({
+                "id": "resolve-sessionmine", "holder": "worker",
+                "session_id": "sess-3330", "tree": ["internal/sessionmine/**"],
+            }), encoding="utf-8")
+            def git(root, args):
+                return (0, "abc1234\x1ffeat: bind (#3330)\n")
+            def audit(root, sha):
+                return {"verdict": "OK", "witness": "diff-witnessed"}
+            out = mod.witness_exited_workers(runs, ROOT, live=True, probe=self._dead,
+                                             git=git, audit_runner=audit)
+            self.assertEqual(out["witnessed"][0]["session_id"], "sess-3330")
+            self.assertEqual(json.loads(log.with_suffix(".witness").read_text(encoding="utf-8"))["session_id"], "sess-3330")
+
     def test_dead_worker_releases_recorded_lane_lease(self) -> None:
         import json
         import tempfile

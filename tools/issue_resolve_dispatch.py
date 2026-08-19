@@ -5163,8 +5163,11 @@ def witness_exited_workers(runs_dir: Path, root: Path, *, live: bool,
             rec = {"issue": issue, "log": log.name, "sha": sha,
                    "claim": CLAIM_WITNESSED if w["witnessed"] else CLAIM_UNWITNESSED,
                    "verdict": w["verdict"], "witness": w["witness"]}
+        lease = read_lease_sidecar(log)
+        if lease and lease.get("session_id"):
+            # Exact durable identity: never infer outcome ownership from PID/time.
+            rec["session_id"] = lease["session_id"]
         if live:
-            lease = read_lease_sidecar(log)
             if lease:
                 rel = release_lane_lease(root, lease, runner=lease_runner)
                 rec["lease_release"] = rel

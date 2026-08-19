@@ -4335,6 +4335,26 @@
           "category": "incidental",
           "reason": "Private filename timestamp parser; not a durable session-runtime concept.",
           "token": "dispatchSessionStartedTime"
+        },
+        {
+          "category": "incidental",
+          "reason": "Projection input row local to the sessionmine outcome fold, not a new runtime session identity concept.",
+          "token": "OutcomeSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Projection result row local to sessionmine reporting, not a new runtime outcome authority.",
+          "token": "SessionOutcome"
+        },
+        {
+          "category": "incidental",
+          "reason": "Data-transfer row for independently graded witness fields, not a new evidence or witness semantics concept.",
+          "token": "OutcomeEvidence"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pure fold operation over existing session identity and diff-witness vocabulary, not a new runtime session concept.",
+          "token": "AttributeOutcomes"
         }
       ],
       "id": "session-runtime",
@@ -4343,6 +4363,7 @@
         "AffinityFromContext",
         "AffinityGatewayConfig",
         "AffinitySelection",
+        "AttributeOutcomes",
         "BeginSessionEffect",
         "ConfigureSessionClientAuth",
         "ConfigureSessionMove",
@@ -4360,6 +4381,8 @@
         "NarrowsSessions",
         "NewSessionAffinityGateway",
         "ObservedSessions",
+        "OutcomeEvidence",
+        "OutcomeSession",
         "PublishSessionDiscovery",
         "ReapMalformedSessionRefs",
         "ReasonSessionLive",
@@ -4416,6 +4439,7 @@
         "SessionMoveRestored",
         "SessionMoveSafePointRequested",
         "SessionMoveTransition",
+        "SessionOutcome",
         "SessionPlacement",
         "SessionRecoveryScenarios",
         "SessionShellErrorRate",
@@ -5423,6 +5447,16 @@
           "category": "incidental",
           "reason": "Report count field; not a distinct witness concept.",
           "token": "WitnessFiles"
+        },
+        {
+          "category": "incidental",
+          "reason": "Outcome-fold explanation value, not a new witness grade or proof rung.",
+          "token": "no_unique_green_diff_witness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Outcome-fold ambiguity explanation, not a new witness grade or proof rung.",
+          "token": "conflicting_green_witnesses"
         }
       ],
       "id": "witness-proof",
@@ -5491,6 +5525,7 @@
         "collectDogfoodKernelValue",
         "committedbuildwitness",
         "compactionWitness",
+        "conflicting_green_witnesses",
         "conptyWitness",
         "coreLockWitnessFromMessage",
         "coreLockWitnessFromMsgFile",
@@ -5533,6 +5568,7 @@
         "named_witness",
         "natural-traffic",
         "newGuardCompactionWitness",
+        "no_unique_green_diff_witness",
         "nwitness",
         "observeProxyFillWitness",
         "persistMicroCacheWitness",

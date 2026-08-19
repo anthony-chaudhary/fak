@@ -263,3 +263,10 @@ func TestModelDowngradeReDispatch(t *testing.T) {
 		}
 	}
 }
+
+func TestWitnessRecordMapCarriesExactSessionIdentity(t *testing.T) {
+	m := (WitnessRecord{SessionID: "sess-3330", RegistrationID: "reg-3330", Claim: ClaimWitnessed}).Map()
+	if m["session_id"] != "sess-3330" || m["registration_id"] != "reg-3330" {
+		t.Fatalf("identity fields missing from sidecar: %#v", m)
+	}
+}
