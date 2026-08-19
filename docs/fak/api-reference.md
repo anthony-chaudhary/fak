@@ -511,6 +511,11 @@ optional `if_rev` (optimistic-concurrency guard). Echoes back the new `SessionSt
 | `pace` | `{"pace":{"max_tokens_per_turn":N,"min_turn_gap_ms":N}}` | re-set the per-turn throttle |
 | `priority` | `{"priority":N}` | re-set the scheduling rank (lower yields first) |
 
+**`GET /v1/fak/fleet`** — read one compact fleet aggregate.
+Response (`fak-fleet-status/1`): bounded live-session cards plus running, blocked,
+throttled, and budget-pressure counts. It projects the same injected snapshot as the
+session list, adds no storage, and uses the existing `/v1/fak/*` bearer gate.
+
 **`GET /v1/fak/sessions`** — snapshot every live session.
 Response (`SessionListResponse`): `{ "sessions": [SessionState, …], "count": N }`, in
 `Table.Snapshot()` order (priority ascending).

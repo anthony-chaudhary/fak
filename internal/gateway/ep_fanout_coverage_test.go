@@ -209,6 +209,7 @@ var epFanoutExemptRoutes = map[string]string{
 	"/v1/fak/trace/":                epExemptNoDecode,
 	"/v1/fak/session/changes":       epExemptNoDecode,
 	"/v1/fak/session/":              epExemptNoDecode,
+	"/v1/fak/fleet":                 epExemptNoDecode,
 	"/v1/fak/sessions":              epExemptNoDecode,
 	"/v1/fak/tasks":                 epExemptNoDecode,
 	"/v1/fak/sharedtask/":           epExemptNoDecode,

@@ -1175,6 +1175,29 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /v1/fak/fleet:
+    get:
+      tags: [fak-native]
+      summary: Read one bounded live-fleet aggregate
+      description: |
+        Projects the existing live session snapshot into compact cards and a
+        fleet rollup. It is read-only and introduces no second persistence or
+        control surface. A deployment without a session-list provider returns
+        404 rather than a misleading empty fleet.
+      responses:
+        '200':
+          description: Schema-versioned session cards and fleet rollup.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FleetStatusResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Session list is not configured for this deployment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
   /v1/fak/sessions:
     get:
       tags: [fak-native]
@@ -2251,6 +2274,36 @@ components:
           description: 'verb `pace`.'
         priority: { type: integer, description: 'verb `priority`.' }
         if_rev: { type: integer, description: Optional compare-and-set guard; the control is refused (409) if the live `rev` differs. }
+
+    FleetSessionCard:
+      type: object
+      required: [trace_id, run, priority, turns_left, tokens_left, rev]
+      properties:
+        trace_id: { type: string }
+        run: { type: string }
+        reason: { type: string }
+        priority: { type: integer }
+        turns_left: { type: integer }
+        tokens_left: { type: integer }
+        rev: { type: integer }
+    FleetRollup:
+      type: object
+      required: [sessions, running, blocked, throttled, budget_pressure]
+      properties:
+        sessions: { type: integer }
+        running: { type: integer }
+        blocked: { type: integer }
+        throttled: { type: integer }
+        budget_pressure: { type: integer }
+    FleetStatusResponse:
+      type: object
+      required: [schema, sessions, rollup]
+      properties:
+        schema: { type: string, enum: [fak-fleet-status/1] }
+        sessions:
+          type: array
+          items: { $ref: '#/components/schemas/FleetSessionCard' }
+        rollup: { $ref: '#/components/schemas/FleetRollup' }
 
     SessionListResponse:
       type: object

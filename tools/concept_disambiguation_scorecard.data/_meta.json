@@ -4606,6 +4606,11 @@
           "category": "incidental",
           "reason": "Runtime event kind constant, not a session runtime controller.",
           "token": "RuntimeTurnStarted"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire-only bounded projection of canonical SessionState for the fleet aggregate; not a new session runtime concept",
+          "token": "FleetSessionCard"
         }
       ],
       "id": "session-runtime",
@@ -4624,6 +4629,7 @@
         "FAK_SESSION_CLIENT_TOKEN",
         "FAK_SESSION_STATE",
         "FinalizeSessionMoveCheckpoint",
+        "FleetSessionCard",
         "GatewaySeat",
         "HeldScheduleReport",
         "HeldScheduleReportSchema",

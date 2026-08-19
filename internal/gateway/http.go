@@ -117,6 +117,7 @@ func (s *Server) routeTable() []gatewayRoute {
 		// every live session's drive state. Registered distinctly from the singular
 		// /v1/fak/session/ subtree, so a single-id request never lands here.
 		{"/v1/fak/sessions", s.handleFakSessions},
+		{"/v1/fak/fleet", s.handleFakFleet},
 		// /v1/fak/tasks is the read-only process task-manager snapshot. Inert (404)
 		// unless a host installs a provider via SetTasksSnapshotProvider and the
 		// operator enables it; the snapshot carries accounting only, no payload bytes.
