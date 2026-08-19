@@ -599,6 +599,46 @@
     },
     {
       "type": "row",
+      "title": "Canonical goals \u2014 explicit identity across execution roots",
+      "id": 210,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 11
+      },
+      "panels": [],
+      "description": "Fleet -> canonical goal -> execution root -> session. Canonical totals fold only roots carrying an explicit goal_id; legacy and unbound roots remain execution_root_only and are never inferred from task, title, issue, or root registration. Existing fak_fleet_goal_* panels remain execution-root scoped.",
+      "targets": [
+        {
+          "expr": "fak_fleet_canonical_goal_execution_roots",
+          "legendFormat": "{{goal_id}} execution roots"
+        },
+        {
+          "expr": "fak_fleet_canonical_goal_attempts_total",
+          "legendFormat": "{{goal_id}} attempts"
+        },
+        {
+          "expr": "fak_fleet_canonical_goal_provider_billed_micro_usd_total",
+          "legendFormat": "{{goal_id}} billed micro-USD"
+        },
+        {
+          "expr": "fak_fleet_canonical_goal_cache_value_reuse_ratio",
+          "legendFormat": "{{goal_id}} cache reuse ratio"
+        },
+        {
+          "expr": "fak_fleet_canonical_goal_binding_ratio",
+          "legendFormat": "canonical binding ratio"
+        },
+        {
+          "expr": "fak_fleet_canonical_goal_efficiency_ready",
+          "legendFormat": "canonical efficiency ready"
+        }
+      ]
+    },
+    {
+      "type": "row",
       "title": "Starting goals \u2014 descendants folded by durable root lineage",
       "id": 211,
       "collapsed": false,
