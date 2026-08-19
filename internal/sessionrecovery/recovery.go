@@ -53,6 +53,7 @@ type Request struct {
 	Status      string   `json:"status"`
 	Reason      string   `json:"reason,omitempty"`
 	ReceiptPath string   `json:"receipt_path,omitempty"`
+	Launched    bool     `json:"launched,omitempty"`
 }
 
 type Receipt struct {
@@ -286,6 +287,9 @@ func Witness(before, after InventoryReport, threadID string) string {
 	}
 	if a == nil || len(a.ProcessTrees) == 0 || a.GuardReceipt == nil {
 		return "launched_unproven"
+	}
+	if a.LatestTurn != nil && strings.EqualFold(a.LatestTurn.Status, "completed") {
+		return "completed"
 	}
 	if a.LatestTurn == nil {
 		return "active"

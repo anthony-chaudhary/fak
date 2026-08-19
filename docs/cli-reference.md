@@ -932,6 +932,9 @@ License: Apache-2.0 (matches the Microsoft Agent Governance Toolkit dep).
 
 `fak launch doctor [--json] [--repair]` diagnoses shim/provider posture; `--repair` refreshes the managed upgrade-stable fak target and owned shims.
 
+
+`fak doctor launch-posture [--entrypoint agent|guard|serve] [--harness NAME] [--provider NAME] [--base-url URL] [--workspace DIR] [--json]` derives the default-on launch posture for the selected repository and wire. It reports exactly seven mechanisms — bounded repository tools, Caveman, Ponytail, compact history, stale-read elision, cold-tool deferral, and vCache anchoring — as `active`, `inert`, `disabled`, or `unsupported`, and names an action for every configured-but-inactive state. Defaults come from the same gateway/profile constants used by launch code. This is a preflight, not savings telemetry: `active` means the launch reaches the mechanism's runtime seam; use gateway/session metrics to prove realized savings.
+
 `fak launch install [--provider claude|codex|all] [--default NAME] [--no-path]`
 installs managed shims and, unless `--no-path` is set, an idempotent fak-owned PATH block
 for supported PowerShell/POSIX startup files. Uninstall removes only that block.

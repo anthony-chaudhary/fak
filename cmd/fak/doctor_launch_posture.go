@@ -1,0 +1,292 @@
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
+)
+
+const launchPostureSchema = "fak.launch-posture.v1"
+
+type launchPostureMechanism struct {
+	Name       string `json:"name"`
+	Configured bool   `json:"configured"`
+	State      string `json:"state"`
+	Reason     string `json:"reason"`
+	Action     string `json:"action,omitempty"`
+	Disable    string `json:"disable,omitempty"`
+}
+
+type launchPostureReport struct {
+	Schema     string                   `json:"schema"`
+	OK         bool                     `json:"ok"`
+	Entrypoint string                   `json:"entrypoint"`
+	Harness    string                   `json:"harness,omitempty"`
+	Wire       string                   `json:"wire"`
+	Workspace  string                   `json:"workspace"`
+	Mechanisms []launchPostureMechanism `json:"mechanisms"`
+	Summary    map[string]int           `json:"summary"`
+}
+
+type launchPostureOptions struct {
+	entrypoint      string
+	harness         string
+	provider        string
+	baseURL         string
+	workspace       string
+	native          bool
+	nativeCodeTools bool
+	outputProfile   string
+	workProfile     string
+	compactHistory  int
+	elideStaleReads bool
+	deferColdTools  bool
+	vcacheAnchor    bool
+}
+
+func runDoctorLaunchPosture(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak doctor launch-posture", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	entrypoint := fs.String("entrypoint", "guard", "launch entrypoint: agent|guard|serve")
+	harness := fs.String("harness", "", "wrapped harness for guard (default: claude)")
+	provider := fs.String("provider", "", "provider family used to derive the runtime wire")
+	baseURL := fs.String("base-url", "", "upstream base URL used to derive the runtime wire")
+	workspace := fs.String("workspace", "", "repository workspace (default: current directory)")
+	native := fs.Bool("native", false, "model a native owned-loop serve")
+	nativeCodeTools := fs.Bool("native-code-tools", true, "model bounded native code tools enabled")
+	outputProfile := fs.String("output-profile", agentDefaultOutputStyle, "modeled response profile")
+	workProfile := fs.String("work-profile", agentDefaultWorkProfile, "modeled work profile")
+	compactHistory := fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "modeled resident history budget; 0 disables")
+	elideStaleReads := fs.Bool("elide-stale-reads", gateway.DefaultElideStaleReads, "model stale-read elision")
+	deferColdTools := fs.Bool("defer-cold-tools", gateway.DefaultDeferColdTools, "model cold-tool deferral")
+	vcacheAnchor := fs.Bool("vcache-anchor", gateway.DefaultVCacheAnchor, "model provider-cache anchoring")
+	asJSON := fs.Bool("json", false, "emit stable JSON")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "fak doctor launch-posture: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+	report, err := deriveLaunchPosture(launchPostureOptions{
+		entrypoint: *entrypoint, harness: *harness, provider: *provider, baseURL: *baseURL,
+		workspace: *workspace, native: *native, nativeCodeTools: *nativeCodeTools,
+		outputProfile: *outputProfile, workProfile: *workProfile, compactHistory: *compactHistory,
+		elideStaleReads: *elideStaleReads, deferColdTools: *deferColdTools, vcacheAnchor: *vcacheAnchor,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "fak doctor launch-posture: %v\n", err)
+		return 2
+	}
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fmt.Fprintf(stderr, "fak doctor launch-posture: encode: %v\n", err)
+			return 2
+		}
+	} else {
+		renderLaunchPosture(stdout, report)
+	}
+	if report.OK {
+		return 0
+	}
+	return 1
+}
+
+func deriveLaunchPosture(opts launchPostureOptions) (launchPostureReport, error) {
+	opts.entrypoint = strings.ToLower(strings.TrimSpace(opts.entrypoint))
+	if opts.entrypoint != "agent" && opts.entrypoint != "guard" && opts.entrypoint != "serve" {
+		return launchPostureReport{}, fmt.Errorf("invalid --entrypoint %q; supported: agent, guard, serve", opts.entrypoint)
+	}
+	if opts.harness == "" && opts.entrypoint == "guard" {
+		opts.harness = "claude"
+	}
+	opts.harness = strings.ToLower(strings.TrimSuffix(filepath.Base(strings.TrimSpace(opts.harness)), ".exe"))
+	if opts.provider == "" {
+		switch {
+		case opts.entrypoint == "guard" && opts.harness == "claude":
+			opts.provider = "anthropic"
+		case opts.entrypoint == "serve" && opts.native:
+			opts.provider = "native"
+		}
+	}
+	if opts.baseURL == "" && opts.provider != "" {
+		opts.baseURL = guardDefaultBaseURL(opts.provider)
+	}
+	root := strings.TrimSpace(opts.workspace)
+	if root == "" {
+		var err error
+		root, err = os.Getwd()
+		if err != nil {
+			return launchPostureReport{}, fmt.Errorf("workspace: %w", err)
+		}
+	}
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return launchPostureReport{}, fmt.Errorf("workspace: %w", err)
+	}
+	wire := classifyShrinkWire(opts.provider, opts.baseURL, nil, func() string {
+		if opts.entrypoint == "serve" && opts.native {
+			return "owned-model"
+		}
+		return ""
+	}())
+
+	mechanisms := []launchPostureMechanism{
+		postureCodeTools(opts, root),
+		postureOutputProfile(opts),
+		postureWorkProfile(opts),
+		postureShrink("compact-history", opts.compactHistory > 0, wire, "--compact-history-budget 0", "use an Anthropic passthrough wire or set --provider anthropic"),
+		postureShrink("stale-read-elision", opts.elideStaleReads, wire, "--elide-stale-reads=false", "use an Anthropic passthrough wire or set --provider anthropic"),
+		postureShrink("cold-tool-deferral", opts.deferColdTools, wire, "--defer-cold-tools=false", "use an Anthropic passthrough wire or set --provider anthropic"),
+		postureShrink("vcache-anchor", opts.vcacheAnchor, wire, "--vcache-anchor=false", "use an Anthropic passthrough wire or set --provider anthropic"),
+	}
+	summary := map[string]int{"active": 0, "inert": 0, "disabled": 0, "unsupported": 0}
+	ok := true
+	for _, mechanism := range mechanisms {
+		summary[mechanism.State]++
+		if mechanism.State == "inert" || mechanism.State == "unsupported" {
+			ok = false
+		}
+	}
+	return launchPostureReport{Schema: launchPostureSchema, OK: ok, Entrypoint: opts.entrypoint, Harness: opts.harness, Wire: wire, Workspace: root, Mechanisms: mechanisms, Summary: summary}, nil
+}
+
+func postureCodeTools(opts launchPostureOptions, workspace string) launchPostureMechanism {
+	m := launchPostureMechanism{Name: "bounded-code-tools", Configured: opts.nativeCodeTools, Disable: "--native-code-tools=false"}
+	if !opts.nativeCodeTools {
+		m.State, m.Reason, m.Action = "disabled", "bounded repository tools were explicitly disabled", "remove --native-code-tools=false"
+		return m
+	}
+	if opts.entrypoint == "guard" {
+		var manifest policy.Manifest
+		if err := json.Unmarshal(guardDefaultPolicyJSON, &manifest); err != nil || !containsAllTools(manifest.Allow, "Read", "Write", "Edit", "Bash", "Grep", "Glob") {
+			m.State, m.Reason, m.Action = "inert", "the guard default policy does not expose the full bounded repository-tool floor", "repair the guard policy or pass a policy that allows Read/Write/Edit/Bash/Grep/Glob"
+			return m
+		}
+		m.State, m.Reason, m.Disable = "active", "the wrapped harness repository tools are admitted by the guard default policy", "use --policy to narrow the tool floor"
+		return m
+	}
+	if opts.entrypoint == "serve" && opts.native {
+		info, err := os.Stat(workspace)
+		if err != nil || !info.IsDir() {
+			m.State, m.Reason, m.Action = "inert", "the selected workspace is not a readable directory", "pass --workspace with an existing repository directory"
+			return m
+		}
+		m.State, m.Reason = "active", "native serve arms the bounded catalog at the selected workspace"
+		return m
+	}
+	if opts.entrypoint == "serve" {
+		m.State, m.Reason, m.Action = "inert", "the bounded catalog requires the owned native loop", "add --native or use the wrapped harness's witnessed repository tools"
+		return m
+	}
+	m.State, m.Reason, m.Action = "unsupported", "this entrypoint does not own the native coding-tool catalog", "use fak serve --native in this workspace or verify the wrapped harness tool catalog"
+	return m
+}
+
+func containsAllTools(have []string, want ...string) bool {
+	set := make(map[string]bool, len(have))
+	for _, name := range have {
+		set[name] = true
+	}
+	for _, name := range want {
+		if !set[name] {
+			return false
+		}
+	}
+	return true
+}
+
+func postureOutputProfile(opts launchPostureOptions) launchPostureMechanism {
+	profile := syspromptmmu.DescribeStyle(opts.outputProfile)
+	m := launchPostureMechanism{Name: "caveman-response-profile", Configured: profile.Applied, Disable: profile.DisableCommand}
+	if !profile.Known {
+		m.State, m.Reason, m.Action = "unsupported", "the selected response profile is unknown", "choose caveman:medium or full"
+		return m
+	}
+	if !profile.Applied {
+		m.State, m.Reason, m.Action = "disabled", "response shaping is off", "select caveman:medium"
+		return m
+	}
+	switch {
+	case opts.entrypoint == "agent":
+		m.State, m.Reason = "active", "the owned agent loop composes the selected governed response segment"
+	case opts.entrypoint == "guard" && opts.harness == "claude":
+		m.State, m.Reason = "active", "guard injects the selected governed segment through claude --append-system-prompt"
+	case opts.entrypoint == "guard":
+		m.State, m.Reason, m.Action = "unsupported", "the wrapped harness has no witnessed response-profile injection seam", "use Claude, set --output-profile full, or add a witnessed adapter"
+	case opts.entrypoint == "serve" && opts.native:
+		m.State, m.Reason, m.Action = "inert", "native serve does not map this doctor selection into FAK_STYLE", "set FAK_STYLE="+profile.Style+" before fak serve --native"
+	default:
+		m.State, m.Reason, m.Action = "unsupported", "passthrough serve does not own the upstream harness response policy", "configure the client harness or use fak guard -- claude"
+	}
+	return m
+}
+
+func postureWorkProfile(opts launchPostureOptions) launchPostureMechanism {
+	profile := syspromptmmu.DescribeWorkProfile(opts.workProfile)
+	m := launchPostureMechanism{Name: "ponytail-work-profile", Configured: profile.Applied, Disable: "--work-profile standard"}
+	if !profile.Known {
+		m.State, m.Reason, m.Action = "unsupported", "the selected work profile is unknown", "choose ponytail:medium or standard"
+		return m
+	}
+	if !profile.Applied {
+		m.State, m.Reason, m.Action = "disabled", "work-policy shaping is off", "select ponytail:medium"
+		return m
+	}
+	switch {
+	case opts.entrypoint == "agent":
+		m.State, m.Reason = "active", "the owned agent loop composes the selected governed work segment"
+	case opts.entrypoint == "guard" && opts.harness == "claude":
+		m.State, m.Reason = "active", "guard injects the selected governed work segment through claude --append-system-prompt"
+	case opts.entrypoint == "guard":
+		m.State, m.Reason, m.Action = "unsupported", "the wrapped harness has no witnessed work-profile injection seam", "use Claude, set --work-profile standard, or add a witnessed adapter"
+	case opts.entrypoint == "serve" && opts.native:
+		m.State, m.Reason = "active", "the owned native loop resolves the same default work profile"
+	default:
+		m.State, m.Reason, m.Action = "unsupported", "passthrough serve does not own the upstream harness work policy", "configure the client harness or use fak guard -- claude"
+	}
+	return m
+}
+
+func postureShrink(name string, configured bool, wire, disable, action string) launchPostureMechanism {
+	m := launchPostureMechanism{Name: name, Configured: configured, Disable: disable}
+	if !configured {
+		m.State, m.Reason, m.Action = "disabled", "the launch setting disables this mechanism", "remove the disabling override"
+		return m
+	}
+	if wire == shrinkWireAnthropicPassthrough {
+		m.State, m.Reason = "active", "configured on and reached by the Anthropic passthrough request seam"
+		return m
+	}
+	m.State, m.Reason, m.Action = "inert", "configured on but runtime wire "+wire+" does not carry the Anthropic request-body seam", action
+	return m
+}
+
+func renderLaunchPosture(w io.Writer, report launchPostureReport) {
+	verdict := "READY"
+	if !report.OK {
+		verdict = "ATTENTION"
+	}
+	fmt.Fprintf(w, "launch posture: %s entrypoint=%s", verdict, report.Entrypoint)
+	if report.Harness != "" {
+		fmt.Fprintf(w, " harness=%s", report.Harness)
+	}
+	fmt.Fprintf(w, " wire=%s workspace=%s\n", report.Wire, report.Workspace)
+	for _, mechanism := range report.Mechanisms {
+		fmt.Fprintf(w, "  %-26s %-11s %s\n", mechanism.Name, strings.ToUpper(mechanism.State), mechanism.Reason)
+		if mechanism.Action != "" && mechanism.State != "active" {
+			fmt.Fprintf(w, "    action: %s\n", mechanism.Action)
+		}
+	}
+	fmt.Fprintf(w, "summary: active=%d inert=%d disabled=%d unsupported=%d\n", report.Summary["active"], report.Summary["inert"], report.Summary["disabled"], report.Summary["unsupported"])
+}

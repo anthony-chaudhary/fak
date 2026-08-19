@@ -62,7 +62,7 @@ var overviewGroups = []struct {
 		{"progress", "one query for recent commits, local WIP, and GitHub issue movement"},
 		{"ps", "live served-session process table ('fak top' = --watch)"},
 		{"signal", "job control for a running session: pause / resume / stop / steer"},
-		{"doctor", "operator diagnostic: answer-shape witness + kernel admit verdict"},
+		{"doctor", "operator diagnostics: runtime witness, kernel admit verdict, and default-on launch posture"},
 		{"recover", "map a refusal reason token to concrete recovery commands"},
 	}},
 	{"capability floor", []overviewEntry{
