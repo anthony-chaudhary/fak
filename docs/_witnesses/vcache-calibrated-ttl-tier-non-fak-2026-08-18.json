@@ -1,0 +1,25 @@
+{
+  "schema": "fak.vcache.calibrated-ttl-tier-witness.v1",
+  "captured_at": "2026-08-19T06:15:00Z",
+  "operator_local_date": "2026-08-18",
+  "workspace_kind": "temporary non-FAK git repository",
+  "runtime_witness": {
+    "test": "TestFreshMeasuredTTLSteersAnthropicTierDecision",
+    "same_request_without_calibration": "FAK authors cache_control ttl=1h under the default managed-cache posture",
+    "same_request_with_fresh_measured_retention_above_one_hour": "FAK leaves the provider-default 5m-tier request byte-identical",
+    "decision_boundary_millis": 3600000
+  },
+  "fallback_witness": {
+    "test": "TestUntrustedTTLCalibrationPreservesStaticTierDecision",
+    "cases": ["missing", "unmeasured", "invalid", "model mismatch"],
+    "effect": "the existing static managed-cache 1h decision is preserved"
+  },
+  "provenance": {
+    "loader": "FreshRuntimeConstants admits only fresh provider/model-matched measured rows",
+    "fixture": "deterministic request and calibration evidence; not a new live Anthropic probe"
+  },
+  "limitations": [
+    "This proves a real request-byte tier decision but does not measure provider billing.",
+    "Cache-write multipliers, heartbeat execution, prediction-error metrics, and provider-wide live probes remain open in #1497."
+  ]
+}

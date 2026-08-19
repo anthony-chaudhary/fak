@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
@@ -68,5 +69,58 @@ func TestFreshReadMultiplierChangesRuntimePricingDecision(t *testing.T) {
 	assumed := &VCacheRuntimeCalibration{ReadMult: 0.25}
 	if got := assumed.ApplyCachePricing(base).CostUSD(usage); got != 1 {
 		t.Fatalf("unmeasured multiplier changed pricing: %v", got)
+	}
+}
+
+func TestFreshMeasuredTTLSteersAnthropicTierDecision(t *testing.T) {
+	raw := []byte(`{"model":"claude-sonnet","max_tokens":64,"system":[{"type":"text","text":"stable policy","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"hi"}]}`)
+	decode := func(t *testing.T) *agent.AnthropicMessagesRequest {
+		t.Helper()
+		req, err := agent.DecodeAnthropicMessagesRequest(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return req
+	}
+
+	fallback := anthropicPassthroughServer(0)
+	fallback.cacheTTL1H = true
+	fallbackReq := decode(t)
+	if !fallback.maybeUpgradeAnthropicCacheTTL1H(fallbackReq) || !bytes.Contains(fallbackReq.Raw, []byte(`"ttl":"1h"`)) {
+		t.Fatalf("missing calibration must preserve the explicit 1h tier:\n%s", fallbackReq.Raw)
+	}
+
+	calibrated := anthropicPassthroughServer(0)
+	calibrated.cacheTTL1H = true
+	calibrated.vcacheCalibration = &VCacheRuntimeCalibration{
+		Provider: "anthropic", Model: "claude-sonnet", Source: "probe:test",
+		TTLMillis: int64((2 * time.Hour) / time.Millisecond), TTLMeasured: true,
+	}
+	calibratedReq := decode(t)
+	if calibrated.maybeUpgradeAnthropicCacheTTL1H(calibratedReq) {
+		t.Fatal("measured provider retention above one hour must suppress the paid 1h tier")
+	}
+	if !bytes.Equal(calibratedReq.Raw, raw) {
+		t.Fatalf("5m default-tier request changed:\n%s", calibratedReq.Raw)
+	}
+}
+
+func TestUntrustedTTLCalibrationPreservesStaticTierDecision(t *testing.T) {
+	cases := []struct {
+		name  string
+		cal   *VCacheRuntimeCalibration
+		model string
+	}{
+		{name: "missing", model: "claude-sonnet"},
+		{name: "unmeasured", model: "claude-sonnet", cal: &VCacheRuntimeCalibration{TTLMillis: int64((2 * time.Hour) / time.Millisecond)}},
+		{name: "invalid", model: "claude-sonnet", cal: &VCacheRuntimeCalibration{TTLMillis: 0, TTLMeasured: true}},
+		{name: "model mismatch", model: "claude-opus", cal: &VCacheRuntimeCalibration{Model: "claude-sonnet", TTLMillis: int64((2 * time.Hour) / time.Millisecond), TTLMeasured: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !tc.cal.wantsExplicitOneHourTTL(tc.model) {
+				t.Fatal("untrusted calibration must preserve the static 1h decision")
+			}
+		})
 	}
 }

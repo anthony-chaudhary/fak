@@ -912,7 +912,7 @@ func (s *Server) maybeUpgradeAnthropicCacheTTL1H(req *agent.AnthropicMessagesReq
 }
 
 func (s *Server) maybeUpgradeAnthropicCacheTTL1HScoped(req *agent.AnthropicMessagesRequest) (bool, bool) {
-	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) || !s.cacheTTL1H {
+	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) || !s.cacheTTL1H || !s.vcacheCalibration.wantsExplicitOneHourTTL(req.Model) {
 		return false, false
 	}
 	upgrade := agent.UpgradeAnthropicStableCacheTTL1hWithMessagePrefixes
