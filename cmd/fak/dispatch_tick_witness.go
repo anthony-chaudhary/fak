@@ -158,6 +158,10 @@ func landWorkerWorktreeVerified(root, wtPath, base string, tree []string, git wo
 // Python worker_resolving_sha scan_limit.
 const dispatchWitnessScanLimit = 300
 
+// The Python launcher stamps this reason when its tracked PID dies before the
+// guard epilogue, even though a surviving child may still publish afterward.
+const dispatchWitnessDiedBeforeEpilogue = "died_before_epilogue"
+
 func readDurableDispatchWitnesses(runsDir string) []dispatchtick.WitnessRecord {
 	latest := map[int]dispatchtick.WitnessRecord{}
 	latestName := map[int]string{}
@@ -263,25 +267,35 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 			continue
 		}
 		stem := strings.TrimSuffix(log, filepath.Ext(log))
-		if _, err := os.Stat(stem + dispatchtick.WitnessSidecarSuffix); err == nil {
-			continue // audited once; a commit's diff (so its verdict) is immutable
-		}
-		pid, ok := readPID(stem + ".pid")
-		if !ok {
-			continue // no pid -> cannot prove the worker finished -> not yet auditable
-		}
-		if dispatchPIDAlive(pid) {
-			// Still running -> it may not have committed yet, AND its lane lease is
-			// being worked right now. #5864: refresh the lease HERE, off the same
-			// process-table read that just proved the worker is alive, so the beat
-			// can never outlive the holder — the next sweep that finds this pid dead
-			// takes the release branch below instead. Live sweeps only: a dry-run
-			// audit must never write to the shared WAL. Fail-open — every refusal and
-			// fault is counted on the payload and nothing is propagated.
-			if live {
-				beater.beatLiveWorker(log, stem, pid, time.Now())
+		reconcileLateCommit := false
+		if raw, err := os.ReadFile(stem + dispatchtick.WitnessSidecarSuffix); err == nil {
+			var prior struct {
+				Claim  string `json:"claim"`
+				Reason string `json:"reason"`
 			}
-			continue
+			if json.Unmarshal(raw, &prior) != nil || prior.Claim != dispatchtick.ClaimNoCommit || prior.Reason != dispatchWitnessDiedBeforeEpilogue {
+				continue // terminal evidence is immutable unless the timeout raced a late commit
+			}
+			reconcileLateCommit = true
+		}
+		if !reconcileLateCommit {
+			pid, ok := readPID(stem + ".pid")
+			if !ok {
+				continue // no pid -> cannot prove the worker finished -> not yet auditable
+			}
+			if dispatchPIDAlive(pid) {
+				// Still running -> it may not have committed yet, AND its lane lease is
+				// being worked right now. #5864: refresh the lease HERE, off the same
+				// process-table read that just proved the worker is alive, so the beat
+				// can never outlive the holder — the next sweep that finds this pid dead
+				// takes the release branch below instead. Live sweeps only: a dry-run
+				// audit must never write to the shared WAL. Fail-open — every refusal and
+				// fault is counted on the payload and nothing is propagated.
+				if live {
+					beater.beatLiveWorker(log, stem, pid, time.Now())
+				}
+				continue
+			}
 		}
 		base := ""
 		if b, err := os.ReadFile(stem + dispatchtick.BaseSHASidecarSuffix); err == nil {
@@ -300,10 +314,13 @@ func witnessExitedWorkers(root, runsDir string, live bool) (map[string]any, []di
 		// audit the resolve log exactly as today (a leaked worktree is reaped later
 		// by worktree_doctor.py --sweep-disposable, which knows the marker). Only in a
 		// live sweep — a dry-run must never mutate the trunk.
-		if live {
+		if live && !reconcileLateCommit {
 			landAndReapWorkerWorktree(root, stem, base)
 		}
 		sha := dispatchWitnessResolvingSHA(root, issue, base)
+		if reconcileLateCommit && sha == "" {
+			continue // the original no-commit claim is still true; preserve it byte-for-byte
+		}
 		tree := readResolveLeaseTree(stem + dispatchLeaseTreeSidecarSuffix)
 		var reverted []string
 		var rec dispatchtick.WitnessRecord

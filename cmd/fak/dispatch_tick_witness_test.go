@@ -130,6 +130,73 @@ func TestWitnessExitedWorkersGradesFinishedSlots(t *testing.T) {
 	}
 }
 
+// TestWitnessReconcilesLateCommitAfterNoCommitSidecar reproduces #8068's ordering:
+// the launcher PID dies and writes died_before_epilogue, cleanup removes the PID/base
+// sidecars, then the surviving Codex child publishes its issue-bound commit. The next
+// sweep must upgrade that stale no-commit witness from repository evidence while a
+// genuinely commit-less sibling remains byte-identical.
+func TestWitnessReconcilesLateCommitAfterNoCommitSidecar(t *testing.T) {
+	root := t.TempDir()
+	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
+	if err := os.MkdirAll(runsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	withWitnessStubs(t, func(_ string, issue int, base string) string {
+		if base != "" {
+			t.Errorf("issue %d base = %q, want the bounded fallback after cleanup pruned .basesha", issue, base)
+		}
+		if issue == 6203 {
+			return "868f2aeb8b"
+		}
+		return ""
+	}, "OK", dispatchtick.WitnessOK)
+
+	for _, issue := range []int{6203, 6204} {
+		stem := filepath.Join(runsDir, fmt.Sprintf("resolve-%d-20260819-011234", issue))
+		if err := os.WriteFile(stem+".log", []byte("worker timed out before guard epilogue\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(stem+dispatchtick.WitnessSidecarSuffix,
+			[]byte(fmt.Sprintf(`{"claim":"CLAIM_NO_COMMIT","issue":%d,"reason":"died_before_epilogue"}`, issue)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unchangedPath := filepath.Join(runsDir, "resolve-6204-20260819-011234"+dispatchtick.WitnessSidecarSuffix)
+	unchangedBefore, err := os.ReadFile(unchangedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload, records := witnessExitedWorkers(root, runsDir, true)
+	if len(records) != 1 || records[0].Issue != 6203 || records[0].Claim != dispatchtick.ClaimWitnessed || records[0].SHA != "868f2aeb8b" {
+		t.Fatalf("records = %+v, want the late #6203 commit reconciled as CLAIM_WITNESSED", records)
+	}
+	if got := len(payload["witnessed"].([]any)); got != 1 {
+		t.Fatalf("witnessed bucket = %v, want one reconciled row", payload["witnessed"])
+	}
+	corrected, err := os.ReadFile(filepath.Join(runsDir, "resolve-6203-20260819-011234"+dispatchtick.WitnessSidecarSuffix))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(corrected, &doc); err != nil {
+		t.Fatalf("corrected witness is not JSON: %v (%s)", err, corrected)
+	}
+	if doc["claim"] != dispatchtick.ClaimWitnessed || doc["sha"] != "868f2aeb8b" || doc["witness"] != dispatchtick.WitnessOK {
+		t.Fatalf("corrected witness = %#v, want the existing shipped-commit form", doc)
+	}
+	unchangedAfter, err := os.ReadFile(unchangedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(unchangedAfter) != string(unchangedBefore) {
+		t.Fatalf("true no-commit witness changed: before=%s after=%s", unchangedBefore, unchangedAfter)
+	}
+	if _, again := witnessExitedWorkers(root, runsDir, true); len(again) != 0 {
+		t.Fatalf("second sweep re-audited terminal evidence: %+v", again)
+	}
+}
+
 // TestWitnessBindsTestRunToDoneClaim is the #3838 witness: at witness time the resolving
 // commit's changed-package tests are run through the injectable seam and the GREEN / RED /
 // UNRUN binding is recorded ALONGSIDE (never replacing) the diff-shape verdict, both in the
