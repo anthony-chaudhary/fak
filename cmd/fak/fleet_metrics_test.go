@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
+	"github.com/anthony-chaudhary/fak/internal/providercost"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
@@ -600,3 +602,36 @@ func TestFleetMetricsConsumesInProcessMicroagentRegistrations(t *testing.T) {
 		}
 	}
 }
+
+func TestFleetMetricsJoinsAuthoritativeProviderCostAndGatesCoverage(t *testing.T) {
+	base := time.Date(2026, 8, 19, 1, 0, 0, 0, time.UTC)
+	regPath := filepath.Join(t.TempDir(), "registrations.jsonl")
+	store := sessionregistry.Store{Path: regPath}
+	for _, in := range []sessionregistry.NewInput{{RegistrationID: "root-a", RootIssue: "#A", TaskID: "goal-a", LaunchKind: "guard", Runtime: "codex", SessionID: "s-a", Now: base}, {RegistrationID: "root-b", RootIssue: "#B", TaskID: "goal-b", LaunchKind: "guard", Runtime: "codex", SessionID: "s-b", Now: base}, {RegistrationID: "x", LaunchKind: "guard", Runtime: "codex", SessionID: "amb", Now: base}, {RegistrationID: "y", LaunchKind: "guard", Runtime: "codex", SessionID: "amb", Now: base}} {
+		r, err := sessionregistry.New(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Register(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	costPath := filepath.Join(t.TempDir(), "cost.jsonl")
+	rows := []providercost.Row{{Schema: providercost.Schema, Provider: "openai", ProviderRowID: "1", SessionID: "s-a", ExportID: "e", ExportedAt: "now", Source: "billing", BilledMicroUSD: costAmount(10), Currency: "USD"}, {Schema: providercost.Schema, Provider: "anthropic", ProviderRowID: "2", SessionID: "s-b", ExportID: "e", ExportedAt: "now", Source: "billing", BilledMicroUSD: costAmount(20), Currency: "USD"}, {Schema: providercost.Schema, Provider: "openai", ProviderRowID: "3", SessionID: "amb", ExportID: "e", ExportedAt: "now", Source: "billing", BilledMicroUSD: costAmount(30), Currency: "USD"}}
+	var buf bytes.Buffer
+	for _, r := range rows {
+		b, _ := json.Marshal(r)
+		buf.Write(b)
+		buf.WriteByte('\n')
+	}
+	if _, err := providercost.Import(costPath, &buf); err != nil {
+		t.Fatal(err)
+	}
+	raw := fleetMetricsSources{registryPath: filepath.Join(t.TempDir(), "sessions.json"), registrationLedger: regPath, usageLedger: filepath.Join(t.TempDir(), "usage.jsonl"), providerCostLedger: costPath, maxSessions: 20, goalCoverageThreshold: 1, stderr: io.Discard}.render(base.Add(time.Hour))
+	for _, want := range []string{`fak_fleet_goal_provider_billed_micro_usd_total{root_registration="root-a",root_issue="#A",task="goal-a"} 10`, `fak_fleet_goal_provider_billed_micro_usd_total{root_registration="root-b",root_issue="#B",task="goal-b"} 20`, `fak_fleet_goal_provider_cost_rows_total{attribution="ambiguous"} 1`, `fak_fleet_goal_provider_cost_attribution_ratio 0.6666666666666666`, `fak_fleet_goal_provider_cost_efficiency_ready 0`} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("missing %q\n%s", want, raw)
+		}
+	}
+}
+func costAmount(v providercost.MicroUSD) *providercost.MicroUSD { return &v }

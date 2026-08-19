@@ -608,7 +608,18 @@
         "x": 0,
         "y": 12
       },
-      "panels": []
+      "panels": [],
+      "description": " Authoritative provider cost is shown only from provider billing exports; provider-cost readiness requires known amounts and the configured exact-attribution threshold.",
+      "targets": [
+        {
+          "expr": "fak_fleet_goal_provider_billed_micro_usd_total",
+          "legendFormat": "{{root_registration}} provider billed micro-USD"
+        },
+        {
+          "expr": "fak_fleet_goal_provider_cost_attribution_ratio",
+          "legendFormat": "provider cost attribution ratio"
+        }
+      ]
     },
     {
       "datasource": {

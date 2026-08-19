@@ -14,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/providercost"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 	"github.com/anthony-chaudhary/fak/internal/taskmgr"
@@ -69,6 +70,7 @@ func runFleetMetrics(stdout, stderr io.Writer, argv []string) int {
 	remote := fs.String("remote", "origin", "with --fleet, the git remote whose session refs are folded in")
 	stale := fs.Duration("stale", defaultSessionStaleWindow, "heartbeat window past which a running-family session reads STALLED")
 	usageLedger := fs.String("usage-ledger", gatewayusageledger.DefaultLedgerRel, "gateway-usage ledger folded into the historical fak_fleet_usage_* families")
+	providerCostLedger := fs.String("provider-cost-ledger", "", "authoritative fak-provider-cost-ledger/1 JSONL (empty disables cost metrics)")
 	since := fs.String("since", "", "fold only usage rows on or after this date (YYYY-MM-DD)")
 	maxSessions := fs.Int("max-sessions", defaultFleetMetricsMaxSessions, "cardinality bound on the per-session label (0 disables the per-session tier entirely)")
 	goalCoverageThreshold := fs.Float64("goal-coverage-threshold", 1, "minimum exact root-goal usage attribution ratio required for efficiency-ready=1 (0..1)")
@@ -95,6 +97,7 @@ func runFleetMetrics(stdout, stderr io.Writer, argv []string) int {
 		remote:                *remote,
 		staleWindow:           *stale,
 		usageLedger:           *usageLedger,
+		providerCostLedger:    *providerCostLedger,
 		dispatchRunsDir:       filepath.Join(repoRoot(), ".dispatch-runs"),
 		since:                 *since,
 		maxSessions:           *maxSessions,
@@ -135,6 +138,7 @@ type fleetMetricsSources struct {
 	remote                string
 	staleWindow           time.Duration
 	usageLedger           string
+	providerCostLedger    string
 	dispatchRunsDir       string
 	registrationLedger    string
 	since                 string
@@ -163,7 +167,13 @@ func (s fleetMetricsSources) render(now time.Time) string {
 	renderFleetUsageExposition(w, usageFold, s.maxSessions, dupDropped)
 
 	registrations, registrationReadable := s.registrationInventory()
-	renderFleetGoalExposition(w, registrations, usageFold, s.goalCoverageThreshold)
+	var costReport providercost.Report
+	if s.providerCostLedger != "" {
+		if rows, err := providercost.Read(s.providerCostLedger); err == nil {
+			costReport = providercost.Fold(rows, registrations)
+		}
+	}
+	renderFleetGoalExposition(w, registrations, usageFold, costReport, s.goalCoverageThreshold)
 	writeRepoPulseMetrics(w, s.dispatchRunsDir)
 	w.gauge("fak_fleet_registration_registry_readable", "1 when the child-registration lineage ledger was read successfully; 0 means goal-level attribution is unavailable, not that the fleet has no goals.", boolGauge(registrationReadable))
 
@@ -203,7 +213,7 @@ type fleetGoalAgg struct {
 
 // renderFleetGoalExposition joins durable lineage to usage. A session is attributable
 // only when exactly one root claims it; unknown and cross-root claims stay visible.
-func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usage fleetUsageFold, coverageThreshold float64) {
+func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usage fleetUsageFold, cost providercost.Report, coverageThreshold float64) {
 	goals := map[string]*fleetGoalAgg{}
 	sessionRoots := map[string]string{}
 	ambiguous := map[string]bool{}
@@ -314,6 +324,23 @@ func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usa
 	w.gauge("fak_fleet_goal_usage_attribution_ratio", "Fraction of usage rows attributable to exactly one root goal; 1 for an empty census.", ratio)
 	w.gauge("fak_fleet_goal_efficiency_coverage_threshold", "Configured minimum exact usage attribution ratio for broad root-goal efficiency readiness.", coverageThreshold)
 	w.gauge("fak_fleet_goal_efficiency_ready", "1 only when exact root-goal usage attribution meets the configured threshold and the lineage registry is readable.", boolGauge(ratio >= coverageThreshold))
+	for _, root := range cost.Roots {
+		g := goals[root.RootRegistrationID]
+		if g == nil {
+			continue
+		}
+		labels := []string{"root_registration", g.rootID, "root_issue", g.rootIssue, "task", g.taskID}
+		w.gauge("fak_fleet_goal_provider_billed_micro_usd_total", "Authoritative provider-export billed micro-USD attributed to exactly one root goal; absent/unknown amounts are excluded.", float64(root.BilledMicroUSD), labels...)
+		w.gauge("fak_fleet_goal_provider_cost_rows", "Provider billing-export rows attributed to exactly one root goal.", float64(root.Rows), labels...)
+	}
+	w.gauge("fak_fleet_goal_provider_cost_rows_total", "Provider billing-export rows by attribution outcome.", float64(cost.Coverage.TotalRows), "attribution", "all")
+	w.gauge("fak_fleet_goal_provider_cost_rows_total", "Provider billing-export rows by attribution outcome.", float64(cost.Coverage.AttributedRows), "attribution", "attributed")
+	w.gauge("fak_fleet_goal_provider_cost_rows_total", "Provider billing-export rows by attribution outcome.", float64(cost.Coverage.MissingRows), "attribution", "missing")
+	w.gauge("fak_fleet_goal_provider_cost_rows_total", "Provider billing-export rows by attribution outcome.", float64(cost.Coverage.AmbiguousRows), "attribution", "ambiguous")
+	costRatio := coverageRatio(cost.Coverage.AttributedAmountRows, cost.Coverage.AmountRows)
+	w.gauge("fak_fleet_goal_provider_cost_attribution_ratio", "Fraction of known-amount provider rows attributed to exactly one root goal.", costRatio)
+	costReady := cost.Coverage.AmountRows > 0 && costRatio >= coverageThreshold
+	w.gauge("fak_fleet_goal_provider_cost_efficiency_ready", "1 only when at least one known provider amount exists and exact cost attribution meets the configured threshold.", boolGauge(costReady))
 	w.gauge("fak_fleet_goal_input_tokens_by_attribution_total", "Gateway input tokens by root-goal attribution.", float64(attributed.InputTokens), "attribution", "attributed")
 	w.gauge("fak_fleet_goal_input_tokens_by_attribution_total", "Gateway input tokens by root-goal attribution.", float64(unattributed.InputTokens), "attribution", "unattributed")
 	w.gauge("fak_fleet_goal_output_tokens_by_attribution_total", "Gateway output tokens by root-goal attribution.", float64(attributed.OutputTokens), "attribution", "attributed")
