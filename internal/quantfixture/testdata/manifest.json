@@ -1,0 +1,30 @@
+{
+  "schema": "quantfixture/1",
+  "fixtures": [
+    {
+      "name": "tiny.gguf.fixture",
+      "kind": "gguf",
+      "license": "CC0-1.0",
+      "max_bytes": 256,
+      "sha256": "d758201d3a9c0c866954faaa2de226c51490a8fdf12a9a9274ca572fd2211fa6",
+      "recipe": "gguf-v3-q4"
+    },
+    {
+      "name": "tiny.safetensors.fixture",
+      "kind": "safetensors",
+      "license": "CC0-1.0",
+      "max_bytes": 256,
+      "sha256": "5efb367995642727a144243a6d1ca881eb3894c4197c735aa23949cdc4a7182e",
+      "recipe": "safetensors-empty-metadata"
+    },
+    {
+      "name": "ternary.bin",
+      "kind": "bin",
+      "license": "CC0-1.0",
+      "max_bytes": 256,
+      "sha256": "b809ec318872746003efa81e4cef9e3c13ac895fdaa65159137a8ba958e47a91",
+      "recipe": "packed-ternary-2bit"
+    }
+  ]
+}
+
