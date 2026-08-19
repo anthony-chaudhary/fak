@@ -177,7 +177,7 @@ func syncCodexPlugin(home, source, destination, workspace string, ops codexPlugi
 		r.FailureStage, r.Detail = "verify_stage", err.Error()
 		return r, err
 	}
-	backup := destination + fmt.Sprintf(".fak-backup-%d", now.UnixNano())
+	backup := codexPluginBackupPath(destination, now)
 	destinationExists := pathExists(destination)
 	if destinationExists {
 		if err := ops.rename(destination, backup); err != nil {
@@ -254,6 +254,11 @@ func syncCodexPlugin(home, source, destination, workspace string, ops codexPlugi
 	return r, nil
 }
 
+func codexPluginBackupPath(destination string, now time.Time) string {
+	parent := filepath.Dir(destination)
+	name := filepath.Base(destination)
+	return filepath.Join(parent, fmt.Sprintf(".fak-plugin-backup-%s-%d", name, now.UnixNano()))
+}
 func attestInstalledHookInventory(profile hookProfileReport, destination string) error {
 	manifest := filepath.Clean(filepath.Join(destination, "hooks", "hooks.json"))
 	seen := map[string]int{}

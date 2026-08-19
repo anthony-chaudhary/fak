@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writePluginFixture(t *testing.T, root, version, marker string) {
@@ -40,6 +41,17 @@ func writePluginFixture(t *testing.T, root, version, marker string) {
 	}
 }
 
+func TestCodexPluginBackupPathIsHiddenVersionSibling(t *testing.T) {
+	destination := filepath.Join(`C:\codex`, "plugins", "cache", "dos", "dos-kernel", "0.30.0")
+	got := codexPluginBackupPath(destination, time.Unix(0, 42))
+	want := filepath.Join(filepath.Dir(destination), ".fak-plugin-backup-0.30.0-42")
+	if got != want {
+		t.Fatalf("backup path=%q, want %q", got, want)
+	}
+	if strings.HasPrefix(filepath.Base(got), "0.30.0") {
+		t.Fatalf("backup %q remains discoverable as a 0.30.0 plugin version", got)
+	}
+}
 func TestSyncCodexPluginLockedDestinationRetainsCoherentStage(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
