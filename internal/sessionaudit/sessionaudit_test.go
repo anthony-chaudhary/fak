@@ -641,3 +641,17 @@ func TestNonClaudeProviderCostRates(t *testing.T) {
 		}
 	}
 }
+
+func TestReportMarkdownRendersTrajectoryOnlyWhenPresent(t *testing.T) {
+	plain := Session{Session: "plain"}
+	if md := ReportMarkdown([]Session{plain}, AggregateSessions([]Session{plain}), "", nil, false, 0, 1, nil, time.Now()); strings.Contains(md, "## Trajectory") {
+		t.Fatal("non-instrumented session rendered trajectory panel")
+	}
+	inst := Session{Session: "sess-a", Trajectory: &TrajectoryPanel{Objectives: []TrajectoryObjective{{ObjectiveID: "o", Title: "ship", Score: .6, Signal: "STALL", Nudges: 1, NudgesDelivered: 1}}}}
+	md := ReportMarkdown([]Session{inst}, AggregateSessions([]Session{inst}), "", nil, false, 0, 1, nil, time.Now())
+	for _, want := range []string{"## Trajectory", "sess-a", "ship", "0.600", "STALL"} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("missing %q", want)
+		}
+	}
+}

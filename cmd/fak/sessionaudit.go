@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/sessionaudit"
+	"github.com/anthony-chaudhary/fak/internal/trajctl"
 )
 
 func cmdSessionAudit(argv []string) { os.Exit(runSessionAudit(os.Stdout, os.Stderr, argv)) }
@@ -199,6 +200,25 @@ func runSessionAuditAudit(stdout, stderr io.Writer, argv []string) int {
 	folded := top
 	if *includeSubagents {
 		folded = sessions
+	}
+	state := trajctl.Fold(trajctl.ReadLedgerFile(filepath.Join(repoRoot(), trajctl.DefaultLedgerRel)))
+	for i := range sessions {
+		panel := state.SessionPanel(sessions[i].Session)
+		if panel == nil {
+			continue
+		}
+		sessions[i].Trajectory = &sessionaudit.TrajectoryPanel{Objectives: make([]sessionaudit.TrajectoryObjective, 0, len(panel.Objectives))}
+		for _, o := range panel.Objectives {
+			sessions[i].Trajectory.Objectives = append(sessions[i].Trajectory.Objectives, sessionaudit.TrajectoryObjective{ObjectiveID: o.ObjectiveID, Title: o.Title, Score: o.Score, Signal: string(o.Signal), Nudges: o.Nudges, NudgesDelivered: o.NudgesDelivered})
+		}
+	}
+	for i := range folded {
+		for _, s := range sessions {
+			if folded[i].Session == s.Session {
+				folded[i].Trajectory = s.Trajectory
+				break
+			}
+		}
 	}
 	agg := sessionaudit.AggregateSessions(folded)
 	var excluded *sessionaudit.Summary

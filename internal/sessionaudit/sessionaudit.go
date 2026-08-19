@@ -146,6 +146,19 @@ type Session struct {
 	WallSeconds       *float64               `json:"wall_s"`
 	Behavior          Behavior               `json:"behavior"`
 	Confusion         Confusion              `json:"confusion"`
+	Trajectory        *TrajectoryPanel       `json:"trajectory,omitempty"`
+}
+
+type TrajectoryObjective struct {
+	ObjectiveID     string  `json:"objective_id"`
+	Title           string  `json:"title"`
+	Score           float64 `json:"score"`
+	Signal          string  `json:"signal"`
+	Nudges          int     `json:"nudges"`
+	NudgesDelivered int     `json:"nudges_delivered"`
+}
+type TrajectoryPanel struct {
+	Objectives []TrajectoryObjective `json:"objectives"`
 }
 
 type Aggregate struct {

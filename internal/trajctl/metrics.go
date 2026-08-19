@@ -101,3 +101,53 @@ func (f *MetricsFile) Snapshot() MetricsSnapshot {
 	f.size = info.Size()
 	return f.value
 }
+
+type SessionObjective struct {
+	ObjectiveID     string  `json:"objective_id"`
+	Title           string  `json:"title"`
+	Score           float64 `json:"score"`
+	Signal          Signal  `json:"signal"`
+	Nudges          int     `json:"nudges"`
+	NudgesDelivered int     `json:"nudges_delivered"`
+}
+type SessionPanel struct {
+	Objectives []SessionObjective `json:"objectives"`
+}
+
+func (s State) SessionPanel(sessionID string) *SessionPanel {
+	ids := map[string]bool{}
+	for _, row := range s.Scores {
+		if row.SessionID == sessionID {
+			ids[row.ObjectiveID] = true
+		}
+	}
+	for _, d := range s.Steers {
+		if d.SessionID == sessionID {
+			ids[d.ObjectiveID] = true
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	p := &SessionPanel{Objectives: []SessionObjective{}}
+	for _, id := range s.ObjectiveIDs() {
+		if !ids[id] {
+			continue
+		}
+		c, ok := s.CurveFor(id)
+		if !ok {
+			continue
+		}
+		item := SessionObjective{ObjectiveID: id, Title: s.Objectives[id].Statement, Score: c.Latest, Signal: c.Signal}
+		for _, d := range s.SteersFor(id) {
+			if d.SessionID == sessionID && d.Action == ActionNudge {
+				item.Nudges++
+				if d.Delivered {
+					item.NudgesDelivered++
+				}
+			}
+		}
+		p.Objectives = append(p.Objectives, item)
+	}
+	return p
+}

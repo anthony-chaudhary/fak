@@ -41,3 +41,15 @@ func TestMetricsFileRefreshesAfterLedgerChange(t *testing.T) {
 		t.Fatalf("cached active=%d", got)
 	}
 }
+
+func TestSessionPanelJoinsOnlyAttributedSession(t *testing.T) {
+	o := Objective{ID: "o", Statement: "ship", Status: StatusActive}
+	s := Fold([]Row{ObjectiveRecord(o), ScoreRecord(ScoreRow{ObjectiveID: "o", Method: CommitScorerMethod, Value: .6, Witness: W3, SessionID: "sess-a"}), SteerRecord(SteerDecision{ObjectiveID: "o", Action: ActionNudge, Signal: SignalStall, Reason: "r", Packet: "p", Delivered: true, SessionID: "sess-a"})})
+	p := s.SessionPanel("sess-a")
+	if p == nil || len(p.Objectives) != 1 || p.Objectives[0].NudgesDelivered != 1 {
+		t.Fatalf("panel=%+v", p)
+	}
+	if p := s.SessionPanel("sess-b"); p != nil {
+		t.Fatalf("non-instrumented panel=%+v", p)
+	}
+}

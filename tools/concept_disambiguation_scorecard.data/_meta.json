@@ -4611,6 +4611,16 @@
           "category": "incidental",
           "reason": "Wire-only bounded projection of canonical SessionState for the fleet aggregate; not a new session runtime concept",
           "token": "FleetSessionCard"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire projection joining existing trajctl objective data to session audit, not a session runtime state concept",
+          "token": "SessionObjective"
+        },
+        {
+          "category": "incidental",
+          "reason": "Session-audit join result over existing objective curves, not a new session runtime state concept",
+          "token": "SessionPanel"
         }
       ],
       "id": "session-runtime",
@@ -4703,7 +4713,9 @@
         "SessionMoveRestored",
         "SessionMoveSafePointRequested",
         "SessionMoveTransition",
+        "SessionObjective",
         "SessionOutcome",
+        "SessionPanel",
         "SessionPlacement",
         "SessionRate",
         "SessionRecoveryScenarios",
@@ -10046,6 +10058,11 @@
           "category": "incidental",
           "reason": "Human renderer for the defaults selfcheck report",
           "token": "renderDefaultsSelfcheck"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private markdown helper for the trajectory panel, not a new rendering architecture concept",
+          "token": "renderTrajectory"
         }
       ],
       "id": "render-materialize",
@@ -10115,6 +10132,7 @@
         "renderSessionOpen",
         "renderShellChoice",
         "renderSweepParkedText",
+        "renderTrajectory",
         "renderValidate",
         "renderVelocityLeg",
         "renderWorkpattern",

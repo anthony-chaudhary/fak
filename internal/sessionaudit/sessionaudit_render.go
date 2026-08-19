@@ -53,6 +53,7 @@ func ReportMarkdown(sessions []Session, agg Aggregate, nsPrefix string, sinceDay
 	renderShellChoice(&b, agg)
 	renderBuckets(&b, agg)
 	renderModels(&b, agg)
+	renderTrajectory(&b, ok)
 	renderNamespaces(&b, agg)
 	renderOpusHeavySessions(&b, ok)
 	renderLongContextSessions(&b, ok)
@@ -325,6 +326,32 @@ func renderBuckets(b *strings.Builder, agg Aggregate) {
 			costCell = "$0.00"
 		}
 		fmt.Fprintf(b, "| %s | %s | %s | %s | %s | %s |\n", bucket, fmtInt(c.Turns), fmtInt(c.Output), fmtInt(c.CacheRead), costCell, priced)
+	}
+	fmt.Fprintln(b)
+}
+
+func renderTrajectory(b *strings.Builder, sessions []Session) {
+	present := false
+	for _, s := range sessions {
+		if s.Trajectory != nil {
+			present = true
+			break
+		}
+	}
+	if !present {
+		return
+	}
+	fmt.Fprintln(b, "## Trajectory")
+	fmt.Fprintln(b)
+	fmt.Fprintln(b, "| Session | Objective | Score | Signal | Nudges | Delivered |")
+	fmt.Fprintln(b, "|---|---|---:|---|---:|---:|")
+	for _, sess := range sessions {
+		if sess.Trajectory == nil {
+			continue
+		}
+		for _, o := range sess.Trajectory.Objectives {
+			fmt.Fprintf(b, "| %s | %s | %.3f | %s | %d | %d |\n", sess.Session, o.Title, o.Score, o.Signal, o.Nudges, o.NudgesDelivered)
+		}
 	}
 	fmt.Fprintln(b)
 }
