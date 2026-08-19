@@ -441,12 +441,15 @@ func rwSpawnResume(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir
 	if err != nil {
 		return 0, err
 	}
-	if harness == resumeactuator.HarnessCodex {
+	switch harness {
+	case resumeactuator.HarnessCodex:
 		if err := validateCodexResumeCoordinates(p); err != nil {
 			return 0, err
 		}
-	} else if claudeExe == "" {
-		return 0, fmt.Errorf("no claude binary (set FLEET_CLAUDE_EXE)")
+	case resumeactuator.HarnessClaude:
+		if claudeExe == "" {
+			return 0, fmt.Errorf("no claude binary (set FLEET_CLAUDE_EXE)")
+		}
 	}
 	wd := firstString(grant.CWD, rwResumeCWD(p))
 	outPath := filepath.Join(logDir, fmt.Sprintf("resume-%s-%d.log", shortID(p.Session), time.Now().Unix()))
