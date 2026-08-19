@@ -30,3 +30,25 @@ func TestAuditRejectsUnclassifiedGuardExample(t *testing.T) {
 		t.Fatalf("Audit() error = %v, want unclassified occurrence", err)
 	}
 }
+
+func TestCurrentGuardPosturesAreClassified(t *testing.T) {
+	want := map[string]string{
+		"README.md": "fak guard -- claude",
+		"docs/generated/disambiguation-index.json": "optionally wraps it with fak guard",
+		"docs/integrations/session-new.md":         "always starts behind `fak guard`",
+		"docs/research/graft-study-2026-08-18.md":  "`fak guard` registers capability",
+		"docs/response-profiles.md":                "external harness through `fak guard`",
+	}
+	for path, fragment := range want {
+		found := false
+		for _, retained := range RetainedOccurrences {
+			if retained.Path == path && strings.Contains(retained.Line, fragment) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s guard posture containing %q is not classified", path, fragment)
+		}
+	}
+}
