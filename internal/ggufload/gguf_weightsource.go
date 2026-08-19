@@ -86,6 +86,17 @@ func (s *WeightSource) Tensor(name string) (TensorInfo, bool) {
 	return s.File.Tensors[i], true
 }
 
+func (s *WeightSource) tensorReader(info TensorInfo) (io.ReaderAt, int64, error) {
+	r, size := s.r, s.size
+	if idx, ok := s.byName[info.Name]; ok && idx < len(s.readerFor) && s.readerFor[idx] != nil {
+		r, size = s.readerFor[idx], s.sizeFor[idx]
+	}
+	if r == nil {
+		return nil, 0, fmt.Errorf("gguf: tensor %s has no reader", info.Name)
+	}
+	return r, size, nil
+}
+
 // TensorBytes reads a named tensor's raw (still-quantized) payload bytes from the
 // shard reader that holds it, bounds-checking the offset and length against the file.
 // It always returns a fresh heap copy — even when the shard reader is a FAK_GGUF_MMAP

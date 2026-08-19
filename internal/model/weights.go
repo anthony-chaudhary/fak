@@ -214,6 +214,7 @@ type Model struct {
 	// (SetExpertCheckpoint), and then every routed expert resolves from the resident stores exactly
 	// as before — this is an added tier, not a replacement.
 	expertCheckpoint *ExpertCheckpointTier
+	weightCloser     *weightCloserState
 
 	// q2w holds the optional resident ternary Q2_0 copy of matmul weights, fed the raw
 	// GGUF group-128 blocks straight from the loader and consumed by q2MatRows.

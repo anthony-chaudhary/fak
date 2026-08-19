@@ -341,6 +341,9 @@ func (rt *serveRuntime) closeEPGroup() {
 	if rt.epGroup != nil {
 		rt.epGroup.Close()
 	}
+	if rt.inKernelModel != nil {
+		_ = rt.inKernelModel.CloseWeights()
+	}
 }
 
 // resolveSessionPlane resolves the auth/key material, validates the budget flags,

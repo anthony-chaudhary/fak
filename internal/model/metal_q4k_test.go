@@ -96,6 +96,58 @@ func cosineAndMaxRel(a, b []float32) (cos float64, maxRel float64) {
 	return cos, maxRel
 }
 
+func TestMetalTransientQ4KReleaseKeepsRegistryBounded(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("Metal unavailable")
+	}
+	metalgemm.ResetQ4K()
+	defer metalgemm.ResetQ4K()
+	raw := make([]byte, q4kBlockBytes)
+	for i := 0; i < 8192+16; i++ {
+		w := metalgemm.UploadQ4K(raw, 1, qkK)
+		if w == nil {
+			t.Fatalf("transient upload %d failed; released registry slots leaked", i)
+		}
+		w.Release()
+	}
+}
+
+func TestMetalLazyQ4KGemvMatchesResidentAndDoesNotCacheHandle(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("Metal unavailable")
+	}
+	const out, in = 5, 256
+	raw := make([]byte, out*(in/qkK)*q4kBlockBytes)
+	for i := range raw {
+		raw[i] = byte(i*29 + 11)
+	}
+	resident := quantizeQ4KFromRaw(append([]byte(nil), raw...), out, in)
+	lazy := &q4kTensor{out: out, in: in, nblk: in / qkK, lazy: &LazyQ4KRange{Reader: bytes.NewReader(raw), Bytes: len(raw)}}
+	x := make([]float32, in)
+	for i := range x {
+		x[i] = float32((i%19)-9) / 13
+	}
+	want := q4kMatRows(resident, x)
+	m := &Model{q4kw: map[string]*q4kTensor{"w": lazy}}
+	var got []float32
+	if !m.withMetalQ4K("w", lazy, func(w *metalgemm.Q4KWeight) {
+		got = make([]float32, out)
+		w.GEMV(x, got)
+	}) {
+		t.Fatal("lazy Q4_K upload failed")
+	}
+	assertClose(t, got, want, 2e-2)
+	metalQ4KMu.Lock()
+	_, cached := metalQ4KCache[m]
+	metalQ4KMu.Unlock()
+	if cached {
+		t.Fatal("lazy operation retained a model-level Metal handle")
+	}
+	if len(lazy.raw) != 0 {
+		t.Fatalf("lazy operation retained %d host payload bytes", len(lazy.raw))
+	}
+}
+
 func TestMetalQ4KUploadUsesNoCopyUnifiedMemory(t *testing.T) {
 	if !metalgemm.Available() {
 		t.Skip("no Metal device available")

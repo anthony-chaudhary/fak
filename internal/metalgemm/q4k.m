@@ -451,6 +451,7 @@ static Q4KW gQ4[MG_MAX_Q4];
 static int gNQ4 = 0;
 
 static int q4k_register_buffer(id<MTLBuffer> b, int out, int in, int nblk) {
+    if (gNQ4 >= MG_MAX_Q4) return -1;
     int id = gNQ4++;
     gQ4[id].buf = CFBridgingRetain(b);
     gQ4[id].out = out;
@@ -860,7 +861,7 @@ int mg_q4k_upload_nocopy(const unsigned char* raw, int out, int in) {
     if (raw == NULL) return -1;
     int nblk = 0;
     long bytes = 0;
-    if (q4k_upload_preflight(out, in, &nblk, &bytes) != 0) return -1;
+    if (q4k_upload_preflight(out, in, &nblk, &bytes) != 0 || gNQ4 >= MG_MAX_Q4) return -1;
     id<MTLBuffer> b = [gDev newBufferWithBytesNoCopy:(void*)raw
                                               length:(NSUInteger)q4k_page_round(bytes)
                                              options:MTLResourceStorageModeShared
@@ -882,7 +883,7 @@ int mg_q4k_upload_nocopy(const unsigned char* raw, int out, int in) {
 int mg_q4k_upload(const unsigned char* raw, int out, int in) {
     int nblk = 0;
     long bytes = 0;
-    if (q4k_upload_preflight(out, in, &nblk, &bytes) != 0) return -1;
+    if (q4k_upload_preflight(out, in, &nblk, &bytes) != 0 || gNQ4 >= MG_MAX_Q4) return -1;
     id<MTLBuffer> b = [gDev newBufferWithLength:(NSUInteger)bytes options:MTLResourceStorageModeShared];
     if (b == nil) {
         NSLog(@"mg_q4k_upload: device buffer alloc failed for %.1f MB", (double)bytes / 1e6);
@@ -1106,6 +1107,20 @@ void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Yca
 
         memcpy(Ycat, yb.contents, (size_t)ytot * 4);
     }
+}
+
+// mg_q4k_release releases one Q4_K buffer. Trailing tombstones collapse so transient
+// upload/execute/release traffic reuses the table instead of exhausting MG_MAX_Q4.
+void mg_q4k_release(int wid) {
+    if (wid < 0 || wid >= gNQ4) return;
+    if (gQ4[wid].buf != NULL) {
+        CFBridgingRelease(gQ4[wid].buf);
+        gQ4[wid].buf = NULL;
+    }
+    gQ4[wid].out = 0;
+    gQ4[wid].in = 0;
+    gQ4[wid].nblk = 0;
+    while (gNQ4 > 0 && gQ4[gNQ4 - 1].buf == NULL) gNQ4--;
 }
 
 // mg_q4k_reset releases every resident q4_k weight buffer and the reused scratch, returning

@@ -54,3 +54,10 @@ func TestMetalGGUFPeakCapacity(t *testing.T) {
 		})
 	}
 }
+
+func TestStreamedDenseQ4KBypassesAllResidentMetalPeakGuard(t *testing.T) {
+	t.Setenv("FAK_METAL_STREAM_Q4K", "1")
+	if err := refuseOversubscribedMetalGGUF("missing-checkpoint.gguf"); err != nil {
+		t.Fatalf("streamed dense Q4_K was rejected by all-resident guard: %v", err)
+	}
+}

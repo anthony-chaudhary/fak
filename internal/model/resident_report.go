@@ -45,9 +45,15 @@ func (m *Model) ResidentReport() *ResidentReport {
 	r := &ResidentReport{}
 	for _, qt := range m.q4kw {
 		r.Q4KTensors++
-		r.Q4KBytes += int64(len(qt.raw))
-		// Each 144-byte Q4_K super-block encodes 256 weights.
-		r.Q4KParams += int64(len(qt.raw) / q4kBlockBytes * qkK)
+		bytes := len(qt.raw)
+		if qt.lazy != nil {
+			bytes = qt.lazy.Bytes
+		}
+		if qt.lazy == nil {
+			r.Q4KBytes += int64(bytes)
+		}
+		// Params count logical weights even when the checkpoint payload is lazy.
+		r.Q4KParams += int64(bytes / q4kBlockBytes * qkK)
 	}
 	for _, qt := range m.q8w {
 		r.Q8Tensors++

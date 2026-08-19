@@ -48,12 +48,13 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 	if !s.MetalQ4K || !metalgemm.Available() {
 		return q4kGemm(qt, Xf, P)
 	}
-	w := s.M.metalQ4KWeight(name, qt)
-	if w == nil {
-		return q4kGemm(qt, Xf, P) // upload declined — stay on the proven CPU path
-	}
 	Y := make([]float32, P*qt.out)
-	w.GEMM(Xf, P, Y)
+	if !s.M.withMetalQ4K(name, qt, func(w *metalgemm.Q4KWeight) { w.GEMM(Xf, P, Y) }) {
+		if qt.lazy != nil {
+			panic("model: lazy Q4_K Metal GEMM upload failed: " + name)
+		}
+		return q4kGemm(qt, Xf, P)
+	}
 	return Y
 }
 
@@ -68,6 +69,11 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 // amortizing). Each filled slice is [P*out] token-major, bit-identical to calling q4kGemmDispatch
 // per name (same q4k_gemm kernel, just grouped into one command buffer).
 func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]float32 {
+	for _, name := range names {
+		if qt := s.M.q4kw[name]; qt != nil && qt.lazy != nil {
+			return nil
+		}
+	}
 	if !s.MetalQ4K || !metalgemm.Available() || P <= 0 {
 		return nil
 	}
@@ -202,12 +208,13 @@ func (s *Session) q4kMatRowsDispatch(name string, qt *q4kTensor, xf []float32) [
 	if !s.MetalQ4K || !metalgemm.Available() {
 		return q4kMatRows(qt, xf)
 	}
-	w := s.M.metalQ4KWeight(name, qt)
-	if w == nil {
+	y := make([]float32, qt.out)
+	if !s.M.withMetalQ4K(name, qt, func(w *metalgemm.Q4KWeight) { w.GEMV(xf, y) }) {
+		if qt.lazy != nil {
+			panic("model: lazy Q4_K Metal GEMV upload failed: " + name)
+		}
 		return q4kMatRows(qt, xf)
 	}
-	y := make([]float32, qt.out)
-	w.GEMV(xf, y)
 	return y
 }
 
@@ -239,6 +246,11 @@ func (s *Session) q8MatRowsDispatch(name string, qt *q8Tensor, xf []float32) []f
 // only when no member could be Metal-routed. Results are bit-identical to calling the per-name
 // dispatches, up to the existing Metal float-order tolerance.
 func (s *Session) q4kGroupDispatch(names []string, xf []float32, outs []int) [][]float32 {
+	for _, name := range names {
+		if qt := s.M.q4kw[name]; qt != nil && qt.lazy != nil {
+			return nil
+		}
+	}
 	if !s.MetalQ4K || !metalgemm.Available() {
 		return nil
 	}
@@ -333,6 +345,11 @@ func (s *Session) q4kGroupDispatch(names []string, xf []float32, outs []int) [][
 // per-matmul path. The Metal kernel is silu-only and adds no bias, so the caller must gate on a
 // non-GELU activation and bias-free MLP. Bit-identical to the per-matmul path up to GPU float-order.
 func (s *Session) q4kFusedMLP(gateName, upName, downName string, x []float32) []float32 {
+	for _, name := range []string{gateName, upName, downName} {
+		if qt := s.M.q4kw[name]; qt != nil && qt.lazy != nil {
+			return nil
+		}
+	}
 	if !s.MetalQ4K || !metalgemm.Available() {
 		return nil
 	}
@@ -382,6 +399,13 @@ func (s *Session) q4kFusedMLP(gateName, upName, downName string, x []float32) []
 // is resident Q6_K, and the whole batch shares one geometry — the q4_k_m residency the fused path needs.
 // The gate-weighted sum stays on the host so the routed-delta reduction order matches the loop exactly.
 func (s *Session) q4kFusedMLPBatch(gate, up, down []string, x []float32) [][]float32 {
+	for _, names := range [][]string{gate, up, down} {
+		for _, name := range names {
+			if qt := s.M.q4kw[name]; qt != nil && qt.lazy != nil {
+				return nil
+			}
+		}
+	}
 	if !s.MetalQ4K || !metalgemm.Available() {
 		return nil
 	}
@@ -518,7 +542,10 @@ func (m *Model) metalQ4KWeights() map[string]bool {
 			if qt == nil {
 				continue // Q8 minority — not a q4_k-resident projection
 			}
-			// metalQ4KWeight uploads if not already cached and records the result
+			if qt.lazy != nil {
+				uploaded[name] = true // lazy weights stage at the operation seam
+				continue
+			}
 			w := m.metalQ4KWeight(name, qt)
 			uploaded[name] = w != nil
 		}
@@ -573,6 +600,31 @@ func (m *Model) metalQ8Weights() map[string]bool {
 		}
 	}
 	return uploaded
+}
+
+func (m *Model) withMetalQ4K(name string, qt *q4kTensor, use func(*metalgemm.Q4KWeight)) bool {
+	if qt == nil {
+		return false
+	}
+	if qt.lazy == nil {
+		w := m.metalQ4KWeight(name, qt)
+		if w == nil {
+			return false
+		}
+		use(w)
+		return true
+	}
+	raw, err := qt.materializeRaw()
+	if err != nil {
+		panic("model: lazy Q4_K read " + name + ": " + err.Error())
+	}
+	w := metalgemm.UploadQ4K(raw, qt.out, qt.in)
+	if w == nil {
+		return false
+	}
+	defer w.Release()
+	use(w)
+	return true
 }
 
 // metalQ4KWeight returns this model's GPU q4_k handle for `name`, uploading the raw blocks once.

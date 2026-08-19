@@ -28,6 +28,7 @@ package ggufload
 // FAK_GGUF_LOAD_WORKERS tunes it.
 
 import (
+	"io"
 	"os"
 	"runtime"
 	"strconv"
@@ -66,7 +67,10 @@ func loadWorkers() int {
 type pendingTensor struct {
 	resident     bool       // true -> AddResident*(raw) by residentType; false -> AddF32Tensor(f32)
 	residentType TensorType // which resident raw-quant store, when resident
-	isKVBHalf    bool       // true -> bufferGLMKVBHalf(layer, half, f32); merge applied on the 2nd half
+	lazyQ4K      bool
+	sourceInfo   TensorInfo
+	lazyReader   io.ReaderAt
+	isKVBHalf    bool // true -> bufferGLMKVBHalf(layer, half, f32); merge applied on the 2nd half
 	name         string
 	shape        []int
 	raw          []byte    // resident raw super-block bytes (resident==true)

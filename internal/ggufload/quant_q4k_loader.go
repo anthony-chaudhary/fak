@@ -58,6 +58,7 @@ type q4kLoadOptions struct {
 	residentDenseKQuant bool
 	streamedExperts     bool
 	streamedExpertBytes int64
+	streamedDenseQ4K    bool
 }
 
 // Q4KLoadOption configures the direct-resident-Q4_K GGUF load path.
@@ -95,6 +96,11 @@ func WithStreamedExperts(hostBytes int64) Q4KLoadOption {
 		o.streamedExperts = true
 		o.streamedExpertBytes = hostBytes
 	}
+}
+
+// WithStreamedDenseQ4K leaves eligible identity-layout dense Q4_K tensors on disk. The returned model retains checkpoint range descriptors and requires the WeightSource to stay open.
+func WithStreamedDenseQ4K(enabled bool) Q4KLoadOption {
+	return func(o *q4kLoadOptions) { o.streamedDenseQ4K = enabled }
 }
 
 // probeQ4KLoadOptions applies opts to the zero value without the config-dependent validation, for
@@ -179,14 +185,30 @@ func LoadModelQ4KProfile(path string, p *LoadProfiler) (*model.Model, error) {
 // resident nowhere else has no fallback to degrade to. Open the checkpoint yourself and keep it
 // open for the model's life instead.
 func LoadModelQ4KProfileOptions(path string, p *LoadProfiler, opts ...Q4KLoadOption) (*model.Model, error) {
-	if probeQ4KLoadOptions(opts).streamedExperts {
-		return nil, fmt.Errorf("gguf: WithStreamedExperts needs a checkpoint that outlives the model; " +
+	if o := probeQ4KLoadOptions(opts); o.streamedExperts || o.streamedDenseQ4K {
+		return nil, fmt.Errorf("gguf: streamed weights need a checkpoint that outlives the model; " +
 			"LoadModelQ4KProfileOptions closes it on return — use OpenWeights + (*WeightSource).QuantModelQ4KProfileOptions " +
 			"and close the source only after the model is done")
 	}
 	return loadVia(path, func(ws *WeightSource) (*model.Model, error) {
 		return ws.QuantModelQ4KProfileOptions(p, opts...)
 	})
+}
+
+// LoadModelQ4KStreamedDense opens path and transfers the checkpoint lifetime to the returned model. CloseWeights must be called when serving stops.
+func LoadModelQ4KStreamedDense(path string, p *LoadProfiler, opts ...Q4KLoadOption) (*model.Model, error) {
+	ws, err := OpenWeights(path)
+	if err != nil {
+		return nil, err
+	}
+	opts = append(opts, WithStreamedDenseQ4K(true))
+	m, err := ws.QuantModelQ4KProfileOptions(p, opts...)
+	if err != nil {
+		_ = ws.Close()
+		return nil, err
+	}
+	m.SetWeightCloser(ws)
+	return m, nil
 }
 
 // QuantModelQ4K is the WeightSource form of LoadModelQ4K: QuantModelProfile with the
@@ -382,6 +404,9 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 			tw.err = fmt.Errorf("gguf: no canonical mapping for tensor %s", info.Name)
 			return tw
 		}
+		if loadOpts.streamedDenseQ4K && info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon) {
+			return s.lazyDenseQ4KTensorWork(info, canon, tw.tickBytes)
+		}
 		shape, raw, ok := s.shapeAndBytesOrFail(info, &tw)
 		if !ok {
 			return tw
@@ -501,11 +526,37 @@ func (s *WeightSource) QuantModelQ4KProfileOptions(p *LoadProfiler, opts ...Q4KL
 // mutations (KV-b half buffering + merge, resident raw-quant adds, f32 adds) in order. It
 // owns all shared mutable state (builder, KV-b merge buffer, profiler) and must only run
 // on the single collector goroutine in original tensor order.
+
+func (s *WeightSource) lazyDenseQ4KTensorWork(info TensorInfo, canon string, tickBytes int64) tensorWork {
+	tw := tensorWork{tickBytes: tickBytes}
+	shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
+	if err != nil {
+		tw.err = err
+		return tw
+	}
+	r, _, err := s.tensorReader(info)
+	if err != nil {
+		tw.err = err
+		return tw
+	}
+	tw.pending = []pendingTensor{{lazyQ4K: true, name: canon, shape: shape, sourceInfo: info, lazyReader: r}}
+	tw.acctType, tw.acctBytes, tw.acctTensors, tw.acctResident = info.Type.String(), tensorOnDiskBytes(info), 1, true
+	return tw
+}
+
 func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builder *model.QuantBuilder, kvbHalf map[int]glmKVBHalf, w3Requested bool) error {
 	p.Tick(tw.tickBytes)
 	p.recordLoadPath(tw.acctType, tw.acctExpert, tw.acctResident, tw.acctBytes, tw.acctTensors)
 	for _, pt := range tw.pending {
 		switch {
+		case pt.lazyQ4K:
+			n, err := tensorPayloadBytes(pt.sourceInfo)
+			if err != nil {
+				return err
+			}
+			if err := builder.AddLazyQ4K(pt.name, pt.shape, model.LazyQ4KRange{Reader: pt.lazyReader, Offset: pt.sourceInfo.FileOffset, Bytes: int(n)}); err != nil {
+				return err
+			}
 		case pt.isKVBHalf:
 			merged, ready, err := bufferGLMKVBHalf(kvbHalf, pt.layer, pt.half, pt.shape, pt.f32)
 			if err != nil {

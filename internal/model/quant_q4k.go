@@ -34,9 +34,11 @@ package model
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"strings"
+	"sync"
 	"unsafe"
 )
 
@@ -46,6 +48,27 @@ import (
 // linear/full-attn projection widths). quantizeQ4KFromRaw panics on a non-multiple rather
 // than silently dropping a tail.
 const qkK = 256
+
+// LazyQ4KRange names one immutable Q4_K payload in a retained checkpoint reader.
+type LazyQ4KRange struct {
+	Reader io.ReaderAt
+	Offset int64
+	Bytes  int
+}
+
+func (q *q4kTensor) materializeRaw() ([]byte, error) {
+	if len(q.raw) > 0 {
+		return q.raw, nil
+	}
+	if q.lazy == nil || q.lazy.Reader == nil || q.lazy.Bytes <= 0 {
+		return nil, fmt.Errorf("model: Q4_K tensor has no resident or lazy payload")
+	}
+	raw := make([]byte, q.lazy.Bytes)
+	if _, err := q.lazy.Reader.ReadAt(raw, q.lazy.Offset); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
 
 // q4kBlockBytes is the resident byte cost of one 256-weight Q4_K super-block:
 // 2 (d f16) + 2 (min f16) + 12 (scales) + 128 (256 nibbles) = 144.
@@ -61,6 +84,7 @@ const q4kBlockBytes = 2 + 2 + 12 + qkK/2
 type q4kTensor struct {
 	out, in, nblk int
 	raw           []byte
+	lazy          *LazyQ4KRange
 }
 
 // q4kRowBytes is the byte length of one resident row (nblk super-blocks).
@@ -535,6 +559,32 @@ func (m *Model) q4k(name string) *q4kTensor {
 	return qt
 }
 
+type weightCloserState struct {
+	once sync.Once
+	c    io.Closer
+	err  error
+}
+
+// SetWeightCloser binds a retained checkpoint lifetime to this model. CloseWeights releases it.
+func (m *Model) SetWeightCloser(c io.Closer) {
+	if m != nil {
+		m.weightCloser = &weightCloserState{c: c}
+	}
+}
+
+// CloseWeights releases a retained lazy-weight checkpoint source once.
+func (m *Model) CloseWeights() error {
+	if m == nil || m.weightCloser == nil {
+		return nil
+	}
+	s := m.weightCloser
+	s.once.Do(func() { s.err = s.c.Close() })
+	return s.err
+}
+
+// Q4KLazy reports whether a Q4_K tensor is backed by a checkpoint range rather than resident bytes.
+func (m *Model) Q4KLazy(name string) bool { return m.q4kw[name] != nil && m.q4kw[name].lazy != nil }
+
 // Q4KCount returns how many tensors hold a resident raw Q4_K copy (diagnostic for the loader).
 func (m *Model) Q4KCount() int { return len(m.q4kw) }
 
@@ -593,6 +643,23 @@ func (b *QuantBuilder) residentQuantTarget(canon string, shape []int) (name stri
 		return "", false, nil
 	}
 	return name, true, nil
+}
+
+// AddLazyQ4K stores a checkpoint-backed Q4_K descriptor without reading its payload.
+func (b *QuantBuilder) AddLazyQ4K(canon string, shape []int, src LazyQ4KRange) error {
+	return b.addResidentQuant(canon, shape, func(name string) {
+		if b.m.q4kw == nil {
+			b.m.q4kw = map[string]*q4kTensor{}
+		}
+		if shape[1]%qkK != 0 {
+			panic("model: Q4_K reduction dim not a multiple of 256")
+		}
+		want := shape[0] * (shape[1] / qkK) * q4kBlockBytes
+		if src.Bytes != want {
+			panic("model: lazy Q4_K payload size mismatch")
+		}
+		b.m.q4kw[name] = &q4kTensor{out: shape[0], in: shape[1], nblk: shape[1] / qkK, lazy: &src}
+	})
 }
 
 // AddResidentQ4K stores a raw Q4_K payload as a resident q4kTensor under the canonical name

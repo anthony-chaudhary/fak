@@ -194,7 +194,13 @@ func loadResidentQ4KProfiled(ggufPath string, tLoad time.Time, opts ...ggufload.
 	// parallel serve: this process admits ONLY its band's routed experts into the resident store,
 	// so its footprint is the replicated remainder + one band (≈ model/ranks), not the full model.
 	// Empty opts (the default, every non-EP serve) is byte-identical to the old LoadModelQ4KProfile.
-	mm, err := ggufload.LoadModelQ4KProfileOptions(ggufPath, prof, opts...)
+	var mm *fakmodel.Model
+	var err error
+	if os.Getenv("FAK_METAL_STREAM_Q4K") == "1" {
+		mm, err = ggufload.LoadModelQ4KStreamedDense(ggufPath, prof, opts...)
+	} else {
+		mm, err = ggufload.LoadModelQ4KProfileOptions(ggufPath, prof, opts...)
+	}
 	must(err)
 	modelengine.PreloadQ4K(mm)
 	fmt.Fprintln(os.Stderr, "fak: "+fakmodel.FormatResidentReport(mm.ResidentReport()))
@@ -292,6 +298,11 @@ func metalGGUFPeakCapacity(metal bool, steady, total int64, known bool) (peak in
 }
 
 func refuseOversubscribedMetalGGUF(path string) error {
+	// The streamed dense-Q4_K experiment replaces the all-resident startup shape this
+	// observed multiplier guards. Its acceptance run measures the new bound directly.
+	if os.Getenv("FAK_METAL_STREAM_Q4K") == "1" {
+		return nil
+	}
 	ws, err := ggufload.OpenWeights(path)
 	if err != nil {
 		return err

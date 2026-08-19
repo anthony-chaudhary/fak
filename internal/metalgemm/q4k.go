@@ -25,6 +25,7 @@ int  mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int
 void mg_q4k_gemm(int wid, const float* X, int P, float* Y, double* out_gpu_ms);
 void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat, const int* yoff, double* out_gpu_ms);
 void mg_q4k_set_use_mm(int on);
+void mg_q4k_release(int wid);
 void mg_q4k_reset(void);
 */
 import "C"
@@ -349,6 +350,22 @@ func GEMMGroup(ws []*Q4KWeight, X []float32, P int) [][]float32 {
 
 // ID returns the backend handle for this matrix.
 func (w *Q4KWeight) ID() int { return int(w.id) }
+
+// Release invalidates this handle and releases its resident Metal buffer. It is safe to call more than once, but callers must ensure no GEMM/GEMV is in flight.
+func (w *Q4KWeight) Release() {
+	if w == nil || w.id < 0 {
+		return
+	}
+	id := int(w.id)
+	q4kPinMu.Lock()
+	C.mg_q4k_release(w.id)
+	if pinned, ok := q4kPins[id]; ok {
+		pinned.pin.Unpin()
+		delete(q4kPins, id)
+	}
+	w.id = -1
+	q4kPinMu.Unlock()
+}
 
 // NoCopy reports whether this handle aliases the caller's pinned raw q4_k bytes through
 // newBufferWithBytesNoCopy instead of owning a copied Metal buffer.
