@@ -253,3 +253,30 @@ func TestDefaultCodexLogDBUsesActiveCodexHome(t *testing.T) {
 		t.Fatalf("fallback=%q", got)
 	}
 }
+
+func TestDuplicateHostHandlerDiagnosesGroupsEnabledHandlersByEvent(t *testing.T) {
+	hooks := []codexEffectiveHook{
+		{Key: "plugin:stop:0", EventName: "stop", Enabled: true},
+		{Key: "plugin:stop:1", EventName: "stop", Enabled: true},
+		{Key: "plugin:stop:disabled", EventName: "stop", Enabled: false},
+		{Key: "plugin:subagent:0", EventName: "subagentStop", Enabled: true},
+	}
+	diagnoses := duplicateHostHandlerDiagnoses(hooks)
+	if len(diagnoses) != 1 {
+		t.Fatalf("diagnoses=%+v", diagnoses)
+	}
+	got := diagnoses[0]
+	if got.Type != "duplicate-host-handlers" || got.Subject != "stop" {
+		t.Fatalf("diagnosis=%+v", got)
+	}
+	if !strings.Contains(got.Message, "2 enabled handlers") || !strings.Contains(got.Message, "plugin:stop:0") || !strings.Contains(got.Message, "plugin:stop:1") {
+		t.Fatalf("message=%q", got.Message)
+	}
+}
+
+func TestDuplicateHostHandlerDiagnosesAcceptsSingleFanInAdapter(t *testing.T) {
+	hooks := []codexEffectiveHook{{Key: "plugin:stop:0", EventName: "stop", Enabled: true}}
+	if diagnoses := duplicateHostHandlerDiagnoses(hooks); len(diagnoses) != 0 {
+		t.Fatalf("diagnoses=%+v", diagnoses)
+	}
+}

@@ -292,10 +292,43 @@ func buildCodexHookProfile(input codexHookProfileBuildInput) codexHookProfileRep
 			Remediation: "repair or remove the unreadable hook source, then rerun sessiondiag --hook-profile",
 		})
 	}
+	report.Diagnoses = append(report.Diagnoses, duplicateHostHandlerDiagnoses(report.Hooks)...)
 	if len(report.Diagnoses) > 0 {
 		report.Verdict = hookProfileVerdictAction
 	}
 	return report
+}
+
+func duplicateHostHandlerDiagnoses(hooks []codexEffectiveHook) []codexHookDiagnosis {
+	byEvent := make(map[string][]codexEffectiveHook)
+	for _, hook := range hooks {
+		if !hook.Enabled || strings.TrimSpace(hook.EventName) == "" {
+			continue
+		}
+		byEvent[hook.EventName] = append(byEvent[hook.EventName], hook)
+	}
+	var events []string
+	for event, declarations := range byEvent {
+		if len(declarations) > 1 {
+			events = append(events, event)
+		}
+	}
+	sort.Strings(events)
+	diagnoses := make([]codexHookDiagnosis, 0, len(events))
+	for _, event := range events {
+		declarations := byEvent[event]
+		keys := make([]string, 0, len(declarations))
+		for _, declaration := range declarations {
+			keys = append(keys, declaration.Key)
+		}
+		sort.Strings(keys)
+		diagnoses = append(diagnoses, codexHookDiagnosis{
+			Type: "duplicate-host-handlers", Subject: event,
+			Message:     fmt.Sprintf("%d enabled handlers are independently visible to Codex for one lifecycle event: %s", len(declarations), strings.Join(keys, ", ")),
+			Remediation: "fan component checks into one host-visible adapter and retain per-component receipts out of band",
+		})
+	}
+	return diagnoses
 }
 
 func diagnoseEffectiveHook(hook codexEffectiveHook, trunkHead string, diagnoses []codexHookDiagnosis) (string, []codexHookDiagnosis) {
