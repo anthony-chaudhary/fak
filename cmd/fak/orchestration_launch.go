@@ -41,6 +41,7 @@ func validateCodexOrchestrationArtifactHome(codexHome string) error {
 		probe = parent
 	}
 	cmd := exec.Command("git", "-C", probe, "rev-parse", "--show-toplevel")
+	configureDispatchHelperCommand(cmd)
 	root, err := cmd.Output()
 	if err != nil {
 		return nil
