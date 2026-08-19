@@ -310,6 +310,7 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 	if err != nil {
 		return dispatchLanePick{}, err
 	}
+	readyState := readDispatchPrereqState(dispatchPrereqStatePath(root))
 	// When no lane is pinned but a specific target issue is requested, route THAT
 	// issue to its own lane before the busiest-lane auto-pick runs. Without this a
 	// `--target-issue N` with no `--lane` falls through to the largest-step-budget
@@ -367,7 +368,15 @@ func pickDispatchLane(root string, stderr io.Writer, explicit string, exclude ma
 			priorityByLane[lane][n] = weight
 			cands[i] = dispatchtick.GenerationCandidate{Number: n, Weight: weight, Generation: info.Generation[n]}
 		}
-		numsByLane[lane] = promoteNewlyUnblocked(dispatchtick.OrderEligibleGenerationCandidates(cands, generation, preferNewest), priorityByLane[lane], newlyUnblocked)
+		eligible := dispatchtick.OrderEligibleGenerationCandidates(cands, generation, preferNewest)
+		agingInputs := make([]dispatchtick.LaneCandidate, len(eligible))
+		for i, n := range eligible {
+			agingInputs[i] = dispatchtick.LaneCandidate{
+				Number: n, Weight: priorityByLane[lane][n],
+				ReadySince: dispatchIssueReadySinceStamp(root, readyState, n),
+			}
+		}
+		numsByLane[lane] = promoteNewlyUnblocked(dispatchtick.OrderLaneCandidates(agingInputs, preferNewest), priorityByLane[lane], newlyUnblocked)
 		counts[lane] = len(nums)
 		stepBudget := info.StepBudget
 		if stepBudget <= 0 {
@@ -572,22 +581,31 @@ func dispatchBacklogSnapshotPath(root string) string {
 }
 
 func dispatchIssueRows(issues []dispatchtick.Issue) []dispatchcache.BacklogIssue {
+	return dispatchIssueRowsFor("", issues)
+}
+
+func dispatchIssueRowsFor(root string, issues []dispatchtick.Issue) []dispatchcache.BacklogIssue {
 	rows := make([]dispatchcache.BacklogIssue, 0, len(issues))
 	for _, issue := range issues {
-		if b, err := json.Marshal(issue); err == nil {
+		p := dispatchIssueProvenanceFor(root, issue.Number)
+		row := dispatchIssueSourceRow{
+			Issue: issue, CreatedUnix: p.CreatedUnix, UpdatedUnix: p.UpdatedUnix,
+		}
+		if b, err := json.Marshal(row); err == nil {
 			rows = append(rows, dispatchcache.BacklogIssue{Number: issue.Number, Data: b})
 		}
 	}
 	return rows
 }
-func dispatchRowsIssues(rows []dispatchcache.BacklogIssue) ([]dispatchtick.Issue, error) {
+func dispatchRowsIssues(root string, rows []dispatchcache.BacklogIssue) ([]dispatchtick.Issue, error) {
 	out := make([]dispatchtick.Issue, 0, len(rows))
 	for _, row := range rows {
-		var issue dispatchtick.Issue
+		var issue dispatchIssueSourceRow
 		if err := json.Unmarshal(row.Data, &issue); err != nil {
 			return nil, err
 		}
-		out = append(out, issue)
+		rememberDispatchIssueProvenance(root, issue)
+		out = append(out, issue.Issue)
 	}
 	return out, nil
 }
@@ -604,9 +622,9 @@ func dispatchFetchBacklogIncremental(root string, limit int, now time.Time) ([]d
 			}
 			// SyncBacklog merges and persists in one step so a quiet tick rewrites only the
 			// watermark sidecar instead of the whole multi-megabyte issue array (#6092).
-			merged, werr := dispatchcache.SyncBacklog(path, key, watermark, snap.Issues, dispatchIssueRows(delta.Issues), delta.Closed)
+			merged, werr := dispatchcache.SyncBacklog(path, key, watermark, snap.Issues, dispatchIssueRowsFor(root, delta.Issues), delta.Closed)
 			if werr == nil {
-				return dispatchRowsIssues(merged)
+				return dispatchRowsIssues(root, merged)
 			}
 		}
 	}
@@ -614,7 +632,7 @@ func dispatchFetchBacklogIncremental(root string, limit int, now time.Time) ([]d
 	if err != nil {
 		return nil, err
 	}
-	_ = dispatchcache.WriteBacklog(path, key, now, dispatchIssueRows(issues))
+	_ = dispatchcache.WriteBacklog(path, key, now, dispatchIssueRowsFor(root, issues))
 	return issues, nil
 }
 
@@ -852,19 +870,19 @@ func dispatchFetchViewIssuesGH(root, slug string, limit int) ([]dispatchtick.Iss
 	if repo != "" {
 		args = append(args, "--repo", repo)
 	}
-	args = append(args, "--search", query, "--limit", strconv.Itoa(limit), "--json", "number,title,labels,body")
+	args = append(args, "--search", query, "--limit", strconv.Itoa(limit), "--json", "number,title,labels,body,createdAt,updatedAt")
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	cmd.Dir = root
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.CombinedOutput()
-	var issues []dispatchtick.Issue
-	if uerr := json.Unmarshal(out, &issues); uerr != nil {
+	var rows []dispatchIssueSourceRow
+	if uerr := json.Unmarshal(out, &rows); uerr != nil {
 		if err != nil {
 			return nil, fmt.Errorf("gh issue list --search: %w (%s)", err, strings.TrimSpace(string(out)))
 		}
 		return nil, fmt.Errorf("gh issue list --search produced invalid JSON: %w", uerr)
 	}
-	return issues, nil
+	return dispatchIssueSourceRows(rows, root), nil
 }
 
 var dispatchLoadLaneTaxonomy = func(root string) (dispatchtick.LaneTaxonomy, error) {
@@ -959,14 +977,13 @@ func dispatchFetchBacklogDeltaGH(root string, watermark time.Time, limit int) (d
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	search := "updated:>=" + watermark.UTC().Format(time.RFC3339)
-	cmd := exec.CommandContext(ctx, "gh", "issue", "list", "--state", "all", "--search", search, "--limit", strconv.Itoa(limit), "--json", "number,title,labels,body,state,updatedAt")
+	cmd := exec.CommandContext(ctx, "gh", "issue", "list", "--state", "all", "--search", search, "--limit", strconv.Itoa(limit), "--json", "number,title,labels,body,state,createdAt,updatedAt")
 	cmd.Dir = root
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.CombinedOutput()
 	var rows []struct {
-		dispatchtick.Issue
-		State     string    `json:"state"`
-		UpdatedAt time.Time `json:"updatedAt"`
+		dispatchIssueSourceRow
+		State string `json:"state"`
 	}
 	if uerr := json.Unmarshal(out, &rows); uerr != nil {
 		if err != nil {
@@ -979,6 +996,7 @@ func dispatchFetchBacklogDeltaGH(root string, watermark time.Time, limit int) (d
 		if row.UpdatedAt.After(d.Watermark) {
 			d.Watermark = row.UpdatedAt
 		}
+		rememberDispatchIssueProvenance(root, row.dispatchIssueSourceRow)
 		if strings.EqualFold(row.State, "OPEN") {
 			d.Issues = append(d.Issues, row.Issue)
 		} else {
@@ -991,18 +1009,18 @@ func dispatchFetchBacklogDeltaGH(root string, watermark time.Time, limit int) (d
 func dispatchFetchOpenIssues(root string, limit int) ([]dispatchtick.Issue, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "gh", "issue", "list", "--state", "open", "--limit", strconv.Itoa(limit), "--json", "number,title,labels,body")
+	cmd := exec.CommandContext(ctx, "gh", "issue", "list", "--state", "open", "--limit", strconv.Itoa(limit), "--json", "number,title,labels,body,createdAt,updatedAt")
 	cmd.Dir = root
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.CombinedOutput()
-	var issues []dispatchtick.Issue
-	if uerr := json.Unmarshal(out, &issues); uerr != nil {
+	var rows []dispatchIssueSourceRow
+	if uerr := json.Unmarshal(out, &rows); uerr != nil {
 		if err != nil {
 			return nil, fmt.Errorf("gh issue list: %w (%s)", err, strings.TrimSpace(string(out)))
 		}
 		return nil, fmt.Errorf("gh issue list produced invalid JSON: %w", uerr)
 	}
-	return issues, nil
+	return dispatchIssueSourceRows(rows, root), nil
 }
 
 func dispatchRouterError(router dispatchtick.RouterPayload) string {

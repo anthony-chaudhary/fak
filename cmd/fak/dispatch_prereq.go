@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
@@ -114,8 +115,9 @@ func openPrereqBlockedSkipped(router dispatchtick.RouterPayload) []dispatchtick.
 const dispatchPrereqStateSchema = "fak-dispatch-prereq-state/1"
 
 type dispatchPrereqState struct {
-	Schema string              `json:"schema"`
-	Held   map[string][]string `json:"held"`
+	Schema     string              `json:"schema"`
+	Held       map[string][]string `json:"held"`
+	ReadySince map[string]int64    `json:"ready_since,omitempty"`
 }
 
 func dispatchPrereqStatePath(root string) string {
@@ -127,33 +129,49 @@ func dispatchPrereqStatePath(root string) string {
 // gets exactly one newly-unblocked pass: this call writes the current hold set, so the next call
 // no longer sees the transition. State I/O fails open; ordinary routing must never depend on it.
 func reconcilePrereqRelease(root string, payload dispatchtick.RouterPayload) dispatchtick.RouterPayload {
+	return reconcilePrereqReleaseAt(root, payload, time.Now().Unix())
+}
+
+func reconcilePrereqReleaseAt(root string, payload dispatchtick.RouterPayload, nowUnix int64) dispatchtick.RouterPayload {
 	prior := readDispatchPrereqState(dispatchPrereqStatePath(root))
 	open := make(map[string]bool, len(payload.Issues))
 	for _, issue := range payload.Issues {
 		open[strconv.Itoa(issue.Number)] = true
 	}
+	current := currentDispatchPrereqState(payload)
+	current.ReadySince = make(map[string]int64, len(payload.Issues))
 	newly := make([]int, 0)
-	for issueID, blockers := range prior.Held {
-		if !open[issueID] {
+	for _, issue := range payload.Issues {
+		issueID := strconv.Itoa(issue.Number)
+		if _, held := current.Held[issueID]; held {
 			continue
 		}
-		blocked := false
-		for _, blocker := range blockers {
-			if open[blocker] {
-				blocked = true
-				break
+		readySince := prior.ReadySince[issueID]
+		if blockers, wasHeld := prior.Held[issueID]; wasHeld {
+			blocked := false
+			for _, blocker := range blockers {
+				if open[blocker] {
+					blocked = true
+					break
+				}
+			}
+			if !blocked {
+				readySince = nowUnix
+				newly = append(newly, issue.Number)
 			}
 		}
-		if !blocked {
-			if n, err := strconv.Atoi(issueID); err == nil && n > 0 {
-				newly = append(newly, n)
-			}
+		if readySince <= 0 {
+			p := dispatchIssueProvenanceFor(root, issue.Number)
+			readySince = dispatchReadySince(0, p.UpdatedUnix, p.CreatedUnix)
+		}
+		if readySince > 0 {
+			current.ReadySince[issueID] = readySince
 		}
 	}
 	sort.Ints(newly)
 	payload.NewlyUnblocked = newly
-	payload.PrereqHeldCount = len(currentDispatchPrereqState(payload).Held)
-	_ = writeDispatchPrereqState(dispatchPrereqStatePath(root), currentDispatchPrereqState(payload))
+	payload.PrereqHeldCount = len(current.Held)
+	_ = writeDispatchPrereqState(dispatchPrereqStatePath(root), current)
 	return payload
 }
 
@@ -183,10 +201,17 @@ func dispatchPrereqTransitionPending(root string) bool {
 }
 
 func readDispatchPrereqState(path string) dispatchPrereqState {
-	state := dispatchPrereqState{Schema: dispatchPrereqStateSchema, Held: map[string][]string{}}
+	state := dispatchPrereqState{
+		Schema: dispatchPrereqStateSchema, Held: map[string][]string{}, ReadySince: map[string]int64{},
+	}
 	b, err := os.ReadFile(path)
 	if err != nil || json.Unmarshal(b, &state) != nil || state.Schema != dispatchPrereqStateSchema || state.Held == nil {
-		return dispatchPrereqState{Schema: dispatchPrereqStateSchema, Held: map[string][]string{}}
+		return dispatchPrereqState{
+			Schema: dispatchPrereqStateSchema, Held: map[string][]string{}, ReadySince: map[string]int64{},
+		}
+	}
+	if state.ReadySince == nil {
+		state.ReadySince = map[string]int64{}
 	}
 	return state
 }

@@ -64,6 +64,8 @@ type dispatchWaveCandidate struct {
 	Lane         string                    `json:"lane"`
 	LeaseID      string                    `json:"lease_id"`
 	Issue        int                       `json:"issue,omitempty"`
+	BaseWeight   int                       `json:"base_weight"`
+	ReadySince   int64                     `json:"ready_since"`
 	StepBudget   int                       `json:"step_budget,omitempty"`
 	Tree         []string                  `json:"tree,omitempty"`
 	Scoped       bool                      `json:"scoped"`
@@ -405,6 +407,7 @@ func priceDispatchWavePayloadFilteredWithFreshCap(root string, router dispatchti
 	for _, n := range router.NewlyUnblocked {
 		newlyUnblocked[n] = true
 	}
+	readyState := readDispatchPrereqState(dispatchPrereqStatePath(root))
 	// One runs-directory scan feeds every view this pricing pass needs -- held lanes, live
 	// issues, the cooldown set, and the poison-cap skip set -- instead of re-globbing the
 	// sidecars four times (#3593).
@@ -486,6 +489,8 @@ func priceDispatchWavePayloadFilteredWithFreshCap(root string, router dispatchti
 			Lane:       lane,
 			LeaseID:    leaseID,
 			Issue:      route.Number,
+			BaseWeight: priority,
+			ReadySince: dispatchIssueReadySinceStamp(root, readyState, route.Number),
 			StepBudget: stepBudget,
 			Tree:       paths,
 			Scoped:     true,
@@ -520,7 +525,7 @@ func priceDispatchWavePayloadFilteredWithFreshCap(root string, router dispatchti
 		if len(router.Issues) == 0 {
 			nums = append([]int(nil), grp.Issues...)
 		}
-		nums = dispatchWaveOrderLaneIssues(nums, grp.Priority)
+		nums = dispatchWaveOrderLaneIssues(root, nums, grp.Priority, readyState)
 		issue, ok := firstLaunchableIssue(nums, liveIssues, cooled, skipIssues)
 		if !ok {
 			continue
@@ -541,6 +546,8 @@ func priceDispatchWavePayloadFilteredWithFreshCap(root string, router dispatchti
 			Lane:       lane,
 			LeaseID:    leaseID,
 			Issue:      issue,
+			BaseWeight: priority,
+			ReadySince: dispatchIssueReadySinceStamp(root, readyState, issue),
 			StepBudget: stepBudget,
 			Tree:       append([]string(nil), grp.Tree...),
 		}
@@ -713,14 +720,17 @@ func dispatchWaveGoalProfile(profiles []string) string {
 	return dispatchGoalProfileThroughput
 }
 
-func dispatchWaveOrderLaneIssues(nums []int, weights map[int]int) []int {
+func dispatchWaveOrderLaneIssues(root string, nums []int, weights map[int]int, readyState dispatchPrereqState) []int {
 	cands := make([]dispatchtick.LaneCandidate, len(nums))
 	for i, n := range nums {
 		weight := dispatchtick.PriorityWeightDefault
 		if w, ok := weights[n]; ok {
 			weight = w
 		}
-		cands[i] = dispatchtick.LaneCandidate{Number: n, Weight: weight}
+		cands[i] = dispatchtick.LaneCandidate{
+			Number: n, Weight: weight,
+			ReadySince: dispatchIssueReadySinceStamp(root, readyState, n),
+		}
 	}
 	return dispatchtick.OrderLaneCandidates(cands, false)
 }
