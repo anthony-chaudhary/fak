@@ -44,7 +44,9 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 // LOWEST tier whose role it fits. That forced choice is the review gate: it makes adding
 // a leaf a conscious layering decision instead of an accident.
 var tier = map[string]int{
-	"abi": 0,
+
+	"agentquery": 1,
+	"abi":        0,
 
 	"citeverify":      2, // mechanical source-line claim verification; stdlib-only, off the hot path.
 	"genlock":         2, // generated-output input lock verification; stdlib-only, off the hot path.
