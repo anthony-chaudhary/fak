@@ -124,7 +124,11 @@ func TestModelLoadMetricsSuppressedUntilSet(t *testing.T) {
 			{Scope: "host", TotalBytes: 64 << 30, FreeBytes: 48 << 30, Known: true, FreeKnown: true},
 		},
 		MemoryHeadroomRatio: 0.15,
+		Messages:            []StartupMessage{{Source: "model-load", Kind: "load-mode", Level: "info", Text: "resident Q4_K"}},
 	})
+	srv.AddStartupMessages(StartupMessage{Source: "serve", Kind: "route-manifest", Level: "info", Text: "policy loaded"})
+	srv.SetStartupReport("guard ready\nhooks: installed\n")
+	srv.MarkReady()
 
 	got := srv.renderMetrics()
 	for _, want := range []string{
@@ -185,6 +189,18 @@ func TestModelLoadMetricsSuppressedUntilSet(t *testing.T) {
 		vars.ModelLoad.MemoryFit[0].WantBytes != 2_240_000 || vars.ModelLoad.MemoryFit[0].MarginBytes != 7_299_204_403 ||
 		!vars.ModelLoad.MemoryFit[1].FreeKnown {
 		t.Fatalf("debug memory fit = %+v, want device+host fit rows", vars.ModelLoad.MemoryFit)
+	}
+	if len(vars.ModelLoad.LoadPaths) != 2 || vars.ModelLoad.LoadPaths[0].Class != "expert" {
+		t.Fatalf("debug load paths = %+v, want structured resident/dequant rows", vars.ModelLoad.LoadPaths)
+	}
+	if vars.Startup.Status != "ready" || vars.Startup.ModelLoad == nil || vars.Startup.ModelLoad.Mode != "gguf-lean-q8" {
+		t.Fatalf("debug startup = %+v, want ready with nested model-load profile", vars.Startup)
+	}
+	if vars.Startup.StartedAt == "" || vars.Startup.ReadyAt == "" || vars.Startup.TimeToReadySeconds <= 0 {
+		t.Fatalf("debug startup timeline = %+v, want durable timestamps and time-to-ready", vars.Startup)
+	}
+	if len(vars.Startup.Messages) != 3 || vars.Startup.Messages[0].Kind != "route-manifest" || vars.Startup.Messages[1].Kind != "load-mode" || vars.Startup.Messages[2].Kind != "startup-report" {
+		t.Fatalf("debug startup messages = %+v, want serve note, model-load note, and guard report", vars.Startup.Messages)
 	}
 
 	// Bottleneck-first ordering: dequant's phase row precedes header's.

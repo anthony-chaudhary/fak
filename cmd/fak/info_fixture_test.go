@@ -137,7 +137,9 @@ func TestInfoViewByName(t *testing.T) {
 		{"endpoints", viewEndpoints, true}, // internal alias accepted
 		{"cache", viewCache, true},
 		{"safety", viewSafety, true},
-		{"CACHE", viewCache, true}, // case-insensitive
+		{"gateway", viewStartup, true},
+		{"startup", viewStartup, true}, // durable-surface alias accepted
+		{"CACHE", viewCache, true},     // case-insensitive
 		{"  cache  ", viewCache, true},
 		{"bogus", viewOverview, false},
 	}

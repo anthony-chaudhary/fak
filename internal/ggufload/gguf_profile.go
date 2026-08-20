@@ -70,6 +70,18 @@ type LoadProfile struct {
 	// LoadPaths is the per-quant-type resident-vs-dequant breakdown (deterministically
 	// ordered). Empty unless the loader recorded it (the resident-Q4_K GLM path does).
 	LoadPaths []LoadPathStat `json:"load_paths,omitempty"`
+	// Alerts retains the bounded, safety-relevant notices observed while loading. It is
+	// the durable twin of AlertWriter: a serve can show these after readiness without
+	// replaying ordinary percentage progress through the user's terminal.
+	Alerts []LoadAlert `json:"alerts,omitempty"`
+}
+
+// LoadAlert is one safety-relevant condition observed during model startup. Kind and
+// Level are bounded labels for structured consumers; Text is the complete operator note.
+type LoadAlert struct {
+	Kind  string `json:"kind"`
+	Level string `json:"level"`
+	Text  string `json:"text"`
 }
 
 // loadPathKey keys the per-quant-type load-path tally by (GGUF quant type, expert class).
@@ -96,11 +108,17 @@ type LoadProfiler struct {
 	Progress      io.Writer
 	Total         int
 	ProgressEvery float64 // percent step between progress lines (default 5)
-	loadStart     time.Time
-	cumBytes      int64
-	ggufSeen      int // GGUF tensors consumed (advances even for split/merged tensors)
-	lastPct       float64
-	memWarned     bool // the headroom-collapse warning fired (emit once per load)
+	// AlertWriter receives only safety-relevant preflight/warning lines. Production
+	// startup can therefore stay free of percentage churn while retaining the one line
+	// that may explain a pre-ready OOM kill. When nil, alerts fall back to Progress for
+	// compatibility with existing explicit progress consumers.
+	AlertWriter io.Writer
+	loadStart   time.Time
+	cumBytes    int64
+	ggufSeen    int // GGUF tensors consumed (advances even for split/merged tensors)
+	lastPct     float64
+	memWarned   bool // the headroom-collapse warning fired (emit once per load)
+	alerts      []LoadAlert
 
 	// loadPaths tallies the per-quant-type resident-vs-dequant breakdown. Written only by
 	// the serial load collector (one goroutine), so it needs no lock even under the parallel
@@ -169,7 +187,7 @@ func (p *LoadProfiler) Tick(payloadBytes int64) {
 // emitProgress writes a throttled one-line load-progress status to p.Progress.
 // no-op when Progress is unset or Total is unknown.
 func (p *LoadProfiler) emitProgress() {
-	if p == nil || p.Progress == nil || p.Total <= 0 {
+	if p == nil || (p.Progress == nil && p.AlertWriter == nil) || p.Total <= 0 {
 		return
 	}
 	n := p.ggufSeen
@@ -196,9 +214,25 @@ func (p *LoadProfiler) emitProgress() {
 	if n == 1 {
 		p.emitMemPreflight(mem)
 	}
-	fmt.Fprintf(p.Progress, "fak: loading model %.0f%% (%d/%d tensors, %.1f GB, %s elapsed, %.2f GB/s%s)\n",
-		pct, n, p.Total, gb, elapsed.Round(time.Second), rate, memSuffix(mem))
+	if p.Progress != nil {
+		fmt.Fprintf(p.Progress, "fak: loading model %.0f%% (%d/%d tensors, %.1f GB, %s elapsed, %.2f GB/s%s)\n",
+			pct, n, p.Total, gb, elapsed.Round(time.Second), rate, memSuffix(mem))
+	}
 	p.emitMemCliffWarning(mem)
+}
+
+func (p *LoadProfiler) alertWriter() io.Writer {
+	if p.AlertWriter != nil {
+		return p.AlertWriter
+	}
+	return p.Progress
+}
+
+func (p *LoadProfiler) recordAlert(kind, level, text string) {
+	if p == nil || text == "" {
+		return
+	}
+	p.alerts = append(p.alerts, LoadAlert{Kind: kind, Level: level, Text: text})
 }
 
 // emitMemPreflight prints a one-time confinement notice before the first progress line.
@@ -218,8 +252,10 @@ func (p *LoadProfiler) emitMemPreflight(mem compute.HostMemStatus) {
 	if mem.HostAvail > 0 {
 		avail = fmt.Sprintf("%.1f GB", float64(mem.HostAvail)/(1<<30))
 	}
-	fmt.Fprintf(p.Progress, "fak: memory preflight: allocations CONFINED to numa node(s) %s (%s): %s free there now, host MemAvailable %s — if the load outgrows the confined nodes the kernel kills fak silently (dmesg: CONSTRAINT_MEMORY_POLICY)\n",
+	text := fmt.Sprintf("allocations CONFINED to numa node(s) %s (%s): %s free there now, host MemAvailable %s — if the load outgrows the confined nodes the kernel kills fak silently (dmesg: CONSTRAINT_MEMORY_POLICY)",
 		mem.PolicyNodes, mem.PolicyLabel, free, avail)
+	p.recordAlert("memory-preflight", "warning", text)
+	fmt.Fprintln(p.alertWriter(), "fak: memory preflight: "+text)
 }
 
 // emitMemCliffWarning fires once when a confined load's remaining node-local free
@@ -238,8 +274,10 @@ func (p *LoadProfiler) emitMemCliffWarning(mem compute.HostMemStatus) {
 		return
 	}
 	p.memWarned = true
-	fmt.Fprintf(p.Progress, "fak: WARNING: numa-confined memory nearly exhausted: rss %.1f GB, only %.1f GB free on allowed node(s) %s — imminent risk of a silent kernel OOM kill; widen the membind (or set it only when the node's free memory clears the load peak)\n",
+	text := fmt.Sprintf("numa-confined memory nearly exhausted: rss %.1f GB, only %.1f GB free on allowed node(s) %s — imminent risk of a silent kernel OOM kill; widen the membind (or set it only when the node's free memory clears the load peak)",
 		float64(mem.RSS)/(1<<30), float64(mem.PolicyFree)/(1<<30), mem.PolicyNodes)
+	p.recordAlert("memory-cliff", "warning", text)
+	fmt.Fprintln(p.alertWriter(), "fak: WARNING: "+text)
 }
 
 // memSuffix renders the live memory tail of a progress line: resident set always (when
@@ -350,6 +388,7 @@ func (p *LoadProfiler) Snapshot(mode, source string, totalNanos int64) *LoadProf
 	}
 	out.TopTensors = top[:n]
 	out.LoadPaths = p.loadPathRows()
+	out.Alerts = append([]LoadAlert(nil), p.alerts...)
 	return out
 }
 

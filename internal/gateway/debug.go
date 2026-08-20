@@ -37,8 +37,12 @@ type debugVarsResponse struct {
 	VCacheGovQuality *vcacheGovernorQualityVars     `json:"vcache_governor_quality,omitempty"`
 	VCacheWarmth     []vcacheWarmthDemotionRecord   `json:"vcache_warmth_demotions,omitempty"`
 	ModelLoad        *debugModelLoadVars            `json:"model_load,omitempty"`
-	KVMemory         *debugKVMemoryVars             `json:"kv_memory,omitempty"`
-	RequestMemory    *debugRequestMemoryVars        `json:"request_memory,omitempty"`
+	// Startup is the named, structured home for one-shot boot state. It keeps the
+	// timeline, model-load detail, and startup messages queryable after readiness;
+	// legacy model_load/startup_report fields remain during migration.
+	Startup       debugStartupVars        `json:"startup"`
+	KVMemory      *debugKVMemoryVars      `json:"kv_memory,omitempty"`
+	RequestMemory *debugRequestMemoryVars `json:"request_memory,omitempty"`
 	// MoEResidency is what a serve that declared an expert budget paid to keep the top-k
 	// activated experts resident (R6, #5617). Omitted unless some request actually engaged a
 	// routed-expert ring, so its absence means "not engaged" rather than "engaged, cost zero".
@@ -280,6 +284,35 @@ type debugModelLoadVars struct {
 	MemoryCapacities    []debugModelLoadCapacityVars   `json:"memory_capacities,omitempty"`
 	MemoryFit           []debugMemoryFitVars           `json:"memory_fit,omitempty"`
 	MemoryHeadroomRatio float64                        `json:"memory_headroom_ratio,omitempty"`
+	LoadPaths           []debugModelLoadPathVars       `json:"load_paths,omitempty"`
+	Messages            []StartupMessage               `json:"messages,omitempty"`
+}
+
+type debugModelLoadPathVars struct {
+	QuantType       string `json:"quant_type"`
+	Class           string `json:"class"`
+	ResidentTensors int    `json:"resident_tensors"`
+	ResidentBytes   int64  `json:"resident_bytes"`
+	DequantTensors  int    `json:"dequant_tensors"`
+	DequantBytes    int64  `json:"dequant_bytes"`
+}
+
+type debugStartupVars struct {
+	Status             string                  `json:"status"`
+	StartedAt          string                  `json:"started_at,omitempty"`
+	ReadyAt            string                  `json:"ready_at,omitempty"`
+	TimeToReadySeconds float64                 `json:"time_to_ready_seconds"`
+	UnaccountedSeconds float64                 `json:"unaccounted_seconds"`
+	Phases             []debugStartupPhaseVars `json:"phases,omitempty"`
+	Messages           []StartupMessage        `json:"messages,omitempty"`
+	ModelLoad          *debugModelLoadVars     `json:"model_load,omitempty"`
+}
+
+type debugStartupPhaseVars struct {
+	Name       string  `json:"name"`
+	Seconds    float64 `json:"seconds"`
+	Provenance string  `json:"provenance"`
+	Stage      string  `json:"stage"`
 }
 
 type debugModelLoadPhaseVars struct {
@@ -593,6 +626,8 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 
 	upstream := m.debugUpstreamVars()
 	upstream.ProviderExtraBodySet, upstream.ProviderExtraBodyKeys = debugProviderExtraBody(s.planner)
+	modelLoad := debugModelLoadProfile(s.modelLoadProfile())
+	startupReport := s.startupReportText()
 
 	return debugVarsResponse{
 		Gateway: debugGatewayVars{
@@ -638,7 +673,8 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		VCacheGovernor:   m.vcacheGovernorDecisionRecords(),
 		VCacheGovQuality: m.vcacheGovernorQualityVars(),
 		VCacheWarmth:     m.vcacheWarmthDemotionRecords(),
-		ModelLoad:        debugModelLoadProfile(s.modelLoadProfile()),
+		ModelLoad:        modelLoad,
+		Startup:          debugStartupProfile(s.startup.snapshot(), startupReport, modelLoad),
 		KVMemory:         debugKVMemory(s.planner),
 		RequestMemory:    debugRequestMemory(s.planner),
 		MoEResidency:     debugMoEResidency(s.planner),
@@ -649,7 +685,7 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		Adjudication:     s.debugAdjudication(),
 		Harness:          s.debugHarness(),
 		Fleet:            s.debugFleet(),
-		StartupReport:    s.startupReportText(),
+		StartupReport:    startupReport,
 		Watchdog:         debugWatchdogVars(),
 		Metrics: debugMetricsVars{
 			HTTP:       debugHTTPRows(httpRows),
@@ -1109,6 +1145,7 @@ func debugModelLoadProfile(p *ModelLoadProfile) *debugModelLoadVars {
 		Tensors:             p.Tensors,
 		Bottleneck:          p.Bottleneck,
 		MemoryHeadroomRatio: p.MemoryHeadroomRatio,
+		Messages:            append([]StartupMessage(nil), p.Messages...),
 	}
 	for _, ph := range p.sorted() {
 		out.Phases = append(out.Phases, debugModelLoadPhaseVars{
@@ -1118,6 +1155,16 @@ func debugModelLoadProfile(p *ModelLoadProfile) *debugModelLoadVars {
 			Tensors: ph.Tensors,
 		})
 	}
+	for _, path := range p.LoadPaths {
+		out.LoadPaths = append(out.LoadPaths, debugModelLoadPathVars{
+			QuantType:       path.QuantType,
+			Class:           modelLoadPathClass(path.Expert),
+			ResidentTensors: path.ResidentTensors,
+			ResidentBytes:   path.ResidentBytes,
+			DequantTensors:  path.DequantTensors,
+			DequantBytes:    path.DequantBytes,
+		})
+	}
 	for _, row := range p.MemoryPlan {
 		out.MemoryPlan = appendDebugMemoryPlanVar(out.MemoryPlan, row.Class, row.Scope, row.Bytes, row.Detail, row.DType)
 	}
@@ -1125,6 +1172,54 @@ func debugModelLoadProfile(p *ModelLoadProfile) *debugModelLoadVars {
 		out.MemoryCapacities = appendDebugCapacityVar(out.MemoryCapacities, cap.Scope, cap.TotalBytes, cap.FreeBytes, cap.Known, cap.FreeKnown)
 	}
 	out.MemoryFit = debugMemoryFitRows(modelLoadMemoryFitRows(p.MemoryPlan, p.MemoryCapacities, p.MemoryHeadroomRatio))
+	return out
+}
+
+func debugStartupProfile(s startupSnapshot, report string, modelLoad *debugModelLoadVars) debugStartupVars {
+	status := "starting"
+	if !s.ready.IsZero() {
+		status = "ready"
+	}
+	out := debugStartupVars{
+		Status:             status,
+		TimeToReadySeconds: s.timeToReady(),
+		UnaccountedSeconds: s.unaccountedSeconds(),
+		ModelLoad:          modelLoad,
+		Messages:           append([]StartupMessage(nil), s.messages...),
+	}
+	if !s.start.IsZero() {
+		out.StartedAt = s.start.UTC().Format(time.RFC3339Nano)
+	}
+	if !s.ready.IsZero() {
+		out.ReadyAt = s.ready.UTC().Format(time.RFC3339Nano)
+	}
+	for _, ph := range s.phases {
+		provenance := ph.Provenance
+		if provenance == "" {
+			provenance = "measured"
+		}
+		stage := "gateway-boot"
+		if ph.PostReady {
+			stage = "post-ready"
+		}
+		out.Phases = append(out.Phases, debugStartupPhaseVars{
+			Name:       ph.Name,
+			Seconds:    ph.Dur.Seconds(),
+			Provenance: provenance,
+			Stage:      stage,
+		})
+	}
+	if modelLoad != nil {
+		out.Messages = append(out.Messages, modelLoad.Messages...)
+	}
+	if strings.TrimSpace(report) != "" {
+		out.Messages = append(out.Messages, StartupMessage{
+			Source: "guard",
+			Kind:   "startup-report",
+			Level:  "info",
+			Text:   report,
+		})
+	}
 	return out
 }
 

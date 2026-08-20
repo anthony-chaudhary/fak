@@ -460,6 +460,7 @@ func serveKeyPrincipals(specs []string, lookupEnv func(string) string, stderr io
 // server from the resolved planes, and arms the admission controller for a pure
 // in-kernel serve.
 func (rt *serveRuntime) buildGateway(sf *serveFlags) {
+	var startupMessages []gateway.StartupMessage
 	// Resolve the optional model-routing policy. Off by default: an empty --route-manifest
 	// leaves routeMan nil, so gateway.New gets a nil RouteManifest and Engine stays unset —
 	// byte-for-byte the pre-routing behavior. A malformed file fails loud here rather than
@@ -482,7 +483,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 			os.Exit(1)
 		}
 		routeMan = &loaded
-		fmt.Printf("fak: model-routing policy loaded from %s\n", *sf.routeManifest)
+		startupMessages = append(startupMessages, gateway.StartupMessage{Source: "serve", Kind: "route-manifest", Level: "info", Text: "model-routing policy loaded from " + *sf.routeManifest})
 	}
 
 	// Resolve the optional model-ACCOUNT roster (#2528). Off by default: an empty
@@ -508,7 +509,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 			os.Exit(1)
 		}
 		routeRoster = &loaded
-		fmt.Printf("fak: model-account roster loaded from %s\n", *sf.routeAccounts)
+		startupMessages = append(startupMessages, gateway.StartupMessage{Source: "serve", Kind: "route-accounts", Level: "info", Text: "model-account roster loaded from " + *sf.routeAccounts})
 	}
 
 	// Resolve the optional multi-tenant KEYSET (#5332). Off by default: no --key-principal
@@ -649,6 +650,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		StreamProgressTimeout: serveStreamProgressTimeout(*sf.streamProgressTimeout),
 	})
 	must(err)
+	srv.AddStartupMessages(startupMessages...)
 	srv.SetModelLoadProfile(rt.loadProfile)
 	if rt.inKernelModel != nil && rt.inKernelTok != nil && strings.TrimSpace(*sf.baseURL) == "" && len(sf.replicaBaseURLs.Values()) == 0 {
 		srv.SetAdmissionController(gateway.NewAdmissionController(gateway.DefaultAdmissionPolicy()))
@@ -666,7 +668,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 	}
 	if gov != nil {
 		srv.SetSpendGovernor(gov, scopeOf)
-		fmt.Printf("fak: spend cap armed on %d scope budget(s)\n", len(sf.spendCap.Values()))
+		srv.AddStartupMessages(gateway.StartupMessage{Source: "serve", Kind: "spend-cap", Level: "info", Text: fmt.Sprintf("spend cap armed on %d scope budget(s)", len(sf.spendCap.Values()))})
 	}
 	rt.srv = srv
 }
@@ -1008,6 +1010,14 @@ func toGatewayLoadProfile(p *ggufload.LoadProfile) *gateway.ModelLoadProfile {
 			ResidentBytes:   lp.ResidentBytes,
 			DequantTensors:  lp.DequantTensors,
 			DequantBytes:    lp.DequantBytes,
+		})
+	}
+	for _, alert := range p.Alerts {
+		out.Messages = append(out.Messages, gateway.StartupMessage{
+			Source: "model-load",
+			Kind:   alert.Kind,
+			Level:  alert.Level,
+			Text:   alert.Text,
 		})
 	}
 	return out

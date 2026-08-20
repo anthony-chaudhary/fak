@@ -20,7 +20,7 @@ import (
 // the same vars — the fixture is the only thing that changes.
 
 // infoViewByName resolves a --tab word to the infoView it selects, matching the tab labels
-// infoViewName prints (overview/agents/accounts/cache/safety). It returns ok=false for an
+// infoViewName prints (overview/agents/fleet/accounts/cache/safety/gateway). It returns ok=false for an
 // unknown name so the caller can report the valid set rather than silently drawing overview.
 func infoViewByName(name string) (infoView, bool) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
@@ -38,6 +38,8 @@ func infoViewByName(name string) (infoView, bool) {
 		return viewCache, true
 	case "safety":
 		return viewSafety, true
+	case "gateway", "startup":
+		return viewStartup, true
 	default:
 		return viewOverview, false
 	}

@@ -149,6 +149,10 @@ type guardInfoVars struct {
 	// twin of the /metrics-only fak_harness_* family, so the pane can show live what the
 	// exit summary prints. Nil until the host samples a session.
 	Harness *gateway.SessionHarness `json:"harness"`
+	// Startup is the gateway's durable boot surface: named phases, the model-load
+	// profile, and startup notes that no longer flash through the launch terminal.
+	// Nil means an older gateway that predates the structured block.
+	Startup *startupViewSnapshot `json:"startup"`
 	// StartupReport is the full startup report the guard recorded at boot — the banner +
 	// hook/auth notes an attended launch keeps compact (`fak guard --banner=auto`). The
 	// --startup flag prints it verbatim; empty means the gateway recorded none (a fak
@@ -160,6 +164,51 @@ type guardInfoVars struct {
 	// gateway OMITS the block on a cold process that never ran a watchdog (resumemetrics.Active()
 	// is false), so nil means "no watchdog signal here" — distinct from a present all-zero snapshot.
 	Watchdog *guardInfoWatchdog `json:"watchdog"`
+}
+
+type startupViewSnapshot struct {
+	Status             string                   `json:"status"`
+	StartedAt          string                   `json:"started_at"`
+	ReadyAt            string                   `json:"ready_at"`
+	TimeToReadySeconds float64                  `json:"time_to_ready_seconds"`
+	UnaccountedSeconds float64                  `json:"unaccounted_seconds"`
+	Phases             []startupViewPhase       `json:"phases"`
+	Messages           []gateway.StartupMessage `json:"messages"`
+	ModelLoad          *startupViewModelLoad    `json:"model_load"`
+}
+
+type startupViewPhase struct {
+	Name       string  `json:"name"`
+	Seconds    float64 `json:"seconds"`
+	Provenance string  `json:"provenance"`
+	Stage      string  `json:"stage"`
+}
+
+type startupViewModelLoad struct {
+	Source       string                      `json:"source"`
+	Mode         string                      `json:"mode"`
+	TotalSeconds float64                     `json:"total_seconds"`
+	Bytes        int64                       `json:"bytes"`
+	Tensors      int                         `json:"tensors"`
+	Bottleneck   string                      `json:"bottleneck"`
+	Phases       []startupViewModelLoadPhase `json:"phases"`
+	LoadPaths    []startupViewModelLoadPath  `json:"load_paths"`
+}
+
+type startupViewModelLoadPhase struct {
+	Phase   string  `json:"phase"`
+	Seconds float64 `json:"seconds"`
+	Bytes   int64   `json:"bytes"`
+	Tensors int     `json:"tensors"`
+}
+
+type startupViewModelLoadPath struct {
+	QuantType       string `json:"quant_type"`
+	Class           string `json:"class"`
+	ResidentTensors int    `json:"resident_tensors"`
+	ResidentBytes   int64  `json:"resident_bytes"`
+	DequantTensors  int    `json:"dequant_tensors"`
+	DequantBytes    int64  `json:"dequant_bytes"`
 }
 
 // guardInfoWatchdog is the wire shape of the resume/heal watchdog counters the pane renders. It
@@ -370,7 +419,7 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	fromFixture := fs.String("from-fixture", "", "render the overlay OFFLINE from a recorded /debug/vars JSON snapshot (the shape `fak info --json` emits) instead of polling a live gateway — no gateway needed. The deterministic capture path (the twin of `fak console guard --journal`): pairs with --tab and --frame to draw a single static frame for docs/media. See visuals/info-overlay-capture.md.")
 	fleetSelfcheck := fs.Bool("fleet-selfcheck", false, "render the deterministic read-only Fleet workspace proof and exit")
 	receiptFile := fs.String("receipt", "", "render a fak-micro-selfcheck/2 execution receipt read-only in the Info/Fleet row format and exit")
-	tab := fs.String("tab", "cache", "with --from-fixture: which tab to render — overview, agents, fleet, accounts, cache, or safety")
+	tab := fs.String("tab", "cache", "with --from-fixture: which tab to render — overview, agents, fleet, accounts, cache, safety, or gateway")
 	frame := fs.Bool("frame", true, "with --from-fixture: render ONE static frame and exit (no watch loop, no cursor control). The only mode --from-fixture supports today; kept as an explicit flag so a future replay mode can turn it off.")
 	width := fs.Int("width", 0, "with --from-fixture: render at this fixed pane width in cells (0 = the overlay's roomy default). A fixed width makes the captured frame byte-deterministic across terminals.")
 	height := fs.Int("height", 0, "with --from-fixture: render at this fixed pane height in rows (0 = roomy — the body renders in full). A fixed height crops/fits the frame exactly as a live pane of that size would.")

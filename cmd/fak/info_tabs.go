@@ -12,7 +12,7 @@ import (
 // The overview block (info_visual.go / info_panels.go) shows every subsystem at once, degrading
 // each to fit the pane. When an operator wants to DWELL on one subsystem — read every agent row,
 // see every deny reason, inspect each seat — the height-degradation works against them. This
-// layer adds a TAB BAR and per-subsystem focused VIEWS: press 1-5 (or click a tab, or arrow
+// layer adds a TAB BAR and per-subsystem focused VIEWS: press 1-7 (or click a tab, or arrow
 // between them) to swap the body to Overview / Agents / Accounts+Nodes / Cache / Safety, each
 // rendered in full without the overview's shrink. A '?' (or click on the tab bar's glossary
 // toggle) opens a GLOSSARY: a row of clickable term chips over plain-words definitions, so a
@@ -38,6 +38,7 @@ const (
 	viewEndpoints
 	viewCache
 	viewSafety
+	viewStartup
 	numInfoViews // sentinel: the count of real views
 )
 
@@ -63,6 +64,8 @@ func infoViewName(v infoView) string {
 		return "cache"
 	case viewSafety:
 		return "safety"
+	case viewStartup:
+		return "gateway"
 	default:
 		return "view"
 	}

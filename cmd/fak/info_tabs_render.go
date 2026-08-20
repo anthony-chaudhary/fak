@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
@@ -104,6 +105,8 @@ func infoViewFullRows(view infoView, ctx guardInfoPanelCtx) (full []string, pinn
 		return renderInfoCacheView(ctx), 0
 	case viewSafety:
 		return renderInfoSafetyView(ctx.v), 0
+	case viewStartup:
+		return startupViewRows(ctx.v), 0
 	default: // viewOverview
 		return guardInfoRoomyPanelRows(ctx), 1
 	}
@@ -300,6 +303,120 @@ func renderInfoSafetyView(v guardInfoVars) []string {
 		rows = append(rows, " incident: "+incident)
 	}
 	return rows
+}
+
+// startupViewRows is the post-ready home for one-shot startup detail. It
+// renders only the structured /debug/vars.startup block, so a launch can stay quiet
+// without making the load mode, phase profile, warnings, or guard report ephemeral.
+func startupViewRows(v guardInfoVars) []string {
+	s := v.Startup
+	if s == nil {
+		return []string{" gateway startup: not reported (older gateway)"}
+	}
+	status := strings.ToUpper(strings.TrimSpace(s.Status))
+	if status == "" {
+		status = "UNKNOWN"
+	}
+	header := " gateway startup: " + status
+	if s.TimeToReadySeconds > 0 {
+		header += " · ready in " + formatStartupDuration(s.TimeToReadySeconds)
+	}
+	if s.UnaccountedSeconds > 0 {
+		header += " · " + formatStartupDuration(s.UnaccountedSeconds) + " unaccounted"
+	}
+	rows := []string{header}
+	if s.StartedAt != "" || s.ReadyAt != "" {
+		rows = append(rows, fmt.Sprintf(" timeline: started %s · ready %s", formatStartupInstant(s.StartedAt), formatStartupInstant(s.ReadyAt)))
+	}
+	if len(s.Phases) > 0 {
+		rows = append(rows, " phases:")
+		for _, ph := range s.Phases {
+			rows = append(rows, fmt.Sprintf("  %-28s %9s · %s · %s", ph.Name, formatStartupDuration(ph.Seconds), ph.Provenance, ph.Stage))
+		}
+	}
+	if m := s.ModelLoad; m != nil {
+		summary := fmt.Sprintf(" model load: %s · %s", emptyAs(m.Mode, "unknown mode"), formatStartupDuration(m.TotalSeconds))
+		if m.Tensors > 0 {
+			summary += fmt.Sprintf(" · %d tensors", m.Tensors)
+		}
+		if m.Bytes > 0 {
+			summary += " · " + formatStartupBytes(m.Bytes)
+		}
+		if m.Bottleneck != "" {
+			summary += " · bottleneck " + m.Bottleneck
+		}
+		rows = append(rows, summary)
+		if m.Source != "" {
+			rows = append(rows, "  source: "+m.Source)
+		}
+		for _, ph := range m.Phases {
+			detail := fmt.Sprintf("  load phase %-20s %9s", ph.Phase, formatStartupDuration(ph.Seconds))
+			if ph.Tensors > 0 {
+				detail += fmt.Sprintf(" · %d tensors", ph.Tensors)
+			}
+			if ph.Bytes > 0 {
+				detail += " · " + formatStartupBytes(ph.Bytes)
+			}
+			rows = append(rows, detail)
+		}
+		for _, path := range m.LoadPaths {
+			rows = append(rows, fmt.Sprintf("  load path %-8s %-6s resident %d/%s · dequant %d/%s",
+				path.QuantType, path.Class, path.ResidentTensors, formatStartupBytes(path.ResidentBytes), path.DequantTensors, formatStartupBytes(path.DequantBytes)))
+		}
+	}
+	if len(s.Messages) > 0 {
+		rows = append(rows, " startup messages:")
+		for _, message := range s.Messages {
+			label := strings.Trim(strings.Join([]string{message.Level, message.Source, message.Kind}, "/"), "/")
+			lines := strings.Split(strings.TrimSpace(message.Text), "\n")
+			for i, line := range lines {
+				if strings.TrimSpace(line) == "" {
+					continue
+				}
+				if i == 0 {
+					rows = append(rows, "  "+label+": "+line)
+				} else {
+					rows = append(rows, "    "+line)
+				}
+			}
+		}
+	}
+	return rows
+}
+
+func formatStartupDuration(seconds float64) string {
+	if seconds <= 0 {
+		return "0s"
+	}
+	d := time.Duration(seconds * float64(time.Second))
+	if d < time.Millisecond {
+		return d.Round(time.Microsecond).String()
+	}
+	return d.Round(time.Millisecond).String()
+}
+
+func formatStartupInstant(raw string) string {
+	if raw == "" {
+		return "pending"
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return parsed.Local().Format("15:04:05.000")
+	}
+	return raw
+}
+
+func formatStartupBytes(bytes int64) string {
+	if bytes <= 0 {
+		return "0 B"
+	}
+	return guardInfoBytesText(uint64(bytes))
+}
+
+func emptyAs(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 // reasonCount is one (reason code, count) pair for the safety view's full breakdown.

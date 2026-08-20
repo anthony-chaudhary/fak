@@ -46,6 +46,9 @@ type startupProfile struct {
 	// report is the host's full human-readable startup report — see SetStartupReport
 	// (startup_report.go) for the contract and the `fak info --startup` reader.
 	report string
+	// messages is the durable, typed home for ordinary startup notes that should
+	// remain inspectable after readiness without being streamed through the TTY.
+	messages []StartupMessage
 }
 
 func newStartupProfile(start time.Time) *startupProfile {
@@ -115,9 +118,10 @@ func (p *startupProfile) markReady(now time.Time) {
 }
 
 type startupSnapshot struct {
-	start  time.Time
-	ready  time.Time
-	phases []StartupPhase
+	start    time.Time
+	ready    time.Time
+	phases   []StartupPhase
+	messages []StartupMessage
 }
 
 func (p *startupProfile) snapshot() startupSnapshot {
@@ -127,9 +131,10 @@ func (p *startupProfile) snapshot() startupSnapshot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return startupSnapshot{
-		start:  p.start,
-		ready:  p.ready,
-		phases: append([]StartupPhase(nil), p.phases...),
+		start:    p.start,
+		ready:    p.ready,
+		phases:   append([]StartupPhase(nil), p.phases...),
+		messages: append([]StartupMessage(nil), p.messages...),
 	}
 }
 
@@ -142,6 +147,46 @@ func (s startupSnapshot) timeToReady() float64 {
 		return time.Nanosecond.Seconds()
 	}
 	return s.ready.Sub(s.start).Seconds()
+}
+
+func (s startupSnapshot) unaccountedSeconds() float64 {
+	var phaseTotal float64
+	for _, ph := range s.phases {
+		if !ph.PostReady {
+			phaseTotal += ph.Dur.Seconds()
+		}
+	}
+	unaccounted := s.timeToReady() - phaseTotal
+	if unaccounted < 0 {
+		return 0
+	}
+	return unaccounted
+}
+
+// StartupMessage is one durable operator-facing startup note. Routine startup
+// detail belongs here rather than in the launch terminal; warning-level notes may
+// also be emitted before readiness when they explain a possible process death.
+type StartupMessage struct {
+	Source string `json:"source"`
+	Kind   string `json:"kind"`
+	Level  string `json:"level"`
+	Text   string `json:"text"`
+}
+
+// AddStartupMessages retains typed startup notes for /debug/vars.startup and its
+// operator surfaces. Empty notes are discarded so callers can append conditionally.
+func (s *Server) AddStartupMessages(messages ...StartupMessage) {
+	if s == nil || s.startup == nil {
+		return
+	}
+	s.startup.mu.Lock()
+	defer s.startup.mu.Unlock()
+	for _, message := range messages {
+		if strings.TrimSpace(message.Text) == "" {
+			continue
+		}
+		s.startup.messages = append(s.startup.messages, message)
+	}
 }
 
 // ModelLoadPhase is one aggregate phase of weight loading, surfaced from the GGUF
@@ -206,6 +251,7 @@ type ModelLoadProfile struct {
 	MemoryPlan          []ModelLoadMemoryDemand
 	MemoryCapacities    []ModelLoadMemoryCapacity
 	MemoryHeadroomRatio float64
+	Messages            []StartupMessage
 }
 
 func (p *ModelLoadProfile) clone() *ModelLoadProfile {
@@ -217,6 +263,7 @@ func (p *ModelLoadProfile) clone() *ModelLoadProfile {
 	out.LoadPaths = append([]ModelLoadPath(nil), p.LoadPaths...)
 	out.MemoryPlan = append([]ModelLoadMemoryDemand(nil), p.MemoryPlan...)
 	out.MemoryCapacities = append([]ModelLoadMemoryCapacity(nil), p.MemoryCapacities...)
+	out.Messages = append([]StartupMessage(nil), p.Messages...)
 	return &out
 }
 
@@ -377,7 +424,6 @@ func (s *Server) writeStartupMetrics(b *strings.Builder) {
 	provenance := map[string]string{}
 	stage := map[string]string{}
 	order := make([]string, 0, len(snap.phases))
-	var phaseTotal float64
 	for _, ph := range snap.phases {
 		if _, seen := sums[ph.Name]; !seen {
 			order = append(order, ph.Name)
@@ -396,11 +442,6 @@ func (s *Server) writeStartupMetrics(b *strings.Builder) {
 	}
 	for _, name := range order {
 		v := sums[name]
-		for _, ph := range snap.phases {
-			if ph.Name == name && !ph.PostReady {
-				phaseTotal += ph.Dur.Seconds()
-			}
-		}
 		fmt.Fprintf(b, "fak_gateway_startup_phase_duration_seconds{phase=\"%s\"} %s\n", promQuote(name), promFloat(v))
 	}
 	writeHelpType(b, "fak_gateway_startup_phase_info", "Startup phase provenance: measured is directly timed by fak; observed is an external boundary visible to fak.", "gauge")
@@ -415,11 +456,7 @@ func (s *Server) writeStartupMetrics(b *strings.Builder) {
 	// phase is missing or host-side work ran between New and MarkReady that no
 	// phase records. 0 (like time_to_ready) until the boot completes.
 	writeHelpType(b, "fak_gateway_startup_unaccounted_seconds", "Boot wall-clock not explained by any named startup phase (time_to_ready minus the sum of phase durations). Near-zero means startup is fully instrumented.", "gauge")
-	unaccounted := snap.timeToReady() - phaseTotal
-	if unaccounted < 0 {
-		unaccounted = 0
-	}
-	fmt.Fprintf(b, "fak_gateway_startup_unaccounted_seconds %s\n", promFloat(unaccounted))
+	fmt.Fprintf(b, "fak_gateway_startup_unaccounted_seconds %s\n", promFloat(snap.unaccountedSeconds()))
 }
 
 // writeModelLoadMetrics renders the boot-time weight-load breakdown when the host

@@ -58,3 +58,35 @@ func TestLoadProgressNilSafe(t *testing.T) {
 		t.Fatalf("cumBytes = %d, want 10", p.cumBytes)
 	}
 }
+
+// TestLoadAlertsDoNotReenablePercentageProgress is the startup-screen witness: a
+// production-style profiler may keep the safety-alert channel armed while ordinary
+// percentage updates remain byte-silent. The alert is retained in the final profile.
+func TestLoadAlertsDoNotReenablePercentageProgress(t *testing.T) {
+	const gib = int64(1) << 30
+	pinHostMemStatus(t, compute.HostMemStatus{
+		Constrained: true,
+		PolicyNodes: "1",
+		PolicyLabel: "membind",
+		PolicyFree:  32 * gib,
+		HostAvail:   64 * gib,
+	})
+	var screen bytes.Buffer
+	p := NewLoadProfiler()
+	p.AlertWriter = &screen
+	p.SetTotal(2)
+	p.Tick(gib)
+	p.Tick(gib)
+
+	got := screen.String()
+	if strings.Contains(got, "loading model") || strings.Contains(got, "% (") {
+		t.Fatalf("alerts-only startup flashed percentage progress:\n%s", got)
+	}
+	if !strings.Contains(got, "memory preflight") {
+		t.Fatalf("alerts-only startup lost the safety notice:\n%s", got)
+	}
+	profile := p.Snapshot("test", "fixture.gguf", 1)
+	if len(profile.Alerts) != 1 || profile.Alerts[0].Kind != "memory-preflight" {
+		t.Fatalf("durable alerts = %+v, want one memory-preflight", profile.Alerts)
+	}
+}

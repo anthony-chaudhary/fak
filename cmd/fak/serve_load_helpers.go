@@ -20,6 +20,24 @@ func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
 	}
 	return []ggufload.Q4KLoadOption{ggufload.WithDenseKQuantResident(false)}
 }
+
+func serveStartupMessage(kind, level, text string) gateway.StartupMessage {
+	return gateway.StartupMessage{Source: "model-load", Kind: kind, Level: level, Text: text}
+}
+
+func withServeStartupMessages(p *gateway.ModelLoadProfile, messages ...gateway.StartupMessage) *gateway.ModelLoadProfile {
+	if p != nil {
+		p.Messages = append(p.Messages, messages...)
+	}
+	return p
+}
+
+func newServeLoadProfiler() *ggufload.LoadProfiler {
+	p := ggufload.NewLoadProfiler()
+	p.AlertWriter = os.Stderr
+	return p
+}
+
 func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloadExperts bool, contextBudgetTokens int, expertShard *ggufload.ExpertShard, expertRanks int) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
 	if modelPath == "" {
 		return nil, false, nil, gateway.StartupPhase{}
@@ -31,10 +49,20 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 			fmt.Fprintln(os.Stderr, "fak serve: safetensors load:", err)
 			must(err)
 		}
-		fmt.Fprintf(os.Stderr, "fak serve: SAFETENSORS_LOAD_OK model_type=%s layers=%d hidden=%d %s\n", m.Cfg.ModelType, m.Cfg.NumLayers, m.Cfg.HiddenSize, fakmodel.FormatResidentReport(m.ResidentReport()))
-		return m, false, nil, gateway.StartupPhase{Name: "model-load", Dur: time.Since(tLoad)}
+		loadDur := time.Since(tLoad)
+		profile := &gateway.ModelLoadProfile{
+			Source:       modelPath,
+			Mode:         "safetensors",
+			TotalSeconds: loadDur.Seconds(),
+			Bottleneck:   "safetensors-load",
+			Phases:       []gateway.ModelLoadPhase{{Phase: "safetensors-load", Seconds: loadDur.Seconds()}},
+			Messages: []gateway.StartupMessage{serveStartupMessage("load-complete", "info",
+				fmt.Sprintf("model_type=%s layers=%d hidden=%d %s", m.Cfg.ModelType, m.Cfg.NumLayers, m.Cfg.HiddenSize, fakmodel.FormatResidentReport(m.ResidentReport())))},
+		}
+		return m, false, profile, gateway.StartupPhase{Name: "model-load", Dur: loadDur}
 	}
 	ggufPath := modelPath
+	var loadMessages []gateway.StartupMessage
 	// A sharded expert-parallel rank (expertShard != nil) admits ONLY its routed-expert band into
 	// the resident store — the residency that fits GLM-5.2 across the fleet (#971). It rides ONLY
 	// the resident-Q4_K arms (cpu-offload, device FAK_Q4K, pure-CPU FAK_Q4K): those carry the
@@ -63,14 +91,14 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 	// (minutes). Probed once here so it covers every serve arm (device + CPU); fail-open, so a
 	// local or unclassifiable weights path prints nothing and loads exactly as before.
 	if w := compute.WarnSlowLoadPath(compute.ProbeLoadPath(ggufPath)); w != "" {
-		fmt.Fprintln(os.Stderr, "fak: "+w)
+		loadMessages = append(loadMessages, serveStartupMessage("slow-load-path", "warning", w))
 	}
 	switch {
 	case backend != nil && cpuOffloadExperts:
 		if !backend.Caps().UploadDtype {
 			must(fmt.Errorf("fak serve: --cpu-offload-experts requires backend %q to advertise quantized UploadDtype (Q8_0 upload); use a quantized-upload backend or omit --cpu-offload-experts", backend.Name()))
 		}
-		fmt.Printf("fak: GGUF device load -> direct-resident Q4_K on backend %q (raw super-blocks copied to VRAM/host, dequant FUSED into the GEMM tile, NO f32/Q8 round-trip; experts host-resident)\n", backend.Name())
+		loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", fmt.Sprintf("GGUF device load -> direct-resident Q4_K on backend %q (raw super-blocks copied to VRAM/host, dequant fused into the GEMM tile, no f32/Q8 round-trip; experts host-resident)", backend.Name())))
 		// Device backend + CPU expert-offload: the DIRECT-RESIDENT-Q4_K path. Q4_K matmul weights
 		// are copied to VRAM (dense) / host RAM (experts) as raw super-blocks and served with the
 		// dequant-fused k_q4k_gemm tile (#485) — skipping the lean path's Q4_K->f32->Q8 round-trip
@@ -92,7 +120,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		// pool against the box's real MemAvailable so a load that would OOM-kill the host (or a second
 		// concurrent large load on a contended box) refuses cleanly here instead of wedging the box.
 		must(compute.RefuseHostScopedPlanIfTooBigForHost(memPlan, serveGGUFHostHeadroom))
-		return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend, q4kOpts...)
+		return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend, loadMessages, q4kOpts...)
 	case backend != nil && os.Getenv("FAK_Q4K") != "" && backend.Caps().UploadDtype:
 		// Standard-arch device serve with FAK_Q4K: hold raw Q4_K matmul tensors RESIDENT on the
 		// device (dequant fused into the GEMM tile, no Q4_K->f32->Q8 round-trip), instead of the
@@ -103,7 +131,7 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		// non-offload device plan (EstimateLoadMemoryPlan, quant-aware), same helper the Q8 arm
 		// uses; only the loader differs. A backend without UploadDtype falls through to the Q8/
 		// f32 arms unchanged (the device Q4_K GEMM needs the quantized-upload seam).
-		fmt.Printf("fak: GGUF device load -> resident Q4_K on backend %q (raw super-blocks, dequant-fused GEMM, ~0.56 B/param vs Q8 ~1 B/param)\n", backend.Name())
+		loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", fmt.Sprintf("GGUF device load -> resident Q4_K on backend %q (raw super-blocks, dequant-fused GEMM, ~0.56 B/param vs Q8 ~1 B/param)", backend.Name())))
 		var memPlan compute.MemoryPlan
 		var err error
 		if residentRanks > 1 {
@@ -112,40 +140,40 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 			memPlan, err = fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens)
 		}
 		must(err)
-		return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend, q4kOpts...)
+		return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend, loadMessages, q4kOpts...)
 	case backend != nil:
 		if backend.Caps().UploadDtype {
 			// A device backend that can consume Q8_0 uploads should not be forced through
 			// the f32 resident path. The served planner runs Session.Quant=true, so this
 			// is the memory-lean representation it will actually execute.
-			fmt.Printf("fak: GGUF device load -> mixed precision on backend %q (Q8 resident weights, f32 activations/KV)\n", backend.Name())
+			loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", fmt.Sprintf("GGUF device load -> mixed precision on backend %q (Q8 resident weights, f32 activations/KV)", backend.Name())))
 			memPlan, err := fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens)
 			must(err)
-			prof := ggufload.NewLoadProfiler()
+			prof := newServeLoadProfiler()
 			mm, err := ggufload.LoadModelQuantProfile(ggufPath, prof)
 			must(err)
 			modelengine.Preload(mm)
 			loadNanos := time.Since(tLoad).Nanoseconds()
-			profile := withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-lean-q8-device", ggufPath, loadNanos)), memPlan, backend)
+			profile := withServeStartupMessages(withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-lean-q8-device", ggufPath, loadNanos)), memPlan, backend), loadMessages...)
 			return mm, false, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 		}
 		// Backends without quantized upload still need f32-resident weights; a lean-Q8
 		// model would drop the f32 matmul weights they fall back to.
-		fmt.Printf("fak: GGUF device load -> f32 resident weights on backend %q (backend has no quantized UploadDtype)\n", backend.Name())
+		loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", fmt.Sprintf("GGUF device load -> f32 resident weights on backend %q (backend has no quantized UploadDtype)", backend.Name())))
 		memPlan, err := fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, true, contextBudgetTokens)
 		must(err)
 		mm, err := ggufload.LoadModel(ggufPath)
 		must(err)
 		modelengine.Preload(mm)
 		loadNanos := time.Since(tLoad).Nanoseconds()
-		profile := withServeGGUFMemoryProfile(toGatewayLoadProfile(&ggufload.LoadProfile{
+		profile := withServeStartupMessages(withServeGGUFMemoryProfile(toGatewayLoadProfile(&ggufload.LoadProfile{
 			Mode:       "gguf-f32-device",
 			Source:     ggufPath,
 			TotalNanos: loadNanos,
 			TotalMS:    float64(loadNanos) / 1e6,
 			Phases:     []ggufload.LoadPhaseStat{{Phase: "f32-load", Calls: 1, Nanos: loadNanos, MS: float64(loadNanos) / 1e6, TimePct: 100}},
 			Bottleneck: "f32-load",
-		}), memPlan, backend)
+		}), memPlan, backend), loadMessages...)
 		return mm, false, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 	case os.Getenv("FAK_Q4K") != "":
 		// CPU-path memory-fit pre-flight (#974): refuse cleanly with a typed FitTooBig BEFORE the
@@ -163,33 +191,30 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		// the device cpu-offload case) so both the streamed summary and the gateway /metrics
 		// profile carry the resident-vs-dequant breakdown — the witness #975 needs.
 		mm, prof, loadNanos := loadResidentQ4KProfiled(ggufPath, tLoad, q4kOpts...)
-		profile := toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k", ggufPath, loadNanos))
+		loadMessages = append(loadMessages, serveStartupMessage("resident-layout", "info", fakmodel.FormatResidentReport(mm.ResidentReport())))
+		profile := withServeStartupMessages(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k", ggufPath, loadNanos)), loadMessages...)
 		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 	default:
 		// CPU-path memory-fit pre-flight (#974): same clean FitTooBig refusal as the FAK_Q4K arm
 		// above, so the default lean CPU serve cannot OOM-wedge the host either.
 		must(fitServeGGUFPathOnHost(ggufPath, false, contextBudgetTokens))
-		prof := ggufload.NewLoadProfiler()
-		prof.Progress = os.Stderr // stream load % to stderr so a large multi-minute load is not silent
+		prof := newServeLoadProfiler()
 		mm, err := ggufload.LoadModelQuantProfile(ggufPath, prof)
 		must(err)
 		modelengine.Preload(mm)
 		loadNanos := time.Since(tLoad).Nanoseconds()
-		profile := toGatewayLoadProfile(prof.Snapshot("gguf-lean-q8", ggufPath, loadNanos))
+		profile := withServeStartupMessages(toGatewayLoadProfile(prof.Snapshot("gguf-lean-q8", ggufPath, loadNanos)), loadMessages...)
 		return mm, false, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 	}
 }
 
 // loadResidentQ4KProfiled runs the profiled raw-Q4_K resident load shared by the three Q4_K
-// serve arms (device cpu-offload, device-resident, pure-CPU): it streams load % to stderr,
-// loads + preloads the resident super-blocks, prints the post-load resident split (so a glance
-// confirms the mixed-quant expert bulk loaded resident, the slow f32 round-trip avoided), and
-// returns the model, the profiler (the caller folds prof.Snapshot into its own profile), and
-// the elapsed load nanos.
+// serve arms (device cpu-offload, device-resident, pure-CPU). It keeps ordinary progress
+// off the launch terminal, preserves safety alerts before readiness, and returns the model,
+// profiler, and elapsed load nanos for the gateway's durable startup surface.
 
 func loadResidentQ4KProfiled(ggufPath string, tLoad time.Time, opts ...ggufload.Q4KLoadOption) (*fakmodel.Model, *ggufload.LoadProfiler, int64) {
-	prof := ggufload.NewLoadProfiler()
-	prof.Progress = os.Stderr // stream load % to stderr so a large multi-minute load is not silent
+	prof := newServeLoadProfiler()
 	// opts carries the per-rank expert shard (ggufload.WithExpertShard) for a sharded expert-
 	// parallel serve: this process admits ONLY its band's routed experts into the resident store,
 	// so its footprint is the replicated remainder + one band (≈ model/ranks), not the full model.
@@ -203,18 +228,18 @@ func loadResidentQ4KProfiled(ggufPath string, tLoad time.Time, opts ...ggufload.
 	}
 	must(err)
 	modelengine.PreloadQ4K(mm)
-	fmt.Fprintln(os.Stderr, "fak: "+fakmodel.FormatResidentReport(mm.ResidentReport()))
 	loadNanos := time.Since(tLoad).Nanoseconds()
 	return mm, prof, loadNanos
 }
 
 // loadResidentQ4KDevice is the device Q4_K arm's shared tail: it runs the profiled resident
-// load and folds the host/device memory plan into the streamed profile. The cpu-offload and
+// load and folds the host/device memory plan into the retained profile. The cpu-offload and
 // device-resident arms differ only in how memPlan is derived upstream. opts threads the per-rank
 // expert shard (see loadResidentQ4KProfiled).
-func loadResidentQ4KDevice(ggufPath string, tLoad time.Time, memPlan compute.MemoryPlan, backend compute.Backend, opts ...ggufload.Q4KLoadOption) (*fakmodel.Model, bool, *gateway.ModelLoadProfile, gateway.StartupPhase) {
+func loadResidentQ4KDevice(ggufPath string, tLoad time.Time, memPlan compute.MemoryPlan, backend compute.Backend, messages []gateway.StartupMessage, opts ...ggufload.Q4KLoadOption) (*fakmodel.Model, bool, *gateway.ModelLoadProfile, gateway.StartupPhase) {
 	mm, prof, loadNanos := loadResidentQ4KProfiled(ggufPath, tLoad, opts...)
-	profile := withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k-device", ggufPath, loadNanos)), memPlan, backend)
+	messages = append(messages, serveStartupMessage("resident-layout", "info", fakmodel.FormatResidentReport(mm.ResidentReport())))
+	profile := withServeStartupMessages(withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k-device", ggufPath, loadNanos)), memPlan, backend), messages...)
 	return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 }
 
