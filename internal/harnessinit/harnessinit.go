@@ -22,10 +22,12 @@ const (
 var modulePattern = regexp.MustCompile(`^[A-Za-z0-9._~/-]+$`)
 
 type Options struct {
-	Dir        string
-	Module     string
-	FAKVersion string
-	Host       string
+	Dir          string
+	Module       string
+	FAKVersion   string
+	Host         string
+	HostManifest string
+	HostLock     string
 }
 
 type Result struct {
@@ -73,7 +75,7 @@ func Init(opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	files, err := render(opts.Module, opts.FAKVersion, opts.Host)
+	files, err := render(opts.Module, opts.FAKVersion, opts.Host, opts.HostManifest, opts.HostLock)
 	if err != nil {
 		return Result{}, err
 	}
@@ -139,8 +141,8 @@ func writeAtomic(path string, body []byte) error {
 	return nil
 }
 
-func render(module, version, host string) ([]fileSpec, error) {
-	hostOutput, err := hostArtifactsFor(host)
+func render(module, version, host, hostManifest, hostLock string) ([]fileSpec, error) {
+	hostOutput, err := normalizeHostArtifacts(host, hostManifest, hostLock)
 	if err != nil {
 		return nil, err
 	}

@@ -10,8 +10,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/harnesshost"
 	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
+
+func hostOptions(t *testing.T, dir, module, host string) Options {
+	t.Helper()
+	artifacts, err := harnesshost.Build(host, ContractVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Options{
+		Dir: dir, Module: module, Host: artifacts.Host,
+		HostManifest: artifacts.Manifest, HostLock: artifacts.Lock,
+	}
+}
 
 func TestInitCreatesIdempotentPublicProductAndPreservesUserFiles(t *testing.T) {
 	root := t.TempDir()
@@ -243,7 +256,8 @@ func TestInitVersionedHostsRoundTripThroughProductLock(t *testing.T) {
 	for _, host := range []string{"codex", "claude"} {
 		t.Run(host, func(t *testing.T) {
 			root := t.TempDir()
-			result, err := Init(Options{Dir: root, Module: "example.test/" + host, Host: host})
+			opts := hostOptions(t, root, "example.test/"+host, host)
+			result, err := Init(opts)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -313,7 +327,7 @@ func TestInitVersionedHostsRoundTripThroughProductLock(t *testing.T) {
 				}
 			}
 
-			second, err := Init(Options{Dir: root, Module: "example.test/" + host, Host: host})
+			second, err := Init(opts)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -342,7 +356,7 @@ func TestInitHostRefusesUnownedProductManifest(t *testing.T) {
 	if err := os.WriteFile(path, want, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Init(Options{Dir: root, Module: "example.test/codex", Host: "codex"})
+	_, err := Init(hostOptions(t, root, "example.test/codex", "codex"))
 	if err == nil || !strings.Contains(err.Error(), "refusing to overwrite user-owned") {
 		t.Fatalf("err=%v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/anthony-chaudhary/fak/internal/harnesshost"
 	"github.com/anthony-chaudhary/fak/internal/harnessinit"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
@@ -73,7 +74,15 @@ func runHarness(stdout, stderr io.Writer, argv []string) int {
 	if err := fs.Parse(argv[1:]); err != nil {
 		return 2
 	}
-	result, err := harnessinit.Init(harnessinit.Options{Dir: pathutil.ExpandTilde(*dir), Module: *module, FAKVersion: *version, Host: *host})
+	hostArtifacts, err := harnesshost.Build(*host, harnessinit.ContractVersion)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak harness init: %v\n", err)
+		return 1
+	}
+	result, err := harnessinit.Init(harnessinit.Options{
+		Dir: pathutil.ExpandTilde(*dir), Module: *module, FAKVersion: *version,
+		Host: hostArtifacts.Host, HostManifest: hostArtifacts.Manifest, HostLock: hostArtifacts.Lock,
+	})
 	if err != nil {
 		fmt.Fprintf(stderr, "fak harness init: %v\n", err)
 		return 1
