@@ -1,4 +1,4 @@
-# OTLP trace export dependency decision — 2026-08-19
+# OTLP trace export dependency decision â€” 2026-08-19
 
 ## Verdict
 

@@ -3,6 +3,7 @@ package devindex
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestPreStateZeroIsUnverified(t *testing.T) {
@@ -50,5 +51,30 @@ func TestReasonLexiconRejectsOrdinaryWords(t *testing.T) {
 	joined := strings.Join(got, ",")
 	if joined != "LOCK_BUSY,OFF_TRUNK" {
 		t.Fatalf("codes=%q", joined)
+	}
+}
+
+func TestFirstSentenceTruncatesAtRuneBoundary(t *testing.T) {
+	input := strings.Repeat("a", 199) + "é" + strings.Repeat("b", 10)
+	got := vsFirstSentence(input)
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncated synopsis is not valid UTF-8: %q", got)
+	}
+	want := strings.Repeat("a", 199) + "…"
+	if got != want {
+		t.Fatalf("truncated synopsis = %q, want %q", got, want)
+	}
+}
+
+func TestVerbSurfaceMarkdownHasNoTrailingWhitespace(t *testing.T) {
+	rendered := string((&VerbSurface{Files: 1}).Markdown())
+	wantCounts := "parsed files: 1<br>\nrows: 0<br>\nunverified rows: 0 / 0<br>\nsource-only rows absent from help: 0\n"
+	if !strings.Contains(rendered, wantCounts) {
+		t.Fatalf("count block lost its rendered line breaks:\n%s", rendered)
+	}
+	for lineNumber, line := range strings.Split(rendered, "\n") {
+		if strings.HasSuffix(line, " ") {
+			t.Fatalf("line %d has trailing whitespace: %q", lineNumber+1, line)
+		}
 	}
 }

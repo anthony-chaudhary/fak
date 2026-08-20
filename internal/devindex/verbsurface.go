@@ -33,6 +33,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // vsCmdDir is the package the surface is derived from. It is a constant rather than a
@@ -998,7 +999,11 @@ func vsFirstSentence(s string) string {
 		break
 	}
 	if len(s) > 200 {
-		s = strings.TrimSpace(s[:200]) + "…"
+		cut := 200
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = strings.TrimSpace(s[:cut]) + "…"
 	}
 	return vsEscapeCell(s)
 }
@@ -1027,7 +1032,7 @@ func (s *VerbSurface) Markdown() []byte {
 			missingHelp++
 		}
 	}
-	fmt.Fprintf(&b, "parsed files: %d  \nrows: %d  \nunverified rows: %d / %d  \nsource-only rows absent from help: %d\n\n", s.Files, len(s.Leaves), unverified, len(s.Leaves), missingHelp)
+	fmt.Fprintf(&b, "parsed files: %d<br>\nrows: %d<br>\nunverified rows: %d / %d<br>\nsource-only rows absent from help: %d\n\n", s.Files, len(s.Leaves), unverified, len(s.Leaves), missingHelp)
 	b.WriteString("| VERB | PURPOSE | IMPLEMENTS | DOC | PRECONDITION | REFUSES | HELP |\n")
 	b.WriteString("|---|---|---|---|---|---|---|\n")
 	for _, l := range s.Leaves {

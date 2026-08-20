@@ -2,10 +2,10 @@
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 963  
-rows: 1037  
-unverified rows: 0 / 1037  
-source-only rows absent from help: 806
+parsed files: 983<br>
+rows: 1063<br>
+unverified rows: 0 / 1063<br>
+source-only rows absent from help: 828
 
 | VERB | PURPOSE | IMPLEMENTS | DOC | PRECONDITION | REFUSES | HELP |
 |---|---|---|---|---|---|---|
@@ -268,6 +268,7 @@ source-only rows absent from help: 806
 | `fak dispatch tick` |  | runDispatchTick / internal/abi, internal/accounts, internal/branchrole, internal/committedbuildwitness, internal/dispatchaudit, internal/dispatchcache, internal/dispatchorder, internal/dispatchtick, internal/fleetaccounts, internal/fleetcap, internal/focusscore, internal/issuefanout, internal/leasequeue, internal/leaseref, internal/loopmgr, internal/microagent, internal/modelaccept, internal/modelroute, internal/regionadmit, internal/selfinstall, internal/stallscan, internal/toolprocgate, internal/trajctl, internal/workerworktree, internal/worktype | `case` arm of the dispatch switch in runDispatch() | STRUCTURAL | `CODEX_LOOP_GATE_REFUSED`, `ENROLL_FAILED`, `FAK_HTTP_WRITE_TIMEOUT_S`, `FAK_PLANNER_TIMEOUT_S`, `LANE_BUSY`, `PROVIDER_REACHABILITY_REFUSED`, `SPAWN_BROKER_DENIED`, `SPAWN_FAILED`, `WORKTREE_OWNER_HANDOFF_FAILED` | **SOURCE ONLY** |
 | `fak dispatch tier-status` | testable core of `fak dispatch tier-status`: it reads the issue rows (or an embedded demo), folds them through BuildTierStatusReport, and renders the readout or its JSON | runDispatchTierStatus / internal/dispatchtick | `case` arm of the dispatch switch in runDispatch() | NONE | — | **SOURCE ONLY** |
 | `fak dispatch timeout-ledger` |  | runDispatchTimeoutLedger / internal/timeoutphase | `case` arm of the dispatch switch in runDispatch() | NONE | — | **SOURCE ONLY** |
+| `fak dispatch trajectory-audit` |  | runDispatchTrajectoryAudit | `case` arm of the dispatch switch in runDispatch() | NONE | — | **SOURCE ONLY** |
 | `fak dispatch unwitnessed-claim` |  | runDispatchUnwitnessedClaim / internal/ghexec, internal/unwitnessedclaim | `case` arm of the dispatch switch in runDispatch() | NONE | — | **SOURCE ONLY** |
 | `fak dispatch wave` |  | runDispatchWave / internal/abi, internal/accounts, internal/branchrole, internal/committedbuildwitness, internal/dispatchaudit, internal/dispatchcache, internal/dispatchorder, internal/dispatchtick, internal/fleetaccounts, internal/fleetcap, internal/focusscore, internal/issuefanout, internal/leasequeue, internal/leaseref, internal/loopmgr, internal/microagent, internal/modelaccept, internal/modelroute, internal/regionadmit, internal/selfinstall, internal/stallscan, internal/toolprocgate, internal/trajctl, internal/workerworktree, internal/worktype | `case` arm of the dispatch switch in runDispatch() | STRUCTURAL | `CODEX_LOOP_GATE_REFUSED`, `ENROLL_FAILED`, `FAK_HTTP_WRITE_TIMEOUT_S`, `FAK_PLANNER_TIMEOUT_S`, `HOLD_ERROR`, `LANE_BUSY`, `PROVIDER_REACHABILITY_REFUSED`, `REFUSE_AT_CAP`, `SPAWN_BROKER_DENIED`, `SPAWN_FAILED`, `WAVE_AUDIT_ERROR`, `WAVE_DEPENDENCY_ERROR`, `WAVE_DEPENDENCY_TIMEOUT`, `WAVE_INTERNAL_ERROR`, `WAVE_PRICE_ERROR`, `WORKTREE_OWNER_HANDOFF_FAILED` | **SOURCE ONLY** |
 | `fak dispatch worktree-ab` | folds two back-to-back executions of the same fixed wave | runDispatchWorktreeAB / internal/scoreboard | `case` arm of the dispatch switch in runDispatch() | NONE | — | **SOURCE ONLY** |
@@ -277,6 +278,7 @@ source-only rows absent from help: 806
 | `fak doctor` | operator diagnostic: run the answer-shape witness + the real kernel admit verdict and recommend | cmdDoctor / internal/abi, internal/answershape, internal/appversion, internal/binstamp, internal/ctxmmu, internal/selfinstall, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbB() | RUNTIME | — | yes |
 | `fak doctor binary` |  |  | `if` arm of the dispatch in runDoctor() | N/A | — | **SOURCE ONLY** |
 | `fak doctor codex-mcp-warning` |  | runDoctorCodexMCPWarning / internal/codexmcpdiag | `if` arm of the dispatch in runDoctor() | NONE | — | **SOURCE ONLY** |
+| `fak doctor defaults-selfcheck` |  | runDoctorDefaultsSelfcheck / internal/agent, internal/gateway, internal/harnessprofile, internal/policy, internal/syspromptmmu, internal/vcachecalibration | `if` arm of the dispatch in runDoctor() | NONE | — | **SOURCE ONLY** |
 | `fak doctor launch-posture` |  | runDoctorLaunchPosture / internal/agent, internal/gateway, internal/harnessprofile, internal/policy, internal/syspromptmmu, internal/vcachecalibration | `if` arm of the dispatch in runDoctor() | NONE | — | **SOURCE ONLY** |
 | `fak doctor mcp` |  | runDoctorMCP / internal/session | `if` arm of the dispatch in runDoctor() | STRUCTURAL | `CHILD_TIMEOUT`, `CONFIG_INVALID`, `EXECUTABLE_MISSING`, `EXECUTABLE_PERMISSION_DENIED`, `INITIALIZE_ERROR`, `INITIALIZE_TIMEOUT`, `INITIALIZE_WRITE_FAILED`, `SPAWN_FAILED` | **SOURCE ONLY** |
 | `fak doctor movers` | renders the `fak doctor movers` section (#2472): the fastest- moving modules and the dormant-with-open-issues candidates, folded purely from the append-only module-versions ledger that `fak version mo… | runDoctorMovers / internal/modver, internal/pathutil, internal/windowgate | `if` arm of the dispatch in runDoctor() | RUNTIME | — | **SOURCE ONLY** |
@@ -365,6 +367,18 @@ source-only rows absent from help: 806
 | `fak glm52-prefill-sweep` | GLM-5.2 prefill-latency sweep: --dry-run prints the plan, --endpoint runs it and lands ledger artifacts | cmdGLM52PrefillSweep / internal/glm52prefillsweep | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak go` | go build/vet/test passthrough that masks peers' untracked-sibling poison via a buildcheck -overlay | cmdGoShim / internal/buildoverlay | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | **SOURCE ONLY** |
 | `fak go help` |  | goShimUsage | `case` arm of the dispatch switch in runGoShim() | NONE | — | **SOURCE ONLY** |
+| `fak goal` |  | cmdGoal / internal/goalregistry, internal/sessionregistry | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
+| `fak goal backfill-root` |  |  | `case` arm of the dispatch switch in runGoal() | N/A | — | **SOURCE ONLY** |
+| `fak goal bind` |  |  | `case` arm of the dispatch switch in runGoal() | N/A | — | **SOURCE ONLY** |
+| `fak goal create` |  |  | `case` arm of the dispatch switch in runGoal() | N/A | — | **SOURCE ONLY** |
+| `fak goal list` |  |  | `case` arm of the dispatch switch in runGoal() | N/A | — | **SOURCE ONLY** |
+| `fak goal reopen` |  |  | `case` arm of the dispatch switch in runGoal() | N/A | — | **SOURCE ONLY** |
+| `fak goal resolve` |  |  | `case` arm of the dispatch switch in runGoal() | N/A | — | **SOURCE ONLY** |
+| `fak goal show` |  |  | `case` arm of the dispatch switch in runGoal() | N/A | — | **SOURCE ONLY** |
+| `fak goal topology` |  |  | `case` arm of the dispatch switch in runGoal() | N/A | — | **SOURCE ONLY** |
+| `fak goal transition` |  |  | `case` arm of the dispatch switch in runGoal() | N/A | — | **SOURCE ONLY** |
+| `fak goal unbind` |  |  | `case` arm of the dispatch switch in runGoal() | N/A | — | **SOURCE ONLY** |
+| `fak goal update` |  |  | `case` arm of the dispatch switch in runGoal() | N/A | — | **SOURCE ONLY** |
 | `fak goal-park` | park a supervisor goal claim: status\|claim a goal identity to a single owner via the .fak/goal-park store | cmdGoalPark / internal/goalpark | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak goal-park claim` |  |  | `case` arm of the dispatch switch in cmdGoalPark() | N/A | — | **SOURCE ONLY** |
 | `fak goal-park status` |  |  | `case` arm of the dispatch switch in cmdGoalPark() | N/A | — | **SOURCE ONLY** |
@@ -374,6 +388,7 @@ source-only rows absent from help: 806
 | `fak guard` | wrap an agent harness: deny/repair/quarantine proposed tool calls (the primary managed-agent front door; guard is deprecated) | cmdGuard / internal/abi, internal/accountobs, internal/accounts, internal/adjudicator, internal/agent, internal/appversion, internal/binstamp, internal/cacheobs, internal/cachevalueledger, internal/cachevaluereport, internal/callavoid, internal/compute, internal/dojo, internal/dormancy, internal/dropin, internal/fleet, internal/fleetaccounts, internal/fleetbus, internal/fleetpane, internal/fleetreap, internal/fleetspine, internal/gateway, internal/gatewayusageledger, internal/ggufload, internal/goalpark, internal/gpulease, internal/guard, internal/guardrotate, internal/guardrsi, internal/guardsessions, internal/guardtrace, internal/guardvars, internal/harnessprofile, internal/harnessres, internal/headroom, internal/hfhub, internal/ifc, internal/journal, internal/leaseref, internal/linkstate, internal/logvault, internal/loopmgr, internal/metrics, internal/model, internal/modelengine, internal/modelreg, internal/negframe, internal/pathutil, internal/policy, internal/ratelimit, internal/regionadmit, internal/rehydrate, internal/resume, internal/secretload, internal/session, internal/sessionaudit, internal/sessionctl, internal/sessionjournal, internal/sessionregistry, internal/sessionreset, internal/slackenv, internal/slackoutbox, internal/strmatch, internal/syspromptmmu, internal/taskmgr, internal/tokenizer, internal/toolcallcontrol, internal/toolprocgate, internal/trajctl, internal/trajectory, internal/turntaxmeter, internal/vcachecalibration, internal/vcacheobserve, internal/vcachesnapshot, internal/versionskew, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbB() | STRUCTURAL | `DEFAULT_DENY`, `FAK_HTTP_WRITE_TIMEOUT_S`, `FAK_PLANNER_TIMEOUT_S`, `FAK_STREAM_STALL_TIMEOUT_S`, `LAB_READINESS_NOT_READY`, `LAB_TARGET_CONFIG_INVALID`, `LAB_TARGET_CONFIG_MISSING`, `LAB_TARGET_NOT_FOUND`, `LAB_TARGET_NOT_READY`, `LAB_TARGET_REPORT_NOT_USEFUL`, `POLICY_BLOCK`, `STALE_CRED` | yes |
 | `fak guard allow` | `fak guard allow` subcommand, peeled off in cmdGuard before the wrap-a-command flag parse | cmdGuardAllow / internal/journal, internal/policy | `if` arm of the dispatch in cmdManageCommand() | STRUCTURAL | `DEFAULT_DENY` | **SOURCE ONLY** |
 | `fak guard deny` |  | cmdGuardDeny | `if` arm of the dispatch in cmdManageCommand() | NONE | — | **SOURCE ONLY** |
+| `fak guard disable` | starts exactly one raw child and restores the normal posture when that child exits | runGuardDisable / internal/childprocess, internal/flock, internal/usagelog | `if` arm of the dispatch in cmdManageCommand() | RUNTIME | — | **SOURCE ONLY** |
 | `fak guard resume` |  | cmdGuardResume / internal/gateway, internal/pathutil, internal/preflight, internal/resume, internal/session | `if` arm of the dispatch in cmdManageCommand() | NONE | — | **SOURCE ONLY** |
 | `fak guard sessions` |  | cmdGuardSessions / internal/guardsessions, internal/resume | `if` arm of the dispatch in cmdManageCommand() | NONE | — | **SOURCE ONLY** |
 | `fak guard-audit` | prune mirrored guard journals from the vault by age/count (dry-run unless --apply) | cmdGuardAudit / internal/guardaudit, internal/logvault | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
@@ -386,7 +401,7 @@ source-only rows absent from help: 806
 | `fak guard-stops` | operator tally of the typed Stop-hook decision ledger: clean stops, bounded stand-downs, fail-open stops | cmdGuardStops / internal/jsonlledger, internal/strmatch | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak guard-stops-slack` | durable update-in-place Slack scoreboard feeder for the guard Stop-decision ledger | cmdGuardStopsSlack / internal/jsonlledger, internal/scoreboard, internal/slackenv, internal/slackoutbox | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak guard-verdict-rsi` | the guard verdict RSI loop: fold the decision journal, score verdict-quality, keep on gain | cmdGuardVerdictRSI / internal/dogfoodissues, internal/guardroute, internal/guardrsi | `case` arm of the dispatch switch in dispatchExtendedVerbA() | RUNTIME | — | **SOURCE ONLY** |
-| `fak harness` |  | cmdHarnessCommand / internal/harnessclassify, internal/harnesscompose, internal/harnesscontrolpacket, internal/harnesscontrolstudy, internal/harnesscreationreceipt, internal/harnesscreationstudy, internal/harnesscrossover, internal/harnessderive, internal/harnessdiscover, internal/harnessgallery, internal/harnessinit, internal/harnessinspect, internal/harnessmix, internal/harnessoverride, internal/harnesspreview, internal/harnessprotocol, internal/harnessrelease, internal/harnessresolve, internal/harnessselect, internal/harnessverify, internal/harnessweb, internal/pathutil | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
+| `fak harness` | MODEL-SET LIFECYCLE: resolve role requirements against witnessed inventory into an atomic canonical lock | cmdHarnessCommand / internal/harnessclassify, internal/harnesscompose, internal/harnesscontrolpacket, internal/harnesscontrolstudy, internal/harnesscreationreceipt, internal/harnesscreationstudy, internal/harnesscrossover, internal/harnessderive, internal/harnessdiscover, internal/harnessgallery, internal/harnesshost, internal/harnessinit, internal/harnessinspect, internal/harnessmix, internal/harnessoverride, internal/harnesspreview, internal/harnessprotocol, internal/harnessrelease, internal/harnessresolve, internal/harnessselect, internal/harnessverify, internal/harnessweb, internal/pathutil | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | yes |
 | `fak harness stack` |  | runHarnessStack / internal/stackresolve | `if` arm of the dispatch in runHarnessCommand() | NONE | — | **SOURCE ONLY** |
 | `fak harness-debt-dispatch` | harness-strength verdict -> backlog: file one deduped deletion issue per REDUNDANT/HOBBLING HARD scaffold | cmdHarnessDebtDispatch / internal/dogfoodissues, internal/strmatch | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak headless-lint` | scan an agent's final output for operator-directed notes (push?/TODO?) and type each to a remediation class | cmdHeadlessLint / internal/headlesslint, internal/resume/transcript | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
@@ -567,6 +582,7 @@ source-only rows absent from help: 806
 | `fak model ls` | `fak ls` / `fak model ls`: list the merged alias registry (embedded catalog + the user's registry.json) with each alias's target and whether it is already downloaded locally | cmdModelLs / internal/modelreg | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model pull` | `fak pull <ref>` / `fak model pull <ref>`: resolve an alias to its target (a bare hf:// URI or path passes through), download it into the local cache (cache-hit if already present), and print the loca… | cmdModelPull / internal/hfhub, internal/modelreg | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model readiness-inventory` |  | runModelReadinessInventory / internal/modelaccept | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
+| `fak model-default` |  | runModelDefault / internal/modelreg | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak multisubmit` | multi-submission planner: lay out N profiles for a resolved issue, seat round-robin over the rotation pool | cmdMultiSubmit / internal/accounts | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak native-benchmarks` |  | cmdNativeBenchmarks / internal/nativebench | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | **SOURCE ONLY** |
 | `fak negate` | negation operator: detect/resolve/reframe a negative over internal/negframe (positive-complement L2 registry) | cmdNegate | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
@@ -603,7 +619,7 @@ source-only rows absent from help: 806
 | `fak operator triage` | decenter-the-human lens: it loads a `fak operator brief --json` artifact and re-partitions its human bucket through choicetriage so the gate pages only on genuine authority decisions | runOperatorTriage / internal/operatorbrief | `case` arm of the dispatch switch in runOperatorHeavinessGroup() | NONE | — | **SOURCE ONLY** |
 | `fak operator triage selfcheck` | the shared `selfcheck` subcommand of the report-replay commands (horizon-recovery, savings-vector): it accepts no flags, rejects any extra argument, runs the package selfcheck, and prints okMsg on suc… | runReportSelfcheck | `if` arm of the dispatch in runOperatorTriage() | NONE | — | **SOURCE ONLY** |
 | `fak opt` | the optimization-fuser / RSI opt-target loop | cmdOpt / internal/opttarget, internal/rsiloop | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
-| `fak orchestration` |  | cmdOrchestration / internal/orchestration, internal/windowgate | `if` arm of the dispatch in resolveEarlyDispatch() | RUNTIME | — | **SOURCE ONLY** |
+| `fak orchestration` |  | cmdOrchestration | `if` arm of the dispatch in resolveEarlyDispatch() | NONE | — | **SOURCE ONLY** |
 | `fak orchestration status` |  | runOrchestrationStatus / internal/processalive | `if` arm of the dispatch in runOrchestration() | NONE | — | **SOURCE ONLY** |
 | `fak org` |  | cmdOrg | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak org help` |  | printOrgUsage | `case` arm of the dispatch switch in runOrg() | NONE | — | **SOURCE ONLY** |
@@ -634,10 +650,14 @@ source-only rows absent from help: 806
 | `fak profile continuity sync-plan` |  | runContinuitySyncPlan / internal/portability | `if` arm of the dispatch in runContinuity() | NONE | — | **SOURCE ONLY** |
 | `fak profile continuity ux-selfcheck` |  | runContinuityUXSelfcheck | `if` arm of the dispatch in runContinuity() | NONE | — | **SOURCE ONLY** |
 | `fak program` | the ongoing-optimization program report (a frontier + a trend, never a completion %) | cmdProgram | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
-| `fak progress` |  | cmdProgress | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
+| `fak progress` |  | cmdProgress / internal/pathutil | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak project` | the ProjectsV2 board control-pane fold: report/verdict/Slack-ready board dimension, not a write-only sync | cmdProject | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak propagation-debt-dispatch` | propagation-scorecard -> backlog: file one deduped issue per HARD un-propagated convention gap | cmdPropagationDebtDispatch / internal/dogfoodissues, internal/propagationscore | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak propagation-scorecard` | score how far each proven scorecard convention has fanned out across the family (propagation debt) | cmdPropagationScorecard / internal/propagationscore | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
+| `fak provider-cost` |  | cmdProviderCost / internal/providercost, internal/sessionregistry | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
+| `fak provider-cost import` |  | fatalProviderCost | `case` arm of the dispatch switch in runProviderCost() | NONE | — | **SOURCE ONLY** |
+| `fak provider-cost reconcile` |  | fatalProviderCost | `case` arm of the dispatch switch in runProviderCost() | NONE | — | **SOURCE ONLY** |
+| `fak provider-cost report` |  | fatalProviderCost | `case` arm of the dispatch switch in runProviderCost() | NONE | — | **SOURCE ONLY** |
 | `fak ps` | the read-only process table: one aligned row per live served session | cmdPS / internal/secretload | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | yes |
 | `fak public-scrub` | public-release safety audit over staged/range/tree/message content (the PUBLIC_LEAK gate family) | cmdPublicScrub | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
 | `fak public-scrub audit-message` |  | runPublicScrubMessage / internal/hooks, internal/windowgate | `case` arm of the dispatch switch in runPublicScrub() | RUNTIME | — | yes |
@@ -729,13 +749,13 @@ source-only rows absent from help: 806
 | `fak session` | the operator control surface for a served session: read live DRIVE state, cancel/update in flight | cmdSession / internal/gateway, internal/guardsessions, internal/journal, internal/pathutil, internal/secretload, internal/session, internal/sessionimage | `case` arm of the dispatch switch in dispatchCoreVerbA() | RUNTIME | — | yes |
 | `fak session audit` |  | runSessionAuditAlias | `if` arm of the dispatch in runSession() | NONE | — | yes |
 | `fak session audit actions` |  | runSessionAuditActions / internal/sessionaudit | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | **SOURCE ONLY** |
-| `fak session audit audit` |  | runSessionAuditAudit / internal/sessionaudit | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | yes |
+| `fak session audit audit` |  | runSessionAuditAudit / internal/sessionaudit, internal/trajctl | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | yes |
 | `fak session audit batch` |  | runSessionAuditBatch / internal/agent | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | **SOURCE ONLY** |
 | `fak session audit budget` | surfaces the per-task spend-vs-target readout the working agent can query mid-task (#2091) | runSessionAuditBudget / internal/sessionaudit | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | yes |
 | `fak session audit codex` |  | runSessionAuditCodex / internal/codexlifecycle | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | **SOURCE ONLY** |
 | `fak session audit deep` |  | runSessionAuditDeep / internal/sessionaudit | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | yes |
 | `fak session audit discover` |  | runSessionAuditDiscover / internal/sessionaudit | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | yes |
-| `fak session audit feed` | makes a session-audit run DURABLE: it folds the discovery window into the SAME CompactReport the summary/actions surfaces build, then appends one scrubbed FeedRow to the durable docs/nightrun ledger �… | runSessionAuditFeed / internal/sessionaudit | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | **SOURCE ONLY** |
+| `fak session audit feed` | makes a session-audit run DURABLE: it folds the discovery window into the SAME CompactReport the summary/actions surfaces build, then appends one scrubbed FeedRow to the durable docs/nightrun ledger… | runSessionAuditFeed / internal/sessionaudit | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | **SOURCE ONLY** |
 | `fak session audit help` |  | sessionAuditUsage | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | **SOURCE ONLY** |
 | `fak session audit summary` |  | runSessionAuditSummary / internal/sessionaudit | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | yes |
 | `fak session branch` | testable core of `fak session branch`: it returns the process exit code (0 ok, 1 a runtime error, 2 a usage error) and takes its streams explicitly. | runSessionBranch / internal/pathutil, internal/session, internal/sessionimage | `if` arm of the dispatch in runSession() | NONE | — | **SOURCE ONLY** |
@@ -774,13 +794,13 @@ source-only rows absent from help: 806
 | `fak session throttle` |  |  | `case` arm of the dispatch switch in runSession() | N/A | — | yes |
 | `fak session-audit` | audit agent-session JSONL transcripts (discover/audit/summary/deep) into model-mix + long-context reports | cmdSessionAudit | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | yes |
 | `fak session-audit actions` |  | runSessionAuditActions / internal/sessionaudit | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | yes |
-| `fak session-audit audit` |  | runSessionAuditAudit / internal/sessionaudit | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | yes |
+| `fak session-audit audit` |  | runSessionAuditAudit / internal/sessionaudit, internal/trajctl | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | yes |
 | `fak session-audit batch` |  | runSessionAuditBatch / internal/agent | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | **SOURCE ONLY** |
 | `fak session-audit budget` | surfaces the per-task spend-vs-target readout the working agent can query mid-task (#2091) | runSessionAuditBudget / internal/sessionaudit | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | **SOURCE ONLY** |
 | `fak session-audit codex` |  | runSessionAuditCodex / internal/codexlifecycle | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | **SOURCE ONLY** |
 | `fak session-audit deep` |  | runSessionAuditDeep / internal/sessionaudit | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | yes |
 | `fak session-audit discover` |  | runSessionAuditDiscover / internal/sessionaudit | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | yes |
-| `fak session-audit feed` | makes a session-audit run DURABLE: it folds the discovery window into the SAME CompactReport the summary/actions surfaces build, then appends one scrubbed FeedRow to the durable docs/nightrun ledger �… | runSessionAuditFeed / internal/sessionaudit | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | **SOURCE ONLY** |
+| `fak session-audit feed` | makes a session-audit run DURABLE: it folds the discovery window into the SAME CompactReport the summary/actions surfaces build, then appends one scrubbed FeedRow to the durable docs/nightrun ledger… | runSessionAuditFeed / internal/sessionaudit | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | **SOURCE ONLY** |
 | `fak session-audit help` |  | sessionAuditUsage | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | **SOURCE ONLY** |
 | `fak session-audit summary` |  | runSessionAuditSummary / internal/sessionaudit | `case` arm of the dispatch switch in runSessionAudit() | NONE | — | yes |
 | `fak sessionjournal` | crash-survivable session journal: boot-epoch fold to LIVE/CRASHED/STALE/CLOSED (open/beat/close/report) | cmdSessionJournal / internal/sessionjournal | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
@@ -925,6 +945,7 @@ source-only rows absent from help: 806
 | `fak trajctl curve` |  | runTrajctlCurve / internal/trajctl | `case` arm of the dispatch switch in runTrajctl() | NONE | — | **SOURCE ONLY** |
 | `fak trajctl declare` |  | runTrajctlDeclare / internal/loopdrive, internal/trajctl | `case` arm of the dispatch switch in runTrajctl() | NONE | — | **SOURCE ONLY** |
 | `fak trajctl depth` |  | runTrajctlDepth / internal/depthadmit, internal/trajctl | `case` arm of the dispatch switch in runTrajctl() | NONE | — | **SOURCE ONLY** |
+| `fak trajctl fleet` |  | runTrajctlFleet / internal/trajctl | `case` arm of the dispatch switch in runTrajctl() | NONE | — | **SOURCE ONLY** |
 | `fak trajctl help` |  |  | `case` arm of the dispatch switch in runTrajctl() | N/A | — | **SOURCE ONLY** |
 | `fak trajctl list` |  | runTrajctlList / internal/trajctl | `case` arm of the dispatch switch in runTrajctl() | NONE | — | **SOURCE ONLY** |
 | `fak trajctl quote` |  | runTrajctlQuote / internal/trajctl | `case` arm of the dispatch switch in runTrajctl() | NONE | — | **SOURCE ONLY** |
@@ -932,7 +953,7 @@ source-only rows absent from help: 806
 | `fak trajctl quote-complete` |  | runTrajctlQuoteComplete / internal/trajctl | `case` arm of the dispatch switch in runTrajctl() | NONE | — | **SOURCE ONLY** |
 | `fak trajctl quote-revise` |  | runTrajctlQuoteRevise / internal/trajctl | `case` arm of the dispatch switch in runTrajctl() | NONE | — | **SOURCE ONLY** |
 | `fak trajctl score` |  | runTrajctlScore / internal/trajctl | `case` arm of the dispatch switch in runTrajctl() | NONE | — | **SOURCE ONLY** |
-| `fak trajctl scorers` | renders the scorer calibration leaderboard (#2566): per scorer method+version, how well its numbers correlate with the W3 witnessed outcome, ranked best-first so the worst-calibrated (repair-target) s… | runTrajctlScorers / internal/trajctl | `case` arm of the dispatch switch in runTrajctl() | NONE | — | **SOURCE ONLY** |
+| `fak trajctl scorers` |  | runTrajctlScorers / internal/trajctl | `case` arm of the dispatch switch in runTrajctl() | NONE | — | **SOURCE ONLY** |
 | `fak trajquery` | scoped SQL SELECT over your own trajectory corpus; the validator refuses out-of-scope queries (run/validate) | cmdTrajQuery | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak trajquery help` |  | trajQueryUsage | `case` arm of the dispatch switch in cmdTrajQuery() | NONE | — | **SOURCE ONLY** |
 | `fak trajquery run` |  | cmdTrajQueryRun / internal/trajquery | `case` arm of the dispatch switch in cmdTrajQuery() | NONE | — | **SOURCE ONLY** |
@@ -942,6 +963,10 @@ source-only rows absent from help: 806
 | `fak trunk-red` | fold the trunk-red witness ledger into distinct shared build breaks, worst (most clones stuck) first | cmdTrunkRed / internal/jsonlledger, internal/safecommit, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbB() | RUNTIME | — | **SOURCE ONLY** |
 | `fak turntax` | turn-tax A/B: price the extra error-code model turns a SOTA loop fires vs fak's one-shot | cmdTurnTaxVisual / internal/turntaxvisual | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | yes |
 | `fak ui-quality-scorecard` | native terminal UI/UX control-pane payload (ui_quality_debt) | cmdUIQualityScore / internal/scdiff, internal/uiquality | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
+| `fak ultracode` |  | cmdUltracode | `if` arm of the dispatch in resolveEarlyDispatch() | NONE | — | yes |
+| `fak ultracode help` |  |  | `if` arm of the dispatch in runUltracode() | N/A | — | **SOURCE ONLY** |
+| `fak ultracode status` |  | runOrchestration / internal/orchestration, internal/windowgate | `if` arm of the dispatch in runUltracode() | RUNTIME | — | yes |
+| `fak ultracode status status` |  | runOrchestrationStatus / internal/processalive | `if` arm of the dispatch in runOrchestration() | NONE | — | yes |
 | `fak unwired-debt-dispatch` | unwired-scorecard -> backlog: file one deduped issue per orphaned internal package | cmdUnwiredDebtDispatch / internal/dogfoodissues, internal/unwiredscore | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak unwired-scorecard` | score which code-complete internal packages are not wired into a runnable CLI surface | cmdUnwiredScorecard / internal/unwiredscore | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak usage` | read side of the CLI-invocation journal: how fak itself has been invoked (totals/errors/timing, per-verb) | cmdUsage / internal/usagelog | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
@@ -980,6 +1005,7 @@ source-only rows absent from help: 806
 | `fak vcache prove-telemetry` |  | runVCacheProveTelemetry / internal/vcachegov | `case` arm of the dispatch switch in runVCache() | NONE | — | yes |
 | `fak vcache score` |  | runVCacheScore / internal/cachevalueledger, internal/vcachecal, internal/vcachechain, internal/vcachegov, internal/vcacheobserve, internal/vcachescore, internal/vcachesnapshot | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
 | `fak vcache session-history` |  | runSessionHistory / internal/sessionmine | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
+| `fak vcache session-history benchmark` |  | runSessionHistoryBenchmark / internal/sessionmine | `if` arm of the dispatch in runSessionHistory() | NONE | — | **SOURCE ONLY** |
 | `fak vcache session-history refresh` |  | runSessionHistoryRefresh / internal/sessionmine | `if` arm of the dispatch in runSessionHistory() | NONE | — | **SOURCE ONLY** |
 | `fak vcache session-history status` |  | runSessionIndexHealth / internal/sessionmine | `if` arm of the dispatch in runSessionHistory() | NONE | — | **SOURCE ONLY** |
 | `fak vcache session-mine` |  | runSessionMine / internal/sessionmine | `case` arm of the dispatch switch in runVCache() | NONE | — | **SOURCE ONLY** |
@@ -998,7 +1024,7 @@ source-only rows absent from help: 806
 | `fak webbench help` |  | webbenchUsage | `case` arm of the dispatch switch in cmdWebbench() | NONE | — | **SOURCE ONLY** |
 | `fak webbench parity-gate` |  | cmdWebbenchParityGate / internal/policy, internal/webbench | `case` arm of the dispatch switch in cmdWebbench() | NONE | — | **SOURCE ONLY** |
 | `fak webbench serving` |  | cmdWebbenchServing / internal/fleet, internal/linkstate, internal/policy, internal/webbench | `case` arm of the dispatch switch in cmdWebbench() | STRUCTURAL | `LAB_READINESS_NOT_READY`, `LAB_TARGET_CONFIG_INVALID`, `LAB_TARGET_CONFIG_MISSING`, `LAB_TARGET_NOT_FOUND`, `LAB_TARGET_NOT_READY`, `LAB_TARGET_REPORT_NOT_USEFUL` | **SOURCE ONLY** |
-| `fak windowgate` | the no-desktop-popup ratchet: scan for console-popup-prone automation, non-zero on violations | cmdWindowgate / internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbA() | RUNTIME | — | yes |
+| `fak windowgate` | the no-desktop-popup ratchet: scan for console-popup-prone automation, non-zero on violations | cmdWindowgate / internal/dispatchaudit, internal/dispatchtick, internal/procguard, internal/windowgate, internal/workerworktree | `case` arm of the dispatch switch in dispatchCoreVerbA() | RUNTIME | — | yes |
 | `fak windowgate scan` |  |  | `if` arm of the dispatch in runWindowgate() | N/A | — | yes |
 | `fak wip` | checkpoint/restore the working-tree delta over refs/fak/wip/*: snapshot gc-safe, list, re-materialize | cmdWip | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | **SOURCE ONLY** |
 | `fak wip admit` | answers whether a task may BEGIN on the declared paths | runWipAdmit / internal/leaseref, internal/strmatch, internal/wipattr, internal/wipinventory, internal/wipref | `case` arm of the dispatch switch in runWip() | STRUCTURAL | `STALE_UNTRACKED_SOURCE` | **SOURCE ONLY** |

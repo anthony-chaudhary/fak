@@ -1,4 +1,4 @@
-# Calibrated vCache TTL-tier steering in a non-FAK repository — 2026-08-18
+# Calibrated vCache TTL-tier steering in a non-FAK repository â€” 2026-08-18
 
 **Verdict:** fresh measured provider retention now changes the real Anthropic request bytes used for the 5m-versus-1h cache tier.
 

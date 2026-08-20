@@ -68,6 +68,6 @@ This map positions the current `guard-gate` coverage backlog. Each entry names t
 - **`startguardlifecycleserver`** — the exact `guard-gate` symbol; distinct from the broader family label and sibling operations.
 - **`watchdogguards`** — the exact `guard-gate` symbol; distinct from the broader family label and sibling operations.
 - **`breathgate`** — the exact `guard-gate` symbol; distinct from the broader family label and sibling operations.
-- **`guardactiveenv`** � the exact guard-gate symbol, not the broader family label.
-- **`guardcodexoauthplaceholderapikey`** � the exact guard-gate symbol, not the broader family label.
-- **`guardalloweffectivereadlayers`** � the exact guard-gate symbol, not the broader family label.
+- **`guardactiveenv`** — the exact guard-gate symbol, not the broader family label.
+- **`guardcodexoauthplaceholderapikey`** — the exact guard-gate symbol, not the broader family label.
+- **`guardalloweffectivereadlayers`** — the exact guard-gate symbol, not the broader family label.
