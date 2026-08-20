@@ -1,6 +1,6 @@
 ---
 title: "Ultracode: a concurrent agent fleet as an operational mode on fak's multi-agent substrate"
-description: "Defines 'ultracode mode' — orchestrating N independent coding agents on disjoint file lanes of one live trunk — as a discipline composed from fak's already-shipped pieces (the D-007 coordination protocol, the trunk guard, disjoint-lease arbitration, Claude Code subagents/forks), not a new feature. Gives the honest, un-gameable definition of the agent-orchestration value metric (a concurrency factor with its Amdahl ceiling) and states plainly why that multiple must never be blended with fak's separate inference 5–10x claims."
+description: "Defines the operational discipline and honest concurrency metric behind Ultracode, then locates the newer fak ultracode command as a front door over the canonical orchestration plan and limited launcher rather than a new kernel primitive."
 ---
 
 # Ultracode: a concurrent agent fleet as an operational mode
@@ -11,8 +11,13 @@ This is the **framing and metric-definition** doc. It defines what "ultracode mo
 which shipped pieces it composes, and — the load-bearing part — the **value metric** by
 which an ultracode run may claim a dogfood multiple, defined so it cannot be gamed. It
 reports **no** run results: the orchestrator writes the results doc separately and cites
-this one for its definitions. Nothing here invents a CLI command or kernel feature;
-ultracode is a *way of using* pieces that already ship.
+this one for its definitions.
+
+Since this framing first shipped, `fak ultracode` has become a first-class CLI front
+door over the canonical orchestration resolver, its bounded Codex launcher, and status
+reader. That product surface does not change the metric below or create a new kernel
+primitive. Its current runtime/proof boundary is audited in
+[`ULTRACODE-NATIVE-RUNTIME-AUDIT-2026-08-20.md`](../notes/ULTRACODE-NATIVE-RUNTIME-AUDIT-2026-08-20.md).
 
 ---
 
@@ -40,11 +45,13 @@ fak already ships:
   subagents / forks running concurrently, a shared task list the orchestrator owns, and the
   same trunk guard arbitrating who may write which files.
 
-So "ultracode" names a *mode of operation* over these shipped pillars. There is no
-`ultracode` binary, no new ABI surface, and no new kernel primitive. If a results doc ever
-implies a new feature shipped, it is wrong — the contribution is the *assembly and
-discipline*, exactly as the rest of fak's multi-agent story is "no single lever is novel;
-the contribution is the assembly."
+So "ultracode" names a *mode of operation* over these shipped pillars and now also the
+`fak ultracode` command that selects its canonical orchestration profile. It remains a
+subcommand of the one `fak` binary—not a second binary, ABI, or kernel primitive. The
+command currently proves plan shape and can launch guarded read-only Codex workers; the
+full lease/effect/witness/reconciliation runtime remains tracked in #5970/#5971. The
+contribution is still the *assembly and discipline*, exactly as the rest of fak's
+multi-agent story is "no single lever is novel; the contribution is the assembly."
 
 ---
 
