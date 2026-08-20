@@ -2295,3 +2295,10 @@ A provider-neutral declaration of when a session may start, how much active or e
 A deterministic verdict over session intent and measured progress: continue, eligible, complete, timeout, failed, or cancelled, with a receipt-ready reason.
 
 **Distinct from:** Unlike a kernel authorization Decision, this evaluates lifecycle timing and completion only and grants no tool capability; unlike a scheduler Decision, it does not choose work placement.
+
+
+### Qwen3.8 cache campaign
+
+Versioned exact-model workflow-cache benchmark corpus and fold for the first-class Qwen3.8 default.
+
+**Distinct from:** Unlike the generic cachevalue ledger, this binds Qwen3.8 checkpoint, tokenizer, template, backend, tools, policy, equivalence, invalidation, and per-mode measurements.

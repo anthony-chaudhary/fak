@@ -53,7 +53,7 @@ import (
 
 //fak:ctxplan verb=cachevalue enters="nothing live — an offline fold over the durable cache-value, cache-savings, and gateway-usage JSONL ledgers on disk" pages="nothing into a model window — it renders a cache-effectiveness P&L card and posts it to the #scoreboard Slack channel (or prints it under --dry-run)" warms="nothing — it REPORTS on whether the kernel prompt-cache method is paying off; it warms no prompt cache or KV itself"
 func cmdCachevalue(argv []string) {
-	dispatchSubcommands("cachevalue", "report | shapes | compaction | status | review | post | feed | weekly | census | metrics | regress", argv,
+	dispatchSubcommands("cachevalue", "report | shapes | compaction | status | review | post | feed | weekly | census | metrics | regress | qwen38-campaign", argv,
 		subcommand{"report", runCachevalueReport},
 		subcommand{"shapes", runCachevalueShapes},
 		subcommand{"compaction", runCachevalueCompaction},
@@ -65,6 +65,7 @@ func cmdCachevalue(argv []string) {
 		subcommand{"census", runCachevalueCensus},
 		subcommand{"metrics", runCachevalueMetrics},
 		subcommand{"regress", runCachevalueRegress},
+		subcommand{"qwen38-campaign", runCachevalueQwen38Campaign},
 	)
 }
 

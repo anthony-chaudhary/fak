@@ -9,7 +9,8 @@
       "distinction": "A correlation coordinate, not a budget or a threshold: CompactionBudget decides WHETHER a rewrite fires, while CompactionJoinKey only says WHICH provider usage row belongs to a fire that already happened. No verdict reads it -- it selects evidence, it never scores it.",
       "distinct_from": [
         "x2-context-ctx-compactionbudget",
-        "compactionjoinresult"
+        "compactionjoinresult",
+        "qwen38cachecampaign"
       ],
       "aliases": [],
       "grounding": "CompactionJoinKey",
@@ -32,6 +33,25 @@
       ],
       "aliases": [],
       "grounding": "CompactionJoinResult",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "qwen38cachecampaign",
+      "canonical": "Qwen3.8 cache campaign",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Versioned exact-model workflow-cache benchmark corpus and fold for the first-class Qwen3.8 default.",
+      "distinction": "Unlike the generic cachevalue ledger, this binds Qwen3.8 checkpoint, tokenizer, template, backend, tools, policy, equivalence, invalidation, and per-mode measurements.",
+      "distinct_from": [
+        "compactionjoinkey"
+      ],
+      "aliases": [],
+      "grounding": "Qwen38Campaign",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

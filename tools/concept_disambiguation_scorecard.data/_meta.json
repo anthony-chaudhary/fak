@@ -962,6 +962,56 @@
           "category": "incidental",
           "reason": "Canonical-goal resource metrics adapter symbol; not a distinct mechanism in this concept family",
           "token": "fak_fleet_canonical_goal_cache_value_rows"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI adapter function for the positioned Qwen3.8 cache campaign concept",
+          "token": "runCachevalueQwen38Campaign"
+        },
+        {
+          "category": "incidental",
+          "reason": "Result type for the positioned Qwen3.8 cache campaign concept",
+          "token": "Qwen38Report"
+        },
+        {
+          "category": "incidental",
+          "reason": "Per-mode result of the positioned Qwen3.8 cache campaign",
+          "token": "Qwen38ModeReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Workload-shape member of the positioned Qwen3.8 cache campaign",
+          "token": "Qwen38Workload"
+        },
+        {
+          "category": "incidental",
+          "reason": "Schema token for the positioned Qwen3.8 cache campaign",
+          "token": "qwen38_cache_campaign"
+        },
+        {
+          "category": "incidental",
+          "reason": "Report schema token for the positioned Qwen3.8 cache campaign",
+          "token": "qwen38_cache_report"
+        },
+        {
+          "category": "incidental",
+          "reason": "Exact identity constant of the positioned Qwen3.8 cache campaign",
+          "token": "Qwen38DefaultAlias"
+        },
+        {
+          "category": "incidental",
+          "reason": "Exact artifact constant of the positioned Qwen3.8 cache campaign",
+          "token": "Qwen38DefaultRef"
+        },
+        {
+          "category": "incidental",
+          "reason": "Measurement field within the positioned Qwen3.8 cache campaign",
+          "token": "CacheLookupMS"
+        },
+        {
+          "category": "incidental",
+          "reason": "Identity hash helper within the positioned Qwen3.8 cache campaign",
+          "token": "qwen38CacheKey"
         }
       ],
       "id": "cache",
@@ -978,6 +1028,7 @@
         "CacheLevers",
         "CacheLineage",
         "CacheLineageChanged",
+        "CacheLookupMS",
         "CacheReadRate",
         "CacheSourceResolution",
         "CacheSourceSelfTestReport",
@@ -1009,6 +1060,11 @@
         "OrgPolicyCachePathEnv",
         "ProviderCacheWriteTokens",
         "ProviderCalibration",
+        "Qwen38DefaultAlias",
+        "Qwen38DefaultRef",
+        "Qwen38ModeReport",
+        "Qwen38Report",
+        "Qwen38Workload",
         "ReasonCacheState",
         "RestartCacheHits",
         "RunCacheSourceSelfTest",
@@ -1182,12 +1238,16 @@
         "provider_cache_read_boundary",
         "provider_cache_usage_not_reported",
         "pycache",
+        "qwen38CacheKey",
+        "qwen38_cache_campaign",
+        "qwen38_cache_report",
         "registerCacheLevers",
         "renderinkernelchatmlrequest",
         "replaceMicroCacheWitness",
         "resetClaudeKeychainCache",
         "reuseRatio",
         "runCacheValueGateScore",
+        "runCachevalueQwen38Campaign",
         "runDisambiguationCacheSourceSelfTest",
         "runMicroCacheArm",
         "runMicroCacheWitness",
