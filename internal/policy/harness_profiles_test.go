@@ -55,7 +55,8 @@ func TestCapturedCodexToolSchemaCurrentAndLegacyAliasesPass(t *testing.T) {
 	if err := json.Unmarshal(codexToolSchemaJSON, &captured); err != nil {
 		t.Fatalf("codex-tool-schema.json is not valid JSON: %v", err)
 	}
-	if captured.Schema != "fak-captured-tool-schema/v1" || captured.Provenance.Product != "codex-cli" || captured.Provenance.Version != "0.148.0" || captured.Provenance.CapturedOn == "" || !captured.Provenance.Sanitized {
+	if captured.Schema != "fak-captured-tool-schema/v1" || captured.Provenance.Product != "codex-cli" || captured.Provenance.Version != "0.148.0" || //boundarylint:ignore CHANGE_DETECTOR_TEST captured fixture provenance must name its source release
+		captured.Provenance.CapturedOn == "" || !captured.Provenance.Sanitized {
 		t.Fatalf("unexpected capture provenance: %+v", captured)
 	}
 	want := map[string]struct {
