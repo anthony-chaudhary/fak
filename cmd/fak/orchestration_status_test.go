@@ -17,12 +17,16 @@ func TestOrchestrationStatusJoinsReceiptProcessAndTurnLog(t *testing.T) {
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	logRel := filepath.Join("fak-orchestration-runs", runID, "worker-1.jsonl")
 	log := "{\"type\":\"thread.started\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"turn.completed\"}\n"
-	if err := os.WriteFile(filepath.Join(home, logRel), []byte(log), 0o600); err != nil {
-		t.Fatal(err)
+	workers := make([]codexOrchestrationWorkerLaunch, 0, 2)
+	for _, roleID := range []string{"worker-1", "worker-2"} {
+		logRel := filepath.Join("fak-orchestration-runs", runID, roleID+".jsonl")
+		if err := os.WriteFile(filepath.Join(home, logRel), []byte(log), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		workers = append(workers, codexOrchestrationWorkerLaunch{RoleID: roleID, PID: 99999999, Status: "started", LogPath: logRel})
 	}
-	receipt := codexOrchestrationLaunchReceipt{Schema: codexOrchestrationLaunchSchema, SessionID: "sess-1", RunID: runID, LaunchedAt: time.Date(2026, 8, 18, 17, 0, 0, 0, time.UTC), RequestedProfile: "auto", ResolvedProfile: "ultracode", WorkClass: "grind", Status: "launched", Workers: []codexOrchestrationWorkerLaunch{{RoleID: "worker-1", PID: 99999999, Status: "started", LogPath: logRel}}}
+	receipt := codexOrchestrationLaunchReceipt{Schema: codexOrchestrationLaunchSchema, SessionID: "sess-1", RunID: runID, LaunchedAt: time.Date(2026, 8, 18, 17, 0, 0, 0, time.UTC), RequestedProfile: "auto", ResolvedProfile: "ultracode", WorkClass: "grind", Status: "launched", Workers: workers}
 	if err := persistCodexOrchestrationLaunchReceipt(home, receipt); err != nil {
 		t.Fatal(err)
 	}
@@ -35,11 +39,31 @@ func TestOrchestrationStatusJoinsReceiptProcessAndTurnLog(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Schema != orchestrationStatusSchema || got.State != "complete" || got.Completed != 1 || len(got.Workers) != 1 {
+	if got.Schema != orchestrationStatusSchema || got.State != "complete" || got.Completed != 2 || len(got.Workers) != 2 {
 		t.Fatalf("unexpected status: %+v", got)
 	}
-	if got.Workers[0].TurnsStarted != 1 || got.Workers[0].TurnsDone != 1 || got.Workers[0].LastEvent != "turn.completed" {
-		t.Fatalf("unexpected worker: %+v", got.Workers[0])
+	if got.Outcome.Verdict != "unverified" || got.Outcome.EffectReadback != orchestrationEvidenceNotObserved || got.Outcome.IndependentWitness != orchestrationEvidenceNotObserved || got.Outcome.Reconciliation != orchestrationEvidenceNotObserved {
+		t.Fatalf("turn completion was mistaken for verified outcome: %+v", got.Outcome)
+	}
+	for _, worker := range got.Workers {
+		if worker.TurnsStarted != 1 || worker.TurnsDone != 1 || worker.LastEvent != "turn.completed" {
+			t.Fatalf("unexpected worker: %+v", worker)
+		}
+	}
+
+	out.Reset()
+	stderr.Reset()
+	if code := runOrchestration(&out, &stderr, []string{"status", "--home", home}); code != 0 {
+		t.Fatalf("human code=%d stderr=%s", code, stderr.String())
+	}
+	for _, want := range []string{
+		"Orchestration orch-test - complete (worker execution)",
+		"Outcome unverified | effects=not_observed | witness=not_observed | reconciliation=not_observed",
+		"worker and turn events do not prove effects, independent witness acceptance, or reconciliation",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, out.String())
+		}
 	}
 }
 
@@ -62,7 +86,7 @@ func TestOrchestrationStatusHumanOutputNamesCurrentActivity(t *testing.T) {
 	if code := runOrchestration(&out, &stderr, []string{"status", "--home", home}); code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
-	for _, want := range []string{"Orchestration orch-live - running", "1 running", "worker-1", "turn.started", "turns 0/1", "machine: fak orchestration status --session sess-live --json"} {
+	for _, want := range []string{"Orchestration orch-live - running (worker execution)", "Outcome unverified", "1 running", "worker-1", "turn.started", "turns 0/1", "machine: fak orchestration status --session sess-live --json"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("missing %q in:\n%s", want, out.String())
 		}

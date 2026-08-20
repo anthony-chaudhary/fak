@@ -16,6 +16,16 @@ import (
 
 const orchestrationStatusSchema = "fak.codex_orchestration_status.v1"
 
+const orchestrationEvidenceNotObserved = "not_observed"
+
+type orchestrationOutcomeStatus struct {
+	Verdict            string `json:"verdict"`
+	EffectReadback     string `json:"effect_readback"`
+	IndependentWitness string `json:"independent_witness"`
+	Reconciliation     string `json:"reconciliation"`
+	Reason             string `json:"reason"`
+}
+
 type orchestrationWorkerStatus struct {
 	RoleID       string    `json:"role_id"`
 	PID          int       `json:"pid,omitempty"`
@@ -41,6 +51,7 @@ type orchestrationRunStatus struct {
 	Running          int                         `json:"running"`
 	Completed        int                         `json:"completed"`
 	Exited           int                         `json:"exited"`
+	Outcome          orchestrationOutcomeStatus  `json:"outcome"`
 	Workers          []orchestrationWorkerStatus `json:"workers"`
 }
 
@@ -81,7 +92,9 @@ func runOrchestrationStatus(stdout, stderr io.Writer, argv []string) int {
 		}
 		return 0
 	}
-	fmt.Fprintf(stdout, "Orchestration %s - %s\n", status.RunID, status.State)
+	fmt.Fprintf(stdout, "Orchestration %s - %s (worker execution)\n", status.RunID, status.State)
+	fmt.Fprintf(stdout, "  Outcome %s | effects=%s | witness=%s | reconciliation=%s\n", status.Outcome.Verdict, status.Outcome.EffectReadback, status.Outcome.IndependentWitness, status.Outcome.Reconciliation)
+	fmt.Fprintf(stdout, "  %s\n", status.Outcome.Reason)
 	fmt.Fprintf(stdout, "  %d running | %d completed | %d exited | launched %s\n", status.Running, status.Completed, status.Exited, status.LaunchedAt.Local().Format("2006-01-02 15:04:05"))
 	for _, worker := range status.Workers {
 		activity := "no events"
@@ -121,7 +134,7 @@ func newestOrchestrationReceipt(home, sessionID string) (codexOrchestrationLaunc
 }
 
 func inspectOrchestrationRun(home string, receipt codexOrchestrationLaunchReceipt) orchestrationRunStatus {
-	out := orchestrationRunStatus{Schema: orchestrationStatusSchema, SessionID: receipt.SessionID, RunID: receipt.RunID, LaunchedAt: receipt.LaunchedAt, RequestedProfile: receipt.RequestedProfile, ResolvedProfile: receipt.ResolvedProfile, WorkClass: receipt.WorkClass, State: "complete", Workers: make([]orchestrationWorkerStatus, 0, len(receipt.Workers))}
+	out := orchestrationRunStatus{Schema: orchestrationStatusSchema, SessionID: receipt.SessionID, RunID: receipt.RunID, LaunchedAt: receipt.LaunchedAt, RequestedProfile: receipt.RequestedProfile, ResolvedProfile: receipt.ResolvedProfile, WorkClass: receipt.WorkClass, State: "complete", Outcome: unverifiedOrchestrationOutcome(), Workers: make([]orchestrationWorkerStatus, 0, len(receipt.Workers))}
 	for _, worker := range receipt.Workers {
 		ws := orchestrationWorkerStatus{RoleID: worker.RoleID, PID: worker.PID, LogPath: worker.LogPath, ProcessAlive: processalive.Check(worker.PID)}
 		path := worker.LogPath
@@ -148,6 +161,16 @@ func inspectOrchestrationRun(home string, receipt codexOrchestrationLaunchReceip
 		out.State = "attention"
 	}
 	return out
+}
+
+func unverifiedOrchestrationOutcome() orchestrationOutcomeStatus {
+	return orchestrationOutcomeStatus{
+		Verdict:            "unverified",
+		EffectReadback:     orchestrationEvidenceNotObserved,
+		IndependentWitness: orchestrationEvidenceNotObserved,
+		Reconciliation:     orchestrationEvidenceNotObserved,
+		Reason:             "worker and turn events do not prove effects, independent witness acceptance, or reconciliation",
+	}
 }
 
 func inspectOrchestrationLog(path string, ws *orchestrationWorkerStatus) {
