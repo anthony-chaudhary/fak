@@ -1337,7 +1337,7 @@ func TestTUIOverviewHumanOutputFromFixtures(t *testing.T) {
 		t.Fatalf("runTUI overview code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"fak console overview", "cards=6", "missing=0", "issues", "loops", "sessions", "garden", "guard", "config", "garden-red"} {
+	for _, want := range []string{"fak console overview", "cards=6", "missing=0", "issues", "loops", "sessions", "garden", "guard", "settings", "garden-red"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("overview output missing %q:\n%s", want, out)
 		}
@@ -1459,6 +1459,61 @@ func TestTUIOverviewConfigRejectsPaneWithoutAdapter(t *testing.T) {
 	}
 }
 
+func TestTUISettingsCanonicalNameWithConfigCompatibility(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "missing-console.json")
+	run := func(name string, args ...string) []byte {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		argv := append([]string{name}, args...)
+		if code := runTUI(&stdout, &stderr, argv); code != 0 {
+			t.Fatalf("runTUI %s code=%d stderr=%s", name, code, stderr.String())
+		}
+		return stdout.Bytes()
+	}
+
+	settings := run("settings", "--path", cfg, "--at", "2026-06-25T12:10:00Z", "--json")
+	compat := run("config", "--path", cfg, "--at", "2026-06-25T12:10:00Z", "--json")
+	if !bytes.Equal(settings, compat) {
+		t.Fatalf("settings and config alias differ:\nsettings=%s\nconfig=%s", settings, compat)
+	}
+	var configReport tuiConfigReport
+	if err := json.Unmarshal(settings, &configReport); err != nil || configReport.Schema != tuiConfigSchema {
+		t.Fatalf("settings schema: report=%+v err=%v body=%s", configReport, err, settings)
+	}
+
+	help := string(run("help"))
+	if !strings.Contains(help, "fak console settings") || strings.Contains(help, "fak console config [") {
+		t.Fatalf("help does not advertise settings canonically:\n%s", help)
+	}
+
+	var panes tuiPaneRegistryReport
+	if err := json.Unmarshal(run("panes", "--json"), &panes); err != nil {
+		t.Fatalf("unmarshal panes: %v", err)
+	}
+	if _, ok := paneDescriptorByID(panes.Panes, "settings"); !ok {
+		t.Fatalf("settings absent from pane discovery: %+v", panes.Panes)
+	}
+	if _, ok := paneDescriptorByID(panes.Panes, "config"); ok {
+		t.Fatalf("compatibility alias config was advertised as a pane: %+v", panes.Panes)
+	}
+
+	var overview tuiOverviewReport
+	if err := json.Unmarshal(run("overview", "--pane", "settings", "--at", "2026-06-25T12:10:00Z", "--json"), &overview); err != nil {
+		t.Fatalf("unmarshal overview: %v", err)
+	}
+	if len(overview.Cards) != 1 || overview.Cards[0].Pane != "settings" || overview.Cards[0].Command != "fak console settings" {
+		t.Fatalf("overview settings card = %+v", overview.Cards)
+	}
+
+	legacyCfg := writeTUIConsoleConfig(t, `{"overview_panes":["config"]}`)
+	if err := json.Unmarshal(run("overview", "--console-config", legacyCfg, "--at", "2026-06-25T12:10:00Z", "--json"), &overview); err != nil {
+		t.Fatalf("unmarshal legacy overview: %v", err)
+	}
+	if len(overview.Cards) != 1 || overview.Cards[0].Pane != "settings" {
+		t.Fatalf("legacy config pane id did not canonicalize: %+v", overview.Cards)
+	}
+}
+
 func TestTUIConfigPaneJSONFromConfig(t *testing.T) {
 	cfg := writeTUIConsoleConfig(t, `{"overview_panes":["guard","loops"],"pane_defaults":{"issues":{"json":true,"top":40},"guard":{"color":"never"}}}`)
 	var stdout, stderr bytes.Buffer
@@ -1505,13 +1560,13 @@ func TestTUIConfigPaneRendersAvailableSettingsWithoutConfig(t *testing.T) {
 			}
 			out := stdout.String()
 			for _, want := range []string{
-				"fak console config  at=2026-06-25T12:10:00Z  status=missing",
+				"fak console settings  at=2026-06-25T12:10:00Z  status=missing",
 				"available_settings=",
 				"\nSettings\n",
 				"guard.color  effective=auto  source=built-in",
 				"options=auto|always|never",
-				`set: fak console config --path "` + cfg + `" --set-default "guard.color=auto"`,
-				`reset: fak console config --path "` + cfg + `" --unset-default guard.color`,
+				`set: fak console settings --path "` + cfg + `" --set-default "guard.color=auto"`,
+				`reset: fak console settings --path "` + cfg + `" --unset-default guard.color`,
 				"issues.json  effective=false  source=built-in",
 			} {
 				if !strings.Contains(out, want) {
@@ -1629,7 +1684,7 @@ func TestTUIConfigPaneRejectsInvalidSavedControls(t *testing.T) {
 		{name: "overview pane without adapter", args: []string{"--set-overview", "agent"}, want: "overview_panes.agent: pane has no overview adapter"},
 		{name: "bad toggle default", args: []string{"--set-default", "issues.json=maybe"}, want: "pane_defaults.issues.json: must be a boolean"},
 		{name: "bad option default", args: []string{"--set-default", "guard.color=blue"}, want: "pane_defaults.guard.color: must be one of auto, always, never"},
-		{name: "config pane default", args: []string{"--set-default", "config.path=tmp.json"}, want: "pane_defaults.config: config pane cannot be defaulted"},
+		{name: "config pane default", args: []string{"--set-default", "config.path=tmp.json"}, want: "pane_defaults.config: settings pane cannot be defaulted"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := filepath.Join(t.TempDir(), "console.json")
@@ -1665,9 +1720,12 @@ func TestTUIPanesRegistryListsControls(t *testing.T) {
 	if report.Counts.Panes < 9 || report.Counts.Overview < 6 || report.Counts.Controls < 12 {
 		t.Fatalf("counts = %+v, want registered built-ins and controls", report.Counts)
 	}
-	config, ok := paneDescriptorByID(report.Panes, "config")
-	if !ok || config.Schema != tuiConfigSchema || !config.Overview || !hasTUIPaneControl(config.Controls, "path") || !hasTUIPaneControl(config.Controls, "set-default") {
-		t.Fatalf("config descriptor = %+v ok=%v", config, ok)
+	settings, ok := paneDescriptorByID(report.Panes, "settings")
+	if !ok || settings.Schema != tuiConfigSchema || !settings.Overview || !hasTUIPaneControl(settings.Controls, "path") || !hasTUIPaneControl(settings.Controls, "set-default") {
+		t.Fatalf("settings descriptor = %+v ok=%v", settings, ok)
+	}
+	if _, ok := paneDescriptorByID(report.Panes, "config"); ok {
+		t.Fatalf("config compatibility alias should not be advertised: %+v", report.Panes)
 	}
 	guard, ok := paneDescriptorByID(report.Panes, "guard")
 	if !ok {

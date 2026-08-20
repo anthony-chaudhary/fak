@@ -82,7 +82,7 @@ func prepareTUIPaneArgs(pane tuiplugin.Pane, argv []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if pane.ID == "config" {
+	if pane.ID == "settings" {
 		if explicit {
 			return append([]string{"--path", cfgPath}, clean...), nil
 		}
@@ -213,8 +213,8 @@ func validateTUIConsoleDefaults(cfg tuiConsoleConfig) error {
 	}
 	sort.Strings(paneIDs)
 	for _, paneID := range paneIDs {
-		if paneID == "config" {
-			return fmt.Errorf("pane_defaults.%s: config pane cannot be defaulted", paneID)
+		if paneID == "config" || paneID == "settings" {
+			return fmt.Errorf("pane_defaults.%s: settings pane cannot be defaulted", paneID)
 		}
 		desc, ok := panes[paneID]
 		if !ok {
@@ -357,6 +357,9 @@ func normalizeTUIOverviewPaneList(values []string) []string {
 	seen := map[string]bool{}
 	for _, v := range values {
 		name := strings.TrimSpace(strings.ToLower(v))
+		if name == "config" {
+			name = "settings"
+		}
 		if name == "" || seen[name] {
 			continue
 		}

@@ -76,7 +76,11 @@ func runTUI(stdout, stderr io.Writer, argv []string) int {
 		tuiUsage(stdout)
 		return 0
 	}
-	pane, ok := tuiplugin.Lookup(argv[0])
+	paneID := argv[0]
+	if paneID == "config" {
+		paneID = "settings"
+	}
+	pane, ok := tuiplugin.Lookup(paneID)
 	if !ok {
 		fmt.Fprintf(stderr, "fak console: unknown subcommand %q\n", argv[0])
 		tuiUsage(stderr)

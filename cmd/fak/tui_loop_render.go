@@ -596,7 +596,7 @@ func tuiUsage(w io.Writer) {
   fak console guard  --guard-json FILE [--guard-json FILE ...] [--json]
                  [--width N] [--color auto|always|never] [--at RFC3339|YYYY-MM-DD]
   fak console panes [--json]
-  fak console config [--path FILE] [--json]
+  fak console settings [--path FILE] [--json]
                  [--set-overview ID,ID] [--clear-overview]
                  [--set-default PANE.CONTROL=VALUE] [--unset-default PANE.CONTROL]
   fak console agent [<target> | --target NAME | --auto] [--list-targets]
@@ -632,7 +632,7 @@ The panes registry lists every registered console pane plus its operator-facing
 controls. This is the in-process plugin seam for adding a pane without editing
 the console dispatcher.
 
-The config pane reads or writes the persisted console controls. Use it to save
+The settings pane reads or writes the persisted console controls. Use it to save
 overview pane order and pane-control defaults after validating them against the
 registered pane descriptors.
 

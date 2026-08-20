@@ -58,9 +58,9 @@ type tuiConfigSetting struct {
 
 func init() {
 	tuiplugin.Register(tuiplugin.Pane{
-		ID:      "config",
-		Summary: "inspect console config, saved overview panes, and pane defaults",
-		Usage:   "fak console config [--path FILE] [--json] [--set-overview ID,ID] [--set-default PANE.CONTROL=VALUE]",
+		ID:      "settings",
+		Summary: "inspect and change console settings, saved overview panes, and pane defaults",
+		Usage:   "fak console settings [--path FILE] [--json] [--set-overview ID,ID] [--set-default PANE.CONTROL=VALUE]",
 		Schema:  tuiConfigSchema,
 		BuiltIn: true,
 		Controls: []tuiplugin.Control{
@@ -77,7 +77,7 @@ func init() {
 }
 
 func runTUIConfig(stdout, stderr io.Writer, argv []string) int {
-	fs := flag.NewFlagSet("tui config", flag.ContinueOnError)
+	fs := flag.NewFlagSet("tui settings", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	path := fs.String("path", defaultTUIConsoleFile(), "console preference JSON (default: FAK_CONSOLE_FILE, else ~/.fak/console.json)")
 	width := fs.Int("width", 120, "target terminal width for human rendering")
@@ -93,7 +93,7 @@ func runTUIConfig(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "fak console config: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(stderr, "fak console settings: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
 	if *width < 72 {
@@ -101,7 +101,7 @@ func runTUIConfig(stdout, stderr io.Writer, argv []string) int {
 	}
 	at, err := parseTUITime(*atText)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak console config: %v\n", err)
+		fmt.Fprintf(stderr, "fak console settings: %v\n", err)
 		return 2
 	}
 	if configMutationRequested(*setOverview, *clearOverview, []string(setDefaults), []string(unsetDefaults)) {
@@ -112,18 +112,18 @@ func runTUIConfig(stdout, stderr io.Writer, argv []string) int {
 			UnsetDefaults: []string(unsetDefaults),
 		}, at)
 		if err != nil {
-			fmt.Fprintf(stderr, "fak console config: %v\n", err)
+			fmt.Fprintf(stderr, "fak console settings: %v\n", err)
 			return 2
 		}
 		if *asJSON {
-			return encodeJSONOrFail(stdout, stderr, report, "fak console config")
+			return encodeJSONOrFail(stdout, stderr, report, "fak console settings")
 		}
 		fmt.Fprint(stdout, renderTUIConfig(report, *width))
 		return 0
 	}
 	report := buildTUIConfigReport(*path, at)
 	if *asJSON {
-		return encodeJSONOrFail(stdout, stderr, report, "fak console config")
+		return encodeJSONOrFail(stdout, stderr, report, "fak console settings")
 	}
 	fmt.Fprint(stdout, renderTUIConfig(report, *width))
 	return 0
@@ -283,7 +283,7 @@ func populateTUIConfigSettings(report *tuiConfigReport, cfg tuiConsoleConfig) {
 func buildTUIConfigSettings(cfg tuiConsoleConfig, path string) []tuiConfigSetting {
 	settings := []tuiConfigSetting{}
 	for _, pane := range tuiplugin.Descriptors() {
-		if pane.ID == "config" {
+		if pane.ID == "settings" {
 			continue
 		}
 		for _, control := range pane.Controls {
@@ -358,7 +358,7 @@ func formatTUIConfigMutationCommand(path, action, value string) string {
 	if action != "--unset-default" || strings.ContainsAny(argument, " \t\"") {
 		argument = `"` + strings.ReplaceAll(argument, `"`, `\"`) + `"`
 	}
-	return fmt.Sprintf("fak console config --path \"%s\" %s %s",
+	return fmt.Sprintf("fak console settings --path \"%s\" %s %s",
 		strings.ReplaceAll(path, `"`, `\"`), action, argument)
 }
 
@@ -431,7 +431,7 @@ func configDefaultTags(c tuiplugin.Control) []string {
 
 func renderTUIConfig(report tuiConfigReport, width int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "fak console config  at=%s  status=%s\n", report.At, report.Status)
+	fmt.Fprintf(&b, "fak console settings  at=%s  status=%s\n", report.At, report.Status)
 	if report.Updated {
 		fmt.Fprintln(&b, "updated=yes")
 	}
@@ -505,11 +505,11 @@ func buildTUIOverviewConfigCard(opt tuiOverviewOptions) (tuiOverviewCard, error)
 		summary += " error=" + report.Error
 	}
 	return tuiOverviewCard{
-		Pane:      "config",
+		Pane:      "settings",
 		Status:    status,
 		Source:    report.Path,
 		Summary:   summary,
-		Command:   "fak console config",
+		Command:   "fak console settings",
 		Attention: attention,
 		Counts:    counts,
 		Tags:      tags,
