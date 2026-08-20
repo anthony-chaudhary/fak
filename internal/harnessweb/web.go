@@ -13,27 +13,41 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/goalregistry"
 	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
 const page = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>fak local harness</title><style>
-:root{color-scheme:dark;--ink:#eef6ee;--muted:#9fb1a3;--panel:#122019;--line:#294034;--accent:#a7f3d0;--warn:#fbbf24;--danger:#fb7185;--bg:#09110d}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 18% 0,#173326 0,var(--bg) 42%);color:var(--ink);font:16px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}main{width:min(1040px,94vw);margin:5vh auto}.eyebrow{color:var(--accent);letter-spacing:.18em;text-transform:uppercase}.shell{border:1px solid var(--line);border-radius:18px;background:color-mix(in srgb,var(--panel) 92%,transparent);box-shadow:0 24px 80px #0008;overflow:hidden}.top{padding:26px 30px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:1fr auto;gap:20px;align-items:end}h1{font:600 clamp(2rem,5vw,4.2rem)/1 ui-sans-serif,system-ui;margin:.15em 0}.sub{color:var(--muted);max-width:66ch}.run{padding:26px 30px}.composer{display:flex;gap:10px}.composer input{flex:1;background:#07100b;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:14px}.composer button,.approval button,.skin{background:var(--accent);color:#062116;border:0;border-radius:10px;padding:0 20px;font-weight:800;cursor:pointer}.skin{padding:9px 12px}.examples{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.examples button{background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:99px;padding:6px 10px;cursor:pointer}.events{display:grid;gap:10px;margin-top:24px}.event{border-left:3px solid var(--line);background:#0a1510;padding:12px 14px}.event[data-kind^="message"]{border-color:var(--accent)}.event[data-kind^="tool"],.event[data-kind^="approval"]{border-color:var(--warn)}.event[data-kind="error"]{border-color:var(--danger)}.kind{color:var(--muted);font-size:.78rem;text-transform:uppercase}.status{display:flex;gap:8px;align-items:center;color:var(--muted)}.dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}.approval{display:flex;gap:8px;margin-top:10px}.approval button:last-child{background:transparent;border:1px solid var(--danger);color:var(--danger)}.empty{color:var(--muted);border:1px dashed var(--line);padding:24px;border-radius:12px}body[data-skin="minimal"]{--accent:#93c5fd;--panel:#111827;--line:#334155;--bg:#020617}body[data-skin="minimal"] .eyebrow{letter-spacing:.06em}body[data-skin="minimal"] h1{font-size:2.4rem}@media(max-width:720px){.top{grid-template-columns:1fr}.composer{display:grid}.composer button{padding:13px}}
-</style></head><body><main><p class="eyebrow">fak / native harness</p><section class="shell"><header class="top"><div><h1>Local, bounded, yours.</h1><p class="sub">A separately built product UI over semantic harness events. No terminal scraping. Offline by default.</p><p class="status"><span class="dot"></span><span id="status">ready on loopback</span></p></div><button id="skin" class="skin" type="button">Switch skin</button></header><div class="run"><form id="prompt" class="composer"><input id="text" aria-label="Message" value="show the native harness works"><button>Run</button></form><nav class="examples" aria-label="Example runs"><button data-example="normal">Tool run</button><button data-example="approval">Approval run</button><button data-example="failure">Failure run</button></nav><section id="events" class="events" aria-live="polite"><p class="empty">Run an offline scenario. Events stay semantic and replayable.</p></section></div></section></main><script>
+:root{color-scheme:dark;--ink:#edf5ef;--muted:#9dafaa;--panel:#101c17;--panel2:#0a1510;--line:#294038;--accent:#8ee8bd;--accent2:#8eb5ff;--warn:#f6c453;--danger:#fb7185;--bg:#07100c}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(circle at 16% 0,#173326 0,var(--bg) 38%);color:var(--ink);font:15px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}a{color:inherit}button,input{font:inherit}main{width:min(1180px,94vw);margin:24px auto 64px}.eyebrow{margin:0;color:var(--accent);font-weight:800;letter-spacing:.16em;text-transform:uppercase;font-size:.78rem}.topbar{display:flex;justify-content:space-between;gap:18px;align-items:center;margin-bottom:18px}.brand{display:flex;align-items:center;gap:12px}.mark{display:grid;place-items:center;width:34px;height:34px;border:1px solid var(--accent);border-radius:9px;color:var(--accent);font-weight:900}.mode{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:.86rem}.dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}.shell{border:1px solid var(--line);border-radius:18px;background:color-mix(in srgb,var(--panel) 94%,transparent);box-shadow:0 24px 80px #0008;overflow:hidden}.top{padding:26px 30px 22px;border-bottom:1px solid var(--line)}h1{font:650 clamp(2rem,5vw,3.6rem)/1 ui-sans-serif,system-ui;margin:.12em 0 .25em}.sub{margin:0;color:var(--muted);max-width:72ch}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}.button,.skin{display:inline-flex;align-items:center;justify-content:center;min-height:38px;border:1px solid var(--line);border-radius:9px;background:transparent;color:var(--ink);padding:8px 12px;font-weight:750;text-decoration:none;cursor:pointer}.button.primary{background:var(--accent);border-color:var(--accent);color:#062116}.button[aria-disabled="true"]{color:var(--muted);cursor:default}.nav{display:flex;gap:5px;overflow:auto;padding:10px 22px;border-bottom:1px solid var(--line);background:#09130f}.nav a{white-space:nowrap;text-decoration:none;color:var(--muted);padding:7px 9px;border-radius:7px}.nav a:hover,.nav a:focus-visible{background:var(--panel);color:var(--ink);outline:none}.content{padding:24px 30px 30px}.section{scroll-margin-top:16px;margin-bottom:32px}.section:last-child{margin-bottom:0}.sectionhead{display:flex;align-items:end;justify-content:space-between;gap:16px;margin-bottom:13px}.sectionhead h2{font:650 1.2rem/1.2 ui-sans-serif,system-ui;margin:0}.sectionhead p{margin:0;color:var(--muted);font-size:.84rem}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.stat{border:1px solid var(--line);border-radius:12px;background:var(--panel2);padding:16px}.stat .value{display:block;font:700 1.8rem/1 ui-sans-serif,system-ui;margin-bottom:7px}.stat .label{display:block;color:var(--ink);font-weight:750}.stat .detail{display:block;color:var(--muted);font-size:.78rem;margin-top:3px}.twocol{display:grid;grid-template-columns:1fr 1fr;gap:12px}.panel{border:1px solid var(--line);border-radius:12px;background:var(--panel2);padding:16px;min-width:0}.panel h3{font:650 1rem/1.2 ui-sans-serif,system-ui;margin:0 0 12px}.rows{display:grid;gap:8px}.row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:10px 0;border-top:1px solid var(--line)}.row:first-child{border-top:0;padding-top:0}.row:last-child{padding-bottom:0}.row strong{display:block;overflow-wrap:anywhere}.meta{color:var(--muted);font-size:.78rem}.tag{align-self:start;border:1px solid var(--line);border-radius:99px;padding:3px 7px;color:var(--muted);font-size:.72rem}.dashboards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.dashboard{display:block;min-height:116px;border:1px solid var(--line);border-radius:12px;background:var(--panel2);padding:14px;text-decoration:none}.dashboard[href]:hover,.dashboard[href]:focus-visible{border-color:var(--accent2);transform:translateY(-1px);outline:none}.dashboard.disabled{opacity:.58}.dashboard strong{display:block;margin-bottom:5px}.dashboard span{display:block;color:var(--muted);font-size:.8rem}.path{margin-top:12px!important;color:var(--accent2)!important;overflow-wrap:anywhere}.composer{display:flex;gap:10px}.composer input{flex:1;min-width:0;background:#06100b;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:14px}.composer button,.approval button{background:var(--accent);color:#062116;border:0;border-radius:10px;padding:0 20px;font-weight:800;cursor:pointer}.examples{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 0}.examples button{background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:99px;padding:6px 10px;cursor:pointer}.events{display:grid;gap:9px;margin-top:18px}.event{border-left:3px solid var(--line);background:#07110c;padding:11px 13px}.event[data-kind^="message"]{border-color:var(--accent)}.event[data-kind^="tool"],.event[data-kind^="approval"]{border-color:var(--warn)}.event[data-kind="error"]{border-color:var(--danger)}.kind{color:var(--muted);font-size:.74rem;text-transform:uppercase}.approval{display:flex;gap:8px;margin-top:10px}.approval button:last-child{background:transparent;border:1px solid var(--danger);color:var(--danger)}.empty{margin:0;color:var(--muted);border:1px dashed var(--line);padding:18px;border-radius:10px}code{color:var(--accent)}body[data-skin="minimal"]{--accent:#93c5fd;--panel:#111827;--panel2:#08101d;--line:#334155;--bg:#020617}@media(max-width:900px){.stats,.dashboards{grid-template-columns:repeat(2,minmax(0,1fr))}.twocol{grid-template-columns:1fr}}@media(max-width:600px){main{width:min(100% - 20px,1180px);margin-top:14px}.top,.content{padding-left:18px;padding-right:18px}.topbar{align-items:flex-start}.mode{max-width:45%;text-align:right}.stats,.dashboards{grid-template-columns:1fr}.composer{display:grid}.composer button{padding:13px}.sectionhead{align-items:start;flex-direction:column}}
+</style></head><body><main><div class="topbar"><div class="brand"><span class="mark">f</span><p class="eyebrow">fak operator home</p></div><p class="mode"><span class="dot"></span><span id="status">loading local state…</span></p></div><section class="shell"><header class="top"><h1>Harness overview</h1><p class="sub">Agents, goals, and live operating surfaces in one place. Start a run after you know what is active.</p><div class="actions"><a id="gateway-link" class="button primary" aria-disabled="true">Web gateway</a><button id="refresh" class="button" type="button">Refresh status</button><button id="skin" class="skin" type="button">Theme</button></div></header><nav class="nav" aria-label="Harness pages"><a href="#overview">Overview</a><a href="#agents">Agent stats</a><a href="#goals">Goals</a><a href="#dashboards">Live dashboards</a><a href="#run">Run agent</a></nav><div class="content">
+<section id="overview" class="section"><div class="sectionhead"><h2>Overview</h2><p id="overview-note">reading current state</p></div><div id="stats" class="stats" aria-live="polite"><p class="empty">Loading operational totals…</p></div></section>
+<section class="section"><div class="twocol"><div id="agents" class="panel"><h3>Agent stats</h3><div id="agent-rows" class="rows"><p class="empty">Loading agents…</p></div></div><div id="goals" class="panel"><h3>Goals</h3><div id="goal-rows" class="rows"><p class="empty">Loading goals…</p></div></div></div></section>
+<section id="dashboards" class="section"><div class="sectionhead"><h2>Live dashboards</h2><p id="dashboard-note">connect a gateway to open live pages</p></div><div id="dashboard-links" class="dashboards"></div></section>
+<section id="run" class="section"><div class="sectionhead"><h2>Run agent</h2><p>Live through the configured gateway; deterministic offline otherwise.</p></div><form id="prompt" class="composer"><input id="text" aria-label="Message" value="show the native harness works"><button>Run</button></form><nav class="examples" aria-label="Proof scenarios"><button data-example="normal">Tool run</button><button data-example="approval">Approval run</button><button data-example="failure">Failure run</button></nav><section id="events" class="events" aria-live="polite"><p class="empty">Choose a goal or start a run. Semantic events appear here.</p></section></section>
+</div></section></main><script>
 const query=new URLSearchParams(location.search);let run=query.get("run")||"",after=0,skin=query.get("skin")||"forest";document.body.dataset.skin=skin;const list=document.querySelector("#events"),status=document.querySelector("#status"),text=document.querySelector("#text");
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 function render(e){const p=e.payload||{},d=document.createElement("article");d.className="event";d.dataset.kind=e.type;const detail=p.text||p.summary||p.name||p.message||p.status||e.type;d.innerHTML='<div class="kind">'+esc(e.type)+' · '+e.sequence+'</div><div>'+esc(detail)+'</div>';if(e.type==="approval.requested"){const a=document.createElement("div");a.className="approval";a.innerHTML='<button data-decision="approve">Approve once</button><button data-decision="deny">Deny</button>';a.addEventListener("click",async x=>{const decision=x.target.dataset.decision;if(!decision)return;await fetch("/api/approvals",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({run_id:run,approval_id:p.approval_id,decision})});await pull()});d.append(a)}list.append(d);after=e.sequence}
+function empty(message){const p=document.createElement("p");p.className="empty";p.textContent=message;return p}
+function row(title,meta,tag){const d=document.createElement("div");d.className="row";const copy=document.createElement("div"),strong=document.createElement("strong"),small=document.createElement("span"),badge=document.createElement("span");strong.textContent=title;small.className="meta";small.textContent=meta;badge.className="tag";badge.textContent=tag;copy.append(strong,small);d.append(copy,badge);return d}
+function stat(value,label,detail){const d=document.createElement("div");d.className="stat";d.innerHTML='<span class="value">'+esc(value)+'</span><span class="label">'+esc(label)+'</span><span class="detail">'+esc(detail)+'</span>';return d}
+function renderOverview(data){const agents=data.agents||{},goals=data.goals||{},gateway=data.gateway||{},workspace=data.workspace||{};status.textContent=(data.mode||"offline")+(gateway.reachable?" · gateway live":" · loopback only");document.querySelector("#overview-note").textContent=gateway.reachable?"live gateway and local registries":"local registries · add -fak-url for gateway state";const stats=document.querySelector("#stats");stats.replaceChildren(stat((agents.live_sessions||[]).length,"Live agents",gateway.reachable?"running through the gateway":"gateway not connected"),stat(agents.total_runs||0,"Stored runs",(agents.completed||0)+" completed · "+(agents.failed||0)+" failed"),stat(goals.active||0,"Active goals",(goals.blocked||0)+" blocked · "+(goals.paused||0)+" paused"),stat(gateway.fleet_sessions||0,"Fleet sessions",(gateway.fleet_machines||0)+" machines visible"));const agentRows=document.querySelector("#agent-rows");agentRows.replaceChildren();for(const a of agents.live_sessions||[])agentRows.append(row(a.trace_id||"unnamed agent",(a.last_tool?"last tool "+a.last_tool+" · ":"")+(a.turns_left||0)+" turns left",a.run||"live"));for(const a of agents.recent_runs||[])agentRows.append(row(a.run_id,a.events+" events · last "+(a.last_event||"unknown"),a.status));if(!agentRows.children.length)agentRows.append(empty("No agent sessions or stored runs yet."));const goalRows=document.querySelector("#goal-rows");goalRows.replaceChildren();if(!goals.readable)goalRows.append(empty("Goal registry unavailable."));else for(const g of goals.items||[])goalRows.append(row(g.title,g.goal_id,g.lifecycle));if(!goalRows.children.length)goalRows.append(empty("No registered goals. Create one with fak goal create."));const gatewayLink=document.querySelector("#gateway-link");if(gateway.url){gatewayLink.href=gateway.url;gatewayLink.target="_blank";gatewayLink.rel="noreferrer";gatewayLink.removeAttribute("aria-disabled")}else{gatewayLink.removeAttribute("href");gatewayLink.removeAttribute("target");gatewayLink.setAttribute("aria-disabled","true")}document.querySelector("#dashboard-note").textContent=gateway.reachable?"live from "+gateway.url:"shown now; connect with -fak-url to enable";const links=document.querySelector("#dashboard-links");links.replaceChildren();for(const item of data.dashboards||[]){const d=document.createElement(item.url?"a":"div");d.className="dashboard"+(item.url?"":" disabled");if(item.url){d.href=item.url;d.target="_blank";d.rel="noreferrer"}const strong=document.createElement("strong"),desc=document.createElement("span"),path=document.createElement("span");strong.textContent=item.label;desc.textContent=item.description;path.className="path";path.textContent=item.path;d.append(strong,desc,path);links.append(d)}if(workspace.armed)document.querySelector("#overview-note").textContent+=" · workspace "+workspace.identity}
+async function refreshOverview(){try{const r=await fetch("/api/status",{cache:"no-store"});if(!r.ok)throw new Error(r.status);renderOverview(await r.json())}catch(e){status.textContent="status unavailable"}}
 async function pull(){const r=await fetch('/api/events?run_id='+encodeURIComponent(run)+'&after='+after);for(const e of await r.json())render(e);status.textContent='connected · cursor '+after}
-async function start(message){list.replaceChildren();after=0;const r=await fetch("/api/runs",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({message})});run=(await r.json()).run_id;history.replaceState(null,"","?run="+encodeURIComponent(run));await pull()}
+async function start(message){list.replaceChildren();after=0;const r=await fetch("/api/runs",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({message})});run=(await r.json()).run_id;history.replaceState(null,"","?run="+encodeURIComponent(run));await pull();await refreshOverview()}
 document.querySelector("#prompt").addEventListener("submit",async e=>{e.preventDefault();await start(text.value)});document.querySelector(".examples").addEventListener("click",async e=>{const x=e.target.dataset.example;if(!x)return;text.value=x==="approval"?"approval: inspect workspace":x==="failure"?"failure: demonstrate typed error":"show the native harness works";await start(text.value)});document.querySelector("#skin").addEventListener("click",()=>{skin=skin==="forest"?"minimal":"forest";document.body.dataset.skin=skin});const scenario=new URLSearchParams(location.search).get("scenario");if(scenario){text.value=scenario==="approval"?"approval: inspect workspace":scenario==="failure"?"failure: demonstrate typed error":"show the native harness works";start(text.value)}
+document.querySelector("#refresh").addEventListener("click",refreshOverview);refreshOverview();if(run)pull();setInterval(refreshOverview,5000);
 </script></body></html>`
 
 type runState struct {
@@ -173,6 +187,186 @@ func (s *store) replace(runID string, events []harnesskit.Envelope) error {
 	return s.saveLocked()
 }
 
+type runSummary struct {
+	RunID     string `json:"run_id"`
+	Status    string `json:"status"`
+	Events    int    `json:"events"`
+	LastEvent string `json:"last_event,omitempty"`
+}
+
+type liveSessionSummary struct {
+	TraceID   string `json:"trace_id"`
+	Run       string `json:"run"`
+	TurnsLeft int    `json:"turns_left"`
+	LastTool  string `json:"last_tool,omitempty"`
+}
+
+type agentOverview struct {
+	TotalRuns        int                  `json:"total_runs"`
+	Running          int                  `json:"running"`
+	Completed        int                  `json:"completed"`
+	Failed           int                  `json:"failed"`
+	AwaitingApproval int                  `json:"awaiting_approval"`
+	LiveSessions     []liveSessionSummary `json:"live_sessions"`
+	RecentRuns       []runSummary         `json:"recent_runs"`
+}
+
+func (s *store) overview(live []liveSessionSummary) agentOverview {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := agentOverview{TotalRuns: len(s.runs), LiveSessions: live, RecentRuns: make([]runSummary, 0, len(s.runs))}
+	for id, state := range s.runs {
+		summary := summarizeRun(id, state.events)
+		switch summary.Status {
+		case "completed":
+			out.Completed++
+		case "failed":
+			out.Failed++
+		case "awaiting approval":
+			out.AwaitingApproval++
+		default:
+			out.Running++
+		}
+		out.RecentRuns = append(out.RecentRuns, summary)
+	}
+	sort.Slice(out.RecentRuns, func(i, j int) bool {
+		iRun, jRun := runSerial(out.RecentRuns[i].RunID), runSerial(out.RecentRuns[j].RunID)
+		if iRun != jRun {
+			return iRun > jRun
+		}
+		return out.RecentRuns[i].RunID > out.RecentRuns[j].RunID
+	})
+	if len(out.RecentRuns) > 8 {
+		out.RecentRuns = out.RecentRuns[:8]
+	}
+	return out
+}
+
+func summarizeRun(id string, events []harnesskit.Envelope) runSummary {
+	summary := runSummary{RunID: id, Status: "running", Events: len(events)}
+	var requested, resolved uint64
+	for _, e := range events {
+		summary.LastEvent = string(e.Type)
+		switch e.Type {
+		case harnesskit.EventApprovalRequested:
+			requested = e.Sequence
+		case harnesskit.EventApprovalResolved:
+			resolved = e.Sequence
+		case harnesskit.EventRunCompleted:
+			var payload harnesskit.RunPayload
+			if e.DecodePayload(&payload) == nil && strings.TrimSpace(payload.Status) != "" {
+				summary.Status = strings.TrimSpace(payload.Status)
+			}
+		}
+	}
+	if requested > resolved {
+		summary.Status = "awaiting approval"
+	}
+	return summary
+}
+
+func runSerial(id string) uint64 {
+	idx := strings.LastIndexByte(id, '-')
+	if idx < 0 || idx == len(id)-1 {
+		return 0
+	}
+	n, _ := strconv.ParseUint(id[idx+1:], 10, 64)
+	return n
+}
+
+type goalLister interface {
+	List() ([]goalregistry.Goal, error)
+}
+
+type goalSummary struct {
+	GoalID    string                 `json:"goal_id"`
+	Title     string                 `json:"title"`
+	Lifecycle goalregistry.Lifecycle `json:"lifecycle"`
+	UpdatedAt time.Time              `json:"updated_at"`
+}
+
+type goalOverview struct {
+	Readable bool          `json:"readable"`
+	Total    int           `json:"total"`
+	Active   int           `json:"active"`
+	Blocked  int           `json:"blocked"`
+	Paused   int           `json:"paused"`
+	Achieved int           `json:"achieved"`
+	Items    []goalSummary `json:"items"`
+}
+
+func readGoalOverview(source goalLister) goalOverview {
+	if source == nil {
+		return goalOverview{Items: []goalSummary{}}
+	}
+	goals, err := source.List()
+	if err != nil {
+		return goalOverview{Items: []goalSummary{}}
+	}
+	out := goalOverview{Readable: true, Total: len(goals), Items: make([]goalSummary, 0, len(goals))}
+	for _, goal := range goals {
+		switch goal.Lifecycle {
+		case goalregistry.Active:
+			out.Active++
+		case goalregistry.Blocked:
+			out.Blocked++
+		case goalregistry.Paused:
+			out.Paused++
+		case goalregistry.Achieved:
+			out.Achieved++
+		}
+		out.Items = append(out.Items, goalSummary{GoalID: goal.GoalID, Title: goal.Title, Lifecycle: goal.Lifecycle, UpdatedAt: goal.UpdatedAt})
+	}
+	sort.Slice(out.Items, func(i, j int) bool { return out.Items[i].UpdatedAt.After(out.Items[j].UpdatedAt) })
+	return out
+}
+
+type dashboardLink struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Path        string `json:"path"`
+	URL         string `json:"url,omitempty"`
+}
+
+type gatewayOverview struct {
+	Configured    bool   `json:"configured"`
+	Reachable     bool   `json:"reachable"`
+	URL           string `json:"url,omitempty"`
+	FleetMachines int    `json:"fleet_machines"`
+	FleetSessions int    `json:"fleet_sessions"`
+}
+
+func dashboardLinks(base string) []dashboardLink {
+	rows := []dashboardLink{
+		{Label: "Web gateway", Description: "Gateway identity and API map.", Path: "/"},
+		{Label: "Health", Description: "Readiness, engine state, and serving diagnostics.", Path: "/healthz"},
+		{Label: "Agent sessions", Description: "Every live session and remaining drive budget.", Path: "/v1/fak/sessions"},
+		{Label: "Background loops", Description: "Supervised loops and their current progress.", Path: "/v1/fak/loops"},
+		{Label: "Fleet status", Description: "Cross-session running, blocked, and pressure totals.", Path: "/v1/fak/fleet"},
+		{Label: "Task manager", Description: "Read-only process task accounting when enabled.", Path: "/v1/fak/tasks"},
+		{Label: "Metrics", Description: "Prometheus counters for cache, latency, and requests.", Path: "/metrics"},
+		{Label: "Diagnostics", Description: "Bounded runtime, agent, fleet, and resource state.", Path: "/debug/vars"},
+	}
+	for i := range rows {
+		if base != "" {
+			rows[i].URL = strings.TrimRight(base, "/") + rows[i].Path
+		}
+	}
+	return rows
+}
+
+func publicGatewayURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return ""
+	}
+	u.User = nil
+	u.RawQuery = ""
+	u.Fragment = ""
+	u.Path = strings.TrimRight(u.Path, "/")
+	return strings.TrimRight(u.String(), "/")
+}
+
 type liveAdapter struct {
 	baseURL   string
 	client    *http.Client
@@ -184,6 +378,48 @@ type workspaceStatus struct {
 	Armed    bool     `json:"armed"`
 	Tools    []string `json:"tools,omitempty"`
 	Identity string   `json:"identity,omitempty"`
+}
+
+func (a *liveAdapter) overview(ctx context.Context) (gatewayOverview, []liveSessionSummary) {
+	base := publicGatewayURL(a.baseURL)
+	out := gatewayOverview{Configured: true, URL: base}
+	if base == "" {
+		return out, []liveSessionSummary{}
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, strings.TrimRight(a.baseURL, "/")+"/debug/vars", nil)
+	if err != nil {
+		return out, []liveSessionSummary{}
+	}
+	client := a.client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return out, []liveSessionSummary{}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return out, []liveSessionSummary{}
+	}
+	var body struct {
+		Sessions []liveSessionSummary `json:"sessions"`
+		Fleet    *struct {
+			Machines int `json:"machines"`
+			Sessions int `json:"sessions"`
+		} `json:"fleet"`
+	}
+	if json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&body) != nil {
+		return out, []liveSessionSummary{}
+	}
+	out.Reachable = true
+	if body.Fleet != nil {
+		out.FleetMachines = body.Fleet.Machines
+		out.FleetSessions = body.Fleet.Sessions
+	}
+	return out, body.Sessions
 }
 
 func (a *liveAdapter) probeWorkspace(ctx context.Context) error {
@@ -345,22 +581,38 @@ func (s *store) resolve(runID, approvalID, decision string) error {
 	return s.saveLocked()
 }
 
-func handler(s *store) http.Handler { return handlerWithLive(s, nil) }
+func handler(s *store) http.Handler { return handlerWithSources(s, nil, nil) }
 
 func handlerWithLive(s *store, live *liveAdapter) http.Handler {
+	return handlerWithSources(s, live, nil)
+}
+
+func handlerWithSources(s *store, live *liveAdapter, goals goalLister) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'")
 		_, _ = io.WriteString(w, page)
 	})
-	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, _ *http.Request) {
-		status := map[string]any{"mode": "offline", "workspace": workspaceStatus{}}
+	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
+		mode := "offline"
+		workspace := workspaceStatus{}
+		gateway := gatewayOverview{}
+		liveSessions := []liveSessionSummary{}
 		if live != nil {
-			status["mode"] = "live"
-			status["workspace"] = live.workspace
+			mode = "live"
+			workspace = live.workspace
+			gateway, liveSessions = live.overview(r.Context())
 		}
-		writeJSON(w, status)
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, struct {
+			Mode       string          `json:"mode"`
+			Workspace  workspaceStatus `json:"workspace"`
+			Gateway    gatewayOverview `json:"gateway"`
+			Agents     agentOverview   `json:"agents"`
+			Goals      goalOverview    `json:"goals"`
+			Dashboards []dashboardLink `json:"dashboards"`
+		}{mode, workspace, gateway, s.overview(liveSessions), readGoalOverview(goals), dashboardLinks(gateway.URL)})
 	})
 	mux.HandleFunc("POST /api/runs", func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
@@ -419,18 +671,30 @@ func selfcheck(out io.Writer) error {
 	if err != nil || product.Spec().Profile.ID != "offline-native-ui" {
 		return fmt.Errorf("public product contract: %w", err)
 	}
+	temp, err := os.MkdirTemp("", "fak-harness-web-selfcheck-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(temp)
+	goals := goalregistry.Store{Path: filepath.Join(temp, "goals.json")}
+	if _, err := goals.Create("Inspect the local harness", "", goalregistry.Provenance{Actor: "selfcheck", Authority: "test"}, nil); err != nil {
+		return err
+	}
 	s := newStore()
-	ts := httptest.NewServer(handler(s))
+	ts := httptest.NewServer(handlerWithSources(s, nil, goals))
 	defer ts.Close()
 	client := ts.Client()
 	pageBody, err := get(client, ts.URL+"/")
 	if err != nil {
 		return err
 	}
-	for _, want := range []string{"Local, bounded, yours.", "aria-live=\"polite\"", "approval.requested", "data-skin", "e.payload"} {
+	for _, want := range []string{"Harness overview", "Web gateway", "Agent stats", "Goals", "Live dashboards", "aria-live=\"polite\"", "approval.requested", "data-skin", "e.payload"} {
 		if !strings.Contains(pageBody, want) {
 			return fmt.Errorf("captured render lacks %q", want)
 		}
+	}
+	if strings.Contains(pageBody, "Local, bounded, yours.") {
+		return fmt.Errorf("captured render still contains retired marketing headline")
 	}
 	normal, err := postRun(client, ts.URL, "prove local native UI")
 	if err != nil {
@@ -466,8 +730,23 @@ func selfcheck(out io.Writer) error {
 	if got := s.after(failure, 0); len(got) != 3 || got[1].Type != harnesskit.EventError {
 		return fmt.Errorf("failure=%v", got)
 	}
+	statusBody, err := get(client, ts.URL+"/api/status")
+	if err != nil {
+		return err
+	}
+	var status struct {
+		Agents     agentOverview   `json:"agents"`
+		Goals      goalOverview    `json:"goals"`
+		Dashboards []dashboardLink `json:"dashboards"`
+	}
+	if err := json.Unmarshal([]byte(statusBody), &status); err != nil {
+		return err
+	}
+	if status.Agents.TotalRuns != 3 || status.Goals.Active != 1 || len(status.Dashboards) != 8 {
+		return fmt.Errorf("operator overview runs=%d active_goals=%d dashboards=%d", status.Agents.TotalRuns, status.Goals.Active, len(status.Dashboards))
+	}
 	h := sha256.Sum256([]byte(pageBody))
-	fmt.Fprintf(out, "HARNESS_WEB_SELFCHECK ok protocol=%s normal=%d resumed=%d approval=4 failure=3 skins=2 html_sha256=%s\n", harnesskit.ProtocolVersion, len(events), len(resumed), hex.EncodeToString(h[:]))
+	fmt.Fprintf(out, "HARNESS_WEB_SELFCHECK ok protocol=%s normal=%d resumed=%d approval=4 failure=3 skins=2 runs=3 goals=1 dashboards=8 html_sha256=%s\n", harnesskit.ProtocolVersion, len(events), len(resumed), hex.EncodeToString(h[:]))
 	return nil
 }
 
@@ -573,7 +852,10 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 			return 2
 		}
 	}
-	server := &http.Server{Handler: handlerWithLive(s, live), ReadHeaderTimeout: 5 * time.Second}
+	server := &http.Server{
+		Handler:           handlerWithSources(s, live, goalregistry.Store{Path: goalregistry.DefaultPath()}),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
 	fmt.Fprintf(stdout, "fak native harness UI: http://%s\n", listener.Addr())
 	go func() { <-ctx.Done(); _ = server.Shutdown(context.Background()) }()
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {

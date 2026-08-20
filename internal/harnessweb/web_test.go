@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/goalregistry"
 	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
@@ -20,7 +21,12 @@ func TestCapturedPageRendersOperatingStatesAndSecondSkin(t *testing.T) {
 	handler(newStore()).ServeHTTP(response, request)
 	body := response.Body.String()
 	for _, want := range []string{
-		"Local, bounded, yours.",
+		"Harness overview",
+		"Web gateway",
+		"Agent stats",
+		"Goals",
+		"Live dashboards",
+		"Run agent",
 		"aria-live=\"polite\"",
 		"approval.requested",
 		"Approval run",
@@ -34,8 +40,85 @@ func TestCapturedPageRendersOperatingStatesAndSecondSkin(t *testing.T) {
 			t.Fatalf("captured browser render missing %q", want)
 		}
 	}
+	if strings.Contains(body, "Local, bounded, yours.") || strings.Contains(body, "separately built product UI") {
+		t.Fatal("captured browser render still leads with promotional implementation copy")
+	}
 	if got := response.Header().Get("Content-Security-Policy"); !strings.Contains(got, "default-src 'self'") {
 		t.Fatalf("CSP=%q", got)
+	}
+}
+
+func TestStatusProjectsAgentStatsGoalsAndLiveDashboardLinks(t *testing.T) {
+	goals := goalregistry.Store{Path: filepath.Join(t.TempDir(), "goals.json")}
+	if _, err := goals.Create("Make the harness operational", "", goalregistry.Provenance{Actor: "operator", Authority: "user"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	blocked, err := goals.Create("Recover the stalled worker", "", goalregistry.Provenance{Actor: "operator", Authority: "user"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := goals.Transition(blocked.GoalID, goalregistry.Blocked, goalregistry.OutcomeEvidence{
+		Class: goalregistry.IndependentWitness, Author: "test", Reference: "fixture",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/debug/vars" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"sessions": []map[string]any{
+				{"trace_id": "agent-main", "run": "running", "turns_left": 12, "last_tool": "Read"},
+				{"trace_id": "agent-review", "run": "paused", "turns_left": 4},
+			},
+			"fleet": map[string]any{"machines": 3, "sessions": 7},
+		})
+	}))
+	defer gateway.Close()
+
+	s := newStore()
+	s.create("complete a run")
+	s.create("failure: prove the failure total")
+	s.create("approval: wait for operator")
+	ui := httptest.NewServer(handlerWithSources(s, &liveAdapter{baseURL: gateway.URL, client: gateway.Client()}, goals))
+	defer ui.Close()
+	response, err := ui.Client().Get(ui.URL + "/api/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var got struct {
+		Mode       string          `json:"mode"`
+		Gateway    gatewayOverview `json:"gateway"`
+		Agents     agentOverview   `json:"agents"`
+		Goals      goalOverview    `json:"goals"`
+		Dashboards []dashboardLink `json:"dashboards"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Mode != "live" || !got.Gateway.Reachable || got.Gateway.URL != gateway.URL {
+		t.Fatalf("gateway=%+v mode=%q", got.Gateway, got.Mode)
+	}
+	if got.Gateway.FleetMachines != 3 || got.Gateway.FleetSessions != 7 || len(got.Agents.LiveSessions) != 2 {
+		t.Fatalf("live overview gateway=%+v agents=%+v", got.Gateway, got.Agents)
+	}
+	if got.Agents.TotalRuns != 3 || got.Agents.Completed != 1 || got.Agents.Failed != 1 || got.Agents.AwaitingApproval != 1 {
+		t.Fatalf("run stats=%+v", got.Agents)
+	}
+	if !got.Goals.Readable || got.Goals.Total != 2 || got.Goals.Active != 1 || got.Goals.Blocked != 1 {
+		t.Fatalf("goals=%+v", got.Goals)
+	}
+	if len(got.Dashboards) != 8 || got.Dashboards[0].Label != "Web gateway" || got.Dashboards[0].URL != gateway.URL+"/" {
+		t.Fatalf("dashboards=%+v", got.Dashboards)
+	}
+}
+
+func TestPublicGatewayURLDropsCredentialsAndQuery(t *testing.T) {
+	if got := publicGatewayURL("https://user:secret@example.test:8443/base/?token=private#part"); got != "https://example.test:8443/base" {
+		t.Fatalf("public gateway URL=%q", got)
 	}
 }
 
@@ -108,7 +191,7 @@ func TestSelfcheckDrivesRenderRunApprovalFailureAndReconnect(t *testing.T) {
 	if err := selfcheck(&out); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"HARNESS_WEB_SELFCHECK ok", "protocol=fak.harness.run/v1", "normal=8", "resumed=2", "approval=4", "failure=3", "skins=2", "html_sha256="} {
+	for _, want := range []string{"HARNESS_WEB_SELFCHECK ok", "protocol=fak.harness.run/v1", "normal=8", "resumed=2", "approval=4", "failure=3", "skins=2", "runs=3", "goals=1", "dashboards=8", "html_sha256="} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("receipt missing %q: %s", want, out.String())
 		}

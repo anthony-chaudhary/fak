@@ -2936,6 +2936,21 @@
           "category": "incidental",
           "reason": "local CLI flag binding for the positioned guard disable usage surface",
           "token": "guardDisable"
+        },
+        {
+          "category": "incidental",
+          "reason": "Operator-home DOM identifier for the existing Web gateway link; it does not introduce a new guard or gate concept.",
+          "token": "gatewayLink"
+        },
+        {
+          "category": "incidental",
+          "reason": "Read-only operator-home view model for existing gateway status; it does not introduce a new guard or gate concept.",
+          "token": "gatewayOverview"
+        },
+        {
+          "category": "incidental",
+          "reason": "Display-safety helper that removes credentials and query data from the configured Web gateway URL; it does not introduce a new guard or gate concept.",
+          "token": "publicGatewayURL"
         }
       ],
       "exclude": [
@@ -3078,6 +3093,8 @@
         "gateresult",
         "gates",
         "gatew",
+        "gatewayLink",
+        "gatewayOverview",
         "gatewayPluginExecutor",
         "gatewayPluginFloor",
         "gating",
@@ -3273,6 +3290,7 @@
         "printGuardLaunchPostures",
         "proseGate",
         "ptrGuardInfoWorkDone",
+        "publicGatewayURL",
         "quality_gate",
         "readGuardCompactionWitnesses",
         "readguardstopsledger",
@@ -5015,6 +5033,16 @@
           "category": "incidental",
           "reason": "Local aggregation map keyed by trajectory signature, not a session runtime identity.",
           "token": "frictionSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Read-only operator-home projection of existing live session data; it does not introduce a new session runtime or scheduler concept.",
+          "token": "liveSessionSummary"
+        },
+        {
+          "category": "incidental",
+          "reason": "Display counter copied from the existing fleet debug payload; it does not introduce a new session runtime or scheduler concept.",
+          "token": "FleetSessions"
         }
       ],
       "id": "session-runtime",
@@ -5036,6 +5064,7 @@
         "FAK_SESSION_STATE",
         "FinalizeSessionMoveCheckpoint",
         "FleetSessionCard",
+        "FleetSessions",
         "GatewaySeat",
         "HeldScheduleReport",
         "HeldScheduleReportSchema",
@@ -5197,6 +5226,7 @@
         "kernelSession",
         "ledgerSettledSessions",
         "live-tool",
+        "liveSessionSummary",
         "live_count",
         "live_sessions",
         "loadSchedulerRecords",
@@ -6733,6 +6763,21 @@
           "category": "incidental",
           "reason": "Private forced-choice recovery helper before normal gateway adjudication",
           "token": "forcedtoolargumentsfrommessages"
+        },
+        {
+          "category": "incidental",
+          "reason": "Operator-home DOM identifier linking to the already-defined Web gateway; it does not introduce a new gateway or engine concept.",
+          "token": "gatewayLink"
+        },
+        {
+          "category": "incidental",
+          "reason": "Read-only operator-home view model for the already-defined Web gateway; it does not introduce a new gateway or engine concept.",
+          "token": "gatewayOverview"
+        },
+        {
+          "category": "incidental",
+          "reason": "Display-safety helper for linking to the already-defined Web gateway; it does not introduce a new gateway or engine concept.",
+          "token": "publicGatewayURL"
         }
       ],
       "id": "gateway-engine",
@@ -6785,6 +6830,8 @@
         "fak_gateway_kv_prefix_tier_transfer_faults_total",
         "fak_gateway_kv_prefix_tier_transfer_latency_seconds_total",
         "forcedtoolargumentsfrommessages",
+        "gatewayLink",
+        "gatewayOverview",
         "gatewayPluginExecutor",
         "gatewayPluginFloor",
         "gateways",
@@ -6808,6 +6855,7 @@
         "microcachedemo",
         "nativeReasonMessageRoleUnsupported",
         "newInKernelPrefixPressureBridge",
+        "publicGatewayURL",
         "query_public_policy",
         "renderinkernelchatmlrequest",
         "resolveCallEngine",
