@@ -229,6 +229,17 @@ var admittedPostFreeze = []string{
 	"FAK_DEV_EXE",
 	"FLEET_CODEX_EXE",
 
+	// internal/goalregistry/goalregistry.go — selects the durable goal-registry JSON file.
+	// The CLI already exposes --registry; the native harness still consumes DefaultPath(),
+	// so removing the ambient override now would split the two operator views.
+	// Relocates to: an explicit registry path passed into every goalregistry.Store caller.
+	"FAK_GOAL_REGISTRY",
+
+	// cmd/fak/serve_load_helpers.go — opts into the experimental bounded Metal Q4_K loader.
+	// This changes model-loading strategy rather than carrying a credential.
+	// Relocates to: a typed fak serve setting passed into the GGUF load helpers.
+	"FAK_METAL_STREAM_Q4K",
+
 	// tools/videogen/trailer/main.go — the ffmpeg executable path, used as the DEFAULT VALUE of
 	// the tool's own `-ffmpeg` flag. A path to a binary; the flag that overrides it is already
 	// the config surface.
