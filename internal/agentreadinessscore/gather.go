@@ -11,41 +11,10 @@ import (
 
 // gather reads the git-tracked tree and runs every pure KPI.
 func gather(root string) ([]KPI, map[string]int) {
-	trackedList := gitLines([]string{"ls-files"}, root)
-	tracked := map[string]bool{}
-	for _, f := range trackedList {
-		tracked[f] = true
-	}
-	present := func(rel string) bool {
-		return tracked[rel] || fileExists(root, rel)
-	}
-
-	readDocs := map[string]bool{}
-	for _, set := range [][]string{identityDocs, firstCommandDocs, installDocs, orientationDocs, pasteDocs, {agentsFile, "README.md"}} {
-		for _, d := range set {
-			readDocs[d] = true
-		}
-	}
-	texts := map[string]string{}
-	for d := range readDocs {
-		texts[d] = safeRead(root, d)
-	}
+	inputs := readGatherInputs(root)
+	trackedList, present := inputs.trackedList, inputs.present
+	texts, pasteTexts := inputs.texts, inputs.pasteTexts
 	agentsText := texts[agentsFile]
-
-	pasteTexts := map[string]string{}
-	for _, d := range pasteDocs {
-		pasteTexts[d] = texts[d]
-	}
-	if matches, _ := filepath.Glob(filepath.Join(root, filepath.FromSlash(pasteDocsGlob), "*.md")); matches != nil {
-		for _, md := range matches {
-			relOS, err := filepath.Rel(root, md)
-			if err != nil {
-				continue
-			}
-			rel := filepath.ToSlash(relOS)
-			pasteTexts[rel] = safeRead(root, rel)
-		}
-	}
 
 	// discover
 	configPresent := map[string]bool{}
@@ -223,4 +192,54 @@ func gather(root string) ([]KPI, map[string]int) {
 		"machine_consumable":  jsonTools,
 	}
 	return kpis, facts
+}
+
+type gatherInputs struct {
+	trackedList []string
+	present     func(string) bool
+	texts       map[string]string
+	pasteTexts  map[string]string
+}
+
+func readGatherInputs(root string) gatherInputs {
+	trackedList := gitLines([]string{"ls-files"}, root)
+	tracked := map[string]bool{}
+	for _, f := range trackedList {
+		tracked[f] = true
+	}
+	present := func(rel string) bool {
+		return tracked[rel] || fileExists(root, rel)
+	}
+
+	readDocs := map[string]bool{}
+	for _, set := range [][]string{identityDocs, firstCommandDocs, installDocs, orientationDocs, pasteDocs, {agentsFile, "README.md"}} {
+		for _, d := range set {
+			readDocs[d] = true
+		}
+	}
+	texts := map[string]string{}
+	for d := range readDocs {
+		texts[d] = safeRead(root, d)
+	}
+
+	pasteTexts := map[string]string{}
+	for _, d := range pasteDocs {
+		pasteTexts[d] = texts[d]
+	}
+	if matches, _ := filepath.Glob(filepath.Join(root, filepath.FromSlash(pasteDocsGlob), "*.md")); matches != nil {
+		for _, md := range matches {
+			relOS, err := filepath.Rel(root, md)
+			if err != nil {
+				continue
+			}
+			rel := filepath.ToSlash(relOS)
+			pasteTexts[rel] = safeRead(root, rel)
+		}
+	}
+	return gatherInputs{
+		trackedList: trackedList,
+		present:     present,
+		texts:       texts,
+		pasteTexts:  pasteTexts,
+	}
 }
