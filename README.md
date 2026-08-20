@@ -67,6 +67,7 @@ scratch. Start with the [harness guide](docs/harness-init.md) when you are ready
 | If you want to… | Start here |
 |---|---|
 | Choose Ponytail and Caveman levels | [Work profiles](docs/work-profiles.md) · [response profiles](docs/response-profiles.md) |
+| Inspect or change console settings | [Settings quickstart](docs/cli-reference.md#console-settings) |
 | Connect another agent or model | [Codex](docs/integrations/openai-codex.md) · [Claude Code](docs/integrations/claude.md) · [all integrations](docs/integrations/) |
 | Understand what fak manages | [Architecture](docs/architecture.md) · [capability map](docs/CAPABILITIES.md) |
 | Check the proof and limits | [Claims](CLAIMS.md) · [benchmark authority](BENCHMARK-AUTHORITY.md) · [security](SECURITY.md) |

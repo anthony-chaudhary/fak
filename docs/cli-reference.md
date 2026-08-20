@@ -99,6 +99,38 @@ Both put the **same reviewable capability floor** (`--policy floor.json`) on eve
 tool call. New here? The fastest "feel it" is the no-credential boundary below;
 the fastest "use it for real" is the dogfood path above.
 
+## Console settings
+
+`fak console settings` is the dedicated view for persisted console preferences. It
+lists every safe registry-backed setting even before `~/.fak/console.json` exists,
+including its effective value, source, allowed options, and copyable set/reset
+commands. Use this five-stage workflow:
+
+```bash
+# 1. Find the canonical settings pane in the console command map.
+fak console help
+
+# 2. Inspect effective values and whether each is built-in or saved.
+fak console settings
+
+# 3. Save one preference.
+fak console settings --set-default issues.top=40
+
+# 4. Reset that preference to its built-in value.
+fak console settings --unset-default issues.top
+
+# 5. Verify the effective value and source after either change.
+fak console settings
+```
+
+The default file is `~/.fak/console.json`; `FAK_CONSOLE_FILE` changes it, and
+`--path FILE` selects one file for a settings command. Mutations validate the full
+configuration before atomically replacing that file with user-only permissions.
+`fak console config` remains a compatibility alias, but help and pane discovery
+advertise only `settings`. The [captured 72×24 render](./_witnesses/tui-settings/settings-render.txt)
+shows a loaded file, built-in values, allowed options, copyable actions, and one
+saved value without a key, model, network call, or GPU.
+
 On the in-front-of-the-model path, an upstream rate limit **never sleeps past your
 client**. fak absorbs short waits in-handler — the transient backoff schedule caps
 at 30s, and a provider-named wait that fits under the ceiling is simply slept, which

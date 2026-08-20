@@ -1,0 +1,24 @@
+schema: fak-terminal-render-witness/1
+surface: fak console settings
+source: cmd/fak@r3113+gb2e0b11992
+revision: b2e0b11992ad371b1fb5619207faba04b554dbb9
+mode: terminal-bytes
+renderer: go1.26.6 linux/amd64
+viewport: 72 columns x 24 rows
+presentation: no ANSI color; stdout piped through head -n 24
+entry_state: /tmp/fak-settings-quickstart.json contains ablate.json=true
+capture_command: archive the revision to an empty /tmp directory; run `go run ./cmd/fak console settings --path /tmp/fak-settings-quickstart.json --set-default ablate.json=true --at 2026-08-20T18:40:00Z --json`; then run `go run ./cmd/fak console settings --path /tmp/fak-settings-quickstart.json --at 2026-08-20T18:40:00Z --width 72 | head -n 24`
+boundary: first 24 emitted lines, ending after the ablate.suite reset command
+artifact: docs/_witnesses/tui-settings/settings-render.txt
+artifact_sha256: 9b50c649194f43f8d11f34883be26c08034aae6a152818078721b31ecda738f2
+captured_at_utc: 2026-08-20T18:45:50Z
+captured_by: isolated WSL render from the witnessed commit
+read_back:
+  status: loaded
+  settings_available: 50
+  saved_value: ablate.json=true
+  saved_source: saved
+  built_in_source_visible: true
+  allowed_options_visible: true
+  set_and_reset_commands_visible: true
+ambiguities: []

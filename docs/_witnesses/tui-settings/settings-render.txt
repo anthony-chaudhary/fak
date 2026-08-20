@@ -1,0 +1,24 @@
+fak console settings  at=2026-08-20T18:40:00Z  status=loaded
+path=/tmp/fak-settings-quickstart.json
+overview_panes=0  pane_defaults=1  available_settings=50
+
+Settings
+ablate.baseline  effective=all-off  source=built-in
+  set: fak console settings --path "/tmp/fak-settings-quickstart.json" --set-default "ablate.baseline=all-off"
+  reset: fak console settings --path "/tmp/fak-settings-quickstart.json" --unset-default ablate.baseline
+ablate.color  effective=auto  source=built-in
+  options=auto|always|never
+  set: fak console settings --path "/tmp/fak-settings-quickstart.json" --set-default "ablate.color=auto"
+  reset: fak console settings --path "/tmp/fak-settings-quickstart.json" --unset-default ablate.color
+ablate.follow  effective=false  source=built-in
+  set: fak console settings --path "/tmp/fak-settings-quickstart.json" --set-default "ablate.follow=true"
+  reset: fak console settings --path "/tmp/fak-settings-quickstart.json" --unset-default ablate.follow
+ablate.json  effective=true  source=saved
+  set: fak console settings --path "/tmp/fak-settings-quickstart.json" --set-default "ablate.json=true"
+  reset: fak console settings --path "/tmp/fak-settings-quickstart.json" --unset-default ablate.json
+ablate.report  effective=(unset)  source=built-in
+  set: fak console settings --path "/tmp/fak-settings-quickstart.json" --set-default "ablate.report=<value>"
+  reset: fak console settings --path "/tmp/fak-settings-quickstart.json" --unset-default ablate.report
+ablate.suite  effective=tau2-smoke  source=built-in
+  set: fak console settings --path "/tmp/fak-settings-quickstart.json" --set-default "ablate.suite=tau2-smoke"
+  reset: fak console settings --path "/tmp/fak-settings-quickstart.json" --unset-default ablate.suite
