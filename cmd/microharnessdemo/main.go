@@ -19,12 +19,22 @@ import (
 
 const maxDepth = 2
 
+type turnBand string
+
+const (
+	bandOneTurn           turnBand = "one_turn"
+	bandBoundedCorrection turnBand = "bounded_correction"
+	bandRootOnly          turnBand = "root_only"
+)
+
 type task struct {
 	ID       string
 	Parent   string
 	Depth    int
 	MaxTurns int
 	Goal     string
+	Class    turnBand `json:"class,omitempty"`
+	Case     string   `json:"case,omitempty"`
 }
 
 type receipt struct {
@@ -32,20 +42,31 @@ type receipt struct {
 	Parent   string   `json:"parent,omitempty"`
 	Depth    int      `json:"depth"`
 	Turns    int      `json:"turns"`
+	Class    turnBand `json:"class,omitempty"`
+	Case     string   `json:"case,omitempty"`
 	Decision string   `json:"decision"`
 	Evidence []string `json:"evidence"`
 	Children []task   `json:"children,omitempty"`
 }
 
+type corpusMeasurement struct {
+	Class    turnBand `json:"class"`
+	Case     string   `json:"case"`
+	Turns    int      `json:"turns"`
+	Outcome  string   `json:"outcome"`
+	Evidence []string `json:"evidence"`
+}
+
 type report struct {
-	Goal                  string    `json:"goal"`
-	Harness               []string  `json:"harness"`
-	Receipts              []receipt `json:"receipts"`
-	MaxDepth              int       `json:"max_depth"`
-	MaxTurnsPerMicroagent int       `json:"max_turns_per_microagent"`
-	ChildTranscriptBytes  int       `json:"child_transcript_bytes"`
-	MasterReceiptBytes    int       `json:"master_receipt_bytes"`
-	FullTranscriptsInRoot bool      `json:"full_transcripts_in_root"`
+	Goal                  string              `json:"goal"`
+	Harness               []string            `json:"harness"`
+	Receipts              []receipt           `json:"receipts"`
+	MaxDepth              int                 `json:"max_depth"`
+	MaxTurnsPerMicroagent int                 `json:"max_turns_per_microagent"`
+	ChildTranscriptBytes  int                 `json:"child_transcript_bytes"`
+	MasterReceiptBytes    int                 `json:"master_receipt_bytes"`
+	FullTranscriptsInRoot bool                `json:"full_transcripts_in_root"`
+	TaskClasses           []corpusMeasurement `json:"task_classes"`
 }
 
 type scriptedModel struct {
@@ -97,14 +118,15 @@ func (a *boundedAgent) Step(ctx context.Context, gw microagent.Gateway) (bool, e
 }
 
 func makeReceipt(t task, turns int) receipt {
-	r := receipt{TaskID: t.ID, Parent: t.Parent, Depth: t.Depth, Turns: turns}
+	r := receipt{TaskID: t.ID, Parent: t.Parent, Depth: t.Depth, Turns: turns, Class: t.Class, Case: t.Case}
 	switch t.ID {
 	case "architecture":
 		r.Decision = "compose a local coding harness from bounded tool and proof profiles"
 		r.Evidence = []string{"goal requires repository edits", "effects need an independent proof boundary"}
 		r.Children = []task{
-			{ID: "tools", Parent: t.ID, Depth: t.Depth + 1, MaxTurns: 1, Goal: "Select the least-privilege tools for a local coding harness."},
-			{ID: "proof", Parent: t.ID, Depth: t.Depth + 1, MaxTurns: 3, Goal: "Define the harness completion witness and failure boundary."},
+			{ID: "tools", Parent: t.ID, Depth: t.Depth + 1, MaxTurns: 1, Goal: "Select the least-privilege tools for a local coding harness.", Class: bandOneTurn, Case: "capability-selection"},
+			{ID: "proof", Parent: t.ID, Depth: t.Depth + 1, MaxTurns: 3, Goal: "Define the harness completion witness after a verifier names a gap.", Class: bandBoundedCorrection, Case: "witness-correction"},
+			{ID: "irreversible-goal", Parent: t.ID, Depth: t.Depth + 1, Goal: "Choose an irreversible repository-wide effect from an ambiguous goal.", Class: bandRootOnly, Case: "irreversible-goal"},
 		}
 	case "tools":
 		r.Decision = "profile=repo-read-write; shell=workspace-only"
@@ -119,12 +141,41 @@ func makeReceipt(t task, turns int) receipt {
 	return r
 }
 
+func admitTask(t task) (bool, corpusMeasurement, error) {
+	if t.Depth > maxDepth {
+		return false, corpusMeasurement{}, fmt.Errorf("task %s exceeds recursion envelope", t.ID)
+	}
+	switch t.Class {
+	case bandRootOnly:
+		return false, corpusMeasurement{
+			Class: t.Class, Case: t.Case, Outcome: "refused-delegation",
+			Evidence: []string{"irreversible or ambiguous decisions remain in the master context"},
+		}, nil
+	case bandOneTurn:
+		if t.MaxTurns != 1 {
+			return false, corpusMeasurement{}, fmt.Errorf("task %s violates one-turn class", t.ID)
+		}
+	case bandBoundedCorrection:
+		if t.MaxTurns < 2 || t.MaxTurns > 3 {
+			return false, corpusMeasurement{}, fmt.Errorf("task %s violates bounded-correction class", t.ID)
+		}
+	case "":
+		if t.MaxTurns < 1 || t.MaxTurns > 3 {
+			return false, corpusMeasurement{}, fmt.Errorf("task %s exceeds turn envelope", t.ID)
+		}
+	default:
+		return false, corpusMeasurement{}, fmt.Errorf("task %s has unknown turn band %q", t.ID, t.Class)
+	}
+	return true, corpusMeasurement{}, nil
+}
+
 func run(ctx context.Context) (report, error) {
 	planner := &scriptedModel{}
 
 	rootGoal := "Build a local coding harness that can edit this repository and prove its work."
 	pending := []task{{ID: "architecture", Parent: "root", Depth: 1, MaxTurns: 2, Goal: rootGoal}}
 	var receipts []receipt
+	var taskClasses []corpusMeasurement
 	for len(pending) > 0 {
 		wave := pending
 		pending = nil
@@ -133,27 +184,44 @@ func run(ctx context.Context) (report, error) {
 		if err != nil {
 			return report{}, err
 		}
+		spawned := 0
 		for _, t := range wave {
-			if t.Depth > maxDepth || t.MaxTurns < 1 || t.MaxTurns > 3 {
-				return report{}, fmt.Errorf("task %s exceeds recursion envelope", t.ID)
-			}
-			if err := host.Spawn(t.ID, &boundedAgent{task: t, receipt: out}); err != nil {
+			admitted, measurement, err := admitTask(t)
+			if err != nil {
+				host.Close()
 				return report{}, err
 			}
+			if !admitted {
+				taskClasses = append(taskClasses, measurement)
+				continue
+			}
+			if err := host.Spawn(t.ID, &boundedAgent{task: t, receipt: out}); err != nil {
+				host.Close()
+				return report{}, err
+			}
+			spawned++
 		}
 		if err := host.Drain(ctx); err != nil {
 			host.Close()
 			return report{}, err
 		}
 		host.Close()
-		for range wave {
+		for i := 0; i < spawned; i++ {
 			r := <-out
 			receipts = append(receipts, r)
 			pending = append(pending, r.Children...)
+			if r.Class != "" {
+				taskClasses = append(taskClasses, corpusMeasurement{
+					Class: r.Class, Case: r.Case, Turns: r.Turns, Outcome: "completed", Evidence: r.Evidence,
+				})
+			}
 		}
 	}
 
 	sort.Slice(receipts, func(i, j int) bool { return receipts[i].TaskID < receipts[j].TaskID })
+	sort.Slice(taskClasses, func(i, j int) bool {
+		return turnBandRank(taskClasses[i].Class) < turnBandRank(taskClasses[j].Class)
+	})
 	masterBytes := 0
 	for _, r := range receipts {
 		compact := r
@@ -166,8 +234,19 @@ func run(ctx context.Context) (report, error) {
 		Harness:  []string{"runtime=fak-native", "tools=repo-read-write/workspace-only", "completion=build+affected-tests"},
 		Receipts: receipts, MaxDepth: maxDepth, MaxTurnsPerMicroagent: 3,
 		ChildTranscriptBytes: planner.transcriptBytes(), MasterReceiptBytes: masterBytes,
-		FullTranscriptsInRoot: false,
+		FullTranscriptsInRoot: false, TaskClasses: taskClasses,
 	}, nil
+}
+
+func turnBandRank(band turnBand) int {
+	switch band {
+	case bandOneTurn:
+		return 0
+	case bandBoundedCorrection:
+		return 1
+	default:
+		return 2
+	}
 }
 
 func check(r report) error {
@@ -181,6 +260,28 @@ func check(r report) error {
 		if rec.Turns < 1 || rec.Turns > 3 || rec.Depth > r.MaxDepth || rec.Decision == "" || len(rec.Evidence) == 0 {
 			return fmt.Errorf("invalid receipt for %s", rec.TaskID)
 		}
+		if rec.Class == bandRootOnly {
+			return fmt.Errorf("master-context task %s crossed the receipt boundary", rec.TaskID)
+		}
+	}
+	wantBands := map[turnBand]struct {
+		caseID  string
+		turns   int
+		outcome string
+	}{
+		bandOneTurn:           {caseID: "capability-selection", turns: 1, outcome: "completed"},
+		bandBoundedCorrection: {caseID: "witness-correction", turns: 3, outcome: "completed"},
+		bandRootOnly:          {caseID: "irreversible-goal", turns: 0, outcome: "refused-delegation"},
+	}
+	for _, measurement := range r.TaskClasses {
+		want, ok := wantBands[measurement.Class]
+		if !ok || measurement.Case != want.caseID || measurement.Turns != want.turns || measurement.Outcome != want.outcome || len(measurement.Evidence) == 0 {
+			return fmt.Errorf("invalid task-class measurement for %s", measurement.Class)
+		}
+		delete(wantBands, measurement.Class)
+	}
+	if len(wantBands) != 0 {
+		return fmt.Errorf("task-class corpus missing %d classes", len(wantBands))
 	}
 	return nil
 }
@@ -190,6 +291,9 @@ func render(w io.Writer, r report) {
 	fmt.Fprintf(w, "goal: %s\n", r.Goal)
 	for _, rec := range r.Receipts {
 		fmt.Fprintf(w, "  receipt %-12s depth=%d turns=%d -> %s\n", rec.TaskID, rec.Depth, rec.Turns, rec.Decision)
+	}
+	for _, measurement := range r.TaskClasses {
+		fmt.Fprintf(w, "  task class %s case=%s turns=%d outcome=%s\n", measurement.Class, measurement.Case, measurement.Turns, measurement.Outcome)
 	}
 	fmt.Fprintf(w, "harness: %s\n", strings.Join(r.Harness, "; "))
 	fmt.Fprintf(w, "context boundary: root retained %d receipt bytes; child transcript bytes=%d; full child transcripts in root=%t\n", r.MasterReceiptBytes, r.ChildTranscriptBytes, r.FullTranscriptsInRoot)

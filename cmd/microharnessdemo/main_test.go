@@ -24,6 +24,32 @@ func TestMicroharnessSpine(t *testing.T) {
 	}
 }
 
+func TestDecisionClassCorpusMapsTurnsAndRefusesMasterOnlyWork(t *testing.T) {
+	r, err := run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := check(r); err != nil {
+		t.Fatal(err)
+	}
+	var got bytes.Buffer
+	render(&got, r)
+	for _, want := range []string{
+		"task class one_turn case=capability-selection turns=1 outcome=completed",
+		"task class bounded_correction case=witness-correction turns=3 outcome=completed",
+		"task class root_only case=irreversible-goal turns=0 outcome=refused-delegation",
+	} {
+		if !strings.Contains(got.String(), want) {
+			t.Errorf("captured task-class corpus missing %q:\n%s", want, got.String())
+		}
+	}
+	for _, rec := range r.Receipts {
+		if rec.TaskID == "irreversible-goal" {
+			t.Fatal("master-context work crossed the delegated receipt boundary")
+		}
+	}
+}
+
 func TestRenderWitness(t *testing.T) {
 	r, err := run(context.Background())
 	if err != nil {
