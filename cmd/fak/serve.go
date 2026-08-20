@@ -15,7 +15,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
-	"github.com/anthony-chaudhary/fak/internal/auditreceipt"
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
@@ -28,7 +27,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
-	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/snapshot"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
@@ -538,13 +536,10 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		return out
 	}
 
-	var orgAudit auditreceipt.Config
-	if enrollment, enrolled, loadErr := policy.LoadOrgEnrollment(""); loadErr != nil {
+	orgAudit, loadErr := loadServeOrgAuditConfig()
+	if loadErr != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: load organization enrollment: %v\n", loadErr)
 		os.Exit(2)
-	} else if enrolled && strings.TrimSpace(enrollment.AuditURL) != "" {
-		redact := adjudicator.Default.PolicySnapshot().RedactFields
-		orgAudit = auditreceipt.Config{Endpoint: enrollment.AuditURL, DeviceID: enrollment.DeviceID, BufferPath: policy.OrgAuditBufferPath(), RedactFields: redact}
 	}
 
 	keyPrincipals, keysetOK := serveKeyPrincipals(sf.keyPrincipal.Values(), os.Getenv, os.Stderr)
