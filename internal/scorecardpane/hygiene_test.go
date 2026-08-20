@@ -30,6 +30,15 @@ func TestKPIRootHygieneFlagsStrayDocAndClutter(t *testing.T) {
 	}
 }
 
+func TestKPIRootHygieneAllowsDiscoveryAndBuildSurfaces(t *testing.T) {
+	k := KPIRootHygiene(nil, []string{
+		".aider.conf.yml", "Dockerfile.cuda", "llms-config.txt", "llms-terms.txt", "llms-updates.txt",
+	})
+	if len(k.Defects) != 0 {
+		t.Fatalf("intentional root discovery/build surfaces must not be clutter: %v", k.Defects)
+	}
+}
+
 func TestKPIIndexPresenceMissing(t *testing.T) {
 	k := KPIIndexPresence(map[string]bool{"INDEX.md": true, "llms.txt": false, "docs/index.md": true})
 	if len(k.Defects) != 1 || !strings.Contains(k.Defects[0], "llms.txt") {

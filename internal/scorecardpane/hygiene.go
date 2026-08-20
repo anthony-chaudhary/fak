@@ -104,8 +104,9 @@ var rootAllowedOther = map[string]bool{
 	"Dockerfile": true, ".dockerignore": true, ".gitignore": true, ".gitattributes": true,
 	".editorconfig": true, "install.sh": true, "test.sh": true, "test.ps1": true,
 	"dos.toml": true, "opencode.json": true, "CITATION.cff": true, "llms.txt": true,
-	"llms-full.txt": true, ".golangci.yml": true, ".golangci.yaml": true,
-	".cursorrules": true, ".mcp.json": true, ".gitmodules": true, ".markdownlint.json": true,
+	"llms-full.txt": true, "llms-config.txt": true, "llms-terms.txt": true, "llms-updates.txt": true,
+	"Dockerfile.cuda": true, ".aider.conf.yml": true, ".golangci.yml": true, ".golangci.yaml": true,
+	".mcp.json": true, ".gitmodules": true, ".markdownlint.json": true,
 	"server.json": true, "glama.json": true, "smithery.yaml": true,
 	"fak-mac.local.ps1.example": true,
 }

@@ -10,8 +10,9 @@ agent. Every tool call Cascade proposes is adjudicated by the kernel before it r
 dangerous calls are denied by structure, malformed calls are repaired, and untrusted tool
 results are quarantined before they reach the model's context.
 
-Windsurf project context for this repo lives in [`.windsurfrules`](https://github.com/anthony-chaudhary/fak/blob/main/.windsurfrules)
-(auto-loaded), which points back here.
+Windsurf auto-loads the repository's canonical [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md)
+as project context. Keep reusable, task-specific guidance in the shared skills instead of
+copying the same always-on instructions into a Windsurf-only root file.
 
 ## How it fits
 

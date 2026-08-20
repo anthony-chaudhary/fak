@@ -83,7 +83,7 @@ type labeledPaths struct {
 // REQUIRED core the gate enforces).
 var agentConfigs = []labeledPaths{
 	{"MCP clients (.mcp.json)", []string{".mcp.json", "examples/mcp/.mcp.json"}},
-	{"Cursor (.cursorrules)", []string{".cursorrules", ".cursor/rules"}},
+	{"Cursor (AGENTS.md / .cursor/rules)", []string{"AGENTS.md", ".cursor/rules"}},
 	{"GitHub Copilot (copilot-instructions)", []string{".github/copilot-instructions.md"}},
 }
 
@@ -91,12 +91,12 @@ var agentConfigs = []labeledPaths{
 // experience-frontier's harness_configs term; a superset of agentConfigs so the core never
 // double-counts). OPTIONAL surface to climb, never required.
 var frontierHarnessConfigs = append(append([]labeledPaths{}, agentConfigs...), []labeledPaths{
-	{"Cline (.clinerules)", []string{".clinerules"}},
-	{"Windsurf (.windsurfrules)", []string{".windsurfrules", ".windsurf/rules"}},
+	{"Cline (AGENTS.md / .clinerules)", []string{"AGENTS.md", ".clinerules"}},
+	{"Windsurf (AGENTS.md / .windsurf/rules)", []string{"AGENTS.md", ".windsurf/rules"}},
 	{"Gemini CLI (GEMINI.md)", []string{"GEMINI.md"}},
 	{"Amp / AGENT.md convention", []string{"AGENT.md"}},
 	{"Aider (.aider.conf.yml)", []string{".aider.conf.yml"}},
-	{"Zed (.rules)", []string{".rules"}},
+	{"Zed (AGENTS.md / .rules)", []string{"AGENTS.md", ".rules"}},
 	{"JetBrains Junie (.junie/guidelines.md)", []string{".junie/guidelines.md"}},
 	{"Continue (.continue/rules)", []string{".continue/rules/fak.md", ".continue/rules"}},
 }...)

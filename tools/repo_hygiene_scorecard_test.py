@@ -405,8 +405,8 @@ def _seed_placement_repo(d: str) -> None:
     _git(d, "add", ".gitignore", "README.md", "INDEX.md",
          "docs/notes/AT-HOME-2026-07-01.md",
          _REAL_DATED, _REAL_ISSUE, _FIXTURE_DOC, _STANDARD_DOC)
-    # -f: the live shape is a doc COMMITTED inside a gitignored tree (the four
-    # .dispatch-runs/contract-overlays/issue-*.md are exactly this at HEAD).
+    # -f: model the historical defect: a doc committed inside a gitignored
+    # runtime tree must not enter the reader-facing corpus.
     _git(d, "add", "-f", _SCRATCH_DOC)
     _git(d, "commit", "-qm", "base")
 

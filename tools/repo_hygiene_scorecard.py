@@ -191,15 +191,12 @@ ROOT_ALLOWED_OTHER = {
     ".dockerignore", ".gitignore", ".gitattributes", ".editorconfig",
     "install.sh", "test.sh", "test.ps1", "dos.toml", "opencode.json",
     "CITATION.cff", "llms.txt", "llms-full.txt", ".golangci.yml", ".golangci.yaml",
-    # agent/editor config a contributor is expected to find at the root
-    ".cursorrules", ".mcp.json", ".gitmodules", ".markdownlint.json",
-    # more agent/editor rule files that each tool reads ONLY from the repo root
-    # (same contract as .cursorrules): Cline, Windsurf, Aider, and the generic
-    # `.rules` convention. Root placement is mandated by the tool, not clutter.
-    ".clinerules", ".windsurfrules", ".aider.conf.yml", ".rules",
+    # agent/editor config a contributor is expected to find at the root. Aider
+    # auto-discovers this exact path; the other supported agents read AGENTS.md.
+    ".aider.conf.yml", ".mcp.json", ".gitmodules", ".markdownlint.json",
     # llms.txt-convention siblings (llms.txt / llms-full.txt already allowlisted):
     # the AI-crawler discovery files a consumer fetches from a well-known root path.
-    "llms-terms.txt", "llms-updates.txt",
+    "llms-config.txt", "llms-terms.txt", "llms-updates.txt",
     # a GPU build variant of the root Dockerfile — build-essential, same class as Dockerfile.
     "Dockerfile.cuda",
     # MCP-registry / discovery manifests: each registry resolves fak from a

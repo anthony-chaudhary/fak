@@ -853,8 +853,8 @@ docs/dispatch-status.md
 # `git ls-files` reports, with two deliberate deltas: `.dispatch-runs/` stays ignored (it
 # already was, above -- operator-private telemetry that predates this block), and
 # `.env.example` is listed though no such file exists yet, to preserve the `!.env.example`
-# intent declared further up. `git ls-files -i -c` is unchanged at 68 entries across this
-# change, so no tracked path changed state -- as expected, since gitignore is inert for them.
+# intent declared further up. Keep this list synchronized with the intentional tracked root
+# dot paths so generated tool state remains private without hiding project configuration.
 #
 # To TRACK a new root dot path, add a `!` line here. Until you do, a bare `git add` will not
 # sweep it in -- which is the point. Deliberate one-offs still work with `git add -f`.
@@ -867,10 +867,8 @@ docs/dispatch-status.md
 !/.aider.conf.yml
 !/.claude
 !/.claude-plugin
-!/.clinerules
 !/.codex
 !/.continue
-!/.cursorrules
 !/.dockerignore
 !/.env.example
 !/.gitattributes
@@ -878,8 +876,6 @@ docs/dispatch-status.md
 !/.gitignore
 !/.junie
 !/.mcp.json
-!/.rules
-!/.windsurfrules
 
 # Video-generation scratch output. Keep project JSON/tools, review proofs, and
 # published final media committable; ignore only regenerable frame/output trees.

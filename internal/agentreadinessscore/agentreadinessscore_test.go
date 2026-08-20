@@ -283,7 +283,7 @@ func TestAgentsEntrypointMissingFileAndElements(t *testing.T) {
 }
 
 func TestAgentConfigMissingAndClean(t *testing.T) {
-	k := kpiAgentConfig([]string{"Cursor (.cursorrules)"})
+	k := kpiAgentConfig([]string{"Cursor (AGENTS.md / .cursor/rules)"})
 	if len(k.Defects) != 1 || !strings.Contains(k.Defects[0], "Cursor") {
 		t.Errorf("missing Cursor => %+v", k)
 	}
@@ -870,9 +870,9 @@ func TestBuildPayloadZeroDebtIsOk(t *testing.T) {
 
 func TestBuildPayloadDebtDrivesActionWithGroupAttribution(t *testing.T) {
 	swap := map[string]KPI{
-		"agent_config":        kpiAgentConfig([]string{"Cursor (.cursorrules)"}), // discover
-		"integration_recipes": kpiIntegrationRecipes([]string{"MCP client"}),     // adopt
-		"extension_scaffold":  kpiExtensionScaffold(true, false),                 // build
+		"agent_config":        kpiAgentConfig([]string{"Cursor (AGENTS.md / .cursor/rules)"}), // discover
+		"integration_recipes": kpiIntegrationRecipes([]string{"MCP client"}),                  // adopt
+		"extension_scaffold":  kpiExtensionScaffold(true, false),                              // build
 	}
 	kpis := make([]KPI, 0, len(cleanKPIs()))
 	for _, k := range cleanKPIs() {
