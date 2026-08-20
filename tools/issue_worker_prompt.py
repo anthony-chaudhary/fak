@@ -308,6 +308,12 @@ def _work_rules(n: int, lane: str) -> list[tuple[str, str, str]]:
          f"exact-output fixture; shipped/done claims need a witnessed commit tied to "
          f"`#{n}` and `(fak {lane})`. Do not stop on narrative alone",
          "LOOP_DONE_UNWITNESSED"),
+        ("browser-display",
+         "Keep browser automation off the operator desktop. Use headless browser mode "
+         "and captured render/screenshot artifacts by default; do not launch or reuse "
+         "visible Chrome or Edge windows unless this issue explicitly requires an "
+         "attended visual witness",
+         "LOOP_DONE_UNWITNESSED"),
         ("no-delete",
          "NEVER run a delete command (`rm`, `del`, `Remove-Item`, `rmdir`, "
          "`git clean`) for ANY reason, including your own scratch files - leave them "

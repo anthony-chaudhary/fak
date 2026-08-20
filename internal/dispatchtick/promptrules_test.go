@@ -109,6 +109,25 @@ func allPromptRules() []PromptRule {
 // Every rule is well-formed data: a stable, unique, kebab-case id, a non-empty imperative,
 // and a witness. Without this, "structured" would be a shape nothing enforces.
 
+func TestWorkRulesDefaultBrowserWorkOffDesktop(t *testing.T) {
+	for _, rule := range WorkRules(8299, "internal/dispatchtick") {
+		if rule.ID != "browser-display" {
+			continue
+		}
+		for _, want := range []string{
+			"off the operator desktop",
+			"headless browser mode and captured render/screenshot artifacts by default",
+			"do not launch or reuse visible Chrome or Edge windows",
+			"unless this issue explicitly requires an attended visual witness",
+		} {
+			if !strings.Contains(rule.Imperative, want) {
+				t.Fatalf("browser display rule missing %q: %s", want, rule.Imperative)
+			}
+		}
+		return
+	}
+	t.Fatal("browser-display rule missing")
+}
 func TestHonestBailRequiresDurableDeliverable(t *testing.T) {
 	var imperative string
 	for _, rule := range WorkRules(6574, "tools") {

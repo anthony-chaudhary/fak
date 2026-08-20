@@ -103,6 +103,12 @@ func WorkRules(issue int, lane string) []PromptRule {
 			"Do not stop on narrative alone", issue, lane),
 		Witness: "LOOP_DONE_UNWITNESSED",
 	}, {
+		ID: "browser-display",
+		Imperative: "Keep browser automation off the operator desktop. Use headless browser mode and " +
+			"captured render/screenshot artifacts by default; do not launch or reuse visible Chrome " +
+			"or Edge windows unless this issue explicitly requires an attended visual witness",
+		Witness: "LOOP_DONE_UNWITNESSED",
+	}, {
 		ID: "no-delete",
 		Imperative: "NEVER run a delete command (`rm`, `del`, `Remove-Item`, `rmdir`, " +
 			"`git clean`) for ANY reason, including your own scratch files - leave them in " +
