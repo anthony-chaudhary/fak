@@ -182,6 +182,32 @@ _FAK_FAMILY_TOKEN_RE = re.compile(r'\b(' + METRIC_PREFIX + r'[a-z0-9_]+)\b')
 # then fold every `<const>+"suffix"` into the emitted family `prefix+suffix`.
 _PREFIX_CONST_RE = re.compile(
     r'\b([A-Za-z_]\w*)\s*:?=\s*"(' + METRIC_PREFIX + r'[a-z0-9_]*_)"')
+# A table-driven exposition helper keeps the metric name out of the writer call:
+#
+#   for _, fam := range []struct{ name, help string; ... }{
+#       {"fak_fleet_session_live", "...", ...},
+#   } {
+#       w.gauge(fam.name, fam.help, ...)
+#   }
+#
+# A tiered helper can additionally receive a literal prefix at each call site and
+# cross it with a suffix table before writing ``prefix+fam.suffix``. Keep this
+# recognition scoped to a function that actually passes the table field to an
+# exposition writer; arbitrary struct rows and quoted fak_* strings remain
+# non-metric identifiers.
+_GO_FUNC_RE = re.compile(
+    r"^func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*\(([^\n]*)\)\s*\{\s*$",
+    re.MULTILINE,
+)
+_TABLE_WRITER_RE = re.compile(
+    r'\.(?:gauge|counter)\(\s*([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*,')
+_PREFIX_TABLE_WRITER_RE = re.compile(
+    r'\.(?:gauge|counter)\(\s*([A-Za-z_]\w*)\s*\+\s*'
+    r'([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*,')
+_TABLE_FIRST_STRING_RE = re.compile(
+    r'\{\s*"([a-z0-9_]+)"\s*,\s*"')
+_TABLE_FIRST_FAMILY_RE = re.compile(
+    r'\{\s*"(' + METRIC_PREFIX + r'[a-z0-9_]+)"\s*,\s*"')
 # Every quoted "fak_..." literal in Go source, metric or not (the closing quote is
 # NOT required, so a struct tag `json:"fak_share_pct,omitempty"` still yields
 # `fak_share_pct`). Subtracting the emitted-metric set leaves the NON-metric
@@ -269,13 +295,63 @@ def extract_prefixed_families(go_text: str) -> set[str]:
     return out
 
 
+def extract_table_driven_families(go_text: str) -> set[str]:
+    """Families emitted through a table field rather than a literal writer arg.
+
+    Recognizes both ``w.gauge(fam.name, ...)`` with full-family rows and a tiered
+    helper that writes ``w.gauge(prefix+fam.suffix, ...)`` after callers pass
+    literal ``fak_*_`` prefixes. Function scoping is load-bearing: a quoted
+    ``fak_*`` tool name or an unrelated struct table never becomes an emitter
+    merely because it shares a file with metrics code.
+    """
+    out: set[str] = set()
+    funcs = list(_GO_FUNC_RE.finditer(go_text))
+    for i, match in enumerate(funcs):
+        name, params_text = match.group(1), match.group(2)
+        end = funcs[i + 1].start() if i + 1 < len(funcs) else len(go_text)
+        body = go_text[match.end():end]
+
+        # A writer consuming ``fam.name`` proves that full fak_* literals in the
+        # first field of this function's table are emitted family declarations.
+        if _TABLE_WRITER_RE.search(body):
+            out.update(_TABLE_FIRST_FAMILY_RE.findall(body))
+
+        for prefix_ident, _row_ident, _field_ident in _PREFIX_TABLE_WRITER_RE.findall(body):
+            params = [part.strip().split()[0] for part in params_text.split(",")]
+            try:
+                prefix_pos = params.index(prefix_ident)
+            except ValueError:
+                continue
+
+            prefixes: set[str] = set()
+            call_re = re.compile(r'\b' + re.escape(name) + r'\(([^\n]*)\)')
+            for call in call_re.finditer(go_text):
+                args = [arg.strip() for arg in call.group(1).split(",")]
+                if prefix_pos >= len(args):
+                    continue
+                literal = re.fullmatch(
+                    r'"(' + METRIC_PREFIX + r'[a-z0-9_]*_)"', args[prefix_pos])
+                if literal:
+                    prefixes.add(literal.group(1))
+
+            suffixes = set(_TABLE_FIRST_STRING_RE.findall(body))
+            suffixes.update(re.findall(
+                r'\b' + re.escape(prefix_ident) + r'\s*\+\s*"([a-z0-9_]+)"',
+                body,
+            ))
+            out.update(prefix + suffix for prefix in prefixes for suffix in suffixes)
+    return out
+
+
 def extract_family_decls(go_text: str) -> set[str]:
     """Families DECLARED via a writer helper (`help`/`write*`/`.gauge`/`.counter`)
     or built from a `fak_*` prefix constant. Excludes the raw space/brace
     exposition-literal form, which is a reliable metric signal only in the
     internal/ gateway source — in cmd/fak an MCP tool-name string in help prose
     (`"fak_capabilities "`) can share that shape without being a metric."""
-    return set(_METRIC_DECL_RE.findall(go_text)) | extract_prefixed_families(go_text)
+    return (set(_METRIC_DECL_RE.findall(go_text))
+            | extract_prefixed_families(go_text)
+            | extract_table_driven_families(go_text))
 
 
 def extract_family_literals(go_text: str) -> set[str]:

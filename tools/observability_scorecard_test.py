@@ -154,6 +154,63 @@ def test_extract_prefixed_families_const_concat():
     assert obs.extract_prefixed_families('const q = "http_"\nf(q+"total")\n') == set()
 
 
+def test_extract_table_driven_families_keeps_phantoms_out():
+    # The fleet exporter emits the live tier from full names in a family table,
+    # then emits three historical tiers by crossing literal call-site prefixes
+    # with one suffix table. Neither shape puts a full family literal directly in
+    # w.gauge(...), but both are real runtime declarations.
+    go = r'''
+func emitLive(w *promWriter) {
+    for _, fam := range []struct {
+        name, help string
+        val func() float64
+    }{
+        {"fak_fleet_session_live", "live", func() float64 { return 1 }},
+        {"fak_fleet_session_stalled", "stalled", func() float64 { return 0 }},
+    } {
+        w.gauge(fam.name, fam.help, fam.val())
+    }
+}
+
+func emitTier(w *promWriter, prefix, tier string) {
+    for _, fam := range []struct {
+        suffix, help string
+        val func() float64
+    }{
+        {"turns", "turns", func() float64 { return 3 }},
+        {"input_tokens", "tokens", func() float64 { return 5 }},
+    } {
+        w.gauge(prefix+fam.suffix, tier+fam.help, fam.val())
+    }
+    w.gauge(prefix+"cache_read_ratio", "ratio", 0.5)
+}
+
+func render(w *promWriter) {
+    emitTier(w, "fak_fleet_usage_", "fleet")
+    emitTier(w, "fak_fleet_usage_session_", "session")
+    _ = "fak_fleet_usage_phantom"
+}
+'''
+    emitted = obs.extract_family_decls(go)
+    assert {
+        "fak_fleet_session_live",
+        "fak_fleet_session_stalled",
+        "fak_fleet_usage_turns",
+        "fak_fleet_usage_input_tokens",
+        "fak_fleet_usage_cache_read_ratio",
+        "fak_fleet_usage_session_turns",
+        "fak_fleet_usage_session_input_tokens",
+        "fak_fleet_usage_session_cache_read_ratio",
+    } <= emitted
+    assert "fak_fleet_usage_phantom" not in emitted
+
+    refs = {"fleet.json": emitted | {"fak_fleet_usage_phantom"}}
+    kpi = obs.kpi_reference_integrity(
+        "dashboard_integrity", refs, emitted, "dashboard")
+    assert len(kpi["defects"]) == 1
+    assert "fak_fleet_usage_phantom" in kpi["defects"][0]
+
+
 def test_fak_any_literal_captures_struct_tag():
     # A JSON struct tag `json:"fak_share_pct,omitempty"` names a NON-metric field a
     # doc may cite (`fleet_benefit.fak_share_pct`). The closing-quote-optional regex
