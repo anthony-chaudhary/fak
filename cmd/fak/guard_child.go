@@ -760,7 +760,6 @@ const guardActiveEnv = "FAK_GUARD_ACTIVE"
 
 func buildGuardChild(command []string, injected [][2]string, pinUpstream bool, extraEnv ...[2]string) *exec.Cmd {
 	command, env := guardChildCommandEnv(command, injected, pinUpstream, extraEnv...)
-	command = resolveWindowsBatchCommand(command)
 	child := exec.Command(command[0], command[1:]...)
 	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
 	child.Env = env
