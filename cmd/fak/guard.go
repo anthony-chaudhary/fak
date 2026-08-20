@@ -163,13 +163,10 @@ func cmdManageCommand(commandName string, argv []string) {
 	preCompactHook := fs.String("precompact-hook", guardPreCompactModeShadow, "Claude Code PreCompact hook actuator for auto-compaction: off|shadow|enforce. shadow logs would-block/would-allow while exiting 0; enforce returns the compactcohere posture exit code.")
 	arbitrateConfig := guardArbitrateConfig{Mode: guardArbitrateModeShadow}
 	fs.Var(guardArbitrateFlagValue{cfg: &arbitrateConfig}, "lease", "guard launch lease admission as comma-separated mode=off|shadow|enforce,lane=<lane>,tree=<glob>,force=true (tree repeatable within one value; defaults to **/*)")
-	denyAllContinue := fs.String("deny-all-continue", guardPreCompactModeEnforce, "Claude Code Stop hook that auto-RESUMES the agent after a deny-all turn (the floor refused EVERY proposed tool call, which the wire reports as end_turn — a stop the agent did not choose): off|shadow|enforce. ENFORCE by default (the false-stop fix), bounded by --deny-all-max consecutive continues; shadow logs the would-continue while letting the turn end; off disables. Claude children only.")
-	denyAllMax := fs.Int("deny-all-max", guardStopHookDefaultMax, "with --deny-all-continue=enforce: the hard give-up — the maximum number of CONSECUTIVE deny-all turns to auto-continue past (with escalating guidance) before letting the turn end, so a model that keeps re-proposing refused calls cannot loop forever. The give-up is LOGGED so it is not a silent false-stop.")
-	denyAllWarn := fs.Int("deny-all-warn", guardStopHookDefaultWarn, "with --deny-all-continue=enforce: at this many CONSECUTIVE deny-all turns the auto-continue guidance escalates from a gentle nudge to a relevance-decision WARNING (asks the agent whether the remaining work is reachable under the floor, and to declare BLOCKED and stop cleanly if not). Clamped to <= --deny-all-final <= --deny-all-max.")
+	denyAllSettings := newDenyAllRetrySettings()
+	fs.Var(&denyAllSettings, "deny-all-continue", "Claude Code Stop hook that auto-RESUMES the agent after a deny-all turn: off|shadow|enforce, optionally followed by warn=N,final=N,max=N,same-stop=N. ENFORCE by default; the limits form one bounded retry policy. Example: --deny-all-continue=enforce,warn=2,final=4,max=6,same-stop=6. Claude children only.")
 	toolprocHooks := fs.String("toolproc-hooks", guardToolprocModeObserve, "Claude Code tool-process observation hooks (off|observe, observe by default): PreToolUse/PostToolUse/SessionEnd append spawn/exit/session_end rows to the workspace toolproc journal (fail-open; `fak toolproc ps --events .fak/toolproc/journal.jsonl` reads the live table). Claude children only.")
 	toolcallControl := fs.String("toolcall-control", "shadow", "avoidable tool-call control: off|shadow|enforce (default shadow)")
-	denyAllFinal := fs.Int("deny-all-final", guardStopHookDefaultFinal, "with --deny-all-continue=enforce: at this many CONSECUTIVE deny-all turns the guidance escalates to a FINAL warning, the last attempts before the hard give-up at --deny-all-max.")
-	denyAllSameStop := fs.Int("same-stop", guardStopHookSameStopFromEnv(), "with --deny-all-continue=enforce (current gateways): the SAME-ISSUE give-up depth — end the session only after this many CONSECUTIVE deny-all turns proposing the IDENTICAL refused action (same tool+reason), default 6. A session hitting a DIFFERENT block each turn (exploring for an allowed path) never reaches it and is never given up; --deny-all-max is the legacy blind bound used only against a gateway that does not emit the same-issue gauge.")
 	taskHandoffMode := fs.String("task-handoff", guardPreCompactModeEnforce, "Claude Code Stop hook completion handoff gate: off|shadow|enforce. ENFORCE by default: on a clean stop, require a valid fak.task-handoff.v1 JSON with witnessed done + current state + 1-2 next steps or no-next-step reason. The path is exposed as FAK_TASK_HANDOFF_FILE.")
 	taskHandoffFile := fs.String("task-handoff-file", "", "path the wrapped agent must write with fak.task-handoff.v1 before a clean stop (default: a private temp file for this guard session)")
 	taskHandoffRepo := fs.String("task-handoff-repo", "", "owner/repo for optional live handoff issue sync (passed to fak task handoff --live)")
@@ -223,6 +220,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	fleetBusInterval := fs.Duration("fleet-bus-interval", DefaultFleetBusInterval, "with --fleet-bus: how often this instance re-announces presence and drains pending directives. Must stay well under fleetbus.DefaultInstanceTTL (90s) or a live guard flickers out of the roster and silently shrinks the denominator a control point measures \"everyone acked\" against. <=0 uses the default.")
 	guardHelpAll := guardArgvHasAll(argv)
 	fs.Usage = func() { printGuardUsage(os.Stderr, fs, commandName, guardHelpAll) }
+	argv = rewriteLegacyDenyAllArgs(argv)
 	_ = fs.Parse(argv)
 	setLaunchToolGrant(allowTools)
 	rotateSet := false
@@ -1314,7 +1312,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	operatorDirectedMode := guardOperatorDirectedEffectiveMode(*operatorDirected, guardSetFlags["operator-directed"], guardChildInteractive(command), guardOperatorUnattended())
 	var stopHookInstall guardStopHookInstall
 	var stopHookEnv [][2]string
-	command, stopHookEnv, stopHookInstall, err = installGuardStopHook(command, *denyAllContinue, gwURL, preCompactInstall.SettingsPath, *denyAllWarn, *denyAllFinal, *denyAllMax, *denyAllSameStop, operatorDirectedMode, handoffCfg)
+	command, stopHookEnv, stopHookInstall, err = installGuardStopHook(command, denyAllSettings.Mode, gwURL, preCompactInstall.SettingsPath, denyAllSettings.Warn, denyAllSettings.Final, denyAllSettings.Max, denyAllSettings.SameStop, operatorDirectedMode, handoffCfg)
 	if err != nil {
 		abortChildWiring(cancel, "Claude Stop hook setup", err, 1)
 	}

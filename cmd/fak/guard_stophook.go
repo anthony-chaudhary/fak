@@ -294,7 +294,7 @@ func guardStopHookStageMessage(stage guardStopHookStage, consecutive, maxN int) 
 // allows the stop (exit 0, so it is NOT fed to the model). It makes the previously-invisible
 // give-up legible: the residual false-stop the audit named.
 func guardStopHookGiveUpMessage(consecutive, maxN int) string {
-	return fmt.Sprintf("fak guard Stop: standing down after %d consecutive deny-all turns (every proposed tool call set aside; %d > max %d) — allowing the stop so the loop cannot spin. To keep the agent moving, inspect why the floor sets everything aside (fak guard --dump-policy) or raise --deny-all-max; --deny-all-continue off disables this layer.", consecutive, consecutive, maxN)
+	return fmt.Sprintf("fak guard Stop: standing down after %d consecutive deny-all turns (every proposed tool call set aside; %d > max %d) — allowing the stop so the loop cannot spin. To keep the agent moving, inspect why the floor sets everything aside (fak guard --dump-policy) or raise --deny-all-continue=max=N; --deny-all-continue off disables this layer.", consecutive, consecutive, maxN)
 }
 
 // guardStopHookSameStageMessage is the same-issue twin of guardStopHookStageMessage: the exact
@@ -317,7 +317,7 @@ func guardStopHookSameStageMessage(stage guardStopHookStage, sameConsecutive, st
 // the hook stands down on a true repeated same issue. It makes explicit that this is a genuine
 // spin on ONE refusal — not the old blind count — and that a varied session is never stopped here.
 func guardStopHookSameGiveUpMessage(sameConsecutive, stop int) string {
-	return fmt.Sprintf("fak guard Stop: standing down after %d turns proposing the IDENTICAL refused action (same tool + same reason; %d >= same-issue give-up %d) — a genuine repeated same issue, not exploration, so allowing the stop keeps the loop from spinning. A session hitting a FRESH block each turn is never stopped here. To keep the agent moving, inspect why the floor sets that same call aside (fak guard --dump-policy) or raise --same-stop; --deny-all-continue off disables this layer.", sameConsecutive, sameConsecutive, stop)
+	return fmt.Sprintf("fak guard Stop: standing down after %d turns proposing the IDENTICAL refused action (same tool + same reason; %d >= same-issue give-up %d) — a genuine repeated same issue, not exploration, so allowing the stop keeps the loop from spinning. A session hitting a FRESH block each turn is never stopped here. To keep the agent moving, inspect why the floor sets that same call aside (fak guard --dump-policy) or raise --deny-all-continue=same-stop=N; --deny-all-continue off disables this layer.", sameConsecutive, sameConsecutive, stop)
 }
 
 type guardStopHookInstall struct {
@@ -1061,7 +1061,7 @@ func installGuardStopHookAt(command []string, mode, gwURL, fakBin, dir, existing
 		{guardStopHookEnvWarn, strconv.Itoa(warnAt)},
 		{guardStopHookEnvFinal, strconv.Itoa(finalAt)},
 		{guardStopHookEnvMax, strconv.Itoa(maxN)},
-		// Pin the same-issue give-up depth (default 6, --same-stop) so the installed Stop hook keys its
+		// Pin the same-issue give-up depth (default 6, deny-all policy same-stop) so the installed Stop hook keys its
 		// stand-down on a true repeated same refusal rather than the blind deny-all count.
 		{guardStopHookEnvSameStop, strconv.Itoa(sameStop)},
 		// Pin the RESOLVED operator-directed gate mode. The operator-absent cap
