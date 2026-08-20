@@ -66,7 +66,7 @@ func (g Graph) SelectRoute(request SelectionRequest) (Mapping, error) {
 			for _, link := range route.Links {
 				key += "\x00" + link.ID
 			}
-			candidates = append(candidates, candidate{mapping: Mapping{Source: cloneEndpoint(source), Destination: cloneEndpoint(destination), Route: route}, score: score{cost: route.TotalCost, latency: route.TotalLatencyNanos, hops: len(route.Links), key: key + "\x00" + source.ID + "\x00" + destination.ID}})
+			candidates = append(candidates, candidate{mapping: Mapping{Source: cloneEndpoint(source), Destination: cloneEndpoint(destination), Route: route}, score: score{objective: route.Objective, cost: route.TotalCost, latency: route.TotalLatencyNanos, readyTime: route.EstimatedReadyTimeNanos, hops: len(route.Links), key: key + "\x00" + source.ID + "\x00" + destination.ID}})
 		}
 	}
 	if len(candidates) == 0 {

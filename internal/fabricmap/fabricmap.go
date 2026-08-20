@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"errors"
 	"fmt"
+	"math/bits"
 	"sort"
 	"strings"
 )
@@ -40,6 +41,15 @@ type Graph struct {
 	Links     []Link     `json:"links"`
 }
 
+// RouteObjective selects the primary route ordering. The zero value preserves
+// the original static-cost behavior.
+type RouteObjective string
+
+const (
+	RouteObjectiveStaticCost         RouteObjective = "static_cost"
+	RouteObjectiveEstimatedReadyTime RouteObjective = "estimated_ready_time"
+)
+
 // Request describes one directional mapping. RequiredLinkLabels supports
 // capabilities not known to this package (encryption, coherency, GPUDirect,
 // persistence, a future transport, and so on).
@@ -47,6 +57,7 @@ type Request struct {
 	From                       string            `json:"from"`
 	To                         string            `json:"to"`
 	Bytes                      uint64            `json:"bytes,omitempty"`
+	Objective                  RouteObjective    `json:"objective,omitempty"`
 	MinBandwidthBytesPerSecond uint64            `json:"min_bandwidth_bytes_per_second,omitempty"`
 	MaxLinkLatencyNanos        uint64            `json:"max_link_latency_nanos,omitempty"`
 	AllowedCPUPaths            []string          `json:"allowed_cpu_paths,omitempty"`
@@ -56,12 +67,15 @@ type Request struct {
 
 // Route is an ordered, directional transfer plan.
 type Route struct {
-	From                              string `json:"from"`
-	To                                string `json:"to"`
-	Links                             []Link `json:"links"`
-	TotalCost                         uint64 `json:"total_cost"`
-	TotalLatencyNanos                 uint64 `json:"total_latency_nanos"`
-	BottleneckBandwidthBytesPerSecond uint64 `json:"bottleneck_bandwidth_bytes_per_second,omitempty"`
+	From                              string         `json:"from"`
+	To                                string         `json:"to"`
+	Links                             []Link         `json:"links"`
+	Bytes                             uint64         `json:"bytes"`
+	Objective                         RouteObjective `json:"objective"`
+	TotalCost                         uint64         `json:"total_cost"`
+	TotalLatencyNanos                 uint64         `json:"total_latency_nanos"`
+	EstimatedReadyTimeNanos           uint64         `json:"estimated_ready_time_nanos,omitempty"`
+	BottleneckBandwidthBytesPerSecond uint64         `json:"bottleneck_bandwidth_bytes_per_second,omitempty"`
 }
 
 func (g Graph) Validate() error {
@@ -101,14 +115,27 @@ func (g Graph) Validate() error {
 	return nil
 }
 
-var ErrNoRoute = errors.New("no route satisfies the directional mapping")
+var (
+	ErrNoRoute                = errors.New("no route satisfies the directional mapping")
+	ErrUnknownRouteObjective  = errors.New("fabricmap: unknown route objective")
+	ErrReadyTimeBytesRequired = errors.New("fabricmap: estimated-ready-time objective requires nonzero bytes")
+	ErrReadyTimeBandwidth     = errors.New("fabricmap: estimated-ready-time objective requires known nonzero bandwidth")
+	ErrReadyTimeOverflow      = errors.New("fabricmap: estimated-ready-time estimate overflows uint64 nanoseconds")
+)
 
-// Plan chooses the lowest-cost eligible route. Ties are resolved by latency,
-// hop count, then link IDs, making manifests reproducible. Each hop is checked
-// independently because a multi-hop route may compose unlike technologies.
+// Plan chooses the eligible route under the request's explicit objective. The
+// zero-value objective preserves cost, latency, hop, then link-ID ordering.
+// Each hop is checked independently because routes may compose unlike technologies.
 func (g Graph) Plan(req Request) (Route, error) {
 	if err := g.Validate(); err != nil {
 		return Route{}, err
+	}
+	objective, err := normalizeRouteObjective(req.Objective)
+	if err != nil {
+		return Route{}, err
+	}
+	if objective == RouteObjectiveEstimatedReadyTime && req.Bytes == 0 {
+		return Route{}, ErrReadyTimeBytesRequired
 	}
 	if req.From == "" || req.To == "" {
 		return Route{}, errors.New("request from and to are required")
@@ -125,7 +152,7 @@ func (g Graph) Plan(req Request) (Route, error) {
 		return Route{}, fmt.Errorf("unknown destination endpoint %q", req.To)
 	}
 	if req.From == req.To {
-		return Route{From: req.From, To: req.To, Links: []Link{}}, nil
+		return Route{From: req.From, To: req.To, Links: []Link{}, Bytes: req.Bytes, Objective: objective}, nil
 	}
 	for _, link := range g.Links {
 		if eligible(link, req) {
@@ -135,9 +162,10 @@ func (g Graph) Plan(req Request) (Route, error) {
 	for from := range adjacency {
 		sort.Slice(adjacency[from], func(i, j int) bool { return adjacency[from][i].ID < adjacency[from][j].ID })
 	}
-	q := priorityQueue{&candidate{node: req.From, bottleneck: ^uint64(0)}}
+	q := priorityQueue{&candidate{node: req.From, bottleneck: ^uint64(0), score: score{objective: objective}}}
 	heap.Init(&q)
-	best := map[string]score{req.From: {}}
+	best := map[string]score{req.From: {objective: objective}}
+	var estimateErr error
 	for q.Len() > 0 {
 		current := heap.Pop(&q).(*candidate)
 		if known, ok := best[current.node]; ok && known.less(current.score) {
@@ -148,12 +176,18 @@ func (g Graph) Plan(req Request) (Route, error) {
 			if len(current.links) == 0 {
 				bottleneck = 0
 			}
-			return Route{From: req.From, To: req.To, Links: current.links, TotalCost: current.cost, TotalLatencyNanos: current.latency, BottleneckBandwidthBytesPerSecond: bottleneck}, nil
+			return routeFromCandidate(req, objective, current.links, current.score, bottleneck), nil
 		}
 		for _, link := range adjacency[current.node] {
 			next := &candidate{node: link.To, links: appendCopy(current.links, link), bottleneck: minBandwidth(current.bottleneck, link.BandwidthBytesPerSecond)}
-			next.cost = current.cost + effectiveCost(link)
-			next.latency = current.latency + link.LatencyNanos
+			nextScore, err := extendScore(current.score, link, req.Bytes)
+			if err != nil {
+				if estimateErr == nil || errors.Is(err, ErrReadyTimeOverflow) {
+					estimateErr = err
+				}
+				continue
+			}
+			next.score = nextScore
 			next.hops = current.hops + 1
 			next.key = current.key + "\x00" + link.ID
 			old, seen := best[next.node]
@@ -163,7 +197,82 @@ func (g Graph) Plan(req Request) (Route, error) {
 			}
 		}
 	}
+	if estimateErr != nil {
+		return Route{}, estimateErr
+	}
 	return Route{}, fmt.Errorf("%w: %s -> %s", ErrNoRoute, req.From, req.To)
+}
+
+func normalizeRouteObjective(objective RouteObjective) (RouteObjective, error) {
+	switch objective {
+	case "", RouteObjectiveStaticCost:
+		return RouteObjectiveStaticCost, nil
+	case RouteObjectiveEstimatedReadyTime:
+		return objective, nil
+	default:
+		return "", fmt.Errorf("%w: %q", ErrUnknownRouteObjective, objective)
+	}
+}
+
+func routeFromCandidate(req Request, objective RouteObjective, links []Link, routeScore score, bottleneck uint64) Route {
+	return Route{
+		From:                              req.From,
+		To:                                req.To,
+		Links:                             links,
+		Bytes:                             req.Bytes,
+		Objective:                         objective,
+		TotalCost:                         routeScore.cost,
+		TotalLatencyNanos:                 routeScore.latency,
+		EstimatedReadyTimeNanos:           routeScore.readyTime,
+		BottleneckBandwidthBytesPerSecond: bottleneck,
+	}
+}
+
+func extendScore(current score, link Link, byteCount uint64) (score, error) {
+	next := score{
+		objective: current.objective,
+		cost:      current.cost + effectiveCost(link),
+		latency:   current.latency + link.LatencyNanos,
+	}
+	if current.objective != RouteObjectiveEstimatedReadyTime {
+		return next, nil
+	}
+	if link.BandwidthBytesPerSecond == 0 {
+		return score{}, fmt.Errorf("%w: link %q", ErrReadyTimeBandwidth, link.ID)
+	}
+	if next.cost < current.cost || next.latency < current.latency {
+		return score{}, fmt.Errorf("%w: link %q cumulative metric", ErrReadyTimeOverflow, link.ID)
+	}
+	serialization, err := serializationNanos(byteCount, link.BandwidthBytesPerSecond)
+	if err != nil {
+		return score{}, fmt.Errorf("%w: link %q", err, link.ID)
+	}
+	hopReady := link.LatencyNanos + serialization
+	if hopReady < link.LatencyNanos || current.readyTime > ^uint64(0)-hopReady {
+		return score{}, fmt.Errorf("%w: link %q cumulative ready time", ErrReadyTimeOverflow, link.ID)
+	}
+	next.readyTime = current.readyTime + hopReady
+	return next, nil
+}
+
+// serializationNanos returns ceil(bytes*1e9/bandwidth) without narrowing the
+// 128-bit intermediate product.
+func serializationNanos(byteCount, bandwidth uint64) (uint64, error) {
+	if bandwidth == 0 {
+		return 0, ErrReadyTimeBandwidth
+	}
+	hi, lo := bits.Mul64(byteCount, 1_000_000_000)
+	if hi >= bandwidth {
+		return 0, ErrReadyTimeOverflow
+	}
+	quotient, remainder := bits.Div64(hi, lo, bandwidth)
+	if remainder != 0 {
+		if quotient == ^uint64(0) {
+			return 0, ErrReadyTimeOverflow
+		}
+		quotient++
+	}
+	return quotient, nil
 }
 
 func eligible(link Link, req Request) bool {
@@ -219,12 +328,16 @@ func appendCopy(links []Link, link Link) []Link {
 }
 
 type score struct {
-	cost, latency uint64
-	hops          int
-	key           string
+	objective                RouteObjective
+	cost, latency, readyTime uint64
+	hops                     int
+	key                      string
 }
 
 func (s score) less(other score) bool {
+	if s.objective == RouteObjectiveEstimatedReadyTime && s.readyTime != other.readyTime {
+		return s.readyTime < other.readyTime
+	}
 	if s.cost != other.cost {
 		return s.cost < other.cost
 	}

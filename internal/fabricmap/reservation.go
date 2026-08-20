@@ -204,9 +204,14 @@ func (q *flowQueue) Push(x any)        { *q = append(*q, x.(*flowState)) }
 func (q *flowQueue) Pop() any          { old := *q; n := len(old); x := old[n-1]; *q = old[:n-1]; return x }
 
 func (a *Allocator) selectReservableRouteLocked(request Request, bandwidth uint64) (Route, map[string]uint64, error) {
+	objective, err := normalizeRouteObjective(request.Objective)
+	if err != nil {
+		return Route{}, nil, err
+	}
 	q := &flowQueue{}
 	heap.Init(q)
-	heap.Push(q, &flowState{node: request.From, bottleneck: ^uint64(0), debits: map[string]uint64{}, visited: map[string]bool{request.From: true}})
+	heap.Push(q, &flowState{node: request.From, bottleneck: ^uint64(0), debits: map[string]uint64{}, visited: map[string]bool{request.From: true}, score: score{objective: objective}})
+	var estimateErr error
 	for q.Len() > 0 {
 		current := heap.Pop(q).(*flowState)
 		if current.node == request.To {
@@ -214,7 +219,7 @@ func (a *Allocator) selectReservableRouteLocked(request Request, bandwidth uint6
 			if bottleneck == ^uint64(0) {
 				bottleneck = 0
 			}
-			return Route{From: request.From, To: request.To, Links: current.links, TotalCost: current.cost, TotalLatencyNanos: current.latency, BottleneckBandwidthBytesPerSecond: bottleneck}, current.debits, nil
+			return routeFromCandidate(request, objective, current.links, current.score, bottleneck), current.debits, nil
 		}
 		for _, link := range a.graph.Links {
 			if link.From != current.node || current.visited[link.To] || !reservationLinkAllowed(link, request) || link.ReservableBandwidthBytesPerSecond == 0 {
@@ -230,11 +235,22 @@ func (a *Allocator) selectReservableRouteLocked(request Request, bandwidth uint6
 				continue
 			}
 			links := appendCopy(current.links, link)
-			nextScore := score{cost: current.cost + effectiveCost(link), latency: current.latency + link.LatencyNanos, hops: len(links), key: current.key + "\x00" + link.ID}
+			nextScore, err := extendScore(current.score, link, request.Bytes)
+			if err != nil {
+				if estimateErr == nil || errors.Is(err, ErrReadyTimeOverflow) {
+					estimateErr = err
+				}
+				continue
+			}
+			nextScore.hops = len(links)
+			nextScore.key = current.key + "\x00" + link.ID
 			visited := cloneVisited(current.visited)
 			visited[link.To] = true
 			heap.Push(q, &flowState{node: link.To, links: links, debits: debits, visited: visited, bottleneck: minBandwidth(current.bottleneck, link.BandwidthBytesPerSecond), score: nextScore})
 		}
+	}
+	if estimateErr != nil {
+		return Route{}, nil, estimateErr
 	}
 	return Route{}, nil, ErrInsufficientCapacity
 }
