@@ -781,14 +781,18 @@ func resolveWindowsBatchCommand(command []string) []string {
 	if absolute, err := filepath.Abs(resolved); err == nil {
 		resolved = absolute
 	}
-	// CreateProcess cannot execute a batch file directly. Front the npm shim with
-	// cmd.exe while preserving every original argument as a distinct argv element.
-	comspec := strings.TrimSpace(os.Getenv("ComSpec"))
-	if comspec == "" {
-		comspec = "cmd.exe"
+	// CreateProcess cannot execute a batch file directly. npm's shim sits beside
+	// the package entrypoint, so invoke that JavaScript file with node instead of
+	// relying on cmd.exe quoting rules for a long generated Codex argv.
+	entrypoint := filepath.Join(filepath.Dir(resolved), "node_modules", "@openai", "codex", "bin", "codex.js")
+	node, nodeErr := exec.LookPath("node.exe")
+	if nodeErr == nil {
+		if _, statErr := os.Stat(entrypoint); statErr == nil {
+			out := []string{node, entrypoint}
+			return append(out, command[1:]...)
+		}
 	}
-	out := []string{comspec, "/d", "/s", "/c", resolved}
-	return append(out, command[1:]...)
+	return command
 }
 
 func guardChildCommandEnv(command []string, injected [][2]string, pinUpstream bool, extraEnv ...[2]string) ([]string, []string) {

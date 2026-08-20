@@ -322,8 +322,8 @@ func TestResolveWindowsBatchCommandUsesCommandInterpreter(t *testing.T) {
 		t.Skip("Windows batch resolution")
 	}
 	got := resolveWindowsBatchCommand([]string{"codex", "exec", "-"})
-	if len(got) < 7 || !strings.EqualFold(filepath.Base(got[0]), "cmd.exe") || got[1] != "/d" || got[4] == "" || got[5] != "exec" || got[6] != "-" {
-		t.Fatalf("extensionless codex was not fronted by cmd.exe: %v", got)
+	if len(got) < 5 || !strings.EqualFold(filepath.Base(got[0]), "node.exe") || filepath.Base(got[1]) != "codex.js" || got[2] != "exec" || got[3] != "-" {
+		t.Fatalf("extensionless codex was not fronted by node and its npm entrypoint: %v", got)
 	}
 }
 
