@@ -268,7 +268,7 @@ func (h *Host) RequestChild(request SpawnRequest, child Microagent) error {
 		return err
 	}
 	if err := h.Spawn(request.ChildID, child); err != nil {
-		h.spawnBudget.release(request.ParentID)
+		h.spawnBudget.release(request)
 		return err
 	}
 	return nil
