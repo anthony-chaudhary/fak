@@ -4,8 +4,37 @@ A kernel, cache, runtime, or other component can publish a standalone
 `fak-component-contract/1` JSON file. Consumers compose files from different authors; nobody
 has to copy the declarations into one central catalog.
 
+## Run
+
+Prerequisite: an installed `fak` executable on `PATH`. The runner reads only the
+three committed JSON contracts; it needs no model, API key, network, or GPU. From
+the repository root, run:
+
 ```powershell
-go run ./cmd/fak component check `
+./examples/component-contracts/run.ps1
+```
+
+It exits `0` only when the hard cache → kernel → CUDA-runtime chain resolves
+and the absent CUDA-graphs recommendation remains a warning. The complete runner
+took 0.27 seconds in the observed warm Windows run on 2026-08-20; expect it to
+finish in under one second.
+
+For the same binary and contract bytes the compatibility verdict and selected
+component order are deterministic. The runner is safe to re-run and creates no
+state; wall time is host-dependent. The captured successful receipt is in
+[`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md), and the command's regression witness is
+in the [component CLI tests](../../cmd/fak/component_test.go).
+
+## What you see
+
+`ALLOW` covers the three selected components and both hard `requires` edges.
+`RECOMMENDATION_UNMET` remains a warning because CUDA graphs are useful to the
+cache but are not a launch requirement.
+
+## Direct command
+
+```powershell
+fak component check `
   --contract examples/component-contracts/radix-cache.json `
   --contract examples/component-contracts/paged-attention-kernel.json `
   --contract examples/component-contracts/cuda-runtime.json `
@@ -69,4 +98,6 @@ unknown fields, malformed relations, and duplicate component IDs fail before res
 
 This is the publication seam, not a registry or package manager. Remote discovery, signatures,
 version ranges, and measured preference ranking can build on the contract without changing the
-hard-versus-hint distinction witnessed here.
+hard-versus-hint distinction witnessed here. This demo does not prove publisher authenticity,
+artifact compatibility on a live GPU, or freshness of the cited evidence; it demonstrates only
+local resolution of the declarations supplied to the command.
