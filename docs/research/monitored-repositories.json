@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-18T14:10:00-07:00",
+  "updated_at": "2026-08-20T07:49:24-07:00",
   "methodology": "Harness-related repositories absent by exact owner/name from tracked fak docs were ranked by direct seam relevance, current development activity, adoption signal, and license clarity. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -105,6 +105,18 @@
       "stars_at_check": 4051,
       "last_push_at_check": "2026-08-18T18:05:57Z",
       "study_note": "docs/research/llm-d-study-2026-08-18.md"
+    },
+    {
+      "repository": "deepseek-ai/deepseek-harness",
+      "url": "https://github.com/deepseek-ai/deepseek-harness",
+      "status": "studied",
+      "priority": 10,
+      "why": "Plugin-first agent harness deeply studied for reversible effect ownership, transactional composition replacement, durable model-visible events, standing session generations, guarded filesystem identity/version semantics, and real-composition tests. One net-new FAK gap survived as #8222; the other strongest candidates map to existing work or deliberate static-binary/default-deny divergences.",
+      "last_checked": "2026-08-20",
+      "checked_revision": "141eb6fef83422698aef7a981029e843e8161534",
+      "stars_at_check": 172283,
+      "last_push_at_check": "2026-08-19T15:37:57Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-DEEPSEEK-HARNESS-2026-08-20.md"
     }
   ]
 }
