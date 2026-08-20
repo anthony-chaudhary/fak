@@ -1338,10 +1338,45 @@ func TestTUIOverviewHumanOutputFromFixtures(t *testing.T) {
 		t.Fatalf("runTUI overview code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"fak console overview", "cards=6", "missing=0", "issues", "loops", "sessions", "garden", "guard", "settings", "garden-red"} {
+	for _, want := range []string{"fak console overview | NOW", "4 NEED ACTION", "0 MISSING", "NOW | highest attention first", "DO NEXT", "issues", "loops", "sessions", "garden", "guard", "settings", "garden-red"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("overview output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestTUIOverviewRenderLeadsWithCurrentAttentionAndDefersImpact(t *testing.T) {
+	report := tuiOverviewReport{
+		At:     "2026-08-20T12:00:00Z",
+		Source: "render witness",
+		Counts: tuiOverviewCounts{Cards: 2, Action: 1, OK: 1},
+		Cards: []tuiOverviewCard{
+			{Pane: "sessions", Status: "action", Attention: 90, Tags: []string{"stalled"}, Summary: "worker has stopped making progress"},
+			{Pane: "guard", Status: "ok", Attention: 0, Tags: []string{"green"}, Summary: "latest checks passed"},
+		},
+		Actions: []tuiOverviewAction{{Pane: "sessions", Command: "fak console sessions --json sessions.json"}},
+	}
+
+	got := renderTUIOverview(report, 100)
+	want := "" +
+		"fak console overview | NOW  1 NEED ACTION  1 HEALTHY  0 MISSING\n" +
+		"snapshot 2026-08-20T12:00:00Z | render witness\n" +
+		"\n" +
+		"NOW | highest attention first\n" +
+		"priority area       state    signal\n" +
+		"      90 sessions   action   stalled | worker has stopped making progress\n" +
+		"       0 guard      ok       green | latest checks passed\n" +
+		"\n" +
+		"DO NEXT\n" +
+		"1. sessions   fak console sessions --json sessions.json\n"
+	if got != want {
+		t.Fatalf("overview render changed:\n--- got ---\n%s--- want ---\n%s", got, want)
+	}
+	reduction := 12.0
+	report.Savings = &tuiOverviewSavings{ReductionPct: &reduction, NetUSD: 12, Rows: 1, Dates: 1}
+	withImpact := renderTUIOverview(report, 100)
+	if now, impact := strings.Index(withImpact, "NOW |"), strings.Index(withImpact, "IMPACT"); now < 0 || impact < 0 || now > impact {
+		t.Fatalf("current attention must render before historical impact:\n%s", withImpact)
 	}
 }
 

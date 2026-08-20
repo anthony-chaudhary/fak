@@ -460,26 +460,31 @@ func displayTUIAgentEnvValue(kv tuiAgentEnv) string {
 
 func renderTUIOverview(report tuiOverviewReport, width int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "fak console overview  at=%s  source=%s\n", report.At, report.Source)
-	if hero := renderTUIOverviewSavingsHero(report.Savings, width); hero != "" {
-		fmt.Fprintf(&b, "\n%s\n\n", hero)
-	}
-	fmt.Fprintf(&b, "cards=%d  ok=%d  action=%d  warn=%d  missing=%d\n",
-		report.Counts.Cards, report.Counts.OK, report.Counts.Action, report.Counts.Warn, report.Counts.Missing)
-	fmt.Fprintln(&b, "\nPanes")
-	fmt.Fprintln(&b, "attention pane       status   tags                 summary")
+	needsAction := report.Counts.Action + report.Counts.Warn
+	fmt.Fprintf(&b, "fak console overview | NOW  %d NEED ACTION  %d HEALTHY  %d MISSING\n",
+		needsAction, report.Counts.OK, report.Counts.Missing)
+	fmt.Fprintf(&b, "snapshot %s | %s\n", report.At, report.Source)
+
+	fmt.Fprintln(&b, "\nNOW | highest attention first")
+	fmt.Fprintln(&b, "priority area       state    signal")
 	for _, card := range report.Cards {
-		fmt.Fprintf(&b, "%9d %-10s %-8s %s %s\n",
+		signal := card.Summary
+		if tags := displayTUITags(card.Tags, 3); tags != "-" {
+			signal = tags + " | " + signal
+		}
+		fmt.Fprintf(&b, "%8d %-10s %-8s %s\n",
 			card.Attention, card.Pane, card.Status,
-			padRightTUI(trimTUI(displayTUITags(card.Tags, 3), 20), 20),
-			trimTUI(card.Summary, maxTUI(20, width-53)))
+			trimTUI(signal, maxTUI(20, width-31)))
 	}
 	if len(report.Actions) > 0 {
-		fmt.Fprintln(&b, "\nNext")
+		fmt.Fprintln(&b, "\nDO NEXT")
 		limit := minTUI(len(report.Actions), 8)
-		for _, action := range report.Actions[:limit] {
-			fmt.Fprintf(&b, "%-10s %s\n", action.Pane, trimTUI(action.Command, maxTUI(20, width-11)))
+		for i, action := range report.Actions[:limit] {
+			fmt.Fprintf(&b, "%d. %-10s %s\n", i+1, action.Pane, trimTUI(action.Command, maxTUI(20, width-14)))
 		}
+	}
+	if hero := renderTUIOverviewSavingsHero(report.Savings, width); hero != "" {
+		fmt.Fprintf(&b, "\nIMPACT\n%s\n", hero)
 	}
 	return b.String()
 }
