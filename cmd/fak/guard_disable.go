@@ -16,6 +16,8 @@ const guardDisableDefaultReason = "operator-requested guard repair"
 type guardDisableOptions struct {
 	Reason  string
 	Command []string
+	Usage   bool
+	JSON    bool
 }
 
 // runGuardDisable starts exactly one raw child and restores the normal posture when that
@@ -23,9 +25,17 @@ type guardDisableOptions struct {
 // variables cover both generations of the continuation hook: the current shell-level
 // break-glass check and the older fak-subcommand override.
 func runGuardDisable(commandName string, stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
+	path, pathErr := guardDisableUsageDefaultPath()
+	return runGuardDisableWithUsage(commandName, stdin, stdout, stderr, argv, path, pathErr)
+}
+
+func runGuardDisableWithUsage(commandName string, stdin io.Reader, stdout, stderr io.Writer, argv []string, usagePath string, usagePathErr error) int {
 	opts, code, done := parseGuardDisable(commandName, argv, stderr)
 	if done {
 		return code
+	}
+	if opts.Usage {
+		return runGuardDisableUsage(stdout, stderr, usagePath, usagePathErr, opts.JSON)
 	}
 
 	program := filepathBaseForDisplay(opts.Command[0])
@@ -37,11 +47,16 @@ func runGuardDisable(commandName string, stdin io.Reader, stdout, stderr io.Writ
 	cmd.Env = guardDisableChildEnv(os.Environ())
 	err := cmd.Run()
 	code = childprocess.ExitCode(err, 127)
+	outcome := guardDisableUsageSuccess
 	if err != nil {
 		if _, started := err.(*exec.ExitError); !started {
+			outcome = guardDisableUsageLaunchError
 			fmt.Fprintf(stderr, "fak %s disable: launch %q: %v\n", commandName, opts.Command[0], err)
+		} else {
+			outcome = guardDisableUsageChildNonzero
 		}
 	}
+	recordGuardDisableUsage(stderr, usagePath, usagePathErr, outcome)
 	fmt.Fprintf(stderr, "fak %s disable: BREAK-GLASS raw session ended (exit %d); later launches remain guarded by default.\n", commandName, code)
 	return code
 }
@@ -50,13 +65,26 @@ func parseGuardDisable(commandName string, argv []string, stderr io.Writer) (gua
 	fs := flag.NewFlagSet(commandName+" disable", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	reason := fs.String("reason", guardDisableDefaultReason, "short operator reason shown in the unavoidable break-glass warning")
+	usage := fs.Bool("usage", false, "fold privacy-safe launcher outcomes per ISO week instead of starting a child")
+	jsonOut := fs.Bool("json", false, "with --usage, emit the machine-readable fold")
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "usage: fak %s disable [--reason TEXT] [--] [agent command...]\n       starts one raw repair child (default: codex); it does not persistently disable guard\n", commandName)
+		fmt.Fprintf(stderr, "usage: fak %s disable [--reason TEXT] [--] [agent command...]\n       fak %s disable --usage [--json]\n       starts one raw repair child (default: codex); it does not persistently disable guard\n", commandName, commandName)
 	}
 	if code, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return guardDisableOptions{}, code, true
 	}
 	command := append([]string(nil), fs.Args()...)
+	if *usage {
+		if len(command) != 0 {
+			fmt.Fprintln(stderr, "fak "+commandName+" disable: --usage does not start a child; remove the command after --")
+			return guardDisableOptions{}, 2, true
+		}
+		return guardDisableOptions{Usage: true, JSON: *jsonOut}, 0, false
+	}
+	if *jsonOut {
+		fmt.Fprintln(stderr, "fak "+commandName+" disable: --json requires --usage")
+		return guardDisableOptions{}, 2, true
+	}
 	if len(command) == 0 {
 		command = []string{"codex"}
 	}

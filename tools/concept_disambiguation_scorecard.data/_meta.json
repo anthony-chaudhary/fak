@@ -2856,6 +2856,81 @@
           "category": "incidental",
           "reason": "private predicate implementing the launcher environment scrub, not another disable posture",
           "token": "guardDisableDropEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "privacy-safe accounting implementation detail of the positioned guard disable break-glass launcher",
+          "token": "guardDisableUsageDefaultPath"
+        },
+        {
+          "category": "incidental",
+          "reason": "privacy-safe accounting implementation detail of the positioned guard disable break-glass launcher",
+          "token": "runGuardDisableWithUsage"
+        },
+        {
+          "category": "incidental",
+          "reason": "privacy-safe accounting implementation detail of the positioned guard disable break-glass launcher",
+          "token": "runGuardDisableUsage"
+        },
+        {
+          "category": "incidental",
+          "reason": "privacy-safe accounting implementation detail of the positioned guard disable break-glass launcher",
+          "token": "guardDisableUsageSuccess"
+        },
+        {
+          "category": "incidental",
+          "reason": "privacy-safe accounting implementation detail of the positioned guard disable break-glass launcher",
+          "token": "guardDisableUsageLaunchError"
+        },
+        {
+          "category": "incidental",
+          "reason": "privacy-safe accounting implementation detail of the positioned guard disable break-glass launcher",
+          "token": "guardDisableUsageChildNonzero"
+        },
+        {
+          "category": "incidental",
+          "reason": "privacy-safe accounting implementation detail of the positioned guard disable break-glass launcher",
+          "token": "recordGuardDisableUsage"
+        },
+        {
+          "category": "incidental",
+          "reason": "privacy-safe accounting implementation detail of the positioned guard disable break-glass launcher",
+          "token": "guardDisableUsageSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "privacy-safe accounting implementation detail of the positioned guard disable break-glass launcher",
+          "token": "guardDisableUsageSummarySchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "privacy-safe accounting implementation detail of the positioned guard disable break-glass launcher",
+          "token": "guardDisableUsageRow"
+        },
+        {
+          "category": "incidental",
+          "reason": "privacy-safe accounting implementation detail of the positioned guard disable break-glass launcher",
+          "token": "guardDisableUsageWeek"
+        },
+        {
+          "category": "incidental",
+          "reason": "privacy-safe accounting implementation detail of the positioned guard disable break-glass launcher",
+          "token": "guardDisableUsageSummary"
+        },
+        {
+          "category": "incidental",
+          "reason": "privacy-safe accounting implementation detail of the positioned guard disable break-glass launcher",
+          "token": "appendGuardDisableUsage"
+        },
+        {
+          "category": "incidental",
+          "reason": "privacy-safe accounting implementation detail of the positioned guard disable break-glass launcher",
+          "token": "guardDisableUsageOutcomeValid"
+        },
+        {
+          "category": "incidental",
+          "reason": "privacy-safe accounting implementation detail of the positioned guard disable break-glass launcher",
+          "token": "foldGuardDisableUsage"
         }
       ],
       "exclude": [
@@ -2945,6 +3020,7 @@
         "aggregate_complexity",
         "allAggregates",
         "appendGuardCompactionWitnessTo",
+        "appendGuardDisableUsage",
         "armbenchPonytailGates",
         "baseAggregates",
         "bindGuardRegistration",
@@ -2980,6 +3056,7 @@
         "firstGuardEnv",
         "fleetDogfoodGuardBaseURL",
         "fleetbarecommitguard",
+        "foldGuardDisableUsage",
         "formatGuardCompactionWitness",
         "fullAggregates",
         "full_tree_gate_retry",
@@ -3022,6 +3099,16 @@
         "guardDisableOptions",
         "guardDisableReason",
         "guardDisableSplitEnv",
+        "guardDisableUsageChildNonzero",
+        "guardDisableUsageDefaultPath",
+        "guardDisableUsageLaunchError",
+        "guardDisableUsageOutcomeValid",
+        "guardDisableUsageRow",
+        "guardDisableUsageSchema",
+        "guardDisableUsageSuccess",
+        "guardDisableUsageSummary",
+        "guardDisableUsageSummarySchema",
+        "guardDisableUsageWeek",
         "guardEquivalentRestartLimit",
         "guardEquivalentRestartStatus",
         "guardEquivalentRestarts",
@@ -3185,9 +3272,12 @@
         "readguardstopsledger",
         "readguardstoptranscript",
         "recordGuardCompactionWitness",
+        "recordGuardDisableUsage",
         "renderguardstartupreport",
         "reservedGuardBanner",
         "runCacheValueGateScore",
+        "runGuardDisableUsage",
+        "runGuardDisableWithUsage",
         "runGuardGoalQuestionHook",
         "runGuardOperatorQuestionGate",
         "runPinnedGate",

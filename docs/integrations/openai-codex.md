@@ -223,6 +223,12 @@ Pass a command after `--` to repair with another harness, for example `fak guard
 --reason 'repair Claude routing' -- claude`. This is a one-child bypass, not a persistent
 machine toggle.
 
+Each child appends a privacy-safe outcome row beside the normal fak usage journal. Inspect
+weekly adoption and outcomes with `fak guard disable --usage` (add `--json` for the typed
+`fak-guard-disable-usage-summary/1` fold). Rows contain only timestamp and the closed outcome
+`success`, `child_nonzero`, or `launch_error`; they omit the reason, command, paths, and host
+identity. `FAK_USAGE_LOG=off` disables both usage journals.
+
 If `fak` itself is too broken to execute that command, use the raw recovery token directly.
 The project hook checks this token in the shell *before invoking `fak`*, so this last-resort
 path does not depend on a working `fak` binary:

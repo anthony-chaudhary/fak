@@ -32,10 +32,10 @@ func TestGuardDisableRunsChildWithNestedGuardStateRemoved(t *testing.T) {
 	t.Setenv("GO_WANT_GUARD_DISABLE_CHILD", "1")
 
 	var stdout, stderr bytes.Buffer
-	code := runGuardDisable("guard", strings.NewReader(""), &stdout, &stderr, []string{
+	code := runGuardDisableWithUsage("guard", strings.NewReader(""), &stdout, &stderr, []string{
 		"--reason", "  repair   routing\nnow  ", "--",
 		os.Args[0], "-test.run=^TestGuardDisableChildProcess$",
-	})
+	}, "", nil)
 	if code != 23 {
 		t.Fatalf("runGuardDisable code=%d, want child exit 23\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -91,9 +91,9 @@ func TestGuardDisablePreservesDirectProviderEnvOutsideGuard(t *testing.T) {
 
 func TestGuardDisableLaunchFailureReturns127(t *testing.T) {
 	var stderr bytes.Buffer
-	code := runGuardDisable("guard", strings.NewReader(""), &bytes.Buffer{}, &stderr, []string{
+	code := runGuardDisableWithUsage("guard", strings.NewReader(""), &bytes.Buffer{}, &stderr, []string{
 		"--reason", "missing child witness", "--", "fak-guard-disable-child-that-does-not-exist",
-	})
+	}, "", nil)
 	if code != 127 {
 		t.Fatalf("runGuardDisable launch failure code=%d, want 127\n%s", code, stderr.String())
 	}
@@ -106,7 +106,7 @@ func TestGuardDisableLaunchFailureReturns127(t *testing.T) {
 
 func TestGuardDisableRoutesBeforeWrappedAgentLookup(t *testing.T) {
 	args := "disable --reason repair -- " + guardE2EExitZeroCommand()
-	code, out, timedOut := runGuardE2E(t, args, map[string]string{})
+	code, out, timedOut := runGuardE2E(t, args, map[string]string{"FAK_USAGE_LOG": "off"})
 	if timedOut || code != 0 {
 		t.Fatalf("fak guard disable code=%d timedOut=%v\n%s", code, timedOut, out)
 	}
