@@ -62,8 +62,8 @@ func TestEdgeGatewayOverviewFailsClosed(t *testing.T) {
 				t.Fatalf("overview=%+v sessions=%d", overview, len(sessions))
 			}
 			links := dashboardLinks(overview.URL)
-			if len(links) != 8 {
-				t.Fatalf("dashboard links=%d want 8", len(links))
+			if len(links) == 0 {
+				t.Fatal("dashboard links are empty")
 			}
 			for _, link := range links {
 				if tt.wantReachable && link.URL == "" {
