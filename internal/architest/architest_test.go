@@ -663,6 +663,7 @@ var tier = map[string]int{
 	"harnessmodelset":       1,
 	"modelsetresolve":       2, // deterministic role resolution composing tier-1 intent and inventory contracts.
 	"modelsetlock":          2,
+	"modelsetreceipt":       2, // startup receipts compose model-set resolution with current tier-1 evidence.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
