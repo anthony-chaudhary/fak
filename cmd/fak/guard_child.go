@@ -760,10 +760,27 @@ const guardActiveEnv = "FAK_GUARD_ACTIVE"
 
 func buildGuardChild(command []string, injected [][2]string, pinUpstream bool, extraEnv ...[2]string) *exec.Cmd {
 	command, env := guardChildCommandEnv(command, injected, pinUpstream, extraEnv...)
+	command = resolveWindowsBatchCommand(command)
 	child := exec.Command(command[0], command[1:]...)
 	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
 	child.Env = env
 	return child
+}
+
+// resolveWindowsBatchCommand preserves Windows PATH semantics for npm-installed agent
+// shims. os/exec does not execute .cmd files when the extensionless name resolves only
+// through PATHEXT, so resolve the concrete shim before starting the guarded child.
+func resolveWindowsBatchCommand(command []string) []string {
+	if runtime.GOOS != "windows" || len(command) == 0 || strings.ContainsAny(command[0], `/\`) || filepath.Ext(command[0]) != "" {
+		return command
+	}
+	resolved, err := exec.LookPath(command[0] + ".cmd")
+	if err != nil {
+		return command
+	}
+	out := append([]string(nil), command...)
+	out[0] = resolved
+	return out
 }
 
 func guardChildCommandEnv(command []string, injected [][2]string, pinUpstream bool, extraEnv ...[2]string) ([]string, []string) {

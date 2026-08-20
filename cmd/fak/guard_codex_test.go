@@ -315,6 +315,14 @@ func TestGuardCodexAuthEnv(t *testing.T) {
 	})
 }
 
+func TestResolveWindowsBatchCommandKeepsExplicitCommand(t *testing.T) {
+	command := []string{"codex.cmd", "exec"}
+	got := resolveWindowsBatchCommand(command)
+	if got[0] != command[0] || got[1] != command[1] {
+		t.Fatalf("explicit batch command changed: got %v want %v", got, command)
+	}
+}
+
 func TestPinnedCodexChildGetsOpenAIPlaceholderOnly(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("ANTHROPIC_API_KEY", "")
