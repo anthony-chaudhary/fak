@@ -1,0 +1,53 @@
+{
+  "schema": "fak-captured-tool-schema/v1",
+  "provenance": {
+    "product": "codex-cli",
+    "version": "0.148.0",
+    "captured_on": "2026-08-20",
+    "sanitized": true
+  },
+  "shell_executors": [
+    {
+      "name": "exec_command",
+      "source": "captured",
+      "command_arg": "cmd",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "cmd": { "type": "string" },
+          "workdir": { "type": "string" }
+        },
+        "required": ["cmd"]
+      },
+      "required_danger_classes": ["posix_shell", "windows_shell"]
+    },
+    {
+      "name": "shell_command",
+      "source": "committed_legacy",
+      "command_arg": "command",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string" },
+          "workdir": { "type": "string" }
+        },
+        "required": ["command"]
+      },
+      "required_danger_classes": ["posix_shell", "windows_shell"]
+    },
+    {
+      "name": "functions.shell_command",
+      "source": "committed_legacy",
+      "command_arg": "command",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string" },
+          "workdir": { "type": "string" }
+        },
+        "required": ["command"]
+      },
+      "required_danger_classes": ["posix_shell", "windows_shell"]
+    }
+  ]
+}

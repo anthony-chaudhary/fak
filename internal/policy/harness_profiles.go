@@ -10,6 +10,9 @@ import (
 //go:embed harness-profiles.json
 var harnessProfilesJSON []byte
 
+//go:embed testdata/codex-tool-schema.json
+var codexToolSchemaJSON []byte
+
 // guard-floor profile lint (issue #2595).
 //
 // The embedded guard floor (cmd/fak/guard-default-policy.json) admits a growing
@@ -52,6 +55,7 @@ type harnessRuleSet struct {
 // shared danger floor.
 type harnessShellAlias struct {
 	Name     string   `json:"name"`
+	Arg      string   `json:"arg,omitempty"`
 	Inherits []string `json:"inherits"`
 }
 
@@ -66,6 +70,33 @@ type harnessProfilesDoc struct {
 	ShellRuleSets map[string]harnessRuleSet `json:"shell_rule_sets"`
 	ShellAliases  []harnessShellAlias       `json:"shell_aliases"`
 	Harnesses     []harnessProfileDecl      `json:"harnesses"`
+}
+
+type capturedToolSchemaProvenance struct {
+	Product    string `json:"product"`
+	Version    string `json:"version"`
+	CapturedOn string `json:"captured_on"`
+	Sanitized  bool   `json:"sanitized"`
+}
+
+type capturedToolInputSchema struct {
+	Type       string                     `json:"type"`
+	Properties map[string]json.RawMessage `json:"properties"`
+	Required   []string                   `json:"required"`
+}
+
+type capturedShellExecutor struct {
+	Name                  string                  `json:"name"`
+	Source                string                  `json:"source"`
+	CommandArg            string                  `json:"command_arg"`
+	InputSchema           capturedToolInputSchema `json:"input_schema"`
+	RequiredDangerClasses []string                `json:"required_danger_classes"`
+}
+
+type capturedToolSchemaDoc struct {
+	Schema         string                       `json:"schema"`
+	Provenance     capturedToolSchemaProvenance `json:"provenance"`
+	ShellExecutors []capturedShellExecutor      `json:"shell_executors"`
 }
 
 // normalizeDangerRegex collapses a leading inline case-insensitive flag so a
@@ -100,6 +131,22 @@ func shellToolSegment(tool string) string {
 
 func looksShellLike(tool string) bool {
 	return shellProgramNames[shellToolSegment(tool)]
+}
+
+func shellAliasFor(prof harnessProfilesDoc, tool string) (harnessShellAlias, bool) {
+	for _, alias := range prof.ShellAliases {
+		if strings.EqualFold(alias.Name, tool) {
+			return alias, true
+		}
+	}
+	return harnessShellAlias{}, false
+}
+
+func shellRuleArg(alias harnessShellAlias, set harnessRuleSet) string {
+	if alias.Arg != "" {
+		return alias.Arg
+	}
+	return set.Arg
 }
 
 // ShellDangerRuleSetsFor returns the inherited danger classes for a shell-like
@@ -141,14 +188,19 @@ func ShellDangerRulesFor(tool string) ([]ArgRule, bool) {
 	if len(sets) == 0 {
 		return nil, false
 	}
+	alias, declared := shellAliasFor(prof, tool)
 	var out []ArgRule
 	for _, setName := range sets {
 		set, ok := prof.ShellRuleSets[setName]
 		if !ok {
 			return nil, false
 		}
+		arg := set.Arg
+		if declared {
+			arg = shellRuleArg(alias, set)
+		}
 		for _, entry := range set.Rules {
-			out = append(out, ArgRule{Tool: tool, Arg: set.Arg, DenyRegex: entry.DenyRegex})
+			out = append(out, ArgRule{Tool: tool, Arg: arg, DenyRegex: entry.DenyRegex})
 		}
 	}
 	return out, len(out) > 0
@@ -187,20 +239,30 @@ func AttachShellDangerRules(rt *Runtime, tool string) []string {
 // harness-profile data source and returns one human-readable defect string per
 // problem (nil/empty = clean).
 func LintHarnessProfiles(floorJSON []byte) []string {
-	return lintHarnessProfilesDoc(floorJSON, harnessProfilesJSON)
+	return lintHarnessProfilesInputs(floorJSON, harnessProfilesJSON, codexToolSchemaJSON)
 }
 
 // lintHarnessProfilesDoc is the pure, testable core: both inputs are parameters
 // so the witness tests can drive it with synthetic floors/profiles without
 // touching the committed artifacts.
 func lintHarnessProfilesDoc(floorJSON, profilesJSON []byte) []string {
+	return lintHarnessProfilesInputs(floorJSON, profilesJSON, nil)
+}
+
+func lintHarnessProfilesInputs(floorJSON, profilesJSON, schemaJSON []byte) []string {
 	var floor Manifest
 	var prof harnessProfilesDoc
+	var captured capturedToolSchemaDoc
 	if err := json.Unmarshal(floorJSON, &floor); err != nil {
 		return []string{fmt.Sprintf("guard floor is not valid JSON: %v", err)}
 	}
 	if err := json.Unmarshal(profilesJSON, &prof); err != nil {
 		return []string{fmt.Sprintf("harness profiles are not valid JSON: %v", err)}
+	}
+	if len(schemaJSON) != 0 {
+		if err := json.Unmarshal(schemaJSON, &captured); err != nil {
+			return []string{fmt.Sprintf("captured Codex tool schema is not valid JSON: %v", err)}
+		}
 	}
 
 	var problems []string
@@ -208,21 +270,22 @@ func lintHarnessProfilesDoc(floorJSON, profilesJSON []byte) []string {
 	for _, a := range floor.Allow {
 		allowSet[a] = true
 	}
-	// arg rules indexed by lowercase tool name -> set of normalized deny
-	// patterns. The adjudicator indexes arg predicates case-insensitively
-	// (decide.go: indexArgPredicates keys on strings.ToLower), so a rule
-	// authored for "Bash" covers "bash"; the lint mirrors that or it would
-	// false-report OpenCode's lowercase shell.
-	rulesByTool := map[string]map[string]bool{}
+	// Arg rules are indexed by lowercase tool name and exact argument key. The
+	// adjudicator folds tool names but argument keys are schema-defined, so the
+	// lint must preserve that same identity or cmd/command drift stays hidden.
+	rulesByToolArg := map[string]map[string]map[string]bool{}
 	for _, r := range floor.ArgRules {
 		if r.DenyRegex == "" {
 			continue
 		}
-		k := strings.ToLower(r.Tool)
-		if rulesByTool[k] == nil {
-			rulesByTool[k] = map[string]bool{}
+		tool := strings.ToLower(r.Tool)
+		if rulesByToolArg[tool] == nil {
+			rulesByToolArg[tool] = map[string]map[string]bool{}
 		}
-		rulesByTool[k][normalizeDangerRegex(r.DenyRegex)] = true
+		if rulesByToolArg[tool][r.Arg] == nil {
+			rulesByToolArg[tool][r.Arg] = map[string]bool{}
+		}
+		rulesByToolArg[tool][r.Arg][normalizeDangerRegex(r.DenyRegex)] = true
 	}
 
 	allowed := func(tool string) bool {
@@ -244,7 +307,6 @@ func lintHarnessProfilesDoc(floorJSON, profilesJSON []byte) []string {
 				"shell alias %q is declared in the harness profiles but is NOT on the guard floor allow list", a.Name))
 			continue
 		}
-		expected := map[string]bool{}
 		for _, setName := range a.Inherits {
 			rs, ok := prof.ShellRuleSets[setName]
 			if !ok {
@@ -252,17 +314,16 @@ func lintHarnessProfilesDoc(floorJSON, profilesJSON []byte) []string {
 					"shell alias %q inherits unknown rule set %q", a.Name, setName))
 				continue
 			}
+			arg := shellRuleArg(a, rs)
+			actual := rulesByToolArg[strings.ToLower(a.Name)][arg]
 			for _, rule := range rs.Rules {
 				if rule.DenyRegex != "" {
-					expected[normalizeDangerRegex(rule.DenyRegex)] = true
+					pat := normalizeDangerRegex(rule.DenyRegex)
+					if !actual[pat] {
+						problems = append(problems, fmt.Sprintf(
+							"shell alias %q argument %q is missing inherited dangerous-command deny rule: %s", a.Name, arg, pat))
+					}
 				}
-			}
-		}
-		actual := rulesByTool[strings.ToLower(a.Name)]
-		for pat := range expected {
-			if !actual[pat] {
-				problems = append(problems, fmt.Sprintf(
-					"shell alias %q is missing inherited dangerous-command deny rule: %s", a.Name, pat))
 			}
 		}
 	}
@@ -290,11 +351,94 @@ func lintHarnessProfilesDoc(floorJSON, profilesJSON []byte) []string {
 		if declared[tool] || !looksShellLike(tool) {
 			continue
 		}
-		if len(rulesByTool[strings.ToLower(tool)]) == 0 {
+		if len(rulesByToolArg[strings.ToLower(tool)]) == 0 {
 			problems = append(problems, fmt.Sprintf(
 				"allow-listed tool %q is a shell-program name but carries no dangerous-command deny rules; classify it in the harness profiles and add the inherited rule set", tool))
 		}
 	}
 
+	if len(schemaJSON) != 0 {
+		problems = append(problems, lintCapturedToolSchema(captured, prof, allowed)...)
+	}
+
 	return problems
+}
+
+func lintCapturedToolSchema(captured capturedToolSchemaDoc, prof harnessProfilesDoc, allowed func(string) bool) []string {
+	var problems []string
+	if captured.Schema == "" || captured.Provenance.Product == "" || captured.Provenance.Version == "" || captured.Provenance.CapturedOn == "" || !captured.Provenance.Sanitized {
+		problems = append(problems, "captured Codex tool schema is missing sanitized capture provenance")
+	}
+
+	aliases := make(map[string]harnessShellAlias, len(prof.ShellAliases))
+	for _, alias := range prof.ShellAliases {
+		aliases[alias.Name] = alias
+	}
+	codexRequired := map[string]bool{}
+	for _, harness := range prof.Harnesses {
+		if harness.Name != "codex" {
+			continue
+		}
+		for _, tool := range harness.RequiredTools {
+			codexRequired[tool] = true
+		}
+	}
+
+	capturedByName := make(map[string]capturedShellExecutor, len(captured.ShellExecutors))
+	for _, executor := range captured.ShellExecutors {
+		if _, duplicate := capturedByName[executor.Name]; duplicate {
+			problems = append(problems, fmt.Sprintf("captured Codex tool schema repeats shell executor %q", executor.Name))
+			continue
+		}
+		capturedByName[executor.Name] = executor
+		alias, ok := aliases[executor.Name]
+		if !ok {
+			problems = append(problems, fmt.Sprintf("captured Codex shell executor %q is not declared as a shell alias", executor.Name))
+			continue
+		}
+		if !allowed(executor.Name) {
+			problems = append(problems, fmt.Sprintf("captured Codex shell executor %q is not on the guard floor", executor.Name))
+		}
+		if executor.CommandArg == "" {
+			problems = append(problems, fmt.Sprintf("captured Codex shell executor %q has no command-bearing argument", executor.Name))
+		} else {
+			if _, ok := executor.InputSchema.Properties[executor.CommandArg]; !ok {
+				problems = append(problems, fmt.Sprintf("captured Codex shell executor %q command argument %q is absent from its input schema", executor.Name, executor.CommandArg))
+			}
+			if !stringSliceContains(executor.InputSchema.Required, executor.CommandArg) {
+				problems = append(problems, fmt.Sprintf("captured Codex shell executor %q command argument %q is not required by its input schema", executor.Name, executor.CommandArg))
+			}
+		}
+		for _, class := range executor.RequiredDangerClasses {
+			set, exists := prof.ShellRuleSets[class]
+			if !exists {
+				problems = append(problems, fmt.Sprintf("captured Codex shell executor %q requires unknown danger class %q", executor.Name, class))
+				continue
+			}
+			if !stringSliceContains(alias.Inherits, class) {
+				problems = append(problems, fmt.Sprintf("captured Codex shell executor %q is missing required danger class %q", executor.Name, class))
+			}
+			if got := shellRuleArg(alias, set); executor.CommandArg != "" && got != executor.CommandArg {
+				problems = append(problems, fmt.Sprintf("captured Codex shell executor %q command argument is %q but danger class %q binds %q", executor.Name, executor.CommandArg, class, got))
+			}
+		}
+	}
+
+	for tool := range codexRequired {
+		if _, shellAlias := aliases[tool]; shellAlias {
+			if _, captured := capturedByName[tool]; !captured {
+				problems = append(problems, fmt.Sprintf("Codex shell alias %q is missing from the captured tool schema", tool))
+			}
+		}
+	}
+	return problems
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

@@ -37,7 +37,7 @@
     { "name": "bash",               "inherits": ["posix_shell"] },
     { "name": "shell_command",      "inherits": ["posix_shell", "windows_shell"] },
     { "name": "functions.shell_command", "inherits": ["posix_shell", "windows_shell"] },
-    { "name": "exec_command",       "inherits": ["posix_shell", "windows_shell"] }
+    { "name": "exec_command",       "arg": "cmd", "inherits": ["posix_shell", "windows_shell"] }
   ],
 
   "harnesses": [

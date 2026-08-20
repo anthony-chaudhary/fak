@@ -50,6 +50,157 @@ func TestLintHarnessProfilesProfilesAreValidJSON(t *testing.T) {
 	}
 }
 
+func TestCapturedCodexToolSchemaCurrentAndLegacyAliasesPass(t *testing.T) {
+	var captured capturedToolSchemaDoc
+	if err := json.Unmarshal(codexToolSchemaJSON, &captured); err != nil {
+		t.Fatalf("codex-tool-schema.json is not valid JSON: %v", err)
+	}
+	if captured.Schema != "fak-captured-tool-schema/v1" || captured.Provenance.Product != "codex-cli" || captured.Provenance.Version != "0.148.0" || captured.Provenance.CapturedOn == "" || !captured.Provenance.Sanitized {
+		t.Fatalf("unexpected capture provenance: %+v", captured)
+	}
+	want := map[string]struct {
+		source string
+		arg    string
+	}{
+		"exec_command":            {source: "captured", arg: "cmd"},
+		"shell_command":           {source: "committed_legacy", arg: "command"},
+		"functions.shell_command": {source: "committed_legacy", arg: "command"},
+	}
+	for _, executor := range captured.ShellExecutors {
+		expected, ok := want[executor.Name]
+		if !ok {
+			t.Errorf("unexpected captured shell executor %q", executor.Name)
+			continue
+		}
+		if executor.Source != expected.source || executor.CommandArg != expected.arg {
+			t.Errorf("captured shell executor %q = source %q arg %q, want source %q arg %q", executor.Name, executor.Source, executor.CommandArg, expected.source, expected.arg)
+		}
+		delete(want, executor.Name)
+	}
+	if len(want) != 0 {
+		t.Fatalf("captured schema is missing shell executors: %v", want)
+	}
+	if problems := LintHarnessProfiles(realFloor(t)); len(problems) != 0 {
+		t.Fatalf("current and legacy captured shell schemas do not match the guard floor: %v", problems)
+	}
+}
+
+func TestLintHarnessProfilesCapturedCodexSchemaMutationsFail(t *testing.T) {
+	var baseProfiles harnessProfilesDoc
+	if err := json.Unmarshal(harnessProfilesJSON, &baseProfiles); err != nil {
+		t.Fatal(err)
+	}
+	var baseSchema capturedToolSchemaDoc
+	if err := json.Unmarshal(codexToolSchemaJSON, &baseSchema); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name    string
+		mutate  func(*harnessProfilesDoc, *capturedToolSchemaDoc)
+		problem string
+	}{
+		{
+			name: "missing exec_command",
+			mutate: func(_ *harnessProfilesDoc, schema *capturedToolSchemaDoc) {
+				var kept []capturedShellExecutor
+				for _, executor := range schema.ShellExecutors {
+					if executor.Name != "exec_command" {
+						kept = append(kept, executor)
+					}
+				}
+				schema.ShellExecutors = kept
+			},
+			problem: `Codex shell alias "exec_command" is missing`,
+		},
+		{
+			name: "cmd command drift",
+			mutate: func(profiles *harnessProfilesDoc, _ *capturedToolSchemaDoc) {
+				for i := range profiles.ShellAliases {
+					if profiles.ShellAliases[i].Name == "exec_command" {
+						profiles.ShellAliases[i].Arg = "command"
+					}
+				}
+			},
+			problem: `command argument is "cmd"`,
+		},
+		{
+			name: "missing posix danger dialect",
+			mutate: func(profiles *harnessProfilesDoc, _ *capturedToolSchemaDoc) {
+				removeAliasInheritance(profiles, "exec_command", "posix_shell")
+			},
+			problem: `missing required danger class "posix_shell"`,
+		},
+		{
+			name: "missing windows danger dialect",
+			mutate: func(profiles *harnessProfilesDoc, _ *capturedToolSchemaDoc) {
+				removeAliasInheritance(profiles, "exec_command", "windows_shell")
+			},
+			problem: `missing required danger class "windows_shell"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			profiles := baseProfiles
+			profiles.ShellAliases = append([]harnessShellAlias(nil), baseProfiles.ShellAliases...)
+			for i := range profiles.ShellAliases {
+				profiles.ShellAliases[i].Inherits = append([]string(nil), baseProfiles.ShellAliases[i].Inherits...)
+			}
+			schema := baseSchema
+			schema.ShellExecutors = append([]capturedShellExecutor(nil), baseSchema.ShellExecutors...)
+			tc.mutate(&profiles, &schema)
+			profilesJSON, err := json.Marshal(profiles)
+			if err != nil {
+				t.Fatal(err)
+			}
+			schemaJSON, err := json.Marshal(schema)
+			if err != nil {
+				t.Fatal(err)
+			}
+			problems := lintHarnessProfilesInputs(realFloor(t), profilesJSON, schemaJSON)
+			if !problemsContain(problems, tc.problem) {
+				t.Fatalf("expected problem containing %q; got %v", tc.problem, problems)
+			}
+		})
+	}
+}
+
+func removeAliasInheritance(profiles *harnessProfilesDoc, aliasName, class string) {
+	for i := range profiles.ShellAliases {
+		if profiles.ShellAliases[i].Name != aliasName {
+			continue
+		}
+		var kept []string
+		for _, inherited := range profiles.ShellAliases[i].Inherits {
+			if inherited != class {
+				kept = append(kept, inherited)
+			}
+		}
+		profiles.ShellAliases[i].Inherits = kept
+	}
+}
+
+func TestLintHarnessProfilesFloorArgumentDriftFails(t *testing.T) {
+	var floor Manifest
+	if err := json.Unmarshal(realFloor(t), &floor); err != nil {
+		t.Fatal(err)
+	}
+	for i := range floor.ArgRules {
+		if floor.ArgRules[i].Tool == "exec_command" {
+			floor.ArgRules[i].Arg = "command"
+		}
+	}
+	floorJSON, err := json.Marshal(floor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	problems := LintHarnessProfiles(floorJSON)
+	if !problemsContain(problems, `exec_command" argument "cmd" is missing`) {
+		t.Fatalf("expected the lint to bind exec_command danger rules to cmd; got %v", problems)
+	}
+}
+
 // TestLintHarnessProfilesSyntheticShellAliasFails is the witness for the first
 // acceptance criterion: adding a shell-like alias to the allow list WITHOUT its
 // inherited dangerous-command denies must fail the lint (and thus CI). This is
@@ -154,5 +305,29 @@ func TestShellDangerRulesForNamespacedShells(t *testing.T) {
 	}
 	if rules, ok := ShellDangerRulesFor("mcp__x__search"); ok || len(rules) != 0 {
 		t.Fatalf("non-shell inherited rules = %+v, %v; want none", rules, ok)
+	}
+}
+
+func TestShellDangerRulesForAliasArgumentOverride(t *testing.T) {
+	cases := []struct {
+		tool string
+		arg  string
+	}{
+		{tool: "exec_command", arg: "cmd"},
+		{tool: "shell_command", arg: "command"},
+		{tool: "functions.shell_command", arg: "command"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.tool, func(t *testing.T) {
+			rules, ok := ShellDangerRulesFor(tc.tool)
+			if !ok || len(rules) == 0 {
+				t.Fatalf("ShellDangerRulesFor(%q) = %d, %v; want inherited rules", tc.tool, len(rules), ok)
+			}
+			for _, rule := range rules {
+				if rule.Tool != tc.tool || rule.Arg != tc.arg || rule.DenyRegex == "" {
+					t.Fatalf("bad inherited rule: %+v", rule)
+				}
+			}
+		})
 	}
 }
