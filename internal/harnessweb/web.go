@@ -394,7 +394,7 @@ func (a *liveAdapter) overview(ctx context.Context) (gatewayOverview, []liveSess
 	}
 	client := a.client
 	if client == nil {
-		client = http.DefaultClient
+		client = &http.Client{Timeout: 1500 * time.Millisecond}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
