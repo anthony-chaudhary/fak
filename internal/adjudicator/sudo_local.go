@@ -12,8 +12,8 @@ const defaultSudoDenyRegex = `\bsudo\b`
 
 // isSudoArgRule reports whether pr is the shipped privilege-escalation
 // deny_regex on a shell command arg. The Bash tool (and its lowercase harness
-// alias) and the shell_command / functions.shell_command mirrors all ship the
-// identical `\bsudo\b` spelling, so all three take the structural path; the
+// alias) and the shell_command / functions.shell_command / exec_command mirrors
+// all ship the identical `\bsudo\b` spelling, so all four take the structural path; the
 // PowerShell escalation rule (Start-Process -Verb RunAs) is a different rule and
 // is untouched.
 func isSudoArgRule(pr *ArgPredicate) bool {
@@ -21,7 +21,7 @@ func isSudoArgRule(pr *ArgPredicate) bool {
 		return false
 	}
 	switch strings.ToLower(pr.Tool) {
-	case "bash", "shell_command", "functions.shell_command":
+	case "bash", "shell_command", "functions.shell_command", "exec_command":
 		return pr.Re.String() == defaultSudoDenyRegex
 	default:
 		return false

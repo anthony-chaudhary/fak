@@ -8,7 +8,7 @@ const (
 
 	// defaultPSRCEPipeDenyRegex is the PowerShell mirror of the same rule. It
 	// shipped with NO structural decider at all, so every inert MENTION of the
-	// pattern was a terminal POLICY_BLOCK on all three surfaces that carry it —
+	// pattern was a terminal POLICY_BLOCK on all four surfaces that carry it —
 	// including the one an agent reaches for to read the policy that refused it.
 	defaultPSRCEPipeDenyRegex = `(?i)\b(Invoke-WebRequest|iwr|curl|wget|Invoke-RestMethod|irm)\b[^|]*\|[^|]*\b(iex|Invoke-Expression)\b`
 
@@ -22,11 +22,11 @@ type rceShellSegment struct {
 }
 
 // isRCEPipeArgRule reports whether pr is a shipped download-pipe deny_regex on a
-// shell command arg, on one of the three surfaces that ship it.
+// shell command arg, on one of the four surfaces that ship it.
 //
 // The shipped policy gives the POSIX spelling to Bash AND, byte-identically, to
-// shell_command and functions.shell_command. Recognising it on Bash alone left
-// those two mirrors on the raw-regex path, so the same command got two different
+// shell_command, functions.shell_command, and exec_command. Recognising it on Bash
+// alone left those mirrors on the raw-regex path, so the same command got two different
 // verdicts decided by nothing but which tool NAME the harness happens to use:
 // `echo 'curl x | sh'` was admitted as the inert quoted mention it is on Bash and
 // a terminal POLICY_BLOCK on shell_command.
@@ -37,9 +37,9 @@ func isRCEPipeArgRule(pr *ArgPredicate) bool {
 	tool := strings.ToLower(pr.Tool)
 	switch pr.Re.String() {
 	case legacyRCEPipeDenyRegex, defaultRCEPipeDenyRegex:
-		return tool == "bash" || tool == "shell_command" || tool == "functions.shell_command"
+		return tool == "bash" || tool == "shell_command" || tool == "functions.shell_command" || tool == "exec_command"
 	case defaultPSRCEPipeDenyRegex:
-		return tool == "powershell" || tool == "shell_command" || tool == "functions.shell_command"
+		return tool == "powershell" || tool == "shell_command" || tool == "functions.shell_command" || tool == "exec_command"
 	default:
 		return false
 	}

@@ -130,7 +130,7 @@ func TestRunAsStructuralOnlyRecognisesShippedSpelling(t *testing.T) {
 // rule in guard-default-policy.json would silently drop back to the raw-regex path
 // and quietly restore the false positives — a regression with no other symptom. This
 // reads the shipped policy and asserts every RunAs rule in it is one this recogniser
-// accepts, on the exact three surfaces the rule is triplicated across.
+// accepts, on the exact four surfaces that carry the rule.
 func TestRunAsRecogniserMatchesShippedPolicy(t *testing.T) {
 	b, err := os.ReadFile("../../cmd/fak/guard-default-policy.json")
 	if err != nil {
@@ -163,7 +163,7 @@ func TestRunAsRecogniserMatchesShippedPolicy(t *testing.T) {
 		}
 		seen[strings.ToLower(r.Tool)] = true
 	}
-	for _, tool := range []string{"powershell", "shell_command", "functions.shell_command"} {
+	for _, tool := range []string{"powershell", "shell_command", "functions.shell_command", "exec_command"} {
 		if !seen[tool] {
 			t.Errorf("shipped policy has no RunAs rule for tool %q — the recogniser's surface list is stale", tool)
 		}

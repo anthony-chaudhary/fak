@@ -58,7 +58,8 @@ var ootDestVerbs = map[string]bool{
 
 // isOutOfTreeWriteArgRule reports whether pr is one of the four shipped out-of-tree
 // write deny_regex rules on a POSIX-shell command arg. Scoped to the shell dialects
-// the rce tokenizer understands ({Bash, shell_command, functions.shell_command});
+// the rce tokenizer understands ({Bash, shell_command, functions.shell_command,
+// exec_command});
 // PowerShell is deliberately excluded (it has no out-of-tree rules today and the
 // tokenizer is POSIX — closing the PowerShell gap is tracked separately).
 func isOutOfTreeWriteArgRule(pr *ArgPredicate) bool {
@@ -66,7 +67,7 @@ func isOutOfTreeWriteArgRule(pr *ArgPredicate) bool {
 		return false
 	}
 	switch strings.ToLower(pr.Tool) {
-	case "bash", "shell_command", "functions.shell_command":
+	case "bash", "shell_command", "functions.shell_command", "exec_command":
 	default:
 		return false
 	}

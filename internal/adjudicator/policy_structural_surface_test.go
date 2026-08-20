@@ -39,7 +39,7 @@ var shippedUndecidedRules = []struct{ marker, why string }{
 // cannot confuse a use with a mention — and its remedy must not claim it can.
 func freeTextArg(arg string) bool {
 	switch strings.ToLower(arg) {
-	case "command", "code":
+	case "command", "cmd", "code":
 		return true
 	}
 	return false

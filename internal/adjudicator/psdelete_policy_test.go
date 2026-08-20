@@ -106,14 +106,14 @@ func TestDeleteRefusalNamesTheAdmittedRoute(t *testing.T) {
 			root:     "/tmp/claude",
 			admitted: remove + " -rf /tmp/claude/session-123/clone",
 			escape:   remove + " -rf /tmp/claude-evil/clone",
-			surfaces: []string{"bash", "shell_command", "functions.shell_command"},
+			surfaces: []string{"bash", "shell_command", "functions.shell_command", "exec_command"},
 		},
 		"powershell": {
 			regex:    defaultPSDeleteDenyRegex,
 			root:     winScratchRoot(),
 			admitted: psDeleteCommand(` ` + winScratchRoot() + `\session-123\clone -Recurse -Force`),
 			escape:   psDeleteCommand(` ` + winScratchRoot() + `-evil\clone -Recurse -Force`),
-			surfaces: []string{"powershell", "shell_command", "functions.shell_command"},
+			surfaces: []string{"powershell", "shell_command", "functions.shell_command", "exec_command"},
 		},
 	}
 
@@ -151,11 +151,11 @@ func TestDeleteRefusalNamesTheAdmittedRoute(t *testing.T) {
 						Re: regexp.MustCompile(r.DenyRegex), Reason: abi.ReasonPolicyBlock,
 					}},
 				})
-				v := a.Adjudicate(context.Background(), inlineCall(r.Tool, jsonCmd(fam.admitted)))
+				v := a.Adjudicate(context.Background(), inlineCall(r.Tool, shellCommandArgs(r.Arg, fam.admitted)))
 				if v.Kind == abi.VerdictDeny && v.Reason == abi.ReasonPolicyBlock {
 					t.Errorf("the refusal advertises the scratchpad route but %q is still a terminal POLICY_BLOCK", fam.admitted)
 				}
-				esc := a.Adjudicate(context.Background(), inlineCall(r.Tool, jsonCmd(fam.escape)))
+				esc := a.Adjudicate(context.Background(), inlineCall(r.Tool, shellCommandArgs(r.Arg, fam.escape)))
 				if esc.Kind != abi.VerdictDeny || esc.Reason != abi.ReasonPolicyBlock {
 					t.Errorf("sibling-prefix escape %q = %v/%s, want Deny/POLICY_BLOCK", fam.escape, esc.Kind, abi.ReasonName(esc.Reason))
 				}

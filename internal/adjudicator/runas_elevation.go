@@ -28,14 +28,15 @@ const defaultRunAsDenyRegex = `(?i)\bStart-Process\b[^|;\n]*-Verb\s+RunAs\b`
 
 // isRunAsArgRule reports whether pr is the shipped Windows privilege-elevation
 // deny_regex on a shell command arg. The rule is scoped to the surfaces that ship it
-// — the PowerShell tool and the shell_command / functions.shell_command mirrors —
+// — the PowerShell tool and the shell_command / functions.shell_command /
+// exec_command mirrors —
 // so a differently-spelled or differently-scoped rule keeps the raw-regex path.
 func isRunAsArgRule(pr *ArgPredicate) bool {
 	if pr == nil || pr.Re == nil || (pr.Arg != "command" && pr.Arg != "cmd") {
 		return false
 	}
 	switch strings.ToLower(pr.Tool) {
-	case "powershell", "shell_command", "functions.shell_command":
+	case "powershell", "shell_command", "functions.shell_command", "exec_command":
 		return pr.Re.String() == defaultRunAsDenyRegex
 	default:
 		return false

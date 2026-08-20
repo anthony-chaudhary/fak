@@ -41,13 +41,13 @@ const (
 )
 
 // isTerraformDestroyArgRule reports whether pr is one of the shipped terraform
-// destroy rules on a shell command arg, on one of the four surfaces that ship it.
+// destroy rules on a shell command arg, on one of the five surfaces that ship it.
 func isTerraformDestroyArgRule(pr *ArgPredicate) bool {
 	if pr == nil || pr.Re == nil || (pr.Arg != "command" && pr.Arg != "cmd") {
 		return false
 	}
 	switch strings.ToLower(pr.Tool) {
-	case "bash", "powershell", "shell_command", "functions.shell_command":
+	case "bash", "powershell", "shell_command", "functions.shell_command", "exec_command":
 	default:
 		return false
 	}

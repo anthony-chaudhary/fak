@@ -31,7 +31,8 @@ var rmDeleteWrappers = map[string]bool{
 //
 // The POSIX spelling used to be recognised on the Bash tool ALONE, even though
 // cmd/fak/guard-default-policy.json ships the byte-identical regex on the
-// shell_command and functions.shell_command mirrors too. Those mirrors therefore
+// shell_command, functions.shell_command, and exec_command mirrors too. Those
+// mirrors therefore
 // kept the raw-regex path and lost BOTH carve-outs the structural decision grants:
 // a recursive delete confined to a declared scratchpad root, and the force-only
 // single-literal-target delete that #4983 degraded to the reversibility confirm
@@ -57,7 +58,7 @@ func isRmRfArgRule(pr *ArgPredicate) bool {
 		return re == defaultRmRfDenyRegex
 	case "powershell":
 		return re == defaultPSDeleteDenyRegex
-	case "shell_command", "functions.shell_command":
+	case "shell_command", "functions.shell_command", "exec_command":
 		// This surface is POSIX on one host and PowerShell on another, so the
 		// shipped policy gives it BOTH rules; recognise both.
 		return re == defaultRmRfDenyRegex || re == defaultPSDeleteDenyRegex

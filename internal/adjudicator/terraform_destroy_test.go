@@ -244,7 +244,7 @@ func TestTerraformRecogniserMatchesShippedPolicy(t *testing.T) {
 
 		// The remedy the fix text names must itself be admitted.
 		a := tfAdj(t, r.Tool, r.DenyRegex)
-		v := a.Adjudicate(context.Background(), inlineCall(r.Tool, jsonCmd(`terraform plan -destroy`)))
+		v := a.Adjudicate(context.Background(), inlineCall(r.Tool, shellCommandArgs(r.Arg, `terraform plan -destroy`)))
 		if v.Kind != abi.VerdictAllow {
 			t.Errorf("tool %q: the fix text advertises `terraform plan -destroy` but the rule still refuses it (%v/%s)",
 				r.Tool, v.Kind, abi.ReasonName(v.Reason))
@@ -253,13 +253,13 @@ func TestTerraformRecogniserMatchesShippedPolicy(t *testing.T) {
 			t.Errorf("tool %q: fix text no longer names the plan remedy this test pins: %q", r.Tool, r.Fix)
 		}
 	}
-	for _, tool := range []string{"bash", "powershell", "shell_command", "functions.shell_command"} {
+	for _, tool := range []string{"bash", "powershell", "shell_command", "functions.shell_command", "exec_command"} {
 		if !seen[tool] {
 			t.Errorf("shipped policy has no terraform rule for tool %q — the recogniser's surface list is stale", tool)
 		}
 	}
-	// The rule is copied across four surfaces, and the LAST array element has no
-	// trailing comma — so a search-and-replace over the other three silently leaves
+	// The rule is copied across five surfaces, and the LAST array element has no
+	// trailing comma — so a search-and-replace over the other four silently leaves
 	// it behind, and one surface then advertises a different boundary than the rest.
 	// An agent that hits the rule on shell_command must read the same guidance it
 	// would get on Bash.

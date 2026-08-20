@@ -7,9 +7,9 @@ import (
 
 // device_op.go — structural decision for the DISK/DEVICE VERB arg-rule family: the
 // POSIX raw-device rule (`\bmkfs\b|\bdd\s+if=|>\s*/dev/sd`, shipped on Bash,
-// shell_command and functions.shell_command) and its PowerShell volume sibling
+// shell_command, functions.shell_command, and exec_command) and its PowerShell volume sibling
 // (`(?i)\b(Format-Volume|Clear-Disk|Initialize-Disk)\b`, shipped on PowerShell and
-// the same two mirrors) in cmd/fak/guard-default-policy.json.
+// the same three mirrors) in cmd/fak/guard-default-policy.json.
 //
 // WHY THIS EXISTS (#5429). Both rules were RAW pattern matches with no structural
 // decider, so the match WAS the verdict and a MENTION could not be told from a USE.
@@ -45,14 +45,15 @@ import (
 const (
 	// defaultDeviceOpDenyRegex is the one canonical spelling of the shipped POSIX
 	// raw-device / filesystem-creation deny_regex. cmd/fak/guard-default-policy.json
-	// ships it three times — Bash, shell_command, functions.shell_command —
+	// ships it four times — Bash, shell_command, functions.shell_command, exec_command —
 	// byte-identical. The rule is RECOGNISED by this exact string and then decided
 	// structurally; a policy that ships a different spelling is unaffected and keeps
 	// the raw-regex path.
 	defaultDeviceOpDenyRegex = `\bmkfs\b|\bdd\s+if=|>\s*/dev/sd`
 
-	// defaultPSDiskOpDenyRegex is the PowerShell volume/disk sibling, shipped three
-	// times in the same file — PowerShell, shell_command, functions.shell_command.
+	// defaultPSDiskOpDenyRegex is the PowerShell volume/disk sibling, shipped four
+	// times in the same file — PowerShell, shell_command, functions.shell_command,
+	// exec_command.
 	// Recognising it here is what stops the same command getting two different
 	// verdicts decided by nothing but which tool NAME the harness happens to use,
 	// the surface-parity defect pinned by TestEveryShippedStructuralRuleIsRecognised.
@@ -80,7 +81,7 @@ func isDeviceOpArgRule(pr *ArgPredicate) bool {
 		return re == defaultDeviceOpDenyRegex
 	case "powershell":
 		return re == defaultPSDiskOpDenyRegex
-	case "shell_command", "functions.shell_command":
+	case "shell_command", "functions.shell_command", "exec_command":
 		// This surface is POSIX on one host and PowerShell on another, so the
 		// shipped policy gives it BOTH rules; recognise both.
 		return re == defaultDeviceOpDenyRegex || re == defaultPSDiskOpDenyRegex
