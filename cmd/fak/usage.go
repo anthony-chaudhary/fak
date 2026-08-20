@@ -750,11 +750,12 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                  end to end  -  exit 1 naming the first broken link if a byte changed
                  since it was written; 'export' re-emits it as JSONL. A self-report is
                  not a witness  -  this is how the record is checked offline)
-  fak usage     [--since DUR] [--by-verb] [--json] [--top N]
+  fak usage     [--since DUR] [--by-verb] [--guard-disable] [--json] [--top N]
                 (reads the durable CLI-invocation journal internal/usagelog appends at
                  process exit -- how fak itself has been used: per-verb counts, error
-                 rate, timing. FAK_USAGE_LOG=off disables recording; FAK_USAGE_LOG_PATH
-                 relocates the journal. 'fak audit verify' covers it too)
+                 rate, timing. --guard-disable reads the sibling privacy-safe break-glass
+                 outcome fold. FAK_USAGE_LOG=off disables recording; FAK_USAGE_LOG_PATH
+                 relocates both journals. 'fak audit verify' covers the main journal)
   fak stopfailure plan | reset-stale | archive-marker-only | clear-reviewed
                 (operator surface for .dos/stop-failures breaker markers. plan is
                  read-only; reset-stale is dry-run unless --apply is passed. The

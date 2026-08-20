@@ -38,6 +38,32 @@ func TestUsageLogPathOverride(t *testing.T) {
 	}
 }
 
+func TestUsageGuardDisableSurfaceRendersOutcomeCounts(t *testing.T) {
+	withUsagePath(t)
+	t.Setenv("FAK_USAGE_LOG", "")
+	path, err := guardDisableUsageDefaultPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []guardDisableUsageRow{
+		{At: "2026-08-17T10:00:00Z", Outcome: guardDisableUsageSuccess},
+		{At: "2026-08-18T10:00:00Z", Outcome: guardDisableUsageChildNonzero},
+	} {
+		if err := appendGuardDisableUsage(path, row); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	out := captureStdout(t, func() { cmdUsage([]string{"--guard-disable", "--json"}) })
+	var got guardDisableUsageSummary
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Schema != guardDisableUsageSummarySchema || len(got.Weeks) != 1 || got.Weeks[0].Invocations != 2 || got.Weeks[0].Success != 1 || got.Weeks[0].ChildNonzero != 1 {
+		t.Fatalf("summary = %+v", got)
+	}
+}
+
 func TestRecordUsageWritesOneRow(t *testing.T) {
 	path := withUsagePath(t)
 	t.Setenv("FAK_USAGE_LOG", "")

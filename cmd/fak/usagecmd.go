@@ -20,14 +20,26 @@ func cmdUsage(args []string) {
 	sinceStr := fs.String("since", "", "only fold rows within this long of now (Go duration, e.g. 24h, 30m)")
 	byVerb := fs.Bool("by-verb", false, "print the per-verb breakdown table")
 	gitOps := fs.Bool("git-ops", false, "print commit/sweep/sync latency split by terminal outcome")
+	guardDisable := fs.Bool("guard-disable", false, "print scoped break-glass launcher outcome counts")
 	asJSON := fs.Bool("json", false, "print the fold as JSON instead of text")
 	topN := fs.Int("top", 0, "how many recent rows to include in the fold (0 = usagelog's default)")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: fak usage [--since DUR] [--by-verb] [--git-ops] [--json] [--top N]")
+		fmt.Fprintln(os.Stderr, "usage: fak usage [--since DUR] [--by-verb] [--git-ops] [--guard-disable] [--json] [--top N]")
 		fmt.Fprintln(os.Stderr, "  reads the usage journal (FAK_USAGE_LOG_PATH, else the per-user default)")
 		fmt.Fprintln(os.Stderr, "  and prints how fak itself has been invoked.")
 	}
 	_ = fs.Parse(args)
+	if *guardDisable {
+		if *sinceStr != "" || *byVerb || *gitOps || *topN != 0 {
+			fmt.Fprintln(os.Stderr, "fak usage: --guard-disable accepts only --json; its ledger already folds by ISO week")
+			os.Exit(2)
+		}
+		path, pathErr := guardDisableUsageDefaultPath()
+		if code := runGuardDisableUsage(os.Stdout, os.Stderr, path, pathErr, *asJSON); code != 0 {
+			os.Exit(code)
+		}
+		return
+	}
 
 	var sinceUnixNano int64
 	if *sinceStr != "" {

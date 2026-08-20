@@ -2931,6 +2931,11 @@
           "category": "incidental",
           "reason": "privacy-safe accounting implementation detail of the positioned guard disable break-glass launcher",
           "token": "foldGuardDisableUsage"
+        },
+        {
+          "category": "incidental",
+          "reason": "local CLI flag binding for the positioned guard disable usage surface",
+          "token": "guardDisable"
         }
       ],
       "exclude": [
@@ -3092,6 +3097,7 @@
         "guardCoreLockAllActive",
         "guardCoreLockAllAdmitAmendment",
         "guardCoreLockAllState",
+        "guardDisable",
         "guardDisableChildEnv",
         "guardDisableDefaultReason",
         "guardDisableDropEnv",
