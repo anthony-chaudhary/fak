@@ -2,7 +2,7 @@
 
 This directory freezes the 2026-08-19 exact-checkpoint acceptance for
 `Qwen/Qwen3.8-27B-FP8@017b9c7af6b5689d5dd426a76e0bc077eb5ca20a` on two
-A100-SXM4-40GB devices with vLLM tensor parallelism behind fak.
+40 GB A100 devices with vLLM tensor parallelism behind fak.
 
 Reproduce the folds from the repository root:
 
@@ -26,7 +26,7 @@ The one-device 40GB OOM remains an honest HOLD; this witness establishes TP2.
 
 The same corpus also freezes native fak CUDA acceptance for
 `unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe` on one
-A100-SXM4-40GB device. The exact 17,106,775,008-byte Q4_K_M file has SHA-256
+40 GB A100 device. The exact 17,106,775,008-byte Q4_K_M file has SHA-256
 `7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169`.
 
 ```console
