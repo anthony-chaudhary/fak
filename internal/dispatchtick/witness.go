@@ -98,9 +98,10 @@ const WitnessTailBytes = 16 << 10
 const StubLogMaxBytes = 512
 
 var (
-	capBannerRE  = regexp.MustCompile(`(?i)hit your[\w\s]*limit|limit\s+exhausted|account cooled by a live usage cap`)
-	glmWallRE    = regexp.MustCompile(`(?i)Limit Exhausted|limit will reset at|usage limit reached`)
-	noopBannerRE = regexp.MustCompile(`(?i)>\s*build\s*[·:]`)
+	capBannerRE       = regexp.MustCompile(`(?i)hit your[\w\s]*limit|limit\s+exhausted|account cooled by a live usage cap`)
+	glmWallRE         = regexp.MustCompile(`(?i)Limit Exhausted|limit will reset at|usage limit reached`)
+	noopBannerRE      = regexp.MustCompile(`(?i)>\s*build\s*[·:]`)
+	offTrunkRefusalRE = regexp.MustCompile(`(?im)^(?:(?:fak(?: commit)?):\s*)?OFF_TRUNK(?:\s*:|\s+-)|^(?:commit|push)\s+refused:\s*OFF_TRUNK\b`)
 )
 
 // WitnessRecord is one finished worker slot's graded verdict — the row the sweep
@@ -227,7 +228,7 @@ func ClassifyNoCommitReason(tail string, size int64) string {
 		return NoCommitModelUnknown
 	case sessionsignals.IsAPIError(tail):
 		return NoCommitRateLimit
-	case strings.Contains(tail, "OFF_TRUNK"):
+	case offTrunkRefusalRE.MatchString(tail):
 		return NoCommitOffTrunk
 	case size >= 0 && size <= StubLogMaxBytes && noopBannerRE.MatchString(tail):
 		return NoCommitBannerNoop
