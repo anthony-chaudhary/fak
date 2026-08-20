@@ -72,7 +72,7 @@ var (
 	reScanFence   = regexp.MustCompile("^\\s*```")
 	reScanH4      = regexp.MustCompile(`^#{4,}(\s|$)`)
 	reScanSetext  = regexp.MustCompile(`^=+\s*$`)
-	reScanAltRule = regexp.MustCompile(`^\s*([*_])\s*(?:\1\s*){2,}$`)
+	reScanAltRule = regexp.MustCompile(`^\s*(?:(?:\*\s*){3,}|(?:_\s*){3,})$`)
 	reScanPlus    = regexp.MustCompile(`^\s*\+\s+\S`)
 	reScanNestUL  = regexp.MustCompile(`^\s+[-*+]\s+\S`)
 	reScanNestOL  = regexp.MustCompile(`^\s+\d+\.\s+\S`)
