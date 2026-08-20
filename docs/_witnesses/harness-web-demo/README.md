@@ -18,6 +18,7 @@ Playwright Desktop Chrome captured the running loopback product at `http://127.0
 | Typed failure, minimal skin | `?scenario=failure&skin=minimal` | [`failure-minimal.png`](../_witnesses/harness-web-demo/failure-minimal.png) |
 | Live native coding run after restart | `?run=live-1` | [`live-coding-gpt-5.6-sol-2026-08-15.png`](live-coding-gpt-5.6-sol-2026-08-15.png) · [receipt](LIVE-CODING-GPT-5.6-SOL-2026-08-15.md) |
 | Operational homepage: agents, goals, and gateway dashboards | `/` | [`operator-home-2026-08-20.png`](operator-home-2026-08-20.png) · [receipt](OPERATOR-HOME-2026-08-20.md) |
+| Operational homepage edge/adversarial sweep | `/` and `/api/status` | [receipt](EDGE-ADVERSARIAL-2026-08-20.md) |
 
 Capture command shape:
 

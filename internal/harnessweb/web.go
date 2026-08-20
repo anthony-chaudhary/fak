@@ -382,7 +382,7 @@ type workspaceStatus struct {
 
 func (a *liveAdapter) overview(ctx context.Context) (gatewayOverview, []liveSessionSummary) {
 	base := publicGatewayURL(a.baseURL)
-	out := gatewayOverview{Configured: true, URL: base}
+	out := gatewayOverview{Configured: true}
 	if base == "" {
 		return out, []liveSessionSummary{}
 	}
@@ -415,6 +415,7 @@ func (a *liveAdapter) overview(ctx context.Context) (gatewayOverview, []liveSess
 		return out, []liveSessionSummary{}
 	}
 	out.Reachable = true
+	out.URL = base
 	if body.Fleet != nil {
 		out.FleetMachines = body.Fleet.Machines
 		out.FleetSessions = body.Fleet.Sessions
