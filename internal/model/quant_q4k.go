@@ -63,7 +63,10 @@ func (q *q4kTensor) materializeRaw() ([]byte, error) {
 	if q.lazy == nil || q.lazy.Reader == nil || q.lazy.Bytes <= 0 {
 		return nil, fmt.Errorf("model: Q4_K tensor has no resident or lazy payload")
 	}
-	raw := make([]byte, q.lazy.Bytes)
+	// Read directly into Metal-compatible backing. Allocating an ordinary slice and then
+	// page-aligning it would transiently hold a second copy of every streamed tensor during
+	// first-token promotion — roughly another 10 GiB for Qwen3.8-27B.
+	raw := makePageAlignedResidentBytes(q.lazy.Bytes)
 	if _, err := q.lazy.Reader.ReadAt(raw, q.lazy.Offset); err != nil {
 		return nil, err
 	}
@@ -524,15 +527,27 @@ func pageAlignResidentBytes(raw []byte) []byte {
 	}
 	rounded := pageRoundResidentLen(len(raw), page)
 	ptrAligned := uintptr(unsafe.Pointer(&raw[0]))%uintptr(page) == 0
-	if ptrAligned && len(raw) == rounded {
+	if ptrAligned && cap(raw) >= rounded {
 		return raw
 	}
+	out := makePageAlignedResidentBytes(len(raw))
+	copy(out, raw)
+	return out
+}
+
+func makePageAlignedResidentBytes(n int) []byte {
+	if n <= 0 {
+		return nil
+	}
+	page := os.Getpagesize()
+	if page <= 1 {
+		return make([]byte, n)
+	}
+	rounded := pageRoundResidentLen(n, page)
 	backing := make([]byte, rounded+page)
 	base := uintptr(unsafe.Pointer(&backing[0]))
 	off := int((uintptr(page) - base%uintptr(page)) % uintptr(page))
-	out := backing[off : off+len(raw)]
-	copy(out, raw)
-	return out
+	return backing[off : off+n]
 }
 
 func pageRoundResidentLen(n, page int) int {

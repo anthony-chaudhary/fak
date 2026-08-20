@@ -69,11 +69,6 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 // amortizing). Each filled slice is [P*out] token-major, bit-identical to calling q4kGemmDispatch
 // per name (same q4k_gemm kernel, just grouped into one command buffer).
 func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]float32 {
-	for _, name := range names {
-		if qt := s.M.q4kw[name]; qt != nil && qt.lazy != nil {
-			return nil
-		}
-	}
 	if !s.MetalQ4K || !metalgemm.Available() || P <= 0 {
 		return nil
 	}
@@ -246,11 +241,6 @@ func (s *Session) q8MatRowsDispatch(name string, qt *q8Tensor, xf []float32) []f
 // only when no member could be Metal-routed. Results are bit-identical to calling the per-name
 // dispatches, up to the existing Metal float-order tolerance.
 func (s *Session) q4kGroupDispatch(names []string, xf []float32, outs []int) [][]float32 {
-	for _, name := range names {
-		if qt := s.M.q4kw[name]; qt != nil && qt.lazy != nil {
-			return nil
-		}
-	}
 	if !s.MetalQ4K || !metalgemm.Available() {
 		return nil
 	}
@@ -345,11 +335,6 @@ func (s *Session) q4kGroupDispatch(names []string, xf []float32, outs []int) [][
 // per-matmul path. The Metal kernel is silu-only and adds no bias, so the caller must gate on a
 // non-GELU activation and bias-free MLP. Bit-identical to the per-matmul path up to GPU float-order.
 func (s *Session) q4kFusedMLP(gateName, upName, downName string, x []float32) []float32 {
-	for _, name := range []string{gateName, upName, downName} {
-		if qt := s.M.q4kw[name]; qt != nil && qt.lazy != nil {
-			return nil
-		}
-	}
 	if !s.MetalQ4K || !metalgemm.Available() {
 		return nil
 	}
@@ -399,13 +384,6 @@ func (s *Session) q4kFusedMLP(gateName, upName, downName string, x []float32) []
 // is resident Q6_K, and the whole batch shares one geometry — the q4_k_m residency the fused path needs.
 // The gate-weighted sum stays on the host so the routed-delta reduction order matches the loop exactly.
 func (s *Session) q4kFusedMLPBatch(gate, up, down []string, x []float32) [][]float32 {
-	for _, names := range [][]string{gate, up, down} {
-		for _, name := range names {
-			if qt := s.M.q4kw[name]; qt != nil && qt.lazy != nil {
-				return nil
-			}
-		}
-	}
 	if !s.MetalQ4K || !metalgemm.Available() {
 		return nil
 	}
@@ -606,32 +584,19 @@ func (m *Model) withMetalQ4K(name string, qt *q4kTensor, use func(*metalgemm.Q4K
 	if qt == nil {
 		return false
 	}
-	if qt.lazy == nil {
-		w := m.metalQ4KWeight(name, qt)
-		if w == nil {
-			return false
-		}
-		use(w)
-		return true
-	}
-	raw, err := qt.materializeRaw()
-	if err != nil {
-		panic("model: lazy Q4_K read " + name + ": " + err.Error())
-	}
-	w := metalgemm.UploadQ4K(raw, qt.out, qt.in)
+	w := m.metalQ4KWeight(name, qt)
 	if w == nil {
 		return false
 	}
-	defer w.Release()
 	use(w)
 	return true
 }
 
-// metalQ4KWeight returns this model's GPU q4_k handle for `name`, uploading the raw blocks once.
-// The normal Apple-unified-memory path aliases qt.raw with a no-copy MTLBuffer, so the GPU and
-// CPU fallback read the same resident bytes. If Metal falls back to a copied buffer, the
-// FAK_Q4K_FREE_CPU opt-in may still drop qt.raw after upload for single residency; failed uploads
-// always keep the CPU copy so q4kMatRows/q4kGemm remain valid.
+// metalQ4KWeight returns this model's GPU q4_k handle for name, uploading the raw blocks once.
+// A streamed tensor is read into page-aligned storage only on first use. UploadQ4K then either
+// pins that storage behind a no-copy shared Metal buffer or copies it into Metal-owned storage;
+// in both cases the cached handle owns the only runtime copy and later tokens do no checkpoint I/O.
+// Resident tensors keep the historical CPU-fallback lifetime below.
 func (m *Model) metalQ4KWeight(name string, qt *q4kTensor) *metalgemm.Q4KWeight {
 	metalQ4KMu.Lock()
 	defer metalQ4KMu.Unlock()
@@ -643,9 +608,18 @@ func (m *Model) metalQ4KWeight(name string, qt *q4kTensor) *metalgemm.Q4KWeight 
 	if w, ok := tbl[name]; ok {
 		return w
 	}
-	w := metalgemm.UploadQ4K(qt.raw, qt.out, qt.in)
+	raw := qt.raw
+	if qt.lazy != nil {
+		var err error
+		raw, err = qt.materializeRaw()
+		if err != nil {
+			panic("model: lazy Q4_K read " + name + ": " + err.Error())
+		}
+		raw = pageAlignResidentBytes(raw)
+	}
+	w := metalgemm.UploadQ4K(raw, qt.out, qt.in)
 	tbl[name] = w // cache nil too, so a failed upload doesn't retry every token
-	if w != nil && freeCPUCopyAfterUpload && !w.NoCopy() {
+	if qt.lazy == nil && w != nil && freeCPUCopyAfterUpload && !w.NoCopy() {
 		// Drop the CPU copy → single residency (~16 GB for 27B vs ~30 GB doubled). UNSAFE
 		// unless EVERY q4_k matmul for this weight — decode GEMV *and* batched prefill GEMM —
 		// is guaranteed to run on the GPU: the CPU fallbacks q4kGemm/q4kMatRows read qt.raw and

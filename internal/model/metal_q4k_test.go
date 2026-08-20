@@ -15,6 +15,7 @@ package model
 // 27B on 36 GB (q4_k_m ≈ 16 GB) AND has the bandwidth + parallel dequant to hit the bar.
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"math/rand"
@@ -112,10 +113,12 @@ func TestMetalTransientQ4KReleaseKeepsRegistryBounded(t *testing.T) {
 	}
 }
 
-func TestMetalLazyQ4KGemvMatchesResidentAndDoesNotCacheHandle(t *testing.T) {
+func TestMetalLazyQ4KGemvMatchesResidentAndCachesHandle(t *testing.T) {
 	if !metalgemm.Available() {
 		t.Skip("Metal unavailable")
 	}
+	metalgemm.ResetQ4K()
+	defer metalgemm.ResetQ4K()
 	const out, in = 5, 256
 	raw := make([]byte, out*(in/qkK)*q4kBlockBytes)
 	for i := range raw {
@@ -129,22 +132,42 @@ func TestMetalLazyQ4KGemvMatchesResidentAndDoesNotCacheHandle(t *testing.T) {
 	}
 	want := q4kMatRows(resident, x)
 	m := &Model{q4kw: map[string]*q4kTensor{"w": lazy}}
+	defer func() {
+		metalQ4KMu.Lock()
+		delete(metalQ4KW, m)
+		metalQ4KMu.Unlock()
+	}()
 	var got []float32
+	var firstID int
 	if !m.withMetalQ4K("w", lazy, func(w *metalgemm.Q4KWeight) {
+		firstID = w.ID()
 		got = make([]float32, out)
 		w.GEMV(x, got)
 	}) {
 		t.Fatal("lazy Q4_K upload failed")
 	}
-	assertClose(t, got, want, 2e-2)
+	cos, maxRel := cosineAndMaxRel(want, got)
+	if math.IsNaN(cos) || math.IsNaN(maxRel) || cos < 0.9999 || maxRel > 2e-2 {
+		t.Fatalf("lazy Q4_K GEMV cosine=%g maxRel=%g, want cosine >= 0.9999 and maxRel <= 0.02", cos, maxRel)
+	}
 	metalQ4KMu.Lock()
-	_, cached := metalQ4KCache[m]
+	cached := metalQ4KW[m]["w"]
 	metalQ4KMu.Unlock()
-	if cached {
-		t.Fatal("lazy operation retained a model-level Metal handle")
+	if cached == nil || cached.ID() != firstID {
+		t.Fatal("lazy operation did not retain its model-level Metal handle")
+	}
+	if !cached.NoCopy() {
+		t.Fatal("lazy operation did not promote into no-copy unified-memory residency")
+	}
+	var secondID int
+	if !m.withMetalQ4K("w", lazy, func(w *metalgemm.Q4KWeight) { secondID = w.ID() }) {
+		t.Fatal("cached lazy Q4_K handle lookup failed")
+	}
+	if secondID != firstID {
+		t.Fatalf("second lazy lookup handle = %d, want cached handle %d", secondID, firstID)
 	}
 	if len(lazy.raw) != 0 {
-		t.Fatalf("lazy operation retained %d host payload bytes", len(lazy.raw))
+		t.Fatalf("lazy tensor retained a second host payload: %d bytes", len(lazy.raw))
 	}
 }
 
