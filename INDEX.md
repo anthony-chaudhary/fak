@@ -265,6 +265,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Learning observation lineage](docs/learning-observation.md) — content-addressed source/candidate/witness/verdict records and closed-enum edges; separate from witness-gated admission.
 
 ## Notes & research (`docs/notes/`)
+- [LLM-as-a-Verifier study: same-model selection, evidence gaps, and the FAK replay seam (2026-08-20)](docs/notes/CONCEPT-STUDY-LLM-AS-A-VERIFIER-2026-08-20.md) -- pinned implementation, paper, history, and 445-trajectory label audit; Pass@1/oracle reproduce, verifier means/error bars do not, and one provenance-bound selector-replay spine survived as #8230.
 - [DeepSeek Harness study: reversible composition, durable turns, and one guarded-filesystem gap (2026-08-20)](docs/notes/CONCEPT-STUDY-DEEPSEEK-HARNESS-2026-08-20.md) -- pinned `rc.8` source study; most candidates map to existing FAK work or intentional divergences, while observed target/version binding for native file mutations survived as #8222.
 - [Agents' Last Exam study: official artifact-scored work as a FAK benchmark lane (2026-08-20)](docs/notes/CONCEPT-STUDY-AGENTS-LAST-EXAM-2026-08-20.md) -- pinned source, paper, history, and social-context study; one official-harness raw-vs-fak spine survived as #8223, while ALE trajectory evidence folded into #6629.
 - [Scoped guard-disable dogfood — 2026-08-20](docs/notes/GUARD-DISABLE-DOGFOOD-2026-08-20.md) -- auto-indexed dated note.
