@@ -311,22 +311,26 @@ going.
    halting.
    It is **on by default** (`--deny-all-continue=enforce`). The give-up is keyed on the
    **same-issue** gauge, not the raw deny-all count: the hook only stands down after
-   `--same-stop` (default 6) consecutive turns proposing the *identical* refused action, so a
+   `same-stop=6` in the `--deny-all-continue` policy after six consecutive turns proposing the *identical* refused action, so a
    session that hits a **different** block each turn (exploring for an allowed path) is never
    given up, while one genuinely spinning on one refusal still stops. Its guidance also firms
    up over the last few identical repeats — naming the repeat and telling the model to change
    tack rather than retry. Once the model does something allowed, the counter resets and the
    next real completion stops normally. (Against an older gateway that does not emit the
-   same-issue gauge, the hook falls back to the legacy blind bound `--deny-all-max`, default
+   same-issue gauge, the hook falls back to the policy's `max=3` blind bound, default
    3 consecutive continues.)
 
 ```bash
 fak manage claude                            # auto-continue ON (enforce); give up after 6 identical repeats
 fak manage --deny-all-continue=shadow -- claude  # log the would-continue, still stop (observe first)
 fak manage --deny-all-continue=off -- claude     # restore the bare end_turn stop
-fak manage --same-stop 10 -- claude              # tolerate up to 10 identical repeats before standing down
-fak manage --deny-all-max 5 -- claude            # legacy blind bound (older gateways without the same-issue gauge)
+fak manage --deny-all-continue=enforce,same-stop=10 -- claude  # tolerate 10 identical repeats
+fak manage --deny-all-continue=enforce,max=5 -- claude         # older-gateway blind bound
 ```
+
+The former `--same-stop`, `--deny-all-warn`, `--deny-all-final`, and `--deny-all-max`
+spellings remain accepted for existing launch scripts; help presents the settings together
+because they are one bounded retry policy.
 
 The Stop hook is merged into the **same** `--settings` file as the PreCompact hook (a single
 `--settings` carries both), is fail-open (an unreachable gateway never wedges the agent), and
