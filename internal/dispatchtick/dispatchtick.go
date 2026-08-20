@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -362,6 +364,12 @@ func GuardAuditPath(workspace, lane, backend string) string {
 func GuardedLaunchCommand(command []string, fakBin, lane, backend, workspace, baseURL string) ([]string, bool) {
 	if len(command) == 0 || strings.TrimSpace(fakBin) == "" {
 		return append([]string(nil), command...), false
+	}
+	if backend == "codex" && runtime.GOOS == "windows" && filepath.Ext(command[0]) == "" {
+		if resolved, err := exec.LookPath(command[0] + ".cmd"); err == nil {
+			command = append([]string(nil), command...)
+			command[0] = resolved
+		}
 	}
 	args := []string{fakBin, "guard"}
 	// Dispatch already audits Codex loop posture before spawn. Carry that decision into

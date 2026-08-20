@@ -2,6 +2,7 @@ package dispatchtick
 
 import (
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -254,6 +255,9 @@ func TestGuardedLaunchCommand(t *testing.T) {
 	codex, guarded := GuardedLaunchCommand([]string{"codex", "exec", "-"}, "fak", "docs", "codex", "/repo", "http://127.0.0.1:18080/v1")
 	if !guarded || !strings.Contains(strings.Join(codex, " "), "guard --codex-loop-gate off --provider openai") {
 		t.Fatalf("codex dispatch must carry the already-evaluated loop-gate decision: %v", codex)
+	}
+	if runtime.GOOS == "windows" && !strings.Contains(strings.Join(codex, " "), "codex.cmd exec -") {
+		t.Fatalf("Windows Codex dispatch must hand guard the concrete batch shim: %v", codex)
 	}
 }
 
