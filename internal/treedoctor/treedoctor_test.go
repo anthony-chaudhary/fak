@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/selfinstall"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
@@ -397,5 +398,40 @@ func TestDiagnoseKeepsStaleWorkerWorktreeWithLiveOwner(t *testing.T) {
 	report := Diagnose(context.Background(), git.run, Options{RepoRoot: root, Now: now, ProcessAlive: func(pid int) bool { return pid == 222 }})
 	if len(report.Worktrees) != 2 || !report.Worktrees[1].Live || report.Worktrees[1].Keep != "live (owner process)" || report.Worktrees[1].Prunable {
 		t.Fatalf("worker report = %+v, want live owner protection", report.Worktrees)
+	}
+}
+
+func TestDiagnoseDefersOldSelfUpdateWorktreeToOwnerAwareGC(t *testing.T) {
+	now := time.Date(2026, 8, 20, 21, 0, 0, 0, time.UTC)
+	root := t.TempDir()
+	updateWT := filepath.Join(filepath.Dir(root), selfinstall.BuildDirName(4242))
+	ordinaryWT := filepath.Join(filepath.Dir(root), "merged-old")
+	for _, wt := range []string{updateWT, ordinaryWT} {
+		if err := os.MkdirAll(wt, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeAt(t, filepath.Join(wt, "f"), now.Add(-2*DefaultLiveWindow))
+	}
+	git := &fakeGit{
+		listOut: listPorcelain(
+			[2]string{root, "aaa"},
+			[2]string{updateWT, "bbb"},
+			[2]string{ordinaryWT, "ccc"},
+		),
+		ancestor: map[string]bool{updateWT: true, ordinaryWT: true},
+		dirty:    map[string]string{},
+	}
+
+	report := Diagnose(context.Background(), git.run, Options{RepoRoot: root, Now: now})
+	byPath := map[string]WorktreeState{}
+	for _, wt := range report.Worktrees {
+		byPath[wt.Path] = wt
+	}
+	update := byPath[updateWT]
+	if !update.IsSelfUpdate || update.Prunable || update.Keep != "self-update lifecycle (owner-aware GC)" {
+		t.Fatalf("self-update report = %+v, want exclusive owner-aware GC", update)
+	}
+	if !byPath[ordinaryWT].Prunable {
+		t.Fatalf("ordinary old merged worktree lost generic prune behavior: %+v", byPath[ordinaryWT])
 	}
 }

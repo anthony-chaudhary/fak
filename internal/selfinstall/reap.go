@@ -35,6 +35,15 @@ const (
 // drifting apart (a drift would silently turn the reaper into a no-op).
 func BuildDirName(pid int) string { return buildDirPrefix + strconv.Itoa(pid) }
 
+// IsSelfUpdateBuildWorktree reports whether path has the exact basename reserved for a
+// self-update source checkout. Generic worktree janitors use this marker to defer cleanup
+// to GarbageCollectStaleBuilds, whose owner, age, process-census, cleanliness, and ancestry
+// gates are stronger than a generic last-touch window.
+func IsSelfUpdateBuildWorktree(path string) bool {
+	_, ok := pidFromBuildDir(filepath.Base(filepath.Clean(strings.TrimSpace(path))))
+	return ok
+}
+
 // pidFromBuildDir extracts the pid encoded in a build-worktree directory's basename, or
 // (0,false) when base is not a "<buildDirPrefix><pid>" name with a positive numeric pid.
 func pidFromBuildDir(base string) (int, bool) {

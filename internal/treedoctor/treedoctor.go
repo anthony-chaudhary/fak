@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
+	"github.com/anthony-chaudhary/fak/internal/selfinstall"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
@@ -136,16 +137,17 @@ type LockResidueState struct {
 
 // WorktreeState classifies one worktree for the prune decision.
 type WorktreeState struct {
-	Path     string `json:"path"`
-	Head     string `json:"head,omitempty"`
-	IsMain   bool   `json:"is_main"`             // the RepoRoot itself — never a prune candidate
-	IsWorker bool   `json:"is_worker,omitempty"` // carries WorkerWorktreeMarker — disposable, reap when not live
-	Merged   bool   `json:"merged"`              // HEAD is an ancestor of Trunk (commits already on the trunk)
-	Live     bool   `json:"live"`                // touched within LiveWindow — an active session, keep
-	DirtyN   int    `json:"dirty_n"`             // count of uncommitted entries (informational)
-	Archive  bool   `json:"archive,omitempty"`   // dirty worker content must be archived before removal
-	Prunable bool   `json:"prunable"`            // safe to remove: (Merged || IsWorker) && !Live && !IsMain
-	Keep     string `json:"keep,omitempty"`
+	Path         string `json:"path"`
+	Head         string `json:"head,omitempty"`
+	IsMain       bool   `json:"is_main"`                  // the RepoRoot itself — never a prune candidate
+	IsWorker     bool   `json:"is_worker,omitempty"`      // carries WorkerWorktreeMarker — disposable, reap when not live
+	IsSelfUpdate bool   `json:"is_self_update,omitempty"` // owned and collected by selfinstall's stricter GC
+	Merged       bool   `json:"merged"`                   // HEAD is an ancestor of Trunk (commits already on the trunk)
+	Live         bool   `json:"live"`                     // touched within LiveWindow — an active session, keep
+	DirtyN       int    `json:"dirty_n"`                  // count of uncommitted entries (informational)
+	Archive      bool   `json:"archive,omitempty"`        // dirty worker content must be archived before removal
+	Prunable     bool   `json:"prunable"`                 // safe to remove: (Merged || IsWorker) && !Live && !IsMain
+	Keep         string `json:"keep,omitempty"`
 }
 
 // Report is the full read-only diagnosis.
@@ -439,6 +441,7 @@ func diagnoseWorktrees(ctx context.Context, run Runner, repoRoot, trunk string, 
 			continue
 		}
 		s.IsWorker = isWorkerWorktree(wt.path)
+		s.IsSelfUpdate = selfinstall.IsSelfUpdateBuildWorktree(wt.path)
 		// Merged? HEAD an ancestor of trunk => its commits are already on the trunk.
 		if _, code, aerr := run(ctx, wt.path, "merge-base", "--is-ancestor", "HEAD", trunk); aerr == nil && code == 0 {
 			s.Merged = true
@@ -457,6 +460,11 @@ func diagnoseWorktrees(ctx context.Context, run Runner, repoRoot, trunk string, 
 			s.Keep = "live (owner process)"
 		}
 		switch {
+		case s.IsSelfUpdate:
+			// Self-update checkout collection has stronger ownership and liveness gates
+			// than this generic age heuristic. Keeping the lifecycle exclusive prevents
+			// a slow build from losing its source after DefaultLiveWindow expires.
+			s.Keep = "self-update lifecycle (owner-aware GC)"
 		case s.Live:
 			// Touched within the window => an active session (or a live worker),
 			// never pruned even if merged/marker. Checked first so a live worker
