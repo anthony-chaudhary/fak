@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-20T12:41:45-07:00",
+  "updated_at": "2026-08-20T13:14:26-07:00",
   "methodology": "Harness-related repositories absent by exact owner/name from tracked fak docs were ranked by direct seam relevance, current development activity, adoption signal, and license clarity. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -165,6 +165,18 @@
       "stars_at_check": 1203,
       "last_push_at_check": "2026-08-20T19:14:30Z",
       "study_note": "docs/notes/CONCEPT-STUDY-THERE-IS-NO-ADDRESS-2026-08-20.md"
+    },
+    {
+      "repository": "z-lab/dflash",
+      "url": "https://github.com/z-lab/dflash",
+      "status": "studied",
+      "priority": 15,
+      "why": "DFlash 2 reference inference and benchmark surface deeply studied across its candidate path selector, dynamic local convolution, exact verification, model cards, runtime ports, papers, releases, and reported H200 results. FAK should ride the trained architecture; per-position acceptance telemetry survived as #8258 and the still-absent stochastic losslessness owner #4202 was reopened.",
+      "last_checked": "2026-08-20",
+      "checked_revision": "07ebd93db9f472af339b644bb70221ad8428328a",
+      "stars_at_check": 5809,
+      "last_push_at_check": "2026-08-18T21:14:10Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-DFLASH2-2026-08-20.md"
     }
   ]
 }

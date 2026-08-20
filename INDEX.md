@@ -266,6 +266,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Learning observation lineage](docs/learning-observation.md) — content-addressed source/candidate/witness/verdict records and closed-enum edges; separate from witness-gated admission.
 
 ## Notes & research (`docs/notes/`)
+- [DFlash 2: parallel path selection, suffix decay, and the FAK measurement seam](docs/notes/CONCEPT-STUDY-DFLASH2-2026-08-20.md) -- auto-indexed dated note.
 - [Claude Code Concise study: result-first parity and persistent-selection gap (2026-08-20)](docs/notes/CONCEPT-STUDY-CLAUDE-CODE-CONCISE-2026-08-20.md) -- pinned v2.1.237 release/settings evidence; FAK response shaping is already default and independently implemented, while persistent config remains filed as #8288.
 - [Native Ultracode runtime audit — 2026-08-20](docs/notes/ULTRACODE-NATIVE-RUNTIME-AUDIT-2026-08-20.md) -- auto-indexed dated note.
 - [There Is No Address study: consumer-owned locality and the FAK ready-endpoint seam (2026-08-20)](docs/notes/CONCEPT-STUDY-THERE-IS-NO-ADDRESS-2026-08-20.md) -- pinned essay/NIXL audit with factual corrections; FAK reuses `fabricmap` to govern consumer-ready KV routes and filed #8259/#8261 for terminal receipts and byte-sized route economics.
