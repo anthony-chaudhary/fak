@@ -2309,3 +2309,17 @@ Versioned exact-model workflow-cache benchmark corpus and fold for the first-cla
 The fak guard/manage disable operator subcommand implemented by runGuardDisable: it launches exactly one raw repair child with loud warnings, child-scoped recovery variables, inherited guard-routing removal, and exit-status propagation, then leaves later launches guarded by default.
 
 **Distinct from:** This is an attended one-child repair launcher, not guardDisabled, the GUARD_DISABLED dispatch switch that skips wrapping workers, and not fak guard allow, which edits a capability overlay while the guard remains active.
+
+
+### ProviderSessionBoundary
+
+A provider-reported replacement conversation that closes one fak trace and opens another inside the same guard process.
+
+**Distinct from:** The explicit provider conversation boundary, not SessionReset/Recontinue, which preserves one logical session across an internal context reset.
+
+
+### BeginProviderSessionAt
+
+The session-table transition that terminalizes the current fak trace and creates the fresh provider-conversation trace while carrying cumulative envelopes.
+
+**Distinct from:** The atomic mutation that applies ProviderSessionBoundary, not the boundary record itself and not SessionReset/Recontinue within one logical session.

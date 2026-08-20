@@ -37,19 +37,20 @@ type QueryBudgetVerdict struct {
 // not run" is a checkable field, never free text. They mirror the refusal-reason
 // discipline the kernel uses elsewhere.
 const (
-	ReasonBudgetTurns     = "BUDGET_TURNS_EXHAUSTED"     // TurnsLeft hit zero
-	ReasonBudgetTokens    = "BUDGET_TOKENS_EXHAUSTED"    // TokensLeft hit zero
-	ReasonBudgetContext   = "BUDGET_CONTEXT_EXHAUSTED"   // ContextTokensLeft hit zero
-	ReasonBudgetQueries   = "BUDGET_QUERIES_EXHAUSTED"   // ClarificationQueriesLeft hit zero
-	ReasonBudgetToolCalls = "BUDGET_TOOLCALLS_EXHAUSTED" // ToolCallsLeft hit zero — the runaway floor (#2887), debited per dispatched tool call, not per turn
-	ReasonBudgetSpend     = "BUDGET_SPEND_EXHAUSTED"     // SpendMicroCentsLeft hit zero (priced dollar ceiling); never auto-reset — a spent cap is terminal, not a fresh-window continuation
-	ReasonPaused          = "PAUSED"                     // operator hold; not terminal, the loop waits
-	ReasonDrained         = "DRAINING"                   // operator stop, taken at this boundary
-	ReasonTerminated      = "TERMINATED"                 // operator FORCEFUL stop (#2758): in-flight work cancelled at the next safe point, no new work — the deliberate counterpart of DRAINING (which lets the turn finish)
-	ReasonStopped         = "STOPPED"                    // already terminal
-	ReasonBudgetReset     = "BUDGET_RESET"               // budget-drained, then re-armed on a fresh window (Recontinue)
-	ReasonResumeCancelled = "RESUME_CANCELLED"           // a WaitResume parked on a Paused session ended because its context was cancelled (#916)
-	ReasonInterrupted     = "INTERRUPTED"                // operator MID-FLIGHT interrupt (#5158), stamped by the loop (not Decide): the arm stops at its next clean turn boundary — softer than DRAINING (no drive-state transition) and never mid-tool, unlike TERMINATED
+	ReasonBudgetTurns          = "BUDGET_TURNS_EXHAUSTED"     // TurnsLeft hit zero
+	ReasonBudgetTokens         = "BUDGET_TOKENS_EXHAUSTED"    // TokensLeft hit zero
+	ReasonBudgetContext        = "BUDGET_CONTEXT_EXHAUSTED"   // ContextTokensLeft hit zero
+	ReasonBudgetQueries        = "BUDGET_QUERIES_EXHAUSTED"   // ClarificationQueriesLeft hit zero
+	ReasonBudgetToolCalls      = "BUDGET_TOOLCALLS_EXHAUSTED" // ToolCallsLeft hit zero — the runaway floor (#2887), debited per dispatched tool call, not per turn
+	ReasonBudgetSpend          = "BUDGET_SPEND_EXHAUSTED"     // SpendMicroCentsLeft hit zero (priced dollar ceiling); never auto-reset — a spent cap is terminal, not a fresh-window continuation
+	ReasonPaused               = "PAUSED"                     // operator hold; not terminal, the loop waits
+	ReasonDrained              = "DRAINING"                   // operator stop, taken at this boundary
+	ReasonTerminated           = "TERMINATED"                 // operator FORCEFUL stop (#2758): in-flight work cancelled at the next safe point, no new work — the deliberate counterpart of DRAINING (which lets the turn finish)
+	ReasonStopped              = "STOPPED"                    // already terminal
+	ReasonBudgetReset          = "BUDGET_RESET"               // budget-drained, then re-armed on a fresh window (Recontinue)
+	ReasonProviderSessionClear = "PROVIDER_SESSION_CLEAR"     // provider /clear or /new ended one visible conversation and opened another
+	ReasonResumeCancelled      = "RESUME_CANCELLED"           // a WaitResume parked on a Paused session ended because its context was cancelled (#916)
+	ReasonInterrupted          = "INTERRUPTED"                // operator MID-FLIGHT interrupt (#5158), stamped by the loop (not Decide): the arm stops at its next clean turn boundary — softer than DRAINING (no drive-state transition) and never mid-tool, unlike TERMINATED
 )
 
 // Decide is the per-turn boundary gate. Given a session's TraceID it:

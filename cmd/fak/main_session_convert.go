@@ -60,8 +60,15 @@ func toGatewaySessionStateAt(s session.State, now time.Time) gateway.SessionStat
 			Reason:      s.CacheAffinity.Reason,
 		},
 		ResetTransaction: toGatewayResetTransaction(s.ResetTransaction),
-		Assumptions:      toGatewaySessionAssumptions(s.Assumptions),
-		Time:             toGatewaySessionTime(s.Time, now),
+		ProviderBoundary: gateway.SessionProviderBoundary{
+			Schema:            s.ProviderBoundary.Schema,
+			Provider:          s.ProviderBoundary.Provider,
+			Source:            s.ProviderBoundary.Source,
+			PreviousTrace:     s.ProviderBoundary.PreviousTrace,
+			ProviderSessionID: s.ProviderBoundary.ProviderSessionID,
+		},
+		Assumptions: toGatewaySessionAssumptions(s.Assumptions),
+		Time:        toGatewaySessionTime(s.Time, now),
 		// Throughput envelope read projection (#2762): the configured expected/min rates
 		// plus the measured sustained rate the floor is judged against — the field that
 		// makes a `throughput=`/`min_throughput=` ceiling legible in `fak session status`.

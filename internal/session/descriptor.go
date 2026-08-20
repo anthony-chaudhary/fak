@@ -112,6 +112,9 @@ type Descriptor struct {
 	// ResetTransaction mirrors State.ResetTransaction so a child trace restored after a
 	// process restart still carries the replayable reset row that minted it.
 	ResetTransaction ResetTransaction `json:"reset_transaction,omitempty,omitzero"`
+	// ProviderBoundary mirrors State.ProviderBoundary so a restart preserves the
+	// fact that this trace began at an explicit provider /clear boundary.
+	ProviderBoundary ProviderSessionBoundary `json:"provider_boundary,omitempty,omitzero"`
 	// ObjectivePin mirrors State.ObjectivePin (issue #1589) so a session migrated to a
 	// new process — a hidden restart, a re-home to another host, or a sessionimage
 	// dump/restore — still reports the same pinned objective (PinID + content Digest)
@@ -205,6 +208,7 @@ func descriptorFromState(st State) Descriptor {
 		Reason:           st.Reason,
 		CacheAffinity:    st.CacheAffinity,
 		ResetTransaction: st.ResetTransaction,
+		ProviderBoundary: st.ProviderBoundary,
 		ObjectivePin:     st.ObjectivePin,
 		PendingTurn:      st.PendingTurn,
 		Rev:              st.Rev,
@@ -237,6 +241,7 @@ func (d Descriptor) RestoredState() State {
 		Reason:           d.Reason,
 		CacheAffinity:    d.CacheAffinity,
 		ResetTransaction: d.ResetTransaction,
+		ProviderBoundary: d.ProviderBoundary,
 		ObjectivePin:     d.ObjectivePin,
 		PendingTurn:      d.PendingTurn,
 		Rev:              d.Rev,

@@ -247,7 +247,7 @@
       "kind": "symbol",
       "definition": "A directive to clear a session's drive state back to a clean baseline without removing it from the pool.",
       "distinction": "The RESET directive - NOT eviction from the pool and NOT session.State itself.",
-      "distinct_from": ["session-state", "session"],
+      "distinct_from": ["session-state", "session", "provider-session-boundary", "begin-provider-session"],
       "aliases": [],
       "grounding": "sessionreset",
       "grounding_kind": "symbol",

@@ -358,6 +358,10 @@ type State struct {
 	// kernel data instead of a model self-report. The zero value means this state was
 	// not produced by a reset.
 	ResetTransaction ResetTransaction `json:"reset_transaction,omitempty,omitzero"`
+	// ProviderBoundary records an explicit provider-side conversation reset such
+	// as /clear. Unlike ResetTransaction it starts a new logical session: no
+	// objective, transcript-derived assumptions, pins, or cache affinity cross it.
+	ProviderBoundary ProviderSessionBoundary `json:"provider_boundary,omitempty,omitzero"`
 	// ObjectivePin is the standing user objective's stable, addressable span (issue
 	// #1583, the managed-context runtime-continuity epic #1570): a PinID that must
 	// survive every replan/reset/migration unchanged, plus a content Digest that makes

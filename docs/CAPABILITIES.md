@@ -32,6 +32,7 @@ removes **turn tax**, not only individual token strings.
 <a id="session-control"></a>
 
 | Live turn control | Budgets turns/tokens/context and pauses, resumes, throttles, steers, or stops a served session out of band—without spending a prompt turn to ask the model to control itself. | `fak help session`; [operator control plane](operator-control-plane.md) |
+| Provider clear/new boundary | Starts a fresh fak trace when a wrapped provider explicitly clears its conversation, while carrying cumulative limits so the UI command cannot reset quotas. | [provider clear/new contract](integrations/provider-session-reset.md) |
 | Same-trace ablation | Replays one frozen trace with cache levers on/off so savings are attributable rather than anecdotal. | `fak help ablate`; `fak ablate --help` |
 
 The browserless turn-tax demo is the smallest captured spine: its self-check drives the real

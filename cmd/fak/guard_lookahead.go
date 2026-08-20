@@ -221,7 +221,11 @@ func parseHookSource(payload []byte) string {
 // rendered lesson for injection. Every other case (nil/blank stdin, non-compact source, git
 // unavailable, no fresh lesson) returns ("", false) — fail-open, inject nothing.
 func lookaheadLessonForCompact(stdin io.Reader) (string, bool) {
-	source := parseHookSource(readHookStdin(stdin))
+	return lookaheadLessonForCompactPayload(readHookStdin(stdin))
+}
+
+func lookaheadLessonForCompactPayload(payload []byte) (string, bool) {
+	source := parseHookSource(payload)
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", false

@@ -79,6 +79,7 @@ func runGuardSessionStartHook(stdout, stderr io.Writer, stdin io.Reader, argv []
 	// the persistence + managed-context RULE (spine #3512) — the soft, always-on half of the
 	// long-horizon default. Attended human-driven sessions get the base affordance only.
 	managedFlag := fs.Bool("managed", false, "inject the long-horizon persistence + managed-context rule")
+	providerFlag := fs.String("provider", "claude", "provider emitting the SessionStart event")
 	// --trace carries the guard trace id threaded in at install (guardSessionStartArgs). Paired
 	// with the child's CLAUDE_CODE_SESSION_ID (the transcript UUID) it is the A1 identity join
 	// (#4112) the resume watchdog reads to resolve a crashed UUID back to its gateway trace.
@@ -87,14 +88,39 @@ func runGuardSessionStartHook(stdout, stderr io.Writer, stdin io.Reader, argv []
 		// Fail open: a discoverability hint must never wedge a session start.
 		return 0
 	}
+	payload := readHookStdin(stdin)
+	hookStart := parseGuardProviderSessionStart(payload)
+	effectiveTrace := strings.TrimSpace(*traceFlag)
+	provider := strings.ToLower(strings.TrimSpace(*providerFlag))
+	if provider == "" {
+		provider = "claude"
+	}
+	sessionID := hookStart.SessionID
+	if sessionID == "" && provider == "claude" {
+		sessionID = strings.TrimSpace(os.Getenv("CLAUDE_CODE_SESSION_ID"))
+	}
+	if hookStart.Source == "clear" && sessionID != "" {
+		result, err := notifyGuardProviderSessionStart(
+			os.Getenv(guardLifecycleSocketEnv), os.Getenv(guardLifecycleTokenEnv),
+			provider, hookStart.Source, sessionID, 500*time.Millisecond,
+		)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak: provider session boundary was not recorded: %v\n", err)
+		} else {
+			if result.Applied {
+				recordGuardProviderSessionClose(result.PreviousTrace, hookStart.Source)
+			}
+			effectiveTrace = result.NewTrace
+		}
+	}
 	// Record the uuid<->trace join first (best-effort, fail-open), so it is written on EVERY
 	// SessionStart source — independent of the affordance mode below. The affordance "off" knob
 	// governs the injected hint, not the durable identity store the watchdog depends on.
-	driverPID := recordGuardSessionStartIdentity(*traceFlag)
+	driverPID := recordGuardSessionStartIdentityFor(effectiveTrace, sessionID)
 	// …then register the session in the crash-survivable journal (C3, #3787), on the same terms:
 	// every SessionStart source, ahead of the affordance knob, best-effort. It reuses the driver
 	// pid the join above already witnessed rather than paying a second process census.
-	recordGuardSessionStartJournal(*traceFlag, driverPID)
+	recordGuardSessionStartJournalFor(effectiveTrace, sessionID, provider, driverPID)
 	if normalizeGuardSessionStartMode(*modeFlag) == guardSessionStartModeOff {
 		return 0
 	}
@@ -126,8 +152,8 @@ func runGuardSessionStartHook(stdout, stderr io.Writer, stdin io.Reader, argv []
 	// inject the fresh same-base-SHA lesson VERBATIM after the reframed affordance — a
 	// witnessed lesson is a fact to carry, not a string to positive-voice. A nil stdin (the
 	// retained stdin-free entry) never triggers this, so that path stays unchanged.
-	if stdin != nil {
-		if lesson, ok := lookaheadLessonForCompact(stdin); ok {
+	if len(payload) > 0 {
+		if lesson, ok := lookaheadLessonForCompactPayload(payload); ok {
 			additionalContext = additionalContext + "\n\n" + lesson
 		}
 	}
@@ -150,6 +176,34 @@ func runGuardSessionStartHook(stdout, stderr io.Writer, stdin io.Reader, argv []
 	return 0
 }
 
+type guardProviderSessionStart struct {
+	Source    string
+	SessionID string
+}
+
+func parseGuardProviderSessionStart(payload []byte) guardProviderSessionStart {
+	if len(payload) == 0 {
+		return guardProviderSessionStart{}
+	}
+	var in struct {
+		Source         string `json:"source"`
+		SessionID      string `json:"session_id"`
+		ThreadID       string `json:"thread_id"`
+		ConversationID string `json:"conversation_id"`
+	}
+	if json.Unmarshal(payload, &in) != nil {
+		return guardProviderSessionStart{}
+	}
+	id := strings.TrimSpace(in.SessionID)
+	if id == "" {
+		id = strings.TrimSpace(in.ThreadID)
+	}
+	if id == "" {
+		id = strings.TrimSpace(in.ConversationID)
+	}
+	return guardProviderSessionStart{Source: strings.ToLower(strings.TrimSpace(in.Source)), SessionID: id}
+}
+
 // recordGuardSessionStartIdentity best-effort appends one uuid<->trace join row to the durable
 // resume_identity.jsonl store (the A1 fold's input, #4112) under the resolved fleet regDir, so
 // the resume watchdog can later resolve a crashed transcript UUID to its gateway trace long
@@ -161,7 +215,11 @@ func runGuardSessionStartHook(stdout, stderr io.Writer, stdin io.Reader, argv []
 // return), so the sibling journal registration (#3787) can stamp the same witnessed pid without
 // paying a second process census — the census is the expensive part of this hook.
 func recordGuardSessionStartIdentity(traceID string) int {
-	uuid := strings.TrimSpace(os.Getenv("CLAUDE_CODE_SESSION_ID"))
+	return recordGuardSessionStartIdentityFor(traceID, os.Getenv("CLAUDE_CODE_SESSION_ID"))
+}
+
+func recordGuardSessionStartIdentityFor(traceID, sessionID string) int {
+	uuid := strings.TrimSpace(sessionID)
 	traceID = strings.TrimSpace(traceID)
 	if uuid == "" || traceID == "" {
 		return 0 // a half row is not a join; FoldIdentity would skip it anyway
@@ -474,8 +532,13 @@ func guardSessionStartManaged(command []string) bool {
 // the injected context includes the long-horizon persistence + managed-context rule (#3512). A
 // non-empty traceID is threaded as --trace so the running hook holds BOTH ids — the guard trace
 // and (from the child env) the transcript UUID — and can record the A1 identity join (#4112).
-func guardSessionStartArgs(managed bool, traceID string) []string {
+func guardSessionStartArgs(managed bool, traceID string, providers ...string) []string {
 	args := []string{"guard-sessionstart"}
+	provider := "claude"
+	if len(providers) > 0 && strings.TrimSpace(providers[0]) != "" {
+		provider = strings.ToLower(strings.TrimSpace(providers[0]))
+	}
+	args = append(args, "--provider", provider)
 	if managed {
 		args = append(args, "--managed")
 	}
@@ -493,7 +556,7 @@ func guardSessionStartMatchers(fakBin string, managed bool, traceID string) []gu
 		Hooks: []guardPreCompactClaudeCommand{{
 			Type:    "command",
 			Command: guardPreCompactHookCommand(fakBin),
-			Args:    guardSessionStartArgs(managed, traceID),
+			Args:    guardSessionStartArgs(managed, traceID, "claude"),
 		}},
 	}}
 }

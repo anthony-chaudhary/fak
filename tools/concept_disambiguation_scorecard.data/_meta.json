@@ -2951,6 +2951,61 @@
           "category": "incidental",
           "reason": "Display-safety helper that removes credentials and query data from the configured Web gateway URL; it does not introduce a new guard or gate concept.",
           "token": "publicGatewayURL"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation or wire identifier for the positioned provider-session boundary; it is not a distinct operator concept.",
+          "token": "guardLifecycleOperationProviderSessionStart"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation or wire identifier for the positioned provider-session boundary; it is not a distinct operator concept.",
+          "token": "guardProviderBoundaryFunc"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation or wire identifier for the positioned provider-session boundary; it is not a distinct operator concept.",
+          "token": "parseGuardProviderSessionStart"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation or wire identifier for the positioned provider-session boundary; it is not a distinct operator concept.",
+          "token": "notifyGuardProviderSessionStart"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation or wire identifier for the positioned provider-session boundary; it is not a distinct operator concept.",
+          "token": "recordGuardSessionStartIdentityFor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation or wire identifier for the positioned provider-session boundary; it is not a distinct operator concept.",
+          "token": "guardProviderSessionStart"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation or wire identifier for the positioned provider-session boundary; it is not a distinct operator concept.",
+          "token": "recordGuardSessionStartJournalFor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation or wire identifier for the positioned provider-session boundary; it is not a distinct operator concept.",
+          "token": "guardSessionJournalIDFor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation or wire identifier for the positioned provider-session boundary; it is not a distinct operator concept.",
+          "token": "recordGuardProviderSessionClose"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation or wire identifier for the positioned provider-session boundary; it is not a distinct operator concept.",
+          "token": "beginGuardProviderBoundary"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation or wire identifier for the positioned provider-session boundary; it is not a distinct operator concept.",
+          "token": "guardProviderBoundaryResult"
         }
       ],
       "exclude": [
@@ -3043,6 +3098,7 @@
         "appendGuardDisableUsage",
         "armbenchPonytailGates",
         "baseAggregates",
+        "beginGuardProviderBoundary",
         "bindGuardRegistration",
         "buildguardchild",
         "cacheValueGateFactsFromReport",
@@ -3193,6 +3249,7 @@
         "guardKeychainSupported",
         "guardLaunchCoreLockAll",
         "guardLaunchKind",
+        "guardLifecycleOperationProviderSessionStart",
         "guardLooksLikeRefusal",
         "guardNormalizeRestatement",
         "guardOAuthKeychainSource",
@@ -3205,6 +3262,9 @@
         "guardPolicyOriginEvidencePath",
         "guardProfileCapture",
         "guardProfilesDisableCommand",
+        "guardProviderBoundaryFunc",
+        "guardProviderBoundaryResult",
+        "guardProviderSessionStart",
         "guardQuarantinedReadRecovery",
         "guardReadPath",
         "guardRegistration",
@@ -3217,6 +3277,7 @@
         "guardSelfTightenOverlayVersion",
         "guardSelfTightenProposal",
         "guardSelfTightenUnion",
+        "guardSessionJournalIDFor",
         "guardSessionStartDriverEntrypointBases",
         "guardSessionStartDriverEntrypointDirs",
         "guardSessionStartNodeWrapsDriver",
@@ -3278,12 +3339,14 @@
         "next_gate_review",
         "nodeGateScript",
         "normalizeGuardOperatorQuestionMode",
+        "notifyGuardProviderSessionStart",
         "observer_guard",
         "optInGate",
         "opt_in_gates",
         "pairedBaselineGuardTimeout",
         "parseGate",
         "parseGuardDisable",
+        "parseGuardProviderSessionStart",
         "prepareGuardChildRegistration",
         "prepushGateContract",
         "printGuardAllowExpiries",
@@ -3297,6 +3360,9 @@
         "readguardstoptranscript",
         "recordGuardCompactionWitness",
         "recordGuardDisableUsage",
+        "recordGuardProviderSessionClose",
+        "recordGuardSessionStartIdentityFor",
+        "recordGuardSessionStartJournalFor",
         "renderguardstartupreport",
         "reservedGuardBanner",
         "runCacheValueGateScore",
@@ -5043,6 +5109,86 @@
           "category": "incidental",
           "reason": "Display counter copied from the existing fleet debug payload; it does not introduce a new session runtime or scheduler concept.",
           "token": "FleetSessions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private helper, field, or wire token that implements the positioned provider-session boundary; it is not a separate session-runtime concept.",
+          "token": "guardLifecycleOperationProviderSessionStart"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private helper, field, or wire token that implements the positioned provider-session boundary; it is not a separate session-runtime concept.",
+          "token": "provider_session_start"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private helper, field, or wire token that implements the positioned provider-session boundary; it is not a separate session-runtime concept.",
+          "token": "parseGuardProviderSessionStart"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private helper, field, or wire token that implements the positioned provider-session boundary; it is not a separate session-runtime concept.",
+          "token": "notifyGuardProviderSessionStart"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private helper, field, or wire token that implements the positioned provider-session boundary; it is not a separate session-runtime concept.",
+          "token": "recordGuardSessionStartIdentityFor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private helper, field, or wire token that implements the positioned provider-session boundary; it is not a separate session-runtime concept.",
+          "token": "guardProviderSessionStart"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private helper, field, or wire token that implements the positioned provider-session boundary; it is not a separate session-runtime concept.",
+          "token": "recordGuardSessionStartJournalFor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private helper, field, or wire token that implements the positioned provider-session boundary; it is not a separate session-runtime concept.",
+          "token": "guardSessionJournalIDFor"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private helper, field, or wire token that implements the positioned provider-session boundary; it is not a separate session-runtime concept.",
+          "token": "recordGuardProviderSessionClose"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private helper, field, or wire token that implements the positioned provider-session boundary; it is not a separate session-runtime concept.",
+          "token": "sessionByTrace"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed reason constant or wire spelling for the positioned provider-session boundary; it is not a separate session-runtime concept.",
+          "token": "PROVIDER_SESSION_CLEAR"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed reason constant or wire spelling for the positioned provider-session boundary; it is not a separate session-runtime concept.",
+          "token": "ReasonProviderSessionClear"
+        },
+        {
+          "category": "incidental",
+          "reason": "Schema or normalization helper for the positioned provider-session boundary; it is not a separate session-runtime concept.",
+          "token": "ProviderSessionBoundarySchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Schema or normalization helper for the positioned provider-session boundary; it is not a separate session-runtime concept.",
+          "token": "normalizeProviderSessionBoundary"
+        },
+        {
+          "category": "incidental",
+          "reason": "Field or gateway projection of the positioned ProviderSessionBoundary record; it is not a separate session-runtime concept.",
+          "token": "ProviderSessionID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Field or gateway projection of the positioned ProviderSessionBoundary record; it is not a separate session-runtime concept.",
+          "token": "SessionProviderBoundary"
         }
       ],
       "id": "session-runtime",
@@ -5082,8 +5228,12 @@
         "ObservedSessions",
         "OutcomeEvidence",
         "OutcomeSession",
+        "PROVIDER_SESSION_CLEAR",
+        "ProviderSessionBoundarySchema",
+        "ProviderSessionID",
         "PublishSessionDiscovery",
         "ReapMalformedSessionRefs",
+        "ReasonProviderSessionClear",
         "ReasonSessionLive",
         "RecordSessionTerminalOutput",
         "RegisteredObserved",
@@ -5143,6 +5293,7 @@
         "SessionOutcome",
         "SessionPanel",
         "SessionPlacement",
+        "SessionProviderBoundary",
         "SessionRate",
         "SessionRecoveryScenarios",
         "SessionShellErrorRate",
@@ -5206,6 +5357,9 @@
         "gen_session_effectiveness_svg",
         "groupsFromSessions",
         "guardInfoSessionWorkDoneQuery",
+        "guardLifecycleOperationProviderSessionStart",
+        "guardProviderSessionStart",
+        "guardSessionJournalIDFor",
         "guardSessionStart",
         "guardSessionStartDriverEntrypointBases",
         "guardSessionStartDriverEntrypointDirs",
@@ -5236,15 +5390,22 @@
         "member_sessions",
         "microagentSessionID",
         "modeled_from_observed_session_mean",
+        "normalizeProviderSessionBoundary",
         "normalizedSessionHarness",
+        "notifyGuardProviderSessionStart",
         "observedSchedulerResult",
         "observedSessionIDs",
         "observed_session",
         "orderRecords",
+        "parseGuardProviderSessionStart",
         "pathwithincodexsessions",
+        "provider_session_start",
         "pumpStdinToSession",
         "readSessionHandoffBlocks",
         "readSessionRows",
+        "recordGuardProviderSessionClose",
+        "recordGuardSessionStartIdentityFor",
+        "recordGuardSessionStartJournalFor",
         "recoveryInventory",
         "recoverySessionDiag",
         "refusalSafeSessionID",
@@ -5311,6 +5472,7 @@
         "sessionAffinity",
         "sessionAmbiguous",
         "sessionBearer",
+        "sessionByTrace",
         "sessionCapabilityCorpus",
         "sessionCapabilityDefinition",
         "sessionChangesFor",

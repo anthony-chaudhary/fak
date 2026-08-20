@@ -1,16 +1,21 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compactcohere"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/resume"
+	"github.com/anthony-chaudhary/fak/internal/session"
+	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 )
 
 func newGuardLifecycleTestServer(t testing.TB) (*gateway.Server, *guardLifecycleServer) {
@@ -39,6 +44,117 @@ func TestGuardLifecycleIPCAuthenticatedSnapshot(t *testing.T) {
 	}
 	if _, err := fetchGuardLifecycleSignals(ipc.path, "wrong-token", time.Second); err == nil {
 		t.Fatal("invalid token unexpectedly succeeded")
+	}
+}
+
+func TestGuardSessionStartClearCreatesFakSessionBoundary(t *testing.T) {
+	oldSessions, oldDurability := serveSessions, serveSessionDurability
+	serveSessions, serveSessionDurability = session.NewTable(), nil
+	t.Cleanup(func() {
+		serveSessions, serveSessionDurability = oldSessions, oldDurability
+	})
+	regDir := t.TempDir()
+	t.Setenv("FLEET_REG_DIR", regDir)
+	journalPath := filepath.Join(t.TempDir(), "session-journal.jsonl")
+	t.Setenv(sessionjournal.EnvPath, journalPath)
+	t.Setenv(guardSessionJournalEnvMode, "")
+	stageGuardSessionStartWitness(t, 1, nil)
+
+	const oldTrace = "guard-old"
+	budget := session.Budget{
+		TurnsLeft: 5, TokensLeft: 800, ContextTokensLeft: 100, ContextTokensCap: 1000,
+		SpendMicroCentsLeft: 40, SpendMicroCentsCap: 100,
+	}
+	if _, ok := serveSessions.SetBudget(oldTrace, budget); !ok {
+		t.Fatal("stage old session budget")
+	}
+	recordGuardSessionStartIdentityFor(oldTrace, "provider-thread-1")
+	recordGuardSessionStartJournalFor(oldTrace, "provider-thread-1", "claude", 0)
+	srv, err := gateway.New(gateway.Config{ExposeProfile: "headless", DefaultTraceID: "launch-placeholder"})
+	if err != nil {
+		t.Fatalf("gateway.New: %v", err)
+	}
+	ipc, err := startGuardLifecycleServer(srv)
+	if err != nil {
+		t.Fatalf("start lifecycle IPC: %v", err)
+	}
+	t.Cleanup(ipc.Close)
+	// The gateway default can advance after the lifecycle server starts (for
+	// example after a context-budget recontinue); clear must close the live trace.
+	srv.SetDefaultTraceID(oldTrace)
+	t.Setenv(guardLifecycleSocketEnv, ipc.path)
+	t.Setenv(guardLifecycleTokenEnv, ipc.token)
+
+	payload := bytes.NewBufferString(`{"hook_event_name":"SessionStart","source":"clear","session_id":"provider-thread-2"}`)
+	var stdout, stderr bytes.Buffer
+	if code := runGuardSessionStartHook(&stdout, &stderr, payload, []string{"--mode", "off", "--provider", "claude", "--trace", oldTrace}); code != 0 {
+		t.Fatalf("hook exit=%d stderr=%s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("off-mode hook emitted stdout: %s", stdout.String())
+	}
+	newTrace := providerBoundaryTrace("claude", "provider-thread-2")
+	old := serveSessions.Get(oldTrace)
+	child := serveSessions.Get(newTrace)
+	if old.Run != session.Stopped || old.Reason != session.ReasonProviderSessionClear {
+		t.Fatalf("old session = run %s reason %q", old.Run, old.Reason)
+	}
+	if child.Run != session.Running || child.ProviderBoundary.PreviousTrace != oldTrace {
+		t.Fatalf("child session = %+v", child)
+	}
+	if child.Budget.ContextTokensLeft != 1000 || child.Budget.TurnsLeft != 5 || child.Budget.SpendMicroCentsLeft != 40 {
+		t.Fatalf("child budget = %+v", child.Budget)
+	}
+	if got := srv.DefaultTraceID(); got != newTrace {
+		t.Fatalf("gateway default trace=%q, want %q", got, newTrace)
+	}
+	wire := toGatewaySessionState(child)
+	if wire.ProviderBoundary.Schema != session.ProviderSessionBoundarySchema ||
+		wire.ProviderBoundary.PreviousTrace != oldTrace {
+		t.Fatalf("gateway provider boundary = %+v", wire.ProviderBoundary)
+	}
+
+	// A duplicate hook delivery for the same provider session is idempotent.
+	result, err := notifyGuardProviderSessionStart(ipc.path, ipc.token, "claude", "clear", "provider-thread-2", time.Second)
+	if err != nil {
+		t.Fatalf("duplicate boundary: %v", err)
+	}
+	if result.Applied || serveSessions.Get(newTrace).Rev != child.Rev {
+		t.Fatalf("duplicate mutated child: result=%+v child rev=%d want=%d", result, serveSessions.Get(newTrace).Rev, child.Rev)
+	}
+
+	// The new provider id is durably joined to the new fak trace.
+	byID, _ := resume.LoadIdentity(regDir)
+	if got := byID["provider-thread-2"]; got != newTrace {
+		t.Fatalf("identity join=%q, want %q", got, newTrace)
+	}
+	journal := sessionjournal.FoldEvents(sessionjournal.LoadFile(journalPath))
+	if len(journal) != 2 || journal[0].ID != "provider-thread-1" || !journal[0].Closed ||
+		journal[1].ID != "provider-thread-2" || journal[1].Closed {
+		t.Fatalf("provider journal boundary = %+v", journal)
+	}
+}
+
+func TestParseGuardProviderSessionStartAcceptsProviderIDShapes(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload string
+		wantID  string
+	}{
+		{name: "session", payload: `{"source":" CLEAR ","session_id":"session-1"}`, wantID: "session-1"},
+		{name: "thread", payload: `{"source":"clear","thread_id":"thread-1"}`, wantID: "thread-1"},
+		{name: "conversation", payload: `{"source":"clear","conversation_id":"conversation-1"}`, wantID: "conversation-1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseGuardProviderSessionStart([]byte(tt.payload))
+			if got.Source != "clear" || got.SessionID != tt.wantID {
+				t.Fatalf("provider start = %+v, want clear/%s", got, tt.wantID)
+			}
+		})
+	}
+	if got := parseGuardProviderSessionStart([]byte(`{"source":`)); got != (guardProviderSessionStart{}) {
+		t.Fatalf("malformed payload = %+v, want zero", got)
 	}
 }
 

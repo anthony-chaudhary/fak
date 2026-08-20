@@ -558,7 +558,8 @@ func TestControlRefusalVocabularyComplete(t *testing.T) {
 		session.ReasonBudgetTurns, session.ReasonBudgetTokens, session.ReasonBudgetContext,
 		session.ReasonBudgetQueries, session.ReasonBudgetSpend, session.ReasonPaused,
 		session.ReasonDrained, session.ReasonTerminated, session.ReasonStopped,
-		session.ReasonBudgetReset, session.ReasonResumeCancelled, session.ReasonTimeBudgetExhausted,
+		session.ReasonBudgetReset, session.ReasonProviderSessionClear,
+		session.ReasonResumeCancelled, session.ReasonTimeBudgetExhausted,
 	}
 	for _, token := range session.ControlRefusalTokens() {
 		if slices.Contains(stopReasons, token) {

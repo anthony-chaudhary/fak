@@ -552,6 +552,18 @@ func (s *Server) SetDefaultTraceID(traceID string) {
 	s.defaultTraceMu.Unlock()
 }
 
+// DefaultTraceID returns the trace currently used for callers that omit an
+// explicit trace. Lifecycle adapters use the read before atomically replacing it
+// at an external provider session boundary.
+func (s *Server) DefaultTraceID() string {
+	if s == nil {
+		return ""
+	}
+	s.defaultTraceMu.RLock()
+	defer s.defaultTraceMu.RUnlock()
+	return s.defaultTraceID
+}
+
 // principalCtxKey is the context key carrying a request's isolation principal.
 type principalCtxKey struct{}
 

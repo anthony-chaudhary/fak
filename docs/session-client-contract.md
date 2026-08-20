@@ -74,6 +74,18 @@ Credentials are references resolved under destination policy, never portable ses
 to another device or compute node proves that the destination can resolve an allowed account; it
 does not copy bearer tokens through the event journal or snapshot.
 
+### Explicit clear is a new logical session
+
+Replacing a provider thread during resume, compaction, migration, or account/model movement does
+not change the logical session. An explicit user `clear`/`new` command does: it declares the prior
+conversation finished and opens a new logical session while the guard process remains alive.
+
+The provider adapter must report the typed boundary rather than relying on terminal text. fak keeps
+the old session terminal and auditable, switches omitted-trace traffic to a fresh child trace, clears
+conversation-local roots and cache affinity, refreshes the context-token axis, and carries cumulative
+hard envelopes. The detailed field contract and provider matrix live in
+[provider clear/new boundaries](integrations/provider-session-reset.md).
+
 ## The attachment contract
 
 All first-party clients use the same conceptual operations, whether the transport is local IPC,

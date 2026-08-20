@@ -962,6 +962,7 @@ type SessionState struct {
 	Generation       int                     `json:"generation,omitempty"`
 	CacheAffinity    SessionCacheAffinity    `json:"cache_affinity,omitempty,omitzero"`
 	ResetTransaction SessionResetTransaction `json:"reset_transaction,omitempty,omitzero"`
+	ProviderBoundary SessionProviderBoundary `json:"provider_boundary,omitempty,omitzero"`
 	Assumptions      []SessionAssumption     `json:"assumptions,omitempty"`
 	// Time is the session's WALL-CLOCK budget projection (issue #1584): elapsed,
 	// remaining, limit, and whether the envelope is exceeded. It is the observability
@@ -1038,6 +1039,19 @@ type SessionResetTransaction struct {
 	BudgetRearm      SessionResetBudgetRearm   `json:"budget_rearm,omitempty,omitzero"`
 	WarmPrefixDigest string                    `json:"warm_prefix_digest,omitempty"`
 }
+
+// SessionProviderBoundary is the gateway wire form of an explicit provider-side
+// conversation reset such as /clear.
+type SessionProviderBoundary struct {
+	Schema            string `json:"schema,omitempty"`
+	Provider          string `json:"provider,omitempty"`
+	Source            string `json:"source,omitempty"`
+	PreviousTrace     string `json:"previous_trace,omitempty"`
+	ProviderSessionID string `json:"provider_session_id,omitempty"`
+}
+
+// IsZero reports whether no provider boundary is attached.
+func (b SessionProviderBoundary) IsZero() bool { return b == (SessionProviderBoundary{}) }
 
 // IsZero reports whether no reset transaction was attached.
 func (tx SessionResetTransaction) IsZero() bool {

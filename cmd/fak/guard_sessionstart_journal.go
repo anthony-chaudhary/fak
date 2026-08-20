@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 )
 
@@ -49,10 +50,14 @@ const (
 // Best-effort at every step, per the hook's contract: an off knob, an unidentifiable session,
 // or a write error all return silently.
 func recordGuardSessionStartJournal(traceID string, driverPID int) {
+	recordGuardSessionStartJournalFor(traceID, os.Getenv("CLAUDE_CODE_SESSION_ID"), guardSessionJournalAgent, driverPID)
+}
+
+func recordGuardSessionStartJournalFor(traceID, sessionID, agent string, driverPID int) {
 	if strings.EqualFold(strings.TrimSpace(os.Getenv(guardSessionJournalEnvMode)), guardSessionJournalModeOff) {
 		return
 	}
-	id := guardSessionJournalID(traceID)
+	id := guardSessionJournalIDFor(traceID, sessionID)
 	if id == "" {
 		return // nothing identifies this session; ParseEvents would skip an id-less row anyway
 	}
@@ -67,7 +72,28 @@ func recordGuardSessionStartJournal(traceID string, driverPID int) {
 		PID:   driverPID,
 		Host:  sessionJournalHost(),
 		CWD:   cwd,
-		Agent: guardSessionJournalAgent,
+		Agent: strings.TrimSpace(agent),
+	})
+}
+
+// recordGuardProviderSessionClose closes the provider session bound to traceID
+// before a clear-origin child is opened. The identity ledger is the witnessed
+// trace<->provider-id join; without a join this records nothing rather than close
+// a guessed journal key.
+func recordGuardProviderSessionClose(traceID, reason string) {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv(guardSessionJournalEnvMode)), guardSessionJournalModeOff) {
+		return
+	}
+	_, sessionByTrace := resume.LoadIdentity(resolveSweepRegDir(""))
+	id := strings.TrimSpace(sessionByTrace[strings.TrimSpace(traceID)])
+	if id == "" {
+		return
+	}
+	now := time.Now().UTC()
+	bt, _ := sessionjournal.BootTime(now)
+	_ = sessionjournal.Append("", sessionjournal.Event{
+		Kind: sessionjournal.KindClose, ID: id, TS: now.Format(time.RFC3339),
+		Boot: sessionjournal.BootID(bt), Reason: strings.TrimSpace(reason),
 	})
 }
 
@@ -79,7 +105,11 @@ func recordGuardSessionStartJournal(traceID string, driverPID int) {
 // per-session id (a resume is launched with an explicit --session-id). Empty when neither
 // exists, which records nothing rather than an anonymous row.
 func guardSessionJournalID(traceID string) string {
-	if uuid := strings.TrimSpace(os.Getenv("CLAUDE_CODE_SESSION_ID")); uuid != "" {
+	return guardSessionJournalIDFor(traceID, os.Getenv("CLAUDE_CODE_SESSION_ID"))
+}
+
+func guardSessionJournalIDFor(traceID, sessionID string) string {
+	if uuid := strings.TrimSpace(sessionID); uuid != "" {
 		return uuid
 	}
 	return strings.TrimSpace(traceID)
