@@ -1,7 +1,7 @@
 ---
 title: "Study: rdi-berkeley/agents-last-exam — official artifact-scored work as a fak benchmark lane"
 date: 2026-08-20
-status: "FILED as #8223; ATIF evidence folded into #6629"
+status: "FILED as #8223 and #8273-#8285; evidence folded into #6629/#6802/#5662/#6572/#5686"
 repo: "https://github.com/rdi-berkeley/agents-last-exam"
 pinned_sha: 75a3f866535946b67f9a57e4f158eb30ad50be8a
 source_license: "Apache-2.0 software; CC-BY-4.0 benchmark data"
@@ -114,13 +114,54 @@ The most consequential issue/PR signals were:
 |---|---|---|---|
 | Official ALE direct-vs-fak benchmark spine | ALE-Claw accepts a per-run OpenAI-compatible `base_url` without global environment mutation (`ale_run/agents/ale_claw/config.py:44-58@75a3f866`); its runner composes agent × task × variant (`ale_run/orchestration/experiment_spec.py:15-45,175-200@75a3f866`) | **ABSENT on-axis.** No ALE entry exists in `internal/benchcatalog`; `internal/agenticbench/result_packet.go:90-105` accepts only the closed #870-#875 campaign | **ADAPT / DEFAULT — filed as #8223 under #1063.** Use upstream runner and grader; add only FAK contract, launch/ingest, and comparison surfaces |
 | Preserve honest timeout outcome and optional score | ALE evaluates after an agent timeout (`lifecycle.py:326-447@75a3f866`) and stores reward plus timeout status in trajectory final metrics (`ale_run/base_interface/trajectory.py:129-142,316-343@75a3f866`); an evaluation timeout may yield no extracted score | **PARTIAL.** `internal/timeoutphase` classifies timeout phase and AgenticBench gates official artifacts, but no ALE packet proves `(timeout, score|null)` survives ingestion without status promotion | **DEFAULT requirement in #8223**, not a second grader or retry mechanism |
-| Import ALE's cross-harness trajectory with explicit loss accounting | ALE-v1.0 records agent identity, tool calls/results, usage, screenshots, nested subagents, continuations, reward, and status (`trajectory.py:1-15,77-142,180-224@75a3f866`) | **PARTIAL.** `internal/trajectory@r21+g394e195591` has provenance-preserving adapters and fidelity receipts; open #6629 already owns standards-shaped ATIF v1.7 conformance | **ADAPT / OPTIONAL — attach ALE as an external fixture to #6629.** ALE-v1.0 is ATIF-inspired, not Harbor ATIF v1.7; reject or report loss rather than rename it |
-| Evidence-cited understanding/approach/execution analysis card | Paper Appendix D.3 builds a structured card from run artifacts, then applies a closed failure taxonomy | **PARTIAL but benchmark-local.** `internal/terminalbench@r20+gcad27c07b7` classifies execution/policy failures; it does not infer domain understanding or strategy | **RECIPE.** Generate after the spine run and keep model/prompt provenance; do not make an LLM diagnosis a kernel truth |
-| Hidden-reference staging and gate-and-score evaluators | Reference enters only after the agent (`README.md:119-127`; `ale_run/environments/task_data/local_host.py:100-104@75a3f866`); representative graders score observable files component-wise | **PRESENT as an authority fence.** `internal/agenticbench@r12+gdd43207fa9` requires benchmark-native arms and an available official grader | **EXCLUDE implementation.** Invoke ALE's evaluator and ingest its result; cloning grader logic would weaken authority |
-| Hybrid CLI+GUI CUA bridge | Unified cross-OS CUA MCP lifts CLI harnesses to desktop work (`README.md:96-135@75a3f866`) | **DIVERGENT ownership.** A gateway arm sees provider requests; it does not automatically own ALE's local desktop effect execution | **RECIPE / explicit claim fence.** Report only policy events that actually traverse fak; a model-endpoint run is not proof of desktop-action enforcement |
-| Provider admission, licensed images, bulk artifact transfer, network policy | Task card provider requirements and upstream issues #24/#26/#27 plus draft PR #48 | FAK has compute/egress controls, but ALE provisions the benchmark VM and licensed software | **WATCH / EXCLUDE.** Contribute upstream if needed; do not fork ALE infrastructure into fak |
-| Rolling public/private benchmark and contamination controls | Paper §3.1 publishes a rotating minority while retaining private tasks | FAK consumes benchmarks; it does not author ALE's corpus | **WATCH.** Pin public task IDs and source revision; never imply the public smoke estimates the private leaderboard |
+| Import ALE's cross-harness trajectory with explicit loss accounting | ALE-v1.0 records agent identity, tool calls/results, usage, screenshots, nested subagents, continuations, reward, and status (`trajectory.py:1-15,77-142,180-224@75a3f866`) | **PARTIAL.** `internal/trajectory@r21+g394e195591` has provenance-preserving adapters and fidelity receipts; open #6629 already owns standards-shaped ATIF v1.7 conformance, while ArmBench usage still lacks per-field authority/completeness | **SPLIT.** Attach ALE as an external fixture to #6629 for schema loss; #8282 owns authoritative-vs-fallback token/cache/cost reconciliation. ALE-v1.0 is ATIF-inspired, not Harbor ATIF v1.7 |
+| Evidence-cited understanding/approach/execution analysis card | Paper Appendix D.3 builds a structured card from run artifacts, requires field-level citations and confirmed-vs-inferred separation, then applies a closed failure taxonomy | **ABSENT above execution categories.** `internal/terminalbench@r20+gcad27c07b7` classifies execution/policy failures but has no claim-level diagnostic artifact | **ADAPT — filed #8278.** Keep the card advisory and model/prompt-provenanced; deterministic evidence resolution, not the generated diagnosis, is the gate |
+| Hidden-reference staging and gate-and-score evaluators | `agent_finished` precedes output gather, reference staging, and evaluation (`lifecycle.py:363-460@75a3f866`); representative graders score observable files component-wise | **PARTIAL.** `internal/agenticbench@r12+gdd43207fa9` requires an available official grader and artifact paths, but proves neither chronology nor evaluator evidence rung | **ADAPT receipts, EXCLUDE grader implementation.** #8274 owns the event-order receipt; #8281 distinguishes normalized scalar from raw grader evidence. ALE remains the sole evaluator authority |
+| Hybrid CLI+GUI CUA bridge | Unified cross-OS CUA MCP lifts CLI harnesses to desktop work; ALE normalizes tool aliases and preserves tool-call IDs (`trajectory.py:77-109,152-177@75a3f866`) | **DIVERGENT ownership, absent denominator.** A gateway arm sees provider requests but does not automatically own ALE's local desktop effects | **ADAPT claim coverage — filed #8283.** Join trajectory call IDs to FAK events and report mediated/unmediated/unknown by class; build no desktop bridge |
+| Provider admission, licensed images, bulk artifact transfer, network policy | Task cards declare snapshot/CPU/RAM/disk/network needs; loader drops disk/network on pinned main; provider image identity ranges from mutable labels to content-addressed receipts; upstream issues #24/#26/#27 and draft PR #48 remain open | **PARTIAL.** FAK has compute/egress controls but no benchmark task-envelope matcher; ALE still owns provisioning | **SPLIT.** #8277 owns FAK's pre-spend admission/observed-environment receipt. Provider implementation and bulk transfer remain upstream/EXCLUDED |
+| Rolling public/private benchmark and contamination controls | Paper §3.1 publishes a rotating minority while retaining private tasks; pinned named lists and paper counts already differ | FAK consumes benchmarks but lacks a content-addressed observed task universe in AgenticBench | **EXTEND #6572.** Bind manifest digest/license/QC class and refuse public-to-private absolute-score or treatment-effect transfer; do not author ALE's corpus |
 | Translate ALE tasks into Harbor/container packets | Upstream issue #39 documents the full-VM/GUI mismatch | FAK can run external harnesses without task transcoding | **EXCLUDE.** Native ALE execution is smaller and preserves benchmark validity |
+
+## Second-pass issue portfolio
+
+The deeper pass converted the remaining concrete gaps into small, independently
+witnessed leaves. #8223 remains the live one-task spine; the rows below are
+offline-first contracts or validators, not permission to defer that run.
+
+| Issue | Missing invariant | Cheapest falsifier |
+|---|---|---|
+| #8273 | evaluator infrastructure/protocol failure, candidate zero, and successful finite `[0,1]` score are distinct | accept `success/0`; refuse `success/null`, `success/NaN`, and judge outage as a score |
+| #8274 | hidden-reference isolation needs chronological evidence, not `official_grader.available` | stage reference before `agent_finished`; the packet must refuse |
+| #8275 | authoritative events and fallible terminal/transfer artifacts must reconcile | event score `.7` plus missing or `.5` terminal JSON must not yield a complete claim |
+| #8276 | queue, agent execution, evaluator, cleanup/total clocks have different owners | `10s + 100s + 30s` must not report `100s` as end-to-end |
+| #8277 | task requirements must match an immutable observed environment before spend | declared disk/network-off plus an unsatisfied provider receipt refuses before launch |
+| #8278 | diagnostic claims need field pointers, input coverage, confidence, and confirmed/inferred status | remove one cited field; the claim becomes unsupported, not plausible prose |
+| #8279 | final returned result must not hide failed attempts or their spend | `failed -> completed` imports two attempts and one declared selection rule |
+| #8280 | ALE's native resume key can alias direct and fak arms before execution | a prior direct completion must not skip a same-task fak arm |
+| #8281 | stock `eval_result.json` is a normalized scalar, not raw grader evidence | structured reasons disappear in the stock file; FAK must label the higher rung unavailable |
+| #8282 | token/cache/cost fields need authority, coverage, and missing-vs-zero semantics | authoritative aggregate `300/$0.005` must not equal fallback `100/$0.001` |
+| #8283 | policy claims need a measured mediated-effect denominator | one mediated Bash call plus one unmediated GUI action cannot become “FAK governed the run” |
+| #8285 | planned/admitted/attempted/evaluated/scored attrition must survive aggregation | equal completed means with half the hard tasks missing must not compare as equal cohorts |
+
+One non-benchmark Core defect also survived deduplication: #8284 follows closed
+#2093 because `internal/idempotency.Store.Do` records only after a nil apply
+return and the CLI calls every apply error safe to retry. ALE's post-launch
+no-blind-retry/read-back pattern exposes the counterexample: an effect can land,
+its response can fail, and a same-key retry can duplicate it. #8284 owns durable
+`PENDING` / `UNKNOWN_APPLIED` plus operation-specific read-back under #2063.
+
+Existing owners received the remaining evidence instead of duplicate issues:
+
+- #6802: strict parsed agent config and redacted effective-config provenance;
+- #5662: 160 ALE tier memberships versus 152 distinct overall tasks, plus sparse
+  model×harness support that cannot justify a causal range ratio;
+- #6572: content-addressed task-universe/license identity and public/private claim scope;
+- #5686: failure-taxonomy excluded/unclassifiable denominators and classifier reliability.
+
+Independent GitHub read-back confirmed #8273-#8285 open with their declared
+labels, milestones, parents, and stable keys. `fak-dev issue contract` over the
+read-back reports **13/13 dispatchable, 0 triage-only, 0 refused** under strict
+born-routed, project-work, scale, and witness gates.
 
 ## Smallest spine and hard fences
 
