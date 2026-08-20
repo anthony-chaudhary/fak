@@ -181,6 +181,7 @@ var tier = map[string]int{
 	"toolcoverage":         1,                // read-only tools/*.py sibling-test coverage audit over skills/CI references; stdlib-only, off the hot path.
 	"modelladder":          3,                // model-ladder selector; imports benchcli(1)+model(1)+stdlib, off the hot path.
 	"modelreg":             3,                // model registry; imports hfhub(1)+stdlib, off the hot path.
+	"modelinventory":       1,                // deterministic local/provider candidate evidence normalization; primitive over standard-library records.
 	"modelsrc":             3,                // model-source URL registry; transports stay behind ReaderAt openers.
 	"nativebench":          1,                // stdlib-only native benchmark comparison obligations and report generation.
 	"skillenv":             5,                // skill virtual-env composer; imports ctxmmu(2)+ctxresidency(3)+kvmmu(3)+stdlib.
@@ -659,6 +660,7 @@ var tier = map[string]int{
 	"harnessinstructions":   3, // tier-3 adapter composing public harness instructions through the host-owned system-prompt MMU.
 	"sessionintent":         1, // stdlib-only session control declarations and deterministic stop evaluation (#7352).
 	"subtractiveprofile":    1, // stdlib-only deterministic capability subtraction algebra (#6791).
+	"harnessmodelset":       1,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
