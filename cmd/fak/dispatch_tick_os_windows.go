@@ -6,10 +6,25 @@ import (
 	"os/exec"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchaudit"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func configureDispatchSpawn(cmd *exec.Cmd) {
 	configureDispatchHelperCommand(cmd)
+}
+
+// configureDispatchWorkerConsole keeps Codex's console-subsystem descendants on
+// one inherited hidden console. A detached Codex has no console to inherit, so
+// each PowerShell, Node, or stdio MCP child can allocate a visible one instead.
+// Other backends retain the lower-cost no-console posture from #3597.
+func configureDispatchWorkerConsole(cmd *exec.Cmd, backend string) {
+	if cmd == nil || !dispatchWorkerNeedsHiddenConsole(backend) {
+		return
+	}
+	if cmd.SysProcAttr != nil {
+		cmd.SysProcAttr.CreationFlags &^= windowgate.DetachedProcess
+	}
+	windowgate.ConfigureBackgroundCommand(cmd)
 }
 
 // dispatchPIDAlive reports whether a pid is currently running — WITHOUT spawning

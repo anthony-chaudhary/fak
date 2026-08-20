@@ -18,7 +18,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
-	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
@@ -274,6 +273,10 @@ func augmentGuardEnvDefaults() {
 
 var dispatchIssueWorkerSpawner = spawnDispatchIssueWorker
 
+func dispatchWorkerNeedsHiddenConsole(backend string) bool {
+	return strings.EqualFold(strings.TrimSpace(backend), "codex")
+}
+
 func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA, stdinPayload string, probeS float64) (dispatchSpawnResult, error) {
 	if len(command) == 0 {
 		return dispatchSpawnResult{}, errors.New("empty worker command")
@@ -315,14 +318,7 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 	cmd.Stdout = fh
 	cmd.Stderr = fh
 	configureDispatchSpawn(cmd)
-	// #3597: a DISPATCHED worker is unattended by construction — its stdout and stderr
-	// are bound to the transcript `fh` just above, and the monitor reads liveness from
-	// that transcript, never from a console. configureDispatchSpawn only hides the
-	// console WINDOW; the console (and its conhost.exe host process) is still allocated,
-	// which is the cost #2340 measured. Decline the console outright here. Scoped to this
-	// spawn deliberately: configureDispatchSpawn's other callers include the operator-
-	// attended `fak dispatch canary` foreground run, which must keep its console.
-	windowgate.ConfigureDetachedCommand(cmd)
+	configureDispatchWorkerConsole(cmd, backend)
 	if err := cmd.Start(); err != nil {
 		_ = fh.Close()
 		return dispatchSpawnResult{}, err

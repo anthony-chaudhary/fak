@@ -10,14 +10,11 @@ package main
 // to an operator yet still pays the full per-console price #2340 measured (87 panes ->
 // 2,829 threads / 54k handles / 2 GB). DETACHED_PROCESS declines the console outright.
 //
-// At the seam, spawnDispatchIssueWorker (dispatch_tick_worker.go) reaches DETACHED_PROCESS
-// twice over: configureDispatchSpawn already routes to windowgate.ConfigureDetachedCommand
-// (#5625 moved the shared helper off ConfigureBackgroundCommand, pinned by
-// dispatch_helper_windows_test.go), and the worker spawn then calls
-// windowgate.ConfigureDetachedCommand explicitly so the dispatched worker keeps declining
-// the console even if that shared helper is ever relaxed back to a window-only mode for its
-// other callers. ConfigureDetachedCommand is idempotent, so the second call is a cheap pin
-// rather than a contradiction.
+// At the seam, non-Codex workers still use DETACHED_PROCESS. Codex is the deliberate
+// exception: a detached Codex has no console for its PowerShell, Node, and stdio MCP
+// descendants to inherit, so those console-subsystem children allocate visible desktop
+// windows. It receives one CREATE_NO_WINDOW console instead; the second live witness below
+// proves the representative descendants inherit it without gaining a window handle.
 //
 // The remaining acceptance boxes are covered elsewhere and deliberately not duplicated here:
 // "the windowless flags are applied only on the headless branch" is guard_child.go's gate,
@@ -37,7 +34,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -54,6 +53,10 @@ const (
 	dispatchWindowlessConsoleMarker = "fak-3597-worker-console="
 	dispatchWindowlessHelperEnv     = "FAK_DISPATCH_WINDOWLESS_HELPER"
 	dispatchWindowlessReleaseEnv    = "FAK_DISPATCH_WINDOWLESS_RELEASE"
+	dispatchCodexConsoleRoleEnv     = "FAK_DISPATCH_CODEX_CONSOLE_ROLE"
+	dispatchCodexConsoleLabelEnv    = "FAK_DISPATCH_CODEX_CONSOLE_LABEL"
+	dispatchCodexConsoleBinDirEnv   = "FAK_DISPATCH_CODEX_CONSOLE_BIN_DIR"
+	dispatchCodexConsoleMarker      = "fak-8252-console"
 )
 
 // dispatchHelperConsoleProcessCount returns how many processes share the CALLING
@@ -68,6 +71,11 @@ func dispatchHelperConsoleProcessCount() uint32 {
 	r, _, _ := syscall.NewLazyDLL("kernel32.dll").NewProc("GetConsoleProcessList").Call(
 		uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
 	return uint32(r)
+}
+
+func dispatchHelperConsoleWindow() uintptr {
+	r, _, _ := syscall.NewLazyDLL("kernel32.dll").NewProc("GetConsoleWindow").Call()
+	return r
 }
 
 // dispatchProcRow is one row of the no-spawn process census below.
@@ -286,6 +294,170 @@ func TestDispatchWorkerLaunchAllocatesNoConsolePane(t *testing.T) {
 	}
 	if len(scope.Tree) == 0 {
 		t.Fatalf("live scope Tree is empty, want the lease tree sidecar to be classified")
+	}
+}
+
+// TestDispatchCodexWorkerDescendantsStayOffDesktop is #8252's captured visual
+// witness. The root crosses the real dispatch spawn seam with backend=codex, then
+// starts console-subsystem children named for the three process families observed
+// on the desktop. Each descendant reports its actual console attachment and window
+// handle; one inherited hidden console means console>0, hwnd=0 for every row.
+func TestDispatchCodexWorkerDescendantsStayOffDesktop(t *testing.T) {
+	switch os.Getenv(dispatchCodexConsoleRoleEnv) {
+	case "root":
+		runDispatchCodexConsoleRoot(t)
+		os.Exit(0)
+	case "child":
+		label := os.Getenv(dispatchCodexConsoleLabelEnv)
+		fmt.Fprintf(os.Stdout, "%s label=%s console=%d hwnd=%d\n",
+			dispatchCodexConsoleMarker, label, dispatchHelperConsoleProcessCount(), dispatchHelperConsoleWindow())
+		_ = os.Stdout.Sync()
+		waitForDispatchCodexConsoleRelease()
+		os.Exit(0)
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	runsDir := t.TempDir()
+	release := filepath.Join(t.TempDir(), "release")
+	binDir := t.TempDir()
+	env := envMap(os.Environ())
+	env[dispatchCodexConsoleRoleEnv] = "root"
+	env[dispatchCodexConsoleBinDirEnv] = binDir
+	env[dispatchWindowlessReleaseEnv] = release
+
+	before := dispatchConsoleHostPIDs(dispatchProcessCensus(t))
+	spawned, err := spawnDispatchIssueWorker(
+		[]string{exe, "-test.run=^TestDispatchCodexWorkerDescendantsStayOffDesktop$"},
+		env,
+		t.TempDir(),
+		runsDir,
+		8252,
+		"cmd",
+		"codex",
+		"issue-8252",
+		[]string{"cmd/fak/**"},
+		dispatchtick.Account{},
+		nil,
+		"",
+		"",
+		0,
+	)
+	if err != nil {
+		t.Fatalf("spawn Codex console witness: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.WriteFile(release, []byte("release"), 0o644)
+		dispatchWindowlessWaitFor(t, "Codex console witness exit", 15*time.Second, func() bool {
+			return !dispatchPIDAlive(spawned.PID)
+		})
+	})
+
+	transcript := func() string {
+		b, _ := os.ReadFile(spawned.Log)
+		return string(b)
+	}
+	wantLabels := []string{"codex-root", "pwsh", "node", "fak-mcp"}
+	dispatchWindowlessWaitFor(t, "all descendant console reports", 30*time.Second, func() bool {
+		body := transcript()
+		for _, label := range wantLabels {
+			if !strings.Contains(body, dispatchCodexConsoleMarker+" label="+label+" ") {
+				return false
+			}
+		}
+		return true
+	})
+
+	for _, line := range strings.Split(transcript(), "\n") {
+		if !strings.HasPrefix(line, dispatchCodexConsoleMarker+" ") {
+			continue
+		}
+		fields := map[string]string{}
+		for _, field := range strings.Fields(line) {
+			if pair := strings.SplitN(field, "=", 2); len(pair) == 2 {
+				fields[pair[0]] = pair[1]
+			}
+		}
+		consoleCount, _ := strconv.ParseUint(fields["console"], 10, 32)
+		windowHandle, _ := strconv.ParseUint(fields["hwnd"], 10, 64)
+		if consoleCount == 0 {
+			t.Errorf("%s has no inherited hidden console; its own console children can reach the desktop", fields["label"])
+		}
+		if windowHandle != 0 {
+			t.Errorf("%s console window handle = %d, want 0 (hidden)", fields["label"], windowHandle)
+		}
+	}
+
+	rows := dispatchProcessCensus(t)
+	subtree := dispatchSubtreePIDs(rows, uint32(spawned.PID))
+	var fresh []string
+	for pid, row := range dispatchConsoleHostPIDs(rows) {
+		if _, existed := before[pid]; existed {
+			continue
+		}
+		if subtree[pid] || subtree[row.PPID] {
+			fresh = append(fresh, fmt.Sprintf("%s(pid=%d ppid=%d)", row.Name, row.PID, row.PPID))
+		}
+	}
+	t.Logf("#8252 hidden-console witness: descendants=%v fresh console hosts under Codex pid %d=%v",
+		wantLabels[1:], spawned.PID, fresh)
+	if len(fresh) > 1 {
+		t.Fatalf("Codex descendants allocated %d console hosts, want at most one inherited hidden host: %v", len(fresh), fresh)
+	}
+}
+
+func runDispatchCodexConsoleRoot(t *testing.T) {
+	binDir := os.Getenv(dispatchCodexConsoleBinDirEnv)
+	if binDir == "" {
+		fmt.Fprintln(os.Stderr, "missing Codex console witness bin dir")
+		os.Exit(2)
+	}
+	fmt.Fprintf(os.Stdout, "%s label=codex-root console=%d hwnd=%d\n",
+		dispatchCodexConsoleMarker, dispatchHelperConsoleProcessCount(), dispatchHelperConsoleWindow())
+	_ = os.Stdout.Sync()
+
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	children := make([]*os.Process, 0, 3)
+	for _, label := range []string{"pwsh", "node", "fak-mcp"} {
+		path := filepath.Join(binDir, label+".exe")
+		if err := os.Link(exe, path); err != nil {
+			fmt.Fprintf(os.Stderr, "link %s witness: %v\n", label, err)
+			os.Exit(2)
+		}
+		childEnv := envMap(os.Environ())
+		childEnv[dispatchCodexConsoleRoleEnv] = "child"
+		childEnv[dispatchCodexConsoleLabelEnv] = label
+		cmd := exec.Command(path, "-test.run=^TestDispatchCodexWorkerDescendantsStayOffDesktop$")
+		cmd.Env = envSliceFromMap(childEnv)
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		if err := cmd.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "start %s witness: %v\n", label, err)
+			os.Exit(2)
+		}
+		children = append(children, cmd.Process)
+	}
+	waitForDispatchCodexConsoleRelease()
+	for _, child := range children {
+		_, _ = child.Wait()
+	}
+}
+
+func waitForDispatchCodexConsoleRelease() {
+	release := os.Getenv(dispatchWindowlessReleaseEnv)
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		if release != "" {
+			if _, err := os.Stat(release); err == nil {
+				return
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 }
 

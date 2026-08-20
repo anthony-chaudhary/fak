@@ -70,6 +70,9 @@ type liveProcessPayload struct {
 func cmdWindowgate(argv []string) { os.Exit(runWindowgate(os.Stdout, os.Stderr, argv)) }
 
 func runWindowgate(stdout, stderr io.Writer, argv []string) int {
+	if rc, handled := runDesktopConsoleSelfcheckChild(stdout, stderr); handled {
+		return rc
+	}
 	if len(argv) > 0 && (argv[0] == "scan" || argv[0] == "report") {
 		argv = argv[1:]
 	}
@@ -81,12 +84,16 @@ func runWindowgate(stdout, stderr io.Writer, argv []string) int {
 	liveTasks := fs.Bool("live-tasks", false, "also audit already-installed Windows Scheduled Tasks")
 	visibleWindows := fs.Bool("visible-windows", false, "also audit currently visible top-level windows")
 	liveProcesses := fs.Bool("live-processes", false, "also audit live console-prone helper processes")
+	selfcheck := fs.Bool("selfcheck", false, "launch representative Codex descendants and prove their Windows consoles stay hidden")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintf(stderr, "fak windowgate: unexpected argument %q\n", fs.Arg(0))
 		return 2
+	}
+	if *selfcheck {
+		return runDesktopConsoleSelfcheck(stdout, stderr, *asJSON)
 	}
 
 	root := strings.TrimSpace(*workspace)
