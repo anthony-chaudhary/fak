@@ -1,3 +1,8 @@
+---
+title: "Fleet terminal UI and UX generation plan"
+description: "A staged plan for supervising fak machines, sessions, loops, objectives, approvals, and fleet health from the existing terminal surfaces."
+---
+
 # Fleet UI/UX generation plan
 
 > Status: initial plan refreshed 2026-08-11 in [#6477](https://github.com/anthony-chaudhary/fak/issues/6477). The G0 spine is tracked by

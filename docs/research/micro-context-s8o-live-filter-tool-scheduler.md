@@ -1,3 +1,8 @@
+---
+title: "Micro-context S8o: live filter and tool scheduler"
+description: "A live quality-qualified matrix that tests adaptive filter and tool scheduling against a tuned fixed cascade and records cancellation limits."
+---
+
 # S8o: live quality-qualified filter/tool scheduler matrix
 
 Date: 2026-08-10  

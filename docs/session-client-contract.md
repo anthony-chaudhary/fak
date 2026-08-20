@@ -1,3 +1,8 @@
+---
+title: "Session clients: full-power attachment and continuity"
+description: "The product contract for attaching terminal, fleet, browser, phone, editor, or native clients to one logical fak session without capability loss."
+---
+
 # Session clients: full-power attachment and portable continuity
 
 **Status:** normative product contract and generation constraint (2026-08-13)

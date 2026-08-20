@@ -1,3 +1,8 @@
+---
+title: "Micro-context S8i: adjudicated semantic residual"
+description: "A two-model corpus that adds semantic interpretation, evidence need, actionability, consensus, and abstention beyond structural issue facts."
+---
+
 # Micro-context S8i: independently adjudicated semantic residual
 
 **Status:** live two-model adjudication plus deterministic consensus/abstention fold<br>

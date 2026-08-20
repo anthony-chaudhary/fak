@@ -1,3 +1,8 @@
+---
+title: "Micro-context S8q/S8r: true pre-answer tool admission"
+description: "A paired counterfactual corpus showing quality-matched tool admission with fewer GitHub reads on a scoped live issue workload."
+---
+
 # S8q/S8r — consensus counterfactual gold and true pre-answer tool admission
 
 **Verdict: `quality_matched_fewer_tools` on the paired GitHub-issue envelope.** A genuine two-stage micro-window scheduler matched the tuned fixed cascade’s 16/16 tool-need quality while opening 8 rather than 16 GitHub reads. Observed mean per-record wall time fell from 5,868.96 ms to 4,831.95 ms (17.7%). This is a scoped live result, not yet a general large-input claim.

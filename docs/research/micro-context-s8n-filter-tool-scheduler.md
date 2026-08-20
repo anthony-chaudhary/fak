@@ -1,3 +1,8 @@
+---
+title: "Micro-context S8n: witnessed filter and tool scheduling"
+description: "A controlled scheduler matrix for task-shaped stopping, queue-slot release, selective stage admission, and bounded hedging."
+---
+
 # S8n: filter/tool micro-window scheduler with witnessed sufficiency
 
 Date: 2026-08-10  

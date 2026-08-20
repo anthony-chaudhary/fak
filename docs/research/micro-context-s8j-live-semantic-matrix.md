@@ -1,3 +1,8 @@
+---
+title: "Micro-context S8j: live semantic execution matrix"
+description: "Live same-workload evidence for retrieval, long-context, map-reduce, and micro-context execution across quality, tokens, latency, and retries."
+---
+
 # Micro-context S8j: live semantic matrix
 
 **Status:** observed live OpenAI-compatible endpoint evidence<br>

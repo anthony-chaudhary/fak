@@ -1,3 +1,8 @@
+---
+title: "Response profiles: concise and composable output"
+description: "How fak response profiles control answer compactness independently from tool authority, work scope, diagnostics, and implementation policy."
+---
+
 # Response profiles: concise, Caveman-compatible, and composable
 
 Response profiles are a **presentation control** for fak's owned agent loop; `caveman:medium` is default-on and `full` is its explicit ablation. They let a user ask for shorter answers without changing tool authorization, work scope, tests, diagnostics, or evidence requirements.

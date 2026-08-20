@@ -1,3 +1,8 @@
+---
+title: "Stale-work review packets: evidence before action"
+description: "How fak stale-work finds review candidates from semantic history and freshness evidence while abstaining instead of editing or deleting work."
+---
+
 # Stale-work review packets
 
 `fak stale-work --json` is an advisory, read-only discovery pass over tracked Markdown and

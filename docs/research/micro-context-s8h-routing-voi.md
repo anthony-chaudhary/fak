@@ -1,3 +1,8 @@
+---
+title: "Micro-context S8h: value-of-information routing"
+description: "An executable experiment comparing global filtering with bounded micro-contexts that select, schedule, and cancel filter, model, or tool stages."
+---
+
 # Micro-context S8h: executable value-of-information routing
 
 **Status:** controlled executable experiment; not live provider evidence<br>

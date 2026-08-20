@@ -1,3 +1,8 @@
+---
+title: "Provider cost reconciliation with authoritative exports"
+description: "How fak imports provider billing rows, preserves unknown cost, joins sessions to root goals, and verifies export counts and billed totals."
+---
+
 # Provider cost reconciliation
 
 `fak provider-cost` imports rows produced by an authoritative provider billing export. It does **not** estimate USD from tokens.

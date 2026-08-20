@@ -1,3 +1,8 @@
+---
+title: "The problems fak exists to solve"
+description: "FAK's P1-P4 checklist for managed context, net-true efficiency, bounded adaptation, and integrated operations, plus its centrality model."
+---
+
 # The problems fak exists to solve
 
 fak exists to make long-running agent work **cheaper, faster, safer, and more operable**.

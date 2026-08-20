@@ -1,3 +1,8 @@
+---
+title: "Trajectory interpretation and presentation"
+description: "A contract for turning canonical fak trajectory evidence into audience-specific views while preserving source truth and interaction lineage."
+---
+
 # Trajectory interpretation and presentation
 
 A trajectory is evidence. A trajectory **view** is a derived product for an audience. They need separate contracts.

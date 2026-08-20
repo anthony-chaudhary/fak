@@ -1,3 +1,8 @@
+---
+title: "Package anatomy beside capability maturity"
+description: "How fak maturity anatomy maps a Go package's static structure and repository position without confusing anatomy with capability lifecycle progress."
+---
+
 # Package anatomy: structural orientation beside maturity
 
 `fak maturity` answers **how far a declared capability has progressed through its

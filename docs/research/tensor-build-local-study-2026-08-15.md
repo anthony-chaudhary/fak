@@ -1,3 +1,8 @@
+---
+title: "TensorBuild study: evidence identity and artifact liveness"
+description: "A hash-pinned local study of how TensorBuild represents build identity, evidence strength, artifact reachability, and outcome economics."
+---
+
 # TensorBuild deep study: evidence identity, artifact liveness, and outcome economics
 
 **Observed:** 2026-08-15  

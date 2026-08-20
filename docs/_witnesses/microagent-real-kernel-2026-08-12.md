@@ -1,3 +1,8 @@
+---
+title: "Microagents through one real fak kernel: captured witness"
+description: "Captured proof that two in-process microagents traverse one fak serve kernel with shared gateway, session state, and cooperative scheduling."
+---
+
 # Microagent → real fak kernel witness — 2026-08-12
 
 ## Scope

@@ -1,3 +1,8 @@
+---
+title: "The port is the agent: gateway UI and UX plan"
+description: "A plan to grow each fak session's existing loopback gateway page into a per-agent console with a scalable micro-context address space."
+---
+
 # The port is the agent: gateway UI/UX plan
 
 > Status: design proposal, 2026-08-11. Companion to

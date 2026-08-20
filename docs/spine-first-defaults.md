@@ -106,7 +106,7 @@ determinism/race), **dogfood** (self-run on the repo's own work, usage ledger),
 (outcome counters, scorecard fold), **integration** (advisory guard gate,
 dos.toml wiring, super-loop hookup), **docs** (doctrine + doc-map linkage), and
 **release** (CLAIMS.md tag + note) â€” into candidates that each carry the *full*
-[`issuecontract`](../internal/issuecontract/contract.go) scope contract
+[`issuepolicy`](../internal/issuepolicy/contract.go) scope contract
 (working spine, done condition, witness, acceptance gate, closure binding,
 route, step budget). Every candidate is **dispatchable the moment it is
 filed**, proven by `go test ./internal/issuefanout`.

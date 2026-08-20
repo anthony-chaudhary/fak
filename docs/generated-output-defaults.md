@@ -1,3 +1,8 @@
+---
+title: "Generated-output defaults for fak workspaces"
+description: "Where fak commands should place diagnostics, captures, fixtures, and other generated output so source trees stay clean and shared work remains safe."
+---
+
 # Generated-output defaults
 
 Generated diagnostics and command captures belong under the ignored repository scratch

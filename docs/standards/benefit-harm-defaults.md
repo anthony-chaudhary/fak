@@ -1,3 +1,8 @@
+---
+title: "Benefit-harm standard for default behavior"
+description: "A standard for enabling fak defaults only when expected benefit beats total harm, with bounded exposure, monitoring, and rollback criteria."
+---
+
 # Benefit–harm standard for defaults
 
 **Status:** shipped doctrine; automated default-admission checker is not yet shipped  

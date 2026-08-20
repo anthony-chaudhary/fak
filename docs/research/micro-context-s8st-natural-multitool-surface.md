@@ -1,3 +1,8 @@
+---
+title: "Micro-context S8s/S8t: natural multi-tool admission"
+description: "A natural held-out decision surface comparing deterministic, fixed-cascade, and semantic policies across five evidence classes."
+---
+
 # S8s/S8t — natural multi-tool admission decision surface
 
 **Verdict: `decision_surface`, not a universal adaptive winner.** Natural held-out windows across five evidence classes produced a real quality/cost tradeoff: the deterministic planner was fastest but only 8/10 correct; fixed cascade and both semantic policies were 10/10. At observed tool latency, fixed cascade was fastest among quality-qualified arms. At a modeled 10× tool-cost regime, semantic two-stage became fastest and opened 8 tools rather than 40.

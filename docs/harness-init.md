@@ -1,3 +1,8 @@
+---
+title: "fak harness init: build a runnable agent product"
+description: "Generate a minimal external Go product that uses fak's public harness contract, pins its module version, and proves one deterministic offline turn."
+---
+
 # fak harness init
 
 `fak harness init` creates the smallest runnable fak-based product outside the fak checkout. The generated program imports only the public `pkg/harnesskit` contract, pins an immutable Go module version, and performs one deterministic offline turn with semantic JSON events.

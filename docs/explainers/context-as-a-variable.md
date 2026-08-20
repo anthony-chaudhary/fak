@@ -1,3 +1,8 @@
+---
+title: "Context as a variable: named, lazy, and queryable"
+description: "A precise model for keeping large inputs under stable names, querying them within bounds, and admitting only selected results to model context."
+---
+
 # Context as a variable: named, lazy, queryable context
 
 **Audience:** people designing or evaluating fak's managed-context runtime who

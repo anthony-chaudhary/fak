@@ -1,3 +1,8 @@
+---
+title: "Micro-context S8m: tool-routing gold stabilization"
+description: "A three-adjudicator fold that sharpens read-only versus live-state tool need while preserving disagreement and confidence limits."
+---
+
 # S8m: three-adjudicator tool-routing gold stabilization
 
 Date: 2026-08-10  

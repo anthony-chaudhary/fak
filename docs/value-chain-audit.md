@@ -1,3 +1,8 @@
+---
+title: "Vertical value-chain audit for agent outcomes"
+description: "How fak joins declared stack stages to measured turns, authoritative provider cost, and organization-defined outcomes without inventing missing cost."
+---
+
 # Vertical value-chain audit
 
 `fak value-chain audit` joins declared stack stages to measured turns, authoritative cost, and organization-defined outcomes. It keeps missing cost absent and reports the denominator covered by cost evidence.

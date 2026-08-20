@@ -1,3 +1,8 @@
+---
+title: "Micro-context S8l: cancellation and partial-fold policies"
+description: "A live matrix of wait-all, deadline-abstain, sufficiency-stop, and bounded-hedge policies for micro-context tail latency and partial progress."
+---
+
 # Micro-context S8l: live cancellation and partial-fold policies
 
 **Status:** observed live endpoint policy matrix<br>

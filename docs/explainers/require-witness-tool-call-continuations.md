@@ -1,3 +1,8 @@
+---
+title: "REQUIRE_WITNESS as a durable tool-call continuation"
+description: "Design for suspending a proposed tool call until a bound attestation arrives, then rechecking policy and resuming with exactly-once execution."
+---
+
 # REQUIRE_WITNESS as a durable tool-call continuation
 
 **Status:** design note; current ABI has the verdict, but the durable held-call queue described here is not yet implemented end to end.

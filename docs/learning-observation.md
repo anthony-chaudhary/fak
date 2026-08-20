@@ -1,3 +1,8 @@
+---
+title: "Learning observation lineage in fak"
+description: "How fak records content-addressed observations, candidates, replay witnesses, and keep or reject verdicts without bypassing admission policy."
+---
+
 # Learning observation lineage
 
 `fak learning-observation` keeps a local, durable, content-addressed graph connecting source observations, candidates, replay witnesses, and explicit keep/reject verdicts. The observation-and-relation mechanism is borrowed from EvoScientist v0.2.6 at commit `12adc6286881e94d23c5711225da883f7a6e3f42`; fak uses its own schema and implementation.

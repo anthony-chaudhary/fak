@@ -1,3 +1,8 @@
+---
+title: "Structured session intent: inventory, study, and spine"
+description: "A typed intent envelope separating start eligibility, effort bounds, completion, recurrence, lifecycle reactions, and authority."
+---
+
 # Structured session intent — inventory, field study, and spine
 
 **Observed:** 2026-08-18. **Status:** working concept plus executable declaration spine.

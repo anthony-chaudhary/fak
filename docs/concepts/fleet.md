@@ -184,7 +184,7 @@ The public/private line for the *box* fleet is a data contract rather than a cod
 | **The worker launch and rollup runbook** | [Issue-scoped headless worker dispatch](../agentic-issue-dispatch.md) |
 | **The always-on backlog driver** | [The issue-dispatch loop](../dispatch-loop.md) |
 | **Witness, closure, and retry vocabulary** | [Dispatch SLO glossary](../dispatch-slo-glossary.md) |
-| **What a running fleet currently reports** | [Dispatch status](https://github.com/anthony-chaudhary/fak/blob/main/docs/dispatch-status.md) · [fleet rollup](../fleet-rollup.md) |
+| **What a running fleet currently reports** | [Dispatch loop and status workflow](../dispatch-loop.md) · [fleet rollup](../fleet-rollup.md) |
 | **Accounts, seats, and provider routing** | [The account switcher](../model-accounts.md) |
 | **The box fleet (machines, not agents)** | [`fleetctl`](../fleet.md) · [fleet compute nodes](../fleet-compute-nodes.md) |
 | **Where the private boundary falls** | [GPU-server private boundary](../gpu-server-private-boundary.md) |

@@ -1,3 +1,8 @@
+---
+title: "Graft study: local structural context for agent kernels"
+description: "A pinned study of Graft's repository graph, retrieval, refresh, and attribution loop, with scoped lessons for fak managed context."
+---
+
 # Graft study — local structural context as an agent-kernel input
 
 > Studied 2026-08-18. Upstream: [NanoNets/Graft](https://github.com/NanoNets/Graft), pinned at [`d0ba1e4f0577b17583c82ab57c9eb155627f7867`](https://github.com/NanoNets/Graft/commit/d0ba1e4f0577b17583c82ab57c9eb155627f7867) (2026-08-18). License: MIT. No upstream source is copied here.

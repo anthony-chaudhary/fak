@@ -1,3 +1,8 @@
+---
+title: "Micro-context S8k: strengthened live baselines"
+description: "A live comparison with tuned retrieval, concurrent chunk mapping, calibrated abstention, and unchanged long-context and micro-context arms."
+---
+
 # Micro-context S8k: strengthened live baselines
 
 **Status:** observed live endpoint evidence with tune-only calibration<br>

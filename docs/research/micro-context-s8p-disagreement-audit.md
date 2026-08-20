@@ -1,3 +1,8 @@
+---
+title: "Micro-context S8p: live scheduler disagreement audit"
+description: "An audit of S8o errors, gold-label agreement, and tool timing that tests whether any pre-answer signal supports adaptive admission."
+---
+
 # S8p — live scheduler disagreement audit
 
 **Verdict: `no_pre_answer_signal`.** The S8o errors do not currently justify an adaptive tool-admission policy. The audit instead exposed two limits in the preceding live matrix: 15/16 held-out labels were majority rather than unanimous gold, and every S8o “adaptive” arm fetched the bounded GitHub receipt *before* classification. S8o therefore measured receipt-conditioned classification, not a decision about whether to open the tool.

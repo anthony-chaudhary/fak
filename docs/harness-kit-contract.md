@@ -1,3 +1,8 @@
+---
+title: "Harness-kit public builder contract"
+description: "The v1alpha1 public Go contract for external agent-product builders who reuse fak without importing unsupported internal packages."
+---
+
 # Harness-kit public builder contract
 
 Status: **v1alpha1**, issue #6786. Import `github.com/anthony-chaudhary/fak/pkg/harnesskit`; anything below `github.com/anthony-chaudhary/fak/internal/` is private and Go itself rejects that import from an external module.

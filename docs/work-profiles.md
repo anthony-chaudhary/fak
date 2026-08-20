@@ -1,3 +1,8 @@
+---
+title: "Work profiles: choose fak implementation policy"
+description: "How Ponytail work profiles control fak's challenge to avoidable complexity independently from response style, tool authority, and task scope."
+---
+
 # Work profiles: choose how fak approaches implementation
 
 Work profiles are **implementation policy** for the owned `fak agent` loop. They answer

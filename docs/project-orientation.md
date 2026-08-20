@@ -1,3 +1,8 @@
+---
+title: "Project orientation: the agent-kernel center"
+description: "The active orientation for fak: preserve managed context, choose capable low-cost execution, enforce authority, and keep agent turns operable."
+---
+
 # Project orientation: the agent-kernel center
 
 **Decision date:** 2026-08-15

@@ -1,3 +1,8 @@
+---
+title: "Token-saving observability for fak serve and manage"
+description: "The bounded token_savings receipt exposed through GET /debug/vars, including lever state, aggregate counts, and privacy constraints."
+---
+
 # Token-saving observability
 
 `fak serve` and `fak manage` expose a bounded `token_savings` receipt on the existing

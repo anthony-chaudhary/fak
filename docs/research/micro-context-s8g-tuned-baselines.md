@@ -1,3 +1,8 @@
+---
+title: "Micro-context S8g: tuned baselines and exact frontier"
+description: "A controlled baseline study showing the S8f workload is fully solved by exact search and parsing before any model-bearing stage is admitted."
+---
+
 # Micro-context S8g: tuned baselines and the exact frontier
 
 **Status:** observed local dry run; no provider/model measurement<br>`n**Issues:** #6033, #6109; semantic-residual follow-up #6124<br>`n**Artifacts:** `experiments/microcontext/s8g-tuned-baselines-2026-08-10.json`
