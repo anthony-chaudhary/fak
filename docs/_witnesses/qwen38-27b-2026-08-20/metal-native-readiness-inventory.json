@@ -1,0 +1,23 @@
+{
+  "schema": "fak.modelaccept.inventory/1",
+  "verdict": "PASS",
+  "corpus_id": "qwen38-native-metal-acceptance-2026-08-20",
+  "rows": [
+    {
+      "model": "qwen38:27b",
+      "family": "qwen38",
+      "generation": "3.8",
+      "lifecycle": "latest",
+      "capability_gate": "PASS",
+      "requested_tier": 0,
+      "witnessed_tier": 0,
+      "corpus_id": "qwen38-native-metal-acceptance-2026-08-20",
+      "declared_at": "2026-08-20T21:55:30Z",
+      "observed_first": "2026-08-20T21:55:56Z",
+      "observed_last": "2026-08-20T21:56:49Z",
+      "samples": 3,
+      "artifact": "docs/_witnesses/qwen38-27b-2026-08-20/metal-native-run-summary.json",
+      "artifact_revision": "internal/model@r448+g8145dc0bea"
+    }
+  ]
+}

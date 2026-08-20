@@ -1,0 +1,116 @@
+{
+  "schema": "fak.qwen38.native-metal-witness/1",
+  "observed_at": "2026-08-20T22:04:00Z",
+  "code": {
+    "model": "internal/model@r448+g8145dc0bea",
+    "agent": "internal/agent@r320+g6bb3c3dd55"
+  },
+  "model": {
+    "id": "qwen38:27b",
+    "artifact": "hf://unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_M.gguf",
+    "repository_revision": "f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+    "sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "bytes": 17106775008,
+    "quant": "Q4_K_M"
+  },
+  "machine": {
+    "class": "Apple MacBook Pro",
+    "soc": "Apple M3 Pro",
+    "gpu_cores": 18,
+    "unified_memory_gib": 36,
+    "os": "macOS",
+    "arch": "arm64"
+  },
+  "launch": {
+    "engine": "inkernel",
+    "backend": "metal",
+    "native": true,
+    "streamed_q4k": true,
+    "context_budget_tokens": 4096,
+    "session_state": "off"
+  },
+  "execution_identity": {
+    "backend": "metal",
+    "forward_path": "metal/qwen35-hybrid-session-v1",
+    "q4k": true,
+    "cpu_model_backend_fallback": false
+  },
+  "functional_campaign": {
+    "models_ready": true,
+    "text": {
+      "expected": "Q38",
+      "actual": "Q38",
+      "latency_ms": 12676,
+      "prompt_tokens": 22,
+      "completion_tokens": 3
+    },
+    "json": {
+      "expected": {
+        "model": "Qwen3.8-27B",
+        "ok": true
+      },
+      "actual": {
+        "model": "Qwen3.8-27B",
+        "ok": true
+      },
+      "latency_ms": 37208,
+      "prompt_tokens": 143,
+      "completion_tokens": 25
+    },
+    "tool": {
+      "name": "record_probe",
+      "arguments": {
+        "hardware": "Apple-M3-Pro",
+        "passed": true
+      },
+      "admitted": true,
+      "verdict": "ALLOW",
+      "latency_ms": 15915,
+      "prompt_tokens": 116,
+      "completion_tokens": 1
+    }
+  },
+  "performance": {
+    "cold_time_to_ready_ms": 103858,
+    "warm_file_cache_time_to_ready_ms": 34897,
+    "full_prefill_tokens_per_second": {
+      "text": 3.2,
+      "json": 5.9,
+      "tool": 8.4
+    },
+    "decode_tokens_per_second": {
+      "text_after_full_prefill": 2.3,
+      "json_after_full_prefill": 2.9,
+      "fully_cached_text_observed_range": [0.4, 1.3]
+    },
+    "pre_fix_decode_tokens_per_second": 0.03
+  },
+  "resource_runs": [
+    {
+      "scope": "functional_campaign",
+      "maximum_resident_set_bytes": 18920570880,
+      "os_peak_memory_footprint_bytes": 45628621512,
+      "swaps": 0
+    },
+    {
+      "scope": "warmup_overlap_campaign",
+      "maximum_resident_set_bytes": 19558662144,
+      "os_peak_memory_footprint_bytes": 42538875384,
+      "swaps": 0
+    }
+  ],
+  "serialization": {
+    "warmup_pending_observed": true,
+    "early_request_started_before_warmup_complete": true,
+    "early_request_latency_ms": 49457,
+    "early_request_expected": "Q38",
+    "early_request_actual": "Q38",
+    "two_request_burst_outputs": ["Q38", "Q38"],
+    "overlap_corruption_observed": false
+  },
+  "rollback": {
+    "candidate_stopped": true,
+    "previous_service_restored": true,
+    "restored_health": "ok"
+  }
+}

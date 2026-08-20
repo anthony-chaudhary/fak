@@ -54,30 +54,42 @@ fak model load qwen38:27b
 `model load` downloads the exact GGUF and verifies its Hugging Face LFS digest.
 The Q4_K_M file is large; check free disk and memory before pulling it.
 
-## Measured support envelope (2026-08-19)
+## Measured support envelope (2026-08-20)
 
 | Route | Hardware | Verdict | Evidence |
 |---|---|---|---|
-| Native fak Metal GGUF | M3 Pro, 18 GPU cores, 36 GiB unified memory | **HOLD_NATIVE_METAL_CAPACITY** | Earlier runs loaded all 866 tensors but died before listener readiness at a measured 47.7–65.5 GiB peak footprint. Current fak now refuses this proven overcommit before tensor loading (`METAL_GGUF_PEAK_TOO_BIG`, exit 2 in 1.94 s). Tracked by [#8067](https://github.com/anthony-chaudhary/fak/issues/8067). |
+| Native fak Metal GGUF | M3 Pro, 18 GPU cores, 36 GiB unified memory | **PASS_NATIVE_METAL_OPT_IN** | The streamed Q4_K path reaches readiness, identifies `metal/qwen35-hybrid-session-v1`, and passes exact `Q38`, strict JSON, an admitted tool call, warmup/request serialization, and rollback. The functional run used 18,920,570,880 B maximum RSS with zero swaps; request p95 was 37.208 s. Evidence: [`qwen38-27b-2026-08-20`](../_witnesses/qwen38-27b-2026-08-20/README.md). |
 | llama.cpp Metal behind fak | same MacBook | **PASS_DELEGATED_METAL** | llama.cpp 9828 (`ebd048fc5`) loads in about 8.15 s at roughly 17 GiB RSS; exact model ID, `Q38`, schema JSON, and an admitted correlated tool call pass through fak. This is a compatibility control, not native-fak Metal acceptance. |
 | Native fak CUDA GGUF | 40 GB A100 | **PASS_NATIVE_CUDA_GGUF** | Exact model identity, `Q38`, schema JSON, and an admitted correlated tool call pass through the native `cuda/qwen35-gdn-ssm-decode-v1` forward with no CPU/model/backend fallback. Startup is 52.431 s. Evidence: [#8070](https://github.com/anthony-chaudhary/fak/issues/8070#issuecomment-5337879917). |
 | vLLM FP8 behind fak | 2× 40 GB A100, tensor parallel | **PASS_FP8_TP2_THROUGH_FAK** | Exact official FP8 revision boots with vLLM 0.27.1 at about 38,069 MiB per GPU; model identity, `Q38`, strict JSON, correlated tool use, and fak admission pass. One 40GB A100 remains **HOLD_FP8_BOOT**. Evidence: [#8075](https://github.com/anthony-chaudhary/fak/issues/8075#issuecomment-5338921901). |
 
-The delegated Metal PASS proves the checkpoint, tokenizer/template, schema, and
-tool-call path can work on the MacBook. It does not promote native Metal. The
-A100 GGUF PASS proves exact native CUDA execution plus structured-output and
-tool-call acceptance without fallback. One A100 40GB remains outside the measured official-FP8 capacity envelope;
-the measured supported route is two 40GB devices with tensor parallelism.
+The native Metal PASS is deliberately scoped to the explicit streamed-Q4_K launch below.
+It is not a parity claim: full-prefill turns decoded at 2.3–2.9 tok/s, while fully cached
+short turns varied from 0.4–1.3 tok/s; the same machine's delegated llama.cpp control
+measured 7.29 tok/s. Cold and warm-file-cache readiness were 103.858 s and 34.897 s.
+The default capacity estimator still rejects this route until [#8101](https://github.com/anthony-chaudhary/fak/issues/8101)
+is recalibrated from the captured high-water mark, so the environment switch remains part
+of the supported recipe.
+
+The A100 GGUF PASS proves exact native CUDA execution plus structured-output and tool-call
+acceptance without fallback. One A100 40GB remains outside the measured official-FP8
+capacity envelope; the measured supported route is two 40GB devices with tensor parallelism.
 
 ## Candidate launch recipes
 
-Native Metal is fail-closed on the measured 36 GiB host; use a larger-memory
-Apple-Silicon machine for the next native acceptance candidate:
+Native Metal is accepted on the measured 36 GiB host through the streamed-Q4_K route:
 
 ```console
 fak model pull qwen38:27b
-fak serve --gguf qwen38:27b --model qwen38:27b --metal --context-budget-tokens 4096
+FAK_METAL_STREAM_Q4K=1 FAK_Q4K=1 fak serve \
+  --gguf qwen38:27b --model qwen38:27b --metal --context-budget-tokens 4096
 ```
+
+Wait for `/healthz` to report `"ok":true`, not merely for the socket to bind. During
+startup it reports `warmup_pending`; an early request now queues behind that warmup, but
+readiness-aware routing avoids charging a user request for the cold promotion. Stop the
+candidate and restore the previous accepted service if readiness, any capability probe,
+or memory pressure fails.
 
 Native CUDA GGUF is accepted on the measured 40 GB A100 route:
 
