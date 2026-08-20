@@ -266,6 +266,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 - [DeepSeek Harness study: reversible composition, durable turns, and one guarded-filesystem gap (2026-08-20)](docs/notes/CONCEPT-STUDY-DEEPSEEK-HARNESS-2026-08-20.md) -- pinned `rc.8` source study; most candidates map to existing FAK work or intentional divergences, while observed target/version binding for native file mutations survived as #8222.
+- [Agents' Last Exam study: official artifact-scored work as a FAK benchmark lane (2026-08-20)](docs/notes/CONCEPT-STUDY-AGENTS-LAST-EXAM-2026-08-20.md) -- pinned source, paper, history, and social-context study; one official-harness raw-vs-fak spine survived as #8223, while ALE trajectory evidence folded into #6629.
 - [Scoped guard-disable dogfood — 2026-08-20](docs/notes/GUARD-DISABLE-DOGFOOD-2026-08-20.md) -- auto-indexed dated note.
 - [Codex `exec_command` guard recovery (2026-08-19)](docs/notes/2026-08-19-guard-codex-exec-command-default-deny.md) -- auto-indexed dated note.
 - [Harness-independent server builder research decision — 2026-08-19](docs/notes/HARNESS-INDEPENDENT-SERVER-BUILDER-RESEARCH-2026-08-19.md) -- auto-indexed dated note.

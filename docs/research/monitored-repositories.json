@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-20T07:49:24-07:00",
+  "updated_at": "2026-08-20T09:52:35-07:00",
   "methodology": "Harness-related repositories absent by exact owner/name from tracked fak docs were ranked by direct seam relevance, current development activity, adoption signal, and license clarity. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -117,6 +117,18 @@
       "stars_at_check": 172283,
       "last_push_at_check": "2026-08-19T15:37:57Z",
       "study_note": "docs/notes/CONCEPT-STUDY-DEEPSEEK-HARNESS-2026-08-20.md"
+    },
+    {
+      "repository": "rdi-berkeley/agents-last-exam",
+      "url": "https://github.com/rdi-berkeley/agents-last-exam",
+      "status": "studied",
+      "priority": 11,
+      "why": "Broad artifact-scored professional-work benchmark deeply studied for official hidden-reference grading, run-local ALE-Claw gateway composition, typed trajectories, timeout-aware artifact scoring, and cross-harness controls. One FAK benchmark-entry spine survived as #8223; ALE trajectory evidence was folded into #6629.",
+      "last_checked": "2026-08-20",
+      "checked_revision": "75a3f866535946b67f9a57e4f158eb30ad50be8a",
+      "stars_at_check": 955,
+      "last_push_at_check": "2026-08-16T04:18:19Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-AGENTS-LAST-EXAM-2026-08-20.md"
     }
   ]
 }
