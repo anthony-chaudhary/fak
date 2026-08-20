@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 const (
@@ -114,6 +116,7 @@ func runProgress(out, errOut io.Writer, args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	if *window <= 0 || *baseline <= 0 || *stallAfter < 2 {
 		fmt.Fprintln(errOut, "progress: --window and --baseline must be positive; --stall-after must be at least 2")
 		return 2

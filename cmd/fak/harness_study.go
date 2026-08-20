@@ -16,6 +16,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnesscreationreceipt"
 	"github.com/anthony-chaudhary/fak/internal/harnesscreationstudy"
 	"github.com/anthony-chaudhary/fak/internal/harnesscrossover"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 func runHarnessStudy(stdout, stderr io.Writer, argv []string) int {
@@ -245,6 +246,7 @@ func runHarnessControlPacket(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintln(stderr, "fak harness study control packet verify: --dir is required")
 			return 2
 		}
+		*dir = pathutil.ExpandTilde(*dir)
 		raw, err := os.ReadFile(filepath.Join(*dir, "packet.json"))
 		if err != nil {
 			fmt.Fprintf(stderr, "fak harness study control packet verify: %v\n", err)
@@ -302,6 +304,7 @@ func runHarnessControlPacketReceipt(stdout, stderr io.Writer, argv []string) int
 		if err := fs.Parse(argv[1:]); err != nil || fs.NArg() != 0 {
 			return 2
 		}
+		*dir = pathutil.ExpandTilde(*dir)
 		r, err := harnesscontrolpacket.StartReceipt(harnesscontrolpacket.ReceiptStartOptions{Dir: *dir, ParticipantID: *participant, PairID: *pair, PairOrder: *order})
 		if err != nil {
 			fmt.Fprintf(stderr, "fak harness study control packet receipt start: %v\n", err)
@@ -328,6 +331,7 @@ func runHarnessControlPacketReceipt(stdout, stderr io.Writer, argv []string) int
 		if err := fs.Parse(argv[1:]); err != nil || fs.NArg() != 0 {
 			return 2
 		}
+		*dir = pathutil.ExpandTilde(*dir)
 		r, err := harnesscontrolpacket.FinalizeReceipt(harnesscontrolpacket.ReceiptFinalizeOptions{Dir: *dir, ArtifactPath: *artifact, CommandsPath: *commands, ErrorsPath: *errorsPath, Succeeded: *succeeded, Verified: *verified, HelpRequests: *help, Confidence: *confidence, InspectCaptured: *inspect, PreviewCaptured: *preview, RuntimeVerifyCaptured: *runtime, Preference: *preference, PreferenceReason: *reason})
 		if err != nil {
 			fmt.Fprintf(stderr, "fak harness study control packet receipt finalize: %v\n", err)
