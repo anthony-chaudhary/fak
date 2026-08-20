@@ -1,4 +1,4 @@
-package agentquery
+package sessionjournal
 
 import (
 	"bufio"
@@ -10,8 +10,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 )
 
 const BenchmarkSchema = "fak-agentquery-benchmark/1"
@@ -131,14 +129,14 @@ func deterministicJournal(events int, observed time.Time) []byte {
 		lane := []string{"cmd", "docs", "gateway"}[i%3]
 		start := observed.Add(-time.Duration((i%1000)+1) * time.Second)
 		end := start.Add(time.Duration((i%250)+1) * time.Millisecond)
-		fmt.Fprintf(&b, `{"schema":"%s","kind":"open","id":"%s","ts":"%s","registration":{"registration_id":"%s","lane":"%s"}}`+"\n", sessionjournal.Schema, id, start.Format(time.RFC3339Nano), id, lane)
-		fmt.Fprintf(&b, `{"schema":"%s","kind":"close","id":"%s","ts":"%s"}`+"\n", sessionjournal.Schema, id, end.Format(time.RFC3339Nano))
+		fmt.Fprintf(&b, `{"schema":"%s","kind":"open","id":"%s","ts":"%s","registration":{"registration_id":"%s","lane":"%s"}}`+"\n", Schema, id, start.Format(time.RFC3339Nano), id, lane)
+		fmt.Fprintf(&b, `{"schema":"%s","kind":"close","id":"%s","ts":"%s"}`+"\n", Schema, id, end.Format(time.RFC3339Nano))
 	}
 	return []byte(b.String())
 }
 
 func directBenchmarkPath(journal []byte, observed time.Time) ([]benchmarkGroup, error) {
-	events, h := sessionjournal.ParseEventsReport(string(journal))
+	events, h := ParseEventsReport(string(journal))
 	if h.Degraded() {
 		return nil, fmt.Errorf("generated journal degraded")
 	}
@@ -147,9 +145,9 @@ func directBenchmarkPath(journal []byte, observed time.Time) ([]benchmarkGroup, 
 func scanBenchmarkPath(journal []byte, observed time.Time) ([]benchmarkGroup, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(journal))
 	scanner.Buffer(make([]byte, 4096), 1<<20)
-	events := make([]sessionjournal.Event, 0)
+	events := make([]Event, 0)
 	for scanner.Scan() {
-		var e sessionjournal.Event
+		var e Event
 		if err := json.Unmarshal(scanner.Bytes(), &e); err != nil {
 			return nil, err
 		}
@@ -161,22 +159,22 @@ func scanBenchmarkPath(journal []byte, observed time.Time) ([]benchmarkGroup, er
 	return groupsFromEvents(events, observed), nil
 }
 func psJSONJQBenchmarkPath(journal []byte, observed time.Time) ([]benchmarkGroup, error) {
-	events := sessionjournal.ParseEvents(string(journal))
-	sessions := sessionjournal.FoldEvents(events)
+	events := ParseEvents(string(journal))
+	sessions := FoldEvents(events)
 	payload, err := json.Marshal(sessions)
 	if err != nil {
 		return nil, err
 	}
-	var decoded []sessionjournal.Session
+	var decoded []Session
 	if err = json.Unmarshal(payload, &decoded); err != nil {
 		return nil, err
 	}
 	return groupsFromSessions(decoded, observed), nil
 }
-func groupsFromEvents(events []sessionjournal.Event, observed time.Time) []benchmarkGroup {
-	return groupsFromSessions(sessionjournal.FoldEvents(events), observed)
+func groupsFromEvents(events []Event, observed time.Time) []benchmarkGroup {
+	return groupsFromSessions(FoldEvents(events), observed)
 }
-func groupsFromSessions(sessions []sessionjournal.Session, observed time.Time) []benchmarkGroup {
+func groupsFromSessions(sessions []Session, observed time.Time) []benchmarkGroup {
 	type key struct{ lane, state string }
 	m := map[key]*benchmarkGroup{}
 	for _, s := range sessions {

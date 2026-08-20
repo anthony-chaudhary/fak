@@ -1,4 +1,4 @@
-package agentquery
+package sessionjournal
 
 import (
 	"testing"

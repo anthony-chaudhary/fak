@@ -59,14 +59,14 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "       fak agents --query \"SELECT lane,state,count(*) AS agents,max(elapsed_ms) AS max_elapsed_ms FROM agents WHERE started_at >= now()-interval '7 day' GROUP BY lane,state ORDER BY max_elapsed_ms DESC\"")
 		fmt.Fprintln(stderr, "--query is a constrained read-only grammar, not arbitrary SQL")
 		fmt.Fprintf(stderr, "--schema --json emits %s\n", agentquery.DescriptorSchema)
-		fmt.Fprintf(stderr, "--benchmark --json emits %s\n", agentquery.BenchmarkSchema)
+		fmt.Fprintf(stderr, "--benchmark --json emits %s\n", sessionjournal.BenchmarkSchema)
 	}
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
 	if *benchmark {
 		if !*asJSON {
-			fmt.Fprintf(stderr, "fak agents: --benchmark requires --json (%s)\n", agentquery.BenchmarkSchema)
+			fmt.Fprintf(stderr, "fak agents: --benchmark requires --json (%s)\n", sessionjournal.BenchmarkSchema)
 			return 2
 		}
 		counts, err := parseBenchmarkSizes(*benchmarkSizes)
@@ -78,7 +78,7 @@ func runAgents(stdout, stderr io.Writer, argv []string) int {
 		if *nowUnix != 0 {
 			now = time.Unix(*nowUnix, 0).UTC()
 		}
-		report, err := agentquery.RunBenchmark(counts, *benchmarkRepetitions, now)
+		report, err := sessionjournal.RunBenchmark(counts, *benchmarkRepetitions, now)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak agents: benchmark: %v\n", err)
 			return 1

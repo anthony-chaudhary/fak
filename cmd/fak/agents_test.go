@@ -374,16 +374,16 @@ func TestAgentsBenchmarkJSON(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code=%d err=%s", code, errout.String())
 	}
-	var got agentquery.BenchmarkReport
+	var got sessionjournal.BenchmarkReport
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Schema != agentquery.BenchmarkSchema || len(got.Cases) != 2 || got.OS == "" {
+	if got.Schema != sessionjournal.BenchmarkSchema || len(got.Cases) != 2 || got.OS == "" {
 		t.Fatalf("got=%+v", got)
 	}
 	out.Reset()
 	errout.Reset()
-	if code := runAgents(&out, &errout, []string{"--benchmark"}); code != 2 || !strings.Contains(errout.String(), agentquery.BenchmarkSchema) {
+	if code := runAgents(&out, &errout, []string{"--benchmark"}); code != 2 || !strings.Contains(errout.String(), sessionjournal.BenchmarkSchema) {
 		t.Fatalf("code=%d err=%s", code, errout.String())
 	}
 }
