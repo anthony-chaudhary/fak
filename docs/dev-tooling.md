@@ -18,7 +18,68 @@ authority for shared-tree safety and recovery.
 
 Repository-only checks use the separately built `fak-dev` artifact. Install it from
 the checkout with `go install ./cmd/fak-dev`; the temporary `fak dev ...` compatibility
-spelling only delegates to a sibling or `PATH`-installed `fak-dev` process.
+spelling only delegates to a sibling or `PATH`-installed `fak-dev` process. After that
+one-time install, `fak self-update --root <checkout>` also detects a side-by-side
+`fak-dev`, builds and smoke-checks both artifacts from the same verified `origin/main`,
+and converges them in one cycle. A host without `fak-dev` remains product-only.
+
+### Keep `fak-dev` current with the runtime binary
+
+From the repository root, run:
+
+```bash
+fak self-update --root .
+```
+
+The update gate builds, vets, and smokes `fak` before swapping it. When `fak-dev`
+already exists beside any converged `fak` copy, the same cycle builds and smokes the
+companion before either artifact is accepted. An absent companion is not an install
+request. `fak self-update --check --root .` is the read-only freshness path.
+
+**Value frame and problem checklist:** for maintainers on a shared checkout, inherited
+repository build scratch could disappear during a concurrent cleanup; the manual
+alternative was setting `GOTMPDIR` for each update or installing both binaries
+separately; the bounded default is better because updater-owned Go work uses OS temp and
+the installed pair advances through one fail-closed gate. This is stewardship work: P1
+context is preserved, P2 removes an observed failed multi-minute build and retry without
+claiming a broader speedup, P3 stays reversible at one child-process seam, and P4 is
+witnessed by the installed-path update and stamp read-back.
+
+**Default-admission record:** indication — an updater-owned Go child, with `fak-dev`
+already installed beside a converged `fak`; comparator — inherit the caller's
+`GOTMPDIR`, with a manual per-run override as the strongest practical alternative;
+benefit — one guarded command converges both artifacts; harms/interactions — a custom
+Go temp location is ignored for updater children and OS-temp disk use lasts for the
+build, with no authority, network, or telemetry expansion; uncertainty — low-space or
+constrained OS temp directories, reviewed by 2026-09-20 if gate-failure telemetry shows
+disk or permission errors; contraindication — an unavailable or unwritable OS temp
+directory, which fails closed before swap; dose/safeguards — only `go` children launched
+by `internal/selfinstall.RealRunner`, while non-Go children inherit the environment and
+build/vet/smoke remain mandatory; consent/control — `--check` is read-only, `--target`
+bounds an explicit install, and output names targets and failures; surveillance/movement
+— watch `outcome=gate-failed`, OS-temp errors, and post-swap stamp mismatches, disabling
+the override if it causes a repeat; rollback is removal of the one `GOTMPDIR`
+assignment. **Verdict: CONDITIONAL DEFAULT** — narrow, reversible, and fail-closed.
+
+The 2026-08-20 live witness first failed without the isolation:
+
+```text
+build fak-dev companion: open C:\work\fak\_scratch\go-tmp\go-build...\_pkg_.a: The system cannot find the path specified.
+self-update: outcome=gate-failed
+```
+
+With the guarded path, both installed stamps matched the fetched tip:
+
+```text
+origin/main=284beb4bd8b43330656cfe214d731195e6069973
+fak:     build: 284beb4bd8b4
+fak-dev: build: 284beb4bd8b43330656cfe214d731195e6069973
+```
+
+`TestRealRunnerKeepsGoWorkOutsideRepoScratch` pins the temp boundary.
+`TestSelfUpdateProbeReadsOwnPathAfterSwap` pins Windows post-swap read-back: the old
+process remains mapped, so the final census invokes the deployed path and observes the
+new file instead of reporting the old in-process stamp as a false divergence.
 
 **Next action:** from the repository root, run `fak test --list` to inventory the
 host-aware test and non-test witness tiers without executing them. This is a one-time

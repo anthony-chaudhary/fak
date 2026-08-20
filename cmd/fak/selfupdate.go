@@ -313,15 +313,10 @@ func selfUpdateHost(repoRoot string) selfinstall.Host {
 	return selfinstall.Host{RepoRoot: repoRoot, Home: home, Scheduled: exe}
 }
 
-// selfUpdateProbe reads one deployed binary's VCS provenance for the census. Our OWN path is
-// answered from the in-process stamp instead of re-execing ourselves; every other copy is asked
-// directly with `<bin> version` (stampOfBinary), and a binary that cannot answer stays
-// unattested rather than being assumed current.
+// selfUpdateProbe reads one deployed binary's VCS provenance from its path. This includes our
+// own path: after a Windows swap the mapped process still carries the old stamp while the file
+// already contains the new build, so an in-process answer would fabricate post-update skew.
 func selfUpdateProbe(path string) (string, bool, bool) {
-	if sameBinary(path) {
-		s := binstamp.Self()
-		return s.Revision, s.Dirty, s.HasVCS && strings.TrimSpace(s.Revision) != ""
-	}
 	s, ok := stampOfBinary(path)
 	return s.Revision, s.Dirty, ok
 }

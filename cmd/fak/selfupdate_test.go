@@ -10,6 +10,17 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/versionskew"
 )
 
+const selfUpdateProbeHelperEnv = "GO_WANT_SELFUPDATE_PROBE_HELPER"
+const selfUpdateProbeHelperRev = "1234567890abcdef1234567890abcdef12345678"
+
+func init() {
+	if os.Getenv(selfUpdateProbeHelperEnv) != "1" {
+		return
+	}
+	_, _ = os.Stdout.WriteString("fak test helper\nbuild: " + selfUpdateProbeHelperRev + "\n")
+	os.Exit(0)
+}
+
 // TestSelfUpdateShouldBuild pins the proceed decision, and in particular the case binstamp
 // alone gets WRONG: a clean local binary that is AHEAD of origin/main. Under the old
 // `verdict == binstamp.Stale` rule that case (rev differs => Stale) rebuilt origin/main OVER
@@ -151,6 +162,18 @@ func TestSelfUpdateFakDevTargetsFindsOnlyInstalledCompanions(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("targets=%v; want it to include %s", got, devPath)
+	}
+}
+
+// TestSelfUpdateProbeReadsOwnPathAfterSwap reproduces the Windows post-swap audit bug. The
+// running process still has its old embedded stamp, but invoking its path starts the new bytes.
+// The census must read the deployed path or it reports a successful update as divergent.
+func TestSelfUpdateProbeReadsOwnPathAfterSwap(t *testing.T) {
+	t.Setenv(selfUpdateProbeHelperEnv, "1")
+	revision, dirty, attested := selfUpdateProbe(os.Args[0])
+	if !attested || dirty || revision != selfUpdateProbeHelperRev {
+		t.Fatalf("selfUpdateProbe(own path) = (%q, dirty=%v, attested=%v), want deployed helper stamp %q",
+			revision, dirty, attested, selfUpdateProbeHelperRev)
 	}
 }
 

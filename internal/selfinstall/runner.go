@@ -58,9 +58,30 @@ func RealRunner(ctx context.Context, dir, name string, args ...string) (string, 
 	if dir != "" {
 		cmd.Dir = dir
 	}
+	if env := goRunnerEnv(name, os.Environ(), os.TempDir()); env != nil {
+		cmd.Env = env
+	}
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.CombinedOutput()
 	return string(out), err == nil
+}
+
+// goRunnerEnv keeps self-update's compiler work outside repo scratch that another session may
+// sweep. Non-Go children inherit the caller environment unchanged.
+func goRunnerEnv(name string, env []string, tempDir string) []string {
+	base := filepath.Base(name)
+	if !strings.EqualFold(base, "go") && !strings.EqualFold(base, "go.exe") {
+		return nil
+	}
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(key, "GOTMPDIR") {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return append(out, "GOTMPDIR="+tempDir)
 }
 
 // OSSwap atomically replaces dst with src. On unix os.Rename over an existing (even
