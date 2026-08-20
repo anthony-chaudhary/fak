@@ -67,7 +67,7 @@ func TestRunStopAcceptanceIntentionalBlockDoesNotRequireTurnCompleted(t *testing
 		lifecycle("hook/completed", "stop:6:C:/plugin/hooks.json", "blocked"),
 	)
 	s := &scriptedAppServer{messages: messages[:5]}
-	r := runStopAcceptance(context.Background(), s, "home", "workspace", "blocked", "prompt", "codex")
+	r := runStopAcceptance(context.Background(), s, "home", "workspace", "codex", "prompt", "blocked")
 	if r.Verdict != "PASS" || r.Stop.Blocked != 1 || r.Stop.Skipped != 1 {
 		t.Fatalf("report=%+v", r)
 	}
