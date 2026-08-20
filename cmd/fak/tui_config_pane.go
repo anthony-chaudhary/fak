@@ -60,13 +60,15 @@ func init() {
 	tuiplugin.Register(tuiplugin.Pane{
 		ID:      "settings",
 		Summary: "inspect and change console settings, saved overview panes, and pane defaults",
-		Usage:   "fak console settings [--path FILE] [--json] [--set-overview ID,ID] [--set-default PANE.CONTROL=VALUE]",
+		Usage:   "fak console settings [--path FILE] [--interactive] [--setting PANE.CONTROL] [--json] [--set-overview ID,ID] [--set-default PANE.CONTROL=VALUE]",
 		Schema:  tuiConfigSchema,
 		BuiltIn: true,
 		Controls: []tuiplugin.Control{
 			{ID: "clear-overview", Label: "Clear Overview", Kind: "action", Flag: "--clear-overview", Detail: "remove the saved overview pane order"},
+			{ID: "interactive", Label: "Interactive", Kind: "action", Flag: "--interactive", Detail: "select, change, save, or reset finite settings from the keyboard"},
 			{ID: "json", Label: "JSON", Kind: "toggle", Flag: "--json", Detail: "emit the typed config model"},
 			{ID: "path", Label: "Path", Kind: "input", Flag: "--path", Default: "~/.fak/console.json", Detail: "console config file to inspect"},
+			{ID: "setting", Label: "Setting", Kind: "input", Flag: "--setting", Detail: "initial PANE.CONTROL row for interactive mode"},
 			{ID: "set-default", Label: "Set Default", Kind: "input", Flag: "--set-default", Detail: "save a pane control default as PANE.CONTROL=VALUE"},
 			{ID: "set-overview", Label: "Set Overview", Kind: "input", Flag: "--set-overview", Detail: "save comma-separated overview pane order"},
 			{ID: "unset-default", Label: "Unset Default", Kind: "input", Flag: "--unset-default", Detail: "remove a pane control default as PANE.CONTROL"},
@@ -83,6 +85,8 @@ func runTUIConfig(stdout, stderr io.Writer, argv []string) int {
 	width := fs.Int("width", 120, "target terminal width for human rendering")
 	asJSON := fs.Bool("json", false, "emit the config TUI model as JSON")
 	atText := fs.String("at", "", "snapshot time (RFC3339 or YYYY-MM-DD, default: now)")
+	interactive := fs.Bool("interactive", false, "select, change, save, or reset finite settings from the keyboard")
+	initialSetting := fs.String("setting", "", "initial PANE.CONTROL row in interactive mode")
 	setOverview := fs.String("set-overview", "", "save comma-separated overview panes in display order")
 	clearOverview := fs.Bool("clear-overview", false, "remove the saved overview pane order")
 	var setDefaults multiFlag
@@ -103,6 +107,17 @@ func runTUIConfig(stdout, stderr io.Writer, argv []string) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "fak console settings: %v\n", err)
 		return 2
+	}
+	if *interactive {
+		if *asJSON || configMutationRequested(*setOverview, *clearOverview, []string(setDefaults), []string(unsetDefaults)) {
+			fmt.Fprintln(stderr, "fak console settings: --interactive cannot combine with --json or mutation flags")
+			return 2
+		}
+		if err := runTUIConfigInteraction(os.Stdin, stdout, *path, *initialSetting, *width, at); err != nil {
+			fmt.Fprintf(stderr, "fak console settings: %v\n", err)
+			return 1
+		}
+		return 0
 	}
 	if configMutationRequested(*setOverview, *clearOverview, []string(setDefaults), []string(unsetDefaults)) {
 		report, err := mutateTUIConfig(*path, tuiConfigMutation{
