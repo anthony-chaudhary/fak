@@ -121,3 +121,27 @@ func TestIssueFanoutJSONCarriesCanonicalProblemFramesToCohortInput(t *testing.T)
 		}
 	}
 }
+
+func TestIssueFanoutCmdLeafJSONUsesRunnableCommandPackage(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := runIssueFanout(&out, &errb, []string{
+		"--title", "Scoped guard break-glass launcher",
+		"--leaf", "cmd",
+		"--spine", "fbe86e17acfe49673079c1583d72fa72471bea2d",
+		"--paths", "cmd/fak/guard_disable.go,cmd/fak/guard_disable_test.go,docs/integrations/openai-codex.md",
+		"--areas", "qa",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errb.String())
+	}
+	var plan issuefanout.Plan
+	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range plan.Candidates {
+		if !strings.Contains(candidate.Witness, "./cmd/fak") || !strings.Contains(candidate.AcceptanceGate, "./cmd/fak") {
+			t.Fatalf("%s kept unrunnable cmd witness: witness=%q gate=%q", candidate.Key, candidate.Witness, candidate.AcceptanceGate)
+		}
+	}
+}

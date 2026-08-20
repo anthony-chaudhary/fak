@@ -15,6 +15,7 @@ package issuefanout
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
@@ -81,8 +82,8 @@ var taxonomy = []template{
 		inScope:    "Table-driven tests over {paths} covering empty, oversized, malformed, and hostile inputs and every error path.",
 		outOfScope: "New features; refactors beyond what a failing test forces.",
 		done:       "Edge/adversarial table tests land in {paths} and fail before / pass after any fix they force.",
-		witness:    "go test ./internal/{leaf} -run 'Edge|Adversarial' -v output captured in the commit or issue.",
-		gate:       "make test-fast green including the new tests.",
+		witness:    "go test {go_package} -run 'Edge|Adversarial' -v output captured in the commit or issue.",
+		gate:       "go test {go_package} -run 'Edge|Adversarial' -v and make test-fast green.",
 		confusion:  "A green test that never drives the real seam is not a witness.",
 		steps:      3, generation: "gen/now", priority: "priority/P1",
 	},
@@ -93,8 +94,8 @@ var taxonomy = []template{
 		inScope:    "Tests asserting each error return of {paths}; message-quality fixes those tests force.",
 		outOfScope: "Happy-path behavior changes.",
 		done:       "Each error return has a test asserting both the refusal and that its message names the recovery.",
-		witness:    "go test ./internal/{leaf} -run 'Refus|Error|Requir' -v output captured in the commit or issue.",
-		gate:       "make test-fast green including the new tests.",
+		witness:    "go test {go_package} -run 'Refus|Error|Requir' -v output captured in the commit or issue.",
+		gate:       "go test {go_package} -run 'Refus|Error|Requir' -v and make test-fast green.",
 		confusion:  "Do not weaken a refusal to make a test pass; the refusal is the contract.",
 		steps:      3, generation: "gen/now", priority: "priority/P2",
 	},
@@ -105,8 +106,8 @@ var taxonomy = []template{
 		inScope:    "A determinism test (two runs, deep-equal) and a -race run over {paths}.",
 		outOfScope: "Performance tuning.",
 		done:       "Determinism test lands; -race run over the package is clean.",
-		witness:    "go test ./internal/{leaf} -race -run Determinism -v output captured in the commit or issue.",
-		gate:       "make test-race green.",
+		witness:    "go test -race {go_package} -run Determinism -v output captured in the commit or issue.",
+		gate:       "go test -race {go_package} -run Determinism -v and make test-race green.",
 		confusion:  "Map iteration order and clock/rand reads are the usual determinism leaks.",
 		steps:      2, generation: "gen/now", priority: "priority/P2",
 	},
@@ -297,6 +298,10 @@ func Build(in Input) (Plan, error) {
 		}
 		allowed[a] = true
 	}
+	goPackage, err := goPackageForInput(in)
+	if err != nil {
+		return Plan{}, err
+	}
 
 	plan := Plan{Schema: Schema, Input: in, AreaCounts: map[string]int{}}
 	for _, t := range taxonomy {
@@ -306,7 +311,7 @@ func Build(in Input) (Plan, error) {
 		if in.Max != 0 && len(plan.Candidates) >= in.Max {
 			break
 		}
-		plan.Candidates = append(plan.Candidates, expand(t, in))
+		plan.Candidates = append(plan.Candidates, expand(t, in, goPackage))
 		plan.AreaCounts[t.area]++
 	}
 	if len(plan.Candidates) < MinFanout {
@@ -466,7 +471,7 @@ func fanoutProblemFrame(t template) issuepolicy.ProblemFrame {
 }
 
 // expand substitutes one template into a fully-scoped candidate.
-func expand(t template, in Input) issuepolicy.Candidate {
+func expand(t template, in Input, goPackage string) issuepolicy.Candidate {
 	paths := in.Paths
 	if len(paths) == 0 {
 		paths = []string{"internal/" + in.Leaf + "/"}
@@ -480,6 +485,7 @@ func expand(t template, in Input) issuepolicy.Candidate {
 		"{leaf}", in.Leaf,
 		"{spine}", in.SpineRef,
 		"{paths}", strings.Join(paths, ", "),
+		"{go_package}", goPackage,
 	)
 	c := issuepolicy.Candidate{
 		ProblemFrame:  fanoutProblemFrame(t),
@@ -527,6 +533,45 @@ func expand(t template, in Input) issuepolicy.Candidate {
 		}
 	}
 	return c
+}
+
+// goPackageForInput selects the one Go package the generic QA templates can
+// actually execute. Explicit cmd/ or internal/ paths win over the lane name;
+// non-Go companions such as docs are ignored. Multiple package roots or an
+// explicit path set with no Go package refuse instead of emitting a plausible
+// but unrunnable witness.
+func goPackageForInput(in Input) (string, error) {
+	if len(in.Paths) == 0 {
+		if in.Leaf == "cmd" {
+			return "./cmd/fak", nil
+		}
+		return "./internal/" + in.Leaf, nil
+	}
+
+	packages := map[string]bool{}
+	for _, raw := range in.Paths {
+		path := strings.Trim(strings.TrimPrefix(strings.ReplaceAll(strings.TrimSpace(raw), `\`, "/"), "./"), "/")
+		parts := strings.Split(path, "/")
+		if len(parts) < 2 || (parts[0] != "cmd" && parts[0] != "internal") {
+			continue
+		}
+		packages["./"+parts[0]+"/"+parts[1]] = true
+	}
+	if len(packages) == 0 {
+		return "", refusef("issuefanout: paths do not identify a Go package under cmd/ or internal/ — include one representative package path so QA witnesses are runnable")
+	}
+	if len(packages) > 1 {
+		names := make([]string, 0, len(packages))
+		for name := range packages {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		return "", refusef("issuefanout: paths identify multiple Go packages (%s) — pass one representative package plus any non-Go companion paths", strings.Join(names, ", "))
+	}
+	for name := range packages {
+		return name, nil
+	}
+	panic("unreachable")
 }
 
 // Render prints the plan for a human: one line per candidate plus the next step.

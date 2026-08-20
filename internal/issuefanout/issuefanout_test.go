@@ -87,6 +87,56 @@ func TestBuildAreaFilterAndCap(t *testing.T) {
 	}
 }
 
+func TestBuildDerivesQAPackageFromDeclaredPaths(t *testing.T) {
+	in := spineInput()
+	in.Leaf = "cmd"
+	in.Paths = []string{
+		"cmd/fak/guard_disable.go",
+		"cmd/fak/guard_disable_test.go",
+		"docs/integrations/openai-codex.md",
+	}
+	in.Areas = []string{"qa"}
+	plan, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range plan.Candidates {
+		for field, value := range map[string]string{
+			"witness": candidate.Witness,
+			"gate":    candidate.AcceptanceGate,
+		} {
+			if !strings.Contains(value, "./cmd/fak") || strings.Contains(value, "./internal/cmd") {
+				t.Fatalf("%s %s = %q, want runnable ./cmd/fak command", candidate.Key, field, value)
+			}
+		}
+	}
+
+	internalPlan, err := Build(Input{Title: "internal spine", Leaf: "issuefanout", SpineRef: "abc", Areas: []string{"qa"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range internalPlan.Candidates {
+		if !strings.Contains(candidate.Witness, "./internal/issuefanout") {
+			t.Fatalf("%s witness = %q, want internal package mapping", candidate.Key, candidate.Witness)
+		}
+	}
+}
+
+func TestBuildRefusesAmbiguousOrNonGoPackagePaths(t *testing.T) {
+	for name, paths := range map[string][]string{
+		"ambiguous": {"cmd/fak/guard.go", "internal/issuefanout/issuefanout.go"},
+		"non-go":    {"docs/integrations/openai-codex.md"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			in := spineInput()
+			in.Paths = paths
+			if _, err := Build(in); err == nil || !strings.Contains(err.Error(), "Go package") {
+				t.Fatalf("Build(paths=%v) error = %v, want Go package refusal", paths, err)
+			}
+		})
+	}
+}
+
 // The planner is pure: same input, byte-identical plan.
 func TestBuildDeterministic(t *testing.T) {
 	a, err := Build(spineInput())
