@@ -274,9 +274,12 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 			// Allow (never QUARANTINE/TRANSFORM/DENY), paired to its originating read-only
 			// call, fills (tool,args)->result so a later identical read is served inline.
 			// All the soundness/security guards live in fillVDSOFromResult.
+			if messages[i].RefutesWitness != "" {
+				s.revokeVDSOWitness(messages[i].RefutesWitness)
+			}
 			if s.vdsoProxyFill && wv.Kind == "ALLOW" {
 				if orig, ok := callByID[messages[i].ToolCallID]; ok {
-					s.fillVDSOFromResult(ctx, orig, messages[i].Content, traceID)
+					s.fillVDSOFromResult(ctx, orig, messages[i].Content, messages[i].Witness, traceID)
 				}
 			}
 			// Deposit the SAME admitted result into the toolproc reuse cache (#5119),
@@ -363,7 +366,10 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 // (adjudicateProposedServed) remains the backstop, but a quarantined result never
 // reaches here because the caller gates on wv.Kind=="ALLOW". The fill is built via the
 // SAME buildCall(readOnly=true) the served probe uses, so the key matches exactly.
-func (s *Server) fillVDSOFromResult(ctx context.Context, orig agent.ToolCall, result, traceID string) {
+func (s *Server) fillVDSOFromResult(ctx context.Context, orig agent.ToolCall, result, witness, traceID string) {
+	if strings.TrimSpace(witness) == "" {
+		return
+	}
 	tool := orig.Function.Name
 	// Trust the assistant-side tool NAME (the result block drops it on the Anthropic
 	// wire). Eligibility mirrors the served probe; IsWriteShaped is the hard backstop.
@@ -380,7 +386,7 @@ func (s *Server) fillVDSOFromResult(ctx context.Context, orig agent.ToolCall, re
 	}
 	// Build the call the SAME way the served probe does (readOnly=true => readOnlyHint+
 	// idempotentHint, principal scoping), so the fill key == the later Lookup key.
-	c, err := s.buildCall(ctx, tool, args, true /*readOnly*/, "" /*witness*/, traceID)
+	c, err := s.buildCall(ctx, tool, args, true /*readOnly*/, witness, traceID)
 	if err != nil {
 		return
 	}
@@ -489,4 +495,16 @@ func (s *Server) resetEngineCacheAfterQuarantine(ctx context.Context, admissions
 		return nil
 	}
 	return nil
+}
+
+func (s *Server) revokeVDSOWitness(witness string) {
+	witness = strings.TrimSpace(witness)
+	if witness == "" {
+		return
+	}
+	for _, em := range abi.EmittersFor(abi.EvComplete) {
+		if v, ok := em.(*vdso.VDSO); ok {
+			v.Revoke(witness)
+		}
+	}
 }

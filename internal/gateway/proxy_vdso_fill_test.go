@@ -53,12 +53,16 @@ func newProxyFillServer(t *testing.T) (*Server, *vdso.VDSO) {
 // assistant tool_use (carrying the args) + the user tool_result (carrying the answer),
 // paired by id. This is exactly what DecodeAnthropicMessagesRequest produces.
 func inboundTurn(id, tool, args, result string) []agent.Message {
+	return inboundTurnWitness(id, tool, args, result, "witness-v1")
+}
+
+func inboundTurnWitness(id, tool, args, result, witness string) []agent.Message {
 	return []agent.Message{
 		{Role: agent.RoleUser, Content: "go"},
 		{Role: agent.RoleAssistant, ToolCalls: []agent.ToolCall{
 			{ID: id, Type: "function", Function: agent.Func{Name: tool, Arguments: args}},
 		}},
-		{Role: agent.RoleTool, ToolCallID: id, Name: tool, Content: result},
+		{Role: agent.RoleTool, ToolCallID: id, Name: tool, Content: result, Witness: witness},
 	}
 }
 
@@ -193,5 +197,39 @@ func TestProxyFill_OffByDefault(t *testing.T) {
 	after := vdsoFills(v)
 	if after != before {
 		t.Fatalf("proxy-fill fired with the flag OFF: fills %d -> %d, want unchanged", before, after)
+	}
+}
+
+func TestProxyVDSOFillWitnesslessStaysCold(t *testing.T) {
+	srv, _ := newProxyFillServer(t)
+	ctx := WithPrincipal(context.Background(), "tenant-A")
+	msgs := inboundTurnWitness("c1", "get_config", `{"k":"v"}`, `{"value":"old"}`, "")
+	if _, err := srv.admitInboundResults(ctx, msgs, nil, "trace-witnessless"); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, _, hits := srv.adjudicateProposedServed(ctx, []agent.ToolCall{{ID: "c2", Type: "function", Function: agent.Func{Name: "get_config", Arguments: `{"k":"v"}`}}}, "trace-probe")
+	if hits != 0 {
+		t.Fatalf("witnessless result warmed proxy vDSO: hits=%d", hits)
+	}
+}
+
+func TestProxyVDSOFillRefutedWitnessMisses(t *testing.T) {
+	srv, _ := newProxyFillServer(t)
+	ctx := WithPrincipal(context.Background(), "tenant-A")
+	args := `{"k":"v"}`
+	if _, err := srv.admitInboundResults(ctx, inboundTurnWitness("c1", "get_config", args, `{"value":"old"}`, "resource-v1"), nil, "trace-fill"); err != nil {
+		t.Fatal(err)
+	}
+	call := agent.ToolCall{ID: "c2", Type: "function", Function: agent.Func{Name: "get_config", Arguments: args}}
+	if _, _, _, _, hits := srv.adjudicateProposedServed(ctx, []agent.ToolCall{call}, "trace-hit"); hits != 1 {
+		t.Fatalf("witnessed fill did not hit before revocation: hits=%d", hits)
+	}
+	refute := inboundTurnWitness("c3", "get_config", args, `{"value":"new"}`, "")
+	refute[2].RefutesWitness = "resource-v1"
+	if _, err := srv.admitInboundResults(ctx, refute, nil, "trace-refute"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, _, hits := srv.adjudicateProposedServed(ctx, []agent.ToolCall{call}, "trace-miss"); hits != 0 {
+		t.Fatalf("refuted witness still served stale bytes: hits=%d", hits)
 	}
 }

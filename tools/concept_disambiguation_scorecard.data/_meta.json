@@ -6385,6 +6385,26 @@
           "category": "incidental",
           "reason": "Goal-registry record type carrying existing witness semantics, not a new witness system",
           "token": "OutcomeEvidence"
+        },
+        {
+          "category": "incidental",
+          "reason": "OpenAI-wire spelling for the existing vDSO external witness concept",
+          "token": "fak_witness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go field spelling for the existing vDSO witness revocation concept",
+          "token": "RefutesWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "OpenAI-wire spelling for existing vDSO witness revocation",
+          "token": "fak_refutes_witness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Gateway adapter calling existing vDSO Revoke primitive",
+          "token": "revokeVDSOWitness"
         }
       ],
       "id": "witness-proof",
@@ -6415,6 +6435,7 @@
         "REVOCABLE",
         "ReasonPopulationUnwitnessed",
         "ReceiptsDigest",
+        "RefutesWitness",
         "ResolutionUnwitnessed",
         "RuntimeTerminalWitness",
         "SOURCE_WITNESSED",
@@ -6484,6 +6505,8 @@
         "durableWitnessRecords",
         "fak_fleet_canonical_goal_witnessed_registrations",
         "fak_fleet_goal_witnessed_registrations",
+        "fak_refutes_witness",
+        "fak_witness",
         "formatGuardCompactionWitness",
         "freshWitnessRecords",
         "guardCompactionWitnessLedger",
@@ -6525,6 +6548,7 @@
         "revocation_reason",
         "revocations",
         "revokeProxyFillWitness",
+        "revokeVDSOWitness",
         "runMicroCacheWitness",
         "runSessionCheckpointWitness",
         "sessionOpenRestartWitness",
@@ -6940,6 +6964,11 @@
           "category": "incidental",
           "reason": "Display-safety helper for linking to the already-defined Web gateway; it does not introduce a new gateway or engine concept.",
           "token": "publicGatewayURL"
+        },
+        {
+          "category": "incidental",
+          "reason": "Gateway-to-vDSO adapter, not a new gateway engine concept",
+          "token": "revokeVDSOWitness"
         }
       ],
       "id": "gateway-engine",
@@ -7023,6 +7052,7 @@
         "resolveCallEngine",
         "resolveSpawnEngine",
         "response_vdso_memo",
+        "revokeVDSOWitness",
         "selectorGateway",
         "shrinkWireInKernel",
         "writeEngine"

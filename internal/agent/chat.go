@@ -90,6 +90,10 @@ type Message struct {
 	FunctionCall *Func      `json:"function_call,omitempty"` // legacy OpenAI-compatible single-call shape
 	ToolCallID   string     `json:"tool_call_id,omitempty"`  // for role=tool
 	Name         string     `json:"name,omitempty"`
+	// Witness binds a client-supplied tool result to an externally verifiable resource version.
+	Witness string `json:"fak_witness,omitempty"`
+	// RefutesWitness names an older version invalidated by this observed result or write.
+	RefutesWitness string `json:"fak_refutes_witness,omitempty"`
 
 	// Thinking carries a Claude extended-thinking ("thinking") content block
 	// through the proxy instead of dropping it; ThinkingSignature is the opaque
