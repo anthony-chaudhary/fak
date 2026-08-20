@@ -232,6 +232,7 @@ var tier = map[string]int{
 	"worktreewitness":  1, // runs a command inside a transient detached worktree pinned at origin/main so the verdict reflects the trunk tip, not the caller's dirty tree; stdlib-only, off the hot path.
 	"goalregistry":     2, // canonical cross-harness goal identity and bindings; foundation composite over the tier-0 flock primitive.
 	"serverproduct":    2, // independent local-server product contract and readiness receipts; foundation composite over protocol and artifact identities.
+	"serveradapter":    2, // independent llama-server invocation rendering and readiness probes; foundation composite over server product contracts.
 
 	"adjudicator": 3, "ctxmmu": 3, "engine": 3, "enginecache": 3, "grammar": 3, "kernel": 3,
 	"preflight": 3, "vdso": 3, "plancfi": 3, "steward": 3, "witness": 3,
@@ -1286,6 +1287,7 @@ var chatEndpointRole = map[string]string{
 	"zaitask":           "the off-path bounded non-streaming Z.AI Coding Plan task runner (not a live kernel planner)",
 	"armbench":          "the off-path benchmark clients for fak/OpenAI-compatible generation surfaces (not a live planner)",
 	"conformance":       "the off-path provider-conformance probe client (not a live planner)",
+	"serveradapter":     "independent local llama-server adapter and readiness probe owned by the serveradapter leaf",
 }
 
 // TestSingleOpenAIChatClient pins the T4 fix as an architecture invariant: the
