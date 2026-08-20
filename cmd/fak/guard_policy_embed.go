@@ -25,7 +25,7 @@ const guardResourceSampleInterval = 2 * time.Second
 // AskUserQuestion/ToolSearch/Read*McpResource*). It also admits the Codex-native
 // names for the same host plumbing (update_plan, request_user_input, get/update_goal,
 // list/read MCP resources, tool_search_tool, hosted web/image built-ins, and
-// shell_command with the same danger arg-rules as Bash/PowerShell), including the
+// shell_command / exec_command with the same danger arg-rules as Bash/PowerShell), including the
 // namespace-qualified spellings some Codex surfaces expose (`functions.shell_command`,
 // `tool_search.tool_search_tool`, `multi_tool_use.parallel`, `web.run`,
 // `image_gen.imagegen`). That keeps `fak guard -- codex` from DEFAULT_DENYing the

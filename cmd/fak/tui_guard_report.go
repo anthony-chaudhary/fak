@@ -856,6 +856,8 @@ func tuiGuardActions(counts tuiGuardCounts) []string {
 		return []string{"inspect WARN guard artifacts before treating fak-by-default actionability as clear"}
 	case counts.Deny == 0 && counts.Quarantine == 0:
 		return []string{"add a recent guard proof with at least one denial or quarantine"}
+	case counts.DefaultDeny > 0:
+		return []string{"inspect the DEFAULT_DENY tool rows; temporary live override: fak guard allow --ttl 15m <tool>"}
 	case counts.PolicyBlock == 0:
 		return []string{"capture a POLICY_BLOCK proof for destructive tool refusals"}
 	default:

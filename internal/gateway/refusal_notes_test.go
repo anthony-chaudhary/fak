@@ -38,6 +38,38 @@ func TestRefusalNotesLeadWithAllowedPathAndTrailReason(t *testing.T) {
 	}
 }
 
+func TestDefaultDenySurfacesBoundedLiveOperatorChoice(t *testing.T) {
+	adj := ToolAdjudication{
+		Tool:     "exec_command",
+		Admitted: false,
+		Verdict:  WireVerdict{Kind: "DENY", Reason: "DEFAULT_DENY", Disposition: "TERMINAL"},
+	}
+	for name, got := range map[string]string{
+		"denySummary":      denySummary([]ToolAdjudication{adj}),
+		"adjudicationNote": adjudicationNote([]ToolAdjudication{adj}),
+		"deniedToolResult": deniedToolResult(adj),
+	} {
+		for _, want := range []string{
+			"operator choice (outside this wrapped agent)",
+			"fak guard allow --ttl 15m exec_command",
+			"live guard reloads",
+			"standard harness tool",
+			"DEFAULT_DENY",
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("%s missing %q:\n%s", name, want, got)
+			}
+		}
+	}
+
+	unsafe := adj
+	unsafe.Tool = "exec_command; injected"
+	got := denySummary([]ToolAdjudication{unsafe})
+	if strings.Contains(got, "--ttl 15m exec_command;") || !strings.Contains(got, "--ttl 15m <tool>") {
+		t.Fatalf("unsafe tool name entered the copyable command:\n%s", got)
+	}
+}
+
 func TestReframeUserSpanUntouched(t *testing.T) {
 	userTool := "Do not forget `USER_LITERAL`; never rewrite my words."
 	adj := ToolAdjudication{

@@ -56,6 +56,7 @@ type harnessToolProbe struct {
 // would never run) would be a false contract, so each alias declares its own set.
 type shellAliasSpec struct {
 	Name   string
+	Arg    string
 	Benign string
 	Denies []string
 }
@@ -126,12 +127,13 @@ func firstClassHarnessFloorProfiles() []harnessFloorProfile {
 				{"web.run", `{"search_query":[{"q":"fak agent kernel"}]}`},
 				{"image_gen.imagegen", `{"prompt":"diagram"}`},
 			},
-			// shell_command is Codex's cross-platform shell, so it must refuse BOTH the
+			// Codex's cross-platform shell aliases must refuse BOTH the
 			// POSIX and the PowerShell danger dialects (the floor carries both rule sets
-			// under shell_command / functions.shell_command).
+			// under each spelling).
 			ShellAliases: []shellAliasSpec{
 				{Name: "shell_command", Benign: "git status --short", Denies: []string{"rm -rf /tmp/x", `Remove-Item -Recurse -Force C:\work`}},
 				{Name: "functions.shell_command", Benign: "git status --short", Denies: []string{"rm -rf /tmp/x", `Remove-Item -Recurse -Force C:\work`}},
+				{Name: "exec_command", Arg: "cmd", Benign: "git status --short", Denies: []string{"rm -rf /tmp/x", `Remove-Item -Recurse -Force C:\work`}},
 			},
 		},
 		{
@@ -200,10 +202,13 @@ func looksLikeShellTool(name string) bool {
 	return strings.Contains(base, "shell")
 }
 
-// shellArgsJSON builds a `{"command": ...}` payload with json.Marshal so backslashes
-// in Windows paths (Remove-Item -Recurse -Force C:\work) are escaped correctly.
-func shellArgsJSON(cmd string) string {
-	b, _ := json.Marshal(map[string]string{"command": cmd})
+// shellArgsJSON uses the alias's real wire key and json.Marshal so backslashes in
+// Windows paths (Remove-Item -Recurse -Force C:\work) are escaped correctly.
+func shellArgsJSON(arg, cmd string) string {
+	if arg == "" {
+		arg = "command"
+	}
+	b, _ := json.Marshal(map[string]string{arg: cmd})
 	return string(b)
 }
 
@@ -272,7 +277,7 @@ func checkHarnessFloorCoverage(manifestJSON []byte) ([]string, error) {
 		}
 		for _, sh := range p.ShellAliases {
 			declared[strings.ToLower(sh.Name)] = true
-			bv, err := decide(sh.Name, shellArgsJSON(sh.Benign))
+			bv, err := decide(sh.Name, shellArgsJSON(sh.Arg, sh.Benign))
 			if err != nil {
 				return nil, err
 			}
@@ -281,7 +286,7 @@ func checkHarnessFloorCoverage(manifestJSON []byte) ([]string, error) {
 					p.Name, sh.Name, sh.Benign, verdictWord(bv)))
 			}
 			for _, danger := range sh.Denies {
-				dv, err := decide(sh.Name, shellArgsJSON(danger))
+				dv, err := decide(sh.Name, shellArgsJSON(sh.Arg, danger))
 				if err != nil {
 					return nil, err
 				}

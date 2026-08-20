@@ -981,7 +981,7 @@ func TestTUIGuardJournalHuman(t *testing.T) {
 		t.Fatalf("runTUI guard --journal human code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"fak console guard", "deny=2", "policy_block=1", "default_deny=1", "quarantine=1", "Bash"} {
+	for _, want := range []string{"fak console guard", "deny=2", "policy_block=1", "default_deny=1", "quarantine=1", "Bash", "fak guard allow --ttl 15m"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("journal pane missing %q:\n%s", want, out)
 		}

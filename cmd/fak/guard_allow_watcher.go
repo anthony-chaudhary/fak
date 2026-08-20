@@ -42,7 +42,11 @@ func newGuardAllowWatcher(interval time.Duration, reload gateway.PolicyReloadFun
 
 func guardAllowLayersSignature() (string, error) {
 	var b strings.Builder
-	for _, layer := range guardAllowOverlayPaths() {
+	// Watch the same effective layer set the reload consumes. Omitting the
+	// per-launch session layer made `guard allow --session` write a grant that
+	// could never affect its live guard: the file was only read at launch, before
+	// the child could create it, then deleted at teardown.
+	for _, layer := range guardAllowEffectiveReadLayers() {
 		b.WriteString(layer.Name)
 		b.WriteByte(0)
 		b.WriteString(layer.Path)

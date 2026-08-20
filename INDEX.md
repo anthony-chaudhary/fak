@@ -265,6 +265,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Learning observation lineage](docs/learning-observation.md) — content-addressed source/candidate/witness/verdict records and closed-enum edges; separate from witness-gated admission.
 
 ## Notes & research (`docs/notes/`)
+- [Codex `exec_command` guard recovery (2026-08-19)](docs/notes/2026-08-19-guard-codex-exec-command-default-deny.md) -- auto-indexed dated note.
 - [Harness-independent server builder research decision — 2026-08-19](docs/notes/HARNESS-INDEPENDENT-SERVER-BUILDER-RESEARCH-2026-08-19.md) -- auto-indexed dated note.
 - [Harness-bundled model serving research decision — 2026-08-19](docs/notes/HARNESS-BUNDLED-MODEL-SERVING-RESEARCH-2026-08-19.md) -- auto-indexed dated note.
 - [Harness model-set dependencies and compatibility resolution research](docs/notes/HARNESS-MODEL-SET-DEPENDENCIES-RESEARCH-2026-08-19.md) -- auto-indexed dated note.

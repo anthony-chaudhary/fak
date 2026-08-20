@@ -670,7 +670,7 @@ func runGuardAllowFromJournal(stdout, stderr io.Writer, overlayPath string, ov *
 			return 1
 		}
 		fmt.Fprintf(stdout, "\nAdded %d tool(s) to the operator allow overlay: %s\n", len(names), overlayPath)
-		fmt.Fprintln(stdout, "  Takes effect on the next `fak guard` launch.")
+		fmt.Fprintln(stdout, "  A live guard reloads this overlay automatically; otherwise it takes effect on the next launch.")
 		printGuardAllowOverlay(stdout, overlayPath, *ov)
 		return 0
 	}
@@ -727,7 +727,7 @@ func guardAllowUsage() string {
 		"usage:",
 		"  fak guard allow <tool>...              add exact tool name(s) to the always-allow overlay",
 		"  fak guard allow --prefix <prefix>...   add an allow_prefix (a tool-name PREFIX family) instead",
-		"  fak guard allow <tool> --ttl 1h        add with an EXPIRY: auto-reverted on the first launch past the window",
+		"  fak guard allow --ttl 1h <tool>        add with an EXPIRY: auto-reverted on the first launch past the window",
 		"  fak guard allow --remove <name>...     remove entr(ies) from the overlay",
 		"  fak guard allow --list                 print every effective layer with its scope, precedence and provenance",
 		"  fak guard allow --user <tool>...       write the per-user home layer instead of repo-local",

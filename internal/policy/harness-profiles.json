@@ -36,7 +36,8 @@
     { "name": "PowerShell",         "inherits": ["windows_shell"] },
     { "name": "bash",               "inherits": ["posix_shell"] },
     { "name": "shell_command",      "inherits": ["posix_shell", "windows_shell"] },
-    { "name": "functions.shell_command", "inherits": ["posix_shell", "windows_shell"] }
+    { "name": "functions.shell_command", "inherits": ["posix_shell", "windows_shell"] },
+    { "name": "exec_command",       "inherits": ["posix_shell", "windows_shell"] }
   ],
 
   "harnesses": [
@@ -54,7 +55,7 @@
     {
       "name": "codex",
       "required_tools": [
-        "shell_command", "functions.shell_command",
+        "shell_command", "functions.shell_command", "exec_command",
         "update_plan", "functions.update_plan",
         "request_user_input", "functions.request_user_input",
         "view_image", "functions.view_image",

@@ -32,8 +32,40 @@ type refusalNote struct {
 // recipe and livelock constraint trail it. The wire tests pin this order.
 var refusalNotes = []refusalNote{
 	{render: remedyNote},
+	{render: defaultDenyOperatorRemedy},
 	{render: reversibilityGateNote, confirmRecipe: true},
 	{render: livelockInBandNote},
+}
+
+// defaultDenyOperatorRemedy turns an otherwise bare DEFAULT_DENY token into a
+// live recovery choice. The agent cannot widen its own floor, so the command is
+// explicitly addressed to an operator outside the wrapped session. A short TTL
+// keeps the workaround bounded while the normal fix (updating a stale harness
+// profile or deliberately authoring the policy) is applied.
+func defaultDenyOperatorRemedy(a ToolAdjudication) string {
+	if reasonOrKind(a.Verdict) != "DEFAULT_DENY" {
+		return ""
+	}
+	tool := refusalCommandTool(a.Tool)
+	return "operator choice (outside this wrapped agent): run `fak guard allow --ttl 15m " + tool +
+		"`; the live guard reloads the temporary repo overlay automatically, then retry the open task." +
+		" Surface this choice to the operator instead of invoking it through the refused tool." +
+		" If " + tool + " is a standard harness tool, update fak too; the built-in floor should cover it."
+}
+
+func refusalCommandTool(tool string) string {
+	tool = strings.TrimSpace(tool)
+	if tool == "" {
+		return "<tool>"
+	}
+	for _, r := range tool {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			r == '_' || r == '-' || r == '.' || r == ':' {
+			continue
+		}
+		return "<tool>"
+	}
+	return tool
 }
 
 // renderRefusalNotes folds every registered renderer over one refused

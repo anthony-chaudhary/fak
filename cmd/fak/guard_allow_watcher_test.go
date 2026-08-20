@@ -77,3 +77,45 @@ func TestGuardAllowWatcherRunStopsWithContext(t *testing.T) {
 		t.Fatal("watcher did not stop with guard context")
 	}
 }
+
+func TestGuardAllowWatcherReloadsSessionScope(t *testing.T) {
+	dir := t.TempDir()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(old)
+		setGuardAllowSessionScopeID("")
+		guardAllowSessionScopeQuarantined = false
+	})
+
+	setGuardAllowSessionScopeID("watcher-test")
+	t.Setenv(guardAllowOverlayEnv, filepath.Join(dir, "base.allow.json"))
+	t.Setenv(guardDenyOverlayEnv, filepath.Join(dir, "deny.json"))
+	reload := guardPolicyReloader("")
+	if _, err := reload(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	w := newGuardAllowWatcher(time.Millisecond, reload, nil)
+	const tool = "session_live_probe"
+	verdict := func() abi.VerdictKind {
+		return adjudicator.Default.Adjudicate(context.Background(), guardToolCall(t, tool, map[string]any{})).Kind
+	}
+	if got := verdict(); got == abi.VerdictAllow {
+		t.Fatalf("precondition verdict = %v, want denied", got)
+	}
+
+	if err := saveGuardAllowOverlay(guardAllowSessionOverlayPath(), guardAllowOverlay{Allow: []string{tool}}); err != nil {
+		t.Fatal(err)
+	}
+	if e := w.Reload(context.Background()); !e.Reloaded || e.Rejected {
+		t.Fatalf("session add reload = %+v", e)
+	}
+	if got := verdict(); got != abi.VerdictAllow {
+		t.Fatalf("after session add = %v, want ALLOW", got)
+	}
+}
