@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-20T10:18:00-07:00",
+  "updated_at": "2026-08-20T12:41:45-07:00",
   "methodology": "Harness-related repositories absent by exact owner/name from tracked fak docs were ranked by direct seam relevance, current development activity, adoption signal, and license clarity. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -141,6 +141,30 @@
       "stars_at_check": 2438,
       "last_push_at_check": "2026-08-20T07:01:30Z",
       "study_note": "docs/notes/CONCEPT-STUDY-LLM-AS-A-VERIFIER-2026-08-20.md"
+    },
+    {
+      "repository": "hiraditya/hiraditya.github.io",
+      "url": "https://github.com/hiraditya/hiraditya.github.io",
+      "status": "studied",
+      "priority": 13,
+      "why": "The There Is No Address essay and its editorial history were studied as a cross-vendor disaggregation warning: public transport addresses stop before consumer-private locality. FAK can mitigate the split with a consumer-owned route-by-reference, terminal receipts, and full-route pricing; surviving leaves are #8259 and #8261.",
+      "last_checked": "2026-08-20",
+      "checked_revision": "2547c55f35391c210d274fa7ea36fcbc383b5d8a",
+      "stars_at_check": 2,
+      "last_push_at_check": "2026-08-20T16:34:48Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-THERE-IS-NO-ADDRESS-2026-08-20.md"
+    },
+    {
+      "repository": "ai-dynamo/nixl",
+      "url": "https://github.com/ai-dynamo/nixl",
+      "status": "studied",
+      "priority": 14,
+      "why": "NIXL was deeply studied at its descriptor, registration, remote-metadata, backend-selection, lifecycle, telemetry, and release seams. It is the transfer adapter beneath the essay, not an address-free universal memory model; FAK should govern consumer-ready route admission and receipts above it.",
+      "last_checked": "2026-08-20",
+      "checked_revision": "aecbc3846d92c34c7507a58d776e1fda50ff4fba",
+      "stars_at_check": 1203,
+      "last_push_at_check": "2026-08-20T19:14:30Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-THERE-IS-NO-ADDRESS-2026-08-20.md"
     }
   ]
 }
