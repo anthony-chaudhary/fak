@@ -662,6 +662,7 @@ var tier = map[string]int{
 	"subtractiveprofile":    1, // stdlib-only deterministic capability subtraction algebra (#6791).
 	"harnessmodelset":       1,
 	"modelsetresolve":       2, // deterministic role resolution composing tier-1 intent and inventory contracts.
+	"modelsetlock":          2,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
