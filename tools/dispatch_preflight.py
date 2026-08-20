@@ -60,6 +60,7 @@ import concurrent.futures
 import datetime as dt
 import functools
 import json
+import ntpath
 import os
 import re
 import shlex
@@ -327,6 +328,14 @@ _FAK_VERSION_TIMEOUT_S = 20
 _FAK_IDENTITY_CACHE: dict[tuple[str, int, int], dict[str, Any]] = {}
 
 
+def _fak_build_key(path: str | Path, size: int, mtime_ns: int, *,
+                   platform: str | None = None) -> str:
+    """Return the guard-inventory key without inventing Windows casing splits."""
+    platform = platform or os.name
+    name = ntpath.basename(str(path)).casefold() if platform == "nt" else Path(path).name
+    return f"{size}-{mtime_ns}-{name}"
+
+
 def _fak_version_text(path: str) -> tuple[str, str | None]:
     """``(stdout, error)`` from ``<path> version``. Never raises."""
     try:
@@ -346,9 +355,9 @@ def fak_build_identity(path: str | Path | None, *,
                        ) -> dict[str, Any]:
     """Identity of ONE `fak` binary: absolute path, build id, and clean/dirty.
 
-    ``build_key`` is ``<size>-<mtime_ns>-<basename>`` — byte-identical to
-    ``issue_resolve_dispatch.guard_build_id``, so a provenance row JOINS directly
-    against the guard-probe inventory already on disk in ``.dispatch-runs``.
+    ``build_key`` is ``<size>-<mtime_ns>-<basename>``. Windows basenames are
+    case-folded because its resolvers may spell one executable as both ``fak.exe``
+    and ``fak.EXE``; POSIX remains case-sensitive.
 
     ``dirty`` is True only when the binary itself reports ``+uncommitted`` — a
     build compiled from an unreviewed working tree. ``None`` means "could not be
@@ -363,7 +372,7 @@ def fak_build_identity(path: str | Path | None, *,
         st = p.stat()
         row["size"] = st.st_size
         row["mtime_ns"] = st.st_mtime_ns
-        row["build_key"] = f"{st.st_size}-{st.st_mtime_ns}-{p.name}"
+        row["build_key"] = _fak_build_key(p, st.st_size, st.st_mtime_ns)
     except OSError as exc:
         row["error"] = str(exc)
         return row
@@ -425,7 +434,10 @@ def fak_bin_provenance(root: Path, env: dict[str, str] | None = None, *,
     ident = identity or fak_build_identity
     resolutions = fak_bin_resolutions(root, env)
     rows = {name: ident(path) for name, path in resolutions.items()}
-    keys = {r.get("build_key") for r in rows.values() if r.get("build_key")}
+    # The stat key distinguishes on-disk candidates; the reported revision catches
+    # the rarer same-metadata rebuild. Unknown revisions retain the stat-only key.
+    keys = {(r.get("build_key"), r.get("build"))
+            for r in rows.values() if r.get("build_key")}
     builds = sorted({str(r["build"]) for r in rows.values() if r.get("build")})
     return {
         "schema": FAK_BIN_PROVENANCE_SCHEMA,

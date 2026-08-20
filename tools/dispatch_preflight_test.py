@@ -1745,6 +1745,43 @@ class FakBinProvenanceTest(unittest.TestCase):
         self.assertTrue(any(w.startswith("DIRTY_FAK_BIN") for w in warns))
         self.assertTrue(any(w.startswith("FAK_BIN_DISAGREEMENT") for w in warns))
 
+    def test_windows_case_variants_share_one_build_identity(self) -> None:
+        mod = self.mod
+        mod.fak_bin_resolutions = lambda root, env=None: {
+            "preflight_gate": r"C:\fixture\bin\fak.exe",
+            "path": r"C:\fixture\bin\fak.EXE"}
+
+        def ident(path, **kw):
+            return {"path": path, "resolved": True, "size": 7, "mtime_ns": 11,
+                    "build": "abc123def456", "dirty": False,
+                    "build_key": mod._fak_build_key(path, 7, 11, platform="nt")}
+
+        prov = mod.fak_bin_provenance(ROOT, identity=ident)
+        self.assertTrue(prov["agree"])
+        self.assertEqual(prov["distinct_builds"], 1)
+        self.assertEqual(mod.fak_bin_warnings(prov), [])
+
+    def test_different_file_or_revision_still_disagrees(self) -> None:
+        mod = self.mod
+        mod.fak_bin_resolutions = lambda root, env=None: {
+            "preflight_gate": r"C:\one\fak.exe", "path": r"C:\two\fak.exe"}
+        rows = {
+            r"C:\one\fak.exe": {"build_key": "7-11-fak.exe", "build": "rev-a"},
+            r"C:\two\fak.exe": {"build_key": "8-12-fak.exe", "build": "rev-b"},
+        }
+
+        def ident(path, **kw):
+            return {"path": path, "resolved": True, "dirty": False, **rows[path]}
+
+        prov = mod.fak_bin_provenance(ROOT, identity=ident)
+        self.assertFalse(prov["agree"])
+        self.assertEqual(prov["distinct_builds"], 2)
+
+        rows[r"C:\two\fak.exe"]["build_key"] = "7-11-fak.exe"
+        same_metadata = mod.fak_bin_provenance(ROOT, identity=ident)
+        self.assertFalse(same_metadata["agree"])
+        self.assertEqual(same_metadata["distinct_builds"], 2)
+
     def test_one_clean_agreeing_build_is_silent(self) -> None:
         """No warning when there is nothing to warn about -- an advisory that fires
         every tick is an advisory nobody reads."""
