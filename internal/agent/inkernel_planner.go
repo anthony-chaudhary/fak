@@ -77,16 +77,16 @@ type InKernelPlanner struct {
 	scopedTree *radixkv.ScopedTree
 
 	// devMu serializes the WHOLE device forward pass (Prefill + the decode loop) when a
-	// backend is wired. The CUDA backend is single-stream by construction (one g_stream, one
-	// cuBLAS handle, a shared size-bucketed device free-list) and its Go-side cudaMu makes
+	// backend or native Metal is wired. These accelerators have one shared command stream and
+	// model-level buffers. The CUDA backend's Go-side cudaMu makes
 	// each INDIVIDUAL op atomic — but NOT a whole multi-op forward. Two Complete calls driven
 	// concurrently by the gateway would interleave their per-token op sequences on that shared
 	// device state and stomp each other's activation/KV buffers, faulting the kernel with an
 	// illegal memory access that then poisons the CUDA context for every later request until a
 	// process restart (observed live on an L4: a 2-way concurrent burst took the GPU serve down
-	// with thousands of sticky cuda_kernels.cu illegal-access errors). The radix-reuse path
-	// (backend == nil) is already CPU-session-local per turn and guards only its shared tree
-	// with p.mu, so devMu engages ONLY on the backend path and leaves the CPU path untouched.
+	// with thousands of sticky cuda_kernels.cu illegal-access errors). The plain CPU path is
+	// already session-local per turn and guards only its shared tree with p.mu, so devMu leaves
+	// it untouched.
 	// This serializes concurrent device requests into safe queuing — correct for a single-stream
 	// device — instead of crashing; batched multi-user device decode is the separate throughput
 	// follow-up (internal/model/batch.go), not a correctness fix.
@@ -823,12 +823,11 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		return false
 	}
 
-	// Serialize the entire device forward pass: the single-stream backend cannot run two
+	// Serialize the entire device forward pass: a single-stream accelerator cannot run two
 	// forwards at once without the concurrent op-streams corrupting shared device buffers
-	// (see devMu). On the CPU path (backend == nil) this is a no-op hold — generateReused
-	// owns a per-turn session there and guards the shared radix tree with p.mu itself — so
-	// the lock costs nothing and the reuse path is unchanged. Held across Prefill + decode.
-	if p.backend != nil {
+	// (see devMu). The plain CPU path owns a per-turn session and guards the shared radix tree
+	// with p.mu itself, so it remains concurrent. Held across Prefill + decode.
+	if p.requiresDeviceSerialization() {
 		p.devMu.Lock()
 		defer p.devMu.Unlock()
 		if err := p.refuseOversizeRequest(len(ids), maxNew); err != nil {
@@ -942,6 +941,10 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		comp.ToolCallsDropped = true
 	}
 	return comp, nil
+}
+
+func (p *InKernelPlanner) requiresDeviceSerialization() bool {
+	return p != nil && (p.backend != nil || p.metal)
 }
 
 const inKernelRequestDeviceHeadroom = 0.15

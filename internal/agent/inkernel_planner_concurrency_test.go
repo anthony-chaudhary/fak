@@ -124,6 +124,30 @@ func TestInKernelConcurrentDeviceCompleteSerializes(t *testing.T) {
 	}
 }
 
+func TestInKernelDeviceSerializationIncludesNativeMetal(t *testing.T) {
+	backend, ok := compute.Lookup("cpu-ref")
+	if !ok {
+		t.Fatal("cpu-ref backend not registered")
+	}
+	tests := []struct {
+		name string
+		p    *InKernelPlanner
+		want bool
+	}{
+		{name: "nil", p: nil, want: false},
+		{name: "cpu", p: &InKernelPlanner{}, want: false},
+		{name: "generic-device", p: &InKernelPlanner{backend: backend}, want: true},
+		{name: "native-metal", p: &InKernelPlanner{metal: true}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.p.requiresDeviceSerialization(); got != tt.want {
+				t.Fatalf("requiresDeviceSerialization() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestInKernelCPUPathUnaffectedByDevMu confirms the fix is a no-op on the CPU path: a
 // nil-backend planner still completes (the devMu hold only engages when backend != nil),
 // so the radix-reuse / CPU-session path is byte-for-byte unchanged.
