@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -165,17 +166,20 @@ func TestDispatchWorkerPreflightParsesCodexQuotaCooldown(t *testing.T) {
 
 func TestDispatchWorkerPreflightHardRefusalsSkipLeaseAndWorkerSpawn(t *testing.T) {
 	tests := []struct {
-		name string
-		obs  dispatchCodexPreflightObservation
-		want string
+		name    string
+		guarded bool
+		obs     dispatchCodexPreflightObservation
+		want    string
 	}{
 		{
-			name: "invalid auth",
-			obs:  dispatchCodexPreflightObservation{AuthError: "refresh token revoked"},
-			want: dispatchWorkerPreflightAuthInvalid,
+			name:    "invalid auth",
+			guarded: true,
+			obs:     dispatchCodexPreflightObservation{AuthError: "refresh token revoked"},
+			want:    dispatchWorkerPreflightAuthInvalid,
 		},
 		{
-			name: "unsupported model",
+			name:    "unsupported model",
+			guarded: true,
 			obs: dispatchCodexPreflightObservation{
 				Authenticated: true,
 				AccountType:   "chatgpt",
@@ -183,10 +187,24 @@ func TestDispatchWorkerPreflightHardRefusalsSkipLeaseAndWorkerSpawn(t *testing.T
 			},
 			want: dispatchWorkerPreflightModelUnsupported,
 		},
+		{
+			name: "unguarded launch",
+			obs: dispatchCodexPreflightObservation{
+				Authenticated: true,
+				AccountType:   "chatgpt",
+				Models:        []string{"gpt-5.6-sol"},
+			},
+			want: dispatchWorkerPreflightRouteMisconfigured,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			root, _ := dispatchCodexGateFixture(t, false)
+			if tc.guarded {
+				t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", healthyDispatchProvider(t)+"/v1")
+			} else {
+				t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", "")
+			}
 			setDispatchWorkerPreflightProbe(t, func(context.Context, dispatchWorkerPreflightRequest) (dispatchCodexPreflightObservation, error) {
 				return tc.obs, nil
 			})
@@ -221,6 +239,13 @@ func TestDispatchWorkerPreflightHardRefusalsSkipLeaseAndWorkerSpawn(t *testing.T
 			}
 			if got["admitted_workers"] != float64(0) {
 				t.Fatalf("admitted_workers = %#v, want 0", got["admitted_workers"])
+			}
+			if !tc.guarded {
+				preflight := mapAt(got, "worker_preflight")
+				reason := dispatchMapString(preflight, "reason")
+				if preflight["guarded"] != false || !strings.Contains(reason, "FLEET_DOGFOOD_GUARD_BASEURL") || !strings.Contains(reason, "fak guard --base-url") {
+					t.Fatalf("unguarded refusal omitted exact remedy: %#v", preflight)
+				}
 			}
 		})
 	}

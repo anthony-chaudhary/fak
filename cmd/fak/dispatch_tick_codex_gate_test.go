@@ -147,20 +147,18 @@ func TestDispatchTickLiveCodexStillRefusesUnguardedChild(t *testing.T) {
 		t.Fatal("unguarded Codex child reached the live spawner")
 	}
 
-	if got["action"] != "codex_loop_gate_refused" || got["verdict"] != "CODEX_LOOP_GATE_REFUSED" || got["ok"] != false {
-		t.Fatalf("dispatch result = action %v verdict %v ok %v, want codex_loop_gate_refused/CODEX_LOOP_GATE_REFUSED/false", got["action"], got["verdict"], got["ok"])
+	if got["action"] != "worker_preflight_refused" || got["verdict"] != dispatchWorkerPreflightRouteMisconfigured || got["ok"] != false {
+		t.Fatalf("dispatch result = action %v verdict %v ok %v, want worker_preflight_refused/%s/false", got["action"], got["verdict"], got["ok"], dispatchWorkerPreflightRouteMisconfigured)
 	}
-	gate := mapAt(got, "codex_loop_gate")
-	parent := mapAt(gate, "parent")
-	launch := mapAt(gate, "launch")
-	if dispatchMapString(gate, "reason") != "codex_session_bypassed_fak_guard" ||
-		dispatchMapString(parent, "session_id") != threadID ||
-		parent["guard_witnessed"] != false ||
-		launch["guarded"] != false ||
-		dispatchMapString(gate, "action") != "refused" ||
-		dispatchMapString(gate, "next_action") != "prepare the child through fak guard before spawning" {
-		t.Fatalf("codex loop gate receipt = %#v", gate)
+	preflight := mapAt(got, "worker_preflight")
+	reason := dispatchMapString(preflight, "reason")
+	if preflight["guarded"] != false || !strings.Contains(reason, "FLEET_DOGFOOD_GUARD_BASEURL") || !strings.Contains(reason, "fak guard --base-url") {
+		t.Fatalf("worker preflight receipt = %#v", preflight)
 	}
+	if _, acquired := got["lease"]; acquired {
+		t.Fatalf("unguarded worker acquired a lane before refusal: %#v", got["lease"])
+	}
+	_ = threadID
 }
 
 func healthyDispatchProvider(t *testing.T) string {
@@ -271,8 +269,8 @@ func runDispatchCodexGateTickMode(t *testing.T, root string, live bool) (map[str
 	}
 	args = append(args, "--json")
 	out, errb, code := runDispatchAt(args...)
-	if code != 0 {
-		t.Fatalf("dispatch tick exit = %d, want 0 (stderr: %s)\n%s", code, errb, out)
+	if code != 0 && code != 1 {
+		t.Fatalf("dispatch tick exit = %d, want a typed receipt (stderr: %s)\n%s", code, errb, out)
 	}
 	if !json.Valid([]byte(out)) {
 		t.Fatalf("dispatch tick emitted invalid JSON:\n%s", out)
