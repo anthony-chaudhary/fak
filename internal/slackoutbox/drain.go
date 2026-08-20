@@ -173,17 +173,11 @@ func (o *Outbox) Plan() ([]PlanItem, *Snapshot, error) {
 func (o *Outbox) Drain(ctx context.Context, w Wire, opts DrainOpts) (*DrainReport, error) {
 	opts = opts.norm()
 
-	lock, err := os.OpenFile(filepath.Join(o.dir, lockFile), os.O_CREATE|os.O_RDWR, 0o644)
+	lock, err := o.acquireDrainLock()
 	if err != nil {
 		return nil, err
 	}
 	defer lock.Close()
-	if err := flock.TryLock(lock); err != nil {
-		if errors.Is(err, flock.ErrLockBusy) {
-			return nil, ErrDrainBusy
-		}
-		return nil, err
-	}
 	defer func() { _ = flock.Unlock(lock) }()
 
 	plan, snap, err := o.Plan()
@@ -375,6 +369,21 @@ func (o *Outbox) Drain(ctx context.Context, w Wire, opts DrainOpts) (*DrainRepor
 		return rep, err
 	}
 	return rep, nil
+}
+
+func (o *Outbox) acquireDrainLock() (*os.File, error) {
+	lock, err := os.OpenFile(filepath.Join(o.dir, lockFile), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err := flock.TryLock(lock); err != nil {
+		_ = lock.Close()
+		if errors.Is(err, flock.ErrLockBusy) {
+			return nil, ErrDrainBusy
+		}
+		return nil, err
+	}
+	return lock, nil
 }
 
 // resolveParent decides how a deferred reply (ParentNonce set) threads. ok returns the
