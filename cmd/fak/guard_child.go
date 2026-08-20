@@ -778,6 +778,9 @@ func resolveWindowsBatchCommand(command []string) []string {
 	if err != nil {
 		return command
 	}
+	if absolute, err := filepath.Abs(resolved); err == nil {
+		resolved = absolute
+	}
 	// CreateProcess cannot execute a batch file directly. Front the npm shim with
 	// cmd.exe while preserving every original argument as a distinct argv element.
 	comspec := strings.TrimSpace(os.Getenv("ComSpec"))
