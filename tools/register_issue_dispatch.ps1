@@ -26,6 +26,7 @@ value is baked into the stored argument list) -- re-run install to pick up a new
   .\register_issue_dispatch.ps1 -Mode resolve -Live   # install, LIVE single-tick canary
   .\register_issue_dispatch.ps1 -TaskName FleetIssueDispatchThroughput -Goal throughput
   .\register_issue_dispatch.ps1 -TaskName FleetIssueDispatchPriority -Goal high-priority
+  .\register_issue_dispatch.ps1 -TaskName FleetIssueDispatchCodex -Backend codex -Live
   .\register_issue_dispatch.ps1 -Action preview        # print the task action without installing
   .\register_issue_dispatch.ps1 -Action status
   .\register_issue_dispatch.ps1 -Action remove
@@ -52,10 +53,10 @@ param(
   #   loop -> issue_dispatch.py: spawns the generic /dos-dispatch-loop worker that
   #     resolves units from the PLAN portfolio (use when the repo ships PLAN-*.md).
   [ValidateSet('auto','resolve','loop')] [string]$Mode = 'auto',
-  # Worker backend (resolve mode only): claude = opus (t1); opencode = glm-5.2 (t2,
-  # a separate zai-coding-plan quota pool). Route a lane to opencode to relieve the
-  # opus weekly-quota ceiling. Pair with -Lane to dedicate a task to one lane.
-  [ValidateSet('claude','opencode')] [string]$Backend = 'claude',
+  # Worker backend for auto/resolve: claude = opus (t1); opencode = glm-5.2 (t2,
+  # a separate quota pool); codex = the Guard-fronted Codex subscription.
+  # Pair with -Lane to dedicate a task to one lane.
+  [ValidateSet('claude','opencode','codex')] [string]$Backend = 'claude',
   [string]$Lane = '',
   # Comma-separated lanes to drop from the busiest-pick (e.g. the opus task excludes
   # 'docs' so the glm task owns it). Ignored when -Lane is set.
@@ -267,7 +268,9 @@ Write-Output "installed $TaskName -- every $EveryMinutes min, arm=$Mode ($tickNa
 Write-Output "loop ledger:  .fak\loops.jsonl via fak loop run ($wrapperLoop)"
 Write-Output "check status any time:  python tools\dispatch_status.py"
 if (-not $Live) {
-  $goLive = ".\tools\register_issue_dispatch.ps1 -Live -Mode $Mode -MaxWorkers $MaxWorkers"
+  $goLive = ".\tools\register_issue_dispatch.ps1 -Live -Mode $Mode -MaxWorkers $MaxWorkers -Backend $Backend"
+  if ($Lane)        { $goLive += " -Lane `"$Lane`"" }
+  if ($ExcludeLane) { $goLive += " -ExcludeLane `"$ExcludeLane`"" }
   if ($goalCfg.Goal)     { $goLive += " -Goal `"$($goalCfg.Goal)`"" }
   if ($goalProfileInput) { $goLive += " -GoalProfile `"$($goalCfg.Profile)`"" }
   Write-Output "to go live later:  $goLive"
