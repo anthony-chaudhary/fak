@@ -718,6 +718,9 @@ func repoTop(t *testing.T) string {
 // shadow roots accumulate and stays green when they are cleaned up.
 func TestLiveTreeInvariantAndShadowCensus(t *testing.T) {
 	top := repoTop(t)
+	if _, err := os.Stat(filepath.Join(top, StateDir)); errors.Is(err, os.ErrNotExist) {
+		t.Skipf("no runtime %s root in this clean checkout; missing-root refusal is covered by the constructed fixtures", StateDir)
+	}
 
 	if v := CheckRoot(top, top); !v.Authoritative {
 		t.Fatalf("the repository root is not its own state root: %s\n"+
