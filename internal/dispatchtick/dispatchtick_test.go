@@ -296,3 +296,44 @@ func TestBuildWorkerCommandRejectsUnboundOpenCode(t *testing.T) {
 		t.Fatalf("err = %v, want account-bound refusal", err)
 	}
 }
+
+func TestGuardedLaunchCommandEdgeAndAdversarialInputs(t *testing.T) {
+	tests := []struct {
+		name      string
+		command   []string
+		fakBin    string
+		backend   string
+		baseURL   string
+		guarded   bool
+		wantExact []string
+		want      []string
+		notWant   []string
+	}{
+		{name: "empty command refuses guard without panic", command: nil, fakBin: "fak", backend: "codex", guarded: false, wantExact: nil},
+		{name: "blank fak binary preserves command", command: []string{"codex", "exec", "-"}, fakBin: " \t", backend: "codex", guarded: false, wantExact: []string{"codex", "exec", "-"}},
+		{name: "non-Codex OpenAI backend requires endpoint", command: []string{"opencode", "run", "prompt"}, fakBin: "fak", backend: "opencode", guarded: false, wantExact: []string{"opencode", "run", "prompt"}},
+		{name: "Codex subscription rejects whitespace endpoint without emitting it", command: []string{"codex", "exec", "--", "hostile;still-argv"}, fakBin: "fak", backend: "codex", baseURL: " \r\n", guarded: true, want: []string{"--provider", "openai", "--codex-loop-gate", "off", "hostile;still-argv"}, notWant: []string{"--base-url"}},
+		{name: "Codex explicit endpoint remains one argv value", command: []string{"codex", "exec", "-"}, fakBin: "fak", backend: "codex", baseURL: "http://127.0.0.1:18080/v1?x=a;b", guarded: true, want: []string{"--base-url", "http://127.0.0.1:18080/v1?x=a;b"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, guarded := GuardedLaunchCommand(tc.command, tc.fakBin, "docs", tc.backend, "/repo", tc.baseURL)
+			if guarded != tc.guarded {
+				t.Fatalf("guarded = %v, want %v; argv=%q", guarded, tc.guarded, got)
+			}
+			if tc.wantExact != nil && !reflect.DeepEqual(got, tc.wantExact) {
+				t.Fatalf("argv = %#v, want %#v", got, tc.wantExact)
+			}
+			for _, arg := range tc.want {
+				if !slices.Contains(got, arg) {
+					t.Errorf("argv %q missing exact argument %q", got, arg)
+				}
+			}
+			for _, arg := range tc.notWant {
+				if slices.Contains(got, arg) {
+					t.Errorf("argv %q unexpectedly contains %q", got, arg)
+				}
+			}
+		})
+	}
+}
