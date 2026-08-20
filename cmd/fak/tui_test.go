@@ -1484,6 +1484,45 @@ func TestTUIConfigPaneJSONFromConfig(t *testing.T) {
 	if report.Counts.PaneDefaults != 3 || !hasTUIConfigDefault(report.Defaults, "issues", "json", "--json", "true") || !hasTUIConfigDefault(report.Defaults, "issues", "top", "--top", "40") || !hasTUIConfigDefault(report.Defaults, "guard", "color", "--color", "never") {
 		t.Fatalf("defaults = %+v", report.Defaults)
 	}
+	if !hasTUIConfigSetting(report.Settings, "guard", "color", "never", "saved") || !hasTUIConfigSetting(report.Settings, "issues", "state", "open", "built-in") {
+		t.Fatalf("settings = %+v", report.Settings)
+	}
+}
+
+func TestTUIConfigPaneRendersAvailableSettingsWithoutConfig(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "missing-console.json")
+	for _, width := range []string{"120", "72"} {
+		t.Run("width="+width, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := runTUI(&stdout, &stderr, []string{
+				"config",
+				"--path", cfg,
+				"--at", "2026-06-25T12:10:00Z",
+				"--width", width,
+			})
+			if code != 0 {
+				t.Fatalf("runTUI config code=%d stderr=%s", code, stderr.String())
+			}
+			out := stdout.String()
+			for _, want := range []string{
+				"fak console config  at=2026-06-25T12:10:00Z  status=missing",
+				"available_settings=",
+				"\nSettings\n",
+				"guard.color  effective=auto  source=built-in",
+				"options=auto|always|never",
+				`set: fak console config --path "` + cfg + `" --set-default "guard.color=auto"`,
+				`reset: fak console config --path "` + cfg + `" --unset-default guard.color`,
+				"issues.json  effective=false  source=built-in",
+			} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("width=%s output missing %q:\n%s", width, want, out)
+				}
+			}
+			if strings.Contains(out, "sessions.key") {
+				t.Fatalf("width=%s settings surface exposed sensitive sessions.key:\n%s", width, out)
+			}
+		})
+	}
 }
 
 func TestTUIConfigPaneUsesConsoleConfigAlias(t *testing.T) {
@@ -1808,6 +1847,15 @@ func tuiPaneControlByID(controls []tuiplugin.Control, id string) (tuiplugin.Cont
 func hasTUIConfigDefault(defaults []tuiConfigDefault, pane, control, flag, value string) bool {
 	for _, def := range defaults {
 		if def.Pane == pane && def.Control == control && def.Flag == flag && def.Value == value {
+			return true
+		}
+	}
+	return false
+}
+
+func hasTUIConfigSetting(settings []tuiConfigSetting, pane, control, effective, source string) bool {
+	for _, setting := range settings {
+		if setting.Pane == pane && setting.Control == control && setting.Effective == effective && setting.Source == source {
 			return true
 		}
 	}

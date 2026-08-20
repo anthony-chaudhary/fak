@@ -26,11 +26,13 @@ type tuiConfigReport struct {
 	Counts   tuiConfigCounts    `json:"counts"`
 	Panes    []string           `json:"overview_panes,omitempty"`
 	Defaults []tuiConfigDefault `json:"defaults,omitempty"`
+	Settings []tuiConfigSetting `json:"settings,omitempty"`
 }
 
 type tuiConfigCounts struct {
-	OverviewPanes int `json:"overview_panes"`
-	PaneDefaults  int `json:"pane_defaults"`
+	OverviewPanes     int `json:"overview_panes"`
+	PaneDefaults      int `json:"pane_defaults"`
+	AvailableSettings int `json:"available_settings"`
 }
 
 type tuiConfigDefault struct {
@@ -39,6 +41,19 @@ type tuiConfigDefault struct {
 	Flag    string   `json:"flag,omitempty"`
 	Value   string   `json:"value"`
 	Tags    []string `json:"tags,omitempty"`
+}
+
+type tuiConfigSetting struct {
+	Pane         string   `json:"pane"`
+	Control      string   `json:"control"`
+	Label        string   `json:"label"`
+	Kind         string   `json:"kind"`
+	Flag         string   `json:"flag"`
+	Effective    string   `json:"effective"`
+	Source       string   `json:"source"` // built-in|saved
+	Options      []string `json:"options,omitempty"`
+	SetCommand   string   `json:"set_command"`
+	ResetCommand string   `json:"reset_command"`
 }
 
 func init() {
@@ -228,20 +243,24 @@ func buildTUIConfigReport(path string, at time.Time) tuiConfigReport {
 	}
 	if report.Path == "" {
 		report.Status = "missing"
+		populateTUIConfigSettings(&report, tuiConsoleConfig{})
 		return report
 	}
 	if _, err := os.Stat(report.Path); err != nil {
 		if os.IsNotExist(err) {
+			populateTUIConfigSettings(&report, tuiConsoleConfig{})
 			return report
 		}
 		report.Status = "error"
 		report.Error = err.Error()
+		populateTUIConfigSettings(&report, tuiConsoleConfig{})
 		return report
 	}
 	cfg, source, err := loadTUIConsoleConfig(report.Path)
 	if err != nil {
 		report.Status = "error"
 		report.Error = err.Error()
+		populateTUIConfigSettings(&report, tuiConsoleConfig{})
 		return report
 	}
 	if source != "" {
@@ -252,7 +271,95 @@ func buildTUIConfigReport(path string, at time.Time) tuiConfigReport {
 	report.Defaults = buildTUIConfigDefaults(cfg)
 	report.Counts.OverviewPanes = len(report.Panes)
 	report.Counts.PaneDefaults = len(report.Defaults)
+	populateTUIConfigSettings(&report, cfg)
 	return report
+}
+
+func populateTUIConfigSettings(report *tuiConfigReport, cfg tuiConsoleConfig) {
+	report.Settings = buildTUIConfigSettings(cfg, report.Path)
+	report.Counts.AvailableSettings = len(report.Settings)
+}
+
+func buildTUIConfigSettings(cfg tuiConsoleConfig, path string) []tuiConfigSetting {
+	settings := []tuiConfigSetting{}
+	for _, pane := range tuiplugin.Descriptors() {
+		if pane.ID == "config" {
+			continue
+		}
+		for _, control := range pane.Controls {
+			if !persistableTUIConfigControl(control) {
+				continue
+			}
+			effective, source := effectiveTUIConfigValue(control, cfg.PaneDefaults[pane.ID][control.ID])
+			ref := pane.ID + "." + control.ID
+			settings = append(settings, tuiConfigSetting{
+				Pane:         pane.ID,
+				Control:      control.ID,
+				Label:        control.Label,
+				Kind:         control.Kind,
+				Flag:         control.Flag,
+				Effective:    effective,
+				Source:       source,
+				Options:      append([]string(nil), control.Options...),
+				SetCommand:   formatTUIConfigMutationCommand(path, "--set-default", ref+"="+suggestedTUIConfigValue(control, effective)),
+				ResetCommand: formatTUIConfigMutationCommand(path, "--unset-default", ref),
+			})
+		}
+	}
+	return settings
+}
+
+func persistableTUIConfigControl(control tuiplugin.Control) bool {
+	if strings.TrimSpace(control.Flag) == "" || control.Flag == "--console-config" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(control.Kind)) {
+	case "toggle", "flag", "input", "select":
+	default:
+		return false
+	}
+	name := strings.Trim(strings.ToLower(control.ID+" "+control.Flag), "- ")
+	for _, token := range strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' || r == ' ' }) {
+		switch token {
+		case "key", "password", "secret", "token":
+			return false
+		}
+	}
+	return true
+}
+
+func effectiveTUIConfigValue(control tuiplugin.Control, raw json.RawMessage) (string, string) {
+	if len(raw) > 0 {
+		if args, err := defaultArgsForTUIControl(control, raw); err == nil && len(args) > 0 {
+			return compactTUIConfigDefaultValue(raw), "saved"
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(control.Kind), "toggle") && strings.TrimSpace(control.Default) == "" {
+		return "false", "built-in"
+	}
+	return strings.TrimSpace(control.Default), "built-in"
+}
+
+func suggestedTUIConfigValue(control tuiplugin.Control, effective string) string {
+	if strings.EqualFold(strings.TrimSpace(control.Kind), "toggle") && effective == "false" {
+		return "true"
+	}
+	if effective != "" {
+		return effective
+	}
+	if len(control.Options) > 0 {
+		return control.Options[0]
+	}
+	return "<value>"
+}
+
+func formatTUIConfigMutationCommand(path, action, value string) string {
+	argument := value
+	if action != "--unset-default" || strings.ContainsAny(argument, " \t\"") {
+		argument = `"` + strings.ReplaceAll(argument, `"`, `\"`) + `"`
+	}
+	return fmt.Sprintf("fak console config --path \"%s\" %s %s",
+		strings.ReplaceAll(path, `"`, `\"`), action, argument)
 }
 
 func buildTUIConfigDefaults(cfg tuiConsoleConfig) []tuiConfigDefault {
@@ -334,7 +441,23 @@ func renderTUIConfig(report tuiConfigReport, width int) string {
 	if report.Error != "" {
 		fmt.Fprintf(&b, "error=%s\n", trimTUI(report.Error, maxTUI(20, width-6)))
 	}
-	fmt.Fprintf(&b, "overview_panes=%d  pane_defaults=%d\n", report.Counts.OverviewPanes, report.Counts.PaneDefaults)
+	fmt.Fprintf(&b, "overview_panes=%d  pane_defaults=%d  available_settings=%d\n",
+		report.Counts.OverviewPanes, report.Counts.PaneDefaults, report.Counts.AvailableSettings)
+	if len(report.Settings) > 0 {
+		fmt.Fprintln(&b, "\nSettings")
+		for _, setting := range report.Settings {
+			effective := setting.Effective
+			if effective == "" {
+				effective = "(unset)"
+			}
+			fmt.Fprintf(&b, "%s.%s  effective=%s  source=%s\n", setting.Pane, setting.Control, effective, setting.Source)
+			if len(setting.Options) > 0 {
+				fmt.Fprintf(&b, "  options=%s\n", strings.Join(setting.Options, "|"))
+			}
+			fmt.Fprintf(&b, "  set: %s\n", setting.SetCommand)
+			fmt.Fprintf(&b, "  reset: %s\n", setting.ResetCommand)
+		}
+	}
 	if len(report.Panes) > 0 {
 		fmt.Fprintln(&b, "\nOverview Panes")
 		for i, pane := range report.Panes {
