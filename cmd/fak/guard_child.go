@@ -760,15 +760,20 @@ const guardActiveEnv = "FAK_GUARD_ACTIVE"
 
 func buildGuardChild(command []string, injected [][2]string, pinUpstream bool, extraEnv ...[2]string) *exec.Cmd {
 	command, env := guardChildCommandEnv(command, injected, pinUpstream, extraEnv...)
-	child := exec.Command(command[0], command[1:]...)
+	child := newResolvedExecCommand(command)
 	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
 	child.Env = env
 	return child
 }
 
+func newResolvedExecCommand(command []string) *exec.Cmd {
+	command = resolveWindowsBatchCommand(command)
+	return exec.Command(command[0], command[1:]...)
+}
+
 // resolveWindowsBatchCommand preserves Windows PATH semantics for npm-installed agent
-// shims. os/exec does not execute .cmd files when the extensionless name resolves only
-// through PATHEXT, so resolve the concrete shim before starting the guarded child.
+// shims. Keep this at the exec boundary: replacing codex with node earlier erases the
+// harness identity that provider wiring, native hooks, and session reporting consume.
 func resolveWindowsBatchCommand(command []string) []string {
 	if runtime.GOOS != "windows" || len(command) == 0 || strings.ContainsAny(command[0], `/\`) || filepath.Ext(command[0]) != "" {
 		return command
@@ -925,7 +930,7 @@ func guardExecLauncher(grant toolprocgate.SpawnGrant) (*exec.Cmd, error) {
 	if len(grant.Argv) == 0 {
 		return nil, fmt.Errorf("empty brokered argv")
 	}
-	child := exec.Command(grant.Argv[0], grant.Argv[1:]...)
+	child := newResolvedExecCommand(grant.Argv)
 	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
 	child.Env = toolprocgate.EnvStrings(grant.Env)
 	child.Dir = grant.CWD

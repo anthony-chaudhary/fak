@@ -2,11 +2,35 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestManagedGuardResolvesWindowsShimOnlyAtExecBoundary(t *testing.T) {
+	guardSource, err := os.ReadFile("guard.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(guardSource, []byte("resolveWindowsBatchCommand(")) {
+		t.Fatal("cmdManageCommand resolves the Windows shim before Codex wiring; keep executable resolution inside buildGuardChild")
+	}
+
+	childSource, err := os.ReadFile("guard_child.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	envAt := bytes.Index(childSource, []byte("command, env := guardChildCommandEnv("))
+	buildAt := bytes.Index(childSource, []byte("child := newResolvedExecCommand(command)"))
+	resolveAt := bytes.Index(childSource, []byte("command = resolveWindowsBatchCommand(command)"))
+	execAt := bytes.Index(childSource, []byte("return exec.Command(command[0]"))
+	brokerAt := bytes.Index(childSource, []byte("child := newResolvedExecCommand(grant.Argv)"))
+	if envAt < 0 || buildAt < envAt || resolveAt < buildAt || execAt < resolveAt || brokerAt < execAt {
+		t.Fatalf("guard child preparation order lost semantic-command wiring: env=%d build=%d resolve=%d exec=%d broker=%d", envAt, buildAt, resolveAt, execAt, brokerAt)
+	}
+}
 
 // guard_codex_test.go — coverage for the first-class `fak guard -- codex` install path
 // (guard_codex.go). TestGuardDetectProvider already proves codex AUTODETECTS to the

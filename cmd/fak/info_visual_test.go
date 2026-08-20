@@ -101,6 +101,31 @@ func provenVisualVars() guardInfoVars {
 	return v
 }
 
+func TestManagedCodexAgentAndSavingsCapturedRender(t *testing.T) {
+	v := provenVisualVars()
+	v.Sessions = []guardInfoSession{{
+		TraceID: "codex-live", Run: "running", ElapsedSeconds: 42, TurnsLeft: 7,
+		LastTool: "Read", InflightSeconds: 3,
+	}}
+	tr := newGuardInfoTrend(guardInfoTrendCap)
+	tr.push(v)
+
+	captured := renderGuardInfoVisualBlock(v, tr, 140, 0)
+	for _, want := range []string{
+		"agent  codex-live · root · running",
+		"tool Read · in-flight 3s",
+		"saving money",
+		"+12,345 tok",
+	} {
+		if !strings.Contains(captured, want) {
+			t.Fatalf("managed Codex TUI capture missing %q:\n%s", want, captured)
+		}
+	}
+	if strings.Contains(captured, "nothing yet") {
+		t.Fatalf("live managed Codex capture regressed to an empty producer state:\n%s", captured)
+	}
+}
+
 // TestRenderGuardInfoVisualBlockContent proves the full-height block carries both sub-panes and
 // the live numbers in plain words: the trends gutter labels, the tasks gutter labels, the section
 // rules, the gauge/sparkline glyphs, the cache verdict, and the safety counters.

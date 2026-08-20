@@ -680,7 +680,6 @@ func cmdManageCommand(commandName string, argv []string) {
 		}
 	}
 	pathLookupDur = time.Since(tPath)
-	command = resolveWindowsBatchCommand(command)
 
 	requireKey, ok := resolveRequiredKey(*requireKeyEnv, os.Getenv)
 	if !ok {
