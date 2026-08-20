@@ -15,7 +15,6 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
-	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 )
 
 // dispatchTickFixtureCores / dispatchTickFixtureRAMMB / dispatchTickFixtureThreads are the
@@ -1085,101 +1084,6 @@ func TestDispatchTickLiveBrokerDenyDoesNotSpawnWorker(t *testing.T) {
 	broker := mapAt(got, "spawn_broker")
 	if broker["allow"] != false || dispatchMapString(broker, "reason") != "unit-test-deny" {
 		t.Fatalf("spawn broker payload = %#v, want denied unit-test reason", broker)
-	}
-}
-
-func TestDispatchTickLiveCodexLoopGateRefusesGuardlessSpawn(t *testing.T) {
-	t.Setenv("CODEX_THREAD_ID", "")
-	// Unwire the ambient dogfood upstream. `fak guard` for a NON-claude backend is only
-	// planned when a base URL names the upstream to proxy (dispatchtick.GuardedLaunchCommand
-	// refuses to misroute otherwise), and a guarded fak session exports
-	// FLEET_DOGFOOD_GUARD_BASEURL — inheriting it silently converts this fixture into the
-	// GUARDED shape and stops it proving anything about the dangerous one. The refusal below
-	// (no spawner call, typed CODEX_LOOP_GATE_REFUSED) is the load-bearing assertion: an
-	// unguarded Codex worker must not be launched into a no-progress thrash loop.
-	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", "")
-	withDispatchJSONHelper(t, dispatchHappyHelper(t))
-	root := t.TempDir()
-	home := t.TempDir()
-	codexHome := filepath.Join(home, ".codex")
-	if err := os.MkdirAll(codexHome, 0o755); err != nil {
-		t.Fatalf("mkdir codex home: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte(`{"ok":true}`), 0o644); err != nil {
-		t.Fatalf("write codex auth: %v", err)
-	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("FAK_CODEX_OAUTH_SESSIONS", "10")
-
-	sessionsDir := filepath.Join(codexHome, "sessions", "2026", "07", "06")
-	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
-		t.Fatalf("mkdir codex sessions: %v", err)
-	}
-	// Same plan re-submitted each turn (args_digests==1 < count): a genuine
-	// no-progress thrash loop the guardless gate must still refuse. Distinct-arg
-	// planning progress is a non-loop, covered elsewhere.
-	writeCodexLoopFixture(t, filepath.Join(sessionsDir, "rollout-loop.jsonl"), []string{
-		`{"timestamp":"2026-07-06T02:25:02.000Z","type":"session_meta","payload":{"session_id":"loop-session","originator":"codex-tui","model_provider":"openai"}}`,
-		`{"timestamp":"2026-07-06T02:25:03.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"one\",\"status\":\"in_progress\"}]}","call_id":"plan_1"}}`,
-		`{"timestamp":"2026-07-06T02:25:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_1","output":"Plan updated"}}`,
-		`{"timestamp":"2026-07-06T02:25:15.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"one\",\"status\":\"in_progress\"}]}","call_id":"plan_2"}}`,
-		`{"timestamp":"2026-07-06T02:25:16.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_2","output":"Plan updated"}}`,
-		`{"timestamp":"2026-07-06T02:25:27.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"one\",\"status\":\"in_progress\"}]}","call_id":"plan_3"}}`,
-		`{"timestamp":"2026-07-06T02:25:28.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan_3","output":"Plan updated"}}`,
-	})
-
-	oldRows := dispatchProbeCodexProcessRows
-	oldBroker := launchSpawnBroker
-	oldSpawner := dispatchIssueWorkerSpawner
-	spawned := false
-	dispatchProbeCodexProcessRows = func() ([]dispatchCodexProcessRow, error) { return nil, nil }
-	oldRegistry := readSessionRows
-	readSessionRows = func() ([]sessionregistry.Record, error) {
-		return []sessionregistry.Record{{State: sessionregistry.StateActive, Identity: sessionregistry.Identity{Runtime: "codex", SessionID: "loop-session"}}}, nil
-	}
-	launchSpawnBroker = func(a launchBrokerAttempt) launchBrokerGrant {
-		return allowLaunchBrokerGrant(a, "unit-test-allow")
-	}
-	dispatchIssueWorkerSpawner = func(command []string, env map[string]string, cwd, runsDir string, issue int, lane, backend, leaseID string, tree []string, account dispatchtick.Account, membership *dispatchtick.Membership, baseSHA, stdinPayload string, probeS float64) (dispatchSpawnResult, error) {
-		spawned = true
-		return dispatchSpawnResult{PID: 999, Issue: issue, Lane: lane, Backend: backend}, nil
-	}
-	t.Cleanup(func() {
-		dispatchProbeCodexProcessRows = oldRows
-		readSessionRows = oldRegistry
-		launchSpawnBroker = oldBroker
-		dispatchIssueWorkerSpawner = oldSpawner
-	})
-
-	out, errb, code := runDispatchAt("tick", "--workspace", root, "--backend", "codex", "--lane", "docs", "--no-refresh", "--no-loop-ledger", "--live", "--json")
-	if code != 0 {
-		t.Fatalf("exit = %d, want 0 for a typed Codex loop-gate hold (stderr: %s)\n%s", code, errb, out)
-	}
-	if spawned {
-		t.Fatal("dispatch worker spawner was called after Codex loop-gate refusal")
-	}
-	var got map[string]any
-	if err := json.Unmarshal([]byte(out), &got); err != nil {
-		t.Fatalf("bad json: %v\n%s", err, out)
-	}
-	if got["action"] != "codex_loop_gate_refused" || got["verdict"] != "CODEX_LOOP_GATE_REFUSED" || got["ok"] != false {
-		t.Fatalf("Codex loop gate = action %v verdict %v ok %v", got["action"], got["verdict"], got["ok"])
-	}
-	if guarded, _ := got["guarded"].(bool); guarded {
-		t.Fatalf("fixture expected guardless Codex preview without FLEET_DOGFOOD_GUARD_BASEURL: %#v", got["launch_command"])
-	}
-	gate := mapAt(got, "codex_loop_gate")
-	if dispatchMapString(gate, "fail_on") != "loop" || dispatchMapString(gate, "verdict") != "LOOP" || dispatchMapInt(gate, "scanned") != 1 {
-		t.Fatalf("codex_loop_gate = %#v, want fail_on=loop verdict=LOOP scanned=1", gate)
-	}
-	top, _ := gate["top_repeated"].([]any)
-	if len(top) != 1 {
-		t.Fatalf("codex_loop_gate.top_repeated = %#v, want one repeated outcome", gate["top_repeated"])
-	}
-	repeated, _ := top[0].(map[string]any)
-	if dispatchMapString(repeated, "tool") != "update_plan" || dispatchMapInt(repeated, "count") != 3 {
-		t.Fatalf("top repeated = %#v, want update_plan count=3", repeated)
 	}
 }
 

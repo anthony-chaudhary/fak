@@ -156,7 +156,7 @@ func dispatchWorkerPreflight(ctx context.Context, req dispatchWorkerPreflightReq
 	}
 	if !req.Guarded {
 		result.Verdict = dispatchWorkerPreflightRouteMisconfigured
-		result.Reason = "Codex worker launch is not guard-fronted; configure FLEET_DOGFOOD_GUARD_BASEURL to a reachable fak gateway or launch through `fak guard --base-url <url> -- codex`"
+		result.Reason = "Codex worker launch is not guard-fronted; enable FLEET_DOGFOOD_GUARD (subscription: `fak guard -- codex`; API/local route: configure FLEET_DOGFOOD_GUARD_BASEURL or use `fak guard --base-url <url> -- codex`)"
 		return result.finishEvidence(nil)
 	}
 	if result.Model == "" {

@@ -252,6 +252,11 @@ func TestGuardedLaunchCommand(t *testing.T) {
 		t.Fatalf("opencode without base URL must not be guarded, got %#v guarded=%v", opencode, guarded)
 	}
 
+	subscriptionCodex, guarded := GuardedLaunchCommand([]string{"codex", "exec", "-"}, "fak", "docs", "codex", "/repo", "")
+	if !guarded || !strings.Contains(strings.Join(subscriptionCodex, " "), "guard --codex-loop-gate off --provider openai") || slices.Contains(subscriptionCodex, "--base-url") {
+		t.Fatalf("subscription Codex dispatch must defer upstream selection to guard: %v", subscriptionCodex)
+	}
+
 	codex, guarded := GuardedLaunchCommand([]string{"codex", "exec", "-"}, "fak", "docs", "codex", "/repo", "http://127.0.0.1:18080/v1")
 	if !guarded || !strings.Contains(strings.Join(codex, " "), "guard --codex-loop-gate off --provider openai") {
 		t.Fatalf("codex dispatch must carry the already-evaluated loop-gate decision: %v", codex)

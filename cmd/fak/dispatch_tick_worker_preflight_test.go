@@ -166,10 +166,11 @@ func TestDispatchWorkerPreflightParsesCodexQuotaCooldown(t *testing.T) {
 
 func TestDispatchWorkerPreflightHardRefusalsSkipLeaseAndWorkerSpawn(t *testing.T) {
 	tests := []struct {
-		name    string
-		guarded bool
-		obs     dispatchCodexPreflightObservation
-		want    string
+		name         string
+		guarded      bool
+		disableGuard bool
+		obs          dispatchCodexPreflightObservation
+		want         string
 	}{
 		{
 			name:    "invalid auth",
@@ -188,7 +189,8 @@ func TestDispatchWorkerPreflightHardRefusalsSkipLeaseAndWorkerSpawn(t *testing.T
 			want: dispatchWorkerPreflightModelUnsupported,
 		},
 		{
-			name: "unguarded launch",
+			name:         "unguarded launch",
+			disableGuard: true,
 			obs: dispatchCodexPreflightObservation{
 				Authenticated: true,
 				AccountType:   "chatgpt",
@@ -200,6 +202,9 @@ func TestDispatchWorkerPreflightHardRefusalsSkipLeaseAndWorkerSpawn(t *testing.T
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			root, _ := dispatchCodexGateFixture(t, false)
+			if tc.disableGuard {
+				t.Setenv("FLEET_DOGFOOD_GUARD", "0")
+			}
 			if tc.guarded {
 				t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", healthyDispatchProvider(t)+"/v1")
 			} else {
@@ -243,7 +248,7 @@ func TestDispatchWorkerPreflightHardRefusalsSkipLeaseAndWorkerSpawn(t *testing.T
 			if !tc.guarded {
 				preflight := mapAt(got, "worker_preflight")
 				reason := dispatchMapString(preflight, "reason")
-				if preflight["guarded"] != false || !strings.Contains(reason, "FLEET_DOGFOOD_GUARD_BASEURL") || !strings.Contains(reason, "fak guard --base-url") {
+				if preflight["guarded"] != false || !strings.Contains(reason, "FLEET_DOGFOOD_GUARD") || !strings.Contains(reason, "fak guard -- codex") {
 					t.Fatalf("unguarded refusal omitted exact remedy: %#v", preflight)
 				}
 			}

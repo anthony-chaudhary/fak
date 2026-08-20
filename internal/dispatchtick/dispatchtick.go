@@ -380,10 +380,12 @@ func GuardedLaunchCommand(command []string, fakBin, lane, backend, workspace, ba
 	}
 	args = append(args, "--provider", GuardProvider(backend))
 	if backend != "claude" {
-		if strings.TrimSpace(baseURL) == "" {
+		if strings.TrimSpace(baseURL) == "" && backend != "codex" {
 			return append([]string(nil), command...), false
 		}
-		args = append(args, "--base-url", baseURL)
+		if strings.TrimSpace(baseURL) != "" {
+			args = append(args, "--base-url", baseURL)
+		}
 	}
 	// Headless dispatch workers launch with the curated fak_* tool surface (#3607): prune the
 	// ~9.9k-token full-registry schema floor to the allowlist a single-issue worker uses; the

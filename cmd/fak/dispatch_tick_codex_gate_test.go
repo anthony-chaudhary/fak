@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,9 +14,9 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 )
 
-func TestDispatchTickLiveCodexAllowsGuardedChildFromUnguardedParent(t *testing.T) {
+func TestDispatchTickLiveCodexAllowsGuardedSubscriptionChildFromUnguardedParent(t *testing.T) {
 	root, threadID := dispatchCodexGateFixture(t, false)
-	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", healthyDispatchProvider(t)+"/v1")
+	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", "")
 
 	got, spawned, command := runDispatchCodexGateTick(t, root)
 	t.Cleanup(func() { releaseInProcessLaneLease(root, mapAt(got, "lease")) })
@@ -24,6 +25,9 @@ func TestDispatchTickLiveCodexAllowsGuardedChildFromUnguardedParent(t *testing.T
 	}
 	if len(command) < 2 || command[1] != "guard" {
 		t.Fatalf("spawned child command = %#v, want fak guard front", command)
+	}
+	if slices.Contains(command, "--base-url") {
+		t.Fatalf("subscription child command must let guard select the matched OAuth upstream: %#v", command)
 	}
 
 	if got["action"] != "spawned" || got["verdict"] != "SPAWNED" || got["ok"] != true {
@@ -141,6 +145,7 @@ func TestDispatchTickAmbiguousLoopFailsSafeWithCleanupAction(t *testing.T) {
 func TestDispatchTickLiveCodexStillRefusesUnguardedChild(t *testing.T) {
 	root, threadID := dispatchCodexGateFixture(t, false)
 	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", "")
+	t.Setenv("FLEET_DOGFOOD_GUARD", "0")
 
 	got, spawned, _ := runDispatchCodexGateTick(t, root)
 	if spawned {
@@ -152,7 +157,7 @@ func TestDispatchTickLiveCodexStillRefusesUnguardedChild(t *testing.T) {
 	}
 	preflight := mapAt(got, "worker_preflight")
 	reason := dispatchMapString(preflight, "reason")
-	if preflight["guarded"] != false || !strings.Contains(reason, "FLEET_DOGFOOD_GUARD_BASEURL") || !strings.Contains(reason, "fak guard --base-url") {
+	if preflight["guarded"] != false || !strings.Contains(reason, "FLEET_DOGFOOD_GUARD") || !strings.Contains(reason, "fak guard -- codex") {
 		t.Fatalf("worker preflight receipt = %#v", preflight)
 	}
 	if _, acquired := got["lease"]; acquired {
