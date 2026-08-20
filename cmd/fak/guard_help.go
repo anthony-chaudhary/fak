@@ -39,6 +39,7 @@ type guardCommonFlag struct {
 // restart/reset plumbing — is real and documented, just one `-all` away.
 var guardCommonFlags = []guardCommonFlag{
 	{"policy", "capability-floor manifest to enforce (default: the built-in floor; see --dump-policy)"},
+	{"allow-tool", "grant one exact tool for this launch; hard danger and self-modification checks still apply (repeatable)"},
 	{"provider", "upstream wire: anthropic|openai|gemini|xai (default: auto-detected from the agent name)"},
 	{"api-key-env", "opt IN to API billing using this env var (default: your subscription / passthrough)"},
 	{"probe", "one-shot smoke mode: prove the guarded wire without requiring a task handoff"},
@@ -46,7 +47,6 @@ var guardCommonFlags = []guardCommonFlag{
 	{"local", "auto-detect an already-running local model server (Ollama / LM Studio / llama.cpp)"},
 	{"log", "write per-request + per-verdict structured logs to a file (or '-' for stderr)"},
 	{"audit", "change where the decision journal is written ('off' disables it)"},
-	{"quiet", "suppress the startup banner and the exit audit summary"},
 	{"dump-policy", "print the built-in capability floor (an editable manifest) and exit"},
 }
 
@@ -75,7 +75,7 @@ var guardFlagGroups = []guardFlagGroup{
 		"anthropic-oauth", "oauth-token-env", "env", "require-key-env", "rotate",
 	}},
 	{"Policy, floor & audit", []string{
-		"policy", "dump-policy", "audit", "log", "landlock-hooks", "toolcall-control",
+		"policy", "allow-tool", "dump-policy", "audit", "log", "landlock-hooks", "toolcall-control",
 	}},
 	{"Token economy (cache & context savers)", []string{
 		"compact-history-budget", "compact-anchor-head", "assume-session-turns",

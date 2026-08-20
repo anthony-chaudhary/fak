@@ -237,6 +237,13 @@ func loadGuardCapabilityFloor(policyPath string) (rt policy.Runtime, floorSource
 	if attached := guardAllowShellAttachments(allowOverlay.Allow); len(attached) > 0 {
 		floorSource += fmt.Sprintf("; inherited shell danger rules attached: %s", strings.Join(attached, ", "))
 	}
+	launchGrant, _ := applyLaunchToolGrant(&rt)
+	if n := len(launchGrant.Allow); n > 0 {
+		floorSource += fmt.Sprintf(" + launch-scoped allow grant (%d exact tool(s); --allow-tool, expires with this process)", n)
+	}
+	if attached := guardAllowShellAttachments(launchGrant.Allow); len(attached) > 0 {
+		floorSource += fmt.Sprintf("; inherited shell danger rules attached: %s", strings.Join(attached, ", "))
+	}
 	denyPath := guardDenyOverlayPath()
 	denyOverlay, denyErr := loadGuardDenyOverlay(denyPath)
 	if denyErr != nil {
@@ -293,7 +300,8 @@ func loadGuardCapabilityFloor(policyPath string) (rt policy.Runtime, floorSource
 	if guardCoreLockAllActive() {
 		floorSource += "; --core-lock-all ACTIVE (session is ratchet-tighten-only: no channel may widen this floor)"
 	}
-	policyDigest = guardEffectivePolicyDigest(policyBytes, allowOverlay, denyOverlay)
+	effectiveAllow := mergeLaunchAllowOverlays(allowOverlay, launchGrant)
+	policyDigest = guardEffectivePolicyDigest(policyBytes, effectiveAllow, denyOverlay)
 	rt = protectGuardPolicyConfig(rt, append(guardAllowOverlayLayerPaths(), denyPath, policyPath)...)
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)
@@ -322,6 +330,7 @@ func guardReloadDefaultFloor() (policy.Runtime, string, error) {
 	} else {
 		overlayWarning = "overlay_error: " + ovErr.Error()
 	}
+	applyLaunchToolGrant(&rt)
 	if ov, ovErr := loadGuardDenyOverlay(denyPath); ovErr == nil {
 		guardApplyDenyOverlay(&rt, ov)
 	} else if overlayWarning == "" {

@@ -1270,6 +1270,7 @@ func loadAndApplyPolicyLocked(path string, enforceWideningGate bool) (policy.Run
 	} else {
 		overlayWarning = "overlay_error: " + ovErr.Error()
 	}
+	applyLaunchToolGrant(&rt)
 	if ov, ovErr := loadGuardDenyOverlay(denyPath); ovErr == nil {
 		guardApplyDenyOverlay(&rt, ov)
 	} else if overlayWarning == "" {
@@ -1319,7 +1320,7 @@ func policyReloader(path string) gateway.PolicyReloadFunc {
 		if readErr != nil {
 			return gateway.PolicyReloadResponse{}, readErr
 		}
-		return gateway.PolicyReloadResponse{Reloaded: true, Source: path, Summary: summary, EffectiveDigest: guardCurrentEffectivePolicyDigest(policyBytes)}, nil
+		return gateway.PolicyReloadResponse{Reloaded: true, Source: path, Summary: summary, EffectiveDigest: effectiveDigestWithLaunchGrant(policyBytes)}, nil
 	}
 }
 
@@ -1344,7 +1345,7 @@ func guardPolicyReloader(policyPath string) gateway.PolicyReloadFunc {
 			fmt.Fprintln(os.Stderr, "fak guard reload warning:", overlayWarning)
 			summary += "\n" + overlayWarning
 		}
-		return gateway.PolicyReloadResponse{Reloaded: true, Source: "built-in guard floor + operator allow overlay", Summary: summary, EffectiveDigest: guardCurrentEffectivePolicyDigest(guardDefaultPolicyJSON)}, nil
+		return gateway.PolicyReloadResponse{Reloaded: true, Source: launchGrantSource("built-in guard floor + operator allow overlay"), Summary: summary, EffectiveDigest: effectiveDigestWithLaunchGrant(guardDefaultPolicyJSON)}, nil
 	}
 }
 

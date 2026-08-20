@@ -64,6 +64,9 @@ func runGuardReplay(fixturePath, wire, policyPath, auditPath string, noAudit boo
 		fmt.Fprintf(out, "fak guard --replay-trace: load floor: %v\n", err)
 		return 2
 	}
+	if grant, _ := applyLaunchToolGrant(&rt); len(grant.Allow) > 0 {
+		floorSource += fmt.Sprintf(" + launch-scoped allow grant (%d exact tool(s))", len(grant.Allow))
+	}
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)
 

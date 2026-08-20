@@ -136,6 +136,8 @@ func cmdManageCommand(commandName string, argv []string) {
 	anthropicOAuth := fs.Bool("anthropic-oauth", false, "force the Claude Pro/Max SUBSCRIPTION OAuth token upstream (sourced, in precedence order, from CLAUDE_CODE_OAUTH_TOKEN, then <claude-config>/.credentials.json, then <claude-config>/.oauth-token) sent as Authorization: Bearer + the oauth beta. This is ALREADY the default for --provider anthropic (even when ANTHROPIC_API_KEY is set); the flag forces it and fails loud if no token is found.")
 	oauthTokenEnv := fs.String("oauth-token-env", "CLAUDE_CODE_OAUTH_TOKEN", "env var to read the subscription OAuth token from first")
 	policyPath := fs.String("policy", "", "capability-floor manifest to enforce (default: the built-in guard floor; see --dump-policy)")
+	var allowTools launchToolFlag
+	fs.Var(&allowTools, "allow-tool", "grant one exact tool name for THIS guard process only (repeatable). The grant re-admits DEFAULT_DENY tools but cannot bypass explicit denies, dangerous-argument rules, self-modification, or later tightening.")
 	envName := fs.String("env", "", "env var to inject the gateway URL into the child (default: chosen by --provider)")
 	requireKeyEnv := fs.String("require-key-env", "", "require this env var's bearer token on the gateway (loopback rarely needs it)")
 	logPath := fs.String("log", "", "write the gateway's per-request + per-verdict structured logs to this file (or '-' for stderr); default off to keep the agent's terminal clean")
@@ -215,6 +217,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	guardHelpAll := guardArgvHasAll(argv)
 	fs.Usage = func() { printGuardUsage(os.Stderr, fs, commandName, guardHelpAll) }
 	_ = fs.Parse(argv)
+	setLaunchToolGrant(allowTools)
 	rotateSet := false
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "rotate" {

@@ -429,7 +429,7 @@ Hot-reloads the configured policy manifest in-place (no request body). The loade
 injected by the host CLI, so the gateway stays policy-schema blind.
 
 **Response** (`PolicyReloadResponse`): `{ "reloaded": true, "source": "<path>",
-"summary": "…" }`.
+"summary": "…", "effective_digest": "sha256:…" }`.
 
 Reloads that only narrow or relabel the effective floor apply normally. A reload that
 adds an allow entry/prefix, removes a deny or `self_modify_glob`, or changes
@@ -438,6 +438,11 @@ includes the deterministic widening delta in both the error and the `CONFIG_SWAP
 Set `FAK_POLICY_RELOAD_ALLOW_WIDEN=1` on the running process to explicitly confirm such
 a reload; the successful response summary and journal then carry `confirmed_widening:`
 plus the same delta. Initial `--policy` installation is not subject to this hot-reload gate.
+
+For one-off development capabilities, launch guard with a repeatable exact grant such as
+`fak guard --allow-tool deploy_preview -- codex`. The grant exists only in that guard
+process, survives policy reloads, and is folded into `effective_digest`; explicit denies,
+dangerous shell-argument rules, self-modification checks, and later tightening still win.
 
 | Status | When |
 |---|---|
