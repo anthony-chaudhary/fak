@@ -1,0 +1,224 @@
+{
+  "schema": "fak.model-set-lock/1",
+  "content_digest": "sha256:a0d5f5926ad1893e0c8b08dbd66f3a01a04d98ec7df4b13aec46feb97f29adf5",
+  "inputs": {
+    "intent": "sha256:4aaa7c18283dede96e9e0d1726bc189625be16a33821aa9084cdd6fa9edaf80e",
+    "inventory": "sha256:0dfc59b44ab04e4de15d848220d7b980ada8a98198cc1b2c0040496ede920413",
+    "policy": "sha256:bd35141a7583ce6d4b4ac829081b0925f1737b877c4f9b7521b422c76e66e165",
+    "target": "sha256:13951641e6376de183450c820b4e3b4152fc47148178b5afe1130c26c972ab6c"
+  },
+  "target": {
+    "os": "linux",
+    "architecture": "amd64",
+    "accelerator": "cpu",
+    "runtime": "mixed-runtime"
+  },
+  "resolver_version": "fak.model-set-resolution/1",
+  "evaluated_at": "2026-08-19T20:00:00Z",
+  "roles": [
+    {
+      "id": "executor",
+      "required": true,
+      "status": "selected",
+      "alternative_ids": [
+        "executor-llamacpp"
+      ],
+      "selected": {
+        "alternative_id": "executor-llamacpp",
+        "candidate_id": "executor-local",
+        "identity": {
+          "source": "local",
+          "artifact": "models/executor.gguf",
+          "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "format": "gguf",
+          "witnesses": [
+            {
+              "kind": "probe",
+              "source": "digest://executor",
+              "observed_at": "2026-08-19T19:00:00Z",
+              "expires_at": "2026-08-20T20:00:00Z"
+            }
+          ]
+        },
+        "evidence": [
+          {
+            "kind": "probe",
+            "source": "digest://executor",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "executor/accelerator",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "executor/architecture",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "executor/availability",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "executor/license",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "executor/locality",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "executor/os",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "executor/protocol",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "executor/runtime",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "executor/tool-calling",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          }
+        ]
+      },
+      "rejections": [
+        {
+          "role_id": "executor",
+          "alternative_id": "executor-llamacpp",
+          "alternative_index": 0,
+          "candidate_id": "planner-provider",
+          "code": "MODEL_SET_RUNTIME_MISMATCH",
+          "constraint": "operational.runtime",
+          "expected": "llamacpp",
+          "actual": "vllm",
+          "remediation": "use a candidate witnessed on the declared runtime"
+        }
+      ]
+    },
+    {
+      "id": "planner",
+      "required": true,
+      "status": "selected",
+      "alternative_ids": [
+        "planner-vllm"
+      ],
+      "selected": {
+        "alternative_id": "planner-vllm",
+        "candidate_id": "planner-provider",
+        "identity": {
+          "source": "provider",
+          "provider": "example",
+          "artifact": "models/planner",
+          "revision": "cccccccccccccccccccccccccccccccccccccccc",
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "format": "safetensors",
+          "witnesses": [
+            {
+              "kind": "artifact-metadata",
+              "source": "metadata://planner",
+              "observed_at": "2026-08-19T19:00:00Z",
+              "expires_at": "2026-08-20T20:00:00Z"
+            }
+          ]
+        },
+        "evidence": [
+          {
+            "kind": "artifact-metadata",
+            "source": "metadata://planner",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "planner/accelerator",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "planner/architecture",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "planner/availability",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "planner/license",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "planner/locality",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "planner/os",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "planner/protocol",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "planner/runtime",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "planner/tool-calling",
+            "observed_at": "2026-08-19T19:00:00Z",
+            "expires_at": "2026-08-20T20:00:00Z"
+          }
+        ]
+      },
+      "rejections": [
+        {
+          "role_id": "planner",
+          "alternative_id": "planner-vllm",
+          "alternative_index": 0,
+          "candidate_id": "executor-local",
+          "code": "MODEL_SET_RUNTIME_MISMATCH",
+          "constraint": "operational.runtime",
+          "expected": "vllm",
+          "actual": "llamacpp",
+          "remediation": "use a candidate witnessed on the declared runtime"
+        }
+      ]
+    }
+  ]
+}
