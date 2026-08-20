@@ -11,17 +11,18 @@ func TestAcceptanceTwelveAgentsAcrossFleetDimensions(t *testing.T) {
 	lanes := []string{"cmd", "docs", "gateway"}
 	hosts := []string{"h1", "h2"}
 	epochs := []string{"boot-a", "boot-b"}
-	root, parent := "root-1", "parent-1"
-	history := make([]Row, 0, 12)
 	states := []string{"LIVE", "CLOSED", "STALE", "CRASHED"}
-	for i := 0; i < 12; i++ {
+	agentCount := len(lanes) * len(states)
+	root, parent := "root-1", "parent-1"
+	history := make([]Row, 0, agentCount)
+	for i := 0; i < agentCount; i++ {
 		id := fmtID(i)
-		lane := lanes[i%3]
-		host := hosts[i%2]
-		epoch := epochs[i%2]
+		lane := lanes[i%len(lanes)]
+		host := hosts[i%len(hosts)]
+		epoch := epochs[i%len(epochs)]
 		started := now.Add(-time.Duration(i+1) * time.Hour).Format(time.RFC3339)
 		elapsed := int64((i + 1) * 1000)
-		state := states[i%4]
+		state := states[i%len(states)]
 		r := Row{AgentID: id, LogicalSessionID: id, Lane: &lane, Host: &host, ExecutionEpoch: &epoch, State: state, Liveness: state, StartedAt: &started, ElapsedMS: &elapsed, Source: "history"}
 		if i == 1 {
 			r.RootID = &root
@@ -35,7 +36,7 @@ func TestAcceptanceTwelveAgentsAcrossFleetDimensions(t *testing.T) {
 	liveElapsed := int64(99_000)
 	live := []Row{{AgentID: "agent-00", LogicalSessionID: "agent-00", State: "LIVE", Liveness: "LIVE", ElapsedMS: &liveElapsed, Source: "live"}}
 	got := Union(live, history, "union", false, 100, now)
-	if len(got.Rows) != 12 || got.Metadata.Deduplicated != 1 {
+	if len(got.Rows) != agentCount || got.Metadata.Deduplicated != 1 {
 		t.Fatalf("rows=%d metadata=%+v", len(got.Rows), got.Metadata)
 	}
 	laneSet, hostSet, stateSet, epochSet := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
@@ -54,7 +55,7 @@ func TestAcceptanceTwelveAgentsAcrossFleetDimensions(t *testing.T) {
 		lineage = lineage || (r.RootID != nil && r.ParentID != nil)
 		stale = stale || r.Stale
 	}
-	if len(laneSet) != 3 || len(hostSet) != 2 || len(stateSet) != 4 || len(epochSet) != 2 || !lineage || !stale {
+	if len(laneSet) != len(lanes) || len(hostSet) != len(hosts) || len(stateSet) != len(states) || len(epochSet) != len(epochs) || !lineage || !stale {
 		t.Fatalf("lanes=%v hosts=%v states=%v epochs=%v lineage=%v stale=%v", laneSet, hostSet, stateSet, epochSet, lineage, stale)
 	}
 }

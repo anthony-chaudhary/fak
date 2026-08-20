@@ -18,8 +18,18 @@ func TestSchemaDescriptorMatchesRowJSONKeys(t *testing.T) {
 		t.Fatalf("json=%v descriptor=%v", got, want)
 	}
 	d := SchemaDescriptor()
-	if d.Schema != DescriptorSchema || d.MaxRows != 10000 || len(d.Filters) < 10 || len(d.Sorts) != 12 {
+	if d.Schema != DescriptorSchema || d.MaxRows != 10000 || len(d.Filters) < 10 {
 		t.Fatalf("descriptor=%+v", d)
+	}
+	for name := range listOrders {
+		if !descriptorContains(d.Sorts, name) {
+			t.Errorf("descriptor missing supported sort %q", name)
+		}
+	}
+	for _, name := range d.Sorts {
+		if !listOrders[name] {
+			t.Errorf("descriptor publishes unsupported sort %q", name)
+		}
 	}
 }
 func TestValidateResult(t *testing.T) {
