@@ -2816,6 +2816,46 @@
           "category": "incidental",
           "reason": "Audit signature label for repeated full-tree gate execution, not a new guard or gate.",
           "token": "full_tree_gate_retry"
+        },
+        {
+          "category": "incidental",
+          "reason": "constant holding the fallback warning text for the positioned guard-disable launcher, not a separate posture",
+          "token": "guardDisableDefaultReason"
+        },
+        {
+          "category": "incidental",
+          "reason": "private argv carrier for the positioned guard-disable launcher, not an independently addressable guard posture",
+          "token": "guardDisableOptions"
+        },
+        {
+          "category": "incidental",
+          "reason": "private flag parser for the positioned guard-disable launcher, not a separate policy or gate",
+          "token": "parseGuardDisable"
+        },
+        {
+          "category": "incidental",
+          "reason": "private environment builder used only by the positioned guard-disable launcher, not a second disable mechanism",
+          "token": "guardDisableChildEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "private whitespace normalizer for the launcher warning reason, not an authorization reason code",
+          "token": "guardDisableReason"
+        },
+        {
+          "category": "incidental",
+          "reason": "private environment lookup helper used by the launcher scrub, not a guard configuration surface",
+          "token": "guardDisableEnvValue"
+        },
+        {
+          "category": "incidental",
+          "reason": "private NAME=VALUE parser used by the launcher scrub, not a distinct guard concept",
+          "token": "guardDisableSplitEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "private predicate implementing the launcher environment scrub, not another disable posture",
+          "token": "guardDisableDropEnv"
         }
       ],
       "exclude": [
@@ -2975,6 +3015,13 @@
         "guardCoreLockAllActive",
         "guardCoreLockAllAdmitAmendment",
         "guardCoreLockAllState",
+        "guardDisableChildEnv",
+        "guardDisableDefaultReason",
+        "guardDisableDropEnv",
+        "guardDisableEnvValue",
+        "guardDisableOptions",
+        "guardDisableReason",
+        "guardDisableSplitEnv",
         "guardEquivalentRestartLimit",
         "guardEquivalentRestartStatus",
         "guardEquivalentRestarts",
@@ -3126,6 +3173,7 @@
         "opt_in_gates",
         "pairedBaselineGuardTimeout",
         "parseGate",
+        "parseGuardDisable",
         "prepareGuardChildRegistration",
         "prepushGateContract",
         "printGuardAllowExpiries",

@@ -116,7 +116,8 @@
    "definition": "The `fak guard allow` operator control-surface subcommand (cmd/fak/guard_allow.go, entry cmdGuardAllow) for inspecting and editing the guard's runtime allow overlay.",
    "distinction": "It is the CLI SUBCOMMAND an operator runs, not guardApplyAllowOverlay, the existing mechanism that applies the overlay file this subcommand edits.",
    "distinct_from": [
-    "x-goal-guard-gate-guard-allow-overlay"
+     "x-goal-guard-gate-guard-allow-overlay",
+     "guard-gate-guard-disable-break-glass"
    ],
    "aliases": [
     "guard allow",

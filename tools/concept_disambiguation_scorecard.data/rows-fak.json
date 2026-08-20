@@ -139,5 +139,28 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "guard-gate-guard-disable-break-glass",
+      "canonical": "guard disable (one-child break-glass launcher)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The fak guard/manage disable operator subcommand implemented by runGuardDisable: it launches exactly one raw repair child with loud warnings, child-scoped recovery variables, inherited guard-routing removal, and exit-status propagation, then leaves later launches guarded by default.",
+      "distinction": "This is an attended one-child repair launcher, not guardDisabled, the GUARD_DISABLED dispatch switch that skips wrapping workers, and not fak guard allow, which edits a capability overlay while the guard remains active.",
+      "distinct_from": [
+        "x-goal25-guard-gate-guarddisabled",
+        "guard-gate-guardallow"
+      ],
+      "aliases": [
+        "fak guard disable",
+        "fak manage disable"
+      ],
+      "grounding": "runGuardDisable",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

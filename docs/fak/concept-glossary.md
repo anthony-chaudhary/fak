@@ -2302,3 +2302,10 @@ A deterministic verdict over session intent and measured progress: continue, eli
 Versioned exact-model workflow-cache benchmark corpus and fold for the first-class Qwen3.8 default.
 
 **Distinct from:** Unlike the generic cachevalue ledger, this binds Qwen3.8 checkpoint, tokenizer, template, backend, tools, policy, equivalence, invalidation, and per-mode measurements.
+
+
+### guard disable (one-child break-glass launcher)
+
+The fak guard/manage disable operator subcommand implemented by runGuardDisable: it launches exactly one raw repair child with loud warnings, child-scoped recovery variables, inherited guard-routing removal, and exit-status propagation, then leaves later launches guarded by default.
+
+**Distinct from:** This is an attended one-child repair launcher, not guardDisabled, the GUARD_DISABLED dispatch switch that skips wrapping workers, and not fak guard allow, which edits a capability overlay while the guard remains active.

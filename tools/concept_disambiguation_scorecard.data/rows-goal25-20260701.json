@@ -1082,7 +1082,8 @@
       "definition": "guardDisabled (cmd/fak/dispatch_tick.go) reports whether dispatch must skip the fak guard wrapper (GUARD_DISABLED environment switch).",
       "distinction": "The opt-OUT switch for wrapping workers in fak guard, not a guard verdict.",
       "distinct_from": [
-        "guard-kernel"
+        "guard-kernel",
+        "guard-gate-guard-disable-break-glass"
       ],
       "aliases": [],
       "grounding": "guardDisabled",

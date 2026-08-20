@@ -208,12 +208,24 @@ What Codex gets from this path:
 Use this path when you are running Codex itself. It preserves Codex's current model wire and
 adds fak as an explicit, inspectable tool boundary.
 
-### Break-glass recovery when `fak` itself is broken
+### Break-glass recovery for guard failures
 
 The normal response to a raw-session continuation block is to exit and restart with
-`fak codex`. If that front door cannot launch, use the explicit **raw recovery token** for
-one repair session. The project hook checks this token in the shell *before invoking `fak`*,
-so recovery does not depend on a working `fak` binary:
+`fak codex`. For one deliberately unguarded repair session, use the scoped break-glass
+launcher. It starts raw Codex by default, prints an unavoidable warning, removes any inherited
+loopback/guard state, and restores the normal default as soon as that child exits:
+
+```powershell
+fak guard disable --reason 'repair the guarded launcher'
+```
+
+Pass a command after `--` to repair with another harness, for example `fak guard disable
+--reason 'repair Claude routing' -- claude`. This is a one-child bypass, not a persistent
+machine toggle.
+
+If `fak` itself is too broken to execute that command, use the raw recovery token directly.
+The project hook checks this token in the shell *before invoking `fak`*, so this last-resort
+path does not depend on a working `fak` binary:
 
 ```powershell
 # PowerShell: launch raw Codex, then clear the process-scoped token after exiting.
@@ -227,10 +239,11 @@ Remove-Item Env:FAK_CODEX_RAW_RECOVERY
 FAK_CODEX_RAW_RECOVERY=break-glass codex
 ```
 
-This is deliberately not a quiet convenience bypass. The exact value `break-glass` is
-required, and every prompt prints `BREAK-GLASS raw Codex recovery active`; while it is set,
-the fak capability floor and guard audit are **not running**. Use the session only to diagnose
-or repair the guarded launcher, exit it, clear the variable, and prove normal service:
+Neither path is a quiet convenience bypass. The manual path requires the exact value
+`break-glass`, and every prompt prints `BREAK-GLASS raw Codex recovery active`; while either
+path is active, the fak capability floor and guard audit are **not running**. Use the session
+only to diagnose or repair the guarded launcher, exit it, clear any manually-set variable,
+and prove normal service:
 
 ```powershell
 Remove-Item Env:FAK_CODEX_RAW_RECOVERY -ErrorAction SilentlyContinue

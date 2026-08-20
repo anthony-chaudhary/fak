@@ -247,7 +247,7 @@ func printGuardUsage(w io.Writer, fs *flag.FlagSet, commandName string, all bool
 	fmt.Fprintf(w, "  e.g. fak %s claude\n", commandName)
 	fmt.Fprintf(w, "       fak %s --provider openai -- codex\n", commandName)
 	fmt.Fprintf(w, "       fak %s --policy my-floor.json -- claude\n", commandName)
-	fmt.Fprintf(w, "       fak %s allow <tool> | policy explain|diff   # operator subcommands, out-of-band (-h on each)\n", commandName)
+	fmt.Fprintf(w, "       fak %s allow <tool> | disable [--reason TEXT] | policy explain|diff   # operator subcommands (-h on each)\n", commandName)
 	if all {
 		printGuardAllGrouped(w, fs)
 		printGuardLaunchPostures(w)

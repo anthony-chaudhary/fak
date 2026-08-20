@@ -45,6 +45,13 @@ func cmdGuard(argv []string) {
 func cmdManageCommand(commandName string, argv []string) {
 	guardUsageStart = time.Now()
 	guardUsageOnce = new(sync.Once)
+	// `fak guard disable` is the deliberately loud, one-child break-glass path. Peel it
+	// before the wrap-a-command parser so the word "disable" can never fall through to
+	// exec.LookPath as though it were an agent binary. A real program named disable remains
+	// wrappable after the delimiter (`fak guard -- disable`).
+	if len(argv) > 0 && argv[0] == "disable" {
+		os.Exit(runGuardDisable(commandName, os.Stdin, os.Stdout, os.Stderr, argv[1:]))
+	}
 	// `fak guard allow …` is the OPERATOR control surface for the always-allow overlay
 	// — add / --list / --remove / --from-journal — peeled off before the wrap-a-command
 	// flag parse. The wrap form always names the agent after `--`, so a bare leading
