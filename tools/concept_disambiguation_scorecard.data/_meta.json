@@ -7456,6 +7456,11 @@
           "category": "incidental",
           "reason": "Goal record field selecting lifecycle evidence handling, not a capability policy primitive",
           "token": "EvidencePolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private validation regex for server-product capability identifiers, not a policy capability concept.",
+          "token": "capabilityPattern"
         }
       ],
       "exclude": [
@@ -7532,6 +7537,7 @@
         "bundled_capability",
         "byCapability",
         "capabilities",
+        "capabilityPattern",
         "capabilityProfile",
         "capability_denied",
         "capability_digest",
@@ -11914,6 +11920,11 @@
           "category": "incidental",
           "reason": "Exported bind-address predicate; loopback is a network interface class, not an agent loop lifecycle concept",
           "token": "LoopbackOnly"
+        },
+        {
+          "category": "incidental",
+          "reason": "Server listener endpoint constrained to loopback networking, not an agent execution loop.",
+          "token": "LoopbackEndpoint"
         }
       ],
       "id": "loop",
@@ -11924,6 +11935,7 @@
         "FakMetaSuperloopNight100",
         "FleetScoutLoop",
         "LoopView",
+        "LoopbackEndpoint",
         "LoopbackOnly",
         "OldestLoopID",
         "POLLING_LOOP",

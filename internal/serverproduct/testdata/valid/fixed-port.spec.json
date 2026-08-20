@@ -1,0 +1,34 @@
+{
+  "schema": "fak.server-product/v1",
+  "server_name": "local-code",
+  "instance_directory": "/srv/fak/local-code",
+  "artifact": {
+    "reference": "/models/code.gguf",
+    "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "adapter": {
+    "name": "llama-server",
+    "version_constraint": ">=b6000"
+  },
+  "protocol": {
+    "family": "openai-http",
+    "revision": "2026-01",
+    "required_capabilities": [
+      "chat.completions",
+      "models.list"
+    ]
+  },
+  "endpoint": {
+    "bind_host": "127.0.0.1",
+    "requested_port": 8080
+  },
+  "auth": {
+    "mode": "none"
+  },
+  "lifecycle": "local-process",
+  "provenance": {
+    "kind": "authored",
+    "source": "server-spec:/srv/fak/local-code/server-spec.json"
+  },
+  "resource": {}
+}

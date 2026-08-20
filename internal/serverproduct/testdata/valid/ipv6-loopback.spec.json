@@ -1,0 +1,36 @@
+{
+  "schema": "fak.server-product/v1",
+  "server_name": "local-rerank",
+  "instance_directory": "/srv/fak/local-rerank",
+  "artifact": {
+    "reference": "/models/rerank.gguf",
+    "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "adapter": {
+    "name": "llama-server",
+    "version_constraint": "b6200"
+  },
+  "protocol": {
+    "family": "openai-http",
+    "revision": "2026-02",
+    "required_capabilities": [
+      "models.list",
+      "rerank"
+    ]
+  },
+  "endpoint": {
+    "bind_host": "::1",
+    "requested_port": 8124
+  },
+  "auth": {
+    "mode": "none"
+  },
+  "lifecycle": "local-process",
+  "provenance": {
+    "kind": "authored",
+    "source": "server-spec:/srv/fak/local-rerank/server-spec.json"
+  },
+  "resource": {
+    "gpu_count": 1
+  }
+}

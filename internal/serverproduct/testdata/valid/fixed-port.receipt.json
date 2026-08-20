@@ -1,0 +1,71 @@
+{
+  "schema": "fak.server-product/v1",
+  "state": "ready",
+  "identity": {
+    "server_name": "local-code",
+    "instance_id": "local-code-0001"
+  },
+  "spec_digest": "sha256:05b0a21573502d622dca036d547f492380555b69858d86ec5c5ab9073ed2bba3",
+  "generation": 1,
+  "created_at": "2026-08-19T12:00:01Z",
+  "artifact": {
+    "reference": "/models/code.gguf",
+    "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "adapter": {
+    "name": "llama-server",
+    "version": "b6001",
+    "executable_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "endpoint": {
+    "base_url": "http://127.0.0.1:8080"
+  },
+  "model_alias": "local-code",
+  "auth": {
+    "mode": "none"
+  },
+  "protocol": {
+    "family": "openai-http",
+    "revision": "2026-01",
+    "capabilities": [
+      "chat.completions",
+      "models.list"
+    ]
+  },
+  "readiness": {
+    "probe": "GET_/health+GET_/v1/models",
+    "probe_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "observed_at": "2026-08-19T12:00:00Z"
+  },
+  "ownership": {
+    "instance_id": "local-code-0001",
+    "process_id": 4101,
+    "process_start_identity": "linux-startticks:100001"
+  },
+  "provenance": {
+    "spec": {
+      "kind": "authored",
+      "source": "server-spec:/srv/fak/local-code/server-spec.json"
+    },
+    "artifact": {
+      "kind": "observed",
+      "source": "sha256-check"
+    },
+    "adapter": {
+      "kind": "observed",
+      "source": "process-inspection"
+    },
+    "endpoint": {
+      "kind": "observed",
+      "source": "listener-probe"
+    },
+    "readiness": {
+      "kind": "observed",
+      "source": "http-probe"
+    },
+    "ownership": {
+      "kind": "observed",
+      "source": "process-start"
+    }
+  }
+}

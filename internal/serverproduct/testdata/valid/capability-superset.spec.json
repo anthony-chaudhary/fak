@@ -1,0 +1,37 @@
+{
+  "schema": "fak.server-product/v1",
+  "server_name": "local-chat",
+  "instance_directory": "/srv/fak/local-chat",
+  "artifact": {
+    "reference": "/models/chat.gguf",
+    "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "adapter": {
+    "name": "llama-server",
+    "version_constraint": "b6300"
+  },
+  "protocol": {
+    "family": "openai-http",
+    "revision": "2026-02",
+    "required_capabilities": [
+      "chat.completions"
+    ]
+  },
+  "endpoint": {
+    "bind_host": "127.0.0.1",
+    "requested_port": 8125
+  },
+  "auth": {
+    "mode": "credential-ref",
+    "credential_ref": "HARNESS_SERVER_TOKEN"
+  },
+  "lifecycle": "local-process",
+  "provenance": {
+    "kind": "authored",
+    "source": "server-spec:/srv/fak/local-chat/server-spec.json"
+  },
+  "resource": {
+    "max_memory_bytes": 17179869184,
+    "gpu_count": 1
+  }
+}

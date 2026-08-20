@@ -1,0 +1,71 @@
+{
+  "schema": "fak.server-product/v1",
+  "state": "ready",
+  "identity": {
+    "server_name": "local-rerank",
+    "instance_id": "local-rerank-0003"
+  },
+  "spec_digest": "sha256:acdc3b29dddd845cbe0d6bd371168fa942d8afb93104b8f6f9822ece46771fbf",
+  "generation": 3,
+  "created_at": "2026-08-19T12:20:01Z",
+  "artifact": {
+    "reference": "/models/rerank.gguf",
+    "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "adapter": {
+    "name": "llama-server",
+    "version": "b6200",
+    "executable_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "endpoint": {
+    "base_url": "http://[::1]:8124"
+  },
+  "model_alias": "local-rerank",
+  "auth": {
+    "mode": "none"
+  },
+  "protocol": {
+    "family": "openai-http",
+    "revision": "2026-02",
+    "capabilities": [
+      "models.list",
+      "rerank"
+    ]
+  },
+  "readiness": {
+    "probe": "GET_/health+POST_/v1/rerank",
+    "probe_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+    "observed_at": "2026-08-19T12:20:00Z"
+  },
+  "ownership": {
+    "instance_id": "local-rerank-0003",
+    "process_id": 4103,
+    "process_start_identity": "linux-startticks:100003"
+  },
+  "provenance": {
+    "spec": {
+      "kind": "authored",
+      "source": "server-spec:/srv/fak/local-rerank/server-spec.json"
+    },
+    "artifact": {
+      "kind": "observed",
+      "source": "sha256-check"
+    },
+    "adapter": {
+      "kind": "observed",
+      "source": "process-inspection"
+    },
+    "endpoint": {
+      "kind": "observed",
+      "source": "listener-probe"
+    },
+    "readiness": {
+      "kind": "observed",
+      "source": "http-probe"
+    },
+    "ownership": {
+      "kind": "observed",
+      "source": "process-start"
+    }
+  }
+}
