@@ -964,12 +964,21 @@ func (p *InKernelPlanner) executionIdentity() (backend, forwardPath string) {
 	}
 	if p.backend != nil {
 		backend, forwardPath = p.backend.Name(), "device/generic"
+	} else if p.metal {
+		// Metal is deliberately a CPU-session seam rather than a compute.Backend, but it still
+		// owns the projection/MLP dispatch selected for this request. Report that resolved
+		// accelerator instead of making a real Metal turn look like a CPU fallback (#8295).
+		backend, forwardPath = "metal", "metal/session-forward"
 	}
 	if p.m != nil && p.m.Cfg.IsQwen35Hybrid() {
 		if p.backend != nil {
 			// Model.NewBackendSession has already validated the structural GDN
 			// contract before this request can complete. Name its stable path here.
 			forwardPath = model.Qwen35GDNCUDAPath
+		} else if p.metal {
+			// Qwen3.5-family Metal uses the native Session forward with Metal projection/MLP
+			// dispatch; q4k= in the same summary records the selected weight format.
+			forwardPath = "metal/qwen35-hybrid-session-v1"
 		} else {
 			forwardPath = "cpu/qwen35-gdn-reference"
 		}

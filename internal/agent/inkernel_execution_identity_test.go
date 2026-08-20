@@ -44,6 +44,14 @@ func TestInKernelExecutionIdentityCPUReference(t *testing.T) {
 	}
 }
 
+func TestInKernelExecutionIdentityQwen35Metal(t *testing.T) {
+	m := model.NewSynthetic(model.Config{LayerTypes: []string{"linear_attention"}})
+	backend, path := (&InKernelPlanner{m: m, metal: true, q4k: true}).executionIdentity()
+	if backend != "metal" || path != "metal/qwen35-hybrid-session-v1" {
+		t.Fatalf("executionIdentity() = backend=%q path=%q, want Metal Qwen hybrid identity", backend, path)
+	}
+}
+
 func TestInKernelExecutionIdentityGenericDevice(t *testing.T) {
 	p := &InKernelPlanner{m: model.NewSynthetic(model.Config{}), backend: compute.Default()}
 	backend, path := p.executionIdentity()
@@ -62,6 +70,22 @@ func TestInKernelExecutionLogNamesQwen35CUDAPath(t *testing.T) {
 	p.logExecutionSummary("avx512", "+fused", 23, 0, 0, 23, 192.63, 0.1, 1, 7.08, 0.1)
 	got := buf.String()
 	for _, want := range []string{"backend=cuda", "forward_path=" + model.Qwen35GDNCUDAPath, "q8dec=avx512+fused/"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("execution log %q missing %q", got, want)
+		}
+	}
+}
+
+func TestInKernelExecutionLogNamesQwen35MetalPath(t *testing.T) {
+	m := model.NewSynthetic(model.Config{LayerTypes: []string{"linear_attention"}})
+	p := &InKernelPlanner{m: m, modelID: "Qwen3.8-27B-Q4_K_M", metal: true, q4k: true}
+	var buf bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(old) })
+	p.logExecutionSummary("neon", "", 22, 3, 0, 22, 6.41, 3.4, 3, 1.07, 2.8)
+	got := buf.String()
+	for _, want := range []string{"backend=metal", "forward_path=metal/qwen35-hybrid-session-v1", "q4k=true"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("execution log %q missing %q", got, want)
 		}
