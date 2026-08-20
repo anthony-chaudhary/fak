@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1647,6 +1648,61 @@ func TestTUIConfigPaneMutatesAndAppliesConsoleConfig(t *testing.T) {
 	}
 	if issues.Schema != tuiIssuesSchema || issues.Counts.Open != 4 {
 		t.Fatalf("issues report = %+v", issues)
+	}
+}
+
+func TestTUIConfigPaneAtomicWritePreservesPriorAndReadsBack(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "console.json")
+	prior := []byte("{\"overview_panes\":[\"guard\"]}\n")
+	if err := os.WriteFile(cfg, prior, 0o600); err != nil {
+		t.Fatalf("write prior config: %v", err)
+	}
+
+	err := writeTUIConsoleConfigFile(cfg, []byte("{\"overview_panes\":[\"loops\"]}\n"), func(src, dst string) error {
+		if filepath.Dir(src) != filepath.Dir(dst) {
+			t.Fatalf("replacement crossed directories: src=%s dst=%s", src, dst)
+		}
+		return errors.New("injected replace failure")
+	})
+	if err == nil || !strings.Contains(err.Error(), "injected replace failure") {
+		t.Fatalf("injected replacement error = %v", err)
+	}
+	got, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatalf("read preserved config: %v", err)
+	}
+	if !bytes.Equal(got, prior) {
+		t.Fatalf("failed replacement changed prior config:\ngot  %q\nwant %q", got, prior)
+	}
+	if matches, err := filepath.Glob(filepath.Join(dir, "console.json.tmp-*")); err != nil || len(matches) != 0 {
+		t.Fatalf("temporary files after failed replacement = %v, err=%v", matches, err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"settings",
+		"--path", cfg,
+		"--set-default", "issues.top=40",
+		"--at", "2026-06-25T12:10:00Z",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI settings mutate code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiConfigReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal settings read-back: %v\n%s", err, stdout.String())
+	}
+	if !report.Updated || !hasTUIConfigSetting(report.Settings, "issues", "top", "40", "saved") {
+		t.Fatalf("settings read-back = %+v", report)
+	}
+	info, err := os.Stat(cfg)
+	if err != nil {
+		t.Fatalf("stat saved config: %v", err)
+	}
+	if got := info.Mode().Perm(); got&0o077 != 0 {
+		t.Fatalf("saved config permissions = %03o, want user-only", got)
 	}
 }
 
