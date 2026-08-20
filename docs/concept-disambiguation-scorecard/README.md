@@ -15,9 +15,9 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **24** (clarity 22 + coverage 2) |
+| **Disambiguation-debt (drive to 0)** | **25** (clarity 22 + coverage 3) |
 | **Crystal-clear concepts (and climbing)** | **752** crystal of 2465 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2595 / 2597** (99.9% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2595 / 2598** (99.9% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 197 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **74** of 3424 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
@@ -28,7 +28,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2465 concepts - score 91.7/100 (grade A) - disambiguation-debt 24
+concept-disambiguation chart - 2465 concepts - score 91.7/100 (grade A) - disambiguation-debt 25
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ############................ 752
@@ -63,6 +63,7 @@ clarity mix by family (each cell = one concept):
 
 coverage by family (positioned / discovered):
   guard-gate       ############################ 461/463
+  plan             ############################ 360/361
   attention        ############################ 76/76
   cache            ############################ 281/281
   context-ctx      ############################ 226/226
@@ -73,7 +74,6 @@ coverage by family (positioned / discovered):
   gateway-engine   ############################ 182/182
   layout           ############################ 15/15
   loop             ############################ 88/88
-  plan             ############################ 360/360
   policy-capability ############################ 184/184
   pool             ############################ 39/39
   render-materialize ############################ 198/198
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   vfs              ............................ 0/0
   witness-proof    ############################ 156/156
 
-namespace coverage  [################################] 99.9%  (2595/2597 confusable tokens positioned)
+namespace coverage  [################################] 99.9%  (2595/2598 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 196
@@ -2755,6 +2755,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
 | guard-gate | 461 | 463 | 2 |
+| plan | 360 | 361 | 1 |
 | attention | 76 | 76 | 0 |
 | cache | 281 | 281 | 0 |
 | context-ctx | 226 | 226 | 0 |
@@ -2765,7 +2766,6 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | gateway-engine | 182 | 182 | 0 |
 | layout | 15 | 15 | 0 |
 | loop | 88 | 88 | 0 |
-| plan | 360 | 360 | 0 |
 | policy-capability | 184 | 184 | 0 |
 | pool | 39 | 39 | 0 |
 | render-materialize | 198 | 198 | 0 |
