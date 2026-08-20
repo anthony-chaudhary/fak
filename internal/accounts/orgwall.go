@@ -54,6 +54,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/accountobs"
+	"github.com/anthony-chaudhary/fak/internal/httptrust"
 )
 
 // SeatHealth is the closed vocabulary for a seat's UPSTREAM usability — what a live
@@ -380,7 +381,9 @@ func CanarySeat(client *http.Client, url, token, model string, now time.Time) (S
 		model = DefaultCanaryModel
 	}
 	if client == nil {
-		client = &http.Client{Timeout: canaryTimeout}
+		// #8172: same trust source as every other fak-originated call, so an
+		// intercepted host does not report a healthy seat as unreachable.
+		client = httptrust.Client(canaryTimeout)
 	}
 	payload, err := json.Marshal(map[string]any{
 		"model":      model,

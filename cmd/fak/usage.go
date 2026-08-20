@@ -326,6 +326,15 @@ const usageCoreText = `usage:
                  SIMD decode tier (AVX-512/AMX>AVX2>scalar, NEON on arm64), whether the
                  target model fits free VRAM/RAM with headroom, and the NUMA layout -
                  each row with a remediation hint. Exit 1 on any Unready row)
+  fak doctor trust [--probe=false] [--host HOST:PORT] [--timeout 4s] [--json]
+                (the MANAGED-HOST TLS check: which trust store fak validates with, the
+                 CA subjects a declared FAK_CA_BUNDLE carries, whether each upstream's
+                 chain validates on the platform store / only with the bundle appended /
+                 not at all (naming the intercepting CA), which sibling runtimes already
+                 point at a corporate bundle while fak does not, which child runtimes
+                 would NOT inherit fak's trust source, and a request-signed cloud route
+                 no certificate can fix. Read-only; an unreachable endpoint is reported
+                 as "no verdict", so an offline host raises nothing. Exit 1 on a finding)
   fak check-tool-failure [--list | TOKEN | --message TEXT] [--json]
                 (closed NON-GUARD tool-failure vocabulary: hangs, timeouts, shell
                  mismatches, hang/shell-mismatch exit-143 cases, and partial applies.

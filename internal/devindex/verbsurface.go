@@ -33,6 +33,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // vsCmdDir is the package the surface is derived from. It is a constant rather than a
@@ -997,10 +998,31 @@ func vsFirstSentence(s string) string {
 		s = s[:i]
 		break
 	}
-	if len(s) > 200 {
-		s = strings.TrimSpace(s[:200]) + "…"
+	if len(s) > vsCellBudget {
+		s = strings.TrimSpace(vsCutRunes(s, vsCellBudget)) + "…"
 	}
 	return vsEscapeCell(s)
+}
+
+// vsCellBudget is the byte budget a single table cell's PURPOSE column gets before
+// the summary is elided. Bytes, not runes, because the budget exists to keep the
+// generated markdown row readable in a terminal, and the row is measured in bytes.
+const vsCellBudget = 200
+
+// vsCutRunes cuts s to at most n BYTES without splitting a UTF-8 rune. The plain
+// `s[:n]` this replaces landed mid-rune whenever byte n fell inside one of the
+// multi-byte characters this repo's prose is full of (— … → ×): the orphaned lead
+// byte survived TrimSpace, the appended "…" followed it, and the generator committed
+// invalid UTF-8 into docs/generated/verb-surface.md — which then crashed every
+// strict-decode consumer of the doc corpus (#8183).
+func vsCutRunes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 func vsIsLetter(b byte) bool { return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' }

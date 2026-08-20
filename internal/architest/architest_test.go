@@ -657,6 +657,8 @@ var tier = map[string]int{
 	"harnessinstructions":   3, // tier-3 adapter composing public harness instructions through the host-owned system-prompt MMU.
 	"sessionintent":         1, // stdlib-only session control declarations and deterministic stop evaluation (#7352).
 	"subtractiveprofile":    1, // stdlib-only deterministic capability subtraction algebra (#6791).
+	"httptrust":             2, // the ONE corporate-trust seam (#8172): resolves a declared CA bundle through secretload(2), widens the platform pool with it, and hands every fak-originated HTTPS client the same RootCAs plus the derived child-runtime trust vars; imports secretload(2)+stdlib, off the hot path.
+	"cloudroute":            1, // stdlib-only detector for a request-signed cloud model route (Bedrock SigV4 / Vertex ADC) whose base-URL repoint cannot take effect (#8172); pure over an environ snapshot, imports nothing internal.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

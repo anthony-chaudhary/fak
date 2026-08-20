@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/cloudroute"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 )
@@ -54,6 +55,14 @@ type guardStartupView struct {
 	maxDurationLimit     time.Duration
 	auditJournal         *journal.Journal
 	bannerMode           string
+	// upstreamTrustNote names the trust store this session validates with, empty on a
+	// host with no corporate CA bundle declared (#8172).
+	upstreamTrustNote string
+	// cloudRouteWaived records that the session runs against a request-signed cloud
+	// model route with the UPSTREAM_UNSUPPORTED refusal waived (#8172). The report has
+	// to say so: every other line in it describes adjudication fak is NOT performing on
+	// this posture, and a banner that stays silent about that is the report lying.
+	cloudRouteWaived bool
 }
 
 // renderGuardStartupReport builds the FULL startup report — always, even under --quiet or the
@@ -114,6 +123,15 @@ func renderGuardStartupReport(v guardStartupView) string {
 			case v.up == "anthropic":
 				fmt.Fprintln(&startupReport, "fak guard: upstream auth — passthrough (Claude Code forwards its own credential through the gateway)")
 			}
+		}
+		// #8172: the enterprise posture, on the durable report rather than a stderr line a
+		// compact launch would lose. Both are empty/false on a host with no corporate CA
+		// bundle and no cloud route selector, which is every non-managed host.
+		if v.upstreamTrustNote != "" {
+			fmt.Fprint(&startupReport, v.upstreamTrustNote)
+		}
+		if v.cloudRouteWaived {
+			fmt.Fprintf(&startupReport, "fak guard: upstream adjudication — NONE for model traffic: a request-signed cloud route (%s=1) was waived, so the child signs its own requests and never reads the injected base URL. The hook floor, tool brokering, transcript, and sandbox below still apply; the model traffic above them does not pass through fak. `fak serve --stdio --policy FILE` is the adjudicated route on this posture.\n", cloudroute.WaiverKey)
 		}
 		// The session's prompt-cache posture, made explicit at boot: whether fak actively
 		// manages the outbound cache_control (1h TTL upgrade) or stays passive and why.

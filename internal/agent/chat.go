@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
+	"github.com/anthony-chaudhary/fak/internal/httptrust"
 )
 
 // Role constants for chat messages.
@@ -642,6 +643,11 @@ type HTTPPlanner struct {
 // CPU-served local model (e.g. a 3B through the transformers shim) can take
 // minutes per turn, so the benchmark needs a longer ceiling than a hosted API.
 func NewHTTPPlanner(baseURL, model, apiKey string) *HTTPPlanner {
+	// #8172: Client is built through httptrust, so a declared corporate CA bundle
+	// (FAK_CA_BUNDLE) is honored on the ONE outbound model client — which covers BOTH
+	// paths that reach an upstream, `fak guard`'s gateway and `fak serve --stdio`'s MCP
+	// planner. With nothing declared this is byte-for-byte the historical
+	// &http.Client{Timeout: plannerTimeout()}, nil Transport included.
 	return &HTTPPlanner{
 		BaseURL:              baseURL,
 		ModelID:              model,
@@ -649,7 +655,7 @@ func NewHTTPPlanner(baseURL, model, apiKey string) *HTTPPlanner {
 		Provider:             ProviderOpenAI,
 		Temperature:          0, // as deterministic as a live model allows
 		MaxTokens:            1024,
-		Client:               &http.Client{Timeout: plannerTimeout()},
+		Client:               httptrust.Client(plannerTimeout()),
 		QuarantineTranscript: true,
 	}
 }
@@ -844,7 +850,10 @@ func (p *HTTPPlanner) ProbeReachability(ctx context.Context) (int, error) {
 	}
 	client := p.Client
 	if client == nil {
-		client = &http.Client{Timeout: plannerTimeout()}
+		// A planner built by hand rather than through NewHTTPPlanner still probes over
+		// the declared trust source (#8172); an unconfigured box gets the same plain
+		// client as before.
+		client = httptrust.Client(plannerTimeout())
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -1475,7 +1484,16 @@ type UpstreamUnreachableError struct {
 }
 
 // Error formats the underlying dial-time cause as "planner: upstream unreachable: <err>".
+//
+// A certificate-verification failure additionally carries the trust hint (#8172):
+// this classifier already knew the chain was untrusted rather than the endpoint
+// unreachable, and dropping that on the floor is what made an intercepted TLS
+// connection read to every operator as a firewall. Other causes are formatted
+// exactly as before.
 func (e *UpstreamUnreachableError) Error() string {
+	if hint := httptrust.TLSTrustHint(e.Err); hint != "" {
+		return fmt.Sprintf("planner: upstream unreachable: %v — %s", e.Err, hint)
+	}
 	return fmt.Sprintf("planner: upstream unreachable: %v", e.Err)
 }
 

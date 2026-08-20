@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/cloudroute"
 )
 
 // scratchRootsHas reports whether the resolved FAK_GUARD_SCRATCHPAD_ROOTS list
@@ -95,6 +97,44 @@ func TestScratchpadRootAliasNeverAddsADirectory(t *testing.T) {
 		}
 		if got != tc.want {
 			t.Errorf("scratchpadRootAlias(%q)=%q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestGuardStartupReportCarriesTheEnterprisePosture pins the two #8172 lines onto
+// the DURABLE report rather than a stderr line a compact or --quiet launch drops.
+// This is the one artifact a running session can be asked about for its whole life
+// (`fak info --startup`, startup_report on /debug/vars), so it is where "which trust
+// store am I validating with" and "is my model traffic adjudicated at all" have to
+// be answerable. The waiver line matters most: every other line in this report
+// describes adjudication fak IS performing, and a banner that stays silent about a
+// waived request-signed route is the report lying by omission.
+func TestGuardStartupReportCarriesTheEnterprisePosture(t *testing.T) {
+	const note = "fak guard: upstream trust — validating against the platform trust store PLUS /etc/corp/ca-bundle.pem (1 certificate(s): Example Corp Root CA)\n"
+	got := renderGuardStartupReport(guardStartupView{upstreamTrustNote: note, cloudRouteWaived: true})
+	if !strings.Contains(got, note) {
+		t.Fatalf("startup report dropped the trust-source line.\nwant: %q\ngot:\n%s", note, got)
+	}
+	if !strings.Contains(got, cloudroute.WaiverKey) {
+		t.Fatalf("startup report never names %s, so an operator cannot tell the waiver is in force.\ngot:\n%s", cloudroute.WaiverKey, got)
+	}
+	for _, want := range []string{"NONE for model traffic", "fak serve --stdio --policy FILE"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("waived-route line missing %q — it must say what is unadjudicated and which route is not.\ngot:\n%s", want, got)
+		}
+	}
+}
+
+// TestGuardStartupReportSilentOnAnUnmanagedHost is the other half of the same
+// property: neither line may appear on a host with no corporate CA bundle and no
+// cloud-route selector, which is every non-managed host. A seam for managed hosts
+// that adds two lines to everyone else's banner has taxed the whole population to
+// serve a subset.
+func TestGuardStartupReportSilentOnAnUnmanagedHost(t *testing.T) {
+	got := renderGuardStartupReport(guardStartupView{})
+	for _, unwanted := range []string{"upstream trust", cloudroute.WaiverKey, "NONE for model traffic"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("unmanaged host got %q on its startup report; the enterprise posture must be invisible here.\ngot:\n%s", unwanted, got)
 		}
 	}
 }

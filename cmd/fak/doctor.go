@@ -86,6 +86,9 @@ func runDoctor(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 	if len(argv) > 0 && argv[0] == "serve" {
 		return runServeDoctor(stdout, stderr, argv[1:])
 	}
+	if len(argv) > 0 && argv[0] == "trust" {
+		return runDoctorTrust(stdout, stderr, argv[1:])
+	}
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	verbFlagUsage(fs, "doctor")
