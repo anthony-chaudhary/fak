@@ -53,6 +53,11 @@ func resolveEarlyDispatch(verb *string, argv *[]string, start time.Time) bool {
 		recordUsage(*verb, *argv, 2, start)
 		os.Exit(2)
 	}
+	if os.Args[1] == "harness" && len(os.Args) > 2 && os.Args[2] == "model-set" {
+		code := runHarnessModelSet(os.Stdout, os.Stderr, os.Args[3:])
+		recordUsage(*verb, *argv, code, start)
+		os.Exit(code)
+	}
 	if os.Args[1] == "orchestration" {
 		cmdOrchestration(os.Args[2:])
 		return true

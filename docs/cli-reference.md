@@ -209,6 +209,34 @@ gain vs tuned warm-cache stack.) The vDSO hit-rate and token savings are reporte
 as **soft UPSIDE secondaries**, never the gate. See `STATUS.md` §2 and `CLAIMS.md`
 (unit 82).
 
+## `fak harness model-set`
+
+`fak harness model-set` is the generated-harness model dependency lifecycle. It composes the shipped strict intent, normalized inventory, deterministic resolver, canonical lock, and startup-receipt packages; it does not download artifacts, contact providers, or construct model servers.
+
+```bash
+# Resolve the generated harness's role requirements into its build/init handoff.
+fak harness model-set resolve \
+  --intent harness.model-set.json \
+  --inventory model-inventory.json \
+  --out harness.model-set.lock.json
+
+# Read and verify the lock without changing it.
+fak harness model-set inspect --lock harness.model-set.lock.json --json
+
+# Re-evaluate current witnessed facts at startup/CI and persist the decision.
+fak harness model-set selfcheck \
+  --lock harness.model-set.lock.json \
+  --inventory model-inventory.json \
+  --receipt harness.model-set.receipt.json \
+  --as-of 2030-01-02T12:00:00Z
+```
+
+`resolve` defaults evaluation to the inventory's authored `as_of`, so identical inputs rerun byte-for-byte. It writes `harness.model-set.expectation.json` beside the conventional lock and publishes the canonical lock last as the commit point; an incompatible or malformed resolution never replaces the prior lock. Target defaults are the current Go OS/architecture with `accelerator=none` and `runtime=mixed-runtime`; generated cross-target builds should set `--os`, `--arch`, `--accelerator`, and `--runtime` explicitly. `--expectation` overrides the expectation-sidecar path.
+
+`selfcheck` defaults `--intent` to `harness.model-set.json` and the expectation to `harness.model-set.expectation.json` beside the lock. It reads only local files, independently re-runs compatibility at `--as-of` (current UTC when omitted), writes a canonical receipt for both compatible and incompatible decisions, and never probes the network. Exit `0` means compatible, `3` means a typed incompatibility was captured in the receipt, `2` is usage, and `1` is invalid input or I/O. Unknown, stale, malformed, mismatched, or unresolved required facts fail closed. The receipt is the startup/CI gate; the lock remains unchanged.
+
+`inspect` verifies the lock digest and optional receipt, then renders target, resolver, role selections, immutable artifact identities, rejection counts, and receipt status. It is read-only. `--json` schemas are `fak.harness-model-set-resolve/1`, `fak.harness-model-set-inspect/1`, and `fak.harness-model-set-selfcheck/1`.
+
 ## `fak ultracode`
 
 `fak ultracode` is the first-class front door for a bounded concurrent coding-agent fleet. It routes through the canonical orchestration runtime with the `ultracode` profile fixed: workers require lane leases, checkable effects require independent readback, and a lead reconciles the results. Planning does not launch a model or spend tokens.

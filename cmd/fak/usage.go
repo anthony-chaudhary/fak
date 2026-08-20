@@ -41,6 +41,14 @@ func usageWallText() string {
 const usageCoreText = `usage:
   fak run       --trace FILE [--engine inkernel] [--vdso=true] [--policy FILE]
   fak launch   [install|uninstall|default|enable|disable|status|doctor] [claude|codex] [--direct]
+  fak harness model-set resolve --intent PATH --inventory PATH --out PATH [--json]
+  fak harness model-set inspect --lock PATH [--receipt PATH] [--json]
+  fak harness model-set selfcheck --lock PATH --inventory PATH --receipt PATH [--as-of RFC3339] [--json]
+                (MODEL-SET LIFECYCLE: resolve role requirements against witnessed
+                 inventory into an atomic canonical lock; inspect lock/receipt
+                 state without mutation; selfcheck re-evaluates locally and writes
+                 a compatibility receipt. No command downloads or starts a model.
+                 Exit 0 compatible, 2 usage, 3 typed incompatibility, 1 invalid I/O.)
   fak commit    --path P [--path P ...] (-m STR | -F FILE/-) [--push] [--trunk B] [--no-signoff] [--review-model M] [--json]
   fak commit status [--dir DIR] [--json]
   fak commit preflight --path P [--path P ...] [--dir DIR] [--json]
