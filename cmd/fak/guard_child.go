@@ -778,9 +778,14 @@ func resolveWindowsBatchCommand(command []string) []string {
 	if err != nil {
 		return command
 	}
-	out := append([]string(nil), command...)
-	out[0] = resolved
-	return out
+	// CreateProcess cannot execute a batch file directly. Front the npm shim with
+	// cmd.exe while preserving every original argument as a distinct argv element.
+	comspec := strings.TrimSpace(os.Getenv("ComSpec"))
+	if comspec == "" {
+		comspec = "cmd.exe"
+	}
+	out := []string{comspec, "/d", "/s", "/c", resolved}
+	return append(out, command[1:]...)
 }
 
 func guardChildCommandEnv(command []string, injected [][2]string, pinUpstream bool, extraEnv ...[2]string) ([]string, []string) {
