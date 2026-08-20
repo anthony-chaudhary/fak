@@ -1,0 +1,148 @@
+{
+  "schema": "fak.model-set-startup-receipt/1",
+  "evaluated_at": "2030-01-02T12:00:00Z",
+  "status": "compatible",
+  "expected": {
+    "requirements": "sha256:383e12d87842687f29db6ec5cbf82ec860b72a63846a38912db93a1209c27e64",
+    "resolution": "sha256:f6b72c5e17e4469d8e847d0f1dca39e95c5320de42bfbd513f4d36e4fcb1595e",
+    "inventory": "sha256:92e57069eedf79109914826f63942c86ac2a207613eba8438f586e3722731fd6"
+  },
+  "observed": {
+    "requirements": "sha256:383e12d87842687f29db6ec5cbf82ec860b72a63846a38912db93a1209c27e64",
+    "resolution": "sha256:f6b72c5e17e4469d8e847d0f1dca39e95c5320de42bfbd513f4d36e4fcb1595e",
+    "inventory": "sha256:92e57069eedf79109914826f63942c86ac2a207613eba8438f586e3722731fd6"
+  },
+  "roles": [
+    {
+      "role_id": "executor",
+      "required": true,
+      "status": "compatible",
+      "expected": {
+        "role_id": "executor",
+        "required": true,
+        "alternative_id": "executor-local",
+        "candidate_id": "executor-exact",
+        "identity_digest": "sha256:b7af4d51b317bc0944700a88e442506574a2aad107923f2f3ab4ab2df38551c2",
+        "evidence_digest": "sha256:43ee87fc16c08dbf391ed2ef964c630d43343c7983539666922c317830c665aa",
+        "fact_set_digest": "sha256:ec995df4b45e3faea559a4f4e09bd96e34e7fb4d8f82407e3fe8da8153c45074"
+      },
+      "observed": {
+        "role_id": "executor",
+        "required": true,
+        "alternative_id": "executor-local",
+        "candidate_id": "executor-exact",
+        "identity_digest": "sha256:b7af4d51b317bc0944700a88e442506574a2aad107923f2f3ab4ab2df38551c2",
+        "evidence_digest": "sha256:43ee87fc16c08dbf391ed2ef964c630d43343c7983539666922c317830c665aa",
+        "fact_set_digest": "sha256:ec995df4b45e3faea559a4f4e09bd96e34e7fb4d8f82407e3fe8da8153c45074"
+      },
+      "reevaluated_selection": {
+        "alternative_id": "executor-local",
+        "candidate_id": "executor-exact"
+      },
+      "fact_bindings": [
+        {
+          "name": "context_tokens",
+          "value_digest": "sha256:027128c21489d0b393ef1eb2d41d6d1e1448dbaf11e2af55f21655c68a91fb6f",
+          "witnesses": [
+            {
+              "kind": "probe",
+              "source": "capability/context/executor-exact",
+              "observed_at": "2030-01-02T11:00:00Z",
+              "expires_at": "2030-01-04T12:00:00Z"
+            }
+          ]
+        },
+        {
+          "name": "structured_json",
+          "value_digest": "sha256:0f33f1d883bd0b50f197fbeaa53e21c7a84ff196b5bd111d2f2efabba13f96ff",
+          "witnesses": [
+            {
+              "kind": "probe",
+              "source": "capability/structured/executor-exact",
+              "observed_at": "2030-01-02T11:00:00Z",
+              "expires_at": "2030-01-04T12:00:00Z"
+            }
+          ]
+        },
+        {
+          "name": "tool_calling",
+          "value_digest": "sha256:50e6449154df063160d47adea1ca0893761c83eadcbb9993a7acd4517b1ca124",
+          "witnesses": [
+            {
+              "kind": "probe",
+              "source": "capability/tools/executor-exact",
+              "observed_at": "2030-01-02T11:00:00Z",
+              "expires_at": "2030-01-04T12:00:00Z"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "role_id": "planner",
+      "required": true,
+      "status": "compatible",
+      "expected": {
+        "role_id": "planner",
+        "required": true,
+        "alternative_id": "planner-structured",
+        "candidate_id": "planner-exact",
+        "identity_digest": "sha256:9fc9b19671395d31b23a5286487158dc24132e64fa9aa0cc9f7341ca00255758",
+        "evidence_digest": "sha256:c770dd21854e1a56a695c4519181fb47c21bcdd1d97c842d9ab8eab2928eeb6c",
+        "fact_set_digest": "sha256:b33f930940e48a655e31f0de8fedeb3e3d3f6911db0ff8f7b104d2d62e0e0f41"
+      },
+      "observed": {
+        "role_id": "planner",
+        "required": true,
+        "alternative_id": "planner-structured",
+        "candidate_id": "planner-exact",
+        "identity_digest": "sha256:9fc9b19671395d31b23a5286487158dc24132e64fa9aa0cc9f7341ca00255758",
+        "evidence_digest": "sha256:c770dd21854e1a56a695c4519181fb47c21bcdd1d97c842d9ab8eab2928eeb6c",
+        "fact_set_digest": "sha256:b33f930940e48a655e31f0de8fedeb3e3d3f6911db0ff8f7b104d2d62e0e0f41"
+      },
+      "reevaluated_selection": {
+        "alternative_id": "planner-structured",
+        "candidate_id": "planner-exact"
+      },
+      "fact_bindings": [
+        {
+          "name": "context_tokens",
+          "value_digest": "sha256:0c11de9f988510f8261ec7e2151590feacde3d78b9b52ef14fb4e2766546b9f1",
+          "witnesses": [
+            {
+              "kind": "probe",
+              "source": "capability/context/planner-exact",
+              "observed_at": "2030-01-02T11:00:00Z",
+              "expires_at": "2030-01-04T12:00:00Z"
+            }
+          ]
+        },
+        {
+          "name": "structured_json",
+          "value_digest": "sha256:50e6449154df063160d47adea1ca0893761c83eadcbb9993a7acd4517b1ca124",
+          "witnesses": [
+            {
+              "kind": "probe",
+              "source": "capability/structured/planner-exact",
+              "observed_at": "2030-01-02T11:00:00Z",
+              "expires_at": "2030-01-04T12:00:00Z"
+            }
+          ]
+        },
+        {
+          "name": "tool_calling",
+          "value_digest": "sha256:50e6449154df063160d47adea1ca0893761c83eadcbb9993a7acd4517b1ca124",
+          "witnesses": [
+            {
+              "kind": "probe",
+              "source": "capability/tools/planner-exact",
+              "observed_at": "2030-01-02T11:00:00Z",
+              "expires_at": "2030-01-04T12:00:00Z"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "failures": []
+}

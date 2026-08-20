@@ -1,0 +1,85 @@
+{
+  "schema": "fak-harness-model-set-intent/1",
+  "roles": [
+    {
+      "id": "executor",
+      "required": true,
+      "alternatives": [
+        {
+          "id": "executor-local",
+          "capabilities": {
+            "tool_calling": true
+          },
+          "operational": {
+            "runtime": "llama.cpp",
+            "serving_protocol": "openai-compatible",
+            "platforms": [
+              "linux/amd64"
+            ],
+            "accelerators": [
+              "cuda"
+            ],
+            "max_memory_bytes": 8589934592,
+            "locality": "local-only",
+            "privacy": "no-egress",
+            "license_allowlist": [
+              "apache-2.0"
+            ]
+          }
+        }
+      ],
+      "preference": {
+        "mode": "declared-order"
+      },
+      "evidence": {
+        "max_age_hours": 4,
+        "required_kinds": [
+          "model-behavior-probe",
+          "operator-attestation",
+          "runtime-probe"
+        ]
+      }
+    },
+    {
+      "id": "planner",
+      "required": true,
+      "alternatives": [
+        {
+          "id": "planner-structured",
+          "capabilities": {
+            "tool_calling": true,
+            "structured_output": true,
+            "minimum_input_tokens": 65536
+          },
+          "operational": {
+            "runtime": "llama.cpp",
+            "serving_protocol": "openai-compatible",
+            "platforms": [
+              "linux/amd64"
+            ],
+            "accelerators": [
+              "cuda"
+            ],
+            "max_memory_bytes": 34359738368,
+            "locality": "remote-allowed",
+            "privacy": "no-egress",
+            "license_allowlist": [
+              "apache-2.0"
+            ]
+          }
+        }
+      ],
+      "preference": {
+        "mode": "declared-order"
+      },
+      "evidence": {
+        "max_age_hours": 4,
+        "required_kinds": [
+          "model-behavior-probe",
+          "operator-attestation",
+          "runtime-probe"
+        ]
+      }
+    }
+  ]
+}

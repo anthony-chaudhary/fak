@@ -1,0 +1,9 @@
+{
+  "schema": "fak.harness-model-set-selfcheck/1",
+  "status": "compatible",
+  "lock_digest": "sha256:15b12b1e3336da0b7be8fad86ce7480b8d858472be9754b04d75843343a26b55",
+  "receipt_path": "harness.model-set.receipt.json",
+  "evaluated_at": "2030-01-02T12:00:00Z",
+  "roles": 2,
+  "failures": null
+}

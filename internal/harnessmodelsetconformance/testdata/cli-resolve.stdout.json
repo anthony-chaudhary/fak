@@ -1,0 +1,9 @@
+{
+  "schema": "fak.harness-model-set-resolve/1",
+  "status": "resolved",
+  "lock_path": "harness.model-set.lock.json",
+  "expectation_path": "harness.model-set.expectation.json",
+  "content_digest": "sha256:15b12b1e3336da0b7be8fad86ce7480b8d858472be9754b04d75843343a26b55",
+  "evaluated_at": "2030-01-02T12:00:00Z",
+  "roles": 2
+}

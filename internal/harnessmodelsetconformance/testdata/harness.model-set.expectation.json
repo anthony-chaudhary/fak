@@ -1,0 +1,28 @@
+{
+  "schema": "fak.model-set-startup-expectation/1",
+  "digests": {
+    "requirements": "sha256:383e12d87842687f29db6ec5cbf82ec860b72a63846a38912db93a1209c27e64",
+    "resolution": "sha256:f6b72c5e17e4469d8e847d0f1dca39e95c5320de42bfbd513f4d36e4fcb1595e",
+    "inventory": "sha256:92e57069eedf79109914826f63942c86ac2a207613eba8438f586e3722731fd6"
+  },
+  "roles": [
+    {
+      "role_id": "executor",
+      "required": true,
+      "alternative_id": "executor-local",
+      "candidate_id": "executor-exact",
+      "identity_digest": "sha256:b7af4d51b317bc0944700a88e442506574a2aad107923f2f3ab4ab2df38551c2",
+      "evidence_digest": "sha256:43ee87fc16c08dbf391ed2ef964c630d43343c7983539666922c317830c665aa",
+      "fact_set_digest": "sha256:ec995df4b45e3faea559a4f4e09bd96e34e7fb4d8f82407e3fe8da8153c45074"
+    },
+    {
+      "role_id": "planner",
+      "required": true,
+      "alternative_id": "planner-structured",
+      "candidate_id": "planner-exact",
+      "identity_digest": "sha256:9fc9b19671395d31b23a5286487158dc24132e64fa9aa0cc9f7341ca00255758",
+      "evidence_digest": "sha256:c770dd21854e1a56a695c4519181fb47c21bcdd1d97c842d9ab8eab2928eeb6c",
+      "fact_set_digest": "sha256:b33f930940e48a655e31f0de8fedeb3e3d3f6911db0ff8f7b104d2d62e0e0f41"
+    }
+  ]
+}

@@ -1,0 +1,281 @@
+{
+  "schema": "fak.model-set-lock/1",
+  "content_digest": "sha256:15b12b1e3336da0b7be8fad86ce7480b8d858472be9754b04d75843343a26b55",
+  "inputs": {
+    "intent": "sha256:383e12d87842687f29db6ec5cbf82ec860b72a63846a38912db93a1209c27e64",
+    "inventory": "sha256:92e57069eedf79109914826f63942c86ac2a207613eba8438f586e3722731fd6",
+    "policy": "sha256:3171fbfe0e3e9c9a2f8a4885ceeab1ea1e4f7c336b3c47b17e5d9e0221b9d08b",
+    "target": "sha256:13951641e6376de183450c820b4e3b4152fc47148178b5afe1130c26c972ab6c"
+  },
+  "target": {
+    "os": "linux",
+    "architecture": "amd64",
+    "accelerator": "cpu",
+    "runtime": "mixed-runtime"
+  },
+  "resolver_version": "fak.model-set-resolution/1",
+  "evaluated_at": "2030-01-02T12:00:00Z",
+  "roles": [
+    {
+      "id": "executor",
+      "required": true,
+      "status": "selected",
+      "alternative_ids": [
+        "executor-local"
+      ],
+      "selected": {
+        "alternative_id": "executor-local",
+        "candidate_id": "executor-exact",
+        "identity": {
+          "source": "local",
+          "artifact": "models/executor-exact.gguf",
+          "digest": "sha256:9f7fb7121258de29663acd1aeb5ae2ad94d7374776662505a25e9f29278eabbf",
+          "format": "gguf",
+          "witnesses": [
+            {
+              "kind": "probe",
+              "source": "identity/executor-exact",
+              "observed_at": "2030-01-02T11:00:00Z",
+              "expires_at": "2030-01-04T12:00:00Z"
+            }
+          ]
+        },
+        "evidence": [
+          {
+            "kind": "operator-attestation",
+            "source": "policy/license/executor-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "operator-attestation",
+            "source": "policy/locality/executor-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "operator-attestation",
+            "source": "policy/privacy/executor-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "availability/executor-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "capability/context/executor-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "capability/structured/executor-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "capability/tools/executor-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "identity/executor-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "platform/accelerator/executor-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "platform/architecture/executor-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "platform/memory/executor-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "platform/os/executor-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "serving/protocol/executor-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "serving/runtime/executor-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          }
+        ]
+      },
+      "rejections": [
+        {
+          "role_id": "executor",
+          "alternative_id": "executor-local",
+          "alternative_index": 0,
+          "candidate_id": "planner-exact",
+          "code": "MODEL_SET_MEMORY_EXCEEDED",
+          "constraint": "operational.max_memory_bytes",
+          "expected": "\u003c=8589934592",
+          "actual": "17179869184",
+          "remediation": "use a candidate whose witnessed accelerator memory fits the ceiling"
+        }
+      ]
+    },
+    {
+      "id": "planner",
+      "required": true,
+      "status": "selected",
+      "alternative_ids": [
+        "planner-structured"
+      ],
+      "selected": {
+        "alternative_id": "planner-structured",
+        "candidate_id": "planner-exact",
+        "identity": {
+          "source": "local",
+          "artifact": "models/planner-exact.gguf",
+          "digest": "sha256:defd1b50b5086fbbae785aef7ebd42ba5f4a6bb0782baade7de5ead274069e2b",
+          "format": "gguf",
+          "witnesses": [
+            {
+              "kind": "probe",
+              "source": "identity/planner-exact",
+              "observed_at": "2030-01-02T11:00:00Z",
+              "expires_at": "2030-01-04T12:00:00Z"
+            }
+          ]
+        },
+        "evidence": [
+          {
+            "kind": "operator-attestation",
+            "source": "policy/license/planner-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "operator-attestation",
+            "source": "policy/locality/planner-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "operator-attestation",
+            "source": "policy/privacy/planner-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "availability/planner-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "capability/context/planner-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "capability/structured/planner-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "capability/tools/planner-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "identity/planner-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "platform/accelerator/planner-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "platform/architecture/planner-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "platform/memory/planner-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "platform/os/planner-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "serving/protocol/planner-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          },
+          {
+            "kind": "probe",
+            "source": "serving/runtime/planner-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          }
+        ]
+      },
+      "rejections": [
+        {
+          "role_id": "planner",
+          "alternative_id": "planner-structured",
+          "alternative_index": 0,
+          "candidate_id": "executor-exact",
+          "code": "MODEL_SET_INPUT_TOKENS_INSUFFICIENT",
+          "constraint": "capabilities.minimum_input_tokens",
+          "expected": "\u003e=65536",
+          "actual": "32768",
+          "remediation": "use a candidate with a large enough witnessed input context"
+        },
+        {
+          "role_id": "planner",
+          "alternative_id": "planner-structured",
+          "alternative_index": 0,
+          "candidate_id": "executor-exact",
+          "code": "MODEL_SET_STRUCTURED_OUTPUT_REQUIRED",
+          "constraint": "capabilities.structured_output",
+          "expected": "true",
+          "actual": "false",
+          "remediation": "supply a candidate with witnessed structured JSON output"
+        }
+      ]
+    }
+  ]
+}

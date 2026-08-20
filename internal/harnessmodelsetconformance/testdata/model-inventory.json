@@ -1,0 +1,424 @@
+{
+  "schema": "fak.model-inventory/1",
+  "as_of": "2030-01-02T12:00:00Z",
+  "candidates": [
+    {
+      "id": "executor-exact",
+      "identity": {
+        "source": "local",
+        "artifact": "models/executor-exact.gguf",
+        "digest": "sha256:9f7fb7121258de29663acd1aeb5ae2ad94d7374776662505a25e9f29278eabbf",
+        "format": "gguf",
+        "witnesses": [
+          {
+            "kind": "probe",
+            "source": "identity/executor-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          }
+        ]
+      },
+      "evidence": {
+        "availability": {
+          "name": "available",
+          "value": {
+            "bool": true
+          },
+          "witnesses": [
+            {
+              "kind": "probe",
+              "source": "availability/executor-exact",
+              "observed_at": "2030-01-02T11:00:00Z",
+              "expires_at": "2030-01-04T12:00:00Z"
+            }
+          ]
+        },
+        "serving": [
+          {
+            "name": "protocol",
+            "value": {
+              "text": "openai-compatible"
+            },
+            "witnesses": [
+              {
+                "kind": "probe",
+                "source": "serving/protocol/executor-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          },
+          {
+            "name": "runtime",
+            "value": {
+              "text": "llama.cpp"
+            },
+            "witnesses": [
+              {
+                "kind": "probe",
+                "source": "serving/runtime/executor-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          }
+        ],
+        "platform": [
+          {
+            "name": "accelerator",
+            "value": {
+              "text": "cuda"
+            },
+            "witnesses": [
+              {
+                "kind": "probe",
+                "source": "platform/accelerator/executor-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          },
+          {
+            "name": "accelerator_memory_bytes",
+            "value": {
+              "integer": 4294967296
+            },
+            "witnesses": [
+              {
+                "kind": "probe",
+                "source": "platform/memory/executor-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          },
+          {
+            "name": "architecture",
+            "value": {
+              "text": "amd64"
+            },
+            "witnesses": [
+              {
+                "kind": "probe",
+                "source": "platform/architecture/executor-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          },
+          {
+            "name": "os",
+            "value": {
+              "text": "linux"
+            },
+            "witnesses": [
+              {
+                "kind": "probe",
+                "source": "platform/os/executor-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          }
+        ],
+        "policy": [
+          {
+            "name": "license",
+            "value": {
+              "text": "apache-2.0"
+            },
+            "witnesses": [
+              {
+                "kind": "operator-attestation",
+                "source": "policy/license/executor-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          },
+          {
+            "name": "locality",
+            "value": {
+              "text": "local"
+            },
+            "witnesses": [
+              {
+                "kind": "operator-attestation",
+                "source": "policy/locality/executor-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          },
+          {
+            "name": "privacy",
+            "value": {
+              "text": "no-egress"
+            },
+            "witnesses": [
+              {
+                "kind": "operator-attestation",
+                "source": "policy/privacy/executor-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          }
+        ],
+        "capabilities": [
+          {
+            "name": "context_tokens",
+            "value": {
+              "integer": 32768
+            },
+            "witnesses": [
+              {
+                "kind": "probe",
+                "source": "capability/context/executor-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          },
+          {
+            "name": "structured_json",
+            "value": {
+              "bool": false
+            },
+            "witnesses": [
+              {
+                "kind": "probe",
+                "source": "capability/structured/executor-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          },
+          {
+            "name": "tool_calling",
+            "value": {
+              "bool": true
+            },
+            "witnesses": [
+              {
+                "kind": "probe",
+                "source": "capability/tools/executor-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "planner-exact",
+      "identity": {
+        "source": "local",
+        "artifact": "models/planner-exact.gguf",
+        "digest": "sha256:defd1b50b5086fbbae785aef7ebd42ba5f4a6bb0782baade7de5ead274069e2b",
+        "format": "gguf",
+        "witnesses": [
+          {
+            "kind": "probe",
+            "source": "identity/planner-exact",
+            "observed_at": "2030-01-02T11:00:00Z",
+            "expires_at": "2030-01-04T12:00:00Z"
+          }
+        ]
+      },
+      "evidence": {
+        "availability": {
+          "name": "available",
+          "value": {
+            "bool": true
+          },
+          "witnesses": [
+            {
+              "kind": "probe",
+              "source": "availability/planner-exact",
+              "observed_at": "2030-01-02T11:00:00Z",
+              "expires_at": "2030-01-04T12:00:00Z"
+            }
+          ]
+        },
+        "serving": [
+          {
+            "name": "protocol",
+            "value": {
+              "text": "openai-compatible"
+            },
+            "witnesses": [
+              {
+                "kind": "probe",
+                "source": "serving/protocol/planner-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          },
+          {
+            "name": "runtime",
+            "value": {
+              "text": "llama.cpp"
+            },
+            "witnesses": [
+              {
+                "kind": "probe",
+                "source": "serving/runtime/planner-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          }
+        ],
+        "platform": [
+          {
+            "name": "accelerator",
+            "value": {
+              "text": "cuda"
+            },
+            "witnesses": [
+              {
+                "kind": "probe",
+                "source": "platform/accelerator/planner-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          },
+          {
+            "name": "accelerator_memory_bytes",
+            "value": {
+              "integer": 17179869184
+            },
+            "witnesses": [
+              {
+                "kind": "probe",
+                "source": "platform/memory/planner-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          },
+          {
+            "name": "architecture",
+            "value": {
+              "text": "amd64"
+            },
+            "witnesses": [
+              {
+                "kind": "probe",
+                "source": "platform/architecture/planner-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          },
+          {
+            "name": "os",
+            "value": {
+              "text": "linux"
+            },
+            "witnesses": [
+              {
+                "kind": "probe",
+                "source": "platform/os/planner-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          }
+        ],
+        "policy": [
+          {
+            "name": "license",
+            "value": {
+              "text": "apache-2.0"
+            },
+            "witnesses": [
+              {
+                "kind": "operator-attestation",
+                "source": "policy/license/planner-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          },
+          {
+            "name": "locality",
+            "value": {
+              "text": "local"
+            },
+            "witnesses": [
+              {
+                "kind": "operator-attestation",
+                "source": "policy/locality/planner-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          },
+          {
+            "name": "privacy",
+            "value": {
+              "text": "no-egress"
+            },
+            "witnesses": [
+              {
+                "kind": "operator-attestation",
+                "source": "policy/privacy/planner-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          }
+        ],
+        "capabilities": [
+          {
+            "name": "context_tokens",
+            "value": {
+              "integer": 131072
+            },
+            "witnesses": [
+              {
+                "kind": "probe",
+                "source": "capability/context/planner-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          },
+          {
+            "name": "structured_json",
+            "value": {
+              "bool": true
+            },
+            "witnesses": [
+              {
+                "kind": "probe",
+                "source": "capability/structured/planner-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          },
+          {
+            "name": "tool_calling",
+            "value": {
+              "bool": true
+            },
+            "witnesses": [
+              {
+                "kind": "probe",
+                "source": "capability/tools/planner-exact",
+                "observed_at": "2030-01-02T11:00:00Z",
+                "expires_at": "2030-01-04T12:00:00Z"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
