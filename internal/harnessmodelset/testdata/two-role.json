@@ -1,0 +1,78 @@
+{
+  "schema": "fak-harness-model-set-intent/1",
+  "roles": [
+    {
+      "id": "executor",
+      "required": true,
+      "alternatives": [
+        {
+          "id": "local-executor",
+          "capabilities": {
+            "tool_calling": true,
+            "minimum_input_tokens": 16384,
+            "modalities": [
+              "text"
+            ]
+          },
+          "operational": {
+            "serving_protocol": "openai-compatible",
+            "platforms": [
+              "linux/amd64"
+            ],
+            "accelerators": [
+              "cpu"
+            ],
+            "max_memory_bytes": 17179869184,
+            "locality": "local-only",
+            "privacy": "no-egress",
+            "license_allowlist": [
+              "Apache-2.0"
+            ]
+          }
+        }
+      ],
+      "preference": {
+        "mode": "local-first"
+      },
+      "evidence": {
+        "max_age_hours": 24,
+        "required_kinds": [
+          "model-behavior-probe",
+          "runtime-probe"
+        ]
+      }
+    },
+    {
+      "id": "planner",
+      "required": true,
+      "alternatives": [
+        {
+          "id": "planner-primary",
+          "capabilities": {
+            "tool_calling": true,
+            "structured_output": true,
+            "tool_protocol": "openai-tools",
+            "minimum_input_tokens": 32768,
+            "modalities": [
+              "text"
+            ]
+          },
+          "operational": {
+            "serving_protocol": "openai-compatible",
+            "locality": "remote-allowed",
+            "privacy": "private-endpoint"
+          }
+        }
+      ],
+      "preference": {
+        "mode": "declared-order"
+      },
+      "evidence": {
+        "max_age_hours": 12,
+        "required_kinds": [
+          "model-behavior-probe"
+        ]
+      }
+    }
+  ]
+}
