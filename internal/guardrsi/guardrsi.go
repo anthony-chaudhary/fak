@@ -565,7 +565,7 @@ func maturityResults(c context) []KPIResult {
 func realizedResults(c context) []KPIResult {
 	return []KPIResult{
 		result("loop_reads_real_journal", "realized", true, 3, "a loop READS the real journal (not a dangling telemetry string)", c.verdictExists, "the native verdict loop discovers + folds the real guard-audit journals"),
-		result("registered_in_control_pane", "realized", true, 2, "the guard-RSI scorecard is registered in the control-pane ratchet", strings.Contains(c.controlPane, "guard-rsi-scorecard") && strings.Contains(c.baseline, "guard_rsi"), "scorecard_control_pane carries the guard_rsi row and the baseline is pinned"),
+		result("registered_in_control_pane", "realized", true, 2, "the guard-RSI scorecard is registered in the control-pane ratchet", (strings.Contains(c.controlPane, "guard-rsi-scorecard") || strings.Contains(c.controlPane, "score guard-rsi")) && strings.Contains(c.baseline, "guard_rsi"), "scorecard_control_pane carries the guard_rsi row and the baseline is pinned"),
 		result("kept_iteration_on_real_rows", "realized", true, 3, "the loop has CLOSED on real usage (>=1 kept iteration possible)", c.auditRows > 0, auditDetail(c)),
 		result("paired_honesty_test", "realized", true, 2, "a paired test proves the keep/revert + empty-journal refusal", c.verdictTestExists, "internal/guardrsi/guardrsi_test.go proves KEEP-on-gain, REVERT-on-no-gain, and empty-journal refusal"),
 		result("documented", "realized", false, 1, "the real-usage loop is documented + has an RSI skill", c.docExists && c.skillExists, "docs/fak/guard-verdict-rsi-loop.md + .claude/skills/guard-rsi-score explain and operationalise the pass"),

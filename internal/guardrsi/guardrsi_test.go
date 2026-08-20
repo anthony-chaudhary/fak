@@ -152,6 +152,29 @@ func TestScorecardPayloadShapeAndGrade(t *testing.T) {
 	}
 }
 
+func TestScorecardRecognizesBothGuardRSICommandSpellings(t *testing.T) {
+	for _, command := range []string{
+		"go run ./cmd/fak guard-rsi-scorecard --json",
+		"go run ./cmd/fak score guard-rsi --json",
+	} {
+		t.Run(command, func(t *testing.T) {
+			root := t.TempDir()
+			writeGuardRSITree(t, root, true)
+			mustWrite(t, filepath.Join(root, "tools", "scorecard_control_pane.py"), []byte(command))
+			if got := BuildScorecard(root).Corpus[DebtKey]; got != 0 {
+				t.Fatalf("%q registration debt = %v, want 0", command, got)
+			}
+		})
+	}
+
+	root := t.TempDir()
+	writeGuardRSITree(t, root, true)
+	mustWrite(t, filepath.Join(root, "tools", "scorecard_control_pane.py"), []byte("unrelated-scorecard"))
+	if got := BuildScorecard(root).Corpus[DebtKey]; got != 1 {
+		t.Fatalf("missing registration debt = %v, want 1", got)
+	}
+}
+
 // TestScorecardGradeRidesSharedKernelTable pins guard-rsi's grade to the shared
 // pkg/scorecard.GradeStd table (#1511): the emitted corpus grade must be exactly the
 // shared-table letter, so a re-copied local grade table can no longer drift this card off
