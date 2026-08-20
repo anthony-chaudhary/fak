@@ -126,6 +126,9 @@ func overlayProfile(base, ov HarnessProfile) HarnessProfile {
 	if ov.Name != "" {
 		out.Name = ov.Name
 	}
+	if ov.AdapterVersion != "" {
+		out.AdapterVersion = ov.AdapterVersion
+	}
 	if len(ov.Names) > 0 {
 		out.Names = unionDetectNames(base.Names, ov.Names)
 	}
@@ -177,6 +180,9 @@ func unionDetectNames(base, override []string) []string {
 // does not require completeness — a partial override (repin one field) is legal; completeness
 // is checked on the MERGED profile by validateComplete.
 func (p HarnessProfile) validateProvided() error {
+	if p.AdapterVersion != "" && !validAdapterVersion(p.AdapterVersion) {
+		return fmt.Errorf("invalid adapter version %q (want MAJOR.MINOR.PATCH)", p.AdapterVersion)
+	}
 	if p.Wire != "" && !p.Wire.Valid() {
 		return fmt.Errorf("unknown wire %q (want anthropic|openai|openai-responses)", p.Wire)
 	}

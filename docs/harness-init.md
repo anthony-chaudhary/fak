@@ -13,6 +13,25 @@ go build -o product-bin ./cmd/product
 go run ./cmd/product --selfcheck
 ```
 
+To start from one of fak's first-party host adapters, select it explicitly:
+
+```text
+fak harness init --dir ./my-codex-product --module example.com/my-codex-product --host codex
+fak harness init --dir ./my-claude-product --module example.com/my-claude-product --host claude
+```
+
+Host initialization adds `product.json` and `product.lock.json`. The manifest projects the
+same `internal/harnessprofile` descriptor used by guard into versioned host, wire, and repoint
+components; the generated product verifies that lock and emits the resolved component identities
+in its `harness.locked` launch receipt. The no-`--host` path remains the generic nine-file product.
+
+The host component version belongs to fak's adapter contract, not to the installed Codex or
+Claude CLI. Its digest covers the descriptor semantics, and a committed snapshot forces a
+deliberate version decision whenever those semantics change. Upstream executable versions are
+runtime observations: init neither installs nor silently pins them. This split lets a stable fak
+adapter tolerate compatible upstream releases while leaving incompatible drift visible for a
+pre-launch check.
+
 Ownership is explicit in `harness.lock.json`: `product/config.go` and `README.md` are user-owned and never overwritten. Generated Go/module files carry generator provenance or are listed in the lock. Re-running the command updates only recognized generated files and leaves user-owned files byte-for-byte intact.
 
 The default pin is `github.com/anthony-chaudhary/fak@v0.43.1-0.20260814184635-613a82b762e2`, the Go proxy's immutable pseudo-version for commit `613a82b762e2` where public contract `v1alpha1` shipped. Override it explicitly with `--fak-version` when upgrading. Windows and Linux clean-room transcripts are archived under `docs/_witnesses/harness-init/`.

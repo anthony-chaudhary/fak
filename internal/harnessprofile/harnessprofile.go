@@ -143,6 +143,10 @@ const (
 type HarnessProfile struct {
 	// Name is the canonical profile id, used in banners and as a rotation identity label.
 	Name string `json:"name"`
+	// AdapterVersion versions fak's integration contract for this harness. It is
+	// independent of the upstream CLI release: the semantic digest covers the descriptor
+	// below, while runtime discovery records whichever upstream version is installed.
+	AdapterVersion string `json:"adapter_version,omitempty"`
 	// Names are the executable base names (lowercased, launcher-suffix stripped) that
 	// select this profile — the detect axis, generalizing guardDetectProvider's cases.
 	Names []string `json:"names"`
@@ -187,6 +191,7 @@ func (p HarnessProfile) HasRepoint(m RepointMechanism) bool {
 var builtins = []HarnessProfile{
 	{
 		Name:           "claude",
+		AdapterVersion: "1.0.0",
 		Names:          []string{"claude", "claude-code"},
 		Wire:           WireAnthropic,
 		DefaultBaseURL: "https://api.anthropic.com",
@@ -199,6 +204,7 @@ var builtins = []HarnessProfile{
 	},
 	{
 		Name:           "codex",
+		AdapterVersion: "1.0.0",
 		Names:          []string{"codex"},
 		Wire:           WireOpenAIResponses,
 		DefaultBaseURL: "https://api.openai.com/v1",

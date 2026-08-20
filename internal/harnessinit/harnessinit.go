@@ -25,6 +25,7 @@ type Options struct {
 	Dir        string
 	Module     string
 	FAKVersion string
+	Host       string
 }
 
 type Result struct {
@@ -32,6 +33,7 @@ type Result struct {
 	Module          string   `json:"module"`
 	FAKVersion      string   `json:"fak_version"`
 	ContractVersion string   `json:"contract_version"`
+	Host            string   `json:"host,omitempty"`
 	Created         []string `json:"created"`
 	Updated         []string `json:"updated,omitempty"`
 	Preserved       []string `json:"preserved,omitempty"`
@@ -43,6 +45,7 @@ type manifest struct {
 	FAKModule       string            `json:"fak_module"`
 	FAKVersion      string            `json:"fak_version"`
 	ContractVersion string            `json:"contract_version"`
+	Host            string            `json:"host,omitempty"`
 	Ownership       map[string]string `json:"ownership"`
 	Build           string            `json:"build"`
 	Run             string            `json:"run"`
@@ -65,21 +68,29 @@ func Init(opts Options) (Result, error) {
 	if opts.FAKVersion == "" {
 		opts.FAKVersion = DefaultFAKVersion
 	}
+	opts.Host = strings.ToLower(strings.TrimSpace(opts.Host))
 	root, err := filepath.Abs(opts.Dir)
+	if err != nil {
+		return Result{}, err
+	}
+	files, err := render(opts.Module, opts.FAKVersion, opts.Host)
 	if err != nil {
 		return Result{}, err
 	}
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return Result{}, err
 	}
-
-	files, err := render(opts.Module, opts.FAKVersion)
-	if err != nil {
-		return Result{}, err
-	}
-	result := Result{Directory: root, Module: opts.Module, FAKVersion: opts.FAKVersion, ContractVersion: ContractVersion}
+	result := Result{Directory: root, Module: opts.Module, FAKVersion: opts.FAKVersion, ContractVersion: ContractVersion, Host: opts.Host}
 	priorManifest, priorManifestErr := os.ReadFile(filepath.Join(root, "harness.lock.json"))
-	goSumOwned := priorManifestErr == nil && bytes.Contains(priorManifest, []byte(`"generator": "`+generatorID+`"`)) && bytes.Contains(priorManifest, []byte(`"go.sum": "generated"`))
+	generatedOwnership := map[string]bool{}
+	if priorManifestErr == nil {
+		var prior manifest
+		if json.Unmarshal(priorManifest, &prior) == nil && prior.Generator == generatorID {
+			for path, owner := range prior.Ownership {
+				generatedOwnership[path] = owner == "generated"
+			}
+		}
+	}
 	for _, f := range files {
 		path := filepath.Join(root, filepath.FromSlash(f.path))
 		old, readErr := os.ReadFile(path)
@@ -87,10 +98,8 @@ func Init(opts Options) (Result, error) {
 		case readErr == nil && !f.generated:
 			result.Preserved = append(result.Preserved, f.path)
 			continue
-		case readErr == nil && f.generated && !bytes.Contains(old, []byte(generatedMarker)) && f.path != "harness.lock.json" && f.path != "go.sum":
+		case readErr == nil && f.generated && !bytes.Contains(old, []byte(generatedMarker)) && f.path != "harness.lock.json" && !generatedOwnership[f.path]:
 			return Result{}, fmt.Errorf("refusing to overwrite user-owned file %s", f.path)
-		case readErr == nil && f.path == "go.sum" && !bytes.Equal(old, []byte(f.body)) && !goSumOwned:
-			return Result{}, fmt.Errorf("refusing to overwrite unrecognized generated file %s", f.path)
 		case readErr == nil && f.path == "harness.lock.json" && !bytes.Contains(old, []byte(`"generator": "`+generatorID+`"`)):
 			return Result{}, fmt.Errorf("refusing to overwrite unrecognized manifest %s", f.path)
 		case readErr != nil && !errors.Is(readErr, os.ErrNotExist):
@@ -130,18 +139,31 @@ func writeAtomic(path string, body []byte) error {
 	return nil
 }
 
-func render(module, version string) ([]fileSpec, error) {
+func render(module, version, host string) ([]fileSpec, error) {
+	hostOutput, err := hostArtifactsFor(host)
+	if err != nil {
+		return nil, err
+	}
+	ownership := map[string]string{"go.mod": "generated", "go.sum": "generated", "cmd/product/main.go": "generated", "generated/runtime.go": "generated", "product/config.go": "user", "product/launch.go": "user", "harness.lock.json": "generated", "README.md": "user"}
+	productLockDefault := ""
+	hostSuffix := ""
+	if hostOutput.host != "" {
+		ownership[HostManifestPath] = "generated"
+		ownership[HostLockPath] = "generated"
+		productLockDefault = HostLockPath
+		hostSuffix = " --host " + hostOutput.host
+	}
 	m := manifest{
 		Schema: "fak-harness-product/v1", Generator: generatorID,
-		FAKModule: "github.com/anthony-chaudhary/fak", FAKVersion: version, ContractVersion: ContractVersion,
-		Ownership: map[string]string{"go.mod": "generated", "go.sum": "generated", "cmd/product/main.go": "generated", "generated/runtime.go": "generated", "product/config.go": "user", "product/launch.go": "user", "harness.lock.json": "generated", "README.md": "user"},
-		Build:     "go build -o product-bin ./cmd/product", Run: "go run ./cmd/product --selfcheck", Upgrade: "fak harness init --dir . --module " + module + " --fak-version " + version,
+		FAKModule: "github.com/anthony-chaudhary/fak", FAKVersion: version, ContractVersion: ContractVersion, Host: hostOutput.host,
+		Ownership: ownership,
+		Build:     "go build -o product-bin ./cmd/product", Run: "go run ./cmd/product --selfcheck", Upgrade: "fak harness init --dir . --module " + module + " --fak-version " + version + hostSuffix,
 	}
 	mb, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return nil, err
 	}
-	return []fileSpec{
+	files := []fileSpec{
 		{"go.mod", fmt.Sprintf("// %s\nmodule %s\n\ngo 1.26\n\nrequire github.com/anthony-chaudhary/fak %s\n", generatedMarker, module, version), true},
 		{"go.sum", fmt.Sprintf("github.com/anthony-chaudhary/fak %s h1:tDlanAfpwQOgGgtMIjsif7YUryFFTnydYPHJk69Ydow=\ngithub.com/anthony-chaudhary/fak %s/go.mod h1:n6KmWHdq9ufGPlRGo8n6xIBrsOw9YuGi+lAFWINC5SI=\n", version, version), true},
 		{"cmd/product/main.go", fmt.Sprintf(`// %s
@@ -163,7 +185,7 @@ func main() {
  launch := flag.Bool("launch", false, "launch one agent with the product launch experience")
  agentID := flag.String("agent-id", "local-agent", "agent/session identity used by launch observability")
  dashboardLink := flag.Bool("dashboard-link", false, "print the scoped Grafana URL for --agent-id")
- productLock := flag.String("product-lock", "", "verified fak product lock")
+ productLock := flag.String("product-lock", %q, "verified fak product lock")
  flag.Parse()
  cfg := product.DefaultLaunchConfig()
  if *dashboardLink { fmt.Fprintln(os.Stdout, runtime.AgentDashboardURL(cfg, *agentID)); return }
@@ -177,7 +199,7 @@ func main() {
  }
  fmt.Fprintln(os.Stderr, "use --launch, --dashboard-link, or --selfcheck"); os.Exit(2)
 }
-`, generatedMarker, ContractVersion, version, module, module), true},
+`, generatedMarker, ContractVersion, version, module, module, productLockDefault), true},
 		{"generated/runtime.go", fmt.Sprintf(`// %s
 // fak-contract: %s; fak-module: github.com/anthony-chaudhary/fak@%s
 package generated
@@ -357,9 +379,16 @@ Generated by **%s** against public contract **%s** and pinned module **github.co
 - Open one agent in Grafana: `+"`go run ./cmd/product --dashboard-link --agent-id AGENT`"+`
 - Run the stock offline protocol witness: `+"`go run ./cmd/product --selfcheck`"+`
 - Run a verified contextual product: `+"`go run ./cmd/product --selfcheck --product-lock product.lock.json`"+`
-- Upgrade generated files: `+"`fak harness init --dir . --module %s --fak-version %s`"+`
+- Upgrade generated files: `+"`fak harness init --dir . --module %s --fak-version %s%s`"+`
 - Customize launch/TUI/Grafana in `+"`product.DefaultLaunchConfig`"+` and `+"`product.DrawLaunchProgress`"+`; customize behavior in `+"`product.DefaultConfig`"+` and `+"`product.OfflineReply`"+`.
 - Ownership: `+"`product/config.go`"+` and `+"`product/launch.go`"+` are user-owned and are never overwritten. Files marked `+"`Code generated`"+` plus `+"`harness.lock.json`"+` are generator-owned.
-`, generatorID, ContractVersion, version, module, version), false},
-	}, nil
+`, generatorID, ContractVersion, version, module, version, hostSuffix), false},
+	}
+	if hostOutput.host != "" {
+		files = append(files,
+			fileSpec{path: HostManifestPath, body: hostOutput.manifest, generated: true},
+			fileSpec{path: HostLockPath, body: hostOutput.lock, generated: true},
+		)
+	}
+	return files, nil
 }

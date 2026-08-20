@@ -68,11 +68,12 @@ func runHarness(stdout, stderr io.Writer, argv []string) int {
 	dir := fs.String("dir", "", "external product directory")
 	module := fs.String("module", "", "Go module path for the product")
 	version := fs.String("fak-version", harnessinit.DefaultFAKVersion, "pinned fak module version")
+	host := fs.String("host", "", "seed a versioned first-party host component (codex|claude)")
 	jsonOut := fs.Bool("json", false, "emit machine-readable result")
 	if err := fs.Parse(argv[1:]); err != nil {
 		return 2
 	}
-	result, err := harnessinit.Init(harnessinit.Options{Dir: pathutil.ExpandTilde(*dir), Module: *module, FAKVersion: *version})
+	result, err := harnessinit.Init(harnessinit.Options{Dir: pathutil.ExpandTilde(*dir), Module: *module, FAKVersion: *version, Host: *host})
 	if err != nil {
 		fmt.Fprintf(stderr, "fak harness init: %v\n", err)
 		return 1

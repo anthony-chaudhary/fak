@@ -1,11 +1,16 @@
 package harnessinit
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
 func TestInitCreatesIdempotentPublicProductAndPreservesUserFiles(t *testing.T) {
@@ -231,5 +236,121 @@ func OfflineReply(prompt string) string { return "admitted support summary: " + 
 		if !strings.Contains(string(body), "DefaultConfig") {
 			t.Fatalf("%s does not use or document stable config seam", generated)
 		}
+	}
+}
+
+func TestInitVersionedHostsRoundTripThroughProductLock(t *testing.T) {
+	for _, host := range []string{"codex", "claude"} {
+		t.Run(host, func(t *testing.T) {
+			root := t.TempDir()
+			result, err := Init(Options{Dir: root, Module: "example.test/" + host, Host: host})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Host != host || len(result.Created) != 11 {
+				t.Fatalf("result=%+v", result)
+			}
+			manifestRaw, err := os.ReadFile(filepath.Join(root, HostManifestPath))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(manifestRaw, []byte("\"id\": \"host:"+host+"\"")) {
+				t.Fatalf("host manifest does not identify %s:\n%s", host, manifestRaw)
+			}
+			lock, err := harnesskit.LoadProductLock(filepath.Join(root, HostLockPath))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := lock.Mixable(); err != nil {
+				t.Fatal(err)
+			}
+			wantComponents := map[string]bool{"host:" + host: false}
+			for _, component := range lock.Components {
+				if _, ok := wantComponents[component.ID]; ok {
+					wantComponents[component.ID] = true
+				}
+				if strings.HasPrefix(component.ID, "wire:") {
+					wantComponents["wire"] = true
+				}
+				if strings.HasPrefix(component.ID, "repoint:") {
+					wantComponents["repoint"] = true
+				}
+			}
+			for _, key := range []string{"host:" + host, "wire", "repoint"} {
+				if !wantComponents[key] {
+					t.Fatalf("lock components=%+v missing %s", lock.Components, key)
+				}
+			}
+
+			cmd := exec.Command("go", "run", "./cmd/product", "--selfcheck")
+			cmd.Dir = root
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("selfcheck: %v\n%s", err, output)
+			}
+			scanner := bufio.NewScanner(bytes.NewReader(output))
+			if !scanner.Scan() {
+				t.Fatalf("selfcheck emitted no receipt: %s", output)
+			}
+			var event struct {
+				Type   string `json:"type"`
+				Detail string `json:"detail"`
+			}
+			if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+				t.Fatal(err)
+			}
+			if event.Type != "harness.locked" {
+				t.Fatalf("first event=%+v", event)
+			}
+			var receipt harnesskit.LaunchReceipt
+			if err := json.Unmarshal([]byte(event.Detail), &receipt); err != nil {
+				t.Fatal(err)
+			}
+			joined := strings.Join(receipt.Components, "\n")
+			for _, want := range []string{"host:" + host + "@", "wire:", "repoint:"} {
+				if !strings.Contains(joined, want) {
+					t.Fatalf("receipt components=%v missing %q", receipt.Components, want)
+				}
+			}
+
+			second, err := Init(Options{Dir: root, Module: "example.test/" + host, Host: host})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(second.Created) != 0 || len(second.Updated) != 0 {
+				t.Fatalf("host rerun was not idempotent: %+v", second)
+			}
+		})
+	}
+}
+
+func TestInitRejectsUnsupportedHostBeforeCreatingDirectory(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "not-created")
+	_, err := Init(Options{Dir: root, Module: "example.test/invalid", Host: "windsurf"})
+	if err == nil || !strings.Contains(err.Error(), "unsupported --host") {
+		t.Fatalf("err=%v", err)
+	}
+	if _, statErr := os.Stat(root); !os.IsNotExist(statErr) {
+		t.Fatalf("unsupported host created target directory: %v", statErr)
+	}
+}
+
+func TestInitHostRefusesUnownedProductManifest(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, HostManifestPath)
+	want := []byte("user-owned product manifest\n")
+	if err := os.WriteFile(path, want, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Init(Options{Dir: root, Module: "example.test/codex", Host: "codex"})
+	if err == nil || !strings.Contains(err.Error(), "refusing to overwrite user-owned") {
+		t.Fatalf("err=%v", err)
+	}
+	got, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("foreign product manifest changed: %q", got)
 	}
 }
