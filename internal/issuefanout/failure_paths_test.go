@@ -63,6 +63,32 @@ var refusalContract = []struct {
 		want:   []string{"fails the issue contract", "fix the input field it names"},
 	},
 	{
+		site: "paths without a Go package",
+		drive: func(t *testing.T) error {
+			in := spineInput()
+			in.Paths = []string{"docs/integrations/openai-codex.md"}
+			plan, err := Build(in)
+			if !reflect.DeepEqual(plan, Plan{}) {
+				t.Fatalf("a refused Build leaked a partial plan: %+v", plan)
+			}
+			return err
+		},
+		want: []string{"do not identify a Go package", "include one representative package path"},
+	},
+	{
+		site: "paths with multiple Go packages",
+		drive: func(t *testing.T) error {
+			in := spineInput()
+			in.Paths = []string{"cmd/fak/guard.go", "internal/issuefanout/issuefanout.go"}
+			plan, err := Build(in)
+			if !reflect.DeepEqual(plan, Plan{}) {
+				t.Fatalf("a refused Build leaked a partial plan: %+v", plan)
+			}
+			return err
+		},
+		want: []string{"identify multiple Go packages", "pass one representative package"},
+	},
+	{
 		site: "live filing without parent accounting",
 		drive: func(t *testing.T) error {
 			plan, err := Build(spineInput())
