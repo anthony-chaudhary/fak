@@ -1,0 +1,100 @@
+{
+  "schema": "fak.prompt-vault-corpus/1",
+  "upstream": {
+    "url": "https://github.com/w512/Prompt-Vault",
+    "revision": "19f2d492c985559ac4aedd98348581ac55d0d4d9",
+    "observed_at": "2026-08-20",
+    "license": "UNDECLARED"
+  },
+  "task": {
+    "path": "Easy/Color_Palette_Generator.md",
+    "sha256": "4e095b579a2dfabde8f4584c1e602028e503d64f6b93fb6fd746ed1abc8a439d",
+    "difficulty": "easy",
+    "artifact": "index.html"
+  },
+  "arms": [
+    {
+      "id": "fak-native",
+      "harness": "fak-native",
+      "model": "qwen38:27b",
+      "settings": {
+        "artifact": "hf://unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_M.gguf@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+        "quant": "Q4_K_M",
+        "backend": "metal",
+        "engine": "inkernel",
+        "context_budget_tokens": 4096,
+        "session_state": "off"
+      },
+      "status": "PENDING_AGENT_RUNTIME"
+    },
+    {
+      "id": "codex",
+      "harness": "codex-cli@0.148.0",
+      "model": "gpt-5.6-sol",
+      "settings": {
+        "reasoning_effort": "xhigh",
+        "sandbox": "isolated benchmark directory",
+        "session": "ephemeral"
+      },
+      "status": "OBSERVED_UNGRADED",
+      "observed": {
+        "wall_ms": 93631,
+        "input_tokens": 38003,
+        "cache_read_tokens": 0,
+        "output_tokens": 3513,
+        "artifact_sha256": "061e44d4dc3db66599c4c7b895e2a6273048fb0a62d4dcf1d72c40e70571a7d9",
+        "exit_code": 0
+      }
+    },
+    {
+      "id": "claude",
+      "harness": "claude-code@2.1.237",
+      "model": "claude-opus-5",
+      "settings": {
+        "effort": "high",
+        "permission_mode": "bypassPermissions",
+        "session_persistence": false
+      },
+      "status": "OBSERVED_UNGRADED",
+      "observed": {
+        "wall_ms": 56051,
+        "input_tokens": 51147,
+        "cache_read_tokens": 0,
+        "output_tokens": 2396,
+        "billed_usd": 0.315635,
+        "artifact_sha256": "154bf52b0c13f567cdda38064d603d46dd6c47359e89bf112db737526baeebc4",
+        "exit_code": 0
+      }
+    },
+    {
+      "id": "ultracode-fleet",
+      "harness": "fak-ultracode",
+      "model": "qwen38:27b",
+      "settings": {
+        "profile": "ultracode",
+        "workers": 4,
+        "route": "ultra",
+        "lead": 1,
+        "worker_roles": [
+          "implementer",
+          "verifier",
+          "reviewer"
+        ]
+      },
+      "status": "PENDING_NATIVE_EXECUTOR"
+    }
+  ],
+  "required_measurements": [
+    "artifact_sha256",
+    "acceptance_passed",
+    "acceptance_total",
+    "wall_ms",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "billed_usd",
+    "tool_calls",
+    "retries",
+    "terminal_verdict"
+  ]
+}
