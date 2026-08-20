@@ -29,7 +29,8 @@ func TestStableIdentityAcrossEditsAliasesAndNameCollision(t *testing.T) {
 	if updated.GoalID != g1.GoalID {
 		t.Fatalf("title edit changed identity: %q -> %q", g1.GoalID, updated.GoalID)
 	}
-	for _, alias := range []struct{ ns, id string }{{"fak:trajctl", "objective-7"}, {"claude:goal", "g-1"}, {"codex:goal", "g-1"}, {"github:issue", "anthony-chaudhary/fak#6663"}, {"dos:unit", "unit-9"}} {
+	aliases := []struct{ ns, id string }{{"fak:trajctl", "objective-7"}, {"claude:goal", "g-1"}, {"codex:goal", "g-1"}, {"github:issue", "anthony-chaudhary/fak#6663"}, {"dos:unit", "unit-9"}}
+	for _, alias := range aliases {
 		if _, err := s.Bind(g1.GoalID, alias.ns, alias.id, "", p); err != nil {
 			t.Fatalf("bind %s: %v", alias.ns, err)
 		}
@@ -38,7 +39,7 @@ func TestStableIdentityAcrossEditsAliasesAndNameCollision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if shown.Title != "Observe the fleet" || len(bindings) != 5 {
+	if shown.Title != "Observe the fleet" || len(bindings) != len(aliases) {
 		t.Fatalf("show = %+v bindings=%d", shown, len(bindings))
 	}
 }
