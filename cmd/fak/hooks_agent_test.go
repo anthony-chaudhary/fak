@@ -186,6 +186,48 @@ func TestProjectSettingsUsesCrossPlatformRepoGuardDelegate(t *testing.T) {
 	}
 }
 
+func TestRepoGuardArgvPrefersCompiledBinary(t *testing.T) {
+	root := t.TempDir()
+	bin := filepath.Join(root, "tools", ".bin", "repoguard.exe")
+	src := filepath.Join(root, "tools", "repo_guard.py")
+	if err := os.MkdirAll(filepath.Dir(bin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bin, []byte("stub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("# fallback"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	argv, ok := repoguardArgv(root)
+	if !ok || !slices.Equal(argv, []string{bin, "--hook"}) {
+		t.Fatalf("repoguardArgv() = %q, %v; want compiled binary %q", argv, ok, bin)
+	}
+}
+
+func TestRepoGuardArgvFallsBackToSource(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "tools", "repo_guard.py")
+	if err := os.MkdirAll(filepath.Dir(src), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("# fallback"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	argv, ok := repoguardArgv(root)
+	if !ok || len(argv) != 3 || argv[1] != src || argv[2] != "--hook" {
+		t.Fatalf("repoguardArgv() = %q, %v; want interpreter + %q --hook", argv, ok, src)
+	}
+}
+
+func TestRepoGuardArgvReportsMissingDelegate(t *testing.T) {
+	if argv, ok := repoguardArgv(t.TempDir()); ok || argv != nil {
+		t.Fatalf("repoguardArgv(empty) = %q, %v; want nil, false", argv, ok)
+	}
+}
+
 // TestProjectSettingsDoNotDuplicateDOSPlugin pins the #2702 boundary: Claude workers load
 // the enabled user-scope DOS plugin, so project settings retain only FAK-owned hooks. Registering
 // dos_hook.py here makes every headless tool result traverse DOS more than once.
