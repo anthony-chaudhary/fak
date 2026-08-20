@@ -25,10 +25,43 @@ host-aware test and non-test witness tiers without executing them. This is a one
 discovery step, not a proof and not a command that every later task must repeat; after it
 returns, choose the task-specific witness in the table below.
 
+## Query the documentation index before surveying the tree
+
+Start an unfamiliar repository task with one bounded lookup:
+
+```bash
+fak-dev index "shared-tree commit"          # default: ranked search of the curated INDEX.md map
+fak-dev index docs "shared-tree commit"     # equivalent explicit spelling
+fak-dev index graph --json                  # HEAD-only census of every tracked Markdown document
+```
+
+The shorthand is intentionally the default because documentation lookup is the common
+orientation path. Named index operations still win when the first argument is a known
+subcommand (`lane`, `refs`, `graph`, and the others listed by `fak-dev index`); use
+`index docs <query>` when the query itself starts with one of those reserved words. The
+query reads the curated map in the checkout. The graph census reads only committed
+`HEAD`, so peer-dirty tracked bodies and untracked Markdown cannot change its evidence.
+
+**Value frame:** for contributors and coding agents, the problem is repeated broad tree
+surveys before the owning authority is known; today the fallback is manual grep plus a
+large index read; the default is better because one read-only query narrows the route;
+the witness is shorthand/explicit output equality plus a non-zero, HEAD-pinned corpus.
+
+**Default-admission record:** indication — orient before a broad survey; comparator —
+manual grep or reading the full map; expected benefit — less context and fewer repeated
+reads; harms — a reserved first word can select a subcommand and ranking can miss an
+uncurated page; uncertainty — relevance is metadata search, not full-text retrieval;
+contraindication — use `rg` for exact symbols or non-Markdown files; dose/control — one
+query, bounded with `--limit` and inspectable with `--json`; surveillance — the CLI tests,
+`fak-dev index graph --json`, and the reciprocal index-sync gate; rollback — restore the
+required `docs` subcommand and prior tree reader. **Verdict: DEFAULT**: the path is
+read-only, reversible, locally witnessed, and keeps explicit controls.
+
 ## Choose the witness for the question
 
 | Question | Start with | What a pass proves |
 |---|---|---|
+| Which current document owns this task? | `fak-dev index "<task terms>" --limit 5` | The ranked entries come from the curated repository map; this narrows the first read but does not replace code or test authority. |
 | Does my working-tree change compile without peers' untracked Go files or an in-tree binary affecting the answer? | `fak-dev buildcheck --vet` | Inner-loop compile feedback: the isolated overlay compiles and vets the requested packages. It is not the pre-commit or committed-tip gate. |
 | Which changed packages and importers need focused tests? | `fak test affected --list` | Task-specific planning after the global tier inventory: it prints the bounded changed-package set; run `fak test affected` to execute that set for behavior proof. |
 | Does the fast repository smoke gate pass? | `make test-fast` | Build, vet, and short tests pass; weight-backed witnesses remain outside this tier. |

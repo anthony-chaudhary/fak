@@ -28,12 +28,19 @@ func writeIndexRepo(t *testing.T) string {
 		"- [STUB] internal/gateway streaming backpressure is deferred.\n" +
 		"## Session\n" +
 		"- [SIMULATED] internal/session cost ring uses stand-in data.\n"
-	for name, body := range map[string]string{"dos.toml": dosToml, "CLAIMS.md": claimsMd} {
+	for name, body := range map[string]string{
+		"dos.toml":  dosToml,
+		"CLAIMS.md": claimsMd,
+		"INDEX.md":  "# Index\n\n- [Gateway](docs/gateway.md) — Gateway authority.\n",
+	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "gateway.md"), []byte("# Gateway\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	generationMd := "# Generation Contract\n\n" +
@@ -73,7 +80,25 @@ func TestIndexClaimsSearch(t *testing.T) {
 	}
 }
 
-// requireIndexUsageError runs `fak index <sub>` with no positional query and asserts
+func TestIndexDefaultsToDocsSearch(t *testing.T) {
+	root := writeIndexRepo(t)
+	var shorthand, explicit, errb bytes.Buffer
+	if rc := RunIndex(&shorthand, &errb, []string{"gateway", "--root", root, "--json"}); rc != 0 {
+		t.Fatalf("default docs search rc=%d, stderr=%s", rc, errb.String())
+	}
+	errb.Reset()
+	if rc := RunIndex(&explicit, &errb, []string{"docs", "gateway", "--root", root, "--json"}); rc != 0 {
+		t.Fatalf("explicit docs search rc=%d, stderr=%s", rc, errb.String())
+	}
+	if shorthand.String() != explicit.String() {
+		t.Fatalf("default docs search diverged from explicit subcommand:\nshort=%s\nexplicit=%s", shorthand.String(), explicit.String())
+	}
+	if !strings.Contains(shorthand.String(), `"path": "docs/gateway.md"`) {
+		t.Fatalf("default docs search missed gateway authority: %s", shorthand.String())
+	}
+}
+
+// requireIndexUsageError runs `fak-dev index <sub>` with no positional query and asserts
 // the mandatory-query contract the claims and docs subcommands share: exit code 2 and
 // the exact one-line usage message on stderr.
 func requireIndexUsageError(t *testing.T, sub, wantStderr string) {
@@ -116,11 +141,11 @@ func TestIndexCtxPlansDispatch(t *testing.T) {
 }
 
 func TestIndexClaimsNeedsQuery(t *testing.T) {
-	requireIndexUsageError(t, "claims", "fak index claims: needs a search query (a lane, a token, or a capability)\n")
+	requireIndexUsageError(t, "claims", "fak-dev index claims: needs a search query (a lane, a token, or a capability)\n")
 }
 
 func TestIndexDocsNeedsQuery(t *testing.T) {
-	requireIndexUsageError(t, "docs", "fak index docs: needs a search query\n")
+	requireIndexUsageError(t, "docs", "fak-dev index docs: needs a search query\n")
 }
 
 func TestIndexClaimsJSON(t *testing.T) {
@@ -213,7 +238,7 @@ func TestIndexRefsBlastRadiusCLI(t *testing.T) {
 }
 
 // writeFreshnessCLIRepo lays down a tree with a known dead INDEX.md link and a
-// known orphaned dated note so `fak index freshness` is tested against fixed bytes.
+// known orphaned dated note so `fak-dev index freshness` is tested against fixed bytes.
 func writeFreshnessCLIRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -303,7 +328,7 @@ func TestIndexFreshnessClean(t *testing.T) {
 
 // TestIndexFreshnessUndeclaredLeafParity dogfoods the freshness detector against the
 // AUTHORITATIVE lane-audit gate on the LIVE tree: internal/devindex.UndeclaredLeaves
-// (the tier-1 reimplementation behind `fak index freshness`) must return the SAME leaf
+// (the tier-1 reimplementation behind `fak-dev index freshness`) must return the SAME leaf
 // set as internal/hooks.UndeclaredLeaves. They diverged once — devindex counted only
 // [lanes.trees] keys as declared and ignored the flat [lanes] name list, so a lane
 // declared in [lanes] with no explicit tree glob was falsely flagged — and this pins

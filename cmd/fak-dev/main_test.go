@@ -16,7 +16,7 @@ func TestHelpIdentifiesIndependentDevelopmentArtifact(t *testing.T) {
 	if code := run(&out, &errOut, []string{"help"}); code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
 	}
-	for _, want := range []string{"fak-dev — repository-development tooling", "index ownership", "wiki <structure|verify|fresh|score>", "separately buildable 'fak' artifact"} {
+	for _, want := range []string{"fak-dev — repository-development tooling", "index [docs] <query>", "index ownership", "wiki <structure|verify|fresh|score>", "separately buildable 'fak' artifact"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("help missing %q:\n%s", want, out.String())
 		}

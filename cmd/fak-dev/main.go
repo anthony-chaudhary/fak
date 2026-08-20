@@ -100,6 +100,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "usage: fak-dev <command> [args...]")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "commands:")
+	fmt.Fprintln(w, "  index [docs] <query> [--json]         search the curated documentation map (docs is the default)")
 	fmt.Fprintln(w, "  index ownership [--json] [--root PATH]  audit runtime/dev command ownership and dependency leaks")
 	fmt.Fprintln(w, "  index policy [--json] [--root PATH]     enforce dev ownership at the repository boundary")
 	fmt.Fprintln(w, "  wiki <structure|verify|fresh|score>    audit the repository documentation wiki")

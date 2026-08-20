@@ -1,26 +1,27 @@
 package devcmd
 
-// fak index — the QUERYABLE SELF-INDEX (epic #1287 / C1 #1288). Instead of
+// fak-dev index — the QUERYABLE SELF-INDEX (epic #1287 / C1 #1288). Instead of
 // re-surveying dos.toml and INDEX.md every session, an agent ASKS:
 //
-//	fak index lane <path>...   which lane/leaf owns these paths (+ the commit stamp)
-//	fak index leaf [<query>]   the lane taxonomy, filtered by name/tree/description
-//	fak index docs <query>     the curated doc map, ranked by relevance
-//	fak index claims <query>   the CLAIMS.md honesty ledger: shipped/simulated/stub
-//	fak index verbs [<query>]  the structured CLI-verb catalog (name/lane/synopsis)
-//	fak index work [<query>]   the selection surface: named issue views + the default's gh query
-//	fak index refs <pkg>.<Symbol>
+//	fak-dev index <query>          the curated doc map (the default)
+//	fak-dev index lane <path>...   which lane/leaf owns these paths (+ the commit stamp)
+//	fak-dev index leaf [<query>]   the lane taxonomy, filtered by name/tree/description
+//	fak-dev index claims <query>   the CLAIMS.md honesty ledger: shipped/simulated/stub
+//	fak-dev index verbs [<query>]  the structured CLI-verb catalog (name/lane/synopsis)
+//	fak-dev index work [<query>]   the selection surface: named issue views + the default's gh query
+//	fak-dev index refs <pkg>.<Symbol>
 //	                         direct + transitive dependents of a Go symbol before editing
-//	fak index ctxknobs         the manual-overlay counter: context flags/env/skills,
+//	fak-dev index ctxknobs     the manual-overlay counter: context flags/env/skills,
 //	                         each operator-debug (fine) or user-required (defect) (#2199)
-//	fak index knobs            the knob census: every user-facing behavior knob,
+//	fak-dev index knobs        the knob census: every user-facing behavior knob,
 //	                         each INTENT (promote) or HOUSEKEEPING (automate) (#2210)
-//	fak index generation [<query>]
+//	fak-dev index generation [<query>]
 //	                         the generation taxonomy: labels, milestones, evidence rules
-//	fak index freshness        the self-index drift report: undeclared leaves, dead doc
+//	fak-dev index freshness    the self-index drift report: undeclared leaves, dead doc
 //	                         links, unknown verbs, and orphaned dated notes — is the
 //	                         index still honest against the tree?
-//	fak index agents [<query>] the sectioned AGENTS.md view (#3535): a compact resident
+//	fak-dev index agents [<query>]
+//	                         the sectioned AGENTS.md view (#3535): a compact resident
 //	                         TOC by default, ranked sections for a query, --section <slug>
 //	                         / --full for byte-exact bodies, --write-resident to (re)write
 //	                         the resident TOC block into CLAUDE.md
@@ -54,22 +55,30 @@ func RunIndex(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	sub := argv[0]
+	restArgs := argv[1:]
+	if !isIndexSubcommand(sub) {
+		// Documentation lookup is the common orientation path. Keep every named
+		// subcommand explicit, but let a free-text query use the curated doc map
+		// without first requiring the caller to know the index taxonomy.
+		sub = "docs"
+		restArgs = argv
+	}
 	fs := flag.NewFlagSet("index "+sub, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	verbFlagUsage(fs, "index")
 	root := fs.String("root", "", "repo root (default: search upward for dos.toml)")
 	asJSON := fs.Bool("json", false, "emit the answer as JSON")
 	limit := fs.Int("limit", 0, "cap the number of results (0 = all)")
-	// `fak index agents` selectors (unused by the other subverbs, like --limit is unused
+	// `fak-dev index agents` selectors (unused by the other subverbs, like --limit is unused
 	// by lane): a section slug, the whole-doc escape hatch, and the resident-TOC writer.
-	agentsSection := fs.String("section", "", "fak index agents: emit one AGENTS.md section by slug")
-	agentsFull := fs.Bool("full", false, "fak index agents: emit the whole AGENTS.md verbatim")
-	agentsWriteResident := fs.Bool("write-resident", false, "fak index agents: (re)write the resident TOC block into CLAUDE.md")
+	agentsSection := fs.String("section", "", "fak-dev index agents: emit one AGENTS.md section by slug")
+	agentsFull := fs.Bool("full", false, "fak-dev index agents: emit the whole AGENTS.md verbatim")
+	agentsWriteResident := fs.Bool("write-resident", false, "fak-dev index agents: (re)write the resident TOC block into CLAUDE.md")
 	// Parse flags that may appear ANYWHERE around the positional query (the natural
-	// `fak index leaf cache --limit 6` order), not just before it. Go's flag package
+	// `fak-dev index leaf cache --limit 6` order), not just before it. Go's flag package
 	// stops at the first non-flag arg, so interleave Parse with positional collection.
 	var args []string
-	for rest := argv[1:]; ; {
+	for rest := restArgs; ; {
 		if err := fs.Parse(rest); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
 				return 0
@@ -90,7 +99,7 @@ func RunIndex(stdout, stderr io.Writer, argv []string) int {
 	}
 	cat, err := devindex.Load(rootDir)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak index: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev index: %v\n", err)
 		return 1
 	}
 
@@ -113,7 +122,7 @@ func RunIndex(stdout, stderr io.Writer, argv []string) int {
 		return indexRefs(stdout, stderr, rootDir, args, *asJSON, *limit)
 	case "ctxplans", "ctxplan":
 		if len(args) != 0 {
-			fmt.Fprintln(stderr, "usage: fak index ctxplans [--json] [--root PATH]")
+			fmt.Fprintln(stderr, "usage: fak-dev index ctxplans [--json] [--root PATH]")
 			return 2
 		}
 		return indexCtxPlans(stdout, stderr, rootDir, *asJSON)
@@ -134,20 +143,33 @@ func RunIndex(stdout, stderr io.Writer, argv []string) int {
 		return runIndexPolicy(stdout, stderr, rootDir, args, *asJSON)
 	case "graph":
 		if len(args) != 0 {
-			fmt.Fprintln(stderr, "usage: fak index graph [--json]")
+			fmt.Fprintln(stderr, "usage: fak-dev index graph [--json] [--root PATH]")
 			return 2
 		}
-		return indexGraphMain(stdout, stderr, boolArg(*asJSON))
+		return indexGraphMain(stdout, stderr, rootDir, boolArg(*asJSON))
 	default:
-		fmt.Fprintf(stderr, "fak index: unknown subcommand %q\n", sub)
+		fmt.Fprintf(stderr, "fak-dev index: unknown subcommand %q\n", sub)
 		writeIndexUsage(stderr)
 		return 2
 	}
 }
 
+func isIndexSubcommand(s string) bool {
+	switch s {
+	case "lane", "leaf", "leaves", "docs", "doc", "claims", "claim", "verbs", "verb",
+		"generation", "generations", "gen", "work", "views", "view", "refs", "ref",
+		"ctxplans", "ctxplan", "ctxknobs", "ctxknob", "knobs", "knob", "freshness", "fresh",
+		"execaudit", "executables", "exec", "agents", "agentsmd", "agent", "ownership",
+		"policy", "enforce", "graph":
+		return true
+	default:
+		return false
+	}
+}
+
 func indexGeneration(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool, limit int) int {
 	hits := capGenerations(cat.SearchGenerations(joinArgs(args)), limit)
-	return indexRenderHits(stdout, stderr, hits, asJSON, "fak index generation", "no matching generation",
+	return indexRenderHits(stdout, stderr, hits, asJSON, "fak-dev index generation", "no matching generation",
 		func(tw *tabwriter.Writer, g devindex.Generation) {
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\tpromote: %s\tdemote: %s\n",
 				g.Stream, g.Label, g.Milestone, truncRunes(g.Meaning, 88),
@@ -157,7 +179,7 @@ func indexGeneration(stdout, stderr io.Writer, cat *devindex.Catalog, args []str
 
 func indexLane(stdout, stderr io.Writer, cat *devindex.Catalog, paths []string, asJSON bool) int {
 	if len(paths) == 0 {
-		fmt.Fprintln(stderr, "fak index lane: needs at least one path")
+		fmt.Fprintln(stderr, "fak-dev index lane: needs at least one path")
 		return 2
 	}
 	answers := make([]laneAnswer, 0, len(paths))
@@ -166,7 +188,7 @@ func indexLane(stdout, stderr io.Writer, cat *devindex.Catalog, paths []string, 
 		answers = append(answers, laneAnswer{Path: p, Lane: lane, Stamp: cat.SuggestStamp(p)})
 	}
 	if asJSON {
-		return encodeJSONOrFail(stdout, stderr, answers, "fak index lane")
+		return encodeJSONOrFail(stdout, stderr, answers, "fak-dev index lane")
 	}
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 	for _, a := range answers {
@@ -176,7 +198,7 @@ func indexLane(stdout, stderr io.Writer, cat *devindex.Catalog, paths []string, 
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\n", a.Path, lane, a.Stamp)
 	}
-	return flushTab(tw, stderr, "fak index lane")
+	return flushTab(tw, stderr, "fak-dev index lane")
 }
 
 // indexRenderHits is the shared post-search rendering for the index subcommands (leaf,
@@ -200,7 +222,7 @@ func indexRenderHits[T any](stdout, stderr io.Writer, hits []T, asJSON bool, cmd
 
 func indexLeaf(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool, limit int) int {
 	hits := capLeaves(cat.SearchLeaves(joinArgs(args)), limit)
-	return indexRenderHits(stdout, stderr, hits, asJSON, "fak index leaf", "no matching leaf",
+	return indexRenderHits(stdout, stderr, hits, asJSON, "fak-dev index leaf", "no matching leaf",
 		func(tw *tabwriter.Writer, l devindex.Leaf) {
 			mark := "ok"
 			if !l.Exists {
@@ -247,11 +269,11 @@ func indexNeedsQuery(stderr io.Writer, args []string, usage string) bool {
 }
 
 func indexClaims(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool, limit int) int {
-	if indexNeedsQuery(stderr, args, "fak index claims: needs a search query (a lane, a token, or a capability)") {
+	if indexNeedsQuery(stderr, args, "fak-dev index claims: needs a search query (a lane, a token, or a capability)") {
 		return 2
 	}
 	hits := capClaims(cat.SearchClaims(joinArgs(args)), limit)
-	return indexRenderHits(stdout, stderr, hits, asJSON, "fak index claims", "no matching claim",
+	return indexRenderHits(stdout, stderr, hits, asJSON, "fak-dev index claims", "no matching claim",
 		func(tw *tabwriter.Writer, cl devindex.Claim) {
 			lanes := strings.Join(cl.Lanes, ",")
 			if lanes == "" {
@@ -261,12 +283,12 @@ func indexClaims(stdout, stderr io.Writer, cat *devindex.Catalog, args []string,
 		})
 }
 
-// indexVerbs answers `fak index verbs [<query>]` from the structured C3 verb manifest
+// indexVerbs answers `fak-dev index verbs [<query>]` from the structured C3 verb manifest
 // (#1290) — the parseable replacement for grepping usage.go's freeform prose. An empty
-// query lists the whole catalog (the SearchVerbs convention), matching `fak index leaf`.
+// query lists the whole catalog (the SearchVerbs convention), matching `fak-dev index leaf`.
 func indexVerbs(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool, limit int) int {
 	hits := capVerbs(cat.SearchVerbs(joinArgs(args)), limit)
-	return indexRenderHits(stdout, stderr, hits, asJSON, "fak index verbs", "no matching verb",
+	return indexRenderHits(stdout, stderr, hits, asJSON, "fak-dev index verbs", "no matching verb",
 		func(tw *tabwriter.Writer, v devindex.Verb) {
 			lane := v.Lane
 			if lane == "" {
@@ -281,17 +303,17 @@ func indexVerbs(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, 
 }
 
 func indexDocs(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool, limit int) int {
-	if indexNeedsQuery(stderr, args, "fak index docs: needs a search query") {
+	if indexNeedsQuery(stderr, args, "fak-dev index docs: needs a search query") {
 		return 2
 	}
 	hits := capDocs(cat.SearchDocs(joinArgs(args)), limit)
-	return indexRenderHits(stdout, stderr, hits, asJSON, "fak index docs", "no matching doc",
+	return indexRenderHits(stdout, stderr, hits, asJSON, "fak-dev index docs", "no matching doc",
 		func(tw *tabwriter.Writer, d devindex.Doc) {
 			fmt.Fprintf(tw, "%s\t%s\n", d.Path, d.Title)
 		})
 }
 
-// indexWork answers `fak index work [<query>]` from .github/issue-views.json — the
+// indexWork answers `fak-dev index work [<query>]` from .github/issue-views.json — the
 // curated DEFAULT selection surface ("what should I work on"), the API-readable
 // mirror of the GitHub saved views. With no query it leads with the default view's
 // ready-to-run `gh issue list --search` command, then lists every named view; a query
@@ -301,14 +323,14 @@ func indexDocs(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, a
 func indexWork(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool, limit int) int {
 	views, err := cat.IssueViews()
 	if err != nil {
-		fmt.Fprintf(stderr, "fak index work: %v\n", err)
+		fmt.Fprintf(stderr, "fak-dev index work: %v\n", err)
 		return 1
 	}
 	if asJSON {
 		if len(args) == 0 {
-			return encodeJSONOrFail(stdout, stderr, views, "fak index work")
+			return encodeJSONOrFail(stdout, stderr, views, "fak-dev index work")
 		}
-		return encodeJSONOrFail(stdout, stderr, capViews(views.SearchViews(joinArgs(args)), limit), "fak index work")
+		return encodeJSONOrFail(stdout, stderr, capViews(views.SearchViews(joinArgs(args)), limit), "fak-dev index work")
 	}
 	hits := capViews(views.SearchViews(joinArgs(args)), limit)
 	if len(hits) == 0 {
@@ -331,10 +353,10 @@ func indexWork(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, a
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\n", slug, iv.Title, truncRunes(iv.Note, 80))
 	}
-	return flushTab(tw, stderr, "fak index work")
+	return flushTab(tw, stderr, "fak-dev index work")
 }
 
-// indexFreshness answers `fak index freshness` from internal/devindex.CheckFreshness:
+// indexFreshness answers `fak-dev index freshness` from internal/devindex.CheckFreshness:
 // every way the self-index disagrees with its live sources — an undeclared leaf, a dead
 // INDEX.md doc link, a main.go verb missing from the catalog, or a dated docs/notes/ note
 // INDEX.md never lists. It is a READ-ONLY query (always exit 0), not a gate: it surfaces
@@ -346,7 +368,7 @@ func indexFreshness(stdout, stderr io.Writer, cat *devindex.Catalog, asJSON bool
 	if limit > 0 && len(drift) > limit {
 		drift = drift[:limit]
 	}
-	return indexRenderHits(stdout, stderr, drift, asJSON, "fak index freshness",
+	return indexRenderHits(stdout, stderr, drift, asJSON, "fak-dev index freshness",
 		"index fresh: no drift — the catalog agrees with the tree",
 		func(tw *tabwriter.Writer, d devindex.Drift) {
 			fmt.Fprintf(tw, "%s\t%s\t%s\n", d.Kind, d.Subject, d.Reason)
@@ -355,20 +377,20 @@ func indexFreshness(stdout, stderr io.Writer, cat *devindex.Catalog, asJSON bool
 
 func writeIndexUsage(w io.Writer) {
 	fmt.Fprint(w, `usage:
-  fak index lane <path>...    which lane/leaf owns each path, + the (fak <leaf>) commit stamp
-  fak index leaf [<query>]    the lane taxonomy (+ shipped/sim/stub rollup), filtered by name/tree/desc
-  fak index docs <query>      the curated doc map (INDEX.md), ranked by relevance
-  fak index claims <query>    the CLAIMS.md honesty ledger, ranked by relevance (shipped/simulated/stub)
-  fak index verbs [<query>]   the structured CLI-verb catalog (name/owning-lane/synopsis)
-  fak index generation [<q>]  generation labels, milestones, issue-body signals, and evidence rules
-  fak index work [<query>]    the selection surface ("what should I work on"): named issue views + the default's gh query
-  fak index refs <pkg>.<Sym>  direct + transitive dependents of a Go symbol before editing
-  fak index ctxknobs          the manual-overlay counter: context flags/env/skills classified operator-debug vs user-required (#2199)
-  fak index knobs             the knob census: every user-facing behavior knob classified INTENT (promote) vs HOUSEKEEPING (automate) (#2210)
-  fak index freshness         the self-index drift report: undeclared leaves, dead doc links, unknown verbs, orphaned dated notes
-  fak index execaudit         executable packages that build but have no adjacent test or no invocation edge outside themselves (#5648)
-  fak index agents [<query>]  the sectioned AGENTS.md view: TOC by default, rank by query, --section <slug>, --full, --write-resident
-  fak index graph             HEAD-only Markdown reachability census under named resolver rules
+  fak-dev index <query>           search the curated doc map (default; same as index docs)
+  fak-dev index lane <path>...    which lane/leaf owns each path, + the (fak <leaf>) commit stamp
+  fak-dev index leaf [<query>]    the lane taxonomy (+ shipped/sim/stub rollup), filtered by name/tree/desc
+  fak-dev index claims <query>    the CLAIMS.md honesty ledger, ranked by relevance (shipped/simulated/stub)
+  fak-dev index verbs [<query>]   the structured CLI-verb catalog (name/owning-lane/synopsis)
+  fak-dev index generation [<q>]  generation labels, milestones, issue-body signals, and evidence rules
+  fak-dev index work [<query>]    the selection surface ("what should I work on"): named issue views + the default's gh query
+  fak-dev index refs <pkg>.<Sym>  direct + transitive dependents of a Go symbol before editing
+  fak-dev index ctxknobs          the manual-overlay counter: context flags/env/skills classified operator-debug vs user-required (#2199)
+  fak-dev index knobs             the knob census: every user-facing behavior knob classified INTENT (promote) vs HOUSEKEEPING (automate) (#2210)
+  fak-dev index freshness         the self-index drift report: undeclared leaves, dead doc links, unknown verbs, orphaned dated notes
+  fak-dev index execaudit         executable packages that build but have no adjacent test or no invocation edge outside themselves (#5648)
+  fak-dev index agents [<query>]  the sectioned AGENTS.md view: TOC by default, rank by query, --section <slug>, --full, --write-resident
+  fak-dev index graph             HEAD-only Markdown reachability census under named resolver rules
   flags: --json  --limit N  --root DIR  |  agents: --section <slug>  --full  --write-resident
 `)
 }

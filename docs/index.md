@@ -18,7 +18,7 @@ FAK coordinates the whole agent path, not isolated components. Start with the [c
 | Evaluating fak | [Reproducibility packet](repro-packet.md) | Identify the product, run the offline proof, then inspect its evidence. |
 | Building or integrating an agent or client | [Managed agent runtime](explainers/agent-runtime.md) | Choose an interface, understand ownership, and follow the proposal-to-continuation flow. |
 | Deploying or operating | [Deployment guide](fak/deployment-guide.md) | Choose an operating envelope, then configure and observe the service. |
-| Contributing | [Contributor guide](../CONTRIBUTING.md) | Build, test, change, and prove the repository under its current contracts. |
+| Contributing | [Contributor guide](../CONTRIBUTING.md) and [developer tooling](dev-tooling.md) | Find the owning document first, then build, test, change, and prove the repository under its current contracts. |
 | Researching design or history | [Notes archive](notes/) | Find rationale and dated evidence, then check current code and tests before relying on it. |
 
 For a human role map, use [`START-HERE.md`](../START-HERE.md). Agents that need a compact authority map should use [`llms.txt`](../llms.txt). The exhaustive audience, task, and lifecycle catalog is [`INDEX.md`](../INDEX.md).

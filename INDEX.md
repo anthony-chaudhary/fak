@@ -226,6 +226,7 @@ Working docs that track a specific effort. Dated by design; they age out.
 
 Developer, design, and internal reference docs — indexed here so each is reachable from the map.
 
+- [Developer tooling](docs/dev-tooling.md) — query the curated documentation map before surveying the tree, then choose the build, test, debug, profile, or committed-tip witness for the question at hand.
 - [`docs/notes/RMRF-ISO-ROOT-FOLDER-AUDIT-2026-07-17.md`](docs/notes/RMRF-ISO-ROOT-FOLDER-AUDIT-2026-07-17.md) — **Root isolation scratch audit**: interrupted peer-dirty copy, buildcheck amplification, evidence-preserving quarantine, and prevention.
 
 **Scorecards & measurement** — [Bench-DX](docs/BENCH-DX-SCORECARD.md) (benchmarking developer experience) · [Claim-reproducibility](docs/CLAIM-REPRO-SCORECARD.md) (are claims falsifiable from a clean clone) · [Code-slop](docs/CODE-SLOP-SCORECARD.md) (the slop the compiler can't see) · [Verifier-exposure](docs/VERIFIER-EXPOSURE-SCORECARD.md) · [MLP first-lovable-cut](docs/mlp/scorecard.md) · [Generation portfolio RSI](docs/generation-future-portfolio-rsi-score.md) · [Industry-scorecard freshness cadence](docs/industry-scorecard/CADENCE.md).

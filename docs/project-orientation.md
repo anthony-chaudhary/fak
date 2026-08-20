@@ -1,6 +1,7 @@
 # Project orientation: the agent-kernel center
 
-**Decision date:** 2026-08-15  
+**Decision date:** 2026-08-15
+
 **Status:** active orientation spine for [#6899](https://github.com/anthony-chaudhary/fak/issues/6899)
 
 ## Verdict

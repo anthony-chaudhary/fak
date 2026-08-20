@@ -36,6 +36,7 @@ connects new work to operator value. Do not turn this direction into a shipped c
 - Human role map: [`START-HERE.md`](START-HERE.md)
 - Documentation by audience, job, and lifecycle, plus the exhaustive repository map: [`INDEX.md`](INDEX.md)
 - Agent workflow, builds, proofs, commits, and shared-tree rules: [`AGENTS.md`](AGENTS.md)
+- Default documentation lookup, HEAD-only reachability census, and task-specific build/test witnesses: [`docs/dev-tooling.md`](docs/dev-tooling.md)
 - Shift-left task organization — author human-readable outcome, scope, dependencies, acceptance, witness, placement, and lane before dispatch: [`docs/shift-left-task-organization.md`](docs/shift-left-task-organization.md)
 - New-work defaults — ship the applied end-to-end spine first, prove its operating envelope, optimize against it, then fan out the hardening backlog with `fak issue fanout` (3 is the floor, not the target): [`docs/spine-first-defaults.md`](docs/spine-first-defaults.md)
 - Contribution contract: [`CONTRIBUTING.md`](CONTRIBUTING.md)
