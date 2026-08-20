@@ -1,0 +1,223 @@
+{
+  "rows": [
+    {
+      "id": "cov-debt250-loop-resolvedcodexloophome",
+      "canonical": "loop implementation surface for resolvedcodexloophome",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`resolvedCodexLoopHome` is the loop symbol declared or used at `cmd/fak/orchestration.go:184` as `home, err := resolvedCodexLoopHome(codexHome)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `resolvedCodexLoopHome` for the operation evidenced at `cmd/fak/orchestration.go:184`. Unlike `loop-agent-goal-loop-seam`, it names this exact implementation surface; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "loop-agent-goal-loop-seam"
+      ],
+      "aliases": [],
+      "grounding": "resolvedcodexloophome",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-loop-codexloop",
+      "canonical": "loop implementation surface for codexloop",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`CodexLoop` is the loop symbol declared or used at `cmd/fak/codexloopissues.go:162` as `\"A regression test reproduces the `%s` no-progress loop fixture and asserts the gate refuses it; `go test ./cmd/fak/ -run CodexLoop` passes.\",`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `CodexLoop` for the operation evidenced at `cmd/fak/codexloopissues.go:162`. Unlike `loop-agent-goal-loop-seam`, it names this exact implementation surface; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "loop-agent-goal-loop-seam"
+      ],
+      "aliases": [],
+      "grounding": "codexloop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-loop-applycodexloopsessionmeta",
+      "canonical": "loop implementation surface for applycodexloopsessionmeta",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`applyCodexLoopSessionMeta` is the loop symbol declared or used at `cmd/fak/sessions_codex_loop.go:1221` as `applyCodexLoopSessionMeta(&d, rec.Timestamp, rec.Payload)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `applyCodexLoopSessionMeta` for the operation evidenced at `cmd/fak/sessions_codex_loop.go:1221`. Unlike `loop-agent-goal-loop-seam`, it names this exact implementation surface; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "loop-agent-goal-loop-seam",
+        "cov-debt250-session-runtime-applycodexloopsessionmeta"
+      ],
+      "aliases": [],
+      "grounding": "applycodexloopsessionmeta",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-loop-codextoploopdrivingoutcome",
+      "canonical": "loop implementation surface for codextoploopdrivingoutcome",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`codexTopLoopDrivingOutcome` is the loop symbol declared or used at `cmd/fak/codexloopissues.go:89` as `outcome, ok := codexTopLoopDrivingOutcome(d.RepeatedOutcomes)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `codexTopLoopDrivingOutcome` for the operation evidenced at `cmd/fak/codexloopissues.go:89`. Unlike `loop-agent-goal-loop-seam`, it names this exact implementation surface; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "loop-agent-goal-loop-seam"
+      ],
+      "aliases": [],
+      "grounding": "codextoploopdrivingoutcome",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-loop-diagnosecodexloop",
+      "canonical": "loop implementation surface for diagnosecodexloop",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`diagnoseCodexLoop` is the loop symbol declared or used at `cmd/fak/sessions_codex_loop.go:273` as `d, err := diagnoseCodexLoop(fh, resolved)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `diagnoseCodexLoop` for the operation evidenced at `cmd/fak/sessions_codex_loop.go:273`. Unlike `loop-agent-goal-loop-seam`, it names this exact implementation surface; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "loop-agent-goal-loop-seam"
+      ],
+      "aliases": [],
+      "grounding": "diagnosecodexloop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-loop-loopcheck",
+      "canonical": "loop implementation surface for loopcheck",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`LoopCheck` is the loop symbol declared or used at `cmd/fak/info_fleet_workspace.go:26` as `Loops []fleetpane.LoopCheck `json:\"loops,omitempty\"``. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `LoopCheck` for the operation evidenced at `cmd/fak/info_fleet_workspace.go:26`. Unlike `loop-agent-goal-loop-seam`, it names this exact implementation surface; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "loop-agent-goal-loop-seam"
+      ],
+      "aliases": [],
+      "grounding": "loopcheck",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-loop-loopdriveregionhold",
+      "canonical": "loop implementation surface for loopdriveregionhold",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`loopDriveRegionHold` is the loop symbol declared or used at `cmd/fak/leaseref_sync_ambient.go:91` as `// loopDriveRegionHold.ensure runs this boundary twice a turn, so a per-step`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `loopDriveRegionHold` for the operation evidenced at `cmd/fak/leaseref_sync_ambient.go:91`. Unlike `loop-agent-goal-loop-seam`, it names this exact implementation surface; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "loop-agent-goal-loop-seam"
+      ],
+      "aliases": [],
+      "grounding": "loopdriveregionhold",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-loop-looplist",
+      "canonical": "loop implementation surface for looplist",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`LoopList` is the loop symbol declared or used at `cmd/fak/fleetpane.go:161` as `doc := fleetpane.LoopList(cfg, opts)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `LoopList` for the operation evidenced at `cmd/fak/fleetpane.go:161`. Unlike `loop-agent-goal-loop-seam`, it names this exact implementation surface; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "loop-agent-goal-loop-seam"
+      ],
+      "aliases": [],
+      "grounding": "looplist",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-loop-loopts",
+      "canonical": "loop implementation surface for loopts",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`LoopTS` is the loop symbol declared or used at `cmd/fak/dispatch_tick_lease_beat.go:245` as `LoopTS: dispatchMapString(r, \"loop_ts\"),`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `LoopTS` for the operation evidenced at `cmd/fak/dispatch_tick_lease_beat.go:245`. Unlike `loop-agent-goal-loop-seam`, it names this exact implementation surface; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "loop-agent-goal-loop-seam"
+      ],
+      "aliases": [],
+      "grounding": "loopts",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-loop-loopwire",
+      "canonical": "loop implementation surface for loopwire",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`loop_wire` is the loop symbol declared or used at `internal/agent/loop.go:407` as `// request-scoped catalog through them (#6657, loop_wire.go).`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `loop_wire` for the operation evidenced at `internal/agent/loop.go:407`. Unlike `loop-agent-goal-loop-seam`, it names this exact implementation surface; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "loop-agent-goal-loop-seam"
+      ],
+      "aliases": [],
+      "grounding": "loopwire",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-loop-ownssessionloop",
+      "canonical": "loop implementation surface for ownssessionloop",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`ownsSessionLoop` is the loop symbol declared or used at `cmd/fak/serve_fleetbus.go:59` as `// native mirrors gateway.Server.ownsSessionLoop (unexported there): a non-native`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `ownsSessionLoop` for the operation evidenced at `cmd/fak/serve_fleetbus.go:59`. Unlike `loop-agent-goal-loop-seam`, it names this exact implementation surface; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "loop-agent-goal-loop-seam",
+        "cov-debt250-session-runtime-ownssessionloop"
+      ],
+      "aliases": [],
+      "grounding": "ownssessionloop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-loop-startgatewayusagesnapshotloop",
+      "canonical": "loop implementation surface for startgatewayusagesnapshotloop",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`startGatewayUsageSnapshotLoop` is the loop symbol declared or used at `cmd/fak/serve.go:884` as `// startGatewayUsageSnapshotLoop starts the optional --metrics-snapshot periodic`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `startGatewayUsageSnapshotLoop` for the operation evidenced at `cmd/fak/serve.go:884`. Unlike `loop-agent-goal-loop-seam`, it names this exact implementation surface; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "loop-agent-goal-loop-seam",
+        "cov-debt250-gateway-engine-startgatewayusagesnapshotloop"
+      ],
+      "aliases": [],
+      "grounding": "startgatewayusagesnapshotloop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

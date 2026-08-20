@@ -1,0 +1,729 @@
+{
+  "rows": [
+    {
+      "id": "cov-debt250-guard-gate-corelockgate",
+      "canonical": "guard-gate implementation surface for corelockgate",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`corelockgate` is the guard-gate symbol declared or used at `internal/branchrole/refaudit.go:223` as `\"internal/corelockgate/corelockgate.go\": RefClassDevelopmentSource,`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `corelockgate` for the operation evidenced at `internal/branchrole/refaudit.go:223`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "corelockgate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-fakguardaffordancemode",
+      "canonical": "guard-gate implementation surface for fakguardaffordancemode",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`FAK_GUARD_AFFORDANCE_MODE` is the guard-gate symbol declared or used at `cmd/fak/guard.go:1340` as `// --settings file the hooks above wrote. On by default; FAK_GUARD_AFFORDANCE_MODE=off opts`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `FAK_GUARD_AFFORDANCE_MODE` for the operation evidenced at `cmd/fak/guard.go:1340`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "fakguardaffordancemode",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-releasegate",
+      "canonical": "guard-gate implementation surface for releasegate",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`release_gate` is the guard-gate symbol declared or used at `internal/quality/issue_autofile.go:43` as `// / FailureBundle the spine (run.go) and release aggregator (release_gate.go)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `release_gate` for the operation evidenced at `internal/quality/issue_autofile.go:43`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "releasegate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-gatefileadmission",
+      "canonical": "guard-gate implementation surface for gatefileadmission",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`gate_fileadmission` is the guard-gate symbol declared or used at `internal/corelockgate/changedwitness.go:46` as `// internal/hooks/gate_fileadmission.go, cmd/fak/dispatch_tick_witness.go,`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `gate_fileadmission` for the operation evidenced at `internal/corelockgate/changedwitness.go:46`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "gatefileadmission",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-gatescope",
+      "canonical": "guard-gate implementation surface for gatescope",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`gatescope` is the guard-gate symbol declared or used at `internal/disambiguation/query.go:343` as `Sources: []SourceWitness{{Kind: SourceKindGoSource, Locator: \"internal/hooks/gatescope.go\", Revision: \"reason-source/1\", CheckedAt: \"2026-08-17T00:00:00Z\", Probe: \"fak-disambiguati`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `gatescope` for the operation evidenced at `internal/disambiguation/query.go:343`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "gatescope",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-guardbanner",
+      "canonical": "guard-gate implementation surface for guardbanner",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`guard_banner` is the guard-gate symbol declared or used at `cmd/fak/guard.go:423` as `// piped launches keep the full startup report byte-for-byte. See guard_banner.go.`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `guard_banner` for the operation evidenced at `cmd/fak/guard.go:423`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "guardbanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-guardcodexdefaultmodelid",
+      "canonical": "guard-gate implementation surface for guardcodexdefaultmodelid",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`guardCodexDefaultModelID` is the guard-gate symbol declared or used at `cmd/fak/dispatch_tick.go:709` as `launch.Model = guardCodexDefaultModelID`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `guardCodexDefaultModelID` for the operation evidenced at `cmd/fak/dispatch_tick.go:709`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "guardcodexdefaultmodelid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-guardsplit",
+      "canonical": "guard-gate implementation surface for guardsplit",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`guard_split` is the guard-gate symbol declared or used at `cmd/fak/info.go:805` as `// SIGWINCH and whose --split pane is deliberately never focused (guard_split.go hands`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `guard_split` for the operation evidenced at `cmd/fak/info.go:805`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "guardsplit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-guardtempdirowner",
+      "canonical": "guard-gate implementation surface for guardtempdirowner",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`guardTempDirOwner` is the guard-gate symbol declared or used at `cmd/fak/guard.go:1295` as `// used a raw os.MkdirTemp whose name had no <pid> segment, so guardTempDirOwner`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `guardTempDirOwner` for the operation evidenced at `cmd/fak/guard.go:1295`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "guardtempdirowner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-guardtoolprochooks",
+      "canonical": "guard-gate implementation surface for guardtoolprochooks",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`guard_toolproc_hooks` is the guard-gate symbol declared or used at `cmd/fak/guard.go:1322` as `// adapter always exits 0, so this can never wedge the child. See guard_toolproc_hooks.go.`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `guard_toolproc_hooks` for the operation evidenced at `cmd/fak/guard.go:1322`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "guardtoolprochooks",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-guardupstreamposture",
+      "canonical": "guard-gate implementation surface for guardupstreamposture",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`guard_upstream_posture` is the guard-gate symbol declared or used at `cmd/fak/guard.go:582` as `// The whole two-world resolution lives in guard_upstream_posture.go; a credential`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `guard_upstream_posture` for the operation evidenced at `cmd/fak/guard.go:582`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm",
+        "cov-debt250-policy-capability-guardupstreamposture"
+      ],
+      "aliases": [],
+      "grounding": "guardupstreamposture",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-cmdguardaudit",
+      "canonical": "guard-gate implementation surface for cmdguardaudit",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`cmdGuardAudit` is the guard-gate symbol declared or used at `cmd/fak/guard_audit.go:16` as `func cmdGuardAudit(args []string) {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `cmdGuardAudit` for the operation evidenced at `cmd/fak/guard_audit.go:16`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "cmdguardaudit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-cmdguardcommitgate",
+      "canonical": "guard-gate implementation surface for cmdguardcommitgate",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`cmdGuardCommitGate` is the guard-gate symbol declared or used at `cmd/fak/guard_commit_gate.go:48` as `func cmdGuardCommitGate(argv []string) {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `cmdGuardCommitGate` for the operation evidenced at `cmd/fak/guard_commit_gate.go:48`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "cmdguardcommitgate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-cmdguarddeny",
+      "canonical": "guard-gate implementation surface for cmdguarddeny",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`cmdGuardDeny` is the guard-gate symbol declared or used at `cmd/fak/guard.go:70` as `cmdGuardDeny(argv[1:])`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `cmdGuardDeny` for the operation evidenced at `cmd/fak/guard.go:70`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "cmdguarddeny",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-cmdguardprecompact",
+      "canonical": "guard-gate implementation surface for cmdguardprecompact",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`cmdGuardPreCompact` is the guard-gate symbol declared or used at `cmd/fak/guard_precompact.go:140` as `func cmdGuardPreCompact(argv []string) {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `cmdGuardPreCompact` for the operation evidenced at `cmd/fak/guard_precompact.go:140`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "cmdguardprecompact",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-cmdguardresume",
+      "canonical": "guard-gate implementation surface for cmdguardresume",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`cmdGuardResume` is the guard-gate symbol declared or used at `cmd/fak/guard.go:116` as `cmdGuardResume(argv[1:])`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `cmdGuardResume` for the operation evidenced at `cmd/fak/guard.go:116`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "cmdguardresume",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-cmdguardsessions",
+      "canonical": "guard-gate implementation surface for cmdguardsessions",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`cmdGuardSessions` is the guard-gate symbol declared or used at `cmd/fak/guard.go:104` as `cmdGuardSessions(argv[1:])`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `cmdGuardSessions` for the operation evidenced at `cmd/fak/guard.go:104`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm",
+        "cov-debt250-session-runtime-cmdguardsessions"
+      ],
+      "aliases": [],
+      "grounding": "cmdguardsessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-cmdguardsessionstart",
+      "canonical": "guard-gate implementation surface for cmdguardsessionstart",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`cmdGuardSessionStart` is the guard-gate symbol declared or used at `cmd/fak/guard_sessionstart.go:50` as `func cmdGuardSessionStart(argv []string) {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `cmdGuardSessionStart` for the operation evidenced at `cmd/fak/guard_sessionstart.go:50`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm",
+        "cov-debt250-session-runtime-cmdguardsessionstart"
+      ],
+      "aliases": [],
+      "grounding": "cmdguardsessionstart",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-cmdguardstophook",
+      "canonical": "guard-gate implementation surface for cmdguardstophook",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`cmdGuardStopHook` is the guard-gate symbol declared or used at `cmd/fak/guard_stophook.go:343` as `func cmdGuardStopHook(argv []string) {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `cmdGuardStopHook` for the operation evidenced at `cmd/fak/guard_stophook.go:343`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "cmdguardstophook",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-cmdguardstops",
+      "canonical": "guard-gate implementation surface for cmdguardstops",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`cmdGuardStops` is the guard-gate symbol declared or used at `cmd/fak/guard_stops.go:732` as `// cmdGuardStops is the `fak guard-stops` entry point: fold the typed Stop-hook`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `cmdGuardStops` for the operation evidenced at `cmd/fak/guard_stops.go:732`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "cmdguardstops",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-cmdguardstopsslack",
+      "canonical": "guard-gate implementation surface for cmdguardstopsslack",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`cmdGuardStopsSlack` is the guard-gate symbol declared or used at `cmd/fak/guard_stops_slack.go:46` as `func cmdGuardStopsSlack(argv []string) { os.Exit(runGuardStopsSlack(os.Stdout, os.Stderr, argv)) }`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `cmdGuardStopsSlack` for the operation evidenced at `cmd/fak/guard_stops_slack.go:46`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "cmdguardstopsslack",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-codexguardwitness",
+      "canonical": "guard-gate implementation surface for codexguardwitness",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`codex_guard_witness` is the guard-gate symbol declared or used at `cmd/fak/sessions_codex_loop.go:412` as `}{\"fak.codex_guard_witness.v1\", sessionID, time.Now().UTC().Format(time.RFC3339Nano)})`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `codex_guard_witness` for the operation evidenced at `cmd/fak/sessions_codex_loop.go:412`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm",
+        "cov-debt250-witness-proof-codexguardwitness"
+      ],
+      "aliases": [],
+      "grounding": "codexguardwitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-computegate",
+      "canonical": "guard-gate implementation surface for computegate",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`ComputeGate` is the guard-gate symbol declared or used at `internal/bench/bench.go:243` as `rep.ComputeGate()`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `ComputeGate` for the operation evidenced at `internal/bench/bench.go:243`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "computegate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-fakctxexpensegate",
+      "canonical": "guard-gate implementation surface for fakctxexpensegate",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`FAK_CTX_EXPENSE_GATE` is the guard-gate symbol declared or used at `internal/gateway/ctxadvice.go:56` as `// \u2014 the soak-first posture FAK_CTX_EXPENSE_GATE takes for the expense advisory.`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `FAK_CTX_EXPENSE_GATE` for the operation evidenced at `internal/gateway/ctxadvice.go:56`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm",
+        "cov-debt250-context-ctx-fakctxexpensegate"
+      ],
+      "aliases": [],
+      "grounding": "fakctxexpensegate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-fakguardcappark",
+      "canonical": "guard-gate implementation surface for fakguardcappark",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`FAK_GUARD_CAP_PARK` is the guard-gate symbol declared or used at `cmd/fak/guard_cap_park.go:244` as `// out), disabled only by FAK_GUARD_CAP_PARK=0/false, matching the FAK_GUARD_PARK_BUDGET=0 escape`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `FAK_GUARD_CAP_PARK` for the operation evidenced at `cmd/fak/guard_cap_park.go:244`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "fakguardcappark",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-fetchguardinfovars",
+      "canonical": "guard-gate implementation surface for fetchguardinfovars",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`fetchGuardInfoVars` is the guard-gate symbol declared or used at `cmd/fak/info.go:284` as `// fetchGuardInfoVars GETs /debug/vars into a guardInfoVars, printing the house error and`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `fetchGuardInfoVars` for the operation evidenced at `cmd/fak/info.go:284`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "fetchguardinfovars",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-ffngateexps",
+      "canonical": "guard-gate implementation surface for ffngateexps",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`ffn_gate_exps` is the guard-gate symbol declared or used at `internal/ggufload/gguf_glm_tensors.go:33` as `// NOT mapped here (by design): the batched ROUTED experts ffn_gate_exps / ffn_up_exps /`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `ffn_gate_exps` for the operation evidenced at `internal/ggufload/gguf_glm_tensors.go:33`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "ffngateexps",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-fleetdupguard",
+      "canonical": "guard-gate implementation surface for fleetdupguard",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`FLEET_DUP_GUARD` is the guard-gate symbol declared or used at `internal/hooks/gate_duplication.go:32` as `// fix. Set FLEET_DUP_GUARD=block to hard-enforce it, or ALLOW_DUP=1 to skip it once. Precision is`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `FLEET_DUP_GUARD` for the operation evidenced at `internal/hooks/gate_duplication.go:32`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "fleetdupguard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-foldtrendgate",
+      "canonical": "guard-gate implementation surface for foldtrendgate",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`FoldTrendGate` is the guard-gate symbol declared or used at `internal/cachevalueledger/compare.go:45` as `report := FoldTrendGate(rows)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `FoldTrendGate` for the operation evidenced at `internal/cachevalueledger/compare.go:45`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "foldtrendgate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-gatebarecommitsweep",
+      "canonical": "guard-gate implementation surface for gatebarecommitsweep",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`gate_barecommitsweep` is the guard-gate symbol declared or used at `internal/hooks/gatescope.go:77` as `{\"BARE_COMMIT_SWEEP\", \"gate_barecommitsweep.go\", SeamPreCommit, ClassLandsTree, \"\"},`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `gate_barecommitsweep` for the operation evidenced at `internal/hooks/gatescope.go:77`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "gatebarecommitsweep",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-gatebrandconsistency",
+      "canonical": "guard-gate implementation surface for gatebrandconsistency",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`gate_brandconsistency` is the guard-gate symbol declared or used at `internal/hooks/gatescope.go:114` as `{\"BRAND_CONSISTENCY\", \"gate_brandconsistency.go\", SeamHygiene, ClassTreeTwin, \"whole-tree hygiene sweep\"},`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `gate_brandconsistency` for the operation evidenced at `internal/hooks/gatescope.go:114`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "gatebrandconsistency",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-gatebrowsercontract",
+      "canonical": "guard-gate implementation surface for gatebrowsercontract",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`gate_browsercontract` is the guard-gate symbol declared or used at `internal/hooks/demo_registry.go:11` as `// the BROWSER_CONTRACT gate (gate_browsercontract.go), exactly as demo_registry.py backs both`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `gate_browsercontract` for the operation evidenced at `internal/hooks/demo_registry.go:11`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "gatebrowsercontract",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-gateconceptadmission",
+      "canonical": "guard-gate implementation surface for gateconceptadmission",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`gate_conceptadmission` is the guard-gate symbol declared or used at `internal/hooks/gatescope.go:69` as `{\"CONCEPT_ADMISSION\", \"gate_conceptadmission.go\", SeamPreCommit, ClassLandsTree, \"\"},`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `gate_conceptadmission` for the operation evidenced at `internal/hooks/gatescope.go:69`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "gateconceptadmission",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-gatedeadcode",
+      "canonical": "guard-gate implementation surface for gatedeadcode",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`gate_deadcode` is the guard-gate symbol declared or used at `internal/hooks/gatescope.go:110` as `{\"DEAD_CODE\", \"gate_deadcode.go\", SeamHygiene, ClassTreeTwin,`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `gate_deadcode` for the operation evidenced at `internal/hooks/gatescope.go:110`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "gatedeadcode",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-gateduplication",
+      "canonical": "guard-gate implementation surface for gateduplication",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`gate_duplication` is the guard-gate symbol declared or used at `internal/hooks/gatescope.go:30` as `// (gate_duplication.go neighborBytes): a block that was MOVED is correctly not flagged there,`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `gate_duplication` for the operation evidenced at `internal/hooks/gatescope.go:30`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "gateduplication",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-gatee2eovermocks",
+      "canonical": "guard-gate implementation surface for gatee2eovermocks",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`gate_e2eovermocks` is the guard-gate symbol declared or used at `internal/hooks/gatescope.go:75` as `{\"E2E_OVER_MOCKS\", \"gate_e2eovermocks.go\", SeamPreCommit, ClassLandsTree, \"\"},`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `gate_e2eovermocks` for the operation evidenced at `internal/hooks/gatescope.go:75`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "gatee2eovermocks",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-gategofmt",
+      "canonical": "guard-gate implementation surface for gategofmt",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`gate_gofmt` is the guard-gate symbol declared or used at `internal/hooks/gatescope.go:71` as `{\"GOFMT\", \"gate_gofmt.go\", SeamPreCommit, ClassLandsTree, \"\"},`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `gate_gofmt` for the operation evidenced at `internal/hooks/gatescope.go:71`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "gategofmt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-gateindexsync",
+      "canonical": "guard-gate implementation surface for gateindexsync",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`gate_indexsync` is the guard-gate symbol declared or used at `internal/hooks/gatescope.go:66` as `{\"INDEX_SYNC\", \"gate_indexsync.go\", SeamPreCommit, ClassLandsTree, \"\"},`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `gate_indexsync` for the operation evidenced at `internal/hooks/gatescope.go:66`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "gateindexsync",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-gatemodedefault",
+      "canonical": "guard-gate implementation surface for gatemodedefault",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`gateModeDefault` is the guard-gate symbol declared or used at `cmd/fak/commit_msg_advisory.go:50` as `mode, escaped := gateModeDefault(\"FLEET_MSG_GUARD\", \"FLEET_ALLOW_MSG\", \"warn\")`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `gateModeDefault` for the operation evidenced at `cmd/fak/commit_msg_advisory.go:50`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "gatemodedefault",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-guard-gate-gateprimary",
+      "canonical": "guard-gate implementation surface for gateprimary",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`GatePrimary` is the guard-gate symbol declared or used at `cmd/fak/main_legacy_helpers.go:388` as `fmt.Printf(\"PRIMARY GATE : %s (%s)\\n\", rep.GatePrimary, rep.PrimaryDetail)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `GatePrimary` for the operation evidenced at `cmd/fak/main_legacy_helpers.go:388`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "gateprimary",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

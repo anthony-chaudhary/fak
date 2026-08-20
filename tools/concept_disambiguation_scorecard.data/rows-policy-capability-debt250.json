@@ -1,0 +1,458 @@
+{
+  "rows": [
+    {
+      "id": "cov-debt250-policy-capability-issuepolicy",
+      "canonical": "policy-capability implementation surface for issuepolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`issuepolicy` is the policy-capability symbol declared or used at `cmd/fanoutdemo/main.go:37` as `\"github.com/anthony-chaudhary/fak/internal/issuepolicy\"`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `issuepolicy` for the operation evidenced at `cmd/fanoutdemo/main.go:37`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "issuepolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-expertringevictpolicy",
+      "canonical": "policy-capability implementation surface for expertringevictpolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`ExpertRingEvictPolicy` is the policy-capability symbol declared or used at `internal/model/expert_ring_policy.go:52` as `// ExpertRingEvictPolicy selects how the routed-expert ring ranks eviction victims among its`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `ExpertRingEvictPolicy` for the operation evidenced at `internal/model/expert_ring_policy.go:52`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "expertringevictpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-applypolicyruntimelocked",
+      "canonical": "policy-capability implementation surface for applypolicyruntimelocked",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`applyPolicyRuntimeLocked` is the policy-capability symbol declared or used at `cmd/fak/guard_core_lock.go:23` as `// applyPolicyRuntimeLocked (cmd/fak/policy_reload_widen.go, the --policy FILE`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `applyPolicyRuntimeLocked` for the operation evidenced at `cmd/fak/guard_core_lock.go:23`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "applypolicyruntimelocked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-expertringpolicy",
+      "canonical": "policy-capability implementation surface for expertringpolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`expert_ring_policy` is the policy-capability symbol declared or used at `internal/model/expert_residency_lfu.go:128` as `// expert_ring_policy.go) can adopt the ranking but not yet the hysteresis \u2014 a bypassed weight still`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `expert_ring_policy` for the operation evidenced at `internal/model/expert_residency_lfu.go:128`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "expertringpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-guardupstreamposture",
+      "canonical": "policy-capability implementation surface for guardupstreamposture",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`guard_upstream_posture` is the policy-capability symbol declared or used at `cmd/fak/guard.go:582` as `// The whole two-world resolution lives in guard_upstream_posture.go; a credential`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `guard_upstream_posture` for the operation evidenced at `cmd/fak/guard.go:582`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture",
+        "cov-debt250-guard-gate-guardupstreamposture"
+      ],
+      "aliases": [],
+      "grounding": "guardupstreamposture",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-policyloadfailed",
+      "canonical": "policy-capability implementation surface for policyloadfailed",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`POLICY_LOAD_FAILED` is the policy-capability symbol declared or used at `cmd/fak/bail.go:51` as `bailPolicyLoadFailed = \"POLICY_LOAD_FAILED\"`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `POLICY_LOAD_FAILED` for the operation evidenced at `cmd/fak/bail.go:51`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "policyloadfailed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-policysnapshot",
+      "canonical": "policy-capability implementation surface for policysnapshot",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`PolicySnapshot` is the policy-capability symbol declared or used at `cmd/fak/guard_startup.go:341` as `if admit, reason := guardCoreLockAllAdmitAmendment(adjudicator.Default.PolicySnapshot(), rt.Adjudicator); !admit {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `PolicySnapshot` for the operation evidenced at `cmd/fak/guard_startup.go:341`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "policysnapshot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-posturedrift",
+      "canonical": "policy-capability implementation surface for posturedrift",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`POSTURE_DRIFT` is the policy-capability symbol declared or used at `internal/gitdaily/outcomes.go:24` as `// exist for. Every OTHER GracePruneRefused reason (LOCKED, SESSION_LIVE, POSTURE_DRIFT,`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `POSTURE_DRIFT` for the operation evidenced at `internal/gitdaily/outcomes.go:24`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "posturedrift",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-preflightokverdict",
+      "canonical": "policy-capability implementation surface for preflightokverdict",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`PreflightOKVerdict` is the policy-capability symbol declared or used at `cmd/fak/dispatch_tick_evaluate.go:119` as `dispatchApplyBinSkew(pre, dispatchtick.PreflightOKVerdict)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `PreflightOKVerdict` for the operation evidenced at `cmd/fak/dispatch_tick_evaluate.go:119`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture",
+        "x-issue1420-policy-capability-preflightverdict"
+      ],
+      "aliases": [],
+      "grounding": "preflightokverdict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-reasonunsupportedactivecachecapability",
+      "canonical": "policy-capability implementation surface for reasonunsupportedactivecachecapability",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`ReasonUnsupportedActiveCacheCapability` is the policy-capability symbol declared or used at `internal/vcachescore/compare.go:75` as `unsupportedInput.ExternalEngine.Reason = string(vcachewarm.ReasonUnsupportedActiveCacheCapability)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `ReasonUnsupportedActiveCacheCapability` for the operation evidenced at `internal/vcachescore/compare.go:75`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture",
+        "cov-debt250-cache-reasonunsupportedactivecachecapability",
+        "cov8145-reasonunsupportedactivecachecapability"
+      ],
+      "aliases": [],
+      "grounding": "reasonunsupportedactivecachecapability",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-selectexpertringevictpolicy",
+      "canonical": "policy-capability implementation surface for selectexpertringevictpolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`SelectExpertRingEvictPolicy` is the policy-capability symbol declared or used at `internal/model/expert_residency_report.go:202` as `if _, d, err := SelectExpertRingEvictPolicy(trace, opts.RegretOptions); err == nil {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `SelectExpertRingEvictPolicy` for the operation evidenced at `internal/model/expert_residency_report.go:202`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "selectexpertringevictpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-appendcapabilitygrant",
+      "canonical": "policy-capability implementation surface for appendcapabilitygrant",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`AppendCapabilityGrant` is the policy-capability symbol declared or used at `cmd/fak/org.go:182` as `// journal.Active() is nil outside a session, and AppendCapabilityGrant no-ops on a`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `AppendCapabilityGrant` for the operation evidenced at `cmd/fak/org.go:182`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "appendcapabilitygrant",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-bailpolicychecknofile",
+      "canonical": "policy-capability implementation surface for bailpolicychecknofile",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`bailPolicyCheckNoFile` is the policy-capability symbol declared or used at `cmd/fak/bail.go:52` as `bailPolicyCheckNoFile = \"POLICY_CHECK_NO_FILE\"`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `bailPolicyCheckNoFile` for the operation evidenced at `cmd/fak/bail.go:52`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "bailpolicychecknofile",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-bailpolicyloadfailed",
+      "canonical": "policy-capability implementation surface for bailpolicyloadfailed",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`bailPolicyLoadFailed` is the policy-capability symbol declared or used at `cmd/fak/bail.go:51` as `bailPolicyLoadFailed = \"POLICY_LOAD_FAILED\"`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `bailPolicyLoadFailed` for the operation evidenced at `cmd/fak/bail.go:51`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "bailpolicyloadfailed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-capabilitygrant",
+      "canonical": "policy-capability implementation surface for capabilitygrant",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`CAPABILITY_GRANT` is the policy-capability symbol declared or used at `cmd/fak/org.go:482` as `// orgCentralGrantRows derives one CAPABILITY_GRANT row per knob the central manifest`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `CAPABILITY_GRANT` for the operation evidenced at `cmd/fak/org.go:482`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "capabilitygrant",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-capabilitygrantrow",
+      "canonical": "policy-capability implementation surface for capabilitygrantrow",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`CapabilityGrantRow` is the policy-capability symbol declared or used at `cmd/fak/org.go:491` as `func orgCentralGrantRows(fold policy.OrgFold, issuer string, version uint64) []journal.CapabilityGrantRow {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `CapabilityGrantRow` for the operation evidenced at `cmd/fak/org.go:491`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "capabilitygrantrow",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-cipreflightfailure",
+      "canonical": "policy-capability implementation surface for cipreflightfailure",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`ciPreflightFailure` is the policy-capability symbol declared or used at `cmd/fak/ci_preflight_shared.go:5` as `// ciPreflightFailure is shared by repository validation commands that retain`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `ciPreflightFailure` for the operation evidenced at `cmd/fak/ci_preflight_shared.go:5`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "cipreflightfailure",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-dispatchworkerpreflightrequest",
+      "canonical": "policy-capability implementation surface for dispatchworkerpreflightrequest",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`dispatchWorkerPreflightRequest` is the policy-capability symbol declared or used at `cmd/fak/dispatch_tick.go:763` as `func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick dispatchLanePick, leaseID string, account dispatchtick.Account, launch dispatchtick.WorkerLaunch, pr`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `dispatchWorkerPreflightRequest` for the operation evidenced at `cmd/fak/dispatch_tick.go:763`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "dispatchworkerpreflightrequest",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-dispatchworkerpreflightresult",
+      "canonical": "policy-capability implementation surface for dispatchworkerpreflightresult",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`dispatchWorkerPreflightResult` is the policy-capability symbol declared or used at `cmd/fak/dispatch_tick.go:763` as `func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick dispatchLanePick, leaseID string, account dispatchtick.Account, launch dispatchtick.WorkerLaunch, pr`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `dispatchWorkerPreflightResult` for the operation evidenced at `cmd/fak/dispatch_tick.go:763`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "dispatchworkerpreflightresult",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-fakpolicyreloadallowwiden",
+      "canonical": "policy-capability implementation surface for fakpolicyreloadallowwiden",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`FAK_POLICY_RELOAD_ALLOW_WIDEN` is the policy-capability symbol declared or used at `cmd/fak/guard_core_lock.go:36` as `// refusal is escapable with FAK_POLICY_RELOAD_ALLOW_WIDEN=1 and is skipped`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `FAK_POLICY_RELOAD_ALLOW_WIDEN` for the operation evidenced at `cmd/fak/guard_core_lock.go:36`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "fakpolicyreloadallowwiden",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-indexpolicyfinding",
+      "canonical": "policy-capability implementation surface for indexpolicyfinding",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`indexPolicyFinding` is the policy-capability symbol declared or used at `internal/devcmd/index_policy.go:134` as `func bareDevSpellingFindings(root string, paths []string, allow bareDevAllowlist) []indexPolicyFinding {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `indexPolicyFinding` for the operation evidenced at `internal/devcmd/index_policy.go:134`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "indexpolicyfinding",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-multimodalpolicy",
+      "canonical": "policy-capability implementation surface for multimodalpolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`MultimodalPolicy` is the policy-capability symbol declared or used at `internal/model/multimodal.go:59` as `// MultimodalPolicy is the opt-in governance envelope for image-bearing prompts.`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `MultimodalPolicy` for the operation evidenced at `internal/model/multimodal.go:59`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "multimodalpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-postureargs",
+      "canonical": "policy-capability implementation surface for postureargs",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`postureArgs` is the policy-capability symbol declared or used at `cmd/fak/dispatch_tick_worker.go:120` as `postureArgs, postureErr := fleetGuardCachePostureArgs()`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `postureArgs` for the operation evidenced at `cmd/fak/dispatch_tick_worker.go:120`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "postureargs",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-tunefirepolicy",
+      "canonical": "policy-capability implementation surface for tunefirepolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`TuneFirePolicy` is the policy-capability symbol declared or used at `internal/agent/anthropic_compact.go:263` as `// rsiloop.TuneFirePolicy over a corpus of scored per-fire receipts (rsiloop.CompactionFireObs \u2192`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `TuneFirePolicy` for the operation evidenced at `internal/agent/anthropic_compact.go:263`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "tunefirepolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-policy-capability-usagepreflight",
+      "canonical": "policy-capability implementation surface for usagepreflight",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`usagepreflight` is the policy-capability symbol declared or used at `internal/usagepreflight/usagepreflight.go:1` as `// Package usagepreflight decides whether an outbound provider request may spend`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `usagepreflight` for the operation evidenced at `internal/usagepreflight/usagepreflight.go:1`. Unlike `egressposture`, it names this exact implementation surface; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "usagepreflight",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

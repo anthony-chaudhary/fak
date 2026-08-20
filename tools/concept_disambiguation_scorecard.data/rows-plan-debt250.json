@@ -1,0 +1,728 @@
+{
+  "rows": [
+    {
+      "id": "cov-debt250-plan-issueplan",
+      "canonical": "plan implementation surface for issueplan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`IssuePlan` is the plan symbol declared or used at `internal/ideascout/fetch.go:222` as `func (f LiveFetcher) CreateIssue(issue IssuePlan, milestone string) (string, error) {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `IssuePlan` for the operation evidenced at `internal/ideascout/fetch.go:222`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "issueplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-candidatesgathered",
+      "canonical": "plan implementation surface for candidatesgathered",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`candidates_gathered` is the plan symbol declared or used at `internal/ideascout/conversion.go:12` as `// (`candidates_gathered`, `planned`); conversion never was, so nothing in the loop`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `candidates_gathered` for the operation evidenced at `internal/ideascout/conversion.go:12`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "candidatesgathered",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-newconfiguredhttpplanner",
+      "canonical": "plan implementation surface for newconfiguredhttpplanner",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`newConfiguredHTTPPlanner` is the plan symbol declared or used at `cmd/fak/serve.go:645` as `// gateway.newConfiguredHTTPPlanner carries it onto every proxy planner, where`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `newConfiguredHTTPPlanner` for the operation evidenced at `cmd/fak/serve.go:645`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "newconfiguredhttpplanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-configrecoveryplans",
+      "canonical": "plan implementation surface for configrecoveryplans",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`configRecoveryPlans` is the plan symbol declared or used at `cmd/fak/bail.go:36` as `// the ratchet: the tokens here and the plans in configRecoveryPlans must be the`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `configRecoveryPlans` for the operation evidenced at `cmd/fak/bail.go:36`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "configrecoveryplans",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-evictionplan",
+      "canonical": "plan implementation surface for evictionplan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`EvictionPlan` is the plan symbol declared or used at `internal/ctxplan/survival.go:161` as `// EvictionPlan is the verdict of planning one eviction down to a token budget. A plan with a`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `EvictionPlan` for the operation evidenced at `internal/ctxplan/survival.go:161`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "evictionplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-explainplan",
+      "canonical": "plan implementation surface for explainplan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`ExplainPlan` is the plan symbol declared or used at `internal/quality/multiple_comparisons.go:480` as `// ExplainRelease (release_gate.go) and ExplainPlan (suite_split.go) \u2014 the bridge`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `ExplainPlan` for the operation evidenced at `internal/quality/multiple_comparisons.go:480`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "explainplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-gathercandidates",
+      "canonical": "plan implementation surface for gathercandidates",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`GatherCandidates` is the plan symbol declared or used at `internal/ideascout/conversion.go:252` as `// conditions GatherCandidates applies, including the fresh lane's fresh_per_topic`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `GatherCandidates` for the operation evidenced at `internal/ideascout/conversion.go:252`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "gathercandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-planpublish",
+      "canonical": "plan implementation surface for planpublish",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`PlanPublish` is the plan symbol declared or used at `cmd/fak/wip_fleet.go:166` as `plan := wipref.PlanPublish(local, maxDeltaBytes)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `PlanPublish` for the operation evidenced at `cmd/fak/wip_fleet.go:166`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "planpublish",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-recoveryplans",
+      "canonical": "plan implementation surface for recoveryplans",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`recoveryPlans` is the plan symbol declared or used at `cmd/fak/recover.go:88` as `plans := recoveryPlans(*trunk)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `recoveryPlans` for the operation evidenced at `cmd/fak/recover.go:88`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan",
+        "plan-recoveryplan"
+      ],
+      "aliases": [],
+      "grounding": "recoveryplans",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-wiplandresult",
+      "canonical": "plan implementation surface for wiplandresult",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`wipLandResult` is the plan symbol declared or used at `cmd/fak/wip_adopt.go:110` as `Land *wipLandResult `json:\"land,omitempty\"``. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `wipLandResult` for the operation evidenced at `cmd/fak/wip_adopt.go:110`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "wiplandresult",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-bindrecoveryplan",
+      "canonical": "plan implementation surface for bindrecoveryplan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`bindRecoveryPlan` is the plan symbol declared or used at `cmd/fak/recover.go:114` as `plan = bindRecoveryPlan(plan, bindings)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `bindRecoveryPlan` for the operation evidenced at `cmd/fak/recover.go:114`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "bindrecoveryplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-candidatedomain",
+      "canonical": "plan implementation surface for candidatedomain",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`candidateDomain` is the plan symbol declared or used at `cmd/fak/harness_preview.go:22` as `candidateDomain := fs.String(\"candidate-domain\", \"\", \"candidate contextual domain\")`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `candidateDomain` for the operation evidenced at `cmd/fak/harness_preview.go:22`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "candidatedomain",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-candidatepath",
+      "canonical": "plan implementation surface for candidatepath",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`candidatePath` is the plan symbol declared or used at `cmd/fak/harness_preview.go:20` as `candidatePath := fs.String(\"candidate\", \"\", \"candidate product lock\")`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `candidatePath` for the operation evidenced at `cmd/fak/harness_preview.go:20`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan",
+        "covg-plan-candidatespath"
+      ],
+      "aliases": [],
+      "grounding": "candidatepath",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-candidatesformodel",
+      "canonical": "plan implementation surface for candidatesformodel",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`CandidatesForModel` is the plan symbol declared or used at `internal/gateway/fleet_membership.go:506` as `// CandidatesForModel returns the admissible workers that hold model, in`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `CandidatesForModel` for the operation evidenced at `internal/gateway/fleet_membership.go:506`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "candidatesformodel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-dispatchwaveexecutionplan",
+      "canonical": "plan implementation surface for dispatchwaveexecutionplan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`dispatchWaveExecutionPlan` is the plan symbol declared or used at `cmd/fak/dispatch_wave.go:79` as `type dispatchWaveExecutionPlan struct {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `dispatchWaveExecutionPlan` for the operation evidenced at `cmd/fak/dispatch_wave.go:79`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan",
+        "x-plan-dispatchwaveexecutionplans"
+      ],
+      "aliases": [],
+      "grounding": "dispatchwaveexecutionplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-dispatchwaveskippedcandidates",
+      "canonical": "plan implementation surface for dispatchwaveskippedcandidates",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`dispatchWaveSkippedCandidates` is the plan symbol declared or used at `cmd/fak/dispatch_wave.go:1565` as `if skipped := dispatchWaveSkippedCandidates(price.Candidates); len(skipped) > 0 {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `dispatchWaveSkippedCandidates` for the operation evidenced at `cmd/fak/dispatch_wave.go:1565`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "dispatchwaveskippedcandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-estimatecpuoffloadexpertsexpertparallelmemoryplan",
+      "canonical": "plan implementation surface for estimatecpuoffloadexpertsexpertparallelmemoryplan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`EstimateCPUOffloadExpertsExpertParallelMemoryPlan` is the plan symbol declared or used at `cmd/fak/serve.go:1310` as `plan, err := ws.EstimateCPUOffloadExpertsExpertParallelMemoryPlan(ranks)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `EstimateCPUOffloadExpertsExpertParallelMemoryPlan` for the operation evidenced at `cmd/fak/serve.go:1310`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "estimatecpuoffloadexpertsexpertparallelmemoryplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-falseplans",
+      "canonical": "plan implementation surface for falseplans",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`FalsePlans` is the plan symbol declared or used at `internal/closebatch/compare.go:12` as `Issues, Batches, Allowed, Held, FalsePlans int`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `FalsePlans` for the operation evidenced at `internal/closebatch/compare.go:12`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "falseplans",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-fitandplanserveggufcpuoffloadpathondevice",
+      "canonical": "plan implementation surface for fitandplanserveggufcpuoffloadpathondevice",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`fitAndPlanServeGGUFCPUOffloadPathOnDevice` is the plan symbol declared or used at `cmd/fak/serve.go:1416` as `// fitAndPlanServeGGUFCPUOffloadPathOnDevice keeps serveDeviceFitBudget's generic device headroom`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `fitAndPlanServeGGUFCPUOffloadPathOnDevice` for the operation evidenced at `cmd/fak/serve.go:1416`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "fitandplanserveggufcpuoffloadpathondevice",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-fitandplanserveggufpathondevice",
+      "canonical": "plan implementation surface for fitandplanserveggufpathondevice",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`fitAndPlanServeGGUFPathOnDevice` is the plan symbol declared or used at `cmd/fak/serve.go:1411` as `func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Resident bool, contextBudgetTokens int) (compute.MemoryPlan, error) {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `fitAndPlanServeGGUFPathOnDevice` for the operation evidenced at `cmd/fak/serve.go:1411`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "fitandplanserveggufpathondevice",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-goexeccandidates",
+      "canonical": "plan implementation surface for goexeccandidates",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`GoExecCandidates` is the plan symbol declared or used at `internal/hooks/gate_desktoppopup.go:40` as `r.GoExecs = appendUnique(r.GoExecs, windowgate.GoExecCandidates(rel, string(b))...)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `GoExecCandidates` for the operation evidenced at `internal/hooks/gate_desktoppopup.go:40`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "goexeccandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-hourlyplan",
+      "canonical": "plan implementation surface for hourlyplan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`HourlyPlan` is the plan symbol declared or used at `internal/mutationbudget/compare.go:28` as `plan := HourlyPlan{Closes: 8, Comments: 5, Fetches: 2}`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `HourlyPlan` for the operation evidenced at `internal/mutationbudget/compare.go:28`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "hourlyplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-isgrowthcandidate",
+      "canonical": "plan implementation surface for isgrowthcandidate",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`isGrowthCandidate` is the plan symbol declared or used at `cmd/fak/commit_review.go:348` as `// (isGrowthCandidate) admits a file only by its \".jsonl\"/\".log\"/\".err\" suffix, so the natural`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `isGrowthCandidate` for the operation evidenced at `cmd/fak/commit_review.go:348`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "isgrowthcandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-mergecandidatenotes",
+      "canonical": "plan implementation surface for mergecandidatenotes",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`mergeCandidateNotes` is the plan symbol declared or used at `internal/hooks/gatescope.go:182` as `mergeCandidateNotes(d, v)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `mergeCandidateNotes` for the operation evidenced at `internal/hooks/gatescope.go:182`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "mergecandidatenotes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-modelloadplan",
+      "canonical": "plan implementation surface for modelloadplan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`modelloadplan` is the plan symbol declared or used at `cmd/fak/model_plan.go:10` as `\"github.com/anthony-chaudhary/fak/internal/modelloadplan\"`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `modelloadplan` for the operation evidenced at `cmd/fak/model_plan.go:10`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "modelloadplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-newproxyplanner",
+      "canonical": "plan implementation surface for newproxyplanner",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`newProxyPlanner` is the plan symbol declared or used at `cmd/fak/shrink_lever_wire.go:112` as `// shrinkWireReplicaFleet \u2014 two or more upstreams. gateway.newProxyPlanner builds a`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `newProxyPlanner` for the operation evidenced at `cmd/fak/shrink_lever_wire.go:112`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "newproxyplanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-planbytestotal",
+      "canonical": "plan implementation surface for planbytestotal",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`plan_bytes_total` is the plan symbol declared or used at `internal/gateway/metrics_prometheus.go:22` as `// label-identical \u2014 a consumer joining plan_bytes_total against plan_observations_total`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `plan_bytes_total` for the operation evidenced at `internal/gateway/metrics_prometheus.go:22`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "planbytestotal",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-planissues",
+      "canonical": "plan implementation surface for planissues",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`PlanIssues` is the plan symbol declared or used at `internal/ideascout/plan.go:80` as `// PlanIssues runs score \u2192 dedup \u2192 threshold \u2192 CAP. It returns the issues to file,`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `PlanIssues` for the operation evidenced at `internal/ideascout/plan.go:80`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "planissues",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-planobservationstotal",
+      "canonical": "plan implementation surface for planobservationstotal",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`plan_observations_total` is the plan symbol declared or used at `internal/gateway/metrics_prometheus.go:22` as `// label-identical \u2014 a consumer joining plan_bytes_total against plan_observations_total`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `plan_observations_total` for the operation evidenced at `internal/gateway/metrics_prometheus.go:22`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "planobservationstotal",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-planoracleerror",
+      "canonical": "plan implementation surface for planoracleerror",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`PLAN_ORACLE_ERROR` is the plan symbol declared or used at `cmd/fak/guard_operator_question.go:136` as `return stopDispOperatorQuestionEscalate, \"PLAN_ORACLE_ERROR\", err.Error()`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `PLAN_ORACLE_ERROR` for the operation evidenced at `cmd/fak/guard_operator_question.go:136`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "planoracleerror",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-planoraclesunavailable",
+      "canonical": "plan implementation surface for planoraclesunavailable",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`PLAN_ORACLES_UNAVAILABLE` is the plan symbol declared or used at `cmd/fak/guard_operator_question.go:76` as `// to PLAN_ORACLES_UNAVAILABLE in a real session.`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `PLAN_ORACLES_UNAVAILABLE` for the operation evidenced at `cmd/fak/guard_operator_question.go:76`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "planoraclesunavailable",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-planpin",
+      "canonical": "plan implementation surface for planpin",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`PlanPin` is the plan symbol declared or used at `internal/ctxplan/planpin.go:12` as `// PlanPin content-addresses an ordered multi-step plan. Steps remain in caller`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `PlanPin` for the operation evidenced at `internal/ctxplan/planpin.go:12`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "planpin",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-pressuredcandidates",
+      "canonical": "plan implementation surface for pressuredcandidates",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`PressuredCandidates` is the plan symbol declared or used at `cmd/fak/kvmmu_pressure_bridge.go:76` as `func (b *inKernelPrefixPressureBridge) PressuredCandidates() (int64, []gateway.KVPressureCandidate) {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `PressuredCandidates` for the operation evidenced at `cmd/fak/kvmmu_pressure_bridge.go:76`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "pressuredcandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-publishplan",
+      "canonical": "plan implementation surface for publishplan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`PublishPlan` is the plan symbol declared or used at `cmd/fak/wip_fleet.go:165` as `func wipPublish(ctx context.Context, repo, remote string, local []wipref.RefRecord, maxDeltaBytes int64) (wipref.PublishPlan, map[string]string, error) {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `PublishPlan` for the operation evidenced at `cmd/fak/wip_fleet.go:165`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "publishplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-pyspawncandidates",
+      "canonical": "plan implementation surface for pyspawncandidates",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`PySpawnCandidates` is the plan symbol declared or used at `internal/hooks/gate_desktoppopup.go:42` as `r.PySpawns = appendUnique(r.PySpawns, windowgate.PySpawnCandidates(rel, string(b))...)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `PySpawnCandidates` for the operation evidenced at `internal/hooks/gate_desktoppopup.go:42`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "pyspawncandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-renderdispatchwaveplanrows",
+      "canonical": "plan implementation surface for renderdispatchwaveplanrows",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`renderDispatchWavePlanRows` is the plan symbol declared or used at `cmd/fak/dispatch_wave.go:1543` as `renderDispatchWavePlanRows(&b, plan)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `renderDispatchWavePlanRows` for the operation evidenced at `cmd/fak/dispatch_wave.go:1543`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan",
+        "cov-debt250-render-materialize-renderdispatchwaveplanrows"
+      ],
+      "aliases": [],
+      "grounding": "renderdispatchwaveplanrows",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-runmodelplan",
+      "canonical": "plan implementation surface for runmodelplan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`runModelPlan` is the plan symbol declared or used at `cmd/fak/model.go:39` as `os.Exit(runModelPlan(os.Stdout, os.Stderr, args[1:]))`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `runModelPlan` for the operation evidenced at `cmd/fak/model.go:39`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "runmodelplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-runplanaudit",
+      "canonical": "plan implementation surface for runplanaudit",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`RunPlanAudit` is the plan symbol declared or used at `cmd/fak-dev/main.go:48` as `return devcmd.RunPlanAudit(stdout, stderr, argv[1:])`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `RunPlanAudit` for the operation evidenced at `cmd/fak-dev/main.go:48`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "runplanaudit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-runwipland",
+      "canonical": "plan implementation surface for runwipland",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`runWipLand` is the plan symbol declared or used at `cmd/fak/wip.go:61` as `return runWipLand(stdout, stderr, argv[1:])`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `runWipLand` for the operation evidenced at `cmd/fak/wip.go:61`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "runwipland",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-plan-unplanned",
+      "canonical": "plan implementation surface for unplanned",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`unplanned` is the plan symbol declared or used at `internal/plancfi/plancfi.go:9` as `// produces a call OUTSIDE the approved plan \u2014 an unplanned gadget \u2014 and plancfi`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `unplanned` for the operation evidenced at `internal/plancfi/plancfi.go:9`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "unplanned",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "rows": [
+    {
+      "id": "cov-debt-tail-plan-wipland",
+      "canonical": "plan implementation surface for wipland",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`wip_land` is the plan symbol declared or used at `cmd/fak/wip_land.go:3` as `// wip_land.go \u2014 `fak wip land`: turning a session's checkpoint ref into a real commit.`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `wip_land` for the operation evidenced at `cmd/fak/wip_land.go:3`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "wipland",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt-tail-plan-wiplandsubject",
+      "canonical": "plan implementation surface for wiplandsubject",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`wipLandSubject` is the plan symbol declared or used at `cmd/fak/wip_land.go:210` as `subject = wipLandSubject(session, files)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `wipLandSubject` for the operation evidenced at `cmd/fak/wip_land.go:210`. Unlike `x-ci-coverage-plan-blockplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "wiplandsubject",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

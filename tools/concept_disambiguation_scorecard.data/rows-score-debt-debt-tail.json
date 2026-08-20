@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "cov-debt-tail-score-debt-mlpdebt",
+      "canonical": "score-debt implementation surface for mlpdebt",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "`mlp_debt` is the score-debt symbol declared or used at `internal/mlpscore/kernel.go:21` as `// DebtKey is the headline HARD integer the control-pane folds (corpus.mlp_debt): the`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `mlp_debt` for the operation evidenced at `internal/mlpscore/kernel.go:21`. Unlike `x2-score-debt-debtintegers`, it names this exact implementation surface; unlike `score-debt`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [],
+      "grounding": "mlpdebt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

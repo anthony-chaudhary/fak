@@ -1,0 +1,241 @@
+{
+  "rows": [
+    {
+      "id": "cov-debt250-gateway-engine-engineresult",
+      "canonical": "gateway-engine implementation surface for engineresult",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`engineResult` is the gateway-engine symbol declared or used at `internal/agent/readengine.go:65` as `return engineResult(ctx, c, body, out, isErr, FakReadEngineID), nil`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `engineResult` for the operation evidenced at `internal/agent/readengine.go:65`. Unlike `x2-gateway-engine-enginecallsavoided`, it names this exact implementation surface; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "engineresult",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-gateway-engine-enginespec",
+      "canonical": "gateway-engine implementation surface for enginespec",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`EngineSpec` is the gateway-engine symbol declared or used at `internal/quality/case.go:70` as `Engine EngineSpec `json:\"engine\"``. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `EngineSpec` for the operation evidenced at `internal/quality/case.go:70`. Unlike `x2-gateway-engine-enginecallsavoided`, it names this exact implementation surface; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "enginespec",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-gateway-engine-enginevllm",
+      "canonical": "gateway-engine implementation surface for enginevllm",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`EngineVLLM` is the gateway-engine symbol declared or used at `internal/enginecache/compare.go:61` as `witnessed, err := (Client{Engine: EngineVLLM, BaseURL: server.URL}).Invalidate(context.Background(), dirs)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `EngineVLLM` for the operation evidenced at `internal/enginecache/compare.go:61`. Unlike `x2-gateway-engine-enginecallsavoided`, it names this exact implementation surface; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "enginevllm",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-gateway-engine-externalengineevents",
+      "canonical": "gateway-engine implementation surface for externalengineevents",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`externalEngineEvents` is the gateway-engine symbol declared or used at `cmd/fak/vcache.go:860` as `externalEngineEvents := fs.Int(\"external-engine-events\", 0, \"fak-authored SGLang/vLLM/llama cache adapter events that fired\")`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `externalEngineEvents` for the operation evidenced at `cmd/fak/vcache.go:860`. Unlike `x2-gateway-engine-enginecallsavoided`, it names this exact implementation surface; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "externalengineevents",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-gateway-engine-inkernelturntax",
+      "canonical": "gateway-engine implementation surface for inkernelturntax",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`inkernel_turntax` is the gateway-engine symbol declared or used at `internal/agent/inkernel_decode.go:157` as `// 1b) RECORD this turn's cache decision (#1538, inkernel_turntax.go). This is the seam the`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `inkernel_turntax` for the operation evidenced at `internal/agent/inkernel_decode.go:157`. Unlike `x2-gateway-engine-enginecallsavoided`, it names this exact implementation surface; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "inkernelturntax",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-gateway-engine-kernelfloor",
+      "canonical": "gateway-engine implementation surface for kernelfloor",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`KernelFloor` is the gateway-engine symbol declared or used at `internal/microagent/egress.go:175` as `// The floor argument is the same KernelFloor the seam adjudicates calls`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `KernelFloor` for the operation evidenced at `internal/microagent/egress.go:175`. Unlike `x2-gateway-engine-enginecallsavoided`, it names this exact implementation surface; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "kernelfloor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-gateway-engine-kernelprincipal",
+      "canonical": "gateway-engine implementation surface for kernelprincipal",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`kernelPrincipal` is the gateway-engine symbol declared or used at `internal/gateway/http.go:1262` as `principal := kernelPrincipal(r)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `kernelPrincipal` for the operation evidenced at `internal/gateway/http.go:1262`. Unlike `x2-gateway-engine-enginecallsavoided`, it names this exact implementation surface; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "kernelprincipal",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-gateway-engine-newsessiongateway",
+      "canonical": "gateway-engine implementation surface for newsessiongateway",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`NewSessionGateway` is the gateway-engine symbol declared or used at `cmd/fak/micro.go:420` as `gw := microagent.NewSessionGateway(microagent.NewSchedulingGateway(base, sched), tbl)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `NewSessionGateway` for the operation evidenced at `cmd/fak/micro.go:420`. Unlike `x2-gateway-engine-enginecallsavoided`, it names this exact implementation surface; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided",
+        "cov-debt250-session-runtime-newsessiongateway"
+      ],
+      "aliases": [],
+      "grounding": "newsessiongateway",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-gateway-engine-pagedkernel",
+      "canonical": "gateway-engine implementation surface for pagedkernel",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`pagedKernel` is the gateway-engine symbol declared or used at `internal/model/expert_ring_policy.go:49` as `// transiently (upload, use, free \u2014 pagedKernel's lifecycle) needs a staging contract the HAL does`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `pagedKernel` for the operation evidenced at `internal/model/expert_ring_policy.go:49`. Unlike `x2-gateway-engine-enginecallsavoided`, it names this exact implementation surface; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "pagedkernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-gateway-engine-qwen35gdnkernelerror",
+      "canonical": "gateway-engine implementation surface for qwen35gdnkernelerror",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`Qwen35GDNKernelError` is the gateway-engine symbol declared or used at `internal/compute/cuda_specialized.go:297` as `kernelErr := &Qwen35GDNKernelError{`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `Qwen35GDNKernelError` for the operation evidenced at `internal/compute/cuda_specialized.go:297`. Unlike `x2-gateway-engine-enginecallsavoided`, it names this exact implementation surface; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "qwen35gdnkernelerror",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-gateway-engine-resolvetoolengine",
+      "canonical": "gateway-engine implementation surface for resolvetoolengine",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`resolveToolEngine` is the gateway-engine symbol declared or used at `internal/agent/loop_session.go:382` as `// resolveToolEngine returns the FINAL engine route to bind to abi.ToolCall.Engine for`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `resolveToolEngine` for the operation evidenced at `internal/agent/loop_session.go:382`. Unlike `x2-gateway-engine-enginecallsavoided`, it names this exact implementation surface; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "resolvetoolengine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-gateway-engine-sessiongateway",
+      "canonical": "gateway-engine implementation surface for sessiongateway",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`SessionGateway` is the gateway-engine symbol declared or used at `cmd/fak/micro_selfcheck.go:51` as `// uses the real gateway HTTP handler and the production SessionGateway/scheduler`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `SessionGateway` for the operation evidenced at `cmd/fak/micro_selfcheck.go:51`. Unlike `x2-gateway-engine-enginecallsavoided`, it names this exact implementation surface; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided",
+        "cov-debt250-session-runtime-sessiongateway"
+      ],
+      "aliases": [],
+      "grounding": "sessiongateway",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-gateway-engine-startgatewayusagesnapshotloop",
+      "canonical": "gateway-engine implementation surface for startgatewayusagesnapshotloop",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`startGatewayUsageSnapshotLoop` is the gateway-engine symbol declared or used at `cmd/fak/serve.go:884` as `// startGatewayUsageSnapshotLoop starts the optional --metrics-snapshot periodic`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `startGatewayUsageSnapshotLoop` for the operation evidenced at `cmd/fak/serve.go:884`. Unlike `x2-gateway-engine-enginecallsavoided`, it names this exact implementation surface; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided",
+        "cov-debt250-loop-startgatewayusagesnapshotloop"
+      ],
+      "aliases": [],
+      "grounding": "startgatewayusagesnapshotloop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

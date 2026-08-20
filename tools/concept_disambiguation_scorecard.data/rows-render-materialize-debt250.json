@@ -1,0 +1,411 @@
+{
+  "rows": [
+    {
+      "id": "cov-debt250-render-materialize-docrender",
+      "canonical": "render-materialize implementation surface for docrender",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`docrender` is the render-materialize symbol declared or used at `internal/docrender/doc.go:1` as `// Package docrender turns this repo's Markdown into a print-ready HTML page and,`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `docrender` for the operation evidenced at `internal/docrender/doc.go:1`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer",
+        "x-render-materialize-oprender"
+      ],
+      "aliases": [],
+      "grounding": "docrender",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-materializeraw",
+      "canonical": "render-materialize implementation surface for materializeraw",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`materializeRaw` is the render-materialize symbol declared or used at `internal/contextq/contextq.go:382` as `materializeRaw(ctx, im, req, &res, frames, entries, selected, excluded)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `materializeRaw` for the operation evidenced at `internal/contextq/contextq.go:382`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer",
+        "x-render-materialize-materializer"
+      ],
+      "aliases": [],
+      "grounding": "materializeraw",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-renderings",
+      "canonical": "render-materialize implementation surface for renderings",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`renderings` is the render-materialize symbol declared or used at `internal/gateway/compaction_contract.go:30` as `// One source, two renderings, so they cannot disagree about what the boundary did.`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `renderings` for the operation evidenced at `internal/gateway/compaction_contract.go:30`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "renderings",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-renderissue",
+      "canonical": "render-materialize implementation surface for renderissue",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`RenderIssue` is the render-materialize symbol declared or used at `internal/ideascout/fetch.go:187` as `// label (RenderIssue always emits ScoutLabel) and the matching`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `RenderIssue` for the operation evidenced at `internal/ideascout/fetch.go:187`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "renderissue",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-rendertui",
+      "canonical": "render-materialize implementation surface for rendertui",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`RenderTUI` is the render-materialize symbol declared or used at `cmd/fak/harness_preview.go:62` as `fmt.Fprint(stdout, harnesspreview.RenderTUI(preview))`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `RenderTUI` for the operation evidenced at `cmd/fak/harness_preview.go:62`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer",
+        "cov-debt250-render-materialize-rendercli",
+        "render-materialize-render-toc",
+        "x-render-materialize-rendertuiloops",
+        "x-render-materialize-renderturn"
+      ],
+      "aliases": [],
+      "grounding": "rendertui",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-cronrender",
+      "canonical": "render-materialize implementation surface for cronrender",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`cronRender` is the render-materialize symbol declared or used at `cmd/fak/cron.go:118` as `cronRender(stdout, *target, *label, descs, *interval, cmdVec)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `cronRender` for the operation evidenced at `cmd/fak/cron.go:118`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "cronrender",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-eventmaterialized",
+      "canonical": "render-materialize implementation surface for eventmaterialized",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`EventMaterialized` is the render-materialize symbol declared or used at `cmd/fak/wip_adopt.go:404` as `next = wiprecon.MarkPhase(next, wiprecon.PhaseMaterialized, now, wiprecon.EventMaterialized,`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `EventMaterialized` for the operation evidenced at `cmd/fak/wip_adopt.go:404`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "eventmaterialized",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-materializegittree",
+      "canonical": "render-materialize implementation surface for materializegittree",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`materializeGitTree` is the render-materialize symbol declared or used at `internal/conceptcatalog/author_cleanroom.go:21` as `tree, cleanup, err := materializeGitTree(root, treeish)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `materializeGitTree` for the operation evidenced at `internal/conceptcatalog/author_cleanroom.go:21`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "materializegittree",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-phasematerialized",
+      "canonical": "render-materialize implementation surface for phasematerialized",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`PhaseMaterialized` is the render-materialize symbol declared or used at `cmd/fak/wip_adopt.go:404` as `next = wiprecon.MarkPhase(next, wiprecon.PhaseMaterialized, now, wiprecon.EventMaterialized,`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `PhaseMaterialized` for the operation evidenced at `cmd/fak/wip_adopt.go:404`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "phasematerialized",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-rendercli",
+      "canonical": "render-materialize implementation surface for rendercli",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`RenderCLI` is the render-materialize symbol declared or used at `cmd/fak/harness_preview.go:60` as `fmt.Fprint(stdout, harnesspreview.RenderCLI(preview))`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `RenderCLI` for the operation evidenced at `cmd/fak/harness_preview.go:60`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer",
+        "cov-debt250-render-materialize-rendertui",
+        "render-materialize-render-csv",
+        "x-render-materialize-rendertuiloops"
+      ],
+      "aliases": [],
+      "grounding": "rendercli",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-rendercounts",
+      "canonical": "render-materialize implementation surface for rendercounts",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`renderCounts` is the render-materialize symbol declared or used at `internal/sessiondiag/inventory.go:1082` as `fmt.Fprintf(w, \"health: %s\\n\", renderCounts(report.Counts.ByHealth))`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `renderCounts` for the operation evidenced at `internal/sessiondiag/inventory.go:1082`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "rendercounts",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-renderdispatchwaveplanrows",
+      "canonical": "render-materialize implementation surface for renderdispatchwaveplanrows",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`renderDispatchWavePlanRows` is the render-materialize symbol declared or used at `cmd/fak/dispatch_wave.go:1543` as `renderDispatchWavePlanRows(&b, plan)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `renderDispatchWavePlanRows` for the operation evidenced at `cmd/fak/dispatch_wave.go:1543`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer",
+        "cov-debt250-plan-renderdispatchwaveplanrows"
+      ],
+      "aliases": [],
+      "grounding": "renderdispatchwaveplanrows",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-renderdocindex",
+      "canonical": "render-materialize implementation surface for renderdocindex",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`RenderDocIndex` is the render-materialize symbol declared or used at `cmd/fak/productscorecard.go:100` as `// RenderDocIndex body --markdown-dir writes as README.md, emitted to stdout so the`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `RenderDocIndex` for the operation evidenced at `cmd/fak/productscorecard.go:100`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "renderdocindex",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-rendergitmainttext",
+      "canonical": "render-materialize implementation surface for rendergitmainttext",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`renderGitMaintText` is the render-materialize symbol declared or used at `cmd/fak/git_daily.go:304` as `renderGitMaintText(w, res.Maint)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `renderGitMaintText` for the operation evidenced at `cmd/fak/git_daily.go:304`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "rendergitmainttext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-renderinfofleetrows",
+      "canonical": "render-materialize implementation surface for renderinfofleetrows",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`renderInfoFleetRows` is the render-materialize symbol declared or used at `cmd/fak/info_fleet_render.go:46` as `// renderInfoFleetRows expands the bounded machine sample for the Agents tab. Attention rows sort`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `renderInfoFleetRows` for the operation evidenced at `cmd/fak/info_fleet_render.go:46`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "renderinfofleetrows",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-renderinventory",
+      "canonical": "render-materialize implementation surface for renderinventory",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`RenderInventory` is the render-materialize symbol declared or used at `internal/devcmd/sessiondiag.go:146` as `sessiondiag.RenderInventory(stdout, report)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `RenderInventory` for the operation evidenced at `internal/devcmd/sessiondiag.go:146`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "renderinventory",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-renderpromptrules",
+      "canonical": "render-materialize implementation surface for renderpromptrules",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`RenderPromptRules` is the render-materialize symbol declared or used at `internal/dispatchtick/prompt.go:109` as `workBlock := RenderPromptRules(`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `RenderPromptRules` for the operation evidenced at `internal/dispatchtick/prompt.go:109`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "renderpromptrules",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-renderrecoverysummary",
+      "canonical": "render-materialize implementation surface for renderrecoverysummary",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`renderRecoverySummary` is the render-materialize symbol declared or used at `cmd/fak/session_recover.go:200` as `renderRecoverySummary(stdout, summary)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `renderRecoverySummary` for the operation evidenced at `cmd/fak/session_recover.go:200`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "renderrecoverysummary",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-renderscore",
+      "canonical": "render-materialize implementation surface for renderscore",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`renderScore` is the render-materialize symbol declared or used at `internal/devcmd/wiki.go:298` as `renderScore(stdout, score, absDir)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `renderScore` for the operation evidenced at `internal/devcmd/wiki.go:298`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer",
+        "x2-render-materialize-rendersmokearmstable"
+      ],
+      "aliases": [],
+      "grounding": "renderscore",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-renderundeclaredleafreason",
+      "canonical": "render-materialize implementation surface for renderundeclaredleafreason",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`renderUndeclaredLeafReason` is the render-materialize symbol declared or used at `internal/repoguard/guard.go:840` as `blocks = append(blocks, renderUndeclaredLeafReason(undeclaredLeaves))`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `renderUndeclaredLeafReason` for the operation evidenced at `internal/repoguard/guard.go:840`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "renderundeclaredleafreason",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-surrender",
+      "canonical": "render-materialize implementation surface for surrender",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`surrender` is the render-materialize symbol declared or used at `cmd/fak/guard_sessionstart.go:304` as `return 0 // the platform did not surrender a parent for this row`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `surrender` for the operation evidenced at `cmd/fak/guard_sessionstart.go:304`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "surrender",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-render-materialize-testwaveunitneverrenderscompletevialeafderivation",
+      "canonical": "render-materialize implementation surface for testwaveunitneverrenderscompletevialeafderivation",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`TestWaveUnitNeverRendersCompleteViaLeafDerivation` is the render-materialize symbol declared or used at `cmd/fak/steer_prs.go:495` as `// steerpr.TestWaveUnitNeverRendersCompleteViaLeafDerivation.`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `TestWaveUnitNeverRendersCompleteViaLeafDerivation` for the operation evidenced at `cmd/fak/steer_prs.go:495`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "testwaveunitneverrenderscompletevialeafderivation",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "rows": [
+    {
+      "id": "cov-debt-tail-attention-externalinvalidateattentionindex",
+      "canonical": "attention implementation surface for externalinvalidateattentionindex",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "`ExternalInvalidateAttentionIndex` is the attention symbol declared or used at `internal/cachemeta/external_invalidation.go:11` as `ExternalInvalidateAttentionIndex ExternalInvalidationKind = \"attention_index\"`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `ExternalInvalidateAttentionIndex` for the operation evidenced at `internal/cachemeta/external_invalidation.go:11`. Unlike `x-attention-attentionneeded-taskgraph`, it names this exact implementation surface; unlike `attention`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-attention-attentionneeded-taskgraph"
+      ],
+      "aliases": [],
+      "grounding": "externalinvalidateattentionindex",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-attention.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt-tail-attention-planeattentionindex",
+      "canonical": "attention implementation surface for planeattentionindex",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "`PlaneAttentionIndex` is the attention symbol declared or used at `internal/cachemeta/attention_index.go:95` as `Plane: PlaneAttentionIndex,`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `PlaneAttentionIndex` for the operation evidenced at `internal/cachemeta/attention_index.go:95`. Unlike `x-attention-attentionneeded-taskgraph`, it names this exact implementation surface; unlike `attention`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-attention-attentionneeded-taskgraph"
+      ],
+      "aliases": [],
+      "grounding": "planeattentionindex",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-attention.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

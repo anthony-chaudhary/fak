@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "cov-debt-tail-layout-daylayout",
+      "canonical": "layout implementation surface for daylayout",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "`DayLayout` is the layout symbol declared or used at `cmd/fak/git_daily.go:347` as `// LOCAL date, matching gitdaily.DayLayout \u2014 the ledger's day keys are local, so a`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `DayLayout` for the operation evidenced at `cmd/fak/git_daily.go:347`. Unlike `c729-gguf-arch-stores-hf-rotary-layout`, it names this exact implementation surface; unlike `layout`, it is not the umbrella domain.",
+      "distinct_from": [
+        "c729-gguf-arch-stores-hf-rotary-layout",
+        "x-layout-datelayout"
+      ],
+      "aliases": [],
+      "grounding": "daylayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

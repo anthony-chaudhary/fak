@@ -1,0 +1,388 @@
+{
+  "rows": [
+    {
+      "id": "cov-debt250-cache-hicache",
+      "canonical": "cache implementation surface for hicache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`HiCache` is the cache symbol declared or used at `internal/compute/kvdemote.go:21` as `// Parity frame: Dynamo KVBM's cost-aware lifecycle across HBM/host/SSD/network, SGLang HiCache`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `HiCache` for the operation evidenced at `internal/compute/kvdemote.go:21`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey",
+        "kv-cache",
+        "vcache",
+        "x3-cache-gocache"
+      ],
+      "aliases": [],
+      "grounding": "hicache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-cachedcontent",
+      "canonical": "cache implementation surface for cachedcontent",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`CachedContent` is the cache symbol declared or used at `internal/nativebench/nativebench.go:498` as `{Name: \"fak + Gemini CachedContent\", Class: FirstClassIntegration, Integration: \"gemini\", Source: \"internal/gemini\"},`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `CachedContent` for the operation evidenced at `internal/nativebench/nativebench.go:498`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "cachedcontent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-cachedlogits",
+      "canonical": "cache implementation surface for cachedlogits",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`cachedLogits` is the cache symbol declared or used at `internal/agent/inkernel_decode.go:45` as `var cachedLogits []float32`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `cachedLogits` for the operation evidenced at `internal/agent/inkernel_decode.go:45`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "cachedlogits",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-cachewrite1hmultiplier",
+      "canonical": "cache implementation surface for cachewrite1hmultiplier",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`CacheWrite1hMultiplier` is the cache symbol declared or used at `cmd/fak/guard_cost_basis.go:229` as `gateway.CacheReadMultiplier, gateway.CacheWrite5mMultiplier, gateway.CacheWrite1hMultiplier)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `CacheWrite1hMultiplier` for the operation evidenced at `cmd/fak/guard_cost_basis.go:229`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey",
+        "x-ci-coverage-cache-cachewrite5mmultiplier"
+      ],
+      "aliases": [],
+      "grounding": "cachewrite1hmultiplier",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-managedcacheactive",
+      "canonical": "cache implementation surface for managedcacheactive",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`managed_cache_active` is the cache symbol declared or used at `internal/ablate/managed_cache_ab.go:59` as `ManagedCacheArmActive = \"managed_cache_active\"`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `managed_cache_active` for the operation evidenced at `internal/ablate/managed_cache_ab.go:59`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "managedcacheactive",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-reasonunsupportedactivecachecapability",
+      "canonical": "cache implementation surface for reasonunsupportedactivecachecapability",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`ReasonUnsupportedActiveCacheCapability` is the cache symbol declared or used at `internal/vcachescore/compare.go:75` as `unsupportedInput.ExternalEngine.Reason = string(vcachewarm.ReasonUnsupportedActiveCacheCapability)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `ReasonUnsupportedActiveCacheCapability` for the operation evidenced at `internal/vcachescore/compare.go:75`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey",
+        "cov-debt250-policy-capability-reasonunsupportedactivecachecapability",
+        "cov8145-reasonunsupportedactivecachecapability"
+      ],
+      "aliases": [],
+      "grounding": "reasonunsupportedactivecachecapability",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-seencache",
+      "canonical": "cache implementation surface for seencache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`SeenCache` is the cache symbol declared or used at `cmd/fak/harness_debt_dispatch.go:124` as `type hddSeenCache = dogfoodissues.SeenCache[hddSeenRecord]`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `SeenCache` for the operation evidenced at `cmd/fak/harness_debt_dispatch.go:124`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "seencache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-armedcache",
+      "canonical": "cache implementation surface for armedcache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`ArmedCache` is the cache symbol declared or used at `internal/gateway/toolproc_reuse.go:8` as `// (ClassifyRepeats/Normalize), #5122 the armed byte cache (toolproc.ArmedCache),`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `ArmedCache` for the operation evidenced at `internal/gateway/toolproc_reuse.go:8`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "armedcache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-bookeduncachedtokens",
+      "canonical": "cache implementation surface for bookeduncachedtokens",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`booked_uncached_tokens` is the cache symbol declared or used at `internal/nativebench/nativebench.go:575` as `Metrics: []string{\"demotion_accuracy\", \"alarm_accuracy\", \"divergence_segment_error\", \"divergence_token_error\", \"divergence_byte_error\", \"booked_uncached_tokens\", \"rebate_tokens\", \"`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `booked_uncached_tokens` for the operation evidenced at `internal/nativebench/nativebench.go:575`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "bookeduncachedtokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-cachedfile",
+      "canonical": "cache implementation surface for cachedfile",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`cachedFile` is the cache symbol declared or used at `internal/hooks/gate_duplication.go:241` as `if e, ok := d.cachedFile(rel); ok {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `cachedFile` for the operation evidenced at `internal/hooks/gate_duplication.go:241`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "cachedfile",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-cachedinput",
+      "canonical": "cache implementation surface for cachedinput",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`CachedInput` is the cache symbol declared or used at `internal/bench/tokenweightcal.go:101` as `CachedInput TokenWeightRate `json:\"cached_input\"``. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `CachedInput` for the operation evidenced at `internal/bench/tokenweightcal.go:101`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "cachedinput",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-cacheroot",
+      "canonical": "cache implementation surface for cacheroot",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`cacheRoot` is the cache symbol declared or used at `cmd/fak/dispatch_tick_preflight_host.go:1150` as `cacheRoot, head := dispatchTreeBuildKey(root)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `cacheRoot` for the operation evidenced at `cmd/fak/dispatch_tick_preflight_host.go:1150`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "cacheroot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-cachetier",
+      "canonical": "cache implementation surface for cachetier",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`CacheTier` is the cache symbol declared or used at `internal/cacheobs/cacheobs.go:125` as `tierStatus map[CacheTier]TierStatus`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `CacheTier` for the operation evidenced at `internal/cacheobs/cacheobs.go:125`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "cachetier",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-cachevaluesavingspricing",
+      "canonical": "cache implementation surface for cachevaluesavingspricing",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`cachevalueSavingsPricing` is the cache symbol declared or used at `cmd/fak/cachevalue_billing_mode.go:15` as `// (cachevalueSavingsPricing). That projection lands on a real invoice line only when the`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `cachevalueSavingsPricing` for the operation evidenced at `cmd/fak/cachevalue_billing_mode.go:15`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "cachevaluesavingspricing",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-guardinfocacheattribution",
+      "canonical": "cache implementation surface for guardinfocacheattribution",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`guardInfoCacheAttribution` is the cache symbol declared or used at `cmd/fak/info.go:108` as `CacheAttribution *guardInfoCacheAttribution `json:\"cache_attribution\"``. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `guardInfoCacheAttribution` for the operation evidenced at `cmd/fak/info.go:108`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "guardinfocacheattribution",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-guardmanagedcacheinputs",
+      "canonical": "cache implementation surface for guardmanagedcacheinputs",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`guardManagedCacheInputs` is the cache symbol declared or used at `cmd/fak/cachevalue_billing_mode.go:36` as `func billingModeFrom(in guardManagedCacheInputs) string {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `guardManagedCacheInputs` for the operation evidenced at `cmd/fak/cachevalue_billing_mode.go:36`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "guardmanagedcacheinputs",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-inducedcachecreationtokens",
+      "canonical": "cache implementation surface for inducedcachecreationtokens",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`InducedCacheCreationTokens` is the cache symbol declared or used at `internal/agent/anthropic_compact.go:176` as `InducedCacheCreationTokens int `json:\"induced_cache_creation_tokens,omitempty\"``. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `InducedCacheCreationTokens` for the operation evidenced at `internal/agent/anthropic_compact.go:176`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "inducedcachecreationtokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-minimaxkvcache",
+      "canonical": "cache implementation surface for minimaxkvcache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`minimaxKVCache` is the cache symbol declared or used at `internal/model/kvcache.go:19` as `msa *minimaxKVCache // MiniMax-M3 lightning-indexer key cache (sparse layers only)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `minimaxKVCache` for the operation evidenced at `internal/model/kvcache.go:19`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "minimaxkvcache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-readvcachetelemetry",
+      "canonical": "cache implementation surface for readvcachetelemetry",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`readVCacheTelemetry` is the cache symbol declared or used at `cmd/fak/vcache.go:693` as `rows, err := readVCacheTelemetry(*file, os.Stdin)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `readVCacheTelemetry` for the operation evidenced at `cmd/fak/vcache.go:693`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "readvcachetelemetry",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-treecache",
+      "canonical": "cache implementation surface for treecache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`treeCache` is the cache symbol declared or used at `internal/gitbroker/gitbroker.go:294` as `// not this type's job: it lives in treeCache (treestate.go), which is keyed and`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `treeCache` for the operation evidenced at `internal/gitbroker/gitbroker.go:294`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "treecache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-cache-microcachedemo",
+      "canonical": "cache implementation surface for microcachedemo",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`microcachedemo` is the cache symbol declared or used at `cmd/microcachedemo/main.go:70` as `fs := flag.NewFlagSet(\"microcachedemo\", flag.ExitOnError)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `microcachedemo` for the operation evidenced at `cmd/microcachedemo/main.go:70`. Unlike `promptcachekey`, it names this exact implementation surface; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "microcachedemo",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

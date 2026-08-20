@@ -1,0 +1,349 @@
+{
+  "rows": [
+    {
+      "id": "cov-debt250-context-ctx-contextual",
+      "canonical": "context-ctx implementation surface for contextual",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`contextual` is the context-ctx symbol declared or used at `cmd/fak/harness_preview.go:21` as `currentDomain := fs.String(\"current-domain\", \"\", \"last admitted contextual domain\")`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `contextual` for the operation evidenced at `cmd/fak/harness_preview.go:21`. Unlike `x2-context-ctx-commandcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "contextual",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-context-ctx-contextid",
+      "canonical": "context-ctx implementation surface for contextid",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`ContextID` is the context-ctx symbol declared or used at `cmd/microcontextdemo/effect_batch.go:22` as `ContextID string `json:\"context_id\"``. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `ContextID` for the operation evidenced at `cmd/microcontextdemo/effect_batch.go:22`. Unlike `x2-context-ctx-commandcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext",
+        "contextq"
+      ],
+      "aliases": [],
+      "grounding": "contextid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-context-ctx-additionalcontext",
+      "canonical": "context-ctx implementation surface for additionalcontext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`additionalContext` is the context-ctx symbol declared or used at `cmd/fak/guard_sessionstart.go:31` as `// context as additionalContext (a one-time cost, NOT a per-prompt-prefix tax \u2014 so it does`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `additionalContext` for the operation evidenced at `cmd/fak/guard_sessionstart.go:31`. Unlike `x2-context-ctx-commandcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "additionalcontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-context-ctx-basecontext",
+      "canonical": "context-ctx implementation surface for basecontext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`BaseContext` is the context-ctx symbol declared or used at `internal/harnessinstructions/adapter.go:63` as `for _, segment := range syspromptmmu.BaseContext() {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `BaseContext` for the operation evidenced at `internal/harnessinstructions/adapter.go:63`. Unlike `x2-context-ctx-commandcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "basecontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-context-ctx-ctxadvice",
+      "canonical": "context-ctx implementation surface for ctxadvice",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`ctxadvice` is the context-ctx symbol declared or used at `internal/gateway/ctxadvice.go:3` as `// ctxadvice.go \u2014 the CONSUMER arm of the managed-context value API (#2424). ctxvalue.go`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `ctxadvice` for the operation evidenced at `internal/gateway/ctxadvice.go:3`. Unlike `x2-context-ctx-commandcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "ctxadvice",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-context-ctx-ctxstepadvice",
+      "canonical": "context-ctx implementation surface for ctxstepadvice",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`CtxStepAdvice` is the context-ctx symbol declared or used at `internal/gateway/ctxadvice.go:16` as `// CtxStepAdvice the HTTP/MCP read returns (ctxAdviceNote), so the pushed line and the`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `CtxStepAdvice` for the operation evidenced at `internal/gateway/ctxadvice.go:16`. Unlike `x2-context-ctx-commandcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "ctxstepadvice",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-context-ctx-generatereusedcontextwithbias",
+      "canonical": "context-ctx implementation surface for generatereusedcontextwithbias",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`generateReusedContextWithBias` is the context-ctx symbol declared or used at `internal/agent/inkernel_decode.go:20` as `gen, promptTok, _, matched, _, prefillS, decodeS, stopped, err = p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, nil, 0, 0, stops, emit)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `generateReusedContextWithBias` for the operation evidenced at `internal/agent/inkernel_decode.go:20`. Unlike `x2-context-ctx-commandcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "generatereusedcontextwithbias",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-context-ctx-recallinjectiondebit",
+      "canonical": "context-ctx implementation surface for recallinjectiondebit",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`RecallInjectionDebit` is the context-ctx symbol declared or used at `cmd/fak/cachevalue_report.go:75` as `report.RecallInjectionDebit = recallDebit`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `RecallInjectionDebit` for the operation evidenced at `cmd/fak/cachevalue_report.go:75`. Unlike `x2-context-ctx-commandcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "recallinjectiondebit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-context-ctx-retainedfactrecall",
+      "canonical": "context-ctx implementation surface for retainedfactrecall",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`RetainedFactRecall` is the context-ctx symbol declared or used at `internal/ctxmmu/compare.go:26` as `RetainedFactRecall float64 `json:\"retained_fact_recall,omitempty\"``. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `RetainedFactRecall` for the operation evidenced at `internal/ctxmmu/compare.go:26`. Unlike `x2-context-ctx-commandcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "retainedfactrecall",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-context-ctx-canarycontexts",
+      "canonical": "context-ctx implementation surface for canarycontexts",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`canaryContexts` is the context-ctx symbol declared or used at `cmd/microcontextdemo/controlled_soak.go:17` as `canaryContexts int`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `canaryContexts` for the operation evidenced at `cmd/microcontextdemo/controlled_soak.go:17`. Unlike `x2-context-ctx-commandcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "canarycontexts",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-context-ctx-compactioneconomics",
+      "canonical": "context-ctx implementation surface for compactioneconomics",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`compaction_economics` is the context-ctx symbol declared or used at `internal/cachevalue/compaction_join.go:4` as `// (cache-value netting/attribution); sibling of compaction_economics.go (#3028, the net`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `compaction_economics` for the operation evidenced at `internal/cachevalue/compaction_join.go:4`. Unlike `x2-context-ctx-commandcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "compactioneconomics",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-context-ctx-compactionnudgenearpercent",
+      "canonical": "context-ctx implementation surface for compactionnudgenearpercent",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`compactionNudgeNearPercent` is the context-ctx symbol declared or used at `internal/ctxresidency/pressure.go:29` as `// compactionNudgeNearPercent, so the agent query, the per-turn nudge, and`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `compactionNudgeNearPercent` for the operation evidenced at `internal/ctxresidency/pressure.go:29`. Unlike `x2-context-ctx-commandcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "compactionnudgenearpercent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-context-ctx-defaultrecallinjectionledger",
+      "canonical": "context-ctx implementation surface for defaultrecallinjectionledger",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`DefaultRecallInjectionLedger` is the context-ctx symbol declared or used at `cmd/fak/cachevalue_report.go:41` as `recallInjectionLedger := fs.String(\"recall-injection-ledger\", cachevaluereport.DefaultRecallInjectionLedger, \"numbers-only recall injection debit ledger (.fak/recall-injections.jso`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `DefaultRecallInjectionLedger` for the operation evidenced at `cmd/fak/cachevalue_report.go:41`. Unlike `x2-context-ctx-commandcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "defaultrecallinjectionledger",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-context-ctx-fakctxexpensegate",
+      "canonical": "context-ctx implementation surface for fakctxexpensegate",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`FAK_CTX_EXPENSE_GATE` is the context-ctx symbol declared or used at `internal/gateway/ctxadvice.go:56` as `// \u2014 the soak-first posture FAK_CTX_EXPENSE_GATE takes for the expense advisory.`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `FAK_CTX_EXPENSE_GATE` for the operation evidenced at `internal/gateway/ctxadvice.go:56`. Unlike `x2-context-ctx-commandcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext",
+        "cov-debt250-guard-gate-fakctxexpensegate"
+      ],
+      "aliases": [],
+      "grounding": "fakctxexpensegate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-context-ctx-hibernatedcontexts",
+      "canonical": "context-ctx implementation surface for hibernatedcontexts",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`hibernatedContexts` is the context-ctx symbol declared or used at `cmd/microcontextdemo/controlled_soak.go:21` as `hibernatedContexts int`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `hibernatedContexts` for the operation evidenced at `cmd/microcontextdemo/controlled_soak.go:21`. Unlike `x2-context-ctx-commandcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "hibernatedcontexts",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-context-ctx-newmanagedcontext",
+      "canonical": "context-ctx implementation surface for newmanagedcontext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`NewManagedContext` is the context-ctx symbol declared or used at `cmd/fak/micro_ablation.go:192` as `managed := microagent.NewManagedContext(capTokens)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `NewManagedContext` for the operation evidenced at `cmd/fak/micro_ablation.go:192`. Unlike `x2-context-ctx-commandcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "newmanagedcontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-context-ctx-queuepeakcontexts",
+      "canonical": "context-ctx implementation surface for queuepeakcontexts",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`queuePeakContexts` is the context-ctx symbol declared or used at `cmd/microcontextdemo/controlled_soak.go:20` as `queuePeakContexts int`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `queuePeakContexts` for the operation evidenced at `cmd/microcontextdemo/controlled_soak.go:20`. Unlike `x2-context-ctx-commandcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "queuepeakcontexts",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-context-ctx-restoredcontexts",
+      "canonical": "context-ctx implementation surface for restoredcontexts",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`restoredContexts` is the context-ctx symbol declared or used at `cmd/microcontextdemo/controlled_soak.go:22` as `restoredContexts int`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `restoredContexts` for the operation evidenced at `cmd/microcontextdemo/controlled_soak.go:22`. Unlike `x2-context-ctx-commandcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext",
+        "x-context-ctx-restorecontext"
+      ],
+      "aliases": [],
+      "grounding": "restoredcontexts",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-context-ctx-tracefromcontext",
+      "canonical": "context-ctx implementation surface for tracefromcontext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`TraceFromContext` is the context-ctx symbol declared or used at `cmd/microcontextdemo/multiturn_descriptor.go:53` as `trace := microagent.TraceFromContext(ctx)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `TraceFromContext` for the operation evidenced at `cmd/microcontextdemo/multiturn_descriptor.go:53`. Unlike `x2-context-ctx-commandcontext`, it names this exact implementation surface; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "tracefromcontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

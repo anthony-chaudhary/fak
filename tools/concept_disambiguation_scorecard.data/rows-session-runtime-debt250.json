@@ -1,0 +1,668 @@
+{
+  "rows": [
+    {
+      "id": "cov-debt250-session-runtime-sessiondiag",
+      "canonical": "session-runtime implementation surface for sessiondiag",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`sessiondiag` is the session-runtime symbol declared or used at `cmd/fak/resume_watchdog_candidates.go:12` as `\"github.com/anthony-chaudhary/fak/internal/sessiondiag\"`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `sessiondiag` for the operation evidenced at `cmd/fak/resume_watchdog_candidates.go:12`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs",
+        "cov-debt250-session-runtime-sessiontag"
+      ],
+      "aliases": [],
+      "grounding": "sessiondiag",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-validsession",
+      "canonical": "session-runtime implementation surface for validsession",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`ValidSession` is the session-runtime symbol declared or used at `cmd/fak/wip.go:376` as `if !wipref.ValidSession(sess) {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `ValidSession` for the operation evidenced at `cmd/fak/wip.go:376`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs",
+        "cov-debt250-session-runtime-validsessionid"
+      ],
+      "aliases": [],
+      "grounding": "validsession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-sessionresume",
+      "canonical": "session-runtime implementation surface for sessionresume",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`SessionResume` is the session-runtime symbol declared or used at `internal/executionroute/compat.go:295` as `dec.Action = SessionResume`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `SessionResume` for the operation evidenced at `internal/executionroute/compat.go:295`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs",
+        "cov-debt250-session-runtime-evsessionresume"
+      ],
+      "aliases": [],
+      "grounding": "sessionresume",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-wiplivesessions",
+      "canonical": "session-runtime implementation surface for wiplivesessions",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`wipLiveSessions` is the session-runtime symbol declared or used at `cmd/fak/wip.go:1238` as `live, err := wipLiveSessions(ctx, repo)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `wipLiveSessions` for the operation evidenced at `cmd/fak/wip.go:1238`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "wiplivesessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-defaultsessionstalewindow",
+      "canonical": "session-runtime implementation surface for defaultsessionstalewindow",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`defaultSessionStaleWindow` is the session-runtime symbol declared or used at `cmd/fak/fleet_commit_health.go:59` as `source := fleetMetricsSources{registryPath: *registry, staleWindow: defaultSessionStaleWindow, maxSessions: defaultFleetMetricsMaxSessions, stderr: stderr}`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `defaultSessionStaleWindow` for the operation evidenced at `cmd/fak/fleet_commit_health.go:59`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "defaultsessionstalewindow",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-maxsessions",
+      "canonical": "session-runtime implementation surface for maxsessions",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`maxSessions` is the session-runtime symbol declared or used at `cmd/fak/fleet_commit_health.go:59` as `source := fleetMetricsSources{registryPath: *registry, staleWindow: defaultSessionStaleWindow, maxSessions: defaultFleetMetricsMaxSessions, stderr: stderr}`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `maxSessions` for the operation evidenced at `cmd/fak/fleet_commit_health.go:59`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs",
+        "c729-fak-sessions-gauge"
+      ],
+      "aliases": [],
+      "grounding": "maxsessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-sessionrecord",
+      "canonical": "session-runtime implementation surface for sessionrecord",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`SessionRecord` is the session-runtime symbol declared or used at `internal/codexlifecycle/retention.go:70` as `// SessionRecord is the metadata a plan consumes \u2014 never prompt or tool-output`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `SessionRecord` for the operation evidenced at `internal/codexlifecycle/retention.go:70`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "sessionrecord",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-faksessionledgerdir",
+      "canonical": "session-runtime implementation surface for faksessionledgerdir",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`FAK_SESSION_LEDGER_DIR` is the session-runtime symbol declared or used at `cmd/fak/session_teleport.go:17` as `// $FAK_SESSION_LEDGER_DIR or the user config dir) and never dial a live gateway.`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `FAK_SESSION_LEDGER_DIR` for the operation evidenced at `cmd/fak/session_teleport.go:17`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "faksessionledgerdir",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-gemma4session",
+      "canonical": "session-runtime implementation surface for gemma4session",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`gemma4_session` is the session-runtime symbol declared or used at `internal/model/arch_support_gemma4.go:17` as `// Step now dispatch a gemma4 checkpoint to the dedicated forward (gemma4_session.go) before`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `gemma4_session` for the operation evidenced at `internal/model/arch_support_gemma4.go:17`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "gemma4session",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-servesessiondurability",
+      "canonical": "session-runtime implementation surface for servesessiondurability",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`serveSessionDurability` is the session-runtime symbol declared or used at `cmd/fak/guard_fleetbus.go:383` as `sessions: &fleetBusApplier{tbl: serveSessions, native: false, durability: serveSessionDurability, ctx: ctx},`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `serveSessionDurability` for the operation evidenced at `cmd/fak/guard_fleetbus.go:383`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "servesessiondurability",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-sessionteleport",
+      "canonical": "session-runtime implementation surface for sessionteleport",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`session_teleport` is the session-runtime symbol declared or used at `cmd/fak/session_cmd.go:133` as `// Two forks share this verb, told apart by shape (see session_teleport.go):`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `session_teleport` for the operation evidenced at `cmd/fak/session_cmd.go:133`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "sessionteleport",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-applycodexloopsessionmeta",
+      "canonical": "session-runtime implementation surface for applycodexloopsessionmeta",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`applyCodexLoopSessionMeta` is the session-runtime symbol declared or used at `cmd/fak/sessions_codex_loop.go:1221` as `applyCodexLoopSessionMeta(&d, rec.Timestamp, rec.Payload)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `applyCodexLoopSessionMeta` for the operation evidenced at `cmd/fak/sessions_codex_loop.go:1221`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs",
+        "cov-debt250-loop-applycodexloopsessionmeta"
+      ],
+      "aliases": [],
+      "grounding": "applycodexloopsessionmeta",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-cmdguardsessions",
+      "canonical": "session-runtime implementation surface for cmdguardsessions",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`cmdGuardSessions` is the session-runtime symbol declared or used at `cmd/fak/guard.go:104` as `cmdGuardSessions(argv[1:])`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `cmdGuardSessions` for the operation evidenced at `cmd/fak/guard.go:104`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs",
+        "cov-debt250-guard-gate-cmdguardsessions"
+      ],
+      "aliases": [],
+      "grounding": "cmdguardsessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-cmdguardsessionstart",
+      "canonical": "session-runtime implementation surface for cmdguardsessionstart",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`cmdGuardSessionStart` is the session-runtime symbol declared or used at `cmd/fak/guard_sessionstart.go:50` as `func cmdGuardSessionStart(argv []string) {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `cmdGuardSessionStart` for the operation evidenced at `cmd/fak/guard_sessionstart.go:50`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs",
+        "cov-debt250-guard-gate-cmdguardsessionstart"
+      ],
+      "aliases": [],
+      "grounding": "cmdguardsessionstart",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-defaultfleetmetricsmaxsessions",
+      "canonical": "session-runtime implementation surface for defaultfleetmetricsmaxsessions",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`defaultFleetMetricsMaxSessions` is the session-runtime symbol declared or used at `cmd/fak/fleet_commit_health.go:59` as `source := fleetMetricsSources{registryPath: *registry, staleWindow: defaultSessionStaleWindow, maxSessions: defaultFleetMetricsMaxSessions, stderr: stderr}`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `defaultFleetMetricsMaxSessions` for the operation evidenced at `cmd/fak/fleet_commit_health.go:59`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "defaultfleetmetricsmaxsessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-dumpservesessions",
+      "canonical": "session-runtime implementation surface for dumpservesessions",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`dumpServeSessions` is the session-runtime symbol declared or used at `cmd/fak/serve.go:920` as `// the load-time inverse of dumpServeSessions: each session re-attaches at the budget /`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `dumpServeSessions` for the operation evidenced at `cmd/fak/serve.go:920`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "dumpservesessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-evsessionresume",
+      "canonical": "session-runtime implementation surface for evsessionresume",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`EvSessionResume` is the session-runtime symbol declared or used at `internal/toolproc/compact.go:80` as `case ev.Kind == EvSessionResume && liveSessions[ev.Session]:`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `EvSessionResume` for the operation evidenced at `internal/toolproc/compact.go:80`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs",
+        "cov-debt250-session-runtime-sessionresume"
+      ],
+      "aliases": [],
+      "grounding": "evsessionresume",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-guardsessionstarthint",
+      "canonical": "session-runtime implementation surface for guardsessionstarthint",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`guardSessionStartHint` is the session-runtime symbol declared or used at `cmd/fak/guard_sessionstart.go:44` as `// guardSessionStartHint is the one-line affordance injected into the first turn. It names the`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `guardSessionStartHint` for the operation evidenced at `cmd/fak/guard_sessionstart.go:44`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "guardsessionstarthint",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-imagepadslots",
+      "canonical": "session-runtime implementation surface for imagepadslots",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`ImagePadSlots` is the session-runtime symbol declared or used at `internal/model/vision_prompt.go:7` as `// #4030), the tokenizer locates the placeholders (ImagePadSlots, #4031), vision_splice.go`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `ImagePadSlots` for the operation evidenced at `internal/model/vision_prompt.go:7`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "imagepadslots",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-newsessiongateway",
+      "canonical": "session-runtime implementation surface for newsessiongateway",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`NewSessionGateway` is the session-runtime symbol declared or used at `cmd/fak/micro.go:420` as `gw := microagent.NewSessionGateway(microagent.NewSchedulingGateway(base, sched), tbl)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `NewSessionGateway` for the operation evidenced at `cmd/fak/micro.go:420`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs",
+        "cov-debt250-gateway-engine-newsessiongateway"
+      ],
+      "aliases": [],
+      "grounding": "newsessiongateway",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-ownssessionloop",
+      "canonical": "session-runtime implementation surface for ownssessionloop",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`ownsSessionLoop` is the session-runtime symbol declared or used at `cmd/fak/serve_fleetbus.go:59` as `// native mirrors gateway.Server.ownsSessionLoop (unexported there): a non-native`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `ownsSessionLoop` for the operation evidenced at `cmd/fak/serve_fleetbus.go:59`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs",
+        "cov-debt250-loop-ownssessionloop"
+      ],
+      "aliases": [],
+      "grounding": "ownssessionloop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-pausesession",
+      "canonical": "session-runtime implementation surface for pausesession",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`PAUSE_SESSION` is the session-runtime symbol declared or used at `internal/humanctl/envelope.go:221` as `case \"PAUSE_SESSION\":`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `PAUSE_SESSION` for the operation evidenced at `internal/humanctl/envelope.go:221`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "pausesession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-restoreservesessions",
+      "canonical": "session-runtime implementation surface for restoreservesessions",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`restoreServeSessions` is the session-runtime symbol declared or used at `cmd/fak/serve.go:918` as `// restoreServeSessions re-attaches the persisted DRIVE state of every session (the COLD`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `restoreServeSessions` for the operation evidenced at `cmd/fak/serve.go:918`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "restoreservesessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-sessionchangeevent",
+      "canonical": "session-runtime implementation surface for sessionchangeevent",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`SessionChangeEvent` is the session-runtime symbol declared or used at `internal/gateway/session_changes.go:26` as `// SessionChangeEvent is one drive-state revision on the wire: a session's full`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `SessionChangeEvent` for the operation evidenced at `internal/gateway/session_changes.go:26`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "sessionchangeevent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-sessiondurable",
+      "canonical": "session-runtime implementation surface for sessiondurable",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`session_durable` is the session-runtime symbol declared or used at `cmd/fak/dispatch_tick.go:1153` as `// registerServeSessionDurability publishes the descriptor UNDER (session_durable.go), so`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `session_durable` for the operation evidenced at `cmd/fak/dispatch_tick.go:1153`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "sessiondurable",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-sessiongateway",
+      "canonical": "session-runtime implementation surface for sessiongateway",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`SessionGateway` is the session-runtime symbol declared or used at `cmd/fak/micro_selfcheck.go:51` as `// uses the real gateway HTTP handler and the production SessionGateway/scheduler`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `SessionGateway` for the operation evidenced at `cmd/fak/micro_selfcheck.go:51`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs",
+        "cov-debt250-gateway-engine-sessiongateway"
+      ],
+      "aliases": [],
+      "grounding": "sessiongateway",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-sessionidentity",
+      "canonical": "session-runtime implementation surface for sessionidentity",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`sessionIdentity` is the session-runtime symbol declared or used at `internal/fleetaccounts/identity.go:118` as `// sessionIdentity extracts the identity a session row carries. Rows built by LoadRegistry`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `sessionIdentity` for the operation evidenced at `internal/fleetaccounts/identity.go:118`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "sessionidentity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-sessionleases",
+      "canonical": "session-runtime implementation surface for sessionleases",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`sessionLeases` is the session-runtime symbol declared or used at `internal/gateway/gateway.go:1560` as `// sessionLeases holds the kernel-MINTED lease identities cross-agent sends address`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `sessionLeases` for the operation evidenced at `internal/gateway/gateway.go:1560`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "sessionleases",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-sessionpath",
+      "canonical": "session-runtime implementation surface for sessionpath",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`sessionPath` is the session-runtime symbol declared or used at `cmd/attnsnrsi/main.go:156` as `sessionPath := flag.String(\"session\", \"\", \"path to the recorded session JSON (baseline+candidates+turns); '-' reads stdin\")`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `sessionPath` for the operation evidenced at `cmd/attnsnrsi/main.go:156`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs",
+        "x-session-runtime-sessionpace"
+      ],
+      "aliases": [],
+      "grounding": "sessionpath",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-sessionrecoverycheckpoint",
+      "canonical": "session-runtime implementation surface for sessionrecoverycheckpoint",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`SessionRecoveryCheckpoint` is the session-runtime symbol declared or used at `internal/disambiguation/query.go:252` as `Sources: []SourceWitness{{Kind: SourceKindGoSource, Locator: \"internal/session/cumulative_envelope.go\", Revision: \"session-source/1\", CheckedAt: \"2026-08-17T00:00:00Z\", Probe: \"fak`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `SessionRecoveryCheckpoint` for the operation evidenced at `internal/disambiguation/query.go:252`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "sessionrecoverycheckpoint",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-sessionsubscribe",
+      "canonical": "session-runtime implementation surface for sessionsubscribe",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`session_subscribe` is the session-runtime symbol declared or used at `internal/gateway/http.go:1229` as `// re-attach drain of the drive-state revision feed (session_subscribe.go).`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `session_subscribe` for the operation evidenced at `internal/gateway/http.go:1229`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "sessionsubscribe",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-sessiontag",
+      "canonical": "session-runtime implementation surface for sessiontag",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`SessionTag` is the session-runtime symbol declared or used at `cmd/fak/serve_fleetbus.go:293` as `meta, tagged := sessionctl.SessionTag(st.TraceID)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `SessionTag` for the operation evidenced at `cmd/fak/serve_fleetbus.go:293`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs",
+        "cov-debt250-session-runtime-sessiondiag",
+        "x-session-runtime-sessioncapfield"
+      ],
+      "aliases": [],
+      "grounding": "sessiontag",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-stopsession",
+      "canonical": "session-runtime implementation surface for stopsession",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`STOP_SESSION` is the session-runtime symbol declared or used at `internal/humanctl/envelope.go:223` as `case \"STOP_SESSION\":`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `STOP_SESSION` for the operation evidenced at `internal/humanctl/envelope.go:223`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs",
+        "loopsession"
+      ],
+      "aliases": [],
+      "grounding": "stopsession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-tagservedsessionadmit",
+      "canonical": "session-runtime implementation surface for tagservedsessionadmit",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`tagServedSessionAdmit` is the session-runtime symbol declared or used at `cmd/fak/main_session_control.go:97` as `tagServedSessionAdmit(traceID, v.State)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `tagServedSessionAdmit` for the operation evidenced at `cmd/fak/main_session_control.go:97`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "tagservedsessionadmit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-targetsession",
+      "canonical": "session-runtime implementation surface for targetsession",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`targetSession` is the session-runtime symbol declared or used at `cmd/fak/vcache_codex_extract.go:34` as `targetSession := *session`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `targetSession` for the operation evidenced at `cmd/fak/vcache_codex_extract.go:34`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "targetsession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-session-runtime-validsessionid",
+      "canonical": "session-runtime implementation surface for validsessionid",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`validSessionID` is the session-runtime symbol declared or used at `cmd/fak/dispatch_tick.go:1176` as `// validDispatchLeaseSessionID mirrors leaseref's own validSessionID (both it and validID`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `validSessionID` for the operation evidenced at `cmd/fak/dispatch_tick.go:1176`. Unlike `x2-session-runtime-sessionobs`, it names this exact implementation surface; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs",
+        "cov-debt250-session-runtime-validsession"
+      ],
+      "aliases": [],
+      "grounding": "validsessionid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

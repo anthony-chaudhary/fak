@@ -1,0 +1,103 @@
+{
+  "rows": [
+    {
+      "id": "cov-debt-tail-decision-decisional",
+      "canonical": "decision implementation surface for decisional",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "`decisional` is the decision symbol declared or used at `internal/gitbroker/client.go:93` as `// broker never guesses: an absent or unrecognized class is decisional. See the`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `decisional` for the operation evidenced at `internal/gitbroker/client.go:93`. Unlike `x2-decision-decisionjournal`, it names this exact implementation surface; unlike `decision`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-decision-decisionjournal",
+        "decision-kernel",
+        "decision-scheduler",
+        "decision-task",
+        "decision-witness",
+        "sharedtask-decisionid"
+      ],
+      "aliases": [],
+      "grounding": "decisional",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-decision.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt-tail-decision-needsdecision",
+      "canonical": "decision implementation surface for needsdecision",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "`NeedsDecision` is the decision symbol declared or used at `cmd/fak/harness_classify.go:72` as `if result.NeedsDecision {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `NeedsDecision` for the operation evidenced at `cmd/fak/harness_classify.go:72`. Unlike `x2-decision-decisionjournal`, it names this exact implementation surface; unlike `decision`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-decision-decisionjournal"
+      ],
+      "aliases": [],
+      "grounding": "needsdecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-decision.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt-tail-decision-dosdecision",
+      "canonical": "decision implementation surface for dosdecision",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "`dosdecision` is the decision symbol declared or used at `cmd/fak-dos/main.go:15` as `\"github.com/anthony-chaudhary/fak/internal/dosdecision\"`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `dosdecision` for the operation evidenced at `cmd/fak-dos/main.go:15`. Unlike `x2-decision-decisionjournal`, it names this exact implementation surface; unlike `decision`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-decision-decisionjournal"
+      ],
+      "aliases": [],
+      "grounding": "dosdecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-decision.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt-tail-decision-permissiondecisionreason",
+      "canonical": "decision implementation surface for permissiondecisionreason",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "`PermissionDecisionReason` is the decision symbol declared or used at `cmd/fak/guard_operator_question_pretool.go:28` as `PermissionDecisionReason string `json:\"permissionDecisionReason\"``. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `PermissionDecisionReason` for the operation evidenced at `cmd/fak/guard_operator_question_pretool.go:28`. Unlike `x2-decision-decisionjournal`, it names this exact implementation surface; unlike `decision`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-decision-decisionjournal"
+      ],
+      "aliases": [],
+      "grounding": "permissiondecisionreason",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-decision.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt-tail-decision-indecision",
+      "canonical": "decision implementation surface for indecision",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "`indecision` is the exact repository symbol or term named `indecision` in the decision concept family; its owning implementation determines the concrete operation.",
+      "distinction": "This row positions the exact `indecision` spelling rather than the broader `decision` domain or a sibling symbol.",
+      "distinct_from": [
+        "x2-decision-decisionjournal",
+        "decision-kernel",
+        "decision-scheduler",
+        "decision-task",
+        "decision-witness"
+      ],
+      "aliases": [],
+      "grounding": "indecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-decision.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

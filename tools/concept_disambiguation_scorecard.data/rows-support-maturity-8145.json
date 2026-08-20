@@ -1,0 +1,114 @@
+{
+  "rows": [
+    {
+      "id": "cov8145-outcomeunsupported",
+      "canonical": "support-maturity implementation surface for outcomeunsupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "`OutcomeUnsupported` is the support-maturity symbol declared or used at `cmd/fak/quantwatch.go:70` as `case quantwatch.OutcomeAbstain, quantwatch.OutcomeUnsupported:`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinct_from": [
+        "x2-support-maturity-supportmaturity"
+      ],
+      "aliases": [],
+      "grounding": "outcomeunsupported",
+      "verdict": "crystal",
+      "gaps": [],
+      "distinction": "Use `OutcomeUnsupported` for the operation evidenced at `cmd/fak/quantwatch.go:70`. Unlike `x2-support-maturity-supportmaturity`, it names this exact implementation surface; unlike `support-maturity`, it is not the umbrella domain.",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": ""
+    },
+    {
+      "id": "cov8145-defaultcoverage",
+      "canonical": "support-maturity implementation surface for defaultcoverage",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "`DefaultCoverage` is the support-maturity symbol declared or used at `cmd/fak/config.go:35` as `fmt.Fprintf(stdout, \"config surface: %d/%d keys, %d/%d postures, defaults %.0f%%, descriptions %.0f%%, guide %.0f%%\\n\", report.Keys, report.MaxKeys, report.Postures, report.MaxPost`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinct_from": [
+        "c729-coverage-report-name"
+      ],
+      "aliases": [],
+      "grounding": "defaultcoverage",
+      "verdict": "crystal",
+      "gaps": [],
+      "distinction": "Use `DefaultCoverage` for the operation evidenced at `cmd/fak/config.go:35`. Unlike `c729-coverage-report-name`, it names this exact implementation surface; unlike `support-maturity`, it is not the umbrella domain.",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": ""
+    },
+    {
+      "id": "cov8145-reasonunsupportedactivecachecapability",
+      "canonical": "support-maturity implementation surface for reasonunsupportedactivecachecapability",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "`ReasonUnsupportedActiveCacheCapability` is the support-maturity symbol declared or used at `internal/vcachescore/compare.go:75` as `unsupportedInput.ExternalEngine.Reason = string(vcachewarm.ReasonUnsupportedActiveCacheCapability)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinct_from": [
+        "cov8145-outcomeunsupported",
+        "cov-debt250-cache-reasonunsupportedactivecachecapability",
+        "cov-debt250-policy-capability-reasonunsupportedactivecachecapability"
+      ],
+      "aliases": [],
+      "grounding": "reasonunsupportedactivecachecapability",
+      "verdict": "crystal",
+      "gaps": [],
+      "distinction": "Use `ReasonUnsupportedActiveCacheCapability` for the operation evidenced at `internal/vcachescore/compare.go:75`. Unlike `cov8145-outcomeunsupported`, it names this exact implementation surface; unlike `support-maturity`, it is not the umbrella domain.",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": ""
+    },
+    {
+      "id": "cov8145-guardsupport",
+      "canonical": "support-maturity implementation surface for guardsupport",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "`guard_support` is the support-maturity symbol declared or used at `internal/accounts/credrefresh.go:97` as `// cmd/fak/guard_support.go's credExpiresAt; it lives here so this leaf stays free of a cmd import.`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinct_from": [
+        "x2-support-maturity-supportmaturity"
+      ],
+      "aliases": [],
+      "grounding": "guardsupport",
+      "verdict": "crystal",
+      "gaps": [],
+      "distinction": "Use `guard_support` for the operation evidenced at `internal/accounts/credrefresh.go:97`. Unlike `x2-support-maturity-supportmaturity`, it names this exact implementation surface; unlike `support-maturity`, it is not the umbrella domain.",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": ""
+    },
+    {
+      "id": "cov8145-seatcoveragemaxagemin",
+      "canonical": "support-maturity implementation surface for seatcoveragemaxagemin",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "`SeatCoverageMaxAgeMin` is the support-maturity symbol declared or used at `internal/accountprobe/coverage.go:32` as `// SeatCoverageMaxAgeMin. This seat's health is measured, so its silence is a finding.`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinct_from": [
+        "c729-default-coverage-scan-cap"
+      ],
+      "aliases": [],
+      "grounding": "seatcoveragemaxagemin",
+      "verdict": "crystal",
+      "gaps": [],
+      "distinction": "Use `SeatCoverageMaxAgeMin` for the operation evidenced at `internal/accountprobe/coverage.go:32`. Unlike `c729-default-coverage-scan-cap`, it names this exact implementation surface; unlike `support-maturity`, it is not the umbrella domain.",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": ""
+    },
+    {
+      "id": "cov8145-sotacoveragescorecard",
+      "canonical": "support-maturity implementation surface for sotacoveragescorecard",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "`sota_coverage_scorecard` is the support-maturity symbol declared or used at `cmd/fak/sota_coverage_scorecard.go:3` as `// sota_coverage_scorecard.go is the thin CLI shell over internal/sotacoverage: it resolves`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinct_from": [
+        "x-goal25b-support-maturity-sotacoverage"
+      ],
+      "aliases": [],
+      "grounding": "sotacoveragescorecard",
+      "verdict": "crystal",
+      "gaps": [],
+      "distinction": "Use `sota_coverage_scorecard` for the operation evidenced at `cmd/fak/sota_coverage_scorecard.go:3`. Unlike `x-goal25b-support-maturity-sotacoverage`, it names this exact implementation surface; unlike `support-maturity`, it is not the umbrella domain.",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": ""
+    }
+  ]
+}

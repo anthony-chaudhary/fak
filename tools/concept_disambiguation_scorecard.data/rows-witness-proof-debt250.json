@@ -1,0 +1,295 @@
+{
+  "rows": [
+    {
+      "id": "cov-debt250-witness-proof-sourcewitness",
+      "canonical": "witness-proof implementation surface for sourcewitness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`SourceWitness` is the witness-proof symbol declared or used at `internal/disambiguation/entry.go:62` as `Sources []SourceWitness `json:\"sources\"``. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `SourceWitness` for the operation evidenced at `internal/disambiguation/entry.go:62`. Unlike `x2-witness-proof-witnessstatus`, it names this exact implementation surface; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "sourcewitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-witness-proof-changedwitness",
+      "canonical": "witness-proof implementation surface for changedwitness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`changedwitness` is the witness-proof symbol declared or used at `internal/corelockgate/binarygrammar.go:13` as `// THE FAILURE. `changed:<path>` arrived with changedwitness.go (ffc676b46b). A fak`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `changedwitness` for the operation evidenced at `internal/corelockgate/binarygrammar.go:13`. Unlike `x2-witness-proof-witnessstatus`, it names this exact implementation surface; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "changedwitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-witness-proof-independentwitness",
+      "canonical": "witness-proof implementation surface for independentwitness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`independent_witness` is the witness-proof symbol declared or used at `cmd/fak/goal.go:38` as `evidenceClass := fs.String(\"evidence-class\", \"\", \"harness_assertion|agent_assertion|operator_declaration|independent_witness\")`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `independent_witness` for the operation evidenced at `cmd/fak/goal.go:38`. Unlike `x2-witness-proof-witnessstatus`, it names this exact implementation surface; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "independentwitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-witness-proof-correlatewitness",
+      "canonical": "witness-proof implementation surface for correlatewitness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`CorrelateWitness` is the witness-proof symbol declared or used at `internal/corelockgate/corelockgate.go:190` as `c.Observe(CorrelateWitness(claim, c.Changed))`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `CorrelateWitness` for the operation evidenced at `internal/corelockgate/corelockgate.go:190`. Unlike `x2-witness-proof-witnessstatus`, it names this exact implementation surface; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "correlatewitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-witness-proof-twitness",
+      "canonical": "witness-proof implementation surface for twitness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`tWITNESS` is the witness-proof symbol declared or used at `cmd/dispatchworker/main.go:188` as `fmt.Fprintln(w, \"REGISTRATION\\tPARENT\\tROOT\\tISSUE\\tKIND\\tRUNTIME\\tPID\\tSTATE\\tWITNESS\")`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `tWITNESS` for the operation evidenced at `cmd/dispatchworker/main.go:188`. Unlike `x2-witness-proof-witnessstatus`, it names this exact implementation surface; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "twitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-witness-proof-witnesscorrelation",
+      "canonical": "witness-proof implementation surface for witnesscorrelation",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`WitnessCorrelation` is the witness-proof symbol declared or used at `internal/corelockgate/corelockgate.go:120` as `Observe func(WitnessCorrelation)`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `WitnessCorrelation` for the operation evidenced at `internal/corelockgate/corelockgate.go:120`. Unlike `x2-witness-proof-witnessstatus`, it names this exact implementation surface; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "witnesscorrelation",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-witness-proof-witnesstailbytes",
+      "canonical": "witness-proof implementation surface for witnesstailbytes",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`WitnessTailBytes` is the witness-proof symbol declared or used at `cmd/fak/dispatch_tick_witness.go:445` as `// dispatchWitnessLogTail reads the last WitnessTailBytes of a worker log (the guard`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `WitnessTailBytes` for the operation evidenced at `cmd/fak/dispatch_tick_witness.go:445`. Unlike `x2-witness-proof-witnessstatus`, it names this exact implementation surface; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "witnesstailbytes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-witness-proof-changedwitnesskind",
+      "canonical": "witness-proof implementation surface for changedwitnesskind",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`ChangedWitnessKind` is the witness-proof symbol declared or used at `internal/corelockgate/binarygrammar.go:55` as `GrammarChangedMarker = \"name it with \" + ChangedWitnessKind + \":<path>\"`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `ChangedWitnessKind` for the operation evidenced at `internal/corelockgate/binarygrammar.go:55`. Unlike `x2-witness-proof-witnessstatus`, it names this exact implementation surface; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "changedwitnesskind",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-witness-proof-codexguardwitness",
+      "canonical": "witness-proof implementation surface for codexguardwitness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`codex_guard_witness` is the witness-proof symbol declared or used at `cmd/fak/sessions_codex_loop.go:412` as `}{\"fak.codex_guard_witness.v1\", sessionID, time.Now().UTC().Format(time.RFC3339Nano)})`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `codex_guard_witness` for the operation evidenced at `cmd/fak/sessions_codex_loop.go:412`. Unlike `x2-witness-proof-witnessstatus`, it names this exact implementation surface; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus",
+        "cov-debt250-guard-gate-codexguardwitness"
+      ],
+      "aliases": [],
+      "grounding": "codexguardwitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-witness-proof-commitiswitnessed",
+      "canonical": "witness-proof implementation surface for commitiswitnessed",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`commitIsWitnessed` is the witness-proof symbol declared or used at `internal/closureaudit/bindprobe.go:177` as `if !commitIsWitnessed(a) {`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `commitIsWitnessed` for the operation evidenced at `internal/closureaudit/bindprobe.go:177`. Unlike `x2-witness-proof-witnessstatus`, it names this exact implementation surface; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus",
+        "witness-proof-commitwitnessed"
+      ],
+      "aliases": [],
+      "grounding": "commitiswitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-witness-proof-evidencewitnessed",
+      "canonical": "witness-proof implementation surface for evidencewitnessed",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`EvidenceWitnessed` is the witness-proof symbol declared or used at `internal/quantpolicy/contract.go:97` as `EvidenceWitnessed EvidenceKind = \"witnessed\"`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `EvidenceWitnessed` for the operation evidenced at `internal/quantpolicy/contract.go:97`. Unlike `x2-witness-proof-witnessstatus`, it names this exact implementation surface; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus",
+        "x-goal25b-witness-proof-evidencewitness"
+      ],
+      "aliases": [],
+      "grounding": "evidencewitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-witness-proof-issueresolvewitnessed",
+      "canonical": "witness-proof implementation surface for issueresolvewitnessed",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`issue_resolve_witnessed` is the witness-proof symbol declared or used at `internal/branchrole/refaudit.go:231` as `\"tools/issue_resolve_witnessed.py\": RefClassDevelopmentSource,`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `issue_resolve_witnessed` for the operation evidenced at `internal/branchrole/refaudit.go:231`. Unlike `x2-witness-proof-witnessstatus`, it names this exact implementation surface; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "issueresolvewitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-witness-proof-kvprefixwitness",
+      "canonical": "witness-proof implementation surface for kvprefixwitness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`KVPrefixWitness` is the witness-proof symbol declared or used at `internal/cachewitness/cachewitness.go:70` as `KVPrefix KVPrefixWitness `json:\"kv_prefix\"``. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `KVPrefixWitness` for the operation evidenced at `internal/cachewitness/cachewitness.go:70`. Unlike `x2-witness-proof-witnessstatus`, it names this exact implementation surface; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "kvprefixwitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-witness-proof-resolvewitnessfiles",
+      "canonical": "witness-proof implementation surface for resolvewitnessfiles",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`resolveWitnessFiles` is the witness-proof symbol declared or used at `cmd/fak/dispatch_tick_livescan.go:231` as `// resolveWitnessFiles returns the durable resolve-*.witness audit sidecars under runsDir,`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `resolveWitnessFiles` for the operation evidenced at `cmd/fak/dispatch_tick_livescan.go:231`. Unlike `x2-witness-proof-witnessstatus`, it names this exact implementation surface; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "resolvewitnessfiles",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-witness-proof-witnessschema",
+      "canonical": "witness-proof implementation surface for witnessschema",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`WitnessSchema` is the witness-proof symbol declared or used at `internal/eveparity/eveparity.go:26` as `// WitnessSchema is the stable id of the parity witness artifact. It matches the schema`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `WitnessSchema` for the operation evidenced at `internal/eveparity/eveparity.go:26`. Unlike `x2-witness-proof-witnessstatus`, it names this exact implementation surface; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "witnessschema",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt250-witness-proof-fakwitnessargkey",
+      "canonical": "witness-proof implementation surface for fakwitnessargkey",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "fakwitnessargkey is the repository symbol or term named `fakwitnessargkey` in the witness-proof concept family; its owning implementation determines the concrete operation while this row makes that name discoverable.",
+      "distinction": "The exact `fakwitnessargkey` symbol in the witness-proof family; it is distinct from the broader `witness-proof` domain and from sibling symbols because it names this one implementation surface.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "fakwitnessargkey",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

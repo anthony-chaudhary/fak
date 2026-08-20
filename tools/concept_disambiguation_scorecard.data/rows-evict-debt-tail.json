@@ -1,0 +1,58 @@
+{
+  "rows": [
+    {
+      "id": "cov-debt-tail-evict-expertringevict",
+      "canonical": "evict implementation surface for expertringevict",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "`ExpertRingEvict` is the evict symbol declared or used at `internal/model/expert_ring_hal.go:71` as `s.expertRing.policy = s.ExpertRingEvict`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `ExpertRingEvict` for the operation evidenced at `internal/model/expert_ring_hal.go:71`. Unlike `x2-evict-kvevictionattestation`, it names this exact implementation surface; unlike `evict`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-evict-kvevictionattestation"
+      ],
+      "aliases": [],
+      "grounding": "expertringevict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-evict.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt-tail-evict-qevict",
+      "canonical": "evict implementation surface for qevict",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "`qevict` is the evict symbol declared or used at `internal/qevicteval/contract.go:13` as `RecipeID = \"qevict/arxiv-2608.05326v1\"`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `qevict` for the operation evidenced at `internal/qevicteval/contract.go:13`. Unlike `x2-evict-kvevictionattestation`, it names this exact implementation surface; unlike `evict`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-evict-kvevictionattestation"
+      ],
+      "aliases": [],
+      "grounding": "qevict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-evict.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "cov-debt-tail-evict-qevicteval",
+      "canonical": "evict implementation surface for qevicteval",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "`qevicteval` is the evict symbol declared or used at `internal/qevicteval/contract.go:1` as `package qevicteval`. This row positions that concrete implementation surface, not merely the family label.",
+      "distinction": "Use `qevicteval` for the operation evidenced at `internal/qevicteval/contract.go:1`. Unlike `x2-evict-kvevictionattestation`, it names this exact implementation surface; unlike `evict`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-evict-kvevictionattestation"
+      ],
+      "aliases": [],
+      "grounding": "qevicteval",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-evict.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
