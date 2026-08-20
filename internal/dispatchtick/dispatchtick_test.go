@@ -337,3 +337,18 @@ func TestGuardedLaunchCommandEdgeAndAdversarialInputs(t *testing.T) {
 		})
 	}
 }
+
+func TestGuardedLaunchCommandDeterminism(t *testing.T) {
+	command := []string{"codex", "exec", "--json", "-"}
+	first, firstGuarded := GuardedLaunchCommand(command, "fak", "docs", "codex", "/repo", "")
+	for i := 0; i < 100; i++ {
+		got, guarded := GuardedLaunchCommand(command, "fak", "docs", "codex", "/repo", "")
+		if guarded != firstGuarded || !reflect.DeepEqual(got, first) {
+			t.Fatalf("run %d differs: guarded=%v argv=%#v; first guarded=%v argv=%#v", i+2, guarded, got, firstGuarded, first)
+		}
+	}
+	first[0] = "mutated"
+	if command[0] != "codex" {
+		t.Fatalf("returned argv aliases caller command: %#v", command)
+	}
+}
