@@ -218,7 +218,7 @@ var externalPythonModules = map[string]bool{
 	"lzma": true, "mailbox": true, "marshal": true, "math": true, "mimetypes": true,
 	"mmap": true, "multiprocessing": true, "netrc": true, "ntpath": true, "numbers": true,
 	"operator": true,
-	"os": true, "pathlib": true, "pickle": true, "pkgutil": true, "platform": true,
+	"os":       true, "pathlib": true, "pickle": true, "pkgutil": true, "platform": true,
 	"plistlib": true, "posixpath": true, "pprint": true, "profile": true, "pstats": true,
 	"pty": true, "pwd": true, "py_compile": true, "queue": true, "quopri": true,
 	"random": true, "re": true, "readline": true, "reprlib": true, "resource": true,
