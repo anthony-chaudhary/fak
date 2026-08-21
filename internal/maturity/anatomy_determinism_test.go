@@ -1,6 +1,7 @@
 package maturity
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -41,7 +42,7 @@ func TestPackageAnatomyDeterminism(t *testing.T) {
 				return
 			}
 			if !reflect.DeepEqual(got, baseline) {
-				errCh <- errSample{}
+				errCh <- errors.New("package anatomy changed across identical runs")
 			}
 		}()
 	}
