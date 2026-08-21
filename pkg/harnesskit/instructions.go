@@ -130,6 +130,9 @@ func ValidateInstructionSnapshot(snapshot InstructionSnapshot) (InstructionSnaps
 	}
 
 	fragments := append([]InstructionFragment(nil), snapshot.Fragments...)
+	if len(fragments) == 0 {
+		return InstructionSnapshot{}, instructionError(CodeInvalid, "instructions.validate", "snapshot has no fragments", nil)
+	}
 	seen := make(map[string]struct{}, len(fragments))
 	for i := range fragments {
 		fragment := &fragments[i]
