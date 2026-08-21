@@ -30,8 +30,21 @@ func TestModelDefaultJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Schema != "fak-model-default/v1" || got.Alias != "qwen38:27b" || !strings.Contains(got.Ref, "Qwen3.8-27B-Q4_K_M.gguf") || !got.Coding || !got.ToolCapable || got.Verdict != "HOLD" || len(got.Decision.Reasons) != 6 {
+	if got.Schema != "fak-model-default/v1" || got.Alias != "qwen38:27b" || !strings.Contains(got.Ref, "Qwen3.8-27B-Q4_K_M.gguf") || !got.Coding || !got.ToolCapable || got.Verdict != "HOLD" {
 		t.Fatalf("unexpected default: %+v", got)
+	}
+	wantReasons := map[string]string{
+		"identity": "UNPROVEN_IDENTITY", "macbook": "MISSING_EVIDENCE", "nvidia": "MISSING_EVIDENCE",
+		"cache": "MISSING_EVIDENCE", "comparison": "MISSING_EVIDENCE", "support": "MISSING_EVIDENCE",
+	}
+	for _, reason := range got.Decision.Reasons {
+		if wantReasons[reason.Family] != reason.Code {
+			t.Fatalf("unexpected default reason: %+v", reason)
+		}
+		delete(wantReasons, reason.Family)
+	}
+	if len(wantReasons) != 0 {
+		t.Fatalf("default decision omitted reasons: %v", wantReasons)
 	}
 }
 
