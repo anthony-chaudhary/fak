@@ -593,6 +593,7 @@ var tier = map[string]int{
 	"quantmeta":             1, // stdlib-only neutral quantization descriptor, parser, and typed adjudication contract (#6222).
 	"qwen38quant":           1, // stdlib-only evidence contract and validator for the Qwen3.8 quantization campaign (#8307).
 	"qwen38quantrun":        2, // endpoint runner depends on the tier-1 campaign evidence contract (#8343).
+	"modelperfobs":          2, // OpenAI-compatible request measurement and JSONL report leaf; stdlib-only, off the hot path (#8389).
 	"quantdetect":           1,
 	"fp4runtime":            2, // stdlib-only FP4/microscaling runtime, GPU-architecture, and accumulator compatibility contract; no model kernel.
 	"fp4meta":               1, // stdlib-only neutral FP4 artifact, recipe, scale, runtime, and hardware metadata contract; no model kernel.
