@@ -119,6 +119,8 @@ func ResolveInstructions(ctx context.Context, provider InstructionProvider, req 
 }
 
 // ValidateInstructionSnapshot normalizes, orders, fingerprints, and freezes provider output.
+const maxInstructionContentBytes = 1 << 20
+
 func ValidateInstructionSnapshot(snapshot InstructionSnapshot) (InstructionSnapshot, error) {
 	if snapshot.SchemaVersion == "" {
 		snapshot.SchemaVersion = InstructionContractVersion
@@ -138,6 +140,9 @@ func ValidateInstructionSnapshot(snapshot InstructionSnapshot) (InstructionSnaps
 		sort.Strings(fragment.Audience)
 		if fragment.ID == "" || fragment.Source == "" || fragment.Content == "" {
 			return InstructionSnapshot{}, instructionError(CodeInvalid, "instructions.validate", "fragment id, source, and content are required", nil)
+		}
+		if len(fragment.Content) > maxInstructionContentBytes {
+			return InstructionSnapshot{}, instructionError(CodeInvalid, "instructions.validate", "fragment content exceeds the 1 MiB admission limit: "+fragment.ID, nil)
 		}
 		if _, ok := seen[fragment.ID]; ok {
 			return InstructionSnapshot{}, instructionError(CodeConflict, "instructions.validate", "duplicate fragment id: "+fragment.ID, nil)
