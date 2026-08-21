@@ -1,0 +1,200 @@
+// Package qwen38quantrun executes the frozen Qwen3.8 quantization corpus
+// against an OpenAI-compatible endpoint and independently grades effects.
+package qwen38quantrun
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"reflect"
+	"strings"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/qwen38quant"
+)
+
+type Config struct {
+	Endpoint, APIKey, Model string
+	Repetitions             int
+	Timeout                 time.Duration
+}
+
+type Result struct {
+	FixtureID string         `json:"fixture_id"`
+	Workload  string         `json:"workload"`
+	Repeat    int            `json:"repeat"`
+	LatencyMS float64        `json:"latency_ms"`
+	Usage     map[string]int `json:"usage,omitempty"`
+	Quality   string         `json:"quality"`
+	Failure   string         `json:"failure,omitempty"`
+	Output    string         `json:"output,omitempty"`
+	ToolName  string         `json:"tool_name,omitempty"`
+	ToolArgs  map[string]any `json:"tool_args,omitempty"`
+}
+
+type Runner struct{ Client *http.Client }
+
+type chatResponse struct {
+	Choices []struct {
+		Message struct {
+			Content   string `json:"content"`
+			ToolCalls []struct {
+				Function struct{ Name, Arguments string } `json:"function"`
+			} `json:"tool_calls"`
+		} `json:"message"`
+	} `json:"choices"`
+	Usage map[string]int `json:"usage"`
+}
+
+func (r Runner) Run(ctx context.Context, cfg Config, corpus qwen38quant.Corpus) ([]Result, error) {
+	if err := corpus.Validate(); err != nil {
+		return nil, err
+	}
+	if cfg.Endpoint == "" || cfg.APIKey == "" || cfg.Model == "" {
+		return nil, fmt.Errorf("endpoint, API key, and exact model are required")
+	}
+	reps := cfg.Repetitions
+	if reps == 0 {
+		reps = corpus.MinimumRepetitions
+	}
+	if reps < corpus.MinimumRepetitions {
+		return nil, fmt.Errorf("repetitions %d below corpus minimum", reps)
+	}
+	client := r.Client
+	if client == nil {
+		client = &http.Client{Timeout: cfg.Timeout}
+		if client.Timeout == 0 {
+			client.Timeout = 10 * time.Minute
+		}
+	}
+	var out []Result
+	for _, f := range corpus.Fixtures {
+		for n := 1; n <= reps; n++ {
+			res := Result{FixtureID: f.ID, Workload: f.Workload, Repeat: n, Quality: "FAIL"}
+			start := time.Now()
+			resp, err := runOne(ctx, client, cfg, f)
+			res.LatencyMS = float64(time.Since(start).Microseconds()) / 1000
+			if err != nil {
+				res.Failure = err.Error()
+				out = append(out, res)
+				continue
+			}
+			res.Usage = resp.Usage
+			grade(&res, f, resp)
+			out = append(out, res)
+		}
+	}
+	return out, nil
+}
+
+func runOne(ctx context.Context, client *http.Client, cfg Config, f qwen38quant.Fixture) (chatResponse, error) {
+	prompt := materialize(f)
+	body := map[string]any{"model": cfg.Model, "messages": []map[string]string{{"role": "user", "content": prompt}}, "temperature": 0, "max_tokens": f.MaxOutputTokens}
+	if len(f.Tools) > 0 {
+		body["tools"] = f.Tools
+		body["tool_choice"] = "required"
+	}
+	b, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(cfg.Endpoint, "/")+"/v1/chat/completions", bytes.NewReader(b))
+	if err != nil {
+		return chatResponse{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+	rsp, err := client.Do(req)
+	if err != nil {
+		return chatResponse{}, err
+	}
+	defer rsp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(rsp.Body, 4<<20))
+	if err != nil {
+		return chatResponse{}, err
+	}
+	if rsp.StatusCode/100 != 2 {
+		return chatResponse{}, fmt.Errorf("HTTP %d: %s", rsp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	var out chatResponse
+	if err = json.Unmarshal(raw, &out); err != nil {
+		return out, err
+	}
+	if len(out.Choices) == 0 {
+		return out, fmt.Errorf("response has no choices")
+	}
+	return out, nil
+}
+
+func grade(res *Result, f qwen38quant.Fixture, r chatResponse) {
+	m := r.Choices[0].Message
+	res.Output = strings.TrimSpace(m.Content)
+	switch f.Workload {
+	case "json_schema":
+		var got any
+		if json.Unmarshal([]byte(res.Output), &got) != nil {
+			res.Failure = "invalid JSON"
+			return
+		}
+		if !reflect.DeepEqual(got, any(f.ExpectedJSON)) {
+			res.Failure = "JSON effect mismatch"
+			return
+		}
+	case "correlated_tools":
+		if len(m.ToolCalls) != 1 {
+			res.Failure = "expected exactly one tool call"
+			return
+		}
+		res.ToolName = m.ToolCalls[0].Function.Name
+		if json.Unmarshal([]byte(m.ToolCalls[0].Function.Arguments), &res.ToolArgs) != nil {
+			res.Failure = "invalid tool arguments"
+			return
+		}
+		wantName, _ := f.ExpectedTool["name"].(string)
+		wantArgs, _ := f.ExpectedTool["arguments"].(map[string]any)
+		wantJSON, _ := json.Marshal(wantArgs)
+		wantArgs = map[string]any{}
+		_ = json.Unmarshal(wantJSON, &wantArgs)
+		if res.ToolName != wantName || !reflect.DeepEqual(res.ToolArgs, wantArgs) {
+			res.Failure = "tool effect mismatch"
+			return
+		}
+	default:
+		if res.Output != f.ExpectedExact {
+			res.Failure = fmt.Sprintf("exact effect mismatch: got %q", res.Output)
+			return
+		}
+	}
+	res.Quality = "PASS"
+}
+
+func materialize(f qwen38quant.Fixture) string {
+	if f.Workload != "long_context_retrieval" {
+		return f.Prompt
+	}
+	records, _ := number(f.Generator["records"])
+	needleRecord, _ := number(f.Generator["needle_record"])
+	needle, _ := f.Generator["needle"].(string)
+	format, _ := f.Generator["filler"].(string)
+	var b strings.Builder
+	b.WriteString(f.Prompt)
+	b.WriteByte('\n')
+	for i := 1; i <= records; i++ {
+		if i == needleRecord {
+			fmt.Fprintf(&b, "record-%04d: secret %s\n", i, needle)
+		} else {
+			fmt.Fprintf(&b, format+"\n", i, i)
+		}
+	}
+	return b.String()
+}
+func number(v any) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int(n), n == float64(int(n))
+	case int:
+		return n, true
+	default:
+		return 0, false
+	}
+}
