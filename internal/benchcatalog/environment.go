@@ -476,17 +476,25 @@ func compareEnvironment(req TaskEnvironmentRequirement, receipt ComputeReceipt) 
 		}
 	}
 	switch req.License {
+	case LicenseNone:
+		// No license capability is required.
 	case LicenseRequired:
 		switch receipt.License {
 		case LicenseNone:
 			missing("license", string(LicenseVerified), string(receipt.License))
 		case LicensePresentUnverified:
 			out = append(out, Refusal{Code: CodeObservationUnknown, Kind: RefusalUnknown, Axis: "license", Required: string(LicenseVerified), Observed: string(receipt.License), Detail: "license presence was observed but entitlement was not verified"})
+		case LicenseVerified:
+			// Verified entitlement satisfies the requirement.
+		case LicenseRequired, LicenseForbidden:
+			// unknownObservations rejects policy-only values before comparison.
 		}
 	case LicenseForbidden:
 		if receipt.License != LicenseNone {
 			forbidden("license", string(LicenseNone), string(receipt.License))
 		}
+	case LicenseVerified, LicensePresentUnverified:
+		// unknownRequirements rejects observation-only values before comparison.
 	}
 	if req.Input.Name != receipt.Input.Name || req.Input.Digest != receipt.Input.Digest {
 		missing("input_data", req.Input.Name+"@"+req.Input.Digest, receipt.Input.Name+"@"+receipt.Input.Digest)
