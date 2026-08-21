@@ -12,7 +12,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 )
 
-const modelUsage = "usage: fak model <load|pull|ls|canary-gate|acceptance-gate|acceptance-run|acceptance-refold|readiness-inventory> ...\n" +
+const modelUsage = "usage: fak model <plan|load|pull|ls|canary-gate|acceptance-gate|acceptance-run|acceptance-refold|readiness-inventory> ...\n" +
+	"  fak model plan         choose a Qwen3.8-27B load from goals and declared capacity without downloading\n" +
 	"  fak model load <ref>   resolve a model ref (alias | hf://… | path) to a cached file path\n" +
 	"  fak model pull <ref>   download a model ref into the local cache (alias-aware)\n" +
 	"  fak model ls           list known model aliases and which are cached locally\n" +
@@ -34,6 +35,8 @@ func cmdModel(args []string) {
 		os.Exit(2)
 	}
 	switch args[0] {
+	case "plan":
+		os.Exit(runModelPlan(os.Stdout, os.Stderr, args[1:]))
 	case "load":
 		cmdModelLoad(args[1:])
 	case "pull":

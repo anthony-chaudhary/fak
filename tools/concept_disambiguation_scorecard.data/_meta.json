@@ -7917,6 +7917,11 @@
           "category": "incidental",
           "reason": "Private validation regex for server-product capability identifiers, not a policy capability concept.",
           "token": "capabilityPattern"
+        },
+        {
+          "category": "incidental",
+          "reason": "Model-load planner request field controlling local versus hosted selection; it does not define or enforce a security policy capability.",
+          "token": "LocalPolicy"
         }
       ],
       "exclude": [
@@ -7951,6 +7956,7 @@
         "FailurePolicy",
         "GoCandidateCapability",
         "HeldSchedulePolicy",
+        "LocalPolicy",
         "MaxPostures",
         "MisfirePolicy",
         "NewWithTierBudgetsAndEvictionPolicy",
