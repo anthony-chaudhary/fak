@@ -1017,6 +1017,21 @@
           "category": "incidental",
           "reason": "A derived ratio in one paired benchmark report, not a cache mechanism or identity",
           "token": "CachedInputShare"
+        },
+        {
+          "category": "incidental",
+          "reason": "Provider adapter package name, not a reusable cache concept.",
+          "token": "geminicache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private capability-check helper, not a cache abstraction.",
+          "token": "requireexplicitcache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Provider-owned JSON resource collection name copied from the Gemini API.",
+          "token": "cachedContents"
         }
       ],
       "id": "cache",
@@ -1133,6 +1148,7 @@
         "cachecreation",
         "cachecreationtokensupgraded",
         "cached",
+        "cachedContents",
         "cachedPrice",
         "cachedWeight",
         "cachedecay",
@@ -1201,6 +1217,7 @@
         "formatTurnCachePair",
         "formatTurnCacheSummary",
         "formatTurnDebugStatsWithBudgetAndCache",
+        "geminicache",
         "identityCacheLever",
         "inducedCacheCreation",
         "inferCacheCreationTokensHeadOnly",
@@ -1250,6 +1267,7 @@
         "registerCacheLevers",
         "renderinkernelchatmlrequest",
         "replaceMicroCacheWitness",
+        "requireexplicitcache",
         "resetClaudeKeychainCache",
         "reuseRatio",
         "runCacheValueGateScore",

@@ -1,0 +1,12 @@
+{
+  "schema": "fak/provider-baseline-provenance/v1",
+  "retrieved_at": "2026-08-21",
+  "provider": "gemini",
+  "repository": "https://github.com/googleapis/go-genai",
+  "version": "v1.69.0",
+  "revision": "fbdae87185987c7fc1abbe9e0b023c614bc8dc3b",
+  "license": "Apache-2.0",
+  "source_paths": ["caches.go", "types.go"],
+  "symbols": ["Caches.Create", "Caches.Get", "Caches.Update", "Caches.Delete", "Caches.List", "CachedContent", "CreateCachedContentConfig", "UpdateCachedContentConfig"],
+  "reuse": "HTTP methods, cachedContents paths, JSON field names, TTL/expire-time semantics, and response shapes are copied/adapted from the generated SDK. fak adds value admission, immutable account/project/location/model/prefix identity, typed route refusal, and provider-observed lifecycle receipts."
+}

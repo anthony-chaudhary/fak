@@ -675,6 +675,7 @@ var tier = map[string]int{
 	"httptrust":                  2, // the ONE corporate-trust seam (#8172): resolves a declared CA bundle through secretload(2), widens the platform pool with it, and hands every fak-originated HTTPS client the same RootCAs plus the derived child-runtime trust vars; imports secretload(2)+stdlib, off the hot path.
 	"cloudroute":                 1, // stdlib-only detector for a request-signed cloud model route (Bedrock SigV4 / Vertex ADC) whose base-URL repoint cannot take effect (#8172); pure over an environ snapshot, imports nothing internal.
 	"modelloadplan":              3, // deterministic Qwen load planner over harnessresolve locks; off the hot path (#8134).
+	"geminicache":                2, // provider CachedContent lifecycle adapter over stdlib HTTP and immutable context identity (#8481).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
