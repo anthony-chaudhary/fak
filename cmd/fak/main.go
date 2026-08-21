@@ -771,6 +771,8 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdAttest(args)
 	case "speed-ab":
 		cmdSpeedAB(os.Args[2:])
+	case "model-observe":
+		cmdModelObserve(args)
 	case "bench":
 		cmdBench(args)
 	case "benchmarks":
