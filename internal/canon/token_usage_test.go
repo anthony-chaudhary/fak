@@ -14,7 +14,7 @@ func TestAdaptTokenUsageFixturesReconcileAndPreserveNative(t *testing.T) {
 		input, output int64
 		unknown       string
 	}{
-		{"openai", map[TokenClass]int64{inputFreshClass: 60, inputReadClass: 40, outputVisibleClass: 20, outputReasoningClass: 10}, 100, 30, "future_modality_tokens"},
+		{"openai", map[TokenClass]int64{inputFreshClass: 45, inputReadClass: 40, inputWriteClass: 15, outputVisibleClass: 20, outputReasoningClass: 10}, 100, 30, "future_modality_tokens"},
 		{"anthropic", map[TokenClass]int64{inputFreshClass: 20, inputReadClass: 50, inputWriteClass: 5, outputVisibleClass: 11}, 75, 11, "future_cache_tier"},
 		{"local", map[TokenClass]int64{inputFreshClass: 17, outputVisibleClass: 9}, 17, 9, "native_extra"},
 	}
@@ -69,6 +69,12 @@ func TestAdaptTokenUsageRejectsOverlappingOpenAIDetail(t *testing.T) {
 	}
 }
 
+func TestAdaptTokenUsageRejectsOverlappingOpenAICacheDetails(t *testing.T) {
+	_, err := AdaptTokenUsage("openai", json.RawMessage(`{"input_tokens":2,"output_tokens":1,"input_tokens_details":{"cache_write_tokens":2,"cached_tokens":1}}`))
+	if err == nil {
+		t.Fatal("expected inclusive cache detail overflow refusal")
+	}
+}
 func TestAdaptTokenUsageRejectsUnknownProviderWithoutLosingContract(t *testing.T) {
 	_, err := AdaptTokenUsage("mystery", json.RawMessage(`{"input_tokens":1}`))
 	if err == nil {

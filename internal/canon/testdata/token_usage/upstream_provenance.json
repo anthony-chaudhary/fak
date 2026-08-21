@@ -1,0 +1,25 @@
+{
+  "schema": "fak/provider-baseline-provenance/v1",
+  "retrieved_at": "2026-08-21",
+  "sources": [
+    {
+      "provider": "openai",
+      "repository": "https://github.com/openai/openai-go",
+      "revision": "6dfcd9b01bc201830df3aff3820a1664ea05e21b",
+      "source_path": "responses/response.go",
+      "symbols": ["ResponseUsage", "ResponseUsageInputTokensDetails", "ResponseUsageOutputTokensDetails"],
+      "license": "Apache-2.0",
+      "reuse": "The JSON field names and inclusive-total semantics are copied from the generated SDK contract. fak maps them into provider-independent context/cache token classes and retains the native receipt."
+    },
+    {
+      "provider": "anthropic",
+      "repository": "https://github.com/anthropics/anthropic-sdk-go",
+      "revision": "da00f432230f3cdc1dff4e0c1e201d8e95558449",
+      "version": "v1.66.0",
+      "source_path": "message.go",
+      "symbols": ["Usage"],
+      "license": "MIT",
+      "reuse": "The cache creation/read JSON field names and usage semantics are copied from the generated SDK contract. fak maps them into provider-independent context/cache token classes and retains the native receipt."
+    }
+  ]
+}

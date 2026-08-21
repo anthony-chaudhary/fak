@@ -74,7 +74,8 @@ func adaptOpenAIUsage(raw []byte) (map[TokenClass]int64, int64, int64, error) {
 		PromptTokens     int64 `json:"prompt_tokens"`
 		CompletionTokens int64 `json:"completion_tokens"`
 		InputDetails     struct {
-			Cached int64 `json:"cached_tokens"`
+			CacheWrite int64 `json:"cache_write_tokens"`
+			Cached     int64 `json:"cached_tokens"`
 		} `json:"input_tokens_details"`
 		PromptDetails struct {
 			Cached int64 `json:"cached_tokens"`
@@ -97,6 +98,7 @@ func adaptOpenAIUsage(raw []byte) (map[TokenClass]int64, int64, int64, error) {
 	if output == 0 {
 		output = u.CompletionTokens
 	}
+	cacheWrite := u.InputDetails.CacheWrite
 	cached := u.InputDetails.Cached
 	if cached == 0 {
 		cached = u.PromptDetails.Cached
@@ -105,10 +107,10 @@ func adaptOpenAIUsage(raw []byte) (map[TokenClass]int64, int64, int64, error) {
 	if reasoning == 0 {
 		reasoning = u.CompletionDetails.Reasoning
 	}
-	if cached > input || reasoning > output {
+	if cacheWrite+cached > input || reasoning > output {
 		return nil, 0, 0, errors.New("token usage: OpenAI detail exceeds its inclusive total")
 	}
-	return map[TokenClass]int64{inputFreshClass: input - cached, inputReadClass: cached, outputVisibleClass: output - reasoning, outputReasoningClass: reasoning}, input, output, nil
+	return map[TokenClass]int64{inputFreshClass: input - cached - cacheWrite, inputReadClass: cached, inputWriteClass: cacheWrite, outputVisibleClass: output - reasoning, outputReasoningClass: reasoning}, input, output, nil
 }
 
 func adaptAnthropicUsage(raw []byte) (map[TokenClass]int64, int64, int64, error) {

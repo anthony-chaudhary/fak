@@ -1,1 +1,1 @@
-{"input_tokens":100,"output_tokens":30,"input_tokens_details":{"cached_tokens":40},"output_tokens_details":{"reasoning_tokens":10},"future_modality_tokens":7}
+{"input_tokens":100,"output_tokens":30,"total_tokens":130,"input_tokens_details":{"cache_write_tokens":15,"cached_tokens":40},"output_tokens_details":{"reasoning_tokens":10},"future_modality_tokens":7}
