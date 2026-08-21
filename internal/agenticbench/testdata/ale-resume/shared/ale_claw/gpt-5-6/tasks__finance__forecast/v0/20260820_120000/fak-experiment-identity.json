@@ -1,0 +1,21 @@
+{
+  "schema": "fak.ale-experiment-identity.v1",
+  "identity": {
+    "task_path": "/tasks/finance/forecast",
+    "source_repo": "https://github.com/rdi-berkeley/agents-last-exam",
+    "source_sha": "75a3f866535946b67f9a57e4f158eb30ad50be8a",
+    "harness": "ale-claw",
+    "agent_id": "ale-claw",
+    "model": "gpt-5.6",
+    "effort": "medium",
+    "endpoint": "https://api.openai.com/v1",
+    "arm": "direct",
+    "snapshot": "2026-08-01",
+    "budget_seconds": 3600,
+    "max_tokens": 32768,
+    "retry_policy": "terminal-only-max-2",
+    "prompt_suffix_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "repetition": 1,
+    "variant": 0
+  }
+}
