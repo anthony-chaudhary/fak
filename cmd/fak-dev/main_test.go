@@ -319,6 +319,27 @@ func TestRuntimeSourceDoesNotDispatchRefactorVerify(t *testing.T) {
 	}
 }
 
+func TestRunDispatchesCodexHookProfileUsage(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run(&out, &errOut, []string{"codex-hook-profile", "--help"})
+	if code != 2 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "Usage of codex-hook-profile") {
+		t.Fatalf("stderr=%s", errOut.String())
+	}
+}
+
+func TestHelpListsCodexHookProfile(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := run(&out, &errOut, []string{"help"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "codex-hook-profile [flags]") {
+		t.Fatalf("help=%s", out.String())
+	}
+}
+
 func TestRunDispatchesSessionDiagUsage(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := run(&out, &errOut, []string{"sessiondiag", "--help"})

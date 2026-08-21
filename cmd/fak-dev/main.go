@@ -56,6 +56,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunCodexHookCensus(stdout, stderr, argv[1:])
 	case "codex-plugin-sync":
 		return devcmd.RunCodexPluginSync(stdout, stderr, argv[1:])
+	case "codex-hook-profile":
+		return devcmd.RunCodexHookProfile(stdout, stderr, argv[1:])
 	case "codex-stop-acceptance":
 		return devcmd.RunCodexStopAcceptance(stdout, stderr, argv[1:])
 	case "codex-hook-gate":
@@ -116,6 +118,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  readme-visual-audit [flags]           audit repository README visual health")
 	fmt.Fprintln(w, "  plan-audit [flags]                   audit repository plan-document drift")
 	fmt.Fprintln(w, "  codex-memory doctor [flags]          inspect Codex memory posture")
+	fmt.Fprintln(w, "  codex-hook-profile [flags]           inspect effective Codex hook topology and readiness")
 	fmt.Fprintln(w, "  sessiondiag [flags]                  diagnose abrupt Codex/fak sessions")
 	fmt.Fprintln(w, "  refactor-verify [flags]              verify declaration-preserving code motion")
 	fmt.Fprintln(w, "  tool-coverage-audit [flags]          audit load-bearing tool test coverage")
