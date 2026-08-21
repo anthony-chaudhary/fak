@@ -11,6 +11,8 @@ import (
 // launchToolFlag collects exact capabilities the operator grants to this guard
 // process. It is intentionally narrower than the durable allow overlay: no prefixes,
 // persistence, or agent-writable amendment channel.
+var exactLaunchToolName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
+
 type launchToolFlag []string
 
 func (f *launchToolFlag) String() string {
@@ -24,6 +26,9 @@ func (f *launchToolFlag) Set(value string) error {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return errors.New("--allow-tool requires a non-empty exact tool name")
+	}
+	if !exactLaunchToolName.MatchString(value) || strings.Contains(value, "..") {
+		return errors.New("--allow-tool requires one literal tool name without wildcard, pattern, or traversal syntax")
 	}
 	*f = append(*f, value)
 	return nil
