@@ -331,6 +331,30 @@ in the separate **`fak-dev`** executable; `fak-dev help` lists them. The legacy
 `fak dev <verb>` spelling is a compatibility handoff to a sibling or
 `PATH`-installed `fak-dev`, not a dev namespace linked into the runtime.
 
+### `fak idempotency`
+
+`fak idempotency` guards a non-idempotent command with a durable key. `run`
+fsyncs a `PENDING` intent before starting the command. A successful command
+becomes `APPLIED` and replays its captured stdout within the dedup window. A
+command error, response loss, or failure to persist the success becomes
+`UNKNOWN_APPLIED`; that state never expires into automatic re-execution.
+
+```bash
+fak idempotency run --op issue-create --token "$TOKEN" --ledger .idem.jsonl -- gh issue create ...
+fak idempotency status --op issue-create --token "$TOKEN" --ledger .idem.jsonl --json
+
+# After operation-specific read-back, record exactly one explicit verdict.
+fak idempotency resolve --op issue-create --token "$TOKEN" --ledger .idem.jsonl --applied-result "created issue #42"
+fak idempotency resolve --op issue-create --token "$TOKEN" --ledger .idem.jsonl --absent
+fak idempotency resolve --op issue-create --token "$TOKEN" --ledger .idem.jsonl --unknown
+```
+
+`--applied-result` records the original result and makes later calls replay it.
+`--absent` permits one fresh execution. `--unknown` records an inconclusive
+read-back and leaves the key blocked. Existing success-only ledger rows without a
+`state` field remain compatible and load as `APPLIED`. This is a fail-closed
+ambiguity gate, not a universal exactly-once transaction protocol.
+
 ### `fak architecture`
 
 `architecture` is the read-only query surface for the same tier declarations and Go import graph enforced by `internal/architest`; it does not maintain a second package taxonomy.
@@ -1168,3 +1192,15 @@ fak study-monitor --registry docs/research/monitored-repositories.json --as-of 2
 ```
 
 The command reads `docs/research/monitored-repositories.json` by default, sorts by priority, and reports each source's status, pinned checked revision, `last_checked` age, and whether it is due for refresh. `--as-of` exists for deterministic witnesses and tests. The command does not contact GitHub or mutate the registry; scouts update all check fields together after inspecting the source.
+
+## `fak vcache session-history`
+
+Explore the historical session index without opening raw transcripts. The live usage contract is:
+
+```text
+fak vcache session-history --index FILE [--provider NAME] [--min-errors N]
+fak vcache session-history refresh [--index FILE] [--once|--interval DURATION]
+fak vcache session-history benchmark [--sizes 1000,10000,100000] [--repetitions 3]
+```
+
+Use `--json` on the query form for machine-readable rows. `--min-errors` must be non-negative and `--limit` must be at least one.
