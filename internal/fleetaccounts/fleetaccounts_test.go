@@ -421,7 +421,7 @@ func TestPickerUsesAccountsRegistryAndIdentityPeerAvailability(t *testing.T) {
 			},
 		},
 		Sessions: []Session{
-			{Account: ".claude", Project: "work", Disp: "LIVE", AgeMin: 1, hasAge: true},
+			{Account: ".claude", Project: "work", Disp: "DONE", AgeMin: 1, hasAge: true},
 			{Account: ".claude-july4-netra", Project: "work", Disp: "INFRA_AUTH", Action: "BLOCKED_AUTH", AgeMin: 22, hasAge: true, Last: "Not logged in"},
 		},
 	}
@@ -434,8 +434,8 @@ func TestPickerUsesAccountsRegistryAndIdentityPeerAvailability(t *testing.T) {
 	if july4 == nil || !derefBool(july4.Available) || derefStr(july4.StatusSource) != "identity-peer" {
 		t.Fatalf("july4 row = %+v, want available via identity-peer", july4)
 	}
-	if derefInt(july4.LiveSessions) != 1 || derefInt(july4.AuthBlockedSessions) != 1 {
-		t.Fatalf("july4 sessions live/auth = %d/%d, want 1/1",
+	if derefInt(july4.LiveSessions) != 0 || derefInt(july4.AuthBlockedSessions) != 1 {
+		t.Fatalf("july4 sessions live/auth = %d/%d, want 0/1",
 			derefInt(july4.LiveSessions), derefInt(july4.AuthBlockedSessions))
 	}
 	resolved := Resolve(rows, home, ResolveRequest{WorkKind: "engineering", Product: "claude"}, DefaultPolicy())

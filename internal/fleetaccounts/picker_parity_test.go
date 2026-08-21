@@ -33,8 +33,8 @@ import (
 //	tombstone  — .claude-gem8NEW-netra is tombstoned in ~/.claude-accounts/registry.json and
 //	             must never be offered, by name/dir/identity.
 //	stale-auth — .claude-july4-netra (canonical) carries an auth-ONLY block while its
-//	             same-UUID peer .claude (duplicate) is serving, so the canonical row must be
-//	             repaired to available with status_source=identity-peer.
+//	             same-UUID peer .claude (duplicate) has a newer successful session, so the
+//	             canonical row must be repaired to available with status_source=identity-peer.
 //	usage-cap  — .claude-capped-acct carries a usage block, which must stay fail-closed.
 
 // parityKnownAsymmetric is the CLOSED set of row keys one surface emits and the other does
@@ -147,7 +147,7 @@ func writePickerParityFixture(t *testing.T) (home, cfg, sessions string) {
 		`"throttle":{".claude-capped-acct":{"reset":"Dec 31, 1pm","block_kind":"usage",`+
 		`"block_reason":"usage limit reached"}},`+
 		`"sessions":[`+
-		`{"account":".claude","project":"work","disp":"LIVE","age_min":1},`+
+		`{"account":".claude","project":"work","disp":"DONE","age_min":1},`+
 		`{"account":".claude-july4-netra","project":"work","disp":"INFRA_AUTH",`+
 		`"action":"BLOCKED_AUTH","age_min":22,"last":"Not logged in"}]}`)
 
@@ -366,8 +366,9 @@ func TestTombstoneStaleAuthAndUsageCapFixtureMatchesLegacyPicker(t *testing.T) {
 
 // TestResolveDefaultLaunchPicksCanonicalRowOnBothSurfaces witnesses #3000's named command —
 // `fleet-accounts resolve --product claude --task "default launch"` — on both surfaces. The
-// duplicate .claude dir proves the account is currently usable, so the CANONICAL row is the
-// one that must be handed to the launch, not the duplicate and not a tombstoned peer.
+// duplicate .claude dir's newer successful session proves the account is currently usable
+// without consuming its live-session slot, so the CANONICAL row is the one that must be
+// handed to the launch, not the duplicate and not a tombstoned peer.
 func TestResolveDefaultLaunchPicksCanonicalRowOnBothSurfaces(t *testing.T) {
 	home, cfg, sessions := writePickerParityFixture(t)
 	const want = ".claude-july4-netra"
