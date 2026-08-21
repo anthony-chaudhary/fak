@@ -607,8 +607,7 @@
       "class": "subprocess_tool",
       "reference": "powershell.exe",
       "consumer_domains": [
-        "cmd",
-        "internal"
+        "cmd"
       ],
       "status": "used",
       "pin": "host_provided",
