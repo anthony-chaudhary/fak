@@ -230,3 +230,16 @@ class LedgerDedupTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+def test_disabled_marker_skips_all_claude_discovery(tmp_path, monkeypatch, capsys):
+    marker = tmp_path / "claude.disabled"
+    marker.write_text("disabled", encoding="utf-8")
+    monkeypatch.setenv("FLEET_CLAUDE_DISABLE_MARKER", str(marker))
+
+    assert resume_sweep.main(["--json", "--window", "360"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["disabled"] is True
+    assert payload["reason"] == "claude_disabled"
+    assert payload["count"] == 0
+    assert payload["rows"] == []

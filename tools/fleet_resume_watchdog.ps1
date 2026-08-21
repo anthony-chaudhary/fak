@@ -90,6 +90,18 @@ param(
   [switch]$Slack
 )
 $ErrorActionPreference = 'Stop'
+$claudeDisableMarker = if ($env:FLEET_CLAUDE_DISABLE_MARKER) {
+  $env:FLEET_CLAUDE_DISABLE_MARKER
+} elseif ($env:LOCALAPPDATA) {
+  Join-Path $env:LOCALAPPDATA 'Fleet\claude.disabled'
+} else {
+  Join-Path $env:USERPROFILE '.fleet\claude.disabled'
+}
+if (Test-Path -LiteralPath $claudeDisableMarker -PathType Leaf) {
+  Write-Output "CLAUDE_DISABLED marker=$claudeDisableMarker; watchdog skipped"
+  exit 0
+}
+
 $stateRoot = if ($env:FLEET_STATE_DIR) {
   $env:FLEET_STATE_DIR
 } elseif ($env:LOCALAPPDATA) {

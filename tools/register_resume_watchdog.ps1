@@ -32,6 +32,14 @@ $ErrorActionPreference = 'Stop'
 $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 if (-not $Watchdog) { $Watchdog = Join-Path $scriptRoot 'fleet_resume_watchdog.ps1' }
 
+$claudeDisableMarker = if ($env:FLEET_CLAUDE_DISABLE_MARKER) {
+  $env:FLEET_CLAUDE_DISABLE_MARKER
+} elseif ($env:LOCALAPPDATA) {
+  Join-Path $env:LOCALAPPDATA 'Fleet\claude.disabled'
+} else {
+  Join-Path $env:USERPROFILE '.fleet\claude.disabled'
+}
+
 if ($Action -eq 'status') {
   $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
   if (-not $t) { Write-Output "NOT INSTALLED ($TaskName)"; return }
@@ -39,6 +47,12 @@ if ($Action -eq 'status') {
   $a = ($t.Actions | Select-Object -First 1).Arguments
   $modeStr = if ($a -match '-Live') { 'LIVE' } else { 'DRY-RUN' }
   Write-Output "State=$($t.State) mode=$modeStr LastRun=$($i.LastRunTime) LastResult=$($i.LastTaskResult) NextRun=$($i.NextRunTime)"
+  return
+}
+if ($Action -eq 'install' -and (Test-Path -LiteralPath $claudeDisableMarker -PathType Leaf)) {
+  $installed = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+  if ($installed) { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false }
+  Write-Output "CLAUDE_DISABLED: $TaskName absent; remove $claudeDisableMarker to opt back in"
   return
 }
 if ($Action -eq 'remove') {

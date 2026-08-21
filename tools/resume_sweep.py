@@ -47,6 +47,7 @@ import subprocess
 from dispatch_worker import install_no_window_subprocess_defaults
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -295,7 +296,35 @@ def sweep(window_min: float, *, probe: bool = False,
             "excluded_recently_resumed": n_excluded, "rows": rows}
 
 
+def claude_disabled_marker() -> Path:
+    """Return the machine-level kill switch for all Claude automation."""
+    override = os.environ.get("FLEET_CLAUDE_DISABLE_MARKER", "").strip()
+    if override:
+        return Path(override)
+    local = os.environ.get("LOCALAPPDATA", "").strip()
+    if local:
+        return Path(local) / "Fleet" / "claude.disabled"
+    return Path.home() / ".fleet" / "claude.disabled"
+
+
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    disabled_marker = claude_disabled_marker()
+    if disabled_marker.is_file():
+        payload = {
+            "schema": "resume-sweep/1",
+            "disabled": True,
+            "reason": "claude_disabled",
+            "marker": str(disabled_marker),
+            "count": 0,
+            "rows": [],
+        }
+        if "--json" in argv:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(f"CLAUDE DISABLED: no sessions scanned ({disabled_marker})")
+        return 0
+
     ap = argparse.ArgumentParser(prog="resume_sweep", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--window", type=float, default=600,
