@@ -2,11 +2,271 @@ package managedharness_test
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	mh "github.com/anthony-chaudhary/fak/pkg/managedharness"
 )
+
+func TestRetentionSetsIncludeEveryRootKind(t *testing.T) {
+	inst := mh.Installation{
+		Effective:     "generation-current",
+		LastKnownGood: "generation-last-good",
+		Generations: []mh.GenerationID{
+			"generation-unpinned",
+			"generation-checkpoint",
+			"generation-session",
+			"generation-staged",
+			"generation-last-good",
+			"generation-current",
+		},
+		Pins: []mh.GenerationPin{
+			{Kind: mh.PinStagedCandidate, Generation: "generation-staged"},
+			{Kind: mh.PinOpenSession, Reference: "session-1", Generation: "generation-session"},
+			{Kind: mh.PinCheckpoint, Reference: "checkpoint-1", Generation: "generation-checkpoint"},
+		},
+	}
+	wantRetained := []mh.GenerationID{
+		"generation-checkpoint",
+		"generation-current",
+		"generation-last-good",
+		"generation-session",
+		"generation-staged",
+	}
+	if got := mh.RetainedGenerations(inst); !reflect.DeepEqual(got, wantRetained) {
+		t.Fatalf("retained generations = %v, want %v", got, wantRetained)
+	}
+	if got, want := mh.ReclaimableGenerations(inst), []mh.GenerationID{"generation-unpinned"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("reclaimable generations = %v, want %v", got, want)
+	}
+}
+
+func TestGarbageCollectPreservesEveryRootAndReportsBytes(t *testing.T) {
+	root := t.TempDir()
+	s, err := mh.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundles, generations := installGenerations(t, s, 6)
+	pins := []mh.GenerationPin{
+		{Kind: mh.PinStagedCandidate, Generation: generations[3]},
+		{Kind: mh.PinOpenSession, Reference: "session-old", Generation: generations[2]},
+		{Kind: mh.PinCheckpoint, Reference: "checkpoint-1", Generation: generations[1]},
+	}
+	for _, pin := range pins {
+		if receipt, err := s.Pin("local", pin); err != nil || receipt.Status != "pinned" {
+			t.Fatalf("pin %+v: %+v %v", pin, receipt, err)
+		}
+	}
+	state, err := s.Inspect("local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRetained := mh.RetainedGenerations(state)
+	wantReclaimed := mh.ReclaimableGenerations(state)
+	if !reflect.DeepEqual(wantReclaimed, []mh.GenerationID{generations[0]}) {
+		t.Fatalf("fixture reclaimable generations = %v, want only %s", wantReclaimed, generations[0])
+	}
+	var wantRetainedBytes int64
+	for _, generation := range wantRetained {
+		info, err := os.Stat(generationArtifact(root, "local", generation))
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantRetainedBytes += info.Size()
+	}
+	reclaimedInfo, err := os.Stat(generationArtifact(root, "local", generations[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := s.GarbageCollect("local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Status != "completed" || !reflect.DeepEqual(receipt.Retained, wantRetained) || !reflect.DeepEqual(receipt.Reclaimed, wantReclaimed) {
+		t.Fatalf("GC receipt identities: %+v", receipt)
+	}
+	if receipt.RetainedBytes != wantRetainedBytes || receipt.ReclaimedBytes != reclaimedInfo.Size() {
+		t.Fatalf("GC receipt bytes: %+v, want retained=%d reclaimed=%d", receipt, wantRetainedBytes, reclaimedInfo.Size())
+	}
+	if _, err := os.Stat(generationArtifact(root, "local", generations[0])); !os.IsNotExist(err) {
+		t.Fatalf("reclaimed generation artifact still exists: %v", err)
+	}
+	for _, generation := range wantRetained {
+		if _, err := os.Stat(generationArtifact(root, "local", generation)); err != nil {
+			t.Fatalf("retained generation %s disappeared: %v", generation, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "releases", string(bundles[0].Release.ID)+".json")); err != nil {
+		t.Fatalf("shared release artifact was deleted: %v", err)
+	}
+	after, err := s.Inspect("local")
+	if err != nil || after.LastKnownGood != generations[4] || len(mh.ReclaimableGenerations(after)) != 0 {
+		t.Fatalf("post-GC rollback state: %+v %v", after, err)
+	}
+	bad := release(t, product("managed", "local", "v1", []string{"offline-work"}, []string{"kernel"}), "bad health")
+	if _, err := s.Publish(bad); err != nil {
+		t.Fatal(err)
+	}
+	rolledBack, err := s.Update("local", bad.Release.ID, func(mh.Bundle) error { return errors.New("health failed") })
+	if err != nil || rolledBack.Status != "rolled_back" || rolledBack.After != after.Effective {
+		t.Fatalf("rollback after GC: %+v %v", rolledBack, err)
+	}
+}
+
+func TestSessionReleaseMakesGenerationReclaimable(t *testing.T) {
+	root := t.TempDir()
+	s, err := mh.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, generations := installGenerations(t, s, 3)
+	if _, err := s.Pin("local", mh.GenerationPin{Kind: mh.PinOpenSession, Reference: "session-1", Generation: generations[0]}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.GarbageCollect("local")
+	if err != nil || len(first.Reclaimed) != 0 {
+		t.Fatalf("open session was not retained: %+v %v", first, err)
+	}
+	closed, err := s.Unpin("local", mh.PinOpenSession, "session-1")
+	if err != nil || closed.Status != "released" || closed.Before != generations[0] {
+		t.Fatalf("close session: %+v %v", closed, err)
+	}
+	second, err := s.GarbageCollect("local")
+	if err != nil || !reflect.DeepEqual(second.Reclaimed, []mh.GenerationID{generations[0]}) {
+		t.Fatalf("closed session generation not reclaimed: %+v %v", second, err)
+	}
+	state, err := s.Inspect("local")
+	if err != nil || state.LastKnownGood != generations[1] {
+		t.Fatalf("rollback root changed after session close: %+v %v", state, err)
+	}
+}
+
+func TestGarbageCollectDeletionFailureKeepsGenerationRecord(t *testing.T) {
+	root := t.TempDir()
+	s, err := mh.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, generations := installGenerations(t, s, 3)
+	blocked := generationArtifact(root, "local", generations[0])
+	if err := os.Remove(blocked); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(blocked, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(blocked, "blocker"), []byte("not owned by GC"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := s.GarbageCollect("local")
+	if err == nil || receipt.Status != "partial" || !reflect.DeepEqual(receipt.Failed, []mh.GenerationID{generations[0]}) {
+		t.Fatalf("failed delete receipt: %+v %v", receipt, err)
+	}
+	state, inspectErr := s.Inspect("local")
+	if inspectErr != nil || !hasGeneration(state.Generations, generations[0]) {
+		t.Fatalf("failed deletion dropped generation record: %+v %v", state, inspectErr)
+	}
+	for _, generation := range generations[1:] {
+		if _, err := os.Stat(generationArtifact(root, "local", generation)); err != nil {
+			t.Fatalf("live generation %s disappeared after failed deletion: %v", generation, err)
+		}
+	}
+}
+
+func TestConcurrentPinAndGarbageCollectAreLinearizable(t *testing.T) {
+	root := t.TempDir()
+	s, err := mh.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer, err := mh.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, generations := installGenerations(t, s, 3)
+	target := generations[0]
+	start := make(chan struct{})
+	pinResult := make(chan error, 1)
+	type gcResult struct {
+		receipt mh.GCReceipt
+		err     error
+	}
+	gcDone := make(chan gcResult, 1)
+	go func() {
+		<-start
+		_, err := peer.Pin("local", mh.GenerationPin{Kind: mh.PinCheckpoint, Reference: "concurrent", Generation: target})
+		pinResult <- err
+	}()
+	go func() {
+		<-start
+		receipt, err := s.GarbageCollect("local")
+		gcDone <- gcResult{receipt: receipt, err: err}
+	}()
+	close(start)
+	pinErr := <-pinResult
+	gc := <-gcDone
+	if gc.err != nil {
+		t.Fatalf("concurrent GC: %+v %v", gc.receipt, gc.err)
+	}
+	_, artifactErr := os.Stat(generationArtifact(root, "local", target))
+	if pinErr == nil {
+		if artifactErr != nil || hasGeneration(gc.receipt.Reclaimed, target) {
+			t.Fatalf("successful concurrent pin disappeared: receipt=%+v artifact=%v", gc.receipt, artifactErr)
+		}
+		state, err := s.Inspect("local")
+		if err != nil || !hasGeneration(mh.RetainedGenerations(state), target) {
+			t.Fatalf("successful concurrent pin absent from state: %+v %v", state, err)
+		}
+		return
+	}
+	if !os.IsNotExist(artifactErr) || !hasGeneration(gc.receipt.Reclaimed, target) {
+		t.Fatalf("failed pin did not linearize after GC: pin=%v receipt=%+v artifact=%v", pinErr, gc.receipt, artifactErr)
+	}
+}
+
+func installGenerations(t *testing.T, s *mh.Store, count int) ([]mh.Bundle, []mh.GenerationID) {
+	t.Helper()
+	p := product("managed", "local", "v1", []string{"offline-work"}, []string{"kernel"})
+	bundles := make([]mh.Bundle, 0, count)
+	generations := make([]mh.GenerationID, 0, count)
+	for n := 0; n < count; n++ {
+		bundle := release(t, p, fmt.Sprintf("generation %d", n+1))
+		if _, err := s.Publish(bundle); err != nil {
+			t.Fatal(err)
+		}
+		var receipt mh.Receipt
+		var err error
+		if n == 0 {
+			receipt, err = s.Install("local", bundle.Release.ID, nil)
+		} else {
+			receipt, err = s.Update("local", bundle.Release.ID, nil)
+		}
+		if err != nil || receipt.Status != "activated" {
+			t.Fatalf("activate generation %d: %+v %v", n+1, receipt, err)
+		}
+		bundles = append(bundles, bundle)
+		generations = append(generations, receipt.After)
+	}
+	return bundles, generations
+}
+
+func generationArtifact(root string, installation mh.InstallationID, generation mh.GenerationID) string {
+	return filepath.Join(root, "installations", string(installation), "generations", string(generation)+".json")
+}
+
+func hasGeneration(generations []mh.GenerationID, target mh.GenerationID) bool {
+	for _, generation := range generations {
+		if generation == target {
+			return true
+		}
+	}
+	return false
+}
 
 func product(id, variant, compat string, caps, layers []string) mh.Product {
 	return mh.Product{ID: mh.ProductID(id), Variant: variant, Compatibility: compat, Capabilities: caps, Layers: layers}

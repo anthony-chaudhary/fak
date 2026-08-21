@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -21,6 +22,19 @@ type ProductID string
 type ReleaseID string
 type InstallationID string
 type GenerationID string
+type PinKind string
+
+const (
+	PinStagedCandidate PinKind = "staged_candidate"
+	PinOpenSession     PinKind = "open_session"
+	PinCheckpoint      PinKind = "checkpoint"
+)
+
+type GenerationPin struct {
+	Kind       PinKind      `json:"kind"`
+	Reference  string       `json:"reference,omitempty"`
+	Generation GenerationID `json:"generation"`
+}
 
 type Product struct {
 	ID            ProductID `json:"id"`
@@ -42,11 +56,12 @@ type Generation struct {
 	ActivatedAt time.Time    `json:"activated_at"`
 }
 type Installation struct {
-	ID            InstallationID `json:"id"`
-	Desired       ReleaseID      `json:"desired"`
-	Effective     GenerationID   `json:"effective"`
-	LastKnownGood GenerationID   `json:"last_known_good"`
-	Generations   []GenerationID `json:"generations"`
+	ID            InstallationID  `json:"id"`
+	Desired       ReleaseID       `json:"desired"`
+	Effective     GenerationID    `json:"effective"`
+	LastKnownGood GenerationID    `json:"last_known_good"`
+	Generations   []GenerationID  `json:"generations"`
+	Pins          []GenerationPin `json:"pins,omitempty"`
 }
 type Receipt struct {
 	Schema        string         `json:"schema"`
@@ -56,10 +71,25 @@ type Receipt struct {
 	Before        GenerationID   `json:"before,omitempty"`
 	After         GenerationID   `json:"after,omitempty"`
 	LastKnownGood GenerationID   `json:"last_known_good,omitempty"`
+	PinKind       PinKind        `json:"pin_kind,omitempty"`
+	Reference     string         `json:"reference,omitempty"`
 	Status        string         `json:"status"`
 	Capabilities  []string       `json:"capabilities,omitempty"`
 	Output        string         `json:"output,omitempty"`
 	Reason        string         `json:"reason,omitempty"`
+}
+
+type GCReceipt struct {
+	Schema         string         `json:"schema"`
+	Installation   InstallationID `json:"installation"`
+	Action         string         `json:"action"`
+	Status         string         `json:"status"`
+	Retained       []GenerationID `json:"retained"`
+	Reclaimed      []GenerationID `json:"reclaimed"`
+	Failed         []GenerationID `json:"failed,omitempty"`
+	RetainedBytes  int64          `json:"retained_bytes"`
+	ReclaimedBytes int64          `json:"reclaimed_bytes"`
+	Reason         string         `json:"reason,omitempty"`
 }
 
 type Bundle struct {
@@ -69,18 +99,69 @@ type Bundle struct {
 type Health func(Bundle) error
 type Work func(Bundle) (string, error)
 
-type Store struct{ root string }
+type Store struct {
+	root string
+	mu   *sync.Mutex
+}
+
+// storeLocks makes lifecycle writes linearizable across Store handles opened
+// for the same local root.
+var storeLocks sync.Map
+
+// RetainedGenerations returns the deterministic union of every generation root.
+func RetainedGenerations(i Installation) []GenerationID {
+	retained := make([]GenerationID, 0, 2+len(i.Pins))
+	retained = append(retained, i.Effective, i.LastKnownGood)
+	for _, pin := range i.Pins {
+		retained = append(retained, pin.Generation)
+	}
+	return sortedGenerationIDs(retained)
+}
+
+// ReclaimableGenerations returns generations that have no current, rollback,
+// staged, session, or checkpoint root.
+func ReclaimableGenerations(i Installation) []GenerationID {
+	retained := make(map[GenerationID]struct{}, 2+len(i.Pins))
+	for _, id := range RetainedGenerations(i) {
+		retained[id] = struct{}{}
+	}
+	var reclaimable []GenerationID
+	for _, id := range i.Generations {
+		if _, ok := retained[id]; !ok {
+			reclaimable = append(reclaimable, id)
+		}
+	}
+	return sortedGenerationIDs(reclaimable)
+}
+
+func sortedGenerationIDs(in []GenerationID) []GenerationID {
+	out := append([]GenerationID(nil), in...)
+	sort.Slice(out, func(a, b int) bool { return out[a] < out[b] })
+	n := 0
+	for _, id := range out {
+		if id != "" && (n == 0 || out[n-1] != id) {
+			out[n] = id
+			n++
+		}
+	}
+	return out[:n]
+}
 
 func Open(root string) (*Store, error) {
 	if root == "" {
 		return nil, errors.New("managed harness: root required")
+	}
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
 	}
 	for _, d := range []string{"releases", "installations"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0700); err != nil {
 			return nil, err
 		}
 	}
-	return &Store{root: root}, nil
+	lock, _ := storeLocks.LoadOrStore(root, &sync.Mutex{})
+	return &Store{root: root, mu: lock.(*sync.Mutex)}, nil
 }
 
 func BuildRelease(product Product, payload any, prov Provenance) (Bundle, error) {
@@ -103,6 +184,8 @@ func BuildRelease(product Product, payload any, prov Provenance) (Bundle, error)
 	return Bundle{Release: Release{ID: ReleaseID(digest[:16]), Product: product, Digest: digest, Provenance: prov}, Payload: blob}, nil
 }
 func (s *Store) Publish(b Bundle) (Receipt, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := verifyBundle(b); err != nil {
 		return Receipt{}, err
 	}
@@ -120,6 +203,8 @@ func (s *Store) Publish(b Bundle) (Receipt, error) {
 	return Receipt{Schema: Schema, Action: "release", Desired: b.Release.ID, Status: "published", Capabilities: b.Release.Product.Capabilities}, nil
 }
 func (s *Store) Install(id InstallationID, release ReleaseID, health Health) (Receipt, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if id == "" {
 		return Receipt{}, errors.New("managed harness: installation id required")
 	}
@@ -129,6 +214,8 @@ func (s *Store) Install(id InstallationID, release ReleaseID, health Health) (Re
 	return s.activate(id, release, health, true)
 }
 func (s *Store) Update(id InstallationID, release ReleaseID, health Health) (Receipt, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.activate(id, release, health, false)
 }
 func (s *Store) activate(id InstallationID, release ReleaseID, health Health, create bool) (Receipt, error) {
@@ -177,11 +264,14 @@ func (s *Store) activate(id InstallationID, release ReleaseID, health Health, cr
 	return Receipt{Schema: Schema, Installation: id, Action: action, Desired: release, Before: before, After: gen.ID, LastKnownGood: inst.LastKnownGood, Status: "activated", Capabilities: b.Release.Product.Capabilities}, nil
 }
 func (s *Store) Run(id InstallationID, work Work) (Receipt, error) {
+	s.mu.Lock()
 	inst, err := s.readInstallation(id)
 	if err != nil {
+		s.mu.Unlock()
 		return Receipt{}, err
 	}
 	b, err := s.currentBundle(inst)
+	s.mu.Unlock()
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -193,7 +283,229 @@ func (s *Store) Run(id InstallationID, work Work) (Receipt, error) {
 	}
 	return r, nil
 }
-func (s *Store) Inspect(id InstallationID) (Installation, error) { return s.readInstallation(id) }
+func (s *Store) Inspect(id InstallationID) (Installation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.readInstallation(id)
+}
+
+// Pin retains a staged candidate, open-session generation, or checkpoint
+// generation until the corresponding reference is released.
+func (s *Store) Pin(id InstallationID, pin GenerationPin) (Receipt, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := validatePin(pin); err != nil {
+		return Receipt{}, err
+	}
+	inst, err := s.readInstallation(id)
+	if err != nil {
+		return Receipt{}, err
+	}
+	if !containsGeneration(inst.Generations, pin.Generation) {
+		return Receipt{}, fmt.Errorf("managed harness: generation %q is not owned by installation %q", pin.Generation, id)
+	}
+	if _, err := s.generationFileInfo(id, pin.Generation); err != nil {
+		return Receipt{}, err
+	}
+	var before GenerationID
+	replaced := false
+	for n := range inst.Pins {
+		if inst.Pins[n].Kind == pin.Kind && inst.Pins[n].Reference == pin.Reference {
+			before = inst.Pins[n].Generation
+			inst.Pins[n] = pin
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		inst.Pins = append(inst.Pins, pin)
+	}
+	sort.Slice(inst.Pins, func(a, b int) bool {
+		if inst.Pins[a].Kind != inst.Pins[b].Kind {
+			return inst.Pins[a].Kind < inst.Pins[b].Kind
+		}
+		return inst.Pins[a].Reference < inst.Pins[b].Reference
+	})
+	if err := s.writeInstallation(inst); err != nil {
+		return Receipt{}, err
+	}
+	return Receipt{Schema: Schema, Installation: id, Action: "pin", Before: before, After: pin.Generation, PinKind: pin.Kind, Reference: pin.Reference, Status: "pinned"}, nil
+}
+
+// Unpin releases one staged, session, or checkpoint reference.
+func (s *Store) Unpin(id InstallationID, kind PinKind, reference string) (Receipt, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := validatePinKey(kind, reference); err != nil {
+		return Receipt{}, err
+	}
+	inst, err := s.readInstallation(id)
+	if err != nil {
+		return Receipt{}, err
+	}
+	var before GenerationID
+	kept := inst.Pins[:0]
+	for _, pin := range inst.Pins {
+		if pin.Kind == kind && pin.Reference == reference {
+			before = pin.Generation
+			continue
+		}
+		kept = append(kept, pin)
+	}
+	if before == "" {
+		return Receipt{}, fmt.Errorf("managed harness: %s pin %q not found", kind, reference)
+	}
+	inst.Pins = kept
+	if err := s.writeInstallation(inst); err != nil {
+		return Receipt{}, err
+	}
+	return Receipt{Schema: Schema, Installation: id, Action: "unpin", Before: before, PinKind: kind, Reference: reference, Status: "released"}, nil
+}
+
+// GarbageCollect deletes only unpinned generation records owned by one
+// installation. Release bundles are intentionally untouched because they may
+// be shared by other installations.
+func (s *Store) GarbageCollect(id InstallationID) (GCReceipt, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	receipt := GCReceipt{Schema: Schema, Installation: id, Action: "gc", Status: "completed"}
+	inst, err := s.readInstallation(id)
+	if err != nil {
+		return receipt, err
+	}
+	receipt.Retained = RetainedGenerations(inst)
+	for _, generation := range receipt.Retained {
+		if !containsGeneration(inst.Generations, generation) {
+			receipt.Status = "refused"
+			receipt.Reason = fmt.Sprintf("retained generation %q is absent from installation state", generation)
+			return receipt, errors.New("managed harness: " + receipt.Reason)
+		}
+		info, err := s.generationFileInfo(id, generation)
+		if err != nil {
+			receipt.Status = "refused"
+			receipt.Reason = err.Error()
+			return receipt, err
+		}
+		receipt.RetainedBytes += info.Size()
+	}
+
+	var failures []string
+	for _, generation := range ReclaimableGenerations(inst) {
+		path, err := s.generationPath(id, generation)
+		if err != nil {
+			receipt.Failed = append(receipt.Failed, generation)
+			failures = append(failures, err.Error())
+			continue
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			receipt.Failed = append(receipt.Failed, generation)
+			failures = append(failures, fmt.Sprintf("generation %q: %v", generation, err))
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			receipt.Failed = append(receipt.Failed, generation)
+			failures = append(failures, fmt.Sprintf("generation %q: owned artifact is not a regular file", generation))
+			continue
+		}
+		if err := os.Remove(path); err != nil {
+			receipt.Failed = append(receipt.Failed, generation)
+			failures = append(failures, fmt.Sprintf("generation %q: %v", generation, err))
+			continue
+		}
+		receipt.Reclaimed = append(receipt.Reclaimed, generation)
+		receipt.ReclaimedBytes += info.Size()
+	}
+	if len(receipt.Reclaimed) > 0 {
+		reclaimed := make(map[GenerationID]struct{}, len(receipt.Reclaimed))
+		for _, generation := range receipt.Reclaimed {
+			reclaimed[generation] = struct{}{}
+		}
+		remaining := inst.Generations[:0]
+		for _, generation := range inst.Generations {
+			if _, ok := reclaimed[generation]; !ok {
+				remaining = append(remaining, generation)
+			}
+		}
+		inst.Generations = remaining
+		if err := s.writeInstallation(inst); err != nil {
+			receipt.Status = "failed"
+			receipt.Reason = err.Error()
+			return receipt, err
+		}
+	}
+	if len(failures) > 0 {
+		receipt.Status = "partial"
+		receipt.Reason = strings.Join(failures, "; ")
+		return receipt, fmt.Errorf("managed harness: GC incomplete: %s", receipt.Reason)
+	}
+	return receipt, nil
+}
+
+func validatePin(pin GenerationPin) error {
+	if pin.Generation == "" {
+		return errors.New("managed harness: pin generation required")
+	}
+	return validatePinKey(pin.Kind, pin.Reference)
+}
+
+func validatePinKey(kind PinKind, reference string) error {
+	switch kind {
+	case PinStagedCandidate:
+		if reference != "" {
+			return errors.New("managed harness: staged candidate pin has no reference")
+		}
+	case PinOpenSession, PinCheckpoint:
+		if reference == "" {
+			return fmt.Errorf("managed harness: %s pin reference required", kind)
+		}
+	default:
+		return fmt.Errorf("managed harness: unknown pin kind %q", kind)
+	}
+	return nil
+}
+
+func containsGeneration(generations []GenerationID, target GenerationID) bool {
+	for _, generation := range generations {
+		if generation == target {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Store) generationPath(id InstallationID, generation GenerationID) (string, error) {
+	if err := safePathComponent("installation", string(id)); err != nil {
+		return "", err
+	}
+	if err := safePathComponent("generation", string(generation)); err != nil {
+		return "", err
+	}
+	return filepath.Join(s.root, "installations", string(id), "generations", string(generation)+".json"), nil
+}
+
+func (s *Store) generationFileInfo(id InstallationID, generation GenerationID) (os.FileInfo, error) {
+	path, err := s.generationPath(id, generation)
+	if err != nil {
+		return nil, err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("managed harness: generation %q artifact: %w", generation, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("managed harness: generation %q artifact is not a regular file", generation)
+	}
+	return info, nil
+}
+
+func safePathComponent(kind, value string) error {
+	if value == "" || value == "." || value == ".." || strings.ContainsAny(value, "/\\:\x00") {
+		return fmt.Errorf("managed harness: invalid %s identity %q", kind, value)
+	}
+	return nil
+}
+
 func (s *Store) readRelease(id ReleaseID) (Bundle, error) {
 	var b Bundle
 	err := readJSON(filepath.Join(s.root, "releases", string(id)+".json"), &b)
@@ -204,13 +516,20 @@ func (s *Store) readRelease(id ReleaseID) (Bundle, error) {
 }
 func (s *Store) readInstallation(id InstallationID) (Installation, error) {
 	var i Installation
+	if err := safePathComponent("installation", string(id)); err != nil {
+		return i, err
+	}
 	err := readJSON(filepath.Join(s.root, "installations", string(id), "state.json"), &i)
 	return i, err
 }
 func (s *Store) currentBundle(i Installation) (Bundle, error) {
 	for n := len(i.Generations) - 1; n >= 0; n-- {
 		var g Generation
-		if err := readJSON(filepath.Join(s.root, "installations", string(i.ID), "generations", string(i.Generations[n])+".json"), &g); err == nil && g.ID == i.Effective {
+		path, err := s.generationPath(i.ID, i.Generations[n])
+		if err != nil {
+			return Bundle{}, err
+		}
+		if err := readJSON(path, &g); err == nil && g.ID == i.Effective {
 			return s.readRelease(g.Release.ID)
 		}
 	}
@@ -218,9 +537,16 @@ func (s *Store) currentBundle(i Installation) (Bundle, error) {
 }
 func (s *Store) writeGeneration(id InstallationID, g Generation) error {
 	blob, _ := json.MarshalIndent(g, "", "  ")
-	return atomicWrite(filepath.Join(s.root, "installations", string(id), "generations", string(g.ID)+".json"), blob)
+	path, err := s.generationPath(id, g.ID)
+	if err != nil {
+		return err
+	}
+	return atomicWrite(path, blob)
 }
 func (s *Store) writeInstallation(i Installation) error {
+	if err := safePathComponent("installation", string(i.ID)); err != nil {
+		return err
+	}
 	blob, _ := json.MarshalIndent(i, "", "  ")
 	return atomicWrite(filepath.Join(s.root, "installations", string(i.ID), "state.json"), blob)
 }
