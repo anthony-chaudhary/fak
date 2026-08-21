@@ -65,10 +65,23 @@ type Campaign struct {
 	Archive []byte
 }
 
-func (r Runner) RunCampaign(ctx context.Context, cfg CampaignConfig, corpus qwen38quant.Corpus) (Campaign, error) {
+func (r Runner) RunCampaign(ctx context.Context, cfg CampaignConfig, corpus qwen38quant.Corpus) (campaign Campaign, err error) {
 	if cfg.Probe == nil || cfg.Lifecycle == nil {
 		return Campaign{}, errors.New("probe and lifecycle are required")
 	}
+	cleanupDone := false
+	defer func() {
+		if cleanupDone {
+			return
+		}
+		if cleanupErr := cfg.Lifecycle.Cleanup(ctx); cleanupErr != nil {
+			if err == nil {
+				err = fmt.Errorf("cleanup: %w", cleanupErr)
+			} else {
+				err = errors.Join(err, fmt.Errorf("cleanup: %w", cleanupErr))
+			}
+		}
+	}()
 	before, err := cfg.Probe.Observe(ctx)
 	if err != nil {
 		return Campaign{}, fmt.Errorf("evidence preflight: %w", err)
@@ -122,7 +135,9 @@ func (r Runner) RunCampaign(ctx context.Context, cfg CampaignConfig, corpus qwen
 	if err := admitObservation(after, cfg); err != nil {
 		return Campaign{}, fmt.Errorf("post-run: %w", err)
 	}
-	cleanupOK := cfg.Lifecycle.Cleanup(ctx) == nil
+	cleanupErr := cfg.Lifecycle.Cleanup(ctx)
+	cleanupDone = true
+	cleanupOK := cleanupErr == nil
 
 	archive := Archive{Schema: "fak.qwen38-quant-raw/1", CorpusID: corpus.ID, Arm: cfg.Arm, Before: before, After: after, Results: results, RestartReady: restartReady, CleanupOK: cleanupOK}
 	raw, err := canonicalJSON(archive)
@@ -145,8 +160,8 @@ func (r Runner) RunCampaign(ctx context.Context, cfg CampaignConfig, corpus qwen
 		Environment: qwen38quant.Environment{Command: append([]string(nil), cfg.Command...), Hardware: before.Hardware, Software: before.Software, ContextTokens: before.ContextTokens, CacheMode: before.CacheMode, RequireDevice: cfg.RequireDevice, DenyFallback: true},
 		Trials:      trials, Verdict: verdict, EvidenceClass: "CAMPAIGN", RawArchiveSHA256: hex.EncodeToString(sum[:]), StaleAfter: cfg.StaleAfter, RollbackThreshold: cfg.RollbackThreshold,
 	}
-	if !cleanupOK {
-		return Campaign{Report: report, Archive: raw}, errors.New("cleanup failed")
+	if cleanupErr != nil {
+		return Campaign{Report: report, Archive: raw}, fmt.Errorf("cleanup: %w", cleanupErr)
 	}
 	if err := qwen38quant.Validate(report, corpus); err != nil {
 		return Campaign{Report: report, Archive: raw}, fmt.Errorf("campaign report: %w", err)

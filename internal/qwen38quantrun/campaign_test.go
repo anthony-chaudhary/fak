@@ -84,3 +84,14 @@ func hash64(c byte) string {
 	}
 	return string(b)
 }
+
+func TestCampaignCleansUpAfterPreflightFailure(t *testing.T) {
+	corpus := qwen38quant.DefaultCorpus()
+	id := qwen38quant.Identity{Model: "x"}
+	probe := &staticProbe{observation: Observation{Identity: id, Hardware: "h", Software: "s", Device: "A100", ContextTokens: 1, CacheMode: "none", Resident: true, FallbackActive: true}}
+	lifecycle := &lifecycleSpy{}
+	_, err := (Runner{}).RunCampaign(context.Background(), CampaignConfig{Endpoint: Config{Endpoint: "http://invalid", Model: "x"}, Arm: "q4_k_m", Expected: id, Command: []string{"x"}, RequireDevice: "A100", Probe: probe, Lifecycle: lifecycle}, corpus)
+	if err == nil || lifecycle.cleanup != 1 {
+		t.Fatalf("err=%v cleanup=%d", err, lifecycle.cleanup)
+	}
+}
