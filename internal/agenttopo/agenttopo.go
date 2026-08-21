@@ -15,12 +15,30 @@ func Ready() bool { return true }
 var (
 	// ErrNilGroup is returned when a topology is declared without a comm.Group.
 	ErrNilGroup = errors.New("agenttopo: nil group")
+	// ErrNilTopology is returned when an expansion has no valid base topology.
+	ErrNilTopology = errors.New("agenttopo: nil topology")
 	// ErrNoMember is returned when a node or edge endpoint is not in the group.
 	ErrNoMember = errors.New("agenttopo: no such member")
+	// ErrInvalidNodeID is returned when a proposed node has no stable identity.
+	ErrInvalidNodeID = errors.New("agenttopo: empty node identity")
+	// ErrIdentityRewrite is returned when a proposal re-declares an existing node.
+	ErrIdentityRewrite = errors.New("agenttopo: existing node identity rewrite")
+	// ErrDuplicateNode is returned when a proposal repeats a new node identity.
+	ErrDuplicateNode = errors.New("agenttopo: duplicate proposed node")
 	// ErrDuplicateEdge is returned when an explicit declaration repeats an edge.
 	ErrDuplicateEdge = errors.New("agenttopo: duplicate edge")
 	// ErrCycle is returned when a declared edge set is not a DAG.
 	ErrCycle = errors.New("agenttopo: topology contains a cycle")
+	// ErrInvalidLimits is returned unless every expansion bound is positive.
+	ErrInvalidLimits = errors.New("agenttopo: expansion limits must be positive")
+	// ErrExpansionLimit is matched by every typed expansion limit refusal.
+	ErrExpansionLimit = errors.New("agenttopo: expansion limit exceeded")
+	// ErrDepthLimit identifies a maximum-depth refusal.
+	ErrDepthLimit = errors.New("agenttopo: expansion depth limit exceeded")
+	// ErrWidthLimit identifies a maximum-width refusal.
+	ErrWidthLimit = errors.New("agenttopo: expansion width limit exceeded")
+	// ErrTotalNodesLimit identifies a maximum-total-nodes refusal.
+	ErrTotalNodesLimit = errors.New("agenttopo: expansion total-nodes limit exceeded")
 	// ErrNoNeighborOutput is returned when CombineIn lacks an in-neighbor output.
 	ErrNoNeighborOutput = errors.New("agenttopo: missing neighbor output")
 )
@@ -29,6 +47,46 @@ var (
 type Edge struct {
 	From string `json:"from"`
 	To   string `json:"to"`
+}
+
+// ExpansionProposal is an additive graph delta. Nodes must be new identities;
+// edges may connect any base or proposed node.
+type ExpansionProposal struct {
+	Nodes []comm.Member `json:"nodes"`
+	Edges []Edge        `json:"edges"`
+}
+
+// ExpansionLimits bounds the admitted topology. Depth counts nodes on the
+// longest path; width counts nodes in the largest longest-path depth layer.
+type ExpansionLimits struct {
+	MaxDepth      int `json:"max_depth"`
+	MaxWidth      int `json:"max_width"`
+	MaxTotalNodes int `json:"max_total_nodes"`
+}
+
+// ExpansionLimit names a closed expansion limit class.
+type ExpansionLimit string
+
+const (
+	LimitDepth      ExpansionLimit = "depth"
+	LimitWidth      ExpansionLimit = "width"
+	LimitTotalNodes ExpansionLimit = "total_nodes"
+)
+
+// ExpansionLimitError reports the exact bound that refused an expansion.
+type ExpansionLimitError struct {
+	Limit  ExpansionLimit `json:"limit"`
+	Actual int            `json:"actual"`
+	Max    int            `json:"max"`
+}
+
+func (e *ExpansionLimitError) Error() string {
+	return fmt.Sprintf("%v: %s=%d max=%d", ErrExpansionLimit, e.Limit, e.Actual, e.Max)
+}
+
+// Unwrap makes both the generic and limit-specific refusal match errors.Is.
+func (e *ExpansionLimitError) Unwrap() []error {
+	return []error{ErrExpansionLimit, expansionLimitSentinel(e.Limit)}
 }
 
 // Exchange is the declared neighborhood of one node. In and Out preserve the
@@ -94,6 +152,68 @@ func Declare(name string, group *comm.Group, edges []Edge) (*Topology, error) {
 		return nil, err
 	}
 	return t, nil
+}
+
+// AdmitExpansion validates an additive proposal and returns a new topology.
+// The base and proposal are never mutated, including on refusal.
+func AdmitExpansion(base *Topology, proposal ExpansionProposal, limits ExpansionLimits) (*Topology, error) {
+	if base == nil || base.group == nil || base.group.Size() == 0 {
+		return nil, ErrNilTopology
+	}
+	if limits.MaxDepth <= 0 || limits.MaxWidth <= 0 || limits.MaxTotalNodes <= 0 {
+		return nil, fmt.Errorf("%w: depth=%d width=%d total_nodes=%d", ErrInvalidLimits, limits.MaxDepth, limits.MaxWidth, limits.MaxTotalNodes)
+	}
+
+	proposedNodes := append([]comm.Member(nil), proposal.Nodes...)
+	sort.Slice(proposedNodes, func(i, j int) bool { return proposedNodes[i].ID < proposedNodes[j].ID })
+	seenNodes := make(map[string]struct{}, len(proposedNodes))
+	allNodes := append([]comm.Member(nil), base.Nodes()...)
+	for _, node := range proposedNodes {
+		if node.ID == "" {
+			return nil, ErrInvalidNodeID
+		}
+		if _, exists := base.members[node.ID]; exists {
+			return nil, fmt.Errorf("%w: %q", ErrIdentityRewrite, node.ID)
+		}
+		if _, duplicate := seenNodes[node.ID]; duplicate {
+			return nil, fmt.Errorf("%w: %q", ErrDuplicateNode, node.ID)
+		}
+		seenNodes[node.ID] = struct{}{}
+		allNodes = append(allNodes, node)
+	}
+
+	proposedEdges := append([]Edge(nil), proposal.Edges...)
+	sort.Slice(proposedEdges, func(i, j int) bool {
+		if proposedEdges[i].From != proposedEdges[j].From {
+			return proposedEdges[i].From < proposedEdges[j].From
+		}
+		return proposedEdges[i].To < proposedEdges[j].To
+	})
+	allEdges := append(base.Edges(), proposedEdges...)
+
+	membership, err := base.group.Membership(0)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrNilTopology, err)
+	}
+	group, err := comm.New(base.group.WaveID(), membership.ParentTraceID, allNodes)
+	if err != nil {
+		return nil, err
+	}
+	expanded, err := Declare(base.name, group, allEdges)
+	if err != nil {
+		return nil, err
+	}
+	if expanded.Size() > limits.MaxTotalNodes {
+		return nil, newExpansionLimitError(LimitTotalNodes, expanded.Size(), limits.MaxTotalNodes)
+	}
+	depth, width := expanded.dimensions()
+	if depth > limits.MaxDepth {
+		return nil, newExpansionLimitError(LimitDepth, depth, limits.MaxDepth)
+	}
+	if width > limits.MaxWidth {
+		return nil, newExpansionLimitError(LimitWidth, width, limits.MaxWidth)
+	}
+	return expanded, nil
 }
 
 // Linear declares rank(i) -> rank(i+1) edges over the group.
@@ -249,6 +369,49 @@ func (t *Topology) validateAcyclic() error {
 		}
 	}
 	return nil
+}
+
+func (t *Topology) dimensions() (int, int) {
+	depths := make(map[string]int, len(t.members))
+	var depthOf func(string) int
+	depthOf = func(id string) int {
+		if depth := depths[id]; depth != 0 {
+			return depth
+		}
+		depth := 1
+		for _, parent := range t.in[id] {
+			depth = max(depth, depthOf(parent)+1)
+		}
+		depths[id] = depth
+		return depth
+	}
+
+	layers := make(map[int]int)
+	maxDepth, maxWidth := 0, 0
+	for _, member := range t.Nodes() {
+		depth := depthOf(member.ID)
+		layers[depth]++
+		maxDepth = max(maxDepth, depth)
+		maxWidth = max(maxWidth, layers[depth])
+	}
+	return maxDepth, maxWidth
+}
+
+func newExpansionLimitError(limit ExpansionLimit, actual, max int) error {
+	return &ExpansionLimitError{Limit: limit, Actual: actual, Max: max}
+}
+
+func expansionLimitSentinel(limit ExpansionLimit) error {
+	switch limit {
+	case LimitDepth:
+		return ErrDepthLimit
+	case LimitWidth:
+		return ErrWidthLimit
+	case LimitTotalNodes:
+		return ErrTotalNodesLimit
+	default:
+		return ErrExpansionLimit
+	}
 }
 
 func membersOf(g *comm.Group) []comm.Member {
