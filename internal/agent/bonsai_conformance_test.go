@@ -77,10 +77,23 @@ You are provided with function signatures within <tools></tools> XML tags:
 {"type":"function","function":{"name":"get_weather","description":"Get the current temperature for a city, in Celsius.","parameters":{"type":"object","properties":{"city":{"type":"string","description":"City name, e.g. Paris"}},"required":["city"]}}}
 </tools>
 
-For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
+If you choose to call a function ONLY reply in the following format with NO suffix:
+
 <tool_call>
-{"name": <function-name>, "arguments": <args-json-object>}
-</tool_call><|im_end|>
+<function=example_function_name>
+<parameter=example_parameter_1>
+value_1
+</parameter>
+</function>
+</tool_call>
+
+<IMPORTANT>
+Reminder:
+- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags
+- Required parameters MUST be specified
+- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after
+- If there is no function call available, answer normally
+</IMPORTANT><|im_end|>
 <|im_start|>user
 What is the weather in Paris?<|im_end|>
 <|im_start|>assistant
