@@ -1,10 +1,9 @@
-// Package qwen38quant defines the evidence contract for the Qwen3.8-27B
-// quantization campaign. It validates evidence; it does not infer missing facts.
 package qwen38quant
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -16,21 +15,36 @@ const Schema = "fak.qwen38-quant-report/1"
 var RequiredArms = []string{"bf16", "fp8", "q8_0", "q6_k", "q5_k_m", "q4_k_m", "iq4_xs", "awq_int4", "gptq_int4", "exl2"}
 var RequiredWorkloads = []string{"text", "json_schema", "correlated_tools", "coding_reasoning", "long_context_retrieval", "repeated_workflow_cache"}
 
+type Fixture struct {
+	ID                    string           `json:"id"`
+	Workload              string           `json:"workload"`
+	Prompt                string           `json:"prompt"`
+	ExpectedExact         string           `json:"expected_exact,omitempty"`
+	JSONSchema            map[string]any   `json:"json_schema,omitempty"`
+	ExpectedJSON          map[string]any   `json:"expected_json,omitempty"`
+	Tools                 []map[string]any `json:"tools,omitempty"`
+	ExpectedTool          map[string]any   `json:"expected_tool,omitempty"`
+	Generator             map[string]any   `json:"generator,omitempty"`
+	MinimumContextTokens  int              `json:"minimum_context_tokens,omitempty"`
+	CacheSequence         []string         `json:"cache_sequence,omitempty"`
+	RequiredCacheEvidence []string         `json:"required_cache_evidence,omitempty"`
+	MaxOutputTokens       int              `json:"max_output_tokens"`
+}
+
 type Corpus struct {
-	Schema    string   `json:"schema"`
-	ID        string   `json:"id"`
-	Workloads []string `json:"workloads"`
+	Schema                     string    `json:"schema"`
+	ID                         string    `json:"id"`
+	ModelFamily                string    `json:"model_family"`
+	Arms                       []string  `json:"arms"`
+	Workloads                  []string  `json:"workloads"`
+	MinimumRepetitions         int       `json:"minimum_repetitions_per_workload"`
+	QualityPrecedesPerformance bool      `json:"quality_precedes_performance"`
+	Fixtures                   []Fixture `json:"fixtures"`
 }
 
 type Identity struct {
-	Model             string `json:"model"`
-	CheckpointSHA256  string `json:"checkpoint_sha256"`
-	ArtifactSHA256    string `json:"artifact_sha256"`
-	TokenizerSHA256   string `json:"tokenizer_sha256"`
-	TemplateSHA256    string `json:"template_sha256"`
-	QuantizerRevision string `json:"quantizer_revision"`
-	RuntimeRevision   string `json:"runtime_revision"`
-	FakModuleRev      string `json:"fak_module_rev"`
+	Model, CheckpointSHA256, ArtifactSHA256, TokenizerSHA256, TemplateSHA256 string
+	QuantizerRevision, RuntimeRevision, FakModuleRev                         string
 }
 
 type Environment struct {
@@ -52,28 +66,71 @@ type Trial struct {
 }
 
 type Report struct {
-	Schema            string      `json:"schema"`
-	CorpusID          string      `json:"corpus_id"`
-	Arm               string      `json:"arm"`
-	Identity          Identity    `json:"identity"`
-	Environment       Environment `json:"environment"`
-	Trials            []Trial     `json:"trials"`
-	Verdict           string      `json:"verdict"`
-	EvidenceClass     string      `json:"evidence_class"`
-	RawArchiveSHA256  string      `json:"raw_archive_sha256"`
-	StaleAfter        string      `json:"stale_after"`
-	RollbackThreshold string      `json:"rollback_threshold"`
+	Schema, CorpusID, CorpusSHA256, Arm string
+	Identity                            Identity    `json:"identity"`
+	Environment                         Environment `json:"environment"`
+	Trials                              []Trial     `json:"trials"`
+	Verdict, EvidenceClass              string
+	RawArchiveSHA256                    string `json:"raw_archive_sha256"`
+	StaleAfter                          string `json:"stale_after"`
+	RollbackThreshold                   string `json:"rollback_threshold"`
 }
 
-func DefaultCorpus() Corpus {
-	return Corpus{Schema: "fak.qwen38-quant-corpus/1", ID: "qwen38-27b-agentic-v1", Workloads: append([]string(nil), RequiredWorkloads...)}
+func DecodeCorpus(data []byte) (Corpus, error) {
+	var c Corpus
+	d := json.NewDecoder(strings.NewReader(string(data)))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&c); err != nil {
+		return Corpus{}, err
+	}
+	if err := c.Validate(); err != nil {
+		return Corpus{}, err
+	}
+	return c, nil
 }
 
 func (c Corpus) Validate() error {
-	if c.Schema != "fak.qwen38-quant-corpus/1" || c.ID == "" {
-		return errors.New("invalid corpus identity")
+	if c.Schema != "fak.qwen38-quant-corpus/1" || c.ID == "" || c.ModelFamily != "Qwen3.8-27B" || c.MinimumRepetitions < 3 || !c.QualityPrecedesPerformance {
+		return errors.New("invalid corpus identity or policy")
 	}
-	return exactSet("workloads", c.Workloads, RequiredWorkloads)
+	if err := exactSet("arms", c.Arms, RequiredArms); err != nil {
+		return err
+	}
+	if err := exactSet("workloads", c.Workloads, RequiredWorkloads); err != nil {
+		return err
+	}
+	if len(c.Fixtures) != len(RequiredWorkloads) {
+		return errors.New("each workload requires one fixture")
+	}
+	ids, families := map[string]bool{}, map[string]bool{}
+	for _, f := range c.Fixtures {
+		if f.ID == "" || ids[f.ID] || families[f.Workload] || !contains(RequiredWorkloads, f.Workload) || f.Prompt == "" || f.MaxOutputTokens <= 0 {
+			return errors.New("invalid or duplicate fixture")
+		}
+		ids[f.ID], families[f.Workload] = true, true
+		if f.ExpectedExact == "" && len(f.ExpectedJSON) == 0 && len(f.ExpectedTool) == 0 {
+			return fmt.Errorf("fixture %s lacks expected effect", f.ID)
+		}
+		switch f.Workload {
+		case "json_schema":
+			if len(f.JSONSchema) == 0 || len(f.ExpectedJSON) == 0 {
+				return errors.New("json fixture incomplete")
+			}
+		case "correlated_tools":
+			if len(f.Tools) == 0 || len(f.ExpectedTool) == 0 {
+				return errors.New("tool fixture incomplete")
+			}
+		case "long_context_retrieval":
+			if len(f.Generator) == 0 || f.MinimumContextTokens <= 0 {
+				return errors.New("long-context fixture incomplete")
+			}
+		case "repeated_workflow_cache":
+			if len(f.CacheSequence) < 3 || len(f.RequiredCacheEvidence) == 0 {
+				return errors.New("cache fixture incomplete")
+			}
+		}
+	}
+	return nil
 }
 
 func Validate(r Report, c Corpus) error {
@@ -83,14 +140,13 @@ func Validate(r Report, c Corpus) error {
 	if r.Schema != Schema {
 		return fmt.Errorf("schema: got %q", r.Schema)
 	}
-	if r.CorpusID != c.ID {
+	if r.CorpusID != c.ID || r.CorpusSHA256 != CorpusDigest(c) {
 		return errors.New("corpus drift")
 	}
 	if !contains(RequiredArms, r.Arm) {
 		return fmt.Errorf("unknown arm %q", r.Arm)
 	}
-	missing := missingIdentity(r.Identity)
-	if len(missing) != 0 {
+	if missing := missingIdentity(r.Identity); len(missing) != 0 {
 		return fmt.Errorf("missing immutable identity: %s", strings.Join(missing, ", "))
 	}
 	if len(r.Environment.Command) == 0 || r.Environment.Command[0] == "" {
@@ -108,88 +164,64 @@ func Validate(r Report, c Corpus) error {
 	if r.StaleAfter == "" || r.RollbackThreshold == "" {
 		return errors.New("missing lifecycle boundary")
 	}
-	counts := map[string]map[int]bool{}
-	qualityPass := true
-	for _, t := range r.Trials {
-		if !contains(c.Workloads, t.Workload) {
-			return fmt.Errorf("unknown workload %q", t.Workload)
-		}
-		if t.Repetition < 1 {
-			return errors.New("invalid repetition")
-		}
-		if t.Quality != "PASS" && t.Quality != "FAIL" {
-			return errors.New("quality must be PASS or FAIL")
-		}
-		if t.Quality == "FAIL" {
-			qualityPass = false
-			if t.Failure == "" {
-				return errors.New("failed trial missing retained failure")
-			}
-		}
-		if counts[t.Workload] == nil {
-			counts[t.Workload] = map[int]bool{}
-		}
-		if counts[t.Workload][t.Repetition] {
-			return errors.New("duplicate repetition")
-		}
-		counts[t.Workload][t.Repetition] = true
-	}
-	for _, w := range c.Workloads {
-		if len(counts[w]) < 3 {
-			return fmt.Errorf("fewer than three repeats for %s", w)
-		}
-	}
-	if !qualityPass && r.Verdict == "PROMOTE" {
-		return errors.New("performance promotion attached to failing quality")
+	if r.EvidenceClass != "CAMPAIGN" {
+		return errors.New("acceptance evidence cannot satisfy campaign")
 	}
 	if r.Verdict != "PROMOTE" && r.Verdict != "HOLD" && r.Verdict != "EXCLUDE" {
 		return errors.New("invalid verdict")
 	}
-	if r.EvidenceClass != "CAMPAIGN" {
-		return errors.New("campaign report must declare CAMPAIGN evidence")
+	counts, failed := map[string]map[int]bool{}, false
+	for _, w := range c.Workloads {
+		counts[w] = map[int]bool{}
+	}
+	for _, t := range r.Trials {
+		if _, ok := counts[t.Workload]; !ok || t.Repetition <= 0 || counts[t.Workload][t.Repetition] {
+			return errors.New("invalid or duplicate trial")
+		}
+		counts[t.Workload][t.Repetition] = true
+		if t.Quality != "PASS" {
+			failed = true
+			if t.Failure == "" {
+				return errors.New("failed trial not retained")
+			}
+		}
+	}
+	for w, reps := range counts {
+		if len(reps) < c.MinimumRepetitions {
+			return fmt.Errorf("workload %s has fewer than %d repetitions", w, c.MinimumRepetitions)
+		}
+	}
+	if failed && r.Verdict == "PROMOTE" {
+		return errors.New("quality failure cannot be promoted")
 	}
 	return nil
 }
 
+func CorpusDigest(c Corpus) string {
+	b, _ := json.Marshal(c)
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:])
+}
+
 func LegacyAcceptance(arm, corpusID, model string, latencies []float64) Report {
-	trials := make([]Trial, 0, len(latencies))
-	legacy := []string{"text", "json_schema", "correlated_tools"}
-	for i, ms := range latencies {
-		if i >= len(legacy) {
-			break
-		}
-		trials = append(trials, Trial{Workload: legacy[i], Repetition: 1, Quality: "PASS", LatencyMS: ms})
+	r := Report{Schema: Schema, CorpusID: corpusID, Arm: arm, Identity: Identity{Model: model}, Verdict: "HOLD", EvidenceClass: "ACCEPTANCE_ONLY"}
+	for n, ms := range latencies {
+		r.Trials = append(r.Trials, Trial{Workload: RequiredWorkloads[n%len(RequiredWorkloads)], Repetition: 1, Quality: "PASS", LatencyMS: ms})
 	}
-	return Report{Schema: Schema, CorpusID: corpusID, Arm: arm, Identity: Identity{Model: model}, Trials: trials, Verdict: "HOLD", EvidenceClass: "ACCEPTANCE_ONLY"}
+	return r
 }
 
 func Selfcheck() error {
-	c := DefaultCorpus()
-	if err := c.Validate(); err != nil {
-		return err
-	}
-	for _, arm := range []string{"fp8", "q4_k_m"} {
-		r := LegacyAcceptance(arm, c.ID, "Qwen3.8-27B", []float64{1, 2, 3})
-		if r.Verdict != "HOLD" || r.EvidenceClass != "ACCEPTANCE_ONLY" {
-			return errors.New("legacy import promoted")
-		}
-		if Validate(r, c) == nil {
-			return errors.New("acceptance-only evidence passed campaign validation")
-		}
-	}
+	c := testCorpus()
 	good := validFixture(c)
 	if err := Validate(good, c); err != nil {
 		return fmt.Errorf("valid fixture: %w", err)
 	}
-	mutations := []func(*Report){
-		func(r *Report) { r.CorpusID = "drift" }, func(r *Report) { r.Identity.ArtifactSHA256 = "" },
-		func(r *Report) { r.Environment.DenyFallback = false }, func(r *Report) { r.Trials = r.Trials[:len(r.Trials)-1] },
-		func(r *Report) {
-			r.Trials[0].Quality = "FAIL"
-			r.Trials[0].Failure = "quality regression"
-			r.Verdict = "PROMOTE"
-		},
-	}
+	mutations := []func(*Report){func(r *Report) { r.CorpusID = "drift" }, func(r *Report) { r.Identity.ArtifactSHA256 = "" }, func(r *Report) { r.Environment.DenyFallback = false }, func(r *Report) { r.Trials = r.Trials[:len(r.Trials)-1] }, func(r *Report) {
+		r.Trials[0].Quality = "FAIL"
+		r.Trials[0].Failure = "quality regression"
+		r.Verdict = "PROMOTE"
+	}}
 	for i, mutate := range mutations {
 		r := validFixture(c)
 		mutate(&r)
@@ -200,24 +232,46 @@ func Selfcheck() error {
 	return nil
 }
 
+func testCorpus() Corpus {
+	fixtures := make([]Fixture, 0, len(RequiredWorkloads))
+	for _, w := range RequiredWorkloads {
+		f := Fixture{ID: w + "-v1", Workload: w, Prompt: "fixture", ExpectedExact: "ok", MaxOutputTokens: 8}
+		switch w {
+		case "json_schema":
+			f.JSONSchema = map[string]any{"type": "object"}
+			f.ExpectedJSON = map[string]any{"ok": true}
+			f.ExpectedExact = ""
+		case "correlated_tools":
+			f.Tools = []map[string]any{{"type": "function"}}
+			f.ExpectedTool = map[string]any{"name": "x"}
+			f.ExpectedExact = ""
+		case "long_context_retrieval":
+			f.Generator = map[string]any{"kind": "records"}
+			f.MinimumContextTokens = 16
+		case "repeated_workflow_cache":
+			f.CacheSequence = []string{"cold", "warm", "restart"}
+			f.RequiredCacheEvidence = []string{"saved"}
+		}
+		fixtures = append(fixtures, f)
+	}
+	return Corpus{Schema: "fak.qwen38-quant-corpus/1", ID: "qwen38-27b-agentic-v1", ModelFamily: "Qwen3.8-27B", Arms: append([]string(nil), RequiredArms...), Workloads: append([]string(nil), RequiredWorkloads...), MinimumRepetitions: 3, QualityPrecedesPerformance: true, Fixtures: fixtures}
+}
+func DefaultCorpus() Corpus { return testCorpus() }
+
 func validFixture(c Corpus) Report {
 	h := strings.Repeat("a", 64)
-	trials := []Trial{}
+	var trials []Trial
 	for _, w := range c.Workloads {
-		for n := 1; n <= 3; n++ {
+		for n := 1; n <= c.MinimumRepetitions; n++ {
 			trials = append(trials, Trial{Workload: w, Repetition: n, Quality: "PASS", LatencyMS: float64(n)})
 		}
 	}
-	return Report{Schema: Schema, CorpusID: c.ID, Arm: "q4_k_m", Identity: Identity{Model: "Qwen/Qwen3.8-27B", CheckpointSHA256: h, ArtifactSHA256: h, TokenizerSHA256: h, TemplateSHA256: h, QuantizerRevision: "q@rev", RuntimeRevision: "r@rev", FakModuleRev: "internal/model@r1+gabc"}, Environment: Environment{Command: []string{"fak", "serve"}, Hardware: "A100", Software: "CUDA", ContextTokens: 16384, CacheMode: "on", RequireDevice: "cuda", DenyFallback: true}, Trials: trials, Verdict: "PROMOTE", EvidenceClass: "CAMPAIGN", RawArchiveSHA256: h, StaleAfter: "2026-11-20", RollbackThreshold: "quality pass rate below 100%"}
+	return Report{Schema: Schema, CorpusID: c.ID, CorpusSHA256: CorpusDigest(c), Arm: "q4_k_m", Identity: Identity{Model: "Qwen/Qwen3.8-27B", CheckpointSHA256: h, ArtifactSHA256: h, TokenizerSHA256: h, TemplateSHA256: h, QuantizerRevision: "q@rev", RuntimeRevision: "r@rev", FakModuleRev: "internal/model@r1+gabc"}, Environment: Environment{Command: []string{"fak", "serve"}, Hardware: "A100", Software: "CUDA", ContextTokens: 16384, CacheMode: "on", RequireDevice: "cuda", DenyFallback: true}, Trials: trials, Verdict: "PROMOTE", EvidenceClass: "CAMPAIGN", RawArchiveSHA256: h, StaleAfter: "2026-11-20", RollbackThreshold: "quality pass rate below 100%"}
 }
 
-func CorpusDigest(c Corpus) string {
-	h := sha256.Sum256([]byte(c.Schema + "\n" + c.ID + "\n" + strings.Join(c.Workloads, "\n")))
-	return hex.EncodeToString(h[:])
-}
 func missingIdentity(i Identity) []string {
 	vals := map[string]string{"model": i.Model, "checkpoint_sha256": i.CheckpointSHA256, "artifact_sha256": i.ArtifactSHA256, "tokenizer_sha256": i.TokenizerSHA256, "template_sha256": i.TemplateSHA256, "quantizer_revision": i.QuantizerRevision, "runtime_revision": i.RuntimeRevision, "fak_module_rev": i.FakModuleRev}
-	out := []string{}
+	var out []string
 	for k, v := range vals {
 		if v == "" || strings.HasSuffix(k, "sha256") && !validHash(v) {
 			out = append(out, k)

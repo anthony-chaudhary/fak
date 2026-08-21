@@ -5,5 +5,55 @@
   "arms": ["bf16", "fp8", "q8_0", "q6_k", "q5_k_m", "q4_k_m", "iq4_xs", "awq_int4", "gptq_int4", "exl2"],
   "workloads": ["text", "json_schema", "correlated_tools", "coding_reasoning", "long_context_retrieval", "repeated_workflow_cache"],
   "minimum_repetitions_per_workload": 3,
-  "quality_precedes_performance": true
+  "quality_precedes_performance": true,
+  "fixtures": [
+    {
+      "id": "text-exact-q38-v1",
+      "workload": "text",
+      "prompt": "Reply with exactly Q38",
+      "expected_exact": "Q38",
+      "max_output_tokens": 16
+    },
+    {
+      "id": "json-release-v1",
+      "workload": "json_schema",
+      "prompt": "Return the release record for version 3 with ready true. Use only the required JSON object.",
+      "json_schema": {"type":"object","properties":{"version":{"type":"integer"},"ready":{"type":"boolean"}},"required":["version","ready"],"additionalProperties":false},
+      "expected_json": {"version":3,"ready":true},
+      "max_output_tokens": 64
+    },
+    {
+      "id": "tool-ticket-314-v1",
+      "workload": "correlated_tools",
+      "prompt": "Look up ticket 314 using the provided tool. Do not answer from memory.",
+      "tools": [{"type":"function","function":{"name":"lookup_ticket","description":"Look up one ticket","parameters":{"type":"object","properties":{"ticket_id":{"type":"integer"}},"required":["ticket_id"],"additionalProperties":false}}}],
+      "expected_tool": {"name":"lookup_ticket","arguments":{"ticket_id":314}},
+      "max_output_tokens": 64
+    },
+    {
+      "id": "coding-fib-v1",
+      "workload": "coding_reasoning",
+      "prompt": "A Go function fib(n int) must return the nth Fibonacci number with fib(0)=0 and fib(1)=1. For n=10, reply with only the decimal result.",
+      "expected_exact": "55",
+      "max_output_tokens": 32
+    },
+    {
+      "id": "long-context-needle-v1",
+      "workload": "long_context_retrieval",
+      "prompt": "Read the generated records and reply with only the secret in record 1537.",
+      "generator": {"kind":"numbered_records_v1","records":2048,"needle_record":1537,"needle":"ORCHID-7319","filler":"record-%04d: ordinary telemetry value %04d"},
+      "expected_exact": "ORCHID-7319",
+      "minimum_context_tokens": 16384,
+      "max_output_tokens": 32
+    },
+    {
+      "id": "cache-prefix-v1",
+      "workload": "repeated_workflow_cache",
+      "prompt": "Given the shared workflow prefix, reply with only the checksum token: CACHE-2048.",
+      "expected_exact": "CACHE-2048",
+      "cache_sequence": ["cold", "warm", "warm_after_restart"],
+      "required_cache_evidence": ["cold_input_tokens", "warm_input_tokens", "cache_saved_token_equiv", "restart_readiness"],
+      "max_output_tokens": 32
+    }
+  ]
 }
