@@ -14,6 +14,10 @@ func TestRunAllFixturesAndRepetitions(t *testing.T) {
 	c := qwen38quant.DefaultCorpus()
 	calls := 0
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"id": "exact"}}})
+			return
+		}
 		calls++
 		if r.Header.Get("Authorization") != "Bearer secret" {
 			t.Error("missing auth")
@@ -54,7 +58,11 @@ func TestRunAllFixturesAndRepetitions(t *testing.T) {
 func TestFailureRetained(t *testing.T) {
 	c := qwen38quant.DefaultCorpus()
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": "wrong"}}}})
+		if r.URL.Path == "/v1/models" {
+			json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"id": "exact"}}})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"model": "exact", "choices": []any{map[string]any{"message": map[string]any{"content": "wrong"}}}})
 	}))
 	defer s.Close()
 	got, err := (Runner{}).Run(context.Background(), Config{Endpoint: s.URL, APIKey: "x", Model: "exact"}, c)
@@ -78,4 +86,20 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func TestModelIdentityMismatchDeniedBeforeMeasurement(t *testing.T) {
+	chatCalls := 0
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"id": "substitute"}}})
+			return
+		}
+		chatCalls++
+	}))
+	defer s.Close()
+	_, err := (Runner{}).Run(context.Background(), Config{Endpoint: s.URL, APIKey: "secret", Model: "exact"}, qwen38quant.DefaultCorpus())
+	if err == nil || !contains(err.Error(), "exact model") || chatCalls != 0 {
+		t.Fatalf("err=%v chatCalls=%d", err, chatCalls)
+	}
 }

@@ -20,24 +20,35 @@ type Config struct {
 	Endpoint, APIKey, Model string
 	Repetitions             int
 	Timeout                 time.Duration
+	BeforeTrial             func(context.Context, qwen38quant.Fixture, int) error
+	Sample                  func(context.Context) (ResourceSample, error)
+}
+
+type ResourceSample struct {
+	MemoryBytes uint64  `json:"memory_bytes,omitempty"`
+	PowerWatts  float64 `json:"power_watts,omitempty"`
 }
 
 type Result struct {
-	FixtureID string         `json:"fixture_id"`
-	Workload  string         `json:"workload"`
-	Repeat    int            `json:"repeat"`
-	LatencyMS float64        `json:"latency_ms"`
-	Usage     map[string]int `json:"usage,omitempty"`
-	Quality   string         `json:"quality"`
-	Failure   string         `json:"failure,omitempty"`
-	Output    string         `json:"output,omitempty"`
-	ToolName  string         `json:"tool_name,omitempty"`
-	ToolArgs  map[string]any `json:"tool_args,omitempty"`
+	FixtureID         string         `json:"fixture_id"`
+	Workload          string         `json:"workload"`
+	Repeat            int            `json:"repeat"`
+	LatencyMS         float64        `json:"latency_ms"`
+	Usage             map[string]int `json:"usage,omitempty"`
+	Quality           string         `json:"quality"`
+	Failure           string         `json:"failure,omitempty"`
+	Output            string         `json:"output,omitempty"`
+	ToolName          string         `json:"tool_name,omitempty"`
+	ToolArgs          map[string]any `json:"tool_args,omitempty"`
+	Phase             string         `json:"phase,omitempty"`
+	CachedInputTokens int            `json:"cached_input_tokens,omitempty"`
+	Resource          ResourceSample `json:"resource,omitempty"`
 }
 
 type Runner struct{ Client *http.Client }
 
 type chatResponse struct {
+	Model   string `json:"model"`
 	Choices []struct {
 		Message struct {
 			Content   string `json:"content"`
@@ -46,7 +57,10 @@ type chatResponse struct {
 			} `json:"tool_calls"`
 		} `json:"message"`
 	} `json:"choices"`
-	Usage map[string]int `json:"usage"`
+	Usage        map[string]int `json:"usage"`
+	UsageDetails struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
 }
 
 func (r Runner) Run(ctx context.Context, cfg Config, corpus qwen38quant.Corpus) ([]Result, error) {
@@ -70,10 +84,23 @@ func (r Runner) Run(ctx context.Context, cfg Config, corpus qwen38quant.Corpus) 
 			client.Timeout = 10 * time.Minute
 		}
 	}
+	if err := preflightModel(ctx, client, cfg); err != nil {
+		return nil, err
+	}
 	var out []Result
 	for _, f := range corpus.Fixtures {
 		for n := 1; n <= reps; n++ {
 			res := Result{FixtureID: f.ID, Workload: f.Workload, Repeat: n, Quality: "FAIL"}
+			if f.Workload == "repeated_workflow_cache" {
+				res.Phase = cachePhase(f, n)
+			}
+			if cfg.BeforeTrial != nil {
+				if err := cfg.BeforeTrial(ctx, f, n); err != nil {
+					res.Failure = "before trial: " + err.Error()
+					out = append(out, res)
+					continue
+				}
+			}
 			start := time.Now()
 			resp, err := runOne(ctx, client, cfg, f)
 			res.LatencyMS = float64(time.Since(start).Microseconds()) / 1000
@@ -83,11 +110,66 @@ func (r Runner) Run(ctx context.Context, cfg Config, corpus qwen38quant.Corpus) 
 				continue
 			}
 			res.Usage = resp.Usage
+			res.CachedInputTokens = resp.UsageDetails.CachedTokens
+			if cfg.Sample != nil {
+				if sample, sampleErr := cfg.Sample(ctx); sampleErr == nil {
+					res.Resource = sample
+				} else {
+					res.Failure = "resource sample: " + sampleErr.Error()
+					out = append(out, res)
+					continue
+				}
+			}
 			grade(&res, f, resp)
 			out = append(out, res)
 		}
 	}
 	return out, nil
+}
+
+func preflightModel(ctx context.Context, client *http.Client, cfg Config) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(cfg.Endpoint, "/")+"/v1/models", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	rsp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("model identity preflight: %w", err)
+	}
+	defer rsp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(rsp.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	if rsp.StatusCode/100 != 2 {
+		return fmt.Errorf("model identity preflight HTTP %d", rsp.StatusCode)
+	}
+	var listing struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &listing); err != nil {
+		return fmt.Errorf("model identity preflight: %w", err)
+	}
+	matches := 0
+	for _, model := range listing.Data {
+		if model.ID == cfg.Model {
+			matches++
+		}
+	}
+	if matches != 1 {
+		return fmt.Errorf("model identity preflight: exact model %q occurred %d times", cfg.Model, matches)
+	}
+	return nil
+}
+
+func cachePhase(f qwen38quant.Fixture, repetition int) string {
+	if repetition <= len(f.CacheSequence) {
+		return f.CacheSequence[repetition-1]
+	}
+	return "warm"
 }
 
 func runOne(ctx context.Context, client *http.Client, cfg Config, f qwen38quant.Fixture) (chatResponse, error) {
@@ -119,6 +201,9 @@ func runOne(ctx context.Context, client *http.Client, cfg Config, f qwen38quant.
 	var out chatResponse
 	if err = json.Unmarshal(raw, &out); err != nil {
 		return out, err
+	}
+	if out.Model != "" && out.Model != cfg.Model {
+		return out, fmt.Errorf("response model mismatch: got %q want %q", out.Model, cfg.Model)
 	}
 	if len(out.Choices) == 0 {
 		return out, fmt.Errorf("response has no choices")
