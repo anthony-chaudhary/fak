@@ -41,6 +41,8 @@ func AdaptTokenUsage(provider string, raw json.RawMessage) (TokenUsage, error) {
 		classes, input, output, err = adaptOpenAIUsage(raw)
 	case "anthropic":
 		classes, input, output, err = adaptAnthropicUsage(raw)
+	case "gemini":
+		classes, input, output, err = adaptGeminiUsage(raw)
 	case "local":
 		classes, input, output, err = adaptLocalUsage(raw)
 	default:
@@ -125,6 +127,38 @@ func adaptAnthropicUsage(raw []byte) (map[TokenClass]int64, int64, int64, error)
 	}
 	input := u.Input + u.CacheRead + u.CacheWrite
 	return map[TokenClass]int64{inputFreshClass: u.Input, inputReadClass: u.CacheRead, inputWriteClass: u.CacheWrite, outputVisibleClass: u.Output}, input, u.Output, nil
+}
+
+// adaptGeminiUsage copies the inclusive prompt/cache semantics from Google's
+// generated GenerateContentResponseUsageMetadata contract. Tool-result tokens
+// are additional model input; thoughts are generated output distinct from the
+// visible candidates.
+func adaptGeminiUsage(raw []byte) (map[TokenClass]int64, int64, int64, error) {
+	var u struct {
+		PromptTokenCount        int64 `json:"promptTokenCount"`
+		CachedContentTokenCount int64 `json:"cachedContentTokenCount"`
+		ToolUsePromptTokenCount int64 `json:"toolUsePromptTokenCount"`
+		CandidatesTokenCount    int64 `json:"candidatesTokenCount"`
+		ThoughtsTokenCount      int64 `json:"thoughtsTokenCount"`
+		TotalTokenCount         int64 `json:"totalTokenCount"`
+	}
+	if err := json.Unmarshal(raw, &u); err != nil {
+		return nil, 0, 0, err
+	}
+	if u.CachedContentTokenCount > u.PromptTokenCount {
+		return nil, 0, 0, errors.New("token usage: Gemini cached content exceeds inclusive prompt total")
+	}
+	input := u.PromptTokenCount + u.ToolUsePromptTokenCount
+	output := u.CandidatesTokenCount + u.ThoughtsTokenCount
+	if u.TotalTokenCount != 0 && u.TotalTokenCount != input+output {
+		return nil, 0, 0, errors.New("token usage: Gemini total does not reconcile with generated SDK components")
+	}
+	return map[TokenClass]int64{
+		inputFreshClass:      u.PromptTokenCount - u.CachedContentTokenCount + u.ToolUsePromptTokenCount,
+		inputReadClass:       u.CachedContentTokenCount,
+		outputVisibleClass:   u.CandidatesTokenCount,
+		outputReasoningClass: u.ThoughtsTokenCount,
+	}, input, output, nil
 }
 
 func adaptLocalUsage(raw []byte) (map[TokenClass]int64, int64, int64, error) {

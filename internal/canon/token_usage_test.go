@@ -16,6 +16,7 @@ func TestAdaptTokenUsageFixturesReconcileAndPreserveNative(t *testing.T) {
 	}{
 		{"openai", map[TokenClass]int64{inputFreshClass: 45, inputReadClass: 40, inputWriteClass: 15, outputVisibleClass: 20, outputReasoningClass: 10}, 100, 30, "future_modality_tokens"},
 		{"anthropic", map[TokenClass]int64{inputFreshClass: 20, inputReadClass: 50, inputWriteClass: 5, outputVisibleClass: 11}, 75, 11, "future_cache_tier"},
+		{"gemini", map[TokenClass]int64{inputFreshClass: 45, inputReadClass: 60, outputVisibleClass: 20, outputReasoningClass: 10}, 105, 30, "future_cache_region"},
 		{"local", map[TokenClass]int64{inputFreshClass: 17, outputVisibleClass: 9}, 17, 9, "native_extra"},
 	}
 	for _, tt := range tests {
@@ -75,6 +76,21 @@ func TestAdaptTokenUsageRejectsOverlappingOpenAICacheDetails(t *testing.T) {
 		t.Fatal("expected inclusive cache detail overflow refusal")
 	}
 }
+
+func TestAdaptTokenUsageRejectsGeminiCachedContentAbovePrompt(t *testing.T) {
+	_, err := AdaptTokenUsage("gemini", json.RawMessage(`{"promptTokenCount":2,"cachedContentTokenCount":3,"totalTokenCount":2}`))
+	if err == nil {
+		t.Fatal("expected inclusive cached-content overflow refusal")
+	}
+}
+
+func TestAdaptTokenUsageRejectsInconsistentGeminiTotal(t *testing.T) {
+	_, err := AdaptTokenUsage("gemini", json.RawMessage(`{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":4}`))
+	if err == nil {
+		t.Fatal("expected generated component total mismatch refusal")
+	}
+}
+
 func TestAdaptTokenUsageRejectsUnknownProviderWithoutLosingContract(t *testing.T) {
 	_, err := AdaptTokenUsage("mystery", json.RawMessage(`{"input_tokens":1}`))
 	if err == nil {

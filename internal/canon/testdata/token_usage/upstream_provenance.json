@@ -20,6 +20,16 @@
       "symbols": ["Usage"],
       "license": "MIT",
       "reuse": "The cache creation/read JSON field names and usage semantics are copied from the generated SDK contract. fak maps them into provider-independent context/cache token classes and retains the native receipt."
+    },
+    {
+      "provider": "gemini",
+      "repository": "https://github.com/googleapis/go-genai",
+      "revision": "fbdae87185987c7fc1abbe9e0b023c614bc8dc3b",
+      "version": "v1.69.0",
+      "source_path": "types.go",
+      "symbols": ["GenerateContentResponseUsageMetadata", "ModalityTokenCount"],
+      "license": "Apache-2.0",
+      "reuse": "The generated SDK field names and inclusive effective-prompt semantics are copied directly. fak subtracts cached content from the inclusive prompt, adds tool-result input, separates visible candidates from thoughts, reconciles the explicit total, and retains the native receipt."
     }
   ]
 }

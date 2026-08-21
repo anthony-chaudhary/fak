@@ -34,8 +34,8 @@ func TestTokenUsageProviderBaselinesArePinned(t *testing.T) {
 	if manifest.Schema != "fak/provider-baseline-provenance/v1" || manifest.RetrievedAt == "" {
 		t.Fatalf("incomplete provider baseline manifest: %+v", manifest)
 	}
-	if len(manifest.Sources) < 2 {
-		t.Fatalf("sources=%d want at least OpenAI and Anthropic", len(manifest.Sources))
+	if len(manifest.Sources) < 3 {
+		t.Fatalf("sources=%d want OpenAI, Anthropic, and Gemini", len(manifest.Sources))
 	}
 	seen := make(map[string]bool)
 	for _, source := range manifest.Sources {
@@ -44,7 +44,7 @@ func TestTokenUsageProviderBaselinesArePinned(t *testing.T) {
 		}
 		seen[source.Provider] = true
 	}
-	for _, provider := range []string{"openai", "anthropic"} {
+	for _, provider := range []string{"openai", "anthropic", "gemini"} {
 		if !seen[provider] {
 			t.Errorf("missing %s baseline", provider)
 		}
