@@ -1204,3 +1204,19 @@ fak vcache session-history benchmark [--sizes 1000,10000,100000] [--repetitions 
 ```
 
 Use `--json` on the query form for machine-readable rows. `--min-errors` must be non-negative and `--limit` must be at least one.
+
+## `fak value-chain audit`
+
+Attribute stack-stage changes to measured outcomes while keeping missing cost absent:
+
+```text
+fak value-chain audit --manifest M --observations O [--json]
+```
+
+The fixture-backed offline witness is:
+
+```bash
+fak value-chain audit --manifest examples/value-chain/support-manifest.json --observations examples/value-chain/support-observations.json --selfcheck --expect examples/value-chain/support-witness.txt
+```
+
+`--selfcheck` compares the rendered report with `--expect`; it requires both flags and exits non-zero on any mismatch.
