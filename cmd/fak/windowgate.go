@@ -85,12 +85,20 @@ func runWindowgate(stdout, stderr io.Writer, argv []string) int {
 	visibleWindows := fs.Bool("visible-windows", false, "also audit currently visible top-level windows")
 	liveProcesses := fs.Bool("live-processes", false, "also audit live console-prone helper processes")
 	selfcheck := fs.Bool("selfcheck", false, "launch representative Codex descendants and prove their Windows consoles stay hidden")
+	soakRuns := fs.Int("soak", 0, "repeat the normal-executable selfcheck N times (max 1000)")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintf(stderr, "fak windowgate: unexpected argument %q\n", fs.Arg(0))
 		return 2
+	}
+	if *soakRuns < 0 || *soakRuns > maxDesktopConsoleSoakRuns {
+		fmt.Fprintf(stderr, "fak windowgate: --soak must be between 0 and %d\n", maxDesktopConsoleSoakRuns)
+		return 2
+	}
+	if *soakRuns > 0 {
+		return runDesktopConsoleSoak(stdout, stderr, *asJSON, *soakRuns)
 	}
 	if *selfcheck {
 		return runDesktopConsoleSelfcheck(stdout, stderr, *asJSON)

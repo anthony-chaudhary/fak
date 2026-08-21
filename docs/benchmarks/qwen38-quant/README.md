@@ -24,6 +24,37 @@ post-warmup repetitions. Quality is evaluated first. A failed quality trial can
 produce `HOLD` or `EXCLUDE`, never `PROMOTE`; performance from such a run is not
 a production gain.
 
+## Production soak
+
+`qwen38campaign --soak` extends that campaign contract across at least three
+finalists. Each finalist must run the frozen six-family corpus three times plus
+the 30 exact-effect coding tasks built into `qwen38quantrun`. The soak also
+captures context-pressure, malformed-request, cancellation, restart, and cache-
+recovery outcomes with independent identity, residency, and no-fallback
+readback. The report records coding latency/throughput, peak memory/power, cache
+latency delta, per-arm archive hashes, an overall raw-archive hash, verdict, and
+rollback threshold.
+
+The file-backed adapter refuses inline API keys and missing observation or
+lifecycle commands. Keys are named through `api_key_env`; command fields are
+argv arrays and are never passed through a shell:
+
+```console
+qwen38campaign --soak --config soak.json --corpus docs/benchmarks/qwen38-quant/corpus.json --report report.json --archive archive.json
+```
+
+A restart command must drain the server's entire process group and prove the
+old endpoint is down before starting its replacement. Waiting for only the API
+parent PID can leave tensor-parallel workers alive; a readiness probe may then
+mistake the stale endpoint for the replacement and corrupt the cache-recovery
+witness.
+
+`qwen38quantrun.ValidateSoakReport` rejects fewer than three unique arms, task
+drift, incomplete scenario readback, invalid campaign reports, missing metrics
+or hashes, and a `PROMOTE` verdict without a fully passing selected arm.
+`ValidateSoakArtifacts` additionally binds the supplied raw archive, every arm
+archive, and every embedded frozen-corpus campaign to those hashes and results.
+
 ## Existing evidence
 
 The 2026-08-19 official FP8 TP2 and native CUDA Q4_K_M artifacts remain useful

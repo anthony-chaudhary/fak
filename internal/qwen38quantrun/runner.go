@@ -143,7 +143,7 @@ func (r Runner) Run(ctx context.Context, cfg Config, corpus qwen38quant.Corpus) 
 			}
 			start := time.Now()
 			resp, err := runOne(ctx, client, cfg, f)
-			res.LatencyMS = float64(time.Since(start).Microseconds()) / 1000
+			res.LatencyMS = float64(time.Since(start).Nanoseconds()) / float64(time.Millisecond)
 			if err != nil {
 				res.Failure = err.Error()
 				out = append(out, res)
