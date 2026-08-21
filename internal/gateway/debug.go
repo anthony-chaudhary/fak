@@ -628,6 +628,8 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 	upstream.ProviderExtraBodySet, upstream.ProviderExtraBodyKeys = debugProviderExtraBody(s.planner)
 	modelLoad := debugModelLoadProfile(s.modelLoadProfile())
 	startupReport := s.startupReportText()
+	adjudication := m.adjudicationSummary()
+	observation := s.buildObservationSnapshot(ctx, now, adjudication, c.VDSOHits, m.servedInlineSnapshot())
 
 	return debugVarsResponse{
 		Gateway: debugGatewayVars{
@@ -664,9 +666,9 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		Inference:        inferenceVarsFromSnapshot(infer, inflightMaxAge),
 		Upstream:         upstream,
 		VCache:           vcacheVarsFromSnapshot(infer),
-		CacheAttribution: cacheAttributionVars(m.adjudicationSummary(), c.VDSOHits, m.servedInlineSnapshot()),
-		ManagedCache:     managedCacheVars(s.cacheTTL1H, s.provider, m.adjudicationSummary()),
-		TokenSavings:     s.tokenSavingsVars(m.adjudicationSummary()),
+		CacheAttribution: observation.CacheAttribution,
+		ManagedCache:     observation.ManagedCache,
+		TokenSavings:     s.tokenSavingsVars(adjudication),
 		ShrinkLevers: shrinkLeverVars(s.anthropicPassthrough(), s.dualRoutesLocalModels(), s.provider,
 			s.compactHistoryBudget, s.elideStaleReads, s.deferColdTools),
 		VCacheFamilies:   vcacheFamiliesVars(vcacheTurns, vcacheCapped),
@@ -678,12 +680,12 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		KVMemory:         debugKVMemory(s.planner),
 		RequestMemory:    debugRequestMemory(s.planner),
 		MoEResidency:     debugMoEResidency(s.planner),
-		Sessions:         s.debugSessions(ctx, now),
+		Sessions:         observation.Sessions,
 		Assumptions:      s.debugAssumptions(ctx),
 		ContextQueries:   s.contextQueryAuditSnapshot(),
 		Endpoints:        s.debugEndpoints(),
 		Adjudication:     s.debugAdjudication(),
-		Harness:          s.debugHarness(),
+		Harness:          observation.Harness,
 		Fleet:            s.debugFleet(),
 		StartupReport:    startupReport,
 		Watchdog:         debugWatchdogVars(),

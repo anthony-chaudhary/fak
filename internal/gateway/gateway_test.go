@@ -661,11 +661,11 @@ func TestHTTPAuth(t *testing.T) {
 }
 
 // TestMetricsAndVarsLoopbackExempt pins the auth posture for the read-only
-// observability surface: on an authenticated gateway /metrics and /debug/vars
-// are reachable WITHOUT a token from loopback (so a panel link opens from the
-// host / an SSH tunnel) but still require the bearer from a remote peer (so the
-// counters are never exposed off-box). Driven through the real Handler so the
-// withAuth middleware is exercised, not bypassed.
+// observability surface: on an authenticated gateway /metrics, /debug/vars, and
+// /v1/fak/observation are reachable WITHOUT a token from loopback (so a panel
+// link opens from the host / an SSH tunnel) but still require the bearer from a
+// remote peer (so the counters are never exposed off-box). Driven through the
+// real Handler so the withAuth middleware is exercised, not bypassed.
 func TestMetricsAndVarsLoopbackExempt(t *testing.T) {
 	srv, err := New(Config{EngineID: "test", Model: "m", RequireKey: "sekret"})
 	if err != nil {
@@ -673,7 +673,7 @@ func TestMetricsAndVarsLoopbackExempt(t *testing.T) {
 	}
 	h := srv.Handler()
 
-	for _, path := range []string{"/metrics", "/debug/vars"} {
+	for _, path := range []string{"/metrics", "/debug/vars", "/v1/fak/observation"} {
 		// Loopback peer, no token -> allowed.
 		loop := httptest.NewRecorder()
 		rl := httptest.NewRequest("GET", path, nil)
@@ -704,7 +704,7 @@ func TestMetricsAndVarsLoopbackExempt(t *testing.T) {
 	}
 
 	// A non-exempt route from loopback still needs the token (the exemption is
-	// scoped to the two observability paths, not "anything from localhost").
+	// scoped to the observability paths, not "anything from localhost").
 	guarded := httptest.NewRecorder()
 	rg := httptest.NewRequest("GET", "/v1/models", nil)
 	rg.RemoteAddr = "127.0.0.1:54322"

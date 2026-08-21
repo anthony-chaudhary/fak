@@ -27,7 +27,7 @@ func newReadBearerServer(t *testing.T) *Server {
 
 func TestReadBearerGrantsReadEndpointsOffLoopback(t *testing.T) {
 	h := newReadBearerServer(t).Handler()
-	for _, path := range []string{"/debug/vars", "/metrics"} {
+	for _, path := range []string{"/debug/vars", "/metrics", "/v1/fak/observation"} {
 		// Without ANY credential a non-loopback caller is rejected.
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))

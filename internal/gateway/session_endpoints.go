@@ -1,5 +1,11 @@
 package gateway
 
+import (
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/guardvars"
+)
+
 // session_endpoints.go — the live "who + where" of a guarded session, exposed on
 // /debug/vars so an operator pane can show which Claude ACCOUNTS and which serving
 // NODES the session is actually using (fak guard, epic "status area"). The gateway
@@ -106,6 +112,18 @@ type SessionHarness struct {
 	HaveGPU            bool    `json:"have_gpu,omitempty"`
 }
 
+// SessionHarnessObservation is the typed pull result used by
+// /v1/fak/observation. Availability distinguishes an observed sample from an
+// empty, stale, unavailable, or unsupported source without exposing process
+// payloads. ObservedAt and Revision are optional source clocks; the gateway
+// supplies the HTTP snapshot boundary when both are absent.
+type SessionHarnessObservation struct {
+	Snapshot     SessionHarness
+	Availability guardvars.Availability
+	ObservedAt   time.Time
+	Revision     string
+}
+
 // SetSessionHarnessProvider installs the pull source for the live harness-resource
 // /debug/vars block. fak guard wires it to its running *harnessres.Sampler (converted
 // to a SessionHarness per scrape); the default serve path leaves it unset so the block
@@ -115,26 +133,71 @@ func (s *Server) SetSessionHarnessProvider(fn func() SessionHarness) {
 		return
 	}
 	s.harnessSnapshotMu.Lock()
+	if fn == nil {
+		s.harnessSnapshotProvider = nil
+	} else {
+		s.harnessSnapshotProvider = func() SessionHarnessObservation {
+			snapshot := fn()
+			availability := guardvars.AvailabilityObserved
+			if snapshot.Samples <= 0 {
+				availability = guardvars.AvailabilityEmpty
+			}
+			return SessionHarnessObservation{
+				Snapshot:     snapshot,
+				Availability: availability,
+			}
+		}
+	}
+	s.harnessSnapshotMu.Unlock()
+}
+
+// SetSessionHarnessObservationProvider installs the status-aware harness pull
+// source used by /v1/fak/observation. It is the richer sibling of
+// SetSessionHarnessProvider: hosts that can distinguish a stale sample from a
+// failed or unsupported sampler can report that state directly. The legacy
+// /debug/vars block still emits only an OBSERVED sample.
+func (s *Server) SetSessionHarnessObservationProvider(fn func() SessionHarnessObservation) {
+	if s == nil {
+		return
+	}
+	s.harnessSnapshotMu.Lock()
 	s.harnessSnapshotProvider = fn
 	s.harnessSnapshotMu.Unlock()
+}
+
+// sessionHarnessObservation pulls the typed harness-source result. ok is false
+// only when no provider is configured; the caller owns status normalization and
+// panic containment so one bad optional source cannot fail the whole snapshot.
+func (s *Server) sessionHarnessObservation() (SessionHarnessObservation, bool) {
+	if s == nil {
+		return SessionHarnessObservation{}, false
+	}
+	s.harnessSnapshotMu.Lock()
+	fn := s.harnessSnapshotProvider
+	s.harnessSnapshotMu.Unlock()
+	if fn == nil {
+		return SessionHarnessObservation{}, false
+	}
+	return fn(), true
 }
 
 // sessionHarness pulls the current harness snapshot for /debug/vars. ok is false when
 // no provider is set or nothing has been sampled yet, so the block is omitted rather
 // than emitted all-zero.
 func (s *Server) sessionHarness() (SessionHarness, bool) {
-	if s == nil {
+	observation, ok := s.sessionHarnessObservation()
+	if !ok {
 		return SessionHarness{}, false
 	}
-	s.harnessSnapshotMu.Lock()
-	fn := s.harnessSnapshotProvider
-	s.harnessSnapshotMu.Unlock()
-	if fn == nil {
+	availability := observation.Availability
+	if availability == "" {
+		availability = guardvars.AvailabilityObserved
+		if observation.Snapshot.Samples <= 0 {
+			availability = guardvars.AvailabilityEmpty
+		}
+	}
+	if availability != guardvars.AvailabilityObserved || observation.Snapshot.Samples <= 0 {
 		return SessionHarness{}, false
 	}
-	h := fn()
-	if h.Samples <= 0 {
-		return SessionHarness{}, false
-	}
-	return h, true
+	return observation.Snapshot, true
 }

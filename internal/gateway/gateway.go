@@ -1268,7 +1268,8 @@ type Server struct {
 	model           string
 	requireKey      string
 	// readBearer is the read-scoped observability bearer (Config.ReadBearer): accepted
-	// ONLY on /healthz, /debug/vars, /metrics, never on a mutating route.
+	// ONLY on the diagnostic reads (/debug/vars, /metrics, /v1/fak/observation),
+	// never on a mutating route.
 	readBearer string
 	// keyset binds additional api keys to org/project isolation principals
 	// (Config.KeyPrincipals, #5332), matched in withAuth by a constant-time digest
@@ -1396,11 +1397,12 @@ type Server struct {
 	endpointsProvider func() SessionEndpoints
 
 	// harnessSnapshotProvider is the optional pull source for the live harness-resource
-	// block on /debug/vars (kernel/agent CPU/RSS/IO/net/GPU) — a structured twin of the
-	// /metrics-only SetHarnessMetricsProvider. nil on the default serve path. Guarded by
-	// harnessSnapshotMu. See session_endpoints.go.
+	// block on /debug/vars and /v1/fak/observation (kernel/agent CPU/RSS/IO/net/GPU).
+	// The typed observation form can report empty/stale/unavailable without collapsing
+	// those states into omission; the legacy debug block remains observed-data only.
+	// nil on the default serve path. Guarded by harnessSnapshotMu. See session_endpoints.go.
 	harnessSnapshotMu       sync.Mutex
-	harnessSnapshotProvider func() SessionHarness
+	harnessSnapshotProvider func() SessionHarnessObservation
 
 	// sessionFleetProvider is the optional pull source for the live cross-machine fleet
 	// block on /debug/vars (the "fleet" block). fak guard wires it to its TTL-cached

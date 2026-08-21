@@ -117,6 +117,10 @@ func (s *Server) routeTable() []gatewayRoute {
 		// every live session's drive state. Registered distinctly from the singular
 		// /v1/fak/session/ subtree, so a single-id request never lands here.
 		{"/v1/fak/sessions", s.handleFakSessions},
+		// /v1/fak/observation is the versioned aggregate diagnostic read: one
+		// point-in-time set of typed source envelopes for sessions, cache
+		// attribution, managed-cache posture, and harness resources.
+		{"/v1/fak/observation", s.handleFakObservation},
 		{"/v1/fak/fleet", s.handleFakFleet},
 		// /v1/fak/tasks is the read-only process task-manager snapshot. Inert (404)
 		// unless a host installs a provider via SetTasksSnapshotProvider and the
@@ -179,8 +183,9 @@ func (s *Server) routeTable() []gatewayRoute {
 // (/v1/chat/completions, /v1/embeddings, /v1/moderations, /v1/models), the
 // Anthropic Messages and native Gemini surfaces, the fak-native
 // syscall/adjudicate JSON endpoints, policy reload, Prometheus metrics
-// (/metrics), expvar-style diagnostics (/debug/vars), MCP-over-HTTP (/mcp), and
-// an unauthenticated health check (/healthz).
+// (/metrics), expvar-style diagnostics (/debug/vars), the typed aggregate
+// observation (/v1/fak/observation), MCP-over-HTTP (/mcp), and an
+// unauthenticated health check (/healthz).
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	for _, rt := range s.routeTable() {
@@ -409,13 +414,13 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 //   - /healthz is ALWAYS exempt — it is the unauthenticated liveness probe a
 //     load balancer or a `fak claude-mac-fak --debug` preflight hits before it
 //     holds a token, and it carries only the planner/engine words (no counts).
-//   - /metrics and /debug/vars are exempt ONLY for a loopback caller. They are
-//     read-only observability surfaces (Prometheus scrape + expvar diagnostics)
-//     that an operator clicks straight from the host or an SSH tunnel; gating
-//     them behind the bearer is what makes those panel links 401. A REMOTE
-//     caller still needs the token, so request counts, token volumes, the model
-//     id, and uptime are never exposed to the open internet — matching the
-//     conventional "metrics open on loopback, gated off-box" posture.
+//   - /metrics, /debug/vars, and /v1/fak/observation are exempt ONLY for a
+//     loopback caller. They are read-only observability surfaces (Prometheus,
+//     legacy diagnostics, and the typed snapshot) that an operator clicks
+//     straight from the host or an SSH tunnel; gating them behind the bearer is
+//     what makes those panel links 401. A REMOTE caller still needs the token,
+//     so request counts, token volumes, the model id, and uptime are never
+//     exposed to the open internet.
 func authExempt(r *http.Request) bool {
 	if r.URL.Path == "/healthz" {
 		return true
@@ -438,7 +443,7 @@ func authExempt(r *http.Request) bool {
 // surface here widens both at once, which is the intent.
 func readScopedPath(r *http.Request) bool {
 	switch r.URL.Path {
-	case "/metrics", "/debug/vars":
+	case "/metrics", "/debug/vars", "/v1/fak/observation":
 		return true
 	}
 	return false
