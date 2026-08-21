@@ -17,6 +17,7 @@ import (
 const (
 	DefaultBaseURL = "https://api.z.ai/api/coding/paas/v4"
 	DefaultModel   = "glm-5.2"
+	maxTaskBytes   = 1 << 20
 )
 
 // Suitability reports whether the fleet taxonomy considers a task safe for the
@@ -30,8 +31,48 @@ type Suitability struct {
 }
 
 func Classify(prompt, taskClass string) Suitability {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return Suitability{Class: "invalid", TargetTier: fleetaccounts.TierFrontier, Reason: "no task content"}
+	}
+	if len(prompt) >= maxTaskBytes {
+		return Suitability{Class: "invalid", TargetTier: fleetaccounts.TierFrontier, Reason: "task exceeds the bounded routing input limit"}
+	}
+	switch taskClass {
+	case "bounded":
+		return classifyBounded(prompt)
+	case "frontier":
+		return Suitability{Class: "frontier", TargetTier: fleetaccounts.TierFrontier, Reason: "frontier work is reserved for a frontier model"}
+	case "", "auto":
+		if strings.HasPrefix(strings.ToLower(prompt), "summarize ") {
+			return classifyBounded(prompt)
+		}
+	default:
+		if !supportedFleetClass(taskClass) {
+			return Suitability{Class: "invalid", TargetTier: fleetaccounts.TierFrontier, Reason: "unsupported task class"}
+		}
+	}
 	got := fleetaccounts.ClassifyTask(prompt, taskClass, fleetaccounts.DefaultPolicy())
 	return Suitability{Suitable: got.TargetTier >= fleetaccounts.TierLight, Class: got.Class, TargetTier: got.TargetTier, Reason: got.Reason}
+}
+
+func classifyBounded(prompt string) Suitability {
+	got := fleetaccounts.ClassifyTask(prompt, "light", fleetaccounts.DefaultPolicy())
+	return Suitability{Suitable: true, Class: got.Class, TargetTier: got.TargetTier, Reason: "bounded task: " + got.Reason}
+}
+
+func supportedFleetClass(taskClass string) bool {
+	switch taskClass {
+	case "light", "easy", "tier2", "t2", "2",
+		"hard", "default", "tier1", "t1", "1",
+		"tier3", "t3", "3",
+		"gardening", "garden", "maintenance", "maint", "cleanup", "chore", "triage",
+		"engineering", "eng", "dev", "feature", "implementation",
+		"tier0", "t0", "0", "apex", "fable", "fable5", "fable-5":
+		return true
+	default:
+		return false
+	}
 }
 
 type Client struct {

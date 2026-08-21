@@ -9679,6 +9679,11 @@
           "category": "incidental",
           "reason": "Numerical attribution coverage denominators, not capability support or maturity state.",
           "token": "SpendCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local fleet-task vocabulary guard; it does not declare provider or feature support maturity.",
+          "token": "supportedFleetClass"
         }
       ],
       "id": "support-maturity",
@@ -9848,6 +9853,7 @@
         "sourcecoverage",
         "streamingsupported",
         "supported",
+        "supportedFleetClass",
         "supportgraph",
         "supportgraphdemo",
         "supporting",
