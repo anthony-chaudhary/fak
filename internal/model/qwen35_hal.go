@@ -410,3 +410,67 @@ func (s *Session) qwen35FullAttentionHAL(layer, pos int, residual compute.Tensor
 	}
 	be.AddInPlace(residual, out)
 }
+
+func (s *Session) qwen35SequencePrefillRequest(ids []int, needLogits bool) compute.Qwen35SequencePrefillRequest {
+	cfg := s.M.Cfg
+	nK, nV, kHd, vHd, _, _, _ := cfg.linearAttnDims()
+	req := compute.Qwen35SequencePrefillRequest{
+		Path: compute.Qwen35SequencePrefillPath, TokenIDs: append([]int(nil), ids...), StartPos: s.halKV.Len(),
+		TokenEmbedding: s.weightHAL("model.embed_tokens.weight"), OutputNorm: s.normWeightHAL("model.norm.weight"), Output: s.lmHeadMatHAL(),
+		Layers: make([]compute.Qwen35SequenceLayer, cfg.NumLayers), States: make([]compute.Qwen35SequenceState, cfg.NumLayers), KV: s.halKV,
+		Hidden: cfg.HiddenSize, Intermediate: cfg.IntermediateSize, NumHeads: cfg.NumHeads, NumKVHeads: cfg.NumKVHeads,
+		HeadDim: cfg.HeadDim, RotaryDim: cfg.rotaryDim(), NumKeyHeads: nK, NumValueHeads: nV, KeyHeadDim: kHd, ValueHeadDim: vHd,
+		ConvKernel: cfg.LinearConvKernelDim, RMSNormEpsilon: float32(cfg.RMSNormEps), RoPEThetaForLayer: make([]float64, cfg.NumLayers), NeedLogits: needLogits,
+	}
+	for l := 0; l < cfg.NumLayers; l++ {
+		req.RoPEThetaForLayer[l] = cfg.ropeThetaForLayer(l)
+		p := func(suffix string) string { return layerName(l, suffix) }
+		layer := compute.Qwen35SequenceLayer{InputNorm: s.normWeightHAL(p("input_layernorm.weight")), PostNorm: s.normWeightHAL(p("post_attention_layernorm.weight")), Gate: s.matWeightHAL(p("mlp.gate_proj.weight")), Up: s.matWeightHAL(p("mlp.up_proj.weight")), Down: s.matWeightHAL(p("mlp.down_proj.weight"))}
+		if cfg.isLinearAttnLayer(l) {
+			layer.Linear = true
+			layer.GDNInQKV = s.matWeightHAL(p("linear_attn.in_proj_qkv.weight"))
+			layer.GDNInZ = s.matWeightHAL(p("linear_attn.in_proj_z.weight"))
+			layer.GDNInB = s.matWeightHAL(p("linear_attn.in_proj_b.weight"))
+			layer.GDNInA = s.matWeightHAL(p("linear_attn.in_proj_a.weight"))
+			layer.GDNConv = s.weightHAL(p("linear_attn.conv1d.weight"))
+			layer.GDNALog = s.weightHAL(p("linear_attn.A_log"))
+			layer.GDNDTBias = s.weightHAL(p("linear_attn.dt_bias"))
+			layer.GDNNorm = s.weightHAL(p("linear_attn.norm.weight"))
+			layer.GDNOut = s.matWeightHAL(p("linear_attn.out_proj.weight"))
+			state := s.qwen35HAL.layers[l]
+			req.States[l] = compute.Qwen35SequenceState{Conv: state.conv, Recurrent: state.recurrent}
+		} else {
+			layer.Q = s.matWeightHAL(p("self_attn.q_proj.weight"))
+			layer.K = s.matWeightHAL(p("self_attn.k_proj.weight"))
+			layer.V = s.matWeightHAL(p("self_attn.v_proj.weight"))
+			layer.O = s.matWeightHAL(p("self_attn.o_proj.weight"))
+			if s.M.hasWeight(p("self_attn.q_norm.weight")) {
+				layer.QNorm = s.normWeightHAL(p("self_attn.q_norm.weight"))
+			}
+			if s.M.hasWeight(p("self_attn.k_norm.weight")) {
+				layer.KNorm = s.normWeightHAL(p("self_attn.k_norm.weight"))
+			}
+		}
+		req.Layers[l] = layer
+	}
+	return req
+}
+
+func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.Qwen35SequencePrefillResult, bool, error) {
+	if s == nil || s.M == nil || s.Backend == nil || !s.M.Cfg.IsQwen35Hybrid() || len(ids) < 2 {
+		return compute.Qwen35SequencePrefillResult{}, false, nil
+	}
+	seq, advertised, err := qwen35SequencePrefillBackend(s.Backend)
+	if err != nil || !advertised {
+		return compute.Qwen35SequencePrefillResult{}, advertised, err
+	}
+	startPos := s.halKV.Len()
+	result, err := seq.Qwen35SequencePrefill(s.qwen35SequencePrefillRequest(ids, needLogits))
+	if err != nil {
+		return result, true, &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardQwen35GDN, Path: compute.Qwen35SequencePrefillPath, Layer: -1, Stage: "sequence prefill", Cause: err}
+	}
+	if result.Tokens != len(ids) || s.halKV.Len() != startPos+len(ids) || result.LastHidden.Buf() == nil || !result.LastHidden.Ready() || (needLogits && (result.Logits.Buf() == nil || !result.Logits.Ready())) {
+		return result, true, &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardQwen35GDN, Path: compute.Qwen35SequencePrefillPath, Layer: -1, Stage: "sequence result", Cause: fmt.Errorf("malformed result: tokens=%d want=%d kv_len=%d want=%d", result.Tokens, len(ids), s.halKV.Len(), startPos+len(ids))}
+	}
+	return result, true, nil
+}

@@ -90,3 +90,44 @@ func (m *Model) ValidateBackendForwardPath(be compute.Backend) error {
 	}
 	return ValidateBackendForwardConfig(m.Cfg, be)
 }
+
+// Qwen35SequencePrefillBackend is the optional whole-prompt seam for native
+// Qwen3.5/3.8 hybrid execution. The compute-owned request avoids a model/compute
+// package cycle and does not widen compute.Backend.
+type Qwen35SequencePrefillBackend interface {
+	Qwen35SequencePrefillPath() string
+	Qwen35SequencePrefill(compute.Qwen35SequencePrefillRequest) (compute.Qwen35SequencePrefillResult, error)
+}
+
+type qwen35SequencePrefillPathMarker interface {
+	Qwen35SequencePrefillPath() string
+}
+
+// UnsupportedSequencePrefillError reports a backend that advertises the native
+// sequence path but cannot execute its complete contract. Callers must not retry
+// through scalar token replay after this error.
+type UnsupportedSequencePrefillError struct {
+	Backend string
+	Path    string
+	Reason  string
+}
+
+func (e *UnsupportedSequencePrefillError) Error() string {
+	return fmt.Sprintf("model: backend %q cannot execute Qwen hybrid sequence prefill via %q: %s; refusing scalar/CPU fallback", e.Backend, e.Path, e.Reason)
+}
+
+func qwen35SequencePrefillBackend(be compute.Backend) (Qwen35SequencePrefillBackend, bool, error) {
+	marker, advertised := be.(qwen35SequencePrefillPathMarker)
+	if !advertised {
+		return nil, false, nil
+	}
+	path := marker.Qwen35SequencePrefillPath()
+	seq, ok := be.(Qwen35SequencePrefillBackend)
+	if !ok {
+		return nil, true, &UnsupportedSequencePrefillError{Backend: be.Name(), Path: path, Reason: "path marker has no operation implementation"}
+	}
+	if path != compute.Qwen35SequencePrefillPath {
+		return nil, true, &UnsupportedSequencePrefillError{Backend: be.Name(), Path: path, Reason: "wrong capability identity"}
+	}
+	return seq, true, nil
+}

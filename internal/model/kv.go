@@ -713,6 +713,12 @@ func (s *Session) Prefill(ids []int) []float32 {
 	if len(ids) == 0 {
 		return nil
 	}
+	if result, used, err := s.tryQwen35SequencePrefill(ids, true); used {
+		if err != nil {
+			s.failBackendForward(-1, "sequence prefill", err)
+		}
+		return s.Backend.Read(result.Logits)
+	}
 	// Coordinated expert-parallel serve (#4835): announce this forward to the follower ranks
 	// and hold the group until it completes, so they replay it and reach the same per-layer
 	// AllReduces. Inert (one nil field read) unless a coordinator is installed on rank 0.
@@ -820,6 +826,12 @@ func (s *Session) Prefill(ids []int) []float32 {
 // next input token and only needs KV state advanced.
 func (s *Session) PrefillNoLogits(ids []int) {
 	if len(ids) == 0 {
+		return
+	}
+	if _, used, err := s.tryQwen35SequencePrefill(ids, false); used {
+		if err != nil {
+			s.failBackendForward(-1, "sequence prefill", err)
+		}
 		return
 	}
 	if s.M.Cfg.usesMLAMoELayout() {
