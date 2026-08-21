@@ -8,7 +8,7 @@ import (
 )
 
 // ReportSchema tags the rolled-up report artifact.
-const ReportSchema = "fak.armbench.report/1"
+const ReportSchema = "fak.armbench.report/2"
 
 // ArmSummary is one arm's rollup. Input and output tokens stay in separate
 // columns and the total is explicitly labelled, because an unlabelled "tokens"
@@ -53,6 +53,11 @@ type ArmSummary struct {
 	CacheWriteTokens int `json:"cache_write_tokens"`
 	CacheHits        int `json:"cache_hits"`
 	CacheMisses      int `json:"cache_misses"`
+	// Accounting is the canonical publishable total. The numeric fields above
+	// are compatibility projections for callers that already consume this Go
+	// type; availability and claim gates always come from this receipt.
+	Accounting AccountingReceipt `json:"accounting"`
+	accounting []AccountingReceipt
 
 	Setup SetupCost `json:"setup"`
 	// SetupAmortizedWallMS / SetupAmortizedCostUSD spread the one-time setup
@@ -212,13 +217,27 @@ func accumulate(s *ArmSummary, t TrialResult) {
 		s.Resumed++
 	}
 	s.Retries += t.Response.Retries
-	s.InputTokens += t.Response.Usage.InputTokens
-	s.OutputTokens += t.Response.Usage.OutputTokens
-	s.CostUSD += t.Response.Usage.CostUSD
-	s.CacheReadTokens += t.Response.Cache.ReadTokens
-	s.CacheWriteTokens += t.Response.Cache.WriteTokens
-	s.CacheHits += t.Response.Cache.Hits
-	s.CacheMisses += t.Response.Cache.Misses
+	receipt := normalizedAccountingReceipt(t.Response.Accounting)
+	s.accounting = append(s.accounting, receipt)
+	if t.Response.Accounting.Schema == "" {
+		// Old run artifacts retain their legacy projections, but their canonical
+		// accounting receipt remains missing and therefore cannot support a gain.
+		s.InputTokens += t.Response.Usage.InputTokens
+		s.OutputTokens += t.Response.Usage.OutputTokens
+		s.CostUSD += t.Response.Usage.CostUSD
+		s.CacheReadTokens += t.Response.Cache.ReadTokens
+		s.CacheWriteTokens += t.Response.Cache.WriteTokens
+		s.CacheHits += t.Response.Cache.Hits
+		s.CacheMisses += t.Response.Cache.Misses
+	} else {
+		s.InputTokens += accountingInt(receipt.InputTokens)
+		s.OutputTokens += accountingInt(receipt.OutputTokens)
+		s.CostUSD += accountingFloat(receipt.CostUSD)
+		s.CacheReadTokens += accountingInt(receipt.CacheReadTokens)
+		s.CacheWriteTokens += accountingInt(receipt.CacheWriteTokens)
+		s.CacheHits += accountingInt(receipt.CacheHits)
+		s.CacheMisses += accountingInt(receipt.CacheMisses)
+	}
 	s.MeanWallMS += t.Response.Latency.WallMS
 	if t.Response.Latency.TTFTAvailable {
 		s.MeanTTFTMS += t.Response.Latency.TTFTMS
@@ -240,6 +259,7 @@ func accumulate(s *ArmSummary, t TrialResult) {
 }
 
 func finalize(s *ArmSummary) {
+	s.Accounting = AggregateAccounting(s.accounting)
 	s.TotalTokens = s.InputTokens + s.OutputTokens
 	if s.Trials > 0 {
 		s.MeanWallMS /= float64(s.Trials)
@@ -307,9 +327,30 @@ func Human(rep *Report) string {
 		if s.TTFTAvailable {
 			ttft = fmt.Sprintf("%.1f", s.MeanTTFTMS)
 		}
-		fmt.Fprintf(&b, "  %-22s %-18s %5d %5d %5.1f%% %10d %10d %10d %9.4f %9.1f %9s\n",
+		inTokens := accountingDisplay(s.Accounting.InputTokens, false)
+		outTokens := accountingDisplay(s.Accounting.OutputTokens, false)
+		totalTokens := accountingTotalDisplay(s.Accounting.InputTokens, s.Accounting.OutputTokens)
+		cost := accountingDisplay(s.Accounting.CostUSD, true)
+		fmt.Fprintf(&b, "  %-22s %-18s %5d %5d %5.1f%% %10s %10s %10s %9s %9.1f %9s\n",
 			truncate(label, 22), s.Kind, s.Trials, s.Failures, s.PassRate*100,
-			s.InputTokens, s.OutputTokens, s.TotalTokens, s.CostUSD, s.MeanWallMS, ttft)
+			inTokens, outTokens, totalTokens, cost, s.MeanWallMS, ttft)
+	}
+	b.WriteString("\n  accounting provenance (only available fields with matching authority and coverage are comparable)\n")
+	for _, s := range rep.Arms {
+		for _, metric := range accountingMetrics {
+			field, _ := s.Accounting.Field(metric)
+			artifact := field.Artifact.Ref
+			if artifact == "" {
+				artifact = "n/a"
+			}
+			fmt.Fprintf(&b, "    %-22s %-19s %-9s %-20s %d/%d %-28s",
+				truncate(s.ArmID, 22), metric, field.Availability, field.Authority,
+				field.Coverage.Observed, field.Coverage.Expected, truncate(artifact, 28))
+			if field.RefusalReason != "" {
+				fmt.Fprintf(&b, "  %s", field.RefusalReason)
+			}
+			b.WriteByte('\n')
+		}
 	}
 	b.WriteString("\n  setup cost (charged once per arm, amortized over its graded trials)\n")
 	for _, s := range rep.Arms {
@@ -319,6 +360,45 @@ func Human(rep *Report) string {
 	}
 	b.WriteString("\n  input and output tokens are never blended: read both columns before quoting a saving.\n")
 	return b.String()
+}
+
+func accountingInt(field AccountingField) int {
+	if field.Value == nil {
+		return 0
+	}
+	return int(*field.Value)
+}
+
+func accountingFloat(field AccountingField) float64 {
+	if field.Value == nil {
+		return 0
+	}
+	return *field.Value
+}
+
+func accountingDisplay(field AccountingField, money bool) string {
+	if field.Value == nil {
+		return "n/a"
+	}
+	prefix := ""
+	if field.Availability != AvailabilityAvailable {
+		prefix = "~"
+	}
+	if money {
+		return fmt.Sprintf("%s%.4f", prefix, *field.Value)
+	}
+	return fmt.Sprintf("%s%.0f", prefix, *field.Value)
+}
+
+func accountingTotalDisplay(input, output AccountingField) string {
+	if input.Value == nil || output.Value == nil {
+		return "n/a"
+	}
+	prefix := ""
+	if input.Availability != AvailabilityAvailable || output.Availability != AvailabilityAvailable {
+		prefix = "~"
+	}
+	return fmt.Sprintf("%s%.0f", prefix, *input.Value+*output.Value)
 }
 
 func shortSHA(s string) string {

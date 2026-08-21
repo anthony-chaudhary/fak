@@ -78,13 +78,17 @@ type CacheCounters struct {
 // are the evidence: the runner refuses a trial that reports usage or latency
 // without them (see checkEvidence).
 type Response struct {
-	RawRequest  string        `json:"raw_request"`
-	RawResponse string        `json:"raw_response"`
-	Text        string        `json:"text"`
-	Usage       Usage         `json:"usage"`
-	Latency     Latency       `json:"latency"`
-	Cache       CacheCounters `json:"cache"`
-	Retries     int           `json:"retries"`
+	RawRequest  string `json:"raw_request"`
+	RawResponse string `json:"raw_response"`
+	Text        string `json:"text"`
+	Usage       Usage  `json:"usage"`
+	// Accounting is the authority/completeness receipt for Usage and Cache.
+	// Legacy numeric fields remain the provider adapter surface; publishable
+	// totals and comparisons use this receipt so an absent field is not zero.
+	Accounting AccountingReceipt `json:"accounting"`
+	Latency    Latency           `json:"latency"`
+	Cache      CacheCounters     `json:"cache"`
+	Retries    int               `json:"retries"`
 	// Failure, when non-empty, marks a trial the provider could not complete.
 	// A failed trial still owes a raw request and a reason — it is counted in
 	// the report's failure column, never dropped.
@@ -480,6 +484,11 @@ func checkEvidence(resp Response, j Judgment) error {
 	}
 	if strings.TrimSpace(resp.RawResponse) == "" {
 		return refuse(ReasonMissingRawEvidence, "trial recorded no raw response and no failure reason — a usage/latency row with no response behind it is not evidence")
+	}
+	if resp.Accounting.Schema != "" {
+		if err := resp.Accounting.Validate(); err != nil {
+			return fmt.Errorf("invalid accounting receipt: %w", err)
+		}
 	}
 	if strings.TrimSpace(j.RawJudgment) == "" {
 		return refuse(ReasonMissingRawEvidence, "trial recorded no raw judgment — a pass/fail with no grader evidence behind it is not evidence")

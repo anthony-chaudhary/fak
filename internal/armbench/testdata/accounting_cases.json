@@ -1,0 +1,151 @@
+{
+  "cases": [
+    {
+      "name": "authoritative_aggregate_overrides_incomplete_steps",
+      "sources": [
+        {
+          "authority": "step_sum",
+          "artifact": {
+            "ref": "transcript://run-1/steps",
+            "sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "coverage": {"scope": "agent_turns", "observed": 2, "expected": 3},
+          "values": {
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "cache_read_tokens": 40,
+            "cache_write_tokens": 5,
+            "cache_hits": 1,
+            "cache_misses": 1,
+            "cost_usd": 0.30
+          }
+        },
+        {
+          "authority": "provider_aggregate",
+          "artifact": {
+            "ref": "provider://run-1/final-usage",
+            "sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "coverage": {"scope": "agent_turns", "observed": 3, "expected": 3},
+          "values": {
+            "input_tokens": 120,
+            "output_tokens": 30,
+            "cache_read_tokens": 80,
+            "cache_write_tokens": 5,
+            "cache_hits": 2,
+            "cache_misses": 1,
+            "cost_usd": 0.42
+          }
+        }
+      ],
+      "metric": "input_tokens",
+      "want_availability": "available",
+      "want_authority": "provider_aggregate",
+      "want_value": 120,
+      "want_discrepancies": 1
+    },
+    {
+      "name": "incomplete_step_fallback_is_degraded",
+      "sources": [
+        {
+          "authority": "step_sum",
+          "artifact": {
+            "ref": "transcript://run-2/steps",
+            "sha256": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+          },
+          "coverage": {"scope": "agent_turns", "observed": 2, "expected": 3},
+          "values": {"input_tokens": 90, "cache_read_tokens": 0}
+        }
+      ],
+      "metric": "input_tokens",
+      "want_availability": "degraded",
+      "want_authority": "step_sum",
+      "want_value": 90,
+      "want_discrepancies": 0
+    },
+    {
+      "name": "missing_is_null",
+      "sources": [],
+      "metric": "cost_usd",
+      "want_availability": "missing",
+      "want_authority": "unknown",
+      "want_value": null,
+      "want_discrepancies": 0
+    },
+    {
+      "name": "observed_zero_is_available",
+      "sources": [
+        {
+          "authority": "provider_aggregate",
+          "artifact": {
+            "ref": "provider://run-3/final-usage",
+            "sha256": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+          },
+          "coverage": {"scope": "agent_turns", "observed": 1, "expected": 1},
+          "values": {"cache_read_tokens": 0, "cost_usd": 0}
+        }
+      ],
+      "metric": "cache_read_tokens",
+      "want_availability": "available",
+      "want_authority": "provider_aggregate",
+      "want_value": 0,
+      "want_discrepancies": 0
+    },
+    {
+      "name": "complete_provider_harness_disagreement_conflicts",
+      "sources": [
+        {
+          "authority": "harness_aggregate",
+          "artifact": {
+            "ref": "harness://run-4/usage",
+            "sha256": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+          },
+          "coverage": {"scope": "agent_turns", "observed": 4, "expected": 4},
+          "values": {"cost_usd": 0.50}
+        },
+        {
+          "authority": "provider_aggregate",
+          "artifact": {
+            "ref": "provider://run-4/final-usage",
+            "sha256": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+          },
+          "coverage": {"scope": "agent_turns", "observed": 4, "expected": 4},
+          "values": {"cost_usd": 0.62}
+        }
+      ],
+      "metric": "cost_usd",
+      "want_availability": "conflict",
+      "want_authority": "provider_aggregate",
+      "want_value": 0.62,
+      "want_discrepancies": 1
+    },
+    {
+      "name": "same_authority_disagreement_conflicts",
+      "sources": [
+        {
+          "authority": "provider_aggregate",
+          "artifact": {
+            "ref": "provider://run-5/usage-a",
+            "sha256": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+          },
+          "coverage": {"scope": "agent_turns", "observed": 2, "expected": 2},
+          "values": {"cache_read_tokens": 70}
+        },
+        {
+          "authority": "provider_aggregate",
+          "artifact": {
+            "ref": "provider://run-5/usage-b",
+            "sha256": "sha256:8888888888888888888888888888888888888888888888888888888888888888"
+          },
+          "coverage": {"scope": "agent_turns", "observed": 2, "expected": 2},
+          "values": {"cache_read_tokens": 75}
+        }
+      ],
+      "metric": "cache_read_tokens",
+      "want_availability": "conflict",
+      "want_authority": "provider_aggregate",
+      "want_value": 70,
+      "want_discrepancies": 1
+    }
+  ]
+}

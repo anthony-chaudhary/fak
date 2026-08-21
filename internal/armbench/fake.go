@@ -110,6 +110,26 @@ func (p *FakeProvider) Complete(_ context.Context, req Request) (Response, error
 		return Response{}, err
 	}
 	resp.RawResponse = string(rawResp)
+	inputTokens := float64(resp.Usage.InputTokens)
+	outputTokens := float64(resp.Usage.OutputTokens)
+	costUSD := resp.Usage.CostUSD
+	cacheReadTokens := float64(resp.Cache.ReadTokens)
+	cacheWriteTokens := float64(resp.Cache.WriteTokens)
+	cacheHits := float64(resp.Cache.Hits)
+	cacheMisses := float64(resp.Cache.Misses)
+	resp.Accounting, err = ReconcileAccounting([]AccountingSource{{
+		Authority: AuthorityProviderAggregate,
+		Artifact:  ArtifactFor("fake://raw-response/"+req.ArmID+"/"+req.TaskID+"/"+fmt.Sprint(req.Trial), rawResp),
+		Coverage:  AccountingCoverage{Scope: "provider_response", Observed: 1, Expected: 1},
+		Values: AccountingValues{
+			InputTokens: &inputTokens, OutputTokens: &outputTokens, CostUSD: &costUSD,
+			CacheReadTokens: &cacheReadTokens, CacheWriteTokens: &cacheWriteTokens,
+			CacheHits: &cacheHits, CacheMisses: &cacheMisses,
+		},
+	}})
+	if err != nil {
+		return Response{}, err
+	}
 	return resp, nil
 }
 
