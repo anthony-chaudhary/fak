@@ -207,6 +207,17 @@ func foldBudgetConsume(root *BudgetTotals, nodes map[string]*BudgetNode, index i
 }
 
 func foldBudgetTerminal(root *BudgetTotals, nodes map[string]*BudgetNode, children map[string]map[string]struct{}, index int, event BudgetEvent, amount Budget) error {
+	var terminalState BudgetNodeState
+	switch event.Kind {
+	case BudgetReserve, BudgetConsume:
+		return budgetRefusal(BudgetInvalidEvent, index, event.NodeID, fmt.Sprintf("event kind %q is not terminal", event.Kind))
+	case BudgetRelease:
+		terminalState = BudgetNodeReleased
+	case BudgetCancel:
+		terminalState = BudgetNodeCancelled
+	case BudgetClose:
+		terminalState = BudgetNodeClosed
+	}
 	if event.NodeID == "" || event.ParentID != "" || !zeroBudget(amount) {
 		return budgetRefusal(BudgetInvalidEvent, index, event.NodeID, "terminal events require only a node id")
 	}
@@ -248,14 +259,7 @@ func foldBudgetTerminal(root *BudgetTotals, nodes map[string]*BudgetNode, childr
 	node.Remaining = Budget{}
 	node.Reserved = Budget{}
 	node.Consumed.MaxWorkers = 0
-	switch event.Kind {
-	case BudgetRelease:
-		node.State = BudgetNodeReleased
-	case BudgetCancel:
-		node.State = BudgetNodeCancelled
-	case BudgetClose:
-		node.State = BudgetNodeClosed
-	}
+	node.State = terminalState
 	delete(children[node.ParentID], node.ID)
 	return nil
 }
