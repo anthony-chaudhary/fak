@@ -44,7 +44,16 @@ func TestAgentOutputProfilesUserReadout(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := out.String()
-	for _, want := range []string{"default is caveman:medium", "caveman:original:*", "not-yet", "--output-style full", "independent axis"} {
+	for _, want := range []string{
+		"default is caveman:medium",
+		"caveman:original:*",
+		"not-yet",
+		"--output-style full",
+		"independent axis",
+		"--set-default adapt.output-style=caveman:medium",
+		"--set-default adapt.output-style=full",
+		"CLI --output-style > persisted preference > shipped default",
+	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("profiles readout missing %q:\n%s", want, text)
 		}

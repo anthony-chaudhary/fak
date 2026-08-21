@@ -1112,6 +1112,7 @@ func cmdAgent(argv []string) {
 	verbFlagUsage(fs, "agent")
 	task := fs.String("task", agent.DefaultTask, "the user task the agent must complete")
 	outputStyle := fs.String("output-style", agentDefaultOutputStyle, "response shape: full|native:{low|medium|high}|caveman:{low|medium|high}; defaults to caveman:medium, full disables it (see `fak agent profiles`)")
+	consoleConfig := fs.String("console-config", defaultTUIConsoleFile(), "persisted operator preferences (default: FAK_CONSOLE_FILE, else ~/.fak/console.json)")
 	workProfile := fs.String("work-profile", agentDefaultWorkProfile, "implementation policy: ponytail:{low|medium|high}|standard; defaults to ponytail:medium, standard disables it (see `fak agent profiles`)")
 	provider := fs.String("provider", "openai", "provider transcript wire: openai, anthropic, gemini, or xai")
 	baseURL := fs.String("base-url", "", "provider base URL (OpenAI-compatible: .../v1; Gemini native: .../v1beta; Anthropic native: https://api.anthropic.com)")
@@ -1129,12 +1130,18 @@ func cmdAgent(argv []string) {
 	routeAccounts := fs.String("route-accounts", "", "model-account roster used to resolve routed model ids to account-bound engine routes")
 	_ = fs.Parse(argv)
 
-	style, err := resolveAgentOutputStyle(*outputStyle)
+	outputStyleExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "output-style" {
+			outputStyleExplicit = true
+		}
+	})
+	preference, err := resolveAgentOutputStylePreference(*outputStyle, outputStyleExplicit, *consoleConfig)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	restoreStyle, err := applyAgentOutputStyle(style)
+	restoreStyle, err := applyAgentOutputStyle(preference.Style)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "agent: set --output-style: %v\n", err)
 		os.Exit(2)
@@ -1154,6 +1161,7 @@ func cmdAgent(argv []string) {
 	applyPolicy(*policyPath)
 	loadedRoute, loadedAccounts, runOpts, err := loadAgentRouteOptionsWithAccounts(*routeManifest, *routeAccounts)
 	must(err)
+	runOpts = append(runOpts, agent.WithResponseProfileSource(preference.Source))
 	if loadedRoute != nil {
 		fmt.Fprintf(os.Stderr, "fak agent: loaded model-routing policy from %s\n", *routeManifest)
 	}

@@ -1,6 +1,7 @@
 package syspromptmmu
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -202,6 +203,17 @@ func DescribeStyle(name string) StyleReadout {
 		out.Witness = seg.Witness
 	}
 	return out
+}
+
+// ResolveStyle is the strict request-boundary form of DescribeStyle. DescribeStyle stays
+// total for read-only diagnostics, while callers that are about to start a run use this
+// form so an unknown or reserved selection cannot silently collapse to full/off.
+func ResolveStyle(name string) (StyleReadout, error) {
+	readout := DescribeStyle(name)
+	if !readout.Known {
+		return readout, fmt.Errorf("unknown response profile %q", strings.TrimSpace(name))
+	}
+	return readout, nil
 }
 
 // StyleFromEnv resolves the style selected by StyleEnvVar, reading through the supplied

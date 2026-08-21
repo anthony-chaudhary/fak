@@ -37,6 +37,13 @@ func WithFinalGate(check func() (satisfied bool, missingWitness string)) RunOpti
 	return func(c *runConfig) { c.finalGate = check }
 }
 
+// WithResponseProfileSource records where the already-resolved response profile came
+// from. Selection remains on syspromptmmu's existing environment seam; this option adds
+// provenance to the run artifact without creating another profile mechanism.
+func WithResponseProfileSource(source string) RunOption {
+	return func(c *runConfig) { c.responseProfileSource = strings.TrimSpace(source) }
+}
+
 // runConfig is the resolved option set for one RunArm invocation. The zero value is
 // the historical loop (nil table => permissive Decide => no per-turn gate; nil route
 // => Engine left unset => kernel default for every tool call).
@@ -58,6 +65,7 @@ type runConfig struct {
 	contextBaselineOutput int
 	toolTerminalWake      *ToolTerminalWakeQueue
 	finalGate             func() (bool, string)
+	responseProfileSource string
 	// observer is the typed loop-progress sink (#5148, WithProgressObserver in
 	// loop_observe.go). nil => every emitProgress is a no-op and the loop is
 	// byte-for-byte the historical loop.

@@ -17,6 +17,23 @@ fak agent profiles
 fak agent profiles --json
 ```
 
+Persist a response profile through the existing console settings path, inspect its
+canonical value and source, or turn shaping off persistently:
+
+```bash
+fak console settings --set-default adapt.output-style=caveman:medium  # set
+fak console settings --json                                           # show
+fak console settings --set-default adapt.output-style=full             # disable
+```
+
+The settings file defaults to `~/.fak/console.json` (or `FAK_CONSOLE_FILE`).
+`fak agent --console-config FILE` selects another settings file. Resolution is
+explicit: CLI `--output-style` wins over the persisted preference, which wins over
+the shipped `caveman:medium` default. Invalid and reserved values are refused before
+the owned loop starts. The JSON run report records `output_style`,
+`output_style_source`, and the content-derived `output_style_witness`; it does not
+expose the prompt fragment bytes.
+
 Run with the recommended Caveman-compatible balance:
 
 ```bash

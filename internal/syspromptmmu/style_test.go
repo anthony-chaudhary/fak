@@ -241,3 +241,18 @@ func TestCavemanShorthandCanonicalizesToNative(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveStyleValidatesTheClosedRegistry(t *testing.T) {
+	got, err := ResolveStyle(" Caveman:Medium ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Style != "caveman:native:medium" || !got.Known || !got.Applied || got.Witness == "" {
+		t.Fatalf("ResolveStyle(caveman:medium) = %+v", got)
+	}
+	for _, raw := range []string{"", "unknown", "caveman:original:*"} {
+		if got, err := ResolveStyle(raw); err == nil || got.Known || got.Applied {
+			t.Fatalf("ResolveStyle(%q) = %+v, err=%v; want strict refusal", raw, got, err)
+		}
+	}
+}

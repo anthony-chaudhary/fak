@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
 	"github.com/anthony-chaudhary/fak/internal/tuiplugin"
 )
 
@@ -50,6 +51,7 @@ type tuiConfigSetting struct {
 	Kind         string   `json:"kind"`
 	Flag         string   `json:"flag"`
 	Effective    string   `json:"effective"`
+	Canonical    string   `json:"canonical,omitempty"`
 	Source       string   `json:"source"` // built-in|saved
 	Options      []string `json:"options,omitempty"`
 	SetCommand   string   `json:"set_command"`
@@ -306,6 +308,7 @@ func buildTUIConfigSettings(cfg tuiConsoleConfig, path string) []tuiConfigSettin
 				continue
 			}
 			effective, source := effectiveTUIConfigValue(control, cfg.PaneDefaults[pane.ID][control.ID])
+			canonical := canonicalTUIConfigValue(pane.ID, control.ID, effective)
 			ref := pane.ID + "." + control.ID
 			settings = append(settings, tuiConfigSetting{
 				Pane:         pane.ID,
@@ -314,6 +317,7 @@ func buildTUIConfigSettings(cfg tuiConsoleConfig, path string) []tuiConfigSettin
 				Kind:         control.Kind,
 				Flag:         control.Flag,
 				Effective:    effective,
+				Canonical:    canonical,
 				Source:       source,
 				Options:      append([]string(nil), control.Options...),
 				SetCommand:   formatTUIConfigMutationCommand(path, "--set-default", ref+"="+suggestedTUIConfigValue(control, effective)),
@@ -322,6 +326,15 @@ func buildTUIConfigSettings(cfg tuiConsoleConfig, path string) []tuiConfigSettin
 		}
 	}
 	return settings
+}
+
+func canonicalTUIConfigValue(pane, control, effective string) string {
+	if pane == "adapt" && control == "output-style" {
+		if style, err := syspromptmmu.ResolveStyle(effective); err == nil {
+			return style.Style
+		}
+	}
+	return ""
 }
 
 func persistableTUIConfigControl(control tuiplugin.Control) bool {
@@ -465,7 +478,11 @@ func renderTUIConfig(report tuiConfigReport, width int) string {
 			if effective == "" {
 				effective = "(unset)"
 			}
-			fmt.Fprintf(&b, "%s.%s  effective=%s  source=%s\n", setting.Pane, setting.Control, effective, setting.Source)
+			if setting.Canonical != "" {
+				fmt.Fprintf(&b, "%s.%s  effective=%s  canonical=%s  source=%s\n", setting.Pane, setting.Control, effective, setting.Canonical, setting.Source)
+			} else {
+				fmt.Fprintf(&b, "%s.%s  effective=%s  source=%s\n", setting.Pane, setting.Control, effective, setting.Source)
+			}
 			if len(setting.Options) > 0 {
 				fmt.Fprintf(&b, "  options=%s\n", strings.Join(setting.Options, "|"))
 			}

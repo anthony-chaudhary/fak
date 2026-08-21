@@ -98,6 +98,9 @@ type RunResult struct {
 	Provider           string     `json:"provider,omitempty"` // transcript wire for live runs
 	BaseURL            string     `json:"base_url,omitempty"` // provider root, never includes secrets
 	MaxTurns           int        `json:"max_turns"`
+	OutputStyle        string     `json:"output_style"`
+	OutputStyleSource  string     `json:"output_style_source"`
+	OutputStyleWitness string     `json:"output_style_witness,omitempty"`
 	WorkProfile        string     `json:"work_profile"`
 	WorkProfileWitness string     `json:"work_profile_witness,omitempty"`
 	Fak                ArmMetrics `json:"fak"`
@@ -291,9 +294,15 @@ func Run(ctx context.Context, p Planner, task string, maxTurns int, opts ...RunO
 	_, isLive := p.(*HTTPPlanner)
 
 	workProfile := syspromptmmu.WorkProfileFromEnv(os.Getenv)
+	outputStyle := syspromptmmu.StyleFromEnv(os.Getenv)
+	outputStyleSource := resolveRunConfig(opts).responseProfileSource
+	if outputStyleSource == "" {
+		outputStyleSource = outputStyle.ActivationSource
+	}
 	res := &RunResult{
 		AppVersion: appversion.Current(),
 		Task:       task, Model: p.Model(), MaxTurns: maxTurns,
+		OutputStyle: outputStyle.Style, OutputStyleSource: outputStyleSource, OutputStyleWitness: outputStyle.Witness,
 		WorkProfile: workProfile.Profile, WorkProfileWitness: workProfile.Witness,
 		Fak: fakM, Baseline: baseM,
 		TurnsSaved:    baseM.Turns - fakM.Turns,

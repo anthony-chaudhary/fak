@@ -13,12 +13,50 @@ import (
 
 const agentDefaultOutputStyle = "caveman:medium"
 
+const (
+	agentOutputStyleSourceCLI       = "cli"
+	agentOutputStyleSourcePersisted = "persisted"
+	agentOutputStyleSourceDefault   = "shipped-default"
+)
+
+type agentOutputStylePreference struct {
+	Style  syspromptmmu.StyleReadout
+	Source string
+}
+
 func resolveAgentOutputStyle(raw string) (syspromptmmu.StyleReadout, error) {
-	style := syspromptmmu.DescribeStyle(raw)
-	if !style.Known {
+	style, err := syspromptmmu.ResolveStyle(raw)
+	if err != nil {
 		return style, fmt.Errorf("agent: invalid --output-style %q; supported: %s", raw, strings.Join(syspromptmmu.StyleNames(), ", "))
 	}
 	return style, nil
+}
+
+func resolveAgentOutputStylePreference(cliValue string, cliExplicit bool, configPath string) (agentOutputStylePreference, error) {
+	if cliExplicit {
+		style, err := resolveAgentOutputStyle(cliValue)
+		return agentOutputStylePreference{Style: style, Source: agentOutputStyleSourceCLI}, err
+	}
+	cfg, source, err := loadTUIConsoleConfig(configPath)
+	if err != nil {
+		return agentOutputStylePreference{}, fmt.Errorf("agent: load persisted response profile: %w", err)
+	}
+	if raw := cfg.PaneDefaults["adapt"]["output-style"]; len(raw) > 0 {
+		selection, err := rawTUIScalar(raw)
+		if err != nil {
+			return agentOutputStylePreference{}, fmt.Errorf("agent: persisted response profile in %s: %w", source, err)
+		}
+		style, err := syspromptmmu.ResolveStyle(selection)
+		if err != nil {
+			return agentOutputStylePreference{}, fmt.Errorf("agent: persisted response profile in %s: %w", source, err)
+		}
+		return agentOutputStylePreference{Style: style, Source: agentOutputStyleSourcePersisted}, nil
+	}
+	style, err := syspromptmmu.ResolveStyle(agentDefaultOutputStyle)
+	if err != nil {
+		return agentOutputStylePreference{}, fmt.Errorf("agent: shipped response profile: %w", err)
+	}
+	return agentOutputStylePreference{Style: style, Source: agentOutputStyleSourceDefault}, nil
 }
 
 func applyAgentOutputStyle(style syspromptmmu.StyleReadout) (func(), error) {
@@ -97,6 +135,11 @@ func printAgentOutputProfiles(w io.Writer, argv []string) error {
 	fmt.Fprintln(w, "  fak agent --work-profile ponytail:medium")
 	fmt.Fprintln(w, "  fak agent --output-style caveman:high --work-profile ponytail:low  # mix independently")
 	fmt.Fprintln(w, "  fak agent --output-style full --work-profile standard             # disable both")
+	fmt.Fprintln(w, "\nPersistent response preference:")
+	fmt.Fprintln(w, "  fak console settings --set-default adapt.output-style=caveman:medium  # set")
+	fmt.Fprintln(w, "  fak console settings --json                                           # show canonical value + source")
+	fmt.Fprintln(w, "  fak console settings --set-default adapt.output-style=full             # disable")
+	fmt.Fprintln(w, "  precedence: CLI --output-style > persisted preference > shipped default")
 	fmt.Fprintln(w, "\nPrecedence: policy and explicit requirements > repository instructions > work profile > response profile.")
 	return nil
 }
