@@ -1220,3 +1220,13 @@ fak value-chain audit --manifest examples/value-chain/support-manifest.json --ob
 ```
 
 `--selfcheck` compares the rendered report with `--expect`; it requires both flags and exits non-zero on any mismatch.
+
+## `fak git-daily`
+
+Run or inspect the lock-aware daily Git maintenance job:
+
+```text
+fak git-daily [--root DIR] [--dry-run] [--force] [--prune-worktrees] [--emit task-scheduler|systemd|cron] [--install] [--status N] [--score] [--json]
+```
+
+`--dry-run` is the safe preview. `--status N` and `--score` are read-only ledger views; they do not run a maintenance tick. `--emit` prints an OS scheduler unit, while `--install` explicitly installs it. Use `--root` in scheduled jobs so repository discovery never depends on the scheduler's working directory.
