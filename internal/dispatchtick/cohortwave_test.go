@@ -11,6 +11,10 @@ import (
 // as a dispatchable leaf, scoped to the given paths. Mirrors the fixture used in
 // internal/issuecohort so the parity check runs on realistic dispatch leaves.
 func cohortLeaf(key string, paths ...string) issuepolicy.Candidate {
+	checks := make(map[string]issuepolicy.ProblemCheck, 4)
+	for _, id := range []string{"P1", "P2", "P3", "P4"} {
+		checks[id] = issuepolicy.ProblemCheck{ID: id, Status: issuepolicy.ProblemCheckPreserved, Evidence: "The leaf preserves this shared invariant.", Valid: true}
+	}
 	return issuepolicy.Candidate{
 		Schema:         issuepolicy.Schema,
 		Key:            key,
@@ -26,6 +30,7 @@ func cohortLeaf(key string, paths ...string) issuepolicy.Candidate {
 		AcceptanceGate: "make ci",
 		ClosureBinding: "commit cites #1 and (fak leaf)",
 		Paths:          paths,
+		ProblemFrame:   issuepolicy.ProblemFrame{Schema: issuepolicy.ProblemFrameSchema, Ready: true, Enforced: true, Centrality: issuepolicy.CentralityCore, Checks: checks},
 	}
 }
 

@@ -137,10 +137,14 @@ func TestRouteAccountRefusesWhenEverySeatAtCap(t *testing.T) {
 	if got.OK || !strings.Contains(got.Reason, "session cap") {
 		t.Fatalf("route = %+v, want refusal naming the session cap", got)
 	}
-	t.Setenv(SessionsPerAccountEnv, "40")
-	relaxed := RouteAccount(AccountRouteInput{Rows: rows, Product: "claude", WorkKind: "engineering"})
-	if !relaxed.OK {
-		t.Fatalf("route with raised cap = %+v, want admitted again", relaxed)
+	for i := range rows {
+		if rows[i].Tag == "day26" {
+			rows[i].LiveSessions = DefaultClaudeSessionsPerAccount - 1
+		}
+	}
+	recovered := RouteAccount(AccountRouteInput{Rows: rows, Product: "claude", WorkKind: "engineering"})
+	if !recovered.OK {
+		t.Fatalf("route with one freed session slot = %+v, want admitted again", recovered)
 	}
 }
 
