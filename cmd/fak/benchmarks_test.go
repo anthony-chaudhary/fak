@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/benchcatalog"
 )
 
 func TestBenchmarksListOfflineIncludesVCache(t *testing.T) {
@@ -55,4 +58,67 @@ func TestBenchmarksRunVCacheExecutesScoreGate(t *testing.T) {
 	if rep.Schema != "fak.vcache.score.v1" || rep.Status != "2x_ready" || !rep.TwoXBetter {
 		t.Fatalf("score = %+v, want default vCache 2x gate pass", rep)
 	}
+}
+
+func TestBenchmarksPreflightReadsEnvironmentFixtures(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := runBenchmarks(&out, &errb, []string{
+		"preflight",
+		"--requirement", environmentFixture("requirement.json"),
+		"--receipt", environmentFixture("receipt-pass.json"),
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("preflight exit=%d stderr=%s", code, errb.String())
+	}
+	var admission benchcatalog.EnvironmentAdmission
+	if err := json.Unmarshal(out.Bytes(), &admission); err != nil {
+		t.Fatalf("preflight JSON: %v\n%s", err, out.String())
+	}
+	if admission.Status != benchcatalog.AdmissionAccepted || admission.RequirementHash == "" || admission.ReceiptHash == "" {
+		t.Fatalf("admission = %+v, want accepted hash-bound read-back", admission)
+	}
+}
+
+func TestBenchmarksPreflightRefusalIsTyped(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := runBenchmarks(&out, &errb, []string{
+		"preflight",
+		"--requirement", environmentFixture("requirement.json"),
+		"--receipt", environmentFixture("receipt-forbidden.json"),
+		"--json",
+	})
+	if code != 1 {
+		t.Fatalf("preflight exit=%d stderr=%s, want typed refusal exit 1", code, errb.String())
+	}
+	var admission benchcatalog.EnvironmentAdmission
+	if err := json.Unmarshal(out.Bytes(), &admission); err != nil {
+		t.Fatalf("preflight JSON: %v\n%s", err, out.String())
+	}
+	if len(admission.Refusals) != 1 || admission.Refusals[0].Code != benchcatalog.CodeForbidden || admission.Refusals[0].Axis != "network" {
+		t.Fatalf("refusals = %+v, want forbidden network", admission.Refusals)
+	}
+}
+
+func TestBenchmarksPreflightLegacyCatalogEntryFailsClosed(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := runBenchmarks(&out, &errb, []string{
+		"preflight", "vcache",
+		"--receipt", environmentFixture("receipt-pass.json"),
+		"--json",
+	})
+	if code != 1 {
+		t.Fatalf("legacy preflight exit=%d stderr=%s, want refusal", code, errb.String())
+	}
+	var admission benchcatalog.EnvironmentAdmission
+	if err := json.Unmarshal(out.Bytes(), &admission); err != nil {
+		t.Fatal(err)
+	}
+	if len(admission.Refusals) != 1 || admission.Refusals[0].Code != benchcatalog.CodeRequirementUnknown || admission.Refusals[0].Axis != "environment" {
+		t.Fatalf("legacy admission = %+v, want stable unknown-environment refusal", admission)
+	}
+}
+
+func environmentFixture(name string) string {
+	return filepath.Join("..", "..", "internal", "benchcatalog", "testdata", "environment-admission", name)
 }

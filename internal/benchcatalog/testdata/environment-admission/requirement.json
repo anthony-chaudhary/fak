@@ -1,0 +1,27 @@
+{
+  "schema": "fak.benchcatalog.task-environment.v1",
+  "task_id": "ale-public-001",
+  "os": "linux",
+  "arch": "amd64",
+  "image_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "min_vcpus": 8,
+  "min_ram_mib": 16384,
+  "min_disk_gib": 100,
+  "gpu": {
+    "class": "nvidia-l4",
+    "min_count": 1
+  },
+  "network": "forbidden",
+  "required_software": [
+    {
+      "name": "libreoffice",
+      "version": "24.2",
+      "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  ],
+  "license": "required",
+  "input": {
+    "name": "ale-public-inputs",
+    "digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  }
+}

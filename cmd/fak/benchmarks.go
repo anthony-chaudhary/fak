@@ -38,6 +38,8 @@ func runBenchmarks(stdout, stderr io.Writer, argv []string) int {
 		return benchmarksList(stdout, stderr, rest)
 	case "describe", "show":
 		return benchmarksDescribe(stdout, stderr, rest)
+	case "preflight":
+		return benchmarksEnvironmentCheck(stdout, stderr, rest)
 	case "run":
 		return benchmarksRun(stdout, stderr, rest)
 	case "-h", "--help", "help":
@@ -56,7 +58,10 @@ func benchmarksUsage(w io.Writer) {
 usage:
   fak benchmarks list [--offline] [--json]   list all benchmarks (offline = zero-asset only)
   fak benchmarks describe <name>             one benchmark: what it measures, how to run it, key flags
-  fak benchmarks run <name> [-- args...]     run a benchmark (go run for cmd/ benches; prints fak verbs)
+  fak benchmarks preflight [<name> | --requirement FILE] --receipt FILE [--json]
+                                               match a task environment before model/provider spend
+  fak benchmarks run <name> [--receipt FILE] [-- args...]
+                                               run; typed catalog entries require a passing receipt
 
 Start here if you have never run a fak benchmark:
   fak benchmarks list --offline              the benchmarks that run NOW with no weights, GPU, dataset, or key
@@ -138,10 +143,114 @@ func benchmarksDescribe(stdout, stderr io.Writer, argv []string) int {
 	} else {
 		fmt.Fprintf(stdout, "\nMethodology: the source comment in cmd/%s (or this binary's verb).\n", b.Name)
 	}
+	if b.Environment != nil {
+		hash, _ := benchcatalog.RequirementHash(*b.Environment)
+		fmt.Fprintf(stdout, "\nEnvironment contract: %s (%s)\n", b.Environment.Schema, hash)
+		fmt.Fprintf(stdout, "Preflight: fak benchmarks preflight %s --receipt <compute-receipt.json>\n", b.Name)
+	} else {
+		fmt.Fprintln(stdout, "\nEnvironment contract: legacy cold-start Need only; supply --requirement and --receipt to preflight a task. A catalog preflight fails closed until this row gains a typed contract.")
+	}
 	if b.Need == benchcatalog.NeedNone {
 		fmt.Fprintf(stdout, "\nThis benchmark runs with no external assets  -  try it now:\n  fak benchmarks run %s\n", b.Name)
 	}
 	return 0
+}
+
+func benchmarksEnvironmentCheck(stdout, stderr io.Writer, argv []string) int {
+	var name, requirementPath, receiptPath string
+	asJSON := false
+	for i := 0; i < len(argv); i++ {
+		switch argv[i] {
+		case "--requirement":
+			if i+1 >= len(argv) {
+				fmt.Fprintln(stderr, "fak benchmarks preflight: --requirement needs a JSON file")
+				return 2
+			}
+			i++
+			requirementPath = argv[i]
+		case "--receipt":
+			if i+1 >= len(argv) {
+				fmt.Fprintln(stderr, "fak benchmarks preflight: --receipt needs a JSON file")
+				return 2
+			}
+			i++
+			receiptPath = argv[i]
+		case "--json":
+			asJSON = true
+		default:
+			if strings.HasPrefix(argv[i], "-") || name != "" {
+				fmt.Fprintf(stderr, "fak benchmarks preflight: unexpected argument %q\n", argv[i])
+				return 2
+			}
+			name = argv[i]
+		}
+	}
+	if receiptPath == "" || (name == "") == (requirementPath == "") {
+		fmt.Fprintln(stderr, "usage: fak benchmarks preflight [<name> | --requirement FILE] --receipt FILE [--json]")
+		return 2
+	}
+
+	receipt, err := loadComputeReceipt(receiptPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak benchmarks preflight: %v\n", err)
+		return 2
+	}
+	var admission benchcatalog.EnvironmentAdmission
+	if requirementPath != "" {
+		requirement, loadErr := loadTaskEnvironmentRequirement(requirementPath)
+		if loadErr != nil {
+			fmt.Fprintf(stderr, "fak benchmarks preflight: %v\n", loadErr)
+			return 2
+		}
+		admission = benchcatalog.AdmitEnvironment(requirement, receipt)
+	} else {
+		b, ok := benchcatalog.Get(name)
+		if !ok {
+			fmt.Fprintf(stderr, "fak benchmarks: no benchmark named %q. Run `fak benchmarks list`.\n", name)
+			return 1
+		}
+		admission = benchcatalog.AdmitCatalogEnvironment(b.Name, b.Environment, receipt)
+	}
+	if asJSON {
+		_ = writeIndentedJSON(stdout, admission)
+	} else {
+		writeEnvironmentAdmission(stdout, admission)
+	}
+	if admission.Status == benchcatalog.AdmissionAccepted {
+		return 0
+	}
+	return 1
+}
+
+func loadTaskEnvironmentRequirement(path string) (benchcatalog.TaskEnvironmentRequirement, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return benchcatalog.TaskEnvironmentRequirement{}, fmt.Errorf("read requirement %s: %w", path, err)
+	}
+	defer f.Close()
+	return benchcatalog.DecodeTaskEnvironmentRequirement(f)
+}
+
+func loadComputeReceipt(path string) (benchcatalog.ComputeReceipt, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return benchcatalog.ComputeReceipt{}, fmt.Errorf("read receipt %s: %w", path, err)
+	}
+	defer f.Close()
+	return benchcatalog.DecodeComputeReceipt(f)
+}
+
+func writeEnvironmentAdmission(w io.Writer, admission benchcatalog.EnvironmentAdmission) {
+	if admission.Status == benchcatalog.AdmissionAccepted {
+		fmt.Fprintf(w, "ADMIT task=%s requirement=%s receipt=%s\n", admission.TaskID, admission.RequirementHash, admission.ReceiptHash)
+		return
+	}
+	for _, refusal := range admission.Refusals {
+		fmt.Fprintf(w, "REFUSE %s axis=%s required=%q observed=%q: %s\n", refusal.Code, refusal.Axis, refusal.Required, refusal.Observed, refusal.Detail)
+		if refusal.Action != "" {
+			fmt.Fprintf(w, "action: %s\n", refusal.Action)
+		}
+	}
 }
 
 // benchmarksRun resolves the benchmark to its real command and runs it. A cmd/
@@ -154,18 +263,32 @@ func benchmarksRun(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	name := argv[0]
-	var extra []string
-	for i, a := range argv[1:] {
-		if a == "--" {
-			extra = argv[1+i+1:]
-			break
-		}
+	receiptPath, extra, ok := parseBenchmarkRunArgs(stderr, argv[1:])
+	if !ok {
+		return 2
 	}
 
 	b, ok := benchcatalog.Get(name)
 	if !ok {
 		fmt.Fprintf(stderr, "fak benchmarks: no benchmark named %q. Run `fak benchmarks list`.\n", name)
 		return 1
+	}
+	if receiptPath != "" || b.Environment != nil {
+		if receiptPath == "" {
+			fmt.Fprintf(stderr, "fak benchmarks run %s: typed environment contract requires --receipt before launch\n", b.Name)
+			return 1
+		}
+		receipt, err := loadComputeReceipt(receiptPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak benchmarks run %s: %v\n", b.Name, err)
+			return 1
+		}
+		admission := benchcatalog.AdmitCatalogEnvironment(b.Name, b.Environment, receipt)
+		if admission.Status != benchcatalog.AdmissionAccepted {
+			writeEnvironmentAdmission(stderr, admission)
+			return 1
+		}
+		fmt.Fprintf(stderr, "fak benchmarks run %s: environment admitted requirement=%s receipt=%s\n", b.Name, admission.RequirementHash, admission.ReceiptHash)
 	}
 
 	if b.Kind == benchcatalog.KindVerb {
@@ -193,6 +316,26 @@ func benchmarksRun(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+func parseBenchmarkRunArgs(stderr io.Writer, argv []string) (receiptPath string, extra []string, ok bool) {
+	for i := 0; i < len(argv); i++ {
+		switch argv[i] {
+		case "--":
+			return receiptPath, argv[i+1:], true
+		case "--receipt":
+			if i+1 >= len(argv) {
+				fmt.Fprintln(stderr, "fak benchmarks run: --receipt needs a JSON file")
+				return "", nil, false
+			}
+			i++
+			receiptPath = argv[i]
+		default:
+			fmt.Fprintf(stderr, "fak benchmarks run: unexpected argument %q (benchmark args follow --)\n", argv[i])
+			return "", nil, false
+		}
+	}
+	return receiptPath, nil, true
 }
 
 func runBuiltInBenchmark(name string, stdout, stderr io.Writer, extra []string) (int, bool) {

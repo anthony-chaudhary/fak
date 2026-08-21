@@ -1,0 +1,30 @@
+{
+  "schema": "fak.benchcatalog.compute-receipt.v1",
+  "provider": "fixture-cloud",
+  "node_id": "sanctioned-l4",
+  "source": "fixture-provider-api:v1",
+  "probed_at": "2026-08-20T12:00:00Z",
+  "os": "linux",
+  "arch": "amd64",
+  "image_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "vcpus": 16,
+  "ram_mib": 32768,
+  "disk_gib": 250,
+  "gpu": {
+    "class": "nvidia-l4",
+    "count": 2
+  },
+  "network": "forbidden",
+  "software": [
+    {
+      "name": "libreoffice",
+      "version": "24.2",
+      "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  ],
+  "license": "verified",
+  "input": {
+    "name": "ale-public-inputs",
+    "digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  }
+}

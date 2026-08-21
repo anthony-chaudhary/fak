@@ -35,6 +35,36 @@ description: "Which fak benchmark page is current authority, which pages are his
 4. **A tuned alternative is mandatory.** Quote the tuned baseline as the headline. A naive stateless arm may provide context but is not the decision-grade alternative.
 5. **Reproduction gates promotion.** If the selected authority row lacks an available artifact or reproducible command for the claimed scope, report `not yet`.
 
+## Preflight a task environment before launch
+
+A benchmark task that declares a typed environment contract must be matched to an
+observed compute receipt before model or provider spend:
+
+```text
+fak benchmarks preflight --requirement task-environment.json --receipt compute-receipt.json
+```
+
+The contract covers OS, architecture, immutable image identity, minimum vCPU,
+RAM, disk, GPU class/count, network posture, post-boot software identity,
+license posture, and input-data identity. The receipt carries the same observed
+axes plus provider, node, source, and probe time. Blank or mutable identities are
+unknown and fail closed; numeric shortfalls are `insufficient`; absent identities
+are `missing`; and a provider capability that violates a task prohibition is
+`forbidden`.
+
+An accepted result prints content hashes for both the requirement and receipt.
+Persist those hashes in the benchmark result packet so the score stays bound to
+the admitted environment. A caller may attach remediation from the existing
+fleet registry to a refusal; the matcher does not create or provision a second
+node registry.
+
+Existing `internal/benchcatalog` rows remain compatible: `Need=offline|weights|dataset`
+continues to drive list, describe, and legacy run behavior. That coarse label is
+not converted into environment proof. `fak benchmarks preflight <legacy-name>
+--receipt ...` therefore returns `BENCH_REQUIREMENT_UNKNOWN` until the row gains
+a typed task contract; operators can preflight a standalone contract with
+`--requirement` during that migration.
+
 ## Evaluator completion check
 
 Before quoting a benchmark, record all six fields:

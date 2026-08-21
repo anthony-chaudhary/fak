@@ -1,0 +1,88 @@
+{
+  "rows": [
+    {
+      "id": "benchcatalog-license-posture",
+      "canonical": "benchmark license posture",
+      "family": "policy-capability",
+      "kind": "config",
+      "definition": "The benchmark environment contract field that states whether a named software license must be verified, must be absent, or is irrelevant before task launch.",
+      "distinction": "A task-scoped SOFTWARE-LICENSE requirement, not the tool-admission posture and not a compute receipt's observation of installed software.",
+      "distinct_from": [
+        "posture",
+        "reason-code",
+        "benchcatalog-capability-missing"
+      ],
+      "aliases": [],
+      "grounding": "LicensePosture",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "benchcatalog-capability-missing",
+      "canonical": "benchmark capability missing",
+      "family": "policy-capability",
+      "kind": "reason-code",
+      "definition": "The stable benchmark preflight refusal emitted when a required environment capability is absent or incompatible with the task contract.",
+      "distinction": "Absence or identity mismatch, not a present resource below its minimum and not a capability that the contract expressly forbids.",
+      "distinct_from": [
+        "reason-code",
+        "benchcatalog-license-posture",
+        "benchcatalog-capability-insufficient",
+        "benchcatalog-capability-forbidden"
+      ],
+      "aliases": [],
+      "grounding": "BENCH_CAPABILITY_MISSING",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "benchcatalog-capability-insufficient",
+      "canonical": "benchmark capability insufficient",
+      "family": "policy-capability",
+      "kind": "reason-code",
+      "definition": "The stable benchmark preflight refusal emitted when a compute resource is present but its observed quantity is below the task minimum.",
+      "distinction": "A numeric shortfall in an observed resource, not a wholly absent or incompatible capability and not an expressly forbidden capability.",
+      "distinct_from": [
+        "reason-code",
+        "benchcatalog-capability-missing",
+        "benchcatalog-capability-forbidden"
+      ],
+      "aliases": [],
+      "grounding": "BENCH_CAPABILITY_INSUFFICIENT",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "benchcatalog-capability-forbidden",
+      "canonical": "benchmark capability forbidden",
+      "family": "policy-capability",
+      "kind": "reason-code",
+      "definition": "The stable benchmark preflight refusal emitted when the provider environment exposes a capability the task contract requires to be absent.",
+      "distinction": "A prohibited observed capability, not a missing requirement and not a present resource below its minimum.",
+      "distinct_from": [
+        "reason-code",
+        "benchcatalog-capability-missing",
+        "benchcatalog-capability-insufficient"
+      ],
+      "aliases": [],
+      "grounding": "BENCH_CAPABILITY_FORBIDDEN",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

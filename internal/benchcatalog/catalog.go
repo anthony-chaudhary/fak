@@ -77,6 +77,10 @@ type Bench struct {
 	Need    Need
 	Level   Level  // the importance axis (serving/e2e vs smoke); zero value == LevelSmoke
 	Summary string // one line: what NUMBER this benchmark produces and what it means
+	// Environment is optional for backward compatibility. A nil row still lists,
+	// describes, and runs through its legacy Need path, but environment preflight
+	// refuses it rather than promoting Need into a resource or policy receipt.
+	Environment *TaskEnvironmentRequirement `json:"environment,omitempty"`
 	// Run is the copy-pasteable command that runs the offline/default arm. For a
 	// weights/dataset bench it is the smallest meaningful invocation; the flags
 	// that point at assets are documented in Flags.

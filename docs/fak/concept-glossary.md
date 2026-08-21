@@ -2323,3 +2323,31 @@ A provider-reported replacement conversation that closes one fak trace and opens
 The session-table transition that terminalizes the current fak trace and creates the fresh provider-conversation trace while carrying cumulative envelopes.
 
 **Distinct from:** The atomic mutation that applies ProviderSessionBoundary, not the boundary record itself and not SessionReset/Recontinue within one logical session.
+
+
+### benchmark license posture
+
+The benchmark environment contract field that states whether a named software license must be verified, must be absent, or is irrelevant before task launch.
+
+**Distinct from:** A task-scoped SOFTWARE-LICENSE requirement, not the tool-admission posture and not a compute receipt's observation of installed software.
+
+
+### benchmark capability missing
+
+The stable benchmark preflight refusal emitted when a required environment capability is absent or incompatible with the task contract.
+
+**Distinct from:** Absence or identity mismatch, not a present resource below its minimum and not a capability that the contract expressly forbids.
+
+
+### benchmark capability insufficient
+
+The stable benchmark preflight refusal emitted when a compute resource is present but its observed quantity is below the task minimum.
+
+**Distinct from:** A numeric shortfall in an observed resource, not a wholly absent or incompatible capability and not an expressly forbidden capability.
+
+
+### benchmark capability forbidden
+
+The stable benchmark preflight refusal emitted when the provider environment exposes a capability the task contract requires to be absent.
+
+**Distinct from:** A prohibited observed capability, not a missing requirement and not a present resource below its minimum.
