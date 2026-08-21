@@ -133,6 +133,9 @@ func q4kResidentBytes(qt *q4kTensor) int64 {
 	if qt == nil {
 		return 0
 	}
+	if qt.lazy != nil {
+		return int64(qt.lazy.Bytes)
+	}
 	return int64(len(qt.raw))
 }
 

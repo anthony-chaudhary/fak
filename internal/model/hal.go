@@ -217,7 +217,11 @@ func (s *Session) weightHALQ8(name string, qt *q8Tensor) compute.Tensor {
 func (s *Session) weightHALQ4K(name string, qt *q4kTensor) compute.Tensor {
 	return s.weightHALStagedBounded("q4k:"+name, name, func() compute.Tensor {
 		requireTensorPresent(qt == nil, "Q4_K", name)
-		return compute.NewQ4K(compute.Default(), []int{qt.out, qt.in}, qt.raw)
+		raw, err := qt.materializeRaw()
+		if err != nil {
+			panic("model: lazy Q4_K read " + name + ": " + err.Error())
+		}
+		return compute.NewQ4K(compute.Default(), []int{qt.out, qt.in}, raw)
 	}, compute.Q4_K, q4kResidentBytes(qt))
 }
 

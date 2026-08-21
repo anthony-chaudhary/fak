@@ -221,7 +221,7 @@ func loadResidentQ4KProfiled(ggufPath string, tLoad time.Time, opts ...ggufload.
 	// Empty opts (the default, every non-EP serve) is byte-identical to the old LoadModelQ4KProfile.
 	var mm *fakmodel.Model
 	var err error
-	if os.Getenv("FAK_METAL_STREAM_Q4K") == "1" {
+	if os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1" {
 		mm, err = ggufload.LoadModelQ4KStreamedDense(ggufPath, prof, opts...)
 	} else {
 		mm, err = ggufload.LoadModelQ4KProfileOptions(ggufPath, prof, opts...)
@@ -325,7 +325,7 @@ func metalGGUFPeakCapacity(metal bool, steady, total int64, known bool) (peak in
 func refuseOversubscribedMetalGGUF(path string) error {
 	// The streamed dense-Q4_K experiment replaces the all-resident startup shape this
 	// observed multiplier guards. Its acceptance run measures the new bound directly.
-	if os.Getenv("FAK_METAL_STREAM_Q4K") == "1" {
+	if os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1" {
 		return nil
 	}
 	ws, err := ggufload.OpenWeights(path)

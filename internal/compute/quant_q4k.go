@@ -3,6 +3,7 @@ package compute
 import (
 	"encoding/binary"
 	"math"
+	"unsafe"
 
 	"github.com/anthony-chaudhary/fak/internal/kquantbits"
 )
@@ -35,11 +36,11 @@ const q4kSuper = 256
 // raw[o*nblk*144:], super-block b within a row at +b*144) as a host Tensor of dtype Q4_K. shape is
 // [out, in] with in a multiple of 256; len(raw) must be out*(in/256)*144. The bytes ride in the
 // HostBuffer.I8() view (one int8 per byte, value-preserving two's-complement reinterpret) — the
-// same layout cpuBackend.MatMul reads and the cuda backend's Upload(_, Q4_K) copies resident.
+// same layout cpuBackend.MatMul reads and the cuda backend's Upload(_, Q4_K) copies resident.`r`n// The byte/int8 reinterpretation is zero-copy: both element types are one byte, and the immutable`r`n// checkpoint payload stays reachable through the host buffer until the synchronous upload returns.
 func NewQ4K(be Backend, shape []int, raw []byte) Tensor {
-	i8 := make([]int8, len(raw))
-	for i, b := range raw {
-		i8[i] = int8(b)
+	var i8 []int8
+	if len(raw) > 0 {
+		i8 = unsafe.Slice((*int8)(unsafe.Pointer(&raw[0])), len(raw))
 	}
 	q := &QuantSpec{Block: q4kSuper, Axis: 2, Bits: 4, Symmetric: false}
 	return makeTensor(be, Q4_K, RowMajor, append([]int(nil), shape...), q, &hostBuf{i8: i8})
@@ -59,9 +60,9 @@ func newRawKQuant(be Backend, dt Dtype, bits, blockBytes int, shape []int, raw [
 	if len(shape) != 2 || shape[1]%q4kSuper != 0 || len(raw) != shape[0]*(shape[1]/q4kSuper)*blockBytes {
 		panic("compute: invalid raw k-quant shape or byte length")
 	}
-	i8 := make([]int8, len(raw))
-	for i, b := range raw {
-		i8[i] = int8(b)
+	var i8 []int8
+	if len(raw) > 0 {
+		i8 = unsafe.Slice((*int8)(unsafe.Pointer(&raw[0])), len(raw))
 	}
 	q := &QuantSpec{Block: q4kSuper, Axis: 2, Bits: uint8(bits), Symmetric: false}
 	return makeTensor(be, dt, RowMajor, append([]int(nil), shape...), q, &hostBuf{i8: i8})
