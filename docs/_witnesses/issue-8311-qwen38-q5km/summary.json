@@ -1,0 +1,23 @@
+{
+  "schema": "fak.qwen38-platform-qualification/1",
+  "issue": 8311,
+  "status": "INVALID_API_CONTRACT",
+  "corpus_sha256": "531927d25f4e314fff8649007b96921af29d3e30809831f47eb43aeb7e80915d",
+  "comparison_admissible": false,
+  "reason": "Neither attempted arm produced a successful API completion; zero-token and undecodable responses invalidate campaign analysis.",
+  "arms": {
+    "q5_k_m": {
+      "status": "INVALID_API_CONTRACT",
+      "successful_api_completions": 0,
+      "report": "q5-report.json",
+      "archive": "q5-archive.json"
+    },
+    "q4_k_m": {
+      "status": "INVALID_API_CONTRACT",
+      "successful_api_completions": 0,
+      "report": "q4-report.json",
+      "archive": "q4-archive.json"
+    }
+  },
+  "next_action": "Fix the serving response contract and rerun each platform arm independently before cross-arm analysis."
+}

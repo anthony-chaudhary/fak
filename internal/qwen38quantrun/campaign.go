@@ -149,7 +149,7 @@ func (r Runner) RunCampaign(ctx context.Context, cfg CampaignConfig, corpus qwen
 	verdict := "PROMOTE"
 	trials := make([]qwen38quant.Trial, 0, len(results))
 	for _, result := range results {
-		trials = append(trials, qwen38quant.Trial{Workload: result.Workload, Repetition: result.Repeat, Quality: result.Quality, LatencyMS: result.LatencyMS, Failure: result.Failure})
+		trials = append(trials, qwen38quant.Trial{Workload: result.Workload, Repetition: result.Repeat, Quality: result.Quality, LatencyMS: result.LatencyMS, Failure: result.Failure, CompletionTokens: result.Usage["completion_tokens"]})
 		if result.Quality != "PASS" {
 			verdict = "HOLD"
 		}

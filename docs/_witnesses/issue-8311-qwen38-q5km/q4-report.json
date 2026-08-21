@@ -1,0 +1,178 @@
+{
+  "Schema": "fak.qwen38-quant-report/1",
+  "CorpusID": "qwen38-27b-agentic-v1",
+  "CorpusSHA256": "531927d25f4e314fff8649007b96921af29d3e30809831f47eb43aeb7e80915d",
+  "Arm": "q4_k_m",
+  "identity": {
+    "Model": "qwen38:27b-q4_k_m",
+    "CheckpointSHA256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "ArtifactSHA256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "TokenizerSHA256": "0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3",
+    "TemplateSHA256": "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041",
+    "QuantizerRevision": "unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+    "RuntimeRevision": "fak@d63bc72f15+build-overlay-omit-info_prefix_transcript.go",
+    "FakModuleRev": "internal/model@r451+gd63bc72f15"
+  },
+  "environment": {
+    "command": [
+      "env",
+      "FAK_Q4K=1",
+      "FAK_QWEN38_API_KEY=\u003csecret\u003e",
+      "/opt/fak-qwen38-campaign/bin/fak",
+      "serve",
+      "--addr",
+      "127.0.0.1:8155",
+      "--gguf",
+      "/opt/fak-qwen38-campaign/models/Qwen3.8-27B-Q4_K_M.gguf",
+      "--backend",
+      "cuda",
+      "--model",
+      "qwen38:27b-q4_k_m",
+      "--context-budget-tokens",
+      "16384",
+      "--require-key-env",
+      "FAK_QWEN38_API_KEY",
+      "--session-registry",
+      "off"
+    ],
+    "hardware": "1x NVIDIA A100-SXM4-40GB",
+    "software": "CUDA 12.9; NVIDIA driver 580.173.02; fak d63bc72f15 binary sha256:f1035d959b661eabed797ca18c366c6e36bf4481dbf171dde47d871c3359d70e; build overlay omitted committed duplicate cmd/fak/info_prefix_transcript.go",
+    "context_tokens": 16384,
+    "cache_mode": "native-prefix",
+    "require_device": "cuda",
+    "deny_fallback": true
+  },
+  "trials": [
+    {
+      "workload": "text",
+      "repetition": 1,
+      "quality": "FAIL",
+      "latency_ms": 6232.934,
+      "failure": "json: cannot unmarshal object into Go struct field chatResponse.usage of type int"
+    },
+    {
+      "workload": "text",
+      "repetition": 2,
+      "quality": "FAIL",
+      "latency_ms": 4867.769,
+      "failure": "json: cannot unmarshal object into Go struct field chatResponse.usage of type int"
+    },
+    {
+      "workload": "text",
+      "repetition": 3,
+      "quality": "FAIL",
+      "latency_ms": 4949.331,
+      "failure": "json: cannot unmarshal object into Go struct field chatResponse.usage of type int"
+    },
+    {
+      "workload": "json_schema",
+      "repetition": 1,
+      "quality": "FAIL",
+      "latency_ms": 13252.236,
+      "failure": "json: cannot unmarshal object into Go struct field chatResponse.usage of type int"
+    },
+    {
+      "workload": "json_schema",
+      "repetition": 2,
+      "quality": "FAIL",
+      "latency_ms": 6205.979,
+      "failure": "json: cannot unmarshal object into Go struct field chatResponse.usage of type int"
+    },
+    {
+      "workload": "json_schema",
+      "repetition": 3,
+      "quality": "FAIL",
+      "latency_ms": 6173.57,
+      "failure": "json: cannot unmarshal object into Go struct field chatResponse.usage of type int"
+    },
+    {
+      "workload": "correlated_tools",
+      "repetition": 1,
+      "quality": "FAIL",
+      "latency_ms": 17294.98,
+      "failure": "HTTP 502: {\"error\":{\"code\":null,\"message\":\"upstream tool-call format not recognized; refusing to skip adjudication\",\"param\":null,\"type\":\"server_error\"}}"
+    },
+    {
+      "workload": "correlated_tools",
+      "repetition": 2,
+      "quality": "FAIL",
+      "latency_ms": 8414.785,
+      "failure": "HTTP 502: {\"error\":{\"code\":null,\"message\":\"upstream tool-call format not recognized; refusing to skip adjudication\",\"param\":null,\"type\":\"server_error\"}}"
+    },
+    {
+      "workload": "correlated_tools",
+      "repetition": 3,
+      "quality": "FAIL",
+      "latency_ms": 8381.797,
+      "failure": "HTTP 502: {\"error\":{\"code\":null,\"message\":\"upstream tool-call format not recognized; refusing to skip adjudication\",\"param\":null,\"type\":\"server_error\"}}"
+    },
+    {
+      "workload": "coding_reasoning",
+      "repetition": 1,
+      "quality": "FAIL",
+      "latency_ms": 11273.798,
+      "failure": "HTTP 502: {\"error\":{\"code\":null,\"message\":\"upstream tool-call format not recognized; refusing to skip adjudication\",\"param\":null,\"type\":\"server_error\"}}"
+    },
+    {
+      "workload": "coding_reasoning",
+      "repetition": 2,
+      "quality": "FAIL",
+      "latency_ms": 7364.673,
+      "failure": "HTTP 502: {\"error\":{\"code\":null,\"message\":\"upstream tool-call format not recognized; refusing to skip adjudication\",\"param\":null,\"type\":\"server_error\"}}"
+    },
+    {
+      "workload": "coding_reasoning",
+      "repetition": 3,
+      "quality": "FAIL",
+      "latency_ms": 7213.426,
+      "failure": "HTTP 502: {\"error\":{\"code\":null,\"message\":\"upstream tool-call format not recognized; refusing to skip adjudication\",\"param\":null,\"type\":\"server_error\"}}"
+    },
+    {
+      "workload": "long_context_retrieval",
+      "repetition": 1,
+      "quality": "FAIL",
+      "latency_ms": 600102.087,
+      "failure": "Post \"http://127.0.0.1:8155/v1/chat/completions\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"
+    },
+    {
+      "workload": "long_context_retrieval",
+      "repetition": 2,
+      "quality": "FAIL",
+      "latency_ms": 600060.643,
+      "failure": "Post \"http://127.0.0.1:8155/v1/chat/completions\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"
+    },
+    {
+      "workload": "long_context_retrieval",
+      "repetition": 3,
+      "quality": "FAIL",
+      "latency_ms": 600002.371,
+      "failure": "Post \"http://127.0.0.1:8155/v1/chat/completions\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"
+    },
+    {
+      "workload": "repeated_workflow_cache",
+      "repetition": 1,
+      "quality": "FAIL",
+      "latency_ms": 7467.233,
+      "failure": "json: cannot unmarshal object into Go struct field chatResponse.usage of type int"
+    },
+    {
+      "workload": "repeated_workflow_cache",
+      "repetition": 2,
+      "quality": "FAIL",
+      "latency_ms": 5019.612,
+      "failure": "json: cannot unmarshal object into Go struct field chatResponse.usage of type int"
+    },
+    {
+      "workload": "repeated_workflow_cache",
+      "repetition": 3,
+      "quality": "FAIL",
+      "latency_ms": 12676.51,
+      "failure": "json: cannot unmarshal object into Go struct field chatResponse.usage of type int"
+    }
+  ],
+  "Verdict": "HOLD",
+  "EvidenceClass": "CAMPAIGN",
+  "raw_archive_sha256": "d2c1b1c6f2ebf0cdaa084952f467a20193a15586ab8417b18822b3df78150d7d",
+  "stale_after": "2026-09-20T00:00:00Z",
+  "rollback_threshold": "rollback if any required workload fails, fallback activates, or runtime identity drifts"
+}

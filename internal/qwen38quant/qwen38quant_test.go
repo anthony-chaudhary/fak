@@ -1,6 +1,7 @@
 package qwen38quant
 
 import (
+	"crypto/sha256"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,9 +13,19 @@ func TestSelfcheck(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-func TestRequiredTenArms(t *testing.T) {
-	if len(RequiredArms) != 10 {
-		t.Fatalf("arms=%d", len(RequiredArms))
+func TestRequiredArmsCoverSupportedFormats(t *testing.T) {
+	want := map[string]bool{
+		"bf16": true, "fp8": true, "q8_0": true, "q6_k": true, "q5_k_m": true,
+		"q4_k_m": true, "iq4_xs": true, "awq_int4": true, "gptq_int4": true, "exl2": true,
+	}
+	for _, arm := range RequiredArms {
+		if seen := !want[arm]; seen {
+			t.Fatalf("unexpected or duplicate required arm %q", arm)
+		}
+		delete(want, arm)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing required arms: %v", want)
 	}
 }
 func TestCheckedInCorpus(t *testing.T) {
@@ -26,8 +37,9 @@ func TestCheckedInCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Fixtures) != 6 || len(CorpusDigest(c)) != 64 {
-		t.Fatalf("fixtures=%d digest=%q", len(c.Fixtures), CorpusDigest(c))
+	digest := CorpusDigest(c)
+	if len(c.Fixtures) != len(RequiredWorkloads) || len(digest) != sha256.Size*2 {
+		t.Fatalf("fixtures=%d workloads=%d digest=%q", len(c.Fixtures), len(RequiredWorkloads), digest)
 	}
 	for _, f := range c.Fixtures {
 		if f.Prompt == "" {
@@ -66,6 +78,21 @@ func TestFailedTrialRetained(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestValidateRejectsCampaignWithoutSuccessfulAPICompletion(t *testing.T) {
+	c := testCorpus()
+	r := validFixture(c)
+	for i := range r.Trials {
+		r.Trials[i].CompletionTokens = 0
+		r.Trials[i].Quality = "FAIL"
+		r.Trials[i].Failure = "usage.completion_tokens: cannot unmarshal object into Go value of type int"
+	}
+	r.Verdict = "HOLD"
+	if err := Validate(r, c); err == nil || !strings.Contains(err.Error(), "no successful API completions") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestAcceptanceOnlyNeverCampaignReady(t *testing.T) {
 	c := testCorpus()
 	for _, a := range []string{"fp8", "q4_k_m"} {

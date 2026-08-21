@@ -24,6 +24,25 @@ post-warmup repetitions. Quality is evaluated first. A failed quality trial can
 produce `HOLD` or `EXCLUDE`, never `PROMOTE`; performance from such a run is not
 a production gain.
 
+### Qualification precedes comparison
+
+This campaign qualifies each quant as a supported platform arm. It does not rank
+one quant against another until both arms independently complete the API contract.
+The first text request is therefore a canary: model identity must match, the
+response must decode, and `usage.completion_tokens` must be a positive integer.
+A zero-token or undecodable canary stops before the remaining 17 requests, emits
+no campaign report, and names the serving-contract defect to fix. It is not a
+`HOLD` data point and cannot feed cross-quant latency, throughput, cache, quality,
+or promotion analysis.
+
+`qwen38quant.Validate` repeats the same boundary for imported and hand-assembled
+reports: a `CAMPAIGN` with no successful API completion is invalid even when its
+verdict says `HOLD`. This prevents a downstream summary from converting an invalid
+platform run into a quant-selection recommendation. After each arm qualifies,
+cross-arm analysis may compare only like-for-like successful workloads; arm
+support remains the primary outcome, while a frontier recommendation is optional
+consumer analysis.
+
 ## Production soak
 
 `qwen38campaign --soak` extends that campaign contract across at least three
@@ -64,7 +83,7 @@ three repetitions of six workloads. Importers therefore type both as
 
 `qwen38quant.Selfcheck` proves that boundary and proves refusals for corpus
 drift, missing immutable hashes, ambiguous fallback, fewer than three repeats,
-and promotion attached to failing quality:
+zero successful API completions, and promotion attached to failing quality:
 
 ```console
 go test ./internal/qwen38quant

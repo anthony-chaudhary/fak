@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/qwen38quant"
@@ -67,11 +68,8 @@ func TestFailureRetained(t *testing.T) {
 	}))
 	defer s.Close()
 	got, err := (Runner{}).Run(context.Background(), Config{Endpoint: s.URL, APIKey: "x", Model: "exact"}, c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got[0].Quality != "FAIL" || got[0].Failure == "" {
-		t.Fatal("failure not retained")
+	if got != nil || err == nil || !strings.Contains(err.Error(), "API canary") {
+		t.Fatalf("got=%v err=%v", got, err)
 	}
 }
 func TestRefusesTooFewRepetitions(t *testing.T) {
@@ -87,6 +85,56 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func TestRunnerStopsAtZeroTokenAPICanary(t *testing.T) {
+	var completions int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]string{"id": "exact"}}})
+			return
+		}
+		completions++
+		json.NewEncoder(w).Encode(map[string]any{
+			"model":   "exact",
+			"choices": []any{map[string]any{"message": map[string]any{"content": "needle-8311"}}},
+			"usage":   map[string]int{"prompt_tokens": 10, "completion_tokens": 0},
+		})
+	}))
+	defer srv.Close()
+	c := qwen38quant.DefaultCorpus()
+	_, err := (Runner{}).Run(context.Background(), Config{Endpoint: srv.URL, APIKey: "secret", Model: "exact"}, c)
+	if err == nil || !strings.Contains(err.Error(), "API canary") || !strings.Contains(err.Error(), "zero completion tokens") {
+		t.Fatalf("err=%v", err)
+	}
+	if completions != 1 {
+		t.Fatalf("completion requests=%d want 1", completions)
+	}
+}
+
+func TestRunnerStopsAtUndecodableUsageCanary(t *testing.T) {
+	var completions int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]string{"id": "exact"}}})
+			return
+		}
+		completions++
+		json.NewEncoder(w).Encode(map[string]any{
+			"model":   "exact",
+			"choices": []any{map[string]any{"message": map[string]any{"content": "needle-8311"}}},
+			"usage":   map[string]any{"prompt_tokens": 10, "completion_tokens": map[string]int{"value": 2}},
+		})
+	}))
+	defer srv.Close()
+	c := qwen38quant.DefaultCorpus()
+	_, err := (Runner{}).Run(context.Background(), Config{Endpoint: srv.URL, APIKey: "secret", Model: "exact"}, c)
+	if err == nil || !strings.Contains(err.Error(), "API canary") || !strings.Contains(err.Error(), "usage.completion_tokens") {
+		t.Fatalf("err=%v", err)
+	}
+	if completions != 1 {
+		t.Fatalf("completion requests=%d want 1", completions)
+	}
 }
 
 func TestModelIdentityMismatchDeniedBeforeMeasurement(t *testing.T) {

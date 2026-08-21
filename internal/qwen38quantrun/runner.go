@@ -128,7 +128,7 @@ func (r Runner) Run(ctx context.Context, cfg Config, corpus qwen38quant.Corpus) 
 		return nil, err
 	}
 	var out []Result
-	for _, f := range corpus.Fixtures {
+	for fixtureIndex, f := range corpus.Fixtures {
 		for n := 1; n <= reps; n++ {
 			res := Result{FixtureID: f.ID, Workload: f.Workload, Repeat: n, Quality: "FAIL"}
 			if f.Workload == "repeated_workflow_cache" {
@@ -147,6 +147,9 @@ func (r Runner) Run(ctx context.Context, cfg Config, corpus qwen38quant.Corpus) 
 			if err != nil {
 				res.Failure = err.Error()
 				out = append(out, res)
+				if fixtureIndex == 0 && n == 1 {
+					return nil, fmt.Errorf("API canary %s failed: %w; fix the serving contract before running the campaign matrix", f.ID, err)
+				}
 				continue
 			}
 			res.Usage = resp.Usage
@@ -162,6 +165,9 @@ func (r Runner) Run(ctx context.Context, cfg Config, corpus qwen38quant.Corpus) 
 			}
 			grade(&res, f, resp)
 			out = append(out, res)
+			if fixtureIndex == 0 && n == 1 && res.Usage["completion_tokens"] == 0 {
+				return nil, fmt.Errorf("API canary %s produced zero completion tokens; fix the serving contract before running the campaign matrix", f.ID)
+			}
 		}
 	}
 	return out, nil

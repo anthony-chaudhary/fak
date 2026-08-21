@@ -58,11 +58,12 @@ type Environment struct {
 }
 
 type Trial struct {
-	Workload   string  `json:"workload"`
-	Repetition int     `json:"repetition"`
-	Quality    string  `json:"quality"`
-	LatencyMS  float64 `json:"latency_ms,omitempty"`
-	Failure    string  `json:"failure,omitempty"`
+	Workload         string  `json:"workload"`
+	Repetition       int     `json:"repetition"`
+	Quality          string  `json:"quality"`
+	LatencyMS        float64 `json:"latency_ms,omitempty"`
+	Failure          string  `json:"failure,omitempty"`
+	CompletionTokens int     `json:"completion_tokens,omitempty"`
 }
 
 type Report struct {
@@ -170,7 +171,7 @@ func Validate(r Report, c Corpus) error {
 	if r.Verdict != "PROMOTE" && r.Verdict != "HOLD" && r.Verdict != "EXCLUDE" {
 		return errors.New("invalid verdict")
 	}
-	counts, failed := map[string]map[int]bool{}, false
+	counts, failed, successfulCompletions := map[string]map[int]bool{}, false, 0
 	for _, w := range c.Workloads {
 		counts[w] = map[int]bool{}
 	}
@@ -179,6 +180,9 @@ func Validate(r Report, c Corpus) error {
 			return errors.New("invalid or duplicate trial")
 		}
 		counts[t.Workload][t.Repetition] = true
+		if t.CompletionTokens > 0 {
+			successfulCompletions++
+		}
 		if t.Quality != "PASS" {
 			failed = true
 			if t.Failure == "" {
@@ -190,6 +194,9 @@ func Validate(r Report, c Corpus) error {
 		if len(reps) < c.MinimumRepetitions {
 			return fmt.Errorf("workload %s has fewer than %d repetitions", w, c.MinimumRepetitions)
 		}
+	}
+	if successfulCompletions == 0 {
+		return errors.New("trials: no successful API completions; fix the serving contract before campaign analysis")
 	}
 	if failed && r.Verdict == "PROMOTE" {
 		return errors.New("quality failure cannot be promoted")
@@ -263,7 +270,7 @@ func validFixture(c Corpus) Report {
 	var trials []Trial
 	for _, w := range c.Workloads {
 		for n := 1; n <= c.MinimumRepetitions; n++ {
-			trials = append(trials, Trial{Workload: w, Repetition: n, Quality: "PASS", LatencyMS: float64(n)})
+			trials = append(trials, Trial{Workload: w, Repetition: n, Quality: "PASS", LatencyMS: float64(n), CompletionTokens: 1})
 		}
 	}
 	return Report{Schema: Schema, CorpusID: c.ID, CorpusSHA256: CorpusDigest(c), Arm: "q4_k_m", Identity: Identity{Model: "Qwen/Qwen3.8-27B", CheckpointSHA256: h, ArtifactSHA256: h, TokenizerSHA256: h, TemplateSHA256: h, QuantizerRevision: "q@rev", RuntimeRevision: "r@rev", FakModuleRev: "internal/model@r1+gabc"}, Environment: Environment{Command: []string{"fak", "serve"}, Hardware: "A100", Software: "CUDA", ContextTokens: 16384, CacheMode: "on", RequireDevice: "cuda", DenyFallback: true}, Trials: trials, Verdict: "PROMOTE", EvidenceClass: "CAMPAIGN", RawArchiveSHA256: h, StaleAfter: "2026-11-20", RollbackThreshold: "quality pass rate below 100%"}
