@@ -260,6 +260,15 @@ func TestRenderInKernelChatMLRequestPinsForcedTool(t *testing.T) {
 	}
 }
 
+func TestRenderInKernelChatMLRequestPinsForcedWriteArtifact(t *testing.T) {
+	choice := json.RawMessage(`{"type":"function","function":{"name":"Write"}}`)
+	tools := []ToolDef{{Type: "function", Function: ToolDefFunction{Name: "Write"}}}
+	got := renderInKernelChatMLRequest([]Message{{Role: RoleUser, Content: "Create index.html."}}, tools, model.Config{}, nil, choice)
+	if !strings.Contains(got, "Return only the complete file contents") || strings.Contains(got, `"const":"Write"`) {
+		t.Fatalf("forced Write should request artifact bytes for fail-closed wrapping:\n%s", got)
+	}
+}
+
 func TestForcedToolArgumentsFromMessages(t *testing.T) {
 	tools := []ToolDef{{Type: "function", Function: ToolDefFunction{Name: "record_probe", Parameters: json.RawMessage(`{"type":"object","properties":{"hardware":{"type":"string"},"passed":{"type":"boolean"}},"required":["hardware","passed"]}`)}}}
 	got, ok := forcedToolArgumentsFromMessages("record_probe", tools, []Message{{Role: RoleUser, Content: "Set hardware to A100-SXM4-40GB. Set passed to the boolean true."}})

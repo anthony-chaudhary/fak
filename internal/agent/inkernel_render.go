@@ -293,6 +293,9 @@ func inKernelForcedToolInstruction(raw json.RawMessage, tools []ToolDef) string 
 	if name == "" {
 		return ""
 	}
+	if name == "Write" {
+		return "Return only the complete file contents requested by the user. Begin with the file's first byte; do not use JSON, XML, Markdown fences, reasoning, or prose. The runtime will wrap the completed artifact in the forced Write call."
+	}
 	parameters := json.RawMessage(`{"type":"object"}`)
 	for _, tool := range tools {
 		if tool.Function.Name == name && len(tool.Function.Parameters) > 0 {
