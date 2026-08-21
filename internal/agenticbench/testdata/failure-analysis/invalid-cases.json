@@ -1,0 +1,27 @@
+[
+  {
+    "name": "unsupported claim",
+    "mutation": "unsupported_claim",
+    "want_error": "requires evidence"
+  },
+  {
+    "name": "escaping path",
+    "mutation": "escaping_path",
+    "want_error": "escapes run root"
+  },
+  {
+    "name": "stale hash",
+    "mutation": "stale_hash",
+    "want_error": "hash"
+  },
+  {
+    "name": "unlabeled inference",
+    "mutation": "unlabeled_inference",
+    "want_error": "kind"
+  },
+  {
+    "name": "unknown category",
+    "mutation": "unknown_category",
+    "want_error": "unknown failure class"
+  }
+]

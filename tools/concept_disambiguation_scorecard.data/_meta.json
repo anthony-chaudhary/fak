@@ -10769,6 +10769,16 @@
           "category": "incidental",
           "reason": "Private CLI formatting helper, not a materialization lifecycle concept.",
           "token": "renderDispatchTrajectoryAudit"
+        },
+        {
+          "category": "incidental",
+          "reason": "Format-specific serializer for the evidence-cited failure-analysis card; it applies the card's advisory contract and introduces no independent render/materialization concept.",
+          "token": "RenderFailureAnalysisJSON"
+        },
+        {
+          "category": "incidental",
+          "reason": "Human-readable formatter for the evidence-cited failure-analysis card; it applies the card's advisory contract and introduces no independent render/materialization concept.",
+          "token": "RenderFailureAnalysisMarkdown"
         }
       ],
       "id": "render-materialize",
@@ -10787,6 +10797,8 @@
         "RenderDents",
         "RenderDocs",
         "RenderFacet",
+        "RenderFailureAnalysisJSON",
+        "RenderFailureAnalysisMarkdown",
         "RenderFidelity",
         "RenderFreshness",
         "RenderHistoryStatus",

@@ -1,0 +1,13 @@
+{
+  "run_id": "ale-failed-001",
+  "task": {
+    "description": "Produce the quarterly variance analysis as a CSV file.",
+    "constraints": ["Write the deliverable to output/result.csv"]
+  },
+  "status": "failed",
+  "official_score": 0.25,
+  "retry_policy": {
+    "decision": "no_retry",
+    "reason": "attempt budget exhausted"
+  }
+}

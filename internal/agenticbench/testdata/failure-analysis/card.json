@@ -1,0 +1,189 @@
+{
+  "schema": "fak.agenticbench.failure-analysis-card.v1",
+  "label": "ADVISORY",
+  "run_id": "ale-failed-001",
+  "generator": {
+    "recipe": "bounded-artifact-analysis-v1",
+    "model": "gpt-5.6",
+    "prompt_version": "failure-analysis-v1",
+    "software_version": "fak-test-r1",
+    "generated_at": "2026-08-20T12:00:00Z"
+  },
+  "artifacts": [
+    {
+      "artifact_path": "run.json",
+      "sha256": "sha256:0d4e0e3ad1635bbe22cb4ec97642bb11403fd8f119f06c165844685e18b32650"
+    },
+    {
+      "artifact_path": "evaluation.json",
+      "sha256": "sha256:e0325bc3aad2e6e1d4988e94a2315f9eb24d3aba0a40f10b905eb27089d03a12"
+    },
+    {
+      "artifact_path": "interaction_log.json",
+      "sha256": "sha256:cc20430f80e0f30c8ecdec2879ad43249448ddf753d5ddfc98fb1edb75233e03"
+    },
+    {
+      "artifact_path": "events.jsonl",
+      "sha256": "sha256:4bc1bcb1f4d9fb9f075a639d0400307540163aaa261b3d1a356d52b6c3c0d071"
+    }
+  ],
+  "verdict": {
+    "outcome": "failure",
+    "summary": {
+      "text": "The run failed with an official score of 0.25.",
+      "kind": "observation",
+      "evidence": [
+        {
+          "artifact_path": "run.json",
+          "json_pointer": "/status",
+          "artifact_hash": "sha256:0d4e0e3ad1635bbe22cb4ec97642bb11403fd8f119f06c165844685e18b32650"
+        },
+        {
+          "artifact_path": "run.json",
+          "json_pointer": "/official_score",
+          "artifact_hash": "sha256:0d4e0e3ad1635bbe22cb4ec97642bb11403fd8f119f06c165844685e18b32650"
+        }
+      ]
+    },
+    "most_important_problem": {
+      "text": "The required CSV deliverable was not produced.",
+      "kind": "observation",
+      "evidence": [
+        {
+          "artifact_path": "evaluation.json",
+          "json_pointer": "/feedback",
+          "artifact_hash": "sha256:e0325bc3aad2e6e1d4988e94a2315f9eb24d3aba0a40f10b905eb27089d03a12"
+        }
+      ]
+    }
+  },
+  "task": {
+    "summary": {
+      "text": "Produce a quarterly variance analysis.",
+      "kind": "observation",
+      "evidence": [
+        {
+          "artifact_path": "run.json",
+          "json_pointer": "/task/description",
+          "artifact_hash": "sha256:0d4e0e3ad1635bbe22cb4ec97642bb11403fd8f119f06c165844685e18b32650"
+        }
+      ]
+    },
+    "constraints": [
+      {
+        "text": "Write the deliverable to output/result.csv.",
+        "kind": "observation",
+        "evidence": [
+          {
+            "artifact_path": "run.json",
+            "json_pointer": "/task/constraints/0",
+            "artifact_hash": "sha256:0d4e0e3ad1635bbe22cb4ec97642bb11403fd8f119f06c165844685e18b32650"
+          }
+        ]
+      }
+    ]
+  },
+  "strengths": [
+    {
+      "text": "The agent read the constraints and calculated variances.",
+      "kind": "observation",
+      "evidence": [
+        {
+          "artifact_path": "interaction_log.json",
+          "json_pointer": "/entries/0/summary",
+          "artifact_hash": "sha256:cc20430f80e0f30c8ecdec2879ad43249448ddf753d5ddfc98fb1edb75233e03"
+        }
+      ]
+    }
+  ],
+  "failures": {
+    "observations": [
+      {
+        "text": "The agent wrote a Markdown artifact at the wrong path.",
+        "kind": "observation",
+        "evidence": [
+          {
+            "artifact_path": "interaction_log.json",
+            "json_pointer": "/entries/1/summary",
+            "artifact_hash": "sha256:cc20430f80e0f30c8ecdec2879ad43249448ddf753d5ddfc98fb1edb75233e03"
+          },
+          {
+            "artifact_path": "events.jsonl",
+            "event_ordinal": 2,
+            "artifact_hash": "sha256:4bc1bcb1f4d9fb9f075a639d0400307540163aaa261b3d1a356d52b6c3c0d071"
+          }
+        ]
+      }
+    ],
+    "inferences": [
+      {
+        "text": "The agent likely failed to re-check the output-format constraint before finishing.",
+        "kind": "inference",
+        "uncertainty": "The bounded interaction log does not expose the agent's private reasoning.",
+        "evidence": [
+          {
+            "artifact_path": "run.json",
+            "json_pointer": "/task/constraints/0",
+            "artifact_hash": "sha256:0d4e0e3ad1635bbe22cb4ec97642bb11403fd8f119f06c165844685e18b32650"
+          },
+          {
+            "artifact_path": "interaction_log.json",
+            "json_pointer": "/entries/1/summary",
+            "artifact_hash": "sha256:cc20430f80e0f30c8ecdec2879ad43249448ddf753d5ddfc98fb1edb75233e03"
+          }
+        ]
+      }
+    ]
+  },
+  "scoring": {
+    "final_score": {
+      "text": "The official evaluator returned 0.25.",
+      "kind": "observation",
+      "evidence": [
+        {
+          "artifact_path": "evaluation.json",
+          "json_pointer": "/score",
+          "artifact_hash": "sha256:e0325bc3aad2e6e1d4988e94a2315f9eb24d3aba0a40f10b905eb27089d03a12"
+        }
+      ]
+    },
+    "breakdown": [
+      {
+        "text": "The format component received zero credit.",
+        "kind": "observation",
+        "evidence": [
+          {
+            "artifact_path": "evaluation.json",
+            "json_pointer": "/breakdown/format",
+            "artifact_hash": "sha256:e0325bc3aad2e6e1d4988e94a2315f9eb24d3aba0a40f10b905eb27089d03a12"
+          }
+        ]
+      }
+    ],
+    "confidence": 0.98,
+    "uncertainty": "The card reports the official evaluator output without interpreting unexposed grader internals."
+  },
+  "classification": {
+    "class": "execution",
+    "subcategory": "output_format_error",
+    "confidence": 0.9,
+    "uncertainty": "A bounded log cannot rule out an earlier planning error.",
+    "rationale": {
+      "text": "The evidence supports an execution-level output-format failure.",
+      "kind": "inference",
+      "uncertainty": "The agent's private plan is unavailable.",
+      "evidence": [
+        {
+          "artifact_path": "run.json",
+          "json_pointer": "/task/constraints/0",
+          "artifact_hash": "sha256:0d4e0e3ad1635bbe22cb4ec97642bb11403fd8f119f06c165844685e18b32650"
+        },
+        {
+          "artifact_path": "interaction_log.json",
+          "json_pointer": "/entries/1/summary",
+          "artifact_hash": "sha256:cc20430f80e0f30c8ecdec2879ad43249448ddf753d5ddfc98fb1edb75233e03"
+        }
+      ]
+    }
+  }
+}

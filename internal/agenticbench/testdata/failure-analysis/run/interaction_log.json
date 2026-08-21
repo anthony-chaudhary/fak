@@ -1,0 +1,12 @@
+{
+  "entries": [
+    {
+      "ordinal": 1,
+      "summary": "The agent read the task constraints and calculated the requested variances."
+    },
+    {
+      "ordinal": 2,
+      "summary": "The agent wrote output/report.md instead of output/result.csv."
+    }
+  ]
+}
