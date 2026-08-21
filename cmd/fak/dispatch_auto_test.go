@@ -249,3 +249,33 @@ func TestDispatchWaveExitBenignForPrelaunchHold(t *testing.T) {
 		t.Fatalf("audit error hold must not be a benign wave exit")
 	}
 }
+
+func TestDispatchAutoCompatibleCapacityMatchesWaveTierPolicy(t *testing.T) {
+	serve := true
+	rows := []dispatchtick.AccountRow{
+		{Account: "opencode-pm-a", Tag: "pm-a", Kind: "worker", Product: "opencode", ModelTier: 2, Available: true, CanServe: &serve},
+		{Account: "opencode-pm-b", Tag: "pm-b", Kind: "worker", Product: "opencode", ModelTier: 2, Available: true, CanServe: &serve},
+	}
+	pool := dispatchtick.BuildSeatPool(rows, nil, "opencode")
+	if pool.FreeSeats != 2 {
+		t.Fatalf("aggregate free seats = %d, want 2", pool.FreeSeats)
+	}
+
+	engineering := dispatchtick.AllocateWave(dispatchtick.AccountWaveInput{
+		Rows: rows, Count: pool.FreeSeats, WorkKind: "engineering", Product: "opencode",
+	})
+	if engineering.Granted != 0 || engineering.TargetTier != 1 {
+		t.Fatalf("engineering allocation = %+v, want zero tier-1-compatible seats", engineering)
+	}
+	plan := dispatchauto.PlanAuto(dispatchauto.Input{EffectiveCap: 2, DistinctPools: engineering.Granted, ReadyWork: 10})
+	if plan.Refill != 0 || plan.Binding != "distinct_pools" {
+		t.Fatalf("engineering auto plan = %+v, want truthful zero refill bound by compatible pools", plan)
+	}
+
+	gardening := dispatchtick.AllocateWave(dispatchtick.AccountWaveInput{
+		Rows: rows, Count: pool.FreeSeats, WorkKind: "gardening", Product: "opencode",
+	})
+	if gardening.Granted != 2 || gardening.TargetTier != 2 {
+		t.Fatalf("gardening allocation = %+v, want both tier-2 seats", gardening)
+	}
+}

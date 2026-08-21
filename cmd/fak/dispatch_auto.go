@@ -166,14 +166,23 @@ func probeDispatchAutoInput(root string, stderr io.Writer, maxWorkers int, workK
 	}
 
 	if rows, err := dispatchReadAccountRoster(root); err == nil {
-		pool := dispatchtick.BuildSeatPool(rows, dispatchLiveSeatLeases(filepath.Join(root, dispatchtick.RunsDirName)), product)
-		freeSlots := pool.FreeSeats
-		if preflightSeatFree != nil {
+		leases := dispatchLiveSeatLeases(filepath.Join(root, dispatchtick.RunsDirName))
+		pool := dispatchtick.BuildSeatPool(rows, leases, product)
+		// Price the same work-kind tier that dispatch wave will allocate. BuildSeatPool
+		// counts every product seat, including tiers this wave cannot use.
+		alloc := dispatchtick.AllocateWave(dispatchtick.AccountWaveInput{
+			Rows: rows, Leases: leases, Count: pool.FreeSeats, WorkKind: workKind, Product: product,
+		})
+		freeSlots := alloc.Granted
+		if preflightSeatFree != nil && *preflightSeatFree < freeSlots {
 			freeSlots = *preflightSeatFree
 		}
 		in.DistinctPools = dispatchAutoAccountCapacity(in.LiveWorkers, freeSlots)
-		if pool.FreeSeats < pool.TotalSeats {
-			notes = append(notes, fmt.Sprintf("accounts: %d/%d session slot(s) free", pool.FreeSeats, pool.TotalSeats))
+		if pool.TotalSeats > 0 {
+			notes = append(notes, fmt.Sprintf("accounts: %d/%d compatible session slot(s) free for %s", freeSlots, pool.TotalSeats, workKind))
+		}
+		if freeSlots == 0 && strings.TrimSpace(alloc.Reason) != "" {
+			notes = append(notes, "accounts: "+strings.TrimSpace(alloc.Reason))
 		}
 	} else {
 		msg := "account roster probe failed: " + err.Error()
