@@ -65,6 +65,8 @@
 package dispatchdoa
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -110,11 +112,27 @@ const (
 	CauseWorkingDir = "working_dir"
 	// CauseUsageError: the binary printed its usage block and exited without a more
 	// specific diagnostic (an unknown subcommand, a missing required argument).
-	CauseUsageError = "usage_error"
+	CauseUsageError      = "usage_error"
+	CauseAuthInvalid     = "auth_invalid"
+	CauseProcessStart    = "process_start"
+	CauseImmediateExit   = "immediate_exit"
+	CauseMissingEvidence = "missing_evidence"
 	// CauseUnrecognized: the DOA shape holds — spawned, stub log, never launched —
 	// but no known signature matched. Kept honest rather than folded away.
 	CauseUnrecognized = "unrecognized"
 )
+
+var causeNextActions = map[string]string{
+	CauseFlagParse:       "repair the worker argv contract, then rerun one canary",
+	CauseExecFailure:     "repair the worker runtime/executable path before retrying",
+	CauseWorkingDir:      "repair the declared worker directory before retrying",
+	CauseUsageError:      "inspect the usage diagnostic and repair the launch contract",
+	CauseAuthInvalid:     "refresh or re-login the selected account, then rerun account/read with refreshToken=true",
+	CauseProcessStart:    "repair the executable/path/process-start failure before retrying",
+	CauseImmediateExit:   "inspect the first post-launch error and repair the worker route",
+	CauseMissingEvidence: "repair launch evidence capture; do not infer success from an empty log",
+	CauseUnrecognized:    "inspect the sampled log and add a stable typed classifier for the novel signature",
+}
 
 var (
 	// launchMarkerRE is the positive proof that the worker BEGAN WORK. Any one of
@@ -153,7 +171,10 @@ var (
 		`|(?i)getwd: no such file or directory`)
 
 	// usageRE is a bare usage block — the weakest signature, checked last.
-	usageRE = regexp.MustCompile(`(?mi)^usage: `)
+	usageRE         = regexp.MustCompile(`(?mi)^usage: `)
+	authInvalidRE   = regexp.MustCompile(`(?i)(auth_invalid|invalid_refresh_token|invalid refresh token|401 unauthorized|upstream rejected the credential)`)
+	processStartRE  = regexp.MustCompile(`(?i)(executable file not found|failed to start|process start|createprocess)`)
+	immediateExitRE = regexp.MustCompile(`(?i)(exited abnormally|nonzero_exit|immediate exit)`)
 )
 
 // Verdict is one run's classification.
@@ -162,6 +183,8 @@ type Verdict struct {
 	DOA bool
 	// Cause is one of the Cause* constants when DOA, and "" otherwise.
 	Cause string
+	// Signature is a scrubbed fingerprint for an unrecognized cause.
+	Signature string
 }
 
 // Classify grades one worker log into a DOA verdict from its HEAD (the first
@@ -200,17 +223,42 @@ func Classify(head string, size int64) Verdict {
 	// Precedence runs most-specific first so a flag-parse death (which ALSO prints a
 	// usage block) is never demoted to the generic usage_error class.
 	switch {
+	case authInvalidRE.MatchString(head):
+		return Verdict{DOA: true, Cause: CauseAuthInvalid}
+	case immediateExitRE.MatchString(head):
+		return Verdict{DOA: true, Cause: CauseImmediateExit}
 	case flagParseRE.MatchString(head):
 		return Verdict{DOA: true, Cause: CauseFlagParse}
 	case execFailureRE.MatchString(head):
 		return Verdict{DOA: true, Cause: CauseExecFailure}
+	case processStartRE.MatchString(head):
+		return Verdict{DOA: true, Cause: CauseProcessStart}
 	case workingDirRE.MatchString(head):
 		return Verdict{DOA: true, Cause: CauseWorkingDir}
+	case missingEvidence(head):
+		return Verdict{DOA: true, Cause: CauseMissingEvidence}
 	case usageRE.MatchString(head):
 		return Verdict{DOA: true, Cause: CauseUsageError}
 	default:
-		return Verdict{DOA: true, Cause: CauseUnrecognized}
+		return Verdict{DOA: true, Cause: CauseUnrecognized, Signature: unknownSignature(head)}
 	}
+}
+
+func missingEvidence(head string) bool {
+	_, body, found := strings.Cut(head, "\n")
+	return !found || strings.TrimSpace(body) == ""
+}
+
+// unknownSignature identifies a novel startup failure without echoing credentials,
+// paths, prompts, or other potentially sensitive log content into status JSON.
+func unknownSignature(head string) string {
+	_, body, _ := strings.Cut(head, "\n")
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(body))
+	return fmt.Sprintf("sha256:%x", sum[:8])
 }
 
 // Verdict rungs for a folded window. A fleet whose spawns are dying is not a
@@ -257,6 +305,10 @@ type Report struct {
 	Rate float64
 	// Causes counts DOA runs by Cause.
 	Causes map[string]int
+	// NextActions gives one stable remediation for every observed cause.
+	NextActions map[string]string
+	// Diagnostics maps unrecognized log paths to scrubbed failure fingerprints.
+	Diagnostics map[string]string
 	// Status is StatusClear / StatusWarn / StatusAlarm.
 	Status string
 	// Sample names up to SampleMax DOA logs, oldest-first by name, so an operator can
@@ -285,6 +337,16 @@ func Fold(runs []Run) Report {
 			cause = CauseUnrecognized
 		}
 		rep.Causes[cause]++
+		if rep.NextActions == nil {
+			rep.NextActions = map[string]string{}
+		}
+		rep.NextActions[cause] = causeNextActions[cause]
+		if cause == CauseUnrecognized && r.Log != "" && r.Verdict.Signature != "" {
+			if rep.Diagnostics == nil {
+				rep.Diagnostics = map[string]string{}
+			}
+			rep.Diagnostics[r.Log] = r.Verdict.Signature
+		}
 		if r.Log != "" {
 			doaLogs = append(doaLogs, r.Log)
 		}

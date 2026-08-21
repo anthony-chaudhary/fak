@@ -139,6 +139,9 @@ func TestDispatchStatusCardCarriesSpawnHealth(t *testing.T) {
 	if snap.SpawnHealth.DOA != 6 || snap.SpawnHealth.Runs != 6 || snap.SpawnHealth.Status != dispatchdoa.StatusAlarm {
 		t.Fatalf("spawn_health = %+v, want 6/6 alarm", snap.SpawnHealth)
 	}
+	if got := snap.SpawnHealth.NextActions[dispatchdoa.CauseFlagParse]; strings.TrimSpace(got) == "" {
+		t.Fatalf("spawn_health.next_actions = %+v, want flag-parse remediation", snap.SpawnHealth.NextActions)
+	}
 	card := renderDispatchStatus(snap)
 	if !strings.Contains(card, "0 live worker(s)") {
 		t.Fatalf("card should still report the (misleading on its own) live count: %q", card)

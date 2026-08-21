@@ -113,6 +113,7 @@ func TestShapeNotKeyedToOneFlag(t *testing.T) {
 		{"wrong architecture", "exec format error\n", CauseExecFailure},
 		{"bad working directory", "chdir C:\\work\\gone: no such file or directory\n", CauseWorkingDir},
 		{"unknown subcommand", "usage: fak guard [flags] -- <agent command...>\n", CauseUsageError},
+		{"missing evidence", "", CauseMissingEvidence},
 		{"shape holds, signature unknown", "some brand new startup fault nobody has seen\n", CauseUnrecognized},
 	}
 	for _, tc := range cases {
@@ -173,6 +174,57 @@ func TestFoldAlarmsOnOutageDayOne(t *testing.T) {
 	}
 	if got := strings.Join(rep.TopCauses(), " "); got != CauseFlagParse+"=30" {
 		t.Fatalf("TopCauses = %q, want %q", got, CauseFlagParse+"=30")
+	}
+}
+
+func TestClassifyOperationalFailureFamilies(t *testing.T) {
+	tests := []struct {
+		name string
+		log  string
+		want string
+	}{
+		{"auth invalid verdict", "worker preflight refused: AUTH_INVALID", CauseAuthInvalid},
+		{"invalid refresh token", `401 Unauthorized: {"code":"invalid_refresh_token"}`, CauseAuthInvalid},
+		{"guarded upstream credential", "upstream rejected the credential (HTTP 401)", CauseAuthInvalid},
+		{"process start", "CreateProcess failed to start worker", CauseProcessStart},
+		{"immediate exit", "harness crashed (NONZERO_EXIT, exit 1)", CauseImmediateExit},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			log := SpawnHeaderPrefix + "20260821 issue=1 lane=dispatch backend=codex argv0=fak.exe\n" + tc.log
+			got := Classify(log, int64(len(log)))
+			if !got.DOA || got.Cause != tc.want {
+				t.Fatalf("Classify(%q) = %+v, want DOA cause %q", tc.log, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFoldProvidesActionForEveryCause(t *testing.T) {
+	runs := []Run{
+		{Log: "auth.log", Verdict: Verdict{DOA: true, Cause: CauseAuthInvalid}},
+		{Log: "novel.log", Verdict: Verdict{DOA: true, Cause: CauseUnrecognized, Signature: "sha256:0123456789abcdef"}},
+	}
+	rep := Fold(runs)
+	for cause := range rep.Causes {
+		if strings.TrimSpace(rep.NextActions[cause]) == "" {
+			t.Fatalf("cause %q has no next action: %+v", cause, rep)
+		}
+	}
+	if got := rep.Diagnostics["novel.log"]; got != "sha256:0123456789abcdef" {
+		t.Fatalf("diagnostic = %q, want scrubbed signature", got)
+	}
+}
+
+func TestUnknownSignatureIsStableAndScrubbed(t *testing.T) {
+	const secret = "sk-secret-material"
+	log := "# fak-spawn 20260821 issue=8406\nnovel startup failure token=" + secret + "\n"
+	got := Classify(log, int64(len(log)))
+	if !got.DOA || got.Cause != CauseUnrecognized || !strings.HasPrefix(got.Signature, "sha256:") {
+		t.Fatalf("verdict = %+v, want fingerprinted unrecognized DOA", got)
+	}
+	if strings.Contains(got.Signature, secret) || got.Signature != Classify(log, int64(len(log))).Signature {
+		t.Fatalf("signature must be stable and scrubbed: %q", got.Signature)
 	}
 }
 

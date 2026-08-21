@@ -69,13 +69,15 @@ type dispatchStatusFocus struct {
 // outage killed 350 of 382 spawned workers and this card read "0 live worker(s)" for six
 // days straight. Present only when the window holds at least one finished run.
 type dispatchStatusSpawnHealth struct {
-	WindowHours float64        `json:"window_hours"`
-	Runs        int            `json:"runs"` // the DENOMINATOR: every finished spawn in the window
-	DOA         int            `json:"doa"`
-	Rate        float64        `json:"doa_rate"`
-	Status      string         `json:"status"` // clear | warn | alarm
-	Causes      map[string]int `json:"causes,omitempty"`
-	Sample      []string       `json:"sample,omitempty"`
+	WindowHours float64           `json:"window_hours"`
+	Runs        int               `json:"runs"` // the DENOMINATOR: every finished spawn in the window
+	DOA         int               `json:"doa"`
+	Rate        float64           `json:"doa_rate"`
+	Status      string            `json:"status"` // clear | warn | alarm
+	Causes      map[string]int    `json:"causes,omitempty"`
+	NextActions map[string]string `json:"next_actions,omitempty"`
+	Diagnostics map[string]string `json:"diagnostics,omitempty"`
+	Sample      []string          `json:"sample,omitempty"`
 }
 
 // dispatchStatusSnapshot is the fleet-dispatch-status/1 payload.
@@ -180,6 +182,8 @@ func dispatchStatusSpawnHealthFold(runsDir string, now time.Time) *dispatchStatu
 		Rate:        rep.Rate,
 		Status:      rep.Status,
 		Causes:      rep.Causes,
+		NextActions: rep.NextActions,
+		Diagnostics: rep.Diagnostics,
 		Sample:      rep.Sample,
 	}
 }
