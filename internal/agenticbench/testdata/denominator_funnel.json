@@ -1,0 +1,53 @@
+{
+  "funnel": {
+    "plan": [
+      {"id": "not-admitted", "stratum": "hard"},
+      {"id": "launch-failed", "stratum": "hard"},
+      {"id": "agent-timeout", "stratum": "hard"},
+      {"id": "evaluator-failed", "stratum": "hard"},
+      {"id": "artifact-incomplete", "stratum": "hard"},
+      {"id": "official-zero", "stratum": "hard"},
+      {"id": "official-score", "stratum": "easy"}
+    ],
+    "arm": {
+      "arm": "fak",
+      "results": [
+        {"unit_id": "not-admitted", "furthest_stage": "planned", "missing_reason": "admission_refused"},
+        {"unit_id": "launch-failed", "furthest_stage": "admitted", "missing_reason": "launch_failed"},
+        {"unit_id": "agent-timeout", "furthest_stage": "agent_terminal", "missing_reason": "agent_timeout"},
+        {"unit_id": "evaluator-failed", "furthest_stage": "evaluator_terminal", "missing_reason": "evaluator_failed"},
+        {"unit_id": "artifact-incomplete", "furthest_stage": "agent_terminal", "missing_reason": "artifact_incomplete"},
+        {"unit_id": "official-zero", "furthest_stage": "scored", "score": 0},
+        {"unit_id": "official-score", "furthest_stage": "scored", "score": 0.8}
+      ]
+    }
+  },
+  "comparison": {
+    "plan": [
+      {"id": "easy-1", "stratum": "easy"},
+      {"id": "easy-2", "stratum": "easy"},
+      {"id": "hard-1", "stratum": "hard"},
+      {"id": "hard-2", "stratum": "hard"}
+    ],
+    "arms": [
+      {
+        "arm": "complete",
+        "results": [
+          {"unit_id": "easy-1", "furthest_stage": "scored", "score": 1},
+          {"unit_id": "easy-2", "furthest_stage": "scored", "score": 1},
+          {"unit_id": "hard-1", "furthest_stage": "scored", "score": 1},
+          {"unit_id": "hard-2", "furthest_stage": "scored", "score": 1}
+        ]
+      },
+      {
+        "arm": "sparse",
+        "results": [
+          {"unit_id": "easy-1", "furthest_stage": "scored", "score": 1},
+          {"unit_id": "easy-2", "furthest_stage": "scored", "score": 1},
+          {"unit_id": "hard-1", "furthest_stage": "admitted", "missing_reason": "launch_failed"},
+          {"unit_id": "hard-2", "furthest_stage": "agent_terminal", "missing_reason": "agent_timeout"}
+        ]
+      }
+    ]
+  }
+}
