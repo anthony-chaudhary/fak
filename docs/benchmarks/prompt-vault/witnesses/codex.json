@@ -1,0 +1,84 @@
+{
+  "schema": "fak.prompt-vault-color-palette-grade/1",
+  "artifact_id": "codex",
+  "artifact_sha256": "061e44d4dc3db66599c4c7b895e2a6273048fb0a62d4dcf1d72c40e70571a7d9",
+  "observed_at": "2026-08-21T01:05:08.536Z",
+  "browser": {
+    "name": "chromium",
+    "version": "151.0.7922.173",
+    "channel": "chrome"
+  },
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "acceptance_passed": 12,
+  "acceptance_total": 12,
+  "terminal_verdict": "PASS",
+  "render": {
+    "file": "codex.png",
+    "sha256": "2bb42c496183f8c69066548f1a2ed5ec62a7ad0d0b120dfc0070fda40b9272de"
+  },
+  "checks": [
+    {
+      "id": "single_file_vanilla",
+      "passed": true,
+      "detail": "index.html with 0 external runtime resource(s)"
+    },
+    {
+      "id": "five_equal_desktop_swatches",
+      "passed": true,
+      "detail": "5 swatch(es); equal full-width geometry=true"
+    },
+    {
+      "id": "centered_hex_labels",
+      "passed": true,
+      "detail": "5/5 labels centered and matched to the background"
+    },
+    {
+      "id": "contrast_aware_text",
+      "passed": true,
+      "detail": "minimum HEX/background contrast 5.65:1"
+    },
+    {
+      "id": "smooth_color_transition",
+      "passed": true,
+      "detail": "5/5 swatches transition background color within one second"
+    },
+    {
+      "id": "generate_button_replaces_unlocked",
+      "passed": true,
+      "detail": "#3F208E #4B6F4F #2933A8 #58232F #52A420 -> #05F8B8 #B01C9B #CFA547 #9561B2 #2F6798"
+    },
+    {
+      "id": "lock_toggles_both_states",
+      "passed": true,
+      "detail": "🔓 -> 🔒 -> 🔓"
+    },
+    {
+      "id": "locked_color_survives_regeneration",
+      "passed": true,
+      "detail": "locked #3F208E -> #3F208E; unlocked changed 4/4"
+    },
+    {
+      "id": "spacebar_regenerates_unlocked",
+      "passed": true,
+      "detail": "#3F208E #4B6F4F #2933A8 #58232F #52A420 -> #05F8B8 #B01C9B #CFA547 #9561B2 #2F6798"
+    },
+    {
+      "id": "hex_click_copies_value",
+      "passed": true,
+      "detail": "clipboard=#3F208E; expected=#3F208E"
+    },
+    {
+      "id": "copy_shows_confirmation",
+      "passed": true,
+      "detail": "visible Copied confirmation=true"
+    },
+    {
+      "id": "desktop_render_captured",
+      "passed": true,
+      "detail": "1440x900 PNG sha256:2bb42c496183f8c69066548f1a2ed5ec62a7ad0d0b120dfc0070fda40b9272de"
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "schema": "fak.prompt-vault-color-palette-grade/1",
+  "artifact_id": "fail-wrong",
+  "artifact_sha256": "6ae223e31603239b3e4a56b23a577ec1c2b6fd1b5e9b86a876da6aafa3d5fc81",
+  "observed_at": "2026-08-21T01:05:01.365Z",
+  "browser": {
+    "name": "chromium",
+    "version": "151.0.7922.173",
+    "channel": "chrome"
+  },
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "acceptance_passed": 6,
+  "acceptance_total": 12,
+  "terminal_verdict": "FAIL",
+  "render": {
+    "file": "fail-wrong.png",
+    "sha256": "e4d45811c38d66b11a6d8837aaf3d3d11ada7231d6fba164245c112d68f37dd2"
+  },
+  "checks": [
+    {
+      "id": "single_file_vanilla",
+      "passed": true,
+      "detail": "index.html with 0 external runtime resource(s)"
+    },
+    {
+      "id": "five_equal_desktop_swatches",
+      "passed": true,
+      "detail": "5 swatch(es); equal full-width geometry=true"
+    },
+    {
+      "id": "centered_hex_labels",
+      "passed": true,
+      "detail": "5/5 labels centered and matched to the background"
+    },
+    {
+      "id": "contrast_aware_text",
+      "passed": true,
+      "detail": "minimum HEX/background contrast 5.91:1"
+    },
+    {
+      "id": "smooth_color_transition",
+      "passed": true,
+      "detail": "5/5 swatches transition background color within one second"
+    },
+    {
+      "id": "generate_button_replaces_unlocked",
+      "passed": false,
+      "detail": "Generate control not found"
+    },
+    {
+      "id": "lock_toggles_both_states",
+      "passed": false,
+      "detail": "lock controls not found"
+    },
+    {
+      "id": "locked_color_survives_regeneration",
+      "passed": false,
+      "detail": "lock controls not found"
+    },
+    {
+      "id": "spacebar_regenerates_unlocked",
+      "passed": false,
+      "detail": "#112233 #DDEEFF #334455 #CCDDEE #556677 -> #112233 #DDEEFF #334455 #CCDDEE #556677"
+    },
+    {
+      "id": "hex_click_copies_value",
+      "passed": false,
+      "detail": "clipboard=EMPTY; expected=#112233"
+    },
+    {
+      "id": "copy_shows_confirmation",
+      "passed": false,
+      "detail": "visible Copied confirmation=false"
+    },
+    {
+      "id": "desktop_render_captured",
+      "passed": true,
+      "detail": "1440x900 PNG sha256:e4d45811c38d66b11a6d8837aaf3d3d11ada7231d6fba164245c112d68f37dd2"
+    }
+  ]
+}

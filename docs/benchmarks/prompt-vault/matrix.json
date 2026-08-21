@@ -3,14 +3,35 @@
   "upstream": {
     "url": "https://github.com/w512/Prompt-Vault",
     "revision": "19f2d492c985559ac4aedd98348581ac55d0d4d9",
-    "observed_at": "2026-08-20",
-    "license": "UNDECLARED"
+    "observed_at": "2026-08-21T01:06:57Z",
+    "source_event_at": "2026-08-19T17:18:26Z",
+    "source_state": "SHIPPED_AT_PIN",
+    "license": "UNDECLARED",
+    "license_disposition": "INSPIRE_ONLY",
+    "refresh_trigger": "none-pinned-revision"
   },
   "task": {
     "path": "Easy/Color_Palette_Generator.md",
     "sha256": "4e095b579a2dfabde8f4584c1e602028e503d64f6b93fb6fd746ed1abc8a439d",
     "difficulty": "easy",
     "artifact": "index.html"
+  },
+  "acceptance_fixture": {
+    "schema": "fak.prompt-vault-color-palette-grade/1",
+    "path": "color-palette.spec.js",
+    "runner": "verify-color-palette.ps1",
+    "playwright_version": "1.62.1",
+    "browser_channel": "chrome",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "checks": 12,
+    "portfolio_disposition": "RECIPE",
+    "negative_witnesses": [
+      "witnesses/fail-empty.json",
+      "witnesses/fail-wrong.json"
+    ]
   },
   "arms": [
     {
@@ -36,14 +57,22 @@
         "sandbox": "isolated benchmark directory",
         "session": "ephemeral"
       },
-      "status": "OBSERVED_UNGRADED",
+      "status": "OBSERVED_ACCEPTED",
       "observed": {
         "wall_ms": 93631,
         "input_tokens": 38003,
         "cache_read_tokens": 0,
         "output_tokens": 3513,
         "artifact_sha256": "061e44d4dc3db66599c4c7b895e2a6273048fb0a62d4dcf1d72c40e70571a7d9",
-        "exit_code": 0
+        "exit_code": 0,
+        "acceptance_passed": 12,
+        "acceptance_total": 12,
+        "billed_usd": "UNKNOWN",
+        "tool_calls": "UNKNOWN",
+        "retries": "UNKNOWN",
+        "terminal_verdict": "PASS",
+        "acceptance_report": "witnesses/codex.json",
+        "render_sha256": "2bb42c496183f8c69066548f1a2ed5ec62a7ad0d0b120dfc0070fda40b9272de"
       }
     },
     {
@@ -55,7 +84,7 @@
         "permission_mode": "bypassPermissions",
         "session_persistence": false
       },
-      "status": "OBSERVED_UNGRADED",
+      "status": "OBSERVED_ACCEPTED",
       "observed": {
         "wall_ms": 56051,
         "input_tokens": 51147,
@@ -63,7 +92,14 @@
         "output_tokens": 2396,
         "billed_usd": 0.315635,
         "artifact_sha256": "154bf52b0c13f567cdda38064d603d46dd6c47359e89bf112db737526baeebc4",
-        "exit_code": 0
+        "exit_code": 0,
+        "acceptance_passed": 12,
+        "acceptance_total": 12,
+        "tool_calls": "UNKNOWN",
+        "retries": "UNKNOWN",
+        "terminal_verdict": "PASS",
+        "acceptance_report": "witnesses/claude.json",
+        "render_sha256": "4bdfa174bb17acf8a22d46a59a871e576075cbf7e6849724a2b0940555890a03"
       }
     },
     {
