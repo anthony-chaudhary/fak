@@ -268,6 +268,9 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Learning observation lineage](docs/learning-observation.md) — content-addressed source/candidate/witness/verdict records and closed-enum edges; separate from witness-gated admission.
 
 ## Notes & research (`docs/notes/`)
+- [Mystery-free architecture dogfood](docs/notes/MYSTERY-FREE-DOGFOOD-ARCHITECTURE-2026-08-21.md) — applies the five-field learning method to fak's live architecture graph, separates redundant reachability from safe API deletion, and records the source-provenance defect.
+
+- [Mystery-free dogfood: repository architecture — 2026-08-21](docs/notes/MYSTERY-FREE-DOGFOOD-ARCHITECTURE-2026-08-21.md) -- auto-indexed dated note.
 - [Concept study: Mojo 1.0 as a systems language for heterogeneous AI compute](docs/notes/CONCEPT-STUDY-MOJO-2026-08-21.md) -- auto-indexed dated note.
 - [DFlash 2: parallel path selection, suffix decay, and the FAK measurement seam](docs/notes/CONCEPT-STUDY-DFLASH2-2026-08-20.md) -- auto-indexed dated note.
 - [Claude Code Concise study: result-first parity and persistent-selection gap (2026-08-20)](docs/notes/CONCEPT-STUDY-CLAUDE-CODE-CONCISE-2026-08-20.md) -- pinned v2.1.237 release/settings evidence; FAK response shaping is already default and independently implemented, while persistent config remains filed as #8288.
