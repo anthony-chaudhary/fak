@@ -26,6 +26,8 @@ import (
 	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
+const defaultFakURL = "http://127.0.0.1:8080"
+
 const page = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>fak local harness</title><style>
@@ -33,7 +35,7 @@ const page = `<!doctype html>
 </style></head><body><main><div class="topbar"><div class="brand"><span class="mark">f</span><p class="eyebrow">fak operator home</p></div><p class="mode"><span class="dot"></span><span id="status">loading local state…</span></p></div><section class="shell"><header class="top"><h1>Harness overview</h1><p class="sub">Agents, goals, and live operating surfaces in one place. Start a run after you know what is active.</p><div class="actions"><a id="gateway-link" class="button primary" aria-disabled="true">Web gateway</a><button id="refresh" class="button" type="button">Refresh status</button><button id="skin" class="skin" type="button">Theme</button></div></header><nav class="nav" aria-label="Harness pages"><a href="#overview">Overview</a><a href="#agents">Agent stats</a><a href="#goals">Goals</a><a href="#dashboards">Live dashboards</a><a href="#run">Run agent</a></nav><div class="content">
 <section id="overview" class="section"><div class="sectionhead"><h2>Overview</h2><p id="overview-note">reading current state</p></div><div id="stats" class="stats" aria-live="polite"><p class="empty">Loading operational totals…</p></div></section>
 <section class="section"><div class="twocol"><div id="agents" class="panel"><h3>Agent stats</h3><div id="agent-rows" class="rows"><p class="empty">Loading agents…</p></div></div><div id="goals" class="panel"><h3>Goals</h3><div id="goal-rows" class="rows"><p class="empty">Loading goals…</p></div></div></div></section>
-<section id="dashboards" class="section"><div class="sectionhead"><h2>Live dashboards</h2><p id="dashboard-note">connect a gateway to open live pages</p></div><div id="dashboard-links" class="dashboards"></div></section>
+<section id="dashboards" class="section"><div class="sectionhead"><h2>Live dashboards</h2><p id="dashboard-note">Gateway dashboards connect automatically when fak serve is running.</p></div><div id="dashboard-links" class="dashboards"></div></section>
 <section id="run" class="section"><div class="sectionhead"><h2>Run agent</h2><p>Live through the configured gateway; deterministic offline otherwise.</p></div><form id="prompt" class="composer"><input id="text" aria-label="Message" value="show the native harness works"><button>Run</button></form><nav class="examples" aria-label="Proof scenarios"><button data-example="normal">Tool run</button><button data-example="approval">Approval run</button><button data-example="failure">Failure run</button></nav><section id="events" class="events" aria-live="polite"><p class="empty">Choose a goal or start a run. Semantic events appear here.</p></section></section>
 </div></section></main><script>
 const query=new URLSearchParams(location.search);let run=query.get("run")||"",after=0,skin=query.get("skin")||"forest";document.body.dataset.skin=skin;const list=document.querySelector("#events"),status=document.querySelector("#status"),text=document.querySelector("#text");
@@ -42,7 +44,7 @@ function render(e){const p=e.payload||{},d=document.createElement("article");d.c
 function empty(message){const p=document.createElement("p");p.className="empty";p.textContent=message;return p}
 function row(title,meta,tag){const d=document.createElement("div");d.className="row";const copy=document.createElement("div"),strong=document.createElement("strong"),small=document.createElement("span"),badge=document.createElement("span");strong.textContent=title;small.className="meta";small.textContent=meta;badge.className="tag";badge.textContent=tag;copy.append(strong,small);d.append(copy,badge);return d}
 function stat(value,label,detail){const d=document.createElement("div");d.className="stat";d.innerHTML='<span class="value">'+esc(value)+'</span><span class="label">'+esc(label)+'</span><span class="detail">'+esc(detail)+'</span>';return d}
-function renderOverview(data){const agents=data.agents||{},goals=data.goals||{},gateway=data.gateway||{},workspace=data.workspace||{};status.textContent=(data.mode||"offline")+(gateway.reachable?" · gateway live":" · loopback only");document.querySelector("#overview-note").textContent=gateway.reachable?"live gateway and local registries":"local registries · add -fak-url for gateway state";const stats=document.querySelector("#stats");stats.replaceChildren(stat((agents.live_sessions||[]).length,"Live agents",gateway.reachable?"running through the gateway":"gateway not connected"),stat(agents.total_runs||0,"Stored runs",(agents.completed||0)+" completed · "+(agents.failed||0)+" failed"),stat(goals.active||0,"Active goals",(goals.blocked||0)+" blocked · "+(goals.paused||0)+" paused"),stat(gateway.fleet_sessions||0,"Fleet sessions",(gateway.fleet_machines||0)+" machines visible"));const agentRows=document.querySelector("#agent-rows");agentRows.replaceChildren();for(const a of agents.live_sessions||[])agentRows.append(row(a.trace_id||"unnamed agent",(a.last_tool?"last tool "+a.last_tool+" · ":"")+(a.turns_left||0)+" turns left",a.run||"live"));for(const a of agents.recent_runs||[])agentRows.append(row(a.run_id,a.events+" events · last "+(a.last_event||"unknown"),a.status));if(!agentRows.children.length)agentRows.append(empty("No agent sessions or stored runs yet."));const goalRows=document.querySelector("#goal-rows");goalRows.replaceChildren();if(!goals.readable)goalRows.append(empty("Goal registry unavailable."));else for(const g of goals.items||[])goalRows.append(row(g.title,g.goal_id,g.lifecycle));if(!goalRows.children.length)goalRows.append(empty("No registered goals. Create one with fak goal create."));const gatewayLink=document.querySelector("#gateway-link");if(gateway.url){gatewayLink.href=gateway.url;gatewayLink.target="_blank";gatewayLink.rel="noreferrer";gatewayLink.removeAttribute("aria-disabled")}else{gatewayLink.removeAttribute("href");gatewayLink.removeAttribute("target");gatewayLink.setAttribute("aria-disabled","true")}document.querySelector("#dashboard-note").textContent=gateway.reachable?"live from "+gateway.url:"shown now; connect with -fak-url to enable";const links=document.querySelector("#dashboard-links");links.replaceChildren();for(const item of data.dashboards||[]){const d=document.createElement(item.url?"a":"div");d.className="dashboard"+(item.url?"":" disabled");if(item.url){d.href=item.url;d.target="_blank";d.rel="noreferrer"}const strong=document.createElement("strong"),desc=document.createElement("span"),path=document.createElement("span");strong.textContent=item.label;desc.textContent=item.description;path.className="path";path.textContent=item.path;d.append(strong,desc,path);links.append(d)}if(workspace.armed)document.querySelector("#overview-note").textContent+=" · workspace "+workspace.identity}
+function renderOverview(data){const agents=data.agents||{},goals=data.goals||{},gateway=data.gateway||{},workspace=data.workspace||{};status.textContent=gateway.reachable?"live - gateway connected":"offline - gateway unavailable";document.querySelector("#overview-note").textContent=gateway.reachable?"live gateway and local registries":"local registries · gateway unavailable; start fak serve and this page reconnects automatically";const stats=document.querySelector("#stats");stats.replaceChildren(stat((agents.live_sessions||[]).length,"Live agents",gateway.reachable?"running through the gateway":"gateway not connected"),stat(agents.total_runs||0,"Stored runs",(agents.completed||0)+" completed · "+(agents.failed||0)+" failed"),stat(goals.active||0,"Active goals",(goals.blocked||0)+" blocked · "+(goals.paused||0)+" paused"),stat(gateway.fleet_sessions||0,"Fleet sessions",(gateway.fleet_machines||0)+" machines visible"));const agentRows=document.querySelector("#agent-rows");agentRows.replaceChildren();for(const a of agents.live_sessions||[])agentRows.append(row(a.trace_id||"unnamed agent",(a.last_tool?"last tool "+a.last_tool+" · ":"")+(a.turns_left||0)+" turns left",a.run||"live"));for(const a of agents.recent_runs||[])agentRows.append(row(a.run_id,a.events+" events · last "+(a.last_event||"unknown"),a.status));if(!agentRows.children.length)agentRows.append(empty("No agent sessions or stored runs yet."));const goalRows=document.querySelector("#goal-rows");goalRows.replaceChildren();if(!goals.readable)goalRows.append(empty("Goal registry unavailable."));else for(const g of goals.items||[])goalRows.append(row(g.title,g.goal_id,g.lifecycle));if(!goalRows.children.length)goalRows.append(empty("No registered goals. Create one with fak goal create."));const gatewayLink=document.querySelector("#gateway-link");if(gateway.url){gatewayLink.href=gateway.url;gatewayLink.target="_blank";gatewayLink.rel="noreferrer";gatewayLink.removeAttribute("aria-disabled")}else{gatewayLink.removeAttribute("href");gatewayLink.removeAttribute("target");gatewayLink.setAttribute("aria-disabled","true")}document.querySelector("#dashboard-note").textContent=gateway.reachable?"live from "+gateway.url:"Start fak serve; dashboards connect automatically to "+(gateway.target||"the configured gateway")+".";const links=document.querySelector("#dashboard-links");links.replaceChildren();for(const item of data.dashboards||[]){const d=document.createElement(item.url?"a":"div");d.className="dashboard"+(item.url?"":" disabled");if(item.url){d.href=item.url;d.target="_blank";d.rel="noreferrer"}const strong=document.createElement("strong"),desc=document.createElement("span"),path=document.createElement("span");strong.textContent=item.label;desc.textContent=item.description;path.className="path";path.textContent=item.path;d.append(strong,desc,path);links.append(d)}if(workspace.armed)document.querySelector("#overview-note").textContent+=" · workspace "+workspace.identity}
 async function refreshOverview(){try{const r=await fetch("/api/status",{cache:"no-store"});if(!r.ok)throw new Error(r.status);renderOverview(await r.json())}catch(e){status.textContent="status unavailable"}}
 async function pull(){const r=await fetch('/api/events?run_id='+encodeURIComponent(run)+'&after='+after);for(const e of await r.json())render(e);status.textContent='connected · cursor '+after}
 async function start(message){list.replaceChildren();after=0;const r=await fetch("/api/runs",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({message})});run=(await r.json()).run_id;history.replaceState(null,"","?run="+encodeURIComponent(run));await pull();await refreshOverview()}
@@ -332,6 +334,7 @@ type gatewayOverview struct {
 	Configured    bool   `json:"configured"`
 	Reachable     bool   `json:"reachable"`
 	URL           string `json:"url,omitempty"`
+	Target        string `json:"target,omitempty"`
 	FleetMachines int    `json:"fleet_machines"`
 	FleetSessions int    `json:"fleet_sessions"`
 }
@@ -368,10 +371,30 @@ func publicGatewayURL(raw string) string {
 }
 
 type liveAdapter struct {
-	baseURL   string
-	client    *http.Client
-	workspace workspaceStatus
-	identity  string
+	baseURL         string
+	offlineFallback bool
+	client          *http.Client
+	workspace       workspaceStatus
+	identity        string
+}
+
+func (a *liveAdapter) reachable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(a.baseURL, "/")+"/healthz", nil)
+	if err != nil {
+		return false
+	}
+	client := a.client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode >= 200 && resp.StatusCode < 300
 }
 
 type workspaceStatus struct {
@@ -382,7 +405,7 @@ type workspaceStatus struct {
 
 func (a *liveAdapter) overview(ctx context.Context) (gatewayOverview, []liveSessionSummary) {
 	base := publicGatewayURL(a.baseURL)
-	out := gatewayOverview{Configured: true}
+	out := gatewayOverview{Configured: true, Target: base}
 	if base == "" {
 		return out, []liveSessionSummary{}
 	}
@@ -624,7 +647,7 @@ func handlerWithSources(s *store, live *liveAdapter, goals goalLister) http.Hand
 			return
 		}
 		message := strings.TrimSpace(input.Message)
-		if live != nil && !strings.HasPrefix(strings.ToLower(message), "approval:") && !strings.HasPrefix(strings.ToLower(message), "failure:") {
+		if live != nil && (!live.offlineFallback || live.reachable(r.Context())) && !strings.HasPrefix(strings.ToLower(message), "approval:") && !strings.HasPrefix(strings.ToLower(message), "failure:") {
 			runID := s.nextRunID("live")
 			events, err := live.run(r.Context(), runID, message)
 			if err != nil {
@@ -787,7 +810,7 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 	check := fs.Bool("selfcheck", false, "run captured render and protocol witness")
 	statePath := fs.String("state", "", "session state file (default: user config directory)")
 	workspace := fs.String("workspace", "", "explicit workspace bound to the fak native gateway")
-	fakURL := fs.String("fak-url", "", "stock fak base URL; non-example prompts run live when set")
+	fakURL := fs.String("fak-url", defaultFakURL, "stock fak base URL (defaults to the local fak serve gateway)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -841,7 +864,7 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 			}
 			identity = workspaceIdentity(resolved)
 		}
-		live = &liveAdapter{baseURL: *fakURL, client: &http.Client{Timeout: 10 * time.Minute}, identity: identity}
+		live = &liveAdapter{baseURL: *fakURL, offlineFallback: *fakURL == defaultFakURL, client: &http.Client{Timeout: 10 * time.Minute}, identity: identity}
 		probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		err := live.probeWorkspace(probeCtx)
 		cancel()
