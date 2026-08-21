@@ -13,6 +13,7 @@ import (
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 	"math"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -1087,7 +1088,8 @@ func TestRenderCompareSignedScoreDeltaOnRegression(t *testing.T) {
 // deliberately does NOT assert zero friction-debt: that is a tree-state regression sentinel
 // (owned by the Python live tests), not a property of this port.
 func TestLivePayloadIsWellFormed(t *testing.T) {
-	p := Build(".")
+	// Go runs package tests from this directory; Build expects the repository root.
+	p := Build(filepath.Join("..", ".."))
 	if p.Schema == "" || p.Verdict == "" || p.Finding == "" || p.Reason == "" || p.NextAction == "" {
 		t.Errorf("live payload missing a top-level field: %+v", p)
 	}
@@ -1095,7 +1097,7 @@ func TestLivePayloadIsWellFormed(t *testing.T) {
 		t.Fatal("live payload has no corpus")
 	}
 	if len(p.KPIs) != len(kpiWeights) {
-		t.Errorf("live payload has %d KPIs, want the weighted set of %d", len(p.KPIs), len(kpiWeights))
+		t.Fatalf("live payload has %d KPIs, want the weighted set of %d", len(p.KPIs), len(kpiWeights))
 	}
 	for _, k := range p.KPIs {
 		if k.Kpi == "" || k.Group == "" {
@@ -1106,7 +1108,10 @@ func TestLivePayloadIsWellFormed(t *testing.T) {
 		}
 	}
 	frontier := corpusInt(p.Corpus, "experience_frontier")
-	byTerm := p.Corpus["frontier_by_term"].(map[string]int)
+	byTerm, ok := p.Corpus["frontier_by_term"].(map[string]int)
+	if !ok {
+		t.Fatalf("frontier_by_term has type %T, want map[string]int", p.Corpus["frontier_by_term"])
+	}
 	sum := 0
 	for _, v := range byTerm {
 		sum += v
