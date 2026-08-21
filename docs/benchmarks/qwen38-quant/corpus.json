@@ -1,0 +1,9 @@
+{
+  "schema": "fak.qwen38-quant-corpus/1",
+  "id": "qwen38-27b-agentic-v1",
+  "model_family": "Qwen3.8-27B",
+  "arms": ["bf16", "fp8", "q8_0", "q6_k", "q5_k_m", "q4_k_m", "iq4_xs", "awq_int4", "gptq_int4", "exl2"],
+  "workloads": ["text", "json_schema", "correlated_tools", "coding_reasoning", "long_context_retrieval", "repeated_workflow_cache"],
+  "minimum_repetitions_per_workload": 3,
+  "quality_precedes_performance": true
+}
