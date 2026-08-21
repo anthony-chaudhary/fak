@@ -90,10 +90,10 @@ type Commit struct {
 var issueRefRE = regexp.MustCompile(`(^|[^0-9A-Za-z_])#([0-9]+)\b`)
 
 // ForeignRefFloor is the first issue number treated as belonging to another
-// repository. fak's own numbering is in the 6000s and grows slowly, so 7000
-// leaves ample headroom while fencing out the upstream-project citations that
-// appear in commit prose. Raise it when fak's numbering approaches it.
-const ForeignRefFloor = 7000
+// repository. fak's own numbering is in the 8000s, so 10000 leaves headroom
+// while fencing out the upstream-project citations that appear in commit prose.
+// Raise it when fak's numbering approaches it.
+const ForeignRefFloor = 10000
 
 // fixesTrailerRE matches the anchored close trailers, which are the only body
 // references precise enough to attribute work.

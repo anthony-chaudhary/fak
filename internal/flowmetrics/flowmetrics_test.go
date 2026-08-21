@@ -18,8 +18,8 @@ func ptr(t time.Time) *time.Time { return &t }
 
 func TestParseIssueRefsFencesForeignAndKeepsSingleDigits(t *testing.T) {
 	// #3 and #26 are real fak issues, so a digit-count fence would drop them.
-	got := ParseIssueRefs("fix(x): thing (#3) and (#26) and #5420 (fak x)")
-	want := []int{3, 26, 5420}
+	got := ParseIssueRefs("fix(x): thing (#3), (#26), #5420, and Closes #8417 (fak x)")
+	want := []int{3, 26, 5420, 8417}
 	if len(got) != len(want) {
 		t.Fatalf("refs = %v, want %v", got, want)
 	}
