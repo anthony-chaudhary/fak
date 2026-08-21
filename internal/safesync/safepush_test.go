@@ -148,7 +148,11 @@ func (s *scriptedRunner) run(_ context.Context, _ string, args ...string) RunRes
 		}
 		return s.branch
 	case args[0] == "merge-base" && len(args) >= 4 && args[1] == "--is-ancestor":
-		return RunResult{Code: s.ancestors[args[2]+".."+args[3]]}
+		code, ok := s.ancestors[args[2]+".."+args[3]]
+		if !ok {
+			code = 1
+		}
+		return RunResult{Code: code}
 	default:
 		return RunResult{Code: 0}
 	}
