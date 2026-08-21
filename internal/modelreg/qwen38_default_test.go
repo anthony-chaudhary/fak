@@ -10,8 +10,18 @@ var defaultEvidenceNow = time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
 
 func TestEvaluateDefaultEvidencePromotesCompleteFreshInputs(t *testing.T) {
 	got := EvaluateDefaultEvidence(passingDefaultEvidence(), defaultEvidenceNow)
-	if got.Verdict != VerdictPromote || len(got.Reasons) != 0 || len(got.EvidenceRefs) != 5 {
+	if got.Verdict != VerdictPromote || len(got.Reasons) != 0 {
 		t.Fatalf("evaluation = %+v", got)
+	}
+	wantRefs := map[string]bool{"macbook": true, "nvidia": true, "cache": true, "comparison": true, "support": true}
+	for _, ref := range got.EvidenceRefs {
+		if !wantRefs[ref.Family] {
+			t.Fatalf("unexpected or duplicate evidence family %q", ref.Family)
+		}
+		delete(wantRefs, ref.Family)
+	}
+	if len(wantRefs) != 0 {
+		t.Fatalf("evaluation omitted evidence families: %v", wantRefs)
 	}
 }
 
