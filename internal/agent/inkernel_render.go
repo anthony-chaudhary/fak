@@ -78,7 +78,7 @@ func renderInKernelChatMLRequest(messages []Message, tools []ToolDef, cfg model.
 	if instruction != "" {
 		messages = append([]Message{{Role: RoleSystem, Content: instruction}}, messages...)
 	}
-	if inKernelForcedToolName(toolChoice) != "" {
+	if inKernelEffectiveToolName(toolChoice, tools) != "" {
 		tools = nil
 	}
 	chat := renderChatMLTools(messages, tools)
@@ -212,7 +212,7 @@ func enforceForcedToolChoice(comp *Completion, choice json.RawMessage, tools []T
 		comp.ToolCallsDropped = true
 		return comp
 	}
-	name := inKernelForcedToolName(choice)
+	name := inKernelEffectiveToolName(choice, tools)
 	if name == "" {
 		return comp
 	}
@@ -289,7 +289,7 @@ func forcedWriteArguments(userText string, assistantContent []string) (string, b
 }
 
 func inKernelForcedToolInstruction(raw json.RawMessage, tools []ToolDef) string {
-	name := inKernelForcedToolName(raw)
+	name := inKernelEffectiveToolName(raw, tools)
 	if name == "" {
 		return ""
 	}
@@ -321,6 +321,19 @@ func inKernelForcedToolInstruction(raw json.RawMessage, tools []ToolDef) string 
 	return "Return only one valid JSON object matching this schema exactly. Do not use XML, Markdown, reasoning, or prose. JSON schema: " + string(schema)
 }
 
+func inKernelEffectiveToolName(raw json.RawMessage, tools []ToolDef) string {
+	if name := inKernelForcedToolName(raw); name != "" {
+		return name
+	}
+	if inKernelRequiresTool(raw) && len(tools) == 1 {
+		return strings.TrimSpace(tools[0].Function.Name)
+	}
+	return ""
+}
+func inKernelRequiresTool(raw json.RawMessage) bool {
+	var choice string
+	return json.Unmarshal(raw, &choice) == nil && choice == "required"
+}
 func inKernelForcedToolName(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""

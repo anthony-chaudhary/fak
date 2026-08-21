@@ -188,7 +188,7 @@ func TestReasoningWithTruncatedToolCallFailsClosed(t *testing.T) {
 }
 
 func TestToolSpecBlockMatchesQwen35Contract(t *testing.T) {
-	got := toolSpecBlock([]ToolDef{{Type: "function", Function: ToolDefFunction{Name: "record_probe", Description: "record", Parameters: json.RawMessage(`{"type":"object"}`)}}})
+	got := toolSpecBlock([]ToolDef{{Type: "function", Function: ToolDefFunction{Name: "record_probe", Description: "record", Parameters: json.RawMessage(`{"type":"object","properties":{"probe":{"type":"string"}},"required":["probe"]}`)}}})
 	for _, want := range []string{
 		"You are provided with function signatures within <tools></tools> XML tags:",
 		"<tools>",
@@ -328,5 +328,25 @@ func TestEnforceForcedWriteRejectsTruncatedArtifact(t *testing.T) {
 	got := enforceForcedToolChoice(comp, choice, tools, []Message{{Role: RoleUser, Content: "Create index.html."}})
 	if !got.ToolCallsDropped || len(got.Message.ToolCalls) != 0 {
 		t.Fatalf("truncated artifact was not refused: %+v", got)
+	}
+}
+
+func TestEnforceRequiredSingleToolChoice(t *testing.T) {
+	tools := []ToolDef{{Type: "function", Function: ToolDefFunction{Name: "record_probe", Parameters: json.RawMessage(`{"type":"object","properties":{"probe":{"type":"string"}},"required":["probe"]}`)}}}
+	comp := &Completion{Message: Message{Role: RoleAssistant, Content: `{"probe":"alpha"}`}}
+	got := enforceForcedToolChoice(comp, json.RawMessage(`"required"`), tools, []Message{{Role: RoleUser, Content: "Set probe to alpha."}})
+	if len(got.Message.ToolCalls) != 1 || got.Message.ToolCalls[0].Function.Name != "record_probe" {
+		t.Fatalf("required tool call not enforced: %#v", got.Message)
+	}
+}
+func TestRenderInKernelRequiredSingleTool(t *testing.T) {
+	tools := []ToolDef{{Type: "function", Function: ToolDefFunction{
+		Name: "record_probe", Parameters: json.RawMessage(`{"type":"object","properties":{"probe":{"type":"string"}},"required":["probe"]}`),
+	}}}
+	got := renderInKernelChatMLRequest([]Message{{Role: RoleUser, Content: "run it"}}, tools, model.Config{}, nil, json.RawMessage(`"required"`))
+	for _, want := range []string{"Return only one valid JSON object", `"const":"record_probe"`, `"required":["probe"]`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("required single-tool prompt missing %q:\n%s", want, got)
+		}
 	}
 }
