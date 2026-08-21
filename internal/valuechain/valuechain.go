@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strings"
@@ -184,10 +185,18 @@ func Audit(m Manifest, in Input) (Report, error) {
 		if o.Turns < 0 {
 			return Report{}, fmt.Errorf("observation %q has negative turns", o.ID)
 		}
-		if o.CostUSD != nil && *o.CostUSD < 0 {
-			return Report{}, fmt.Errorf("observation %q has negative cost_usd", o.ID)
+		if o.CostUSD != nil {
+			if math.IsNaN(*o.CostUSD) || math.IsInf(*o.CostUSD, 0) {
+				return Report{}, fmt.Errorf("observation %q cost_usd must be finite", o.ID)
+			}
+			if *o.CostUSD < 0 {
+				return Report{}, fmt.Errorf("observation %q has negative cost_usd", o.ID)
+			}
 		}
 		for id, value := range o.Outcomes {
+			if math.IsNaN(value) || math.IsInf(value, 0) {
+				return Report{}, fmt.Errorf("observation %q outcome %q must be finite", o.ID, id)
+			}
 			if value < 0 {
 				return Report{}, fmt.Errorf("observation %q has negative outcome %q", o.ID, id)
 			}

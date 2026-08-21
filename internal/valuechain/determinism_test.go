@@ -8,12 +8,21 @@ import (
 
 func TestVerticalValueChainDeterminism(t *testing.T) {
 	costA, costB := 1.0, 0.5
-	manifest := Manifest{Schema: "fak-value-chain/1", ChainID: "chain", Outcome: Outcome{Unit: "tasks"}, Stages: []Stage{{ID: "prepare", Name: "Prepare"}, {ID: "run", Name: "Run", Consumes: []string{"prepare"}}}, Arms: []Arm{{ID: "baseline", Label: "Baseline"}, {ID: "optimized", Label: "Optimized"}}}
-	input := Input{Observations: []Observation{
-		{StageID: "prepare", ArmID: "baseline", Runs: 2, CostUSD: &costA, InputTokens: 10, OutputTokens: 2, LatencyMS: 5, OutcomeUnits: 1},
-		{StageID: "run", ArmID: "baseline", Runs: 2, CostUSD: &costA, InputTokens: 10, OutputTokens: 2, LatencyMS: 5, OutcomeUnits: 1},
-		{StageID: "prepare", ArmID: "optimized", Runs: 2, CostUSD: &costB, InputTokens: 5, OutputTokens: 2, LatencyMS: 3, OutcomeUnits: 1},
-		{StageID: "run", ArmID: "optimized", Runs: 2, CostUSD: &costB, InputTokens: 5, OutputTokens: 2, LatencyMS: 3, OutcomeUnits: 1},
+	manifest := Manifest{
+		Schema: Schema,
+		Name:   "chain",
+		Stages: []Stage{
+			{ID: "prepare", Kind: "preparation"},
+			{ID: "run", Kind: "outcome", DependsOn: []string{"prepare"}},
+		},
+		Arms:     []Arm{{ID: "baseline", Default: true}, {ID: "optimized"}},
+		Outcomes: []Outcome{{ID: "tasks", Unit: "task"}},
+	}
+	input := Input{Schema: Schema, Observations: []Observation{
+		{ID: "baseline-prepare", TraceID: "baseline-trace", StageID: "prepare", Arm: "baseline", Turns: 2, CostUSD: &costA, Provenance: "test-meter"},
+		{ID: "baseline-run", TraceID: "baseline-trace", PairID: "pair-1", StageID: "run", Arm: "baseline", Turns: 2, CostUSD: &costA, Outcomes: map[string]float64{"tasks": 1}, Provenance: "test-meter"},
+		{ID: "optimized-prepare", TraceID: "optimized-trace", StageID: "prepare", Arm: "optimized", Turns: 2, CostUSD: &costB, Provenance: "test-meter"},
+		{ID: "optimized-run", TraceID: "optimized-trace", PairID: "pair-1", StageID: "run", Arm: "optimized", Turns: 2, CostUSD: &costB, Outcomes: map[string]float64{"tasks": 1}, Provenance: "test-meter"},
 	}}
 	baseline, err := Audit(manifest, input)
 	if err != nil {

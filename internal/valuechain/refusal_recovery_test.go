@@ -12,10 +12,19 @@ func TestVerticalValueChainRefusalsNameRecovery(t *testing.T) {
 		input    Input
 		want     []string
 	}{
-		{name: "schema", manifest: Manifest{}, want: []string{"schema", "fak-value-chain/1"}},
-		{name: "chain id", manifest: Manifest{Schema: "fak-value-chain/1"}, want: []string{"chain_id", "required"}},
-		{name: "stage identity", manifest: Manifest{Schema: "fak-value-chain/1", ChainID: "c", Outcome: Outcome{Unit: "tasks"}, Stages: []Stage{{}}}, want: []string{"stage", "id", "name", "required"}},
-		{name: "observation key", manifest: Manifest{Schema: "fak-value-chain/1", ChainID: "c", Outcome: Outcome{Unit: "tasks"}, Stages: []Stage{{ID: "s", Name: "Stage"}}, Arms: []Arm{{ID: "a", Label: "Arm"}}}, input: Input{Observations: []Observation{{StageID: "missing", ArmID: "a"}}}, want: []string{"unknown stage", "missing"}},
+		{name: "schema", manifest: Manifest{}, want: []string{"schema", Schema}},
+		{name: "manifest name", manifest: Manifest{Schema: Schema}, input: Input{Schema: Schema}, want: []string{"name", "required"}},
+		{name: "stage identity", manifest: Manifest{Schema: Schema, Name: "chain", Stages: []Stage{{}}}, input: Input{Schema: Schema}, want: []string{"stage", "id", "required"}},
+		{
+			name: "observation key",
+			manifest: Manifest{
+				Schema: Schema, Name: "chain", Stages: []Stage{{ID: "s", Kind: "stage"}}, Arms: []Arm{{ID: "a"}},
+			},
+			input: Input{Schema: Schema, Observations: []Observation{{
+				ID: "observation", TraceID: "trace", StageID: "missing", Arm: "a", Provenance: "test",
+			}}},
+			want: []string{"unknown stage", "missing"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
