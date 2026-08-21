@@ -387,7 +387,7 @@ func (a *liveAdapter) reachable(ctx context.Context) bool {
 	}
 	client := a.client
 	if client == nil {
-		client = http.DefaultClient
+		client = &http.Client{Timeout: 500 * time.Millisecond}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
