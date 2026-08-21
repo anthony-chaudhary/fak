@@ -42,13 +42,14 @@ func leaseLifecycleBurstCases() []leaseLifecycleBurstCase {
 
 func TestLeaseLifecycleBurstMatrix(t *testing.T) {
 	got := leaseLifecycleBurstCases()
-	if len(got) != 12 {
-		t.Fatalf("matrix has %d cells, want 12 (N=1,8,32,128 x disjoint, overlap25, hotspot)", len(got))
-	}
 	wantWidths := []int{1, 8, 32, 128}
+	wantPatterns := []string{burstPatternDisjoint, burstPatternOverlap25, burstPatternHotspot}
+	if len(got) != len(wantWidths)*len(wantPatterns) {
+		t.Fatalf("matrix has %d cells, want %d widths x %d patterns", len(got), len(wantWidths), len(wantPatterns))
+	}
 	for wi, width := range wantWidths {
-		for pi, pattern := range []string{burstPatternDisjoint, burstPatternOverlap25, burstPatternHotspot} {
-			cell := got[wi*3+pi]
+		for pi, pattern := range wantPatterns {
+			cell := got[wi*len(wantPatterns)+pi]
 			if cell.Children != width || cell.Pattern != pattern {
 				t.Fatalf("cell %d = %+v, want children=%d pattern=%s", wi*3+pi, cell, width, pattern)
 			}
