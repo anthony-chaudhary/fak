@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
+)
 
 func TestGuardProfileEdgeAndAdversarialInputs(t *testing.T) {
 	cases := []struct {
@@ -13,7 +17,7 @@ func TestGuardProfileEdgeAndAdversarialInputs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, ok := guardBuiltinProfiles()[tc.profile]
+			ok := syspromptmmu.DescribeStyle(tc.profile).Known || syspromptmmu.DescribeWorkProfile(tc.profile).Known
 			if ok != tc.wantOK {
 				t.Fatalf("profile %q accepted=%v, want %v", tc.profile, ok, tc.wantOK)
 			}
