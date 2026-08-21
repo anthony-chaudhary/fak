@@ -1,6 +1,7 @@
 package devcmd
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -257,5 +258,42 @@ func TestPackageVersionReadsOnlyProjectTable(t *testing.T) {
 	}
 	if got := packageVersion(repo); got != "0.30.0" {
 		t.Fatalf("version=%q", got)
+	}
+}
+
+func TestSyncCodexPluginBoundsProfileAttestation(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source", "claude-plugin")
+	destination := filepath.Join(root, "cache", "0.30.0")
+	writePluginFixture(t, source, "0.30.0", "new")
+	writePluginFixture(t, destination, "0.30.0", "old")
+
+	oldInspect := codexPluginProfileInspect
+	codexPluginProfileInspect = func(ctx context.Context, _, _, _ string) (hookProfileReport, error) {
+		<-ctx.Done()
+		return hookProfileReport{}, ctx.Err()
+	}
+	t.Cleanup(func() { codexPluginProfileInspect = oldInspect })
+
+	started := time.Now()
+	r, err := syncCodexPlugin(root, source, destination, root, codexPluginSyncOps{rename: os.Rename, remove: os.RemoveAll})
+	if err == nil {
+		t.Fatal("expected bounded attestation failure")
+	}
+	if r.Status != "INSTALLED_UNATTESTED" || r.FailureStage != "attest_profile" {
+		t.Fatalf("receipt=%+v err=%v", r, err)
+	}
+	if !strings.Contains(r.Detail, "attestation timed out") || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("detail=%q err=%v", r.Detail, err)
+	}
+	if elapsed := time.Since(started); elapsed > codexPluginAttestTimeout+2*time.Second {
+		t.Fatalf("attestation exceeded bound: %s", elapsed)
+	}
+	installed, readErr := os.ReadFile(filepath.Join(destination, "hooks", "hooks.json"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !strings.Contains(string(installed), "old") {
+		t.Fatalf("timeout did not restore old install: %s", installed)
 	}
 }

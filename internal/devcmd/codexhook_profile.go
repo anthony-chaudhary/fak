@@ -123,6 +123,12 @@ func RunCodexHookProfile(stdout, stderr io.Writer, args []string) int {
 	return 0
 }
 func inspectCodexHookProfile(home, workspace, binary string) (hookProfileReport, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	return inspectCodexHookProfileContext(ctx, home, workspace, binary)
+}
+
+func inspectCodexHookProfileContext(ctx context.Context, home, workspace, binary string) (hookProfileReport, error) {
 	home, _ = filepath.Abs(home)
 	workspace, _ = filepath.Abs(workspace)
 	if binary == "" {
@@ -264,6 +270,10 @@ func discoverCodexBinary() string {
 func queryCodexHooks(home, workspace, binary string) (appServerReply, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	return queryCodexHooksContext(ctx, home, workspace, binary)
+}
+
+func queryCodexHooksContext(ctx context.Context, home, workspace, binary string) (appServerReply, error) {
 	cmd := exec.CommandContext(ctx, binary, "app-server", "--stdio")
 	cmd.Env = append(os.Environ(), "CODEX_HOME="+home)
 	stdin, e := cmd.StdinPipe()

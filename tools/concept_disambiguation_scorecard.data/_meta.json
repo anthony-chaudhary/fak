@@ -8585,6 +8585,16 @@
           "category": "incidental",
           "reason": "W3C tracing child-span carrier, not model context memory.",
           "token": "providerSpanContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Context-aware wrapper used only to bound external plugin inspection cancellation",
+          "token": "inspectCodexHookProfileContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Context-aware subprocess helper used only to propagate cancellation",
+          "token": "queryCodexHooksContext"
         }
       ],
       "id": "context-ctx",
@@ -8661,6 +8671,7 @@
         "guardReadPath",
         "guardSourceReadRecovery",
         "guardSourceReadRecoverySchema",
+        "inspectCodexHookProfileContext",
         "latestGuardCompactionWitness",
         "newGuardCompactionWitness",
         "newTraceContext",
@@ -8672,6 +8683,7 @@
         "probeCtx",
         "providerContext",
         "providerSpanContext",
+        "queryCodexHooksContext",
         "readGuardCompactionWitnesses",
         "recalled",
         "recalling",

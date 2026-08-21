@@ -1,6 +1,7 @@
 package devcmd
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -17,7 +18,12 @@ import (
 	"time"
 )
 
-const codexPluginSyncSchema = "fak/codex-plugin-sync/v1"
+const (
+	codexPluginSyncSchema    = "fak/codex-plugin-sync/v1"
+	codexPluginAttestTimeout = 20 * time.Second
+)
+
+var codexPluginProfileInspect = inspectCodexHookProfileContext
 
 type codexPluginArtifact struct {
 	Path   string `json:"path"`
@@ -222,8 +228,13 @@ func syncCodexPlugin(home, source, destination, workspace string, ops codexPlugi
 	}
 	r.StagedDestination = ""
 	r.Status = "INSTALLED"
-	profile, profileErr := inspectCodexHookProfile(home, workspace, "")
+	ctx, cancel := context.WithTimeout(context.Background(), codexPluginAttestTimeout)
+	profile, profileErr := codexPluginProfileInspect(ctx, home, workspace, "")
+	cancel()
 	if profileErr != nil {
+		if errors.Is(profileErr, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			profileErr = fmt.Errorf("attestation timed out after %s: %w", codexPluginAttestTimeout, context.DeadlineExceeded)
+		}
 		r.Status = "INSTALLED_UNATTESTED"
 		r.FailureStage, r.Detail = "attest_profile", profileErr.Error()
 		return r, rollback("attest_profile", profileErr)
