@@ -1558,7 +1558,8 @@
       "distinction": "A recalled-fact staleness verdict, not a resume-source or page-fault decision.",
       "distinct_from": [
         "x-goal25-decision-sourcedecision",
-        "decision-kernel"
+        "decision-kernel",
+        "observation-validity-decision"
       ],
       "aliases": [],
       "grounding": "StaleFactDecision",

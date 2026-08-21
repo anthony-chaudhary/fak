@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **52** (clarity 25 + coverage 27) |
-| **Crystal-clear concepts (and climbing)** | **758** crystal of 2471 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2596 / 2623** (99.0% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **56** (clarity 25 + coverage 31) |
+| **Crystal-clear concepts (and climbing)** | **759** crystal of 2472 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2597 / 2628** (98.8% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 197 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **74** of 3434 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **74** of 3435 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 90.1/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 89.9/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2471 concepts - score 90.1/100 (grade A) - disambiguation-debt 52
+concept-disambiguation chart - 2472 concepts - score 89.9/100 (grade B) - disambiguation-debt 56
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ############................ 758
+  * crystal       ############................ 759
   o defined       ############################ 1713
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -43,7 +43,7 @@ clarity mix by family (each cell = one concept):
   cache            ***************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (239 concept(s); 63 crystal)
   context-ctx      ********************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (213 concept(s); 56 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
-  decision         ******************************ooooooooooooooooooooo (51 concept(s); 30 crystal)
+  decision         *******************************ooooooooooooooooooooo (52 concept(s); 31 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ***************oooooooooooooooooooooooooooooooo (47 concept(s); 15 crystal)
   gateway-engine   **************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (143 concept(s); 26 crystal)
@@ -62,18 +62,18 @@ clarity mix by family (each cell = one concept):
   witness-proof    ********************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (148 concept(s); 68 crystal)
 
 coverage by family (positioned / discovered):
-  cache            ###########################. 281/287
-  guard-gate       ############################ 461/465
+  guard-gate       ############################ 461/469
+  cache            ###########################. 281/288
+  session-runtime  ###########################. 251/256
   plan             ############################ 360/364
-  session-runtime  ############################ 251/255
   support-maturity ###########################. 55/58
+  context-ctx      ############################ 226/228
   gateway-engine   ############################ 182/184
   policy-capability ############################ 184/186
   pool             ###########################. 39/41
-  context-ctx      ############################ 226/227
   attention        ############################ 76/76
   cross-cluster    ............................ 0/0
-  decision         ############################ 57/57
+  decision         ############################ 58/58
   dev-tier         ............................ 0/0
   evict            ############################ 54/54
   layout           ############################ 15/15
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   vfs              ............................ 0/0
   witness-proof    ############################ 156/156
 
-namespace coverage  [################################] 99.0%  (2596/2623 confusable tokens positioned)
+namespace coverage  [################################] 98.8%  (2597/2628 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 196
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 197/197
 
-name index: 3434 lookup name(s) -> 2471 concept(s), 74 ambiguous
+name index: 3435 lookup name(s) -> 2472 concept(s), 74 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **197 / 197** (196 mutual, 1 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 3 |
-| Boundaries drawn (mutual / total) | 1606 / 4437 |
+| Boundaries drawn (mutual / total) | 1608 / 4439 |
 | Dangling `distinct_from` references (drive to 0) | 6 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3434 over 2471 concepts |
+| Lookup names indexed | 3435 over 2472 concepts |
 | Lookup names landing on several concepts | 74 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **2** |
-| Concepts carrying a contrast set | 2471 |
+| Concepts carrying a contrast set | 2472 |
 
 ## The concepts (best verdict first)
 
@@ -291,6 +291,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | decision | **Decision (scheduler)** - Loop admission advisory: whether to fire a scheduled loop now |
 | * | crystal | symbol | decision | **Decision (shared-task)** - Shared-task execution state tracking and reconciliation record |
 | * | crystal | symbol | decision | **ModelDecision** - The modelaccept record (type ModelDecision) capturing the accept/reject decision for one model in the inventory (keyed byDecision). |
+| * | crystal | symbol | decision | **ObservationValidityDecision** - Reconciliation receipt that binds a read-only child result to its observed state epoch and read set, then marks it current or stale from relevant post-start workspace changes. |
 | * | crystal | symbol | decision | **ComparisonDecision (one cell of a multiplicity family)** - One quality comparison's adjudicated outcome inside a multiplicity family: the (model, slice, metric) cell, its correction-adjusted p-value, whether the correction rejected it, whether the hierarchical gate left it untested, and - when it blocks - the reason plus the first divergence and the scrubbed replay artifact an operator acts on. |
 | * | crystal | symbol | decision | **MultiplicityDecision (whole-family multiplicity verdict)** - The whole-family verdict over one adjudicated grid of quality comparisons: the declared policy, the bound that policy actually buys stated in words, every per-cell ComparisonDecision, the blocking subset ordered strongest-evidence-first, any family-level refusal, the per-tier cost rollup, and a Pass that is true only when nothing blocked and nothing was refused. |
 | * | crystal | symbol | decision | **MultiplicityDecisionSchema (versioned tag on a multiplicity decision)** - The versioned schema tag stamped on every MultiplicityDecision artifact (fak-quality-multiplicity/1) so a consumer pins the major version and a shape change becomes a conscious migration rather than silent field drift. |
@@ -2749,7 +2750,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 90 | 1 | 1 one-sided boundary on a confusable pair |
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2831/4437 boundaries drawn one-way only |
+| separation | `mutuality_soft` | 80 | 0 | 2831/4439 boundaries drawn one-way only |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2760,18 +2761,18 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| cache | 281 | 287 | 6 |
-| guard-gate | 461 | 465 | 4 |
+| guard-gate | 461 | 469 | 8 |
+| cache | 281 | 288 | 7 |
+| session-runtime | 251 | 256 | 5 |
 | plan | 360 | 364 | 4 |
-| session-runtime | 251 | 255 | 4 |
 | support-maturity | 55 | 58 | 3 |
+| context-ctx | 226 | 228 | 2 |
 | gateway-engine | 182 | 184 | 2 |
 | policy-capability | 184 | 186 | 2 |
 | pool | 39 | 41 | 2 |
-| context-ctx | 226 | 227 | 1 |
 | attention | 76 | 76 | 0 |
 | cross-cluster | 0 | 0 | 0 |
-| decision | 57 | 57 | 0 |
+| decision | 58 | 58 | 0 |
 | dev-tier | 0 | 0 | 0 |
 | evict | 54 | 54 | 0 |
 | layout | 15 | 15 | 0 |

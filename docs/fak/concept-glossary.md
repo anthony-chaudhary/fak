@@ -2351,3 +2351,10 @@ The stable benchmark preflight refusal emitted when a compute resource is presen
 The stable benchmark preflight refusal emitted when the provider environment exposes a capability the task contract requires to be absent.
 
 **Distinct from:** A prohibited observed capability, not a missing requirement and not a present resource below its minimum.
+
+
+### ObservationValidityDecision
+
+Reconciliation receipt that binds a read-only child result to its observed state epoch and read set, then marks it current or stale from relevant post-start workspace changes.
+
+**Distinct from:** Unlike StaleFactDecision, which evaluates one recalled memory fact, this decision validates a child observation against workspace-change evidence and carries the exact invalidating paths plus rerun-or-abstain guidance.
