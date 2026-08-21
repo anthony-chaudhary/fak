@@ -30,8 +30,8 @@ func TestGuardDenialRowGrantStaysExactOnly(t *testing.T) {
 			}
 			var rt policy.Runtime
 			guardApplyAllowOverlay(&rt, grant)
-			if len(rt.Policy().AllowPrefix) != 0 {
-				t.Fatalf("runtime gained prefix authority: %+v", rt.Policy())
+			if len(rt.Adjudicator.AllowPrefix) != 0 {
+				t.Fatalf("runtime gained prefix authority: %+v", rt.Adjudicator)
 			}
 		})
 	}
