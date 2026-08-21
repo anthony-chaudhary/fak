@@ -32,10 +32,11 @@ func TestTwoRoleModelSetConformanceRefusalsNameRecovery(t *testing.T) {
 		if !errors.As(err, &required) || len(required.RoleIDs) == 0 {
 			t.Fatalf("Resolve error = %#v, want typed required-role refusal", err)
 		}
-		if !strings.Contains(err.Error(), required.RoleIDs[0]) || len(resolution.Rejections) == 0 {
+		rejections := resolution.Rejections()
+		if !strings.Contains(err.Error(), required.RoleIDs[0]) || len(rejections) == 0 {
 			t.Fatalf("refusal omits role or recovery detail: err=%q resolution=%+v", err, resolution)
 		}
-		for _, rejection := range resolution.Rejections {
+		for _, rejection := range rejections {
 			if rejection.Constraint == "" || rejection.Remediation == "" {
 				t.Fatalf("rejection lacks constraint/remediation: %+v", rejection)
 			}
@@ -48,7 +49,7 @@ func TestTwoRoleModelSetConformanceRefusalsNameRecovery(t *testing.T) {
 		if !errors.As(err, &validation) || len(validation.Problems) == 0 {
 			t.Fatalf("ParseJSON error = %#v, want typed validation problems", err)
 		}
-		if !strings.Contains(err.Error(), "schema") || !strings.Contains(err.Error(), "required") {
+		if !strings.Contains(err.Error(), "schema") || !strings.Contains(err.Error(), "must equal "+modelsetreceipt.ReceiptSchema) {
 			t.Fatalf("receipt refusal does not name repair: %q", err)
 		}
 	})
