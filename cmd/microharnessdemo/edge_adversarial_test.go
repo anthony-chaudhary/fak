@@ -13,12 +13,12 @@ func TestMicroharnessEdgeAndAdversarialInputs(t *testing.T) {
 		want string
 	}{
 		{name: "empty", task: task{}, want: "id"},
-		{name: "oversized id", task: task{ID: strings.Repeat("x", 1<<20), Goal: "g", Depth: 1, TurnBudget: 1, DecisionClass: "one_turn"}, want: "id"},
-		{name: "hostile id", task: task{ID: "../../escape", Goal: "g", Depth: 1, TurnBudget: 1, DecisionClass: "one_turn"}, want: "id"},
-		{name: "negative depth", task: task{ID: "safe", Goal: "g", Depth: -1, TurnBudget: 1, DecisionClass: "one_turn"}, want: "depth"},
-		{name: "depth overflow", task: task{ID: "safe", Goal: "g", Depth: 3, TurnBudget: 1, DecisionClass: "one_turn"}, want: "depth"},
-		{name: "turn overflow", task: task{ID: "safe", Goal: "g", Depth: 1, TurnBudget: 4, DecisionClass: "bounded_correction"}, want: "turn"},
-		{name: "hostile class", task: task{ID: "safe", Goal: "g", Depth: 1, TurnBudget: 1, DecisionClass: "root_only;delegate"}, want: "decision"},
+		{name: "oversized id", task: task{ID: strings.Repeat("x", 1<<20), Goal: "g", Depth: 1, MaxTurns: 1, Class: bandOneTurn}, want: "id"},
+		{name: "hostile id", task: task{ID: "../../escape", Goal: "g", Depth: 1, MaxTurns: 1, Class: bandOneTurn}, want: "id"},
+		{name: "negative depth", task: task{ID: "safe", Goal: "g", Depth: -1, MaxTurns: 1, Class: bandOneTurn}, want: "depth"},
+		{name: "depth overflow", task: task{ID: "safe", Goal: "g", Depth: 3, MaxTurns: 1, Class: bandOneTurn}, want: "depth"},
+		{name: "turn overflow", task: task{ID: "safe", Goal: "g", Depth: 1, MaxTurns: 4, Class: bandBoundedCorrection}, want: "turn"},
+		{name: "hostile class", task: task{ID: "safe", Goal: "g", Depth: 1, MaxTurns: 1, Class: "root_only;delegate"}, want: "decision"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

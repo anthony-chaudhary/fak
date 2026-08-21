@@ -13,9 +13,9 @@ func TestMicroharnessRefusalsNameRecovery(t *testing.T) {
 		want []string
 	}{
 		{name: "identity", task: task{}, want: []string{"id", "goal", "required"}},
-		{name: "depth", task: task{ID: "safe", Goal: "g", Depth: 3, TurnBudget: 1, DecisionClass: "one_turn"}, want: []string{"depth", "2"}},
-		{name: "turn budget", task: task{ID: "safe", Goal: "g", Depth: 1, TurnBudget: 4, DecisionClass: "bounded_correction"}, want: []string{"turn", "3"}},
-		{name: "class", task: task{ID: "safe", Goal: "g", Depth: 1, TurnBudget: 1, DecisionClass: "unknown"}, want: []string{"decision class", "unsupported"}},
+		{name: "depth", task: task{ID: "safe", Goal: "g", Depth: 3, MaxTurns: 1, Class: bandOneTurn}, want: []string{"depth", "2"}},
+		{name: "turn budget", task: task{ID: "safe", Goal: "g", Depth: 1, MaxTurns: 4, Class: bandBoundedCorrection}, want: []string{"turn", "3"}},
+		{name: "class", task: task{ID: "safe", Goal: "g", Depth: 1, MaxTurns: 1, Class: "unknown"}, want: []string{"decision class", "unsupported"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

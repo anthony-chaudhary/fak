@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -18,6 +19,8 @@ import (
 )
 
 const maxDepth = 2
+
+var taskIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$`)
 
 type turnBand string
 
@@ -142,8 +145,14 @@ func makeReceipt(t task, turns int) receipt {
 }
 
 func admitTask(t task) (bool, corpusMeasurement, error) {
-	if t.Depth > maxDepth {
-		return false, corpusMeasurement{}, fmt.Errorf("task %s exceeds recursion envelope", t.ID)
+	if strings.TrimSpace(t.ID) == "" || strings.TrimSpace(t.Goal) == "" {
+		return false, corpusMeasurement{}, errors.New("task id and goal are required before admission")
+	}
+	if !taskIDPattern.MatchString(t.ID) {
+		return false, corpusMeasurement{}, fmt.Errorf("task id %q must be 1..120 literal letters, digits, dots, underscores, or hyphens", t.ID)
+	}
+	if t.Depth < 1 || t.Depth > maxDepth {
+		return false, corpusMeasurement{}, fmt.Errorf("task %s depth must be within 1..%d", t.ID, maxDepth)
 	}
 	switch t.Class {
 	case bandRootOnly:
@@ -153,23 +162,26 @@ func admitTask(t task) (bool, corpusMeasurement, error) {
 		}, nil
 	case bandOneTurn:
 		if t.MaxTurns != 1 {
-			return false, corpusMeasurement{}, fmt.Errorf("task %s violates one-turn class", t.ID)
+			return false, corpusMeasurement{}, fmt.Errorf("task %s decision class one_turn requires turn budget 1", t.ID)
 		}
 	case bandBoundedCorrection:
 		if t.MaxTurns < 2 || t.MaxTurns > 3 {
-			return false, corpusMeasurement{}, fmt.Errorf("task %s violates bounded-correction class", t.ID)
+			return false, corpusMeasurement{}, fmt.Errorf("task %s decision class bounded_correction requires turn budget within 2..3", t.ID)
 		}
 	case "":
 		if t.MaxTurns < 1 || t.MaxTurns > 3 {
-			return false, corpusMeasurement{}, fmt.Errorf("task %s exceeds turn envelope", t.ID)
+			return false, corpusMeasurement{}, fmt.Errorf("task %s turn budget must be within 1..3", t.ID)
 		}
 	default:
-		return false, corpusMeasurement{}, fmt.Errorf("task %s has unknown turn band %q", t.ID, t.Class)
+		return false, corpusMeasurement{}, fmt.Errorf("task %s decision class %q is unsupported", t.ID, t.Class)
 	}
 	return true, corpusMeasurement{}, nil
 }
 
 func run(ctx context.Context) (report, error) {
+	if err := ctx.Err(); err != nil {
+		return report{}, fmt.Errorf("spawn architecture: %w; retry with a live context", err)
+	}
 	planner := &scriptedModel{}
 
 	rootGoal := "Build a local coding harness that can edit this repository and prove its work."
