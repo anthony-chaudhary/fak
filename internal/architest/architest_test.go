@@ -674,6 +674,7 @@ var tier = map[string]int{
 	"harnessmodelsetconformance": 3, // captured end-to-end model-set artifact and CLI witness; off the hot path.
 	"httptrust":                  2, // the ONE corporate-trust seam (#8172): resolves a declared CA bundle through secretload(2), widens the platform pool with it, and hands every fak-originated HTTPS client the same RootCAs plus the derived child-runtime trust vars; imports secretload(2)+stdlib, off the hot path.
 	"cloudroute":                 1, // stdlib-only detector for a request-signed cloud model route (Bedrock SigV4 / Vertex ADC) whose base-URL repoint cannot take effect (#8172); pure over an environ snapshot, imports nothing internal.
+	"modelloadplan":              3, // deterministic Qwen load planner over harnessresolve locks; off the hot path (#8134).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
@@ -1299,6 +1300,7 @@ var chatEndpointRole = map[string]string{
 	"trajctl":           "the off-path GatewayJudgeClient (#2543): an LLM-as-judge W1 progress scorer that POSTs a forced-tool verdict call to fak's own gateway (not a live planner)",
 	"deepseekbench":     "the off-path DeepSeek V4 TTFT/TPOT/context-scaling benchmark client (#3014): a streaming latency/throughput measurement against an OpenAI-compatible endpoint (hosted DeepSeek or self-hosted vLLM/SGLang) reporting OBSERVED provider speed (not a live planner)",
 	"glm52prefillsweep": "the off-path GLM-5.2 prefill-latency sweep client (#3085/#3086): POSTs a prefill-dominant request (large prompt, max_tokens~1) at each prompt length against a fak serve endpoint to record TTFT / prefill tok/s (not a live planner)",
+	"qwen38quantrun":    "the off-path Qwen3.8 quantization corpus runner and production-soak client (#8343/#8319) against a declared OpenAI-compatible endpoint (not a live planner)",
 	"zaitask":           "the off-path bounded non-streaming Z.AI Coding Plan task runner (not a live kernel planner)",
 	"armbench":          "the off-path benchmark clients for fak/OpenAI-compatible generation surfaces (not a live planner)",
 	"conformance":       "the off-path provider-conformance probe client (not a live planner)",
