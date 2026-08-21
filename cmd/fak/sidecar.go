@@ -13,8 +13,8 @@ package main
 //	fak sidecar                     render the pane as terminal text (default)
 //	fak sidecar --slack             emit the Slack Block Kit payload (JSON array)
 //	fak sidecar --json              emit the machine-readable Pane envelope
-//	fak sidecar --from FILE         read a captured `fleet_sessions.py json` payload
-//	                                (file or '-') instead of running it
+//	fak sidecar --from FILE         read a captured legacy `fleet_sessions.py json`
+//	                                payload (file or '-') instead of the Go census
 //	fak sidecar --lanes-from FILE   read a dos-top lane-occupancy JSON reading
 //	fak sidecar --posture-from FILE read a gateway /debug/vars posture reading
 //
@@ -34,9 +34,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anthony-chaudhary/fak/internal/cadencereport"
-	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
+	"github.com/anthony-chaudhary/fak/internal/fleetmon"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/sessiondesc"
 	"github.com/anthony-chaudhary/fak/internal/sidecar"
 
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
@@ -50,11 +50,11 @@ func runSidecar(stdout, stderr io.Writer, argv []string) int {
 	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
 	asJSON := fs.Bool("json", false, "emit the machine-readable Pane envelope")
 	asSlack := fs.Bool("slack", false, "emit the Slack Block Kit payload (JSON array of blocks)")
-	from := fs.String("from", "", "read a captured `fleet_sessions.py json` payload (file or '-') instead of running it")
+	from := fs.String("from", "", "read a captured legacy `fleet_sessions.py json` payload (file or '-') instead of the Go census")
 	lanesFrom := fs.String("lanes-from", "", "read a dos-top lane-occupancy JSON reading (file or '-')")
 	postureFrom := fs.String("posture-from", "", "read a gateway /debug/vars posture reading (file or '-')")
-	timeout := fs.Int("timeout", 60, "seconds for the fleet_sessions census collector")
-	python := fs.String("python", "", "python interpreter for the census collector (default: auto)")
+	timeout := fs.Int("timeout", 60, "deprecated compatibility flag; the default census is in-process")
+	python := fs.String("python", "", "deprecated compatibility flag; the default census never starts Python")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -106,18 +106,38 @@ func runSidecar(stdout, stderr io.Writer, argv []string) int {
 func collectSidecar(stderr io.Writer, root, python, from, lanesFrom, postureFrom string, timeoutSec int) sidecar.Inputs {
 	var in sidecar.Inputs
 
-	// sessions + accounts — the B1/B2 census from the existing fleet_sessions.py
-	// json contract. A captured --from payload keeps the render deterministic.
-	census, censusErr := loadCensus(root, python, from, timeoutSec)
-	if censusErr != "" {
-		note := "fleet_sessions census unavailable: " + censusErr
-		in.Sessions = sidecar.PlaneInput{Measured: false, Note: note}
-		in.Accounts = sidecar.PlaneInput{Measured: false, Note: note}
+	// The default session plane is the in-process cross-harness census joined
+	// through the exact-id session descriptor contract. --from deliberately keeps
+	// the old captured payload path deterministic for offline fixtures.
+	if from == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			in.Sessions = sidecar.PlaneInput{Measured: false, Note: "fleetmon census unavailable: " + err.Error()}
+		} else {
+			rows, note, joinErr := sidecarRowsFromFleetCensus(fleetmon.Census(home, time.Now()))
+			if joinErr != nil {
+				in.Sessions = sidecar.PlaneInput{Measured: false, Note: "session descriptor join refused: " + joinErr.Error()}
+			} else {
+				in.SessionRows = rows
+				in.Sessions = sidecar.PlaneInput{Measured: true, Note: note}
+			}
+		}
+		in.Accounts = sidecar.PlaneInput{
+			Measured: false,
+			Note:     "account availability is not part of the in-process session census (use --from for a legacy captured reading)",
+		}
 	} else {
-		in.SessionRows = censusSessions(census)
-		in.Sessions = sidecar.PlaneInput{Measured: true, Note: "fleet_sessions.py json census"}
-		in.AccountRows = censusAccounts(census)
-		in.Accounts = sidecar.PlaneInput{Measured: true, Note: "fleet_sessions.py availability"}
+		census, censusErr := loadCensus(from)
+		if censusErr != "" {
+			note := "legacy fleet_sessions capture unavailable: " + censusErr
+			in.Sessions = sidecar.PlaneInput{Measured: false, Note: note}
+			in.Accounts = sidecar.PlaneInput{Measured: false, Note: note}
+		} else {
+			in.SessionRows = censusSessions(census)
+			in.Sessions = sidecar.PlaneInput{Measured: true, Note: "legacy fleet_sessions.py captured census"}
+			in.AccountRows = censusAccounts(census)
+			in.Accounts = sidecar.PlaneInput{Measured: true, Note: "legacy fleet_sessions.py captured availability"}
+		}
 	}
 
 	// lanes — a dos-top occupancy reading. OBSERVED, rendered not re-adjudicated.
@@ -152,46 +172,73 @@ func collectSidecar(stderr io.Writer, root, python, from, lanesFrom, postureFrom
 	return in
 }
 
-// loadCensus reads the fleet_sessions.py json payload, from a captured file/stdin
-// (--from) or by running the collector. It returns the parsed object and an empty
-// error string on success, or a one-line reason on failure.
-func loadCensus(root, python, from string, timeoutSec int) (map[string]any, string) {
-	if from != "" {
-		m, err := readJSONObject(from)
-		if err != nil {
-			return nil, err.Error()
+// sidecarRowsFromFleetCensus composes the shipped cross-agent census with the
+// shipped exact-id descriptor fold. NO_NAMESPACE sentinels stay typed in the
+// plane note; observed-empty is a measured empty result. Duplicate or empty
+// session ids are delegated to sessiondesc.Fold and therefore fail closed.
+func sidecarRowsFromFleetCensus(census []fleetmon.CensusRow) ([]sidecar.SessionRow, string, error) {
+	harnessRows := make([]sessiondesc.HarnessRow, 0, len(census))
+	livenessByID := make(map[string]fleetmon.Liveness, len(census))
+	unavailable := make([]string, 0)
+	for _, row := range census {
+		switch row.Kind {
+		case fleetmon.KindNoNamespace:
+			note := row.Agent + "=NO_NAMESPACE"
+			if row.Note != "" {
+				note += " (" + row.Note + ")"
+			}
+			unavailable = append(unavailable, note)
+		case fleetmon.KindSession:
+			harnessRows = append(harnessRows, sessiondesc.HarnessRow{
+				SessionID: row.Session,
+				Agent:     row.Agent,
+			})
+			livenessByID[row.Session] = row.Liveness
+		default:
+			return nil, "", fmt.Errorf("fleetmon census row for %q has unknown kind %q", row.Agent, row.Kind)
 		}
-		return m, ""
 	}
-	python = resolvePython(python)
-	payload, runErr := cadencereport.RunPyEnvelope(root,
-		[]string{"tools/fleet_sessions.py", "json"}, python, time.Duration(timeoutSec)*time.Second)
-	if runErr != "" {
-		return nil, runErr
+
+	descriptors, err := sessiondesc.Fold(sessiondesc.Sources{
+		HarnessStatus: sessiondesc.SourceObserved,
+		Harness:       harnessRows,
+	})
+	if err != nil {
+		return nil, "", err
 	}
-	if payload == nil {
-		return nil, "collector returned no payload"
+
+	rows := make([]sidecar.SessionRow, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		rows = append(rows, sidecar.SessionRow{
+			Session:     descriptor.ID,
+			Account:     descriptor.Harness.Identity,
+			Harness:     descriptor.Harness.Agent,
+			Disposition: strings.ToLower(string(livenessByID[descriptor.ID])),
+		})
 	}
-	return payload, ""
+
+	note := "fleetmon census -> fak.session.descriptor.v1"
+	if len(descriptors) == 0 {
+		note += "; measured empty"
+	}
+	if len(unavailable) > 0 {
+		note += "; source unavailable: " + strings.Join(unavailable, "; ")
+	}
+	return rows, note, nil
 }
 
-// resolvePython returns the explicit interpreter or the workspace default. The
-// sidecar's --python flag defaults to "" (auto); without this resolution the
-// empty string reaches cadencereport.RunPyEnvelope and exec.Command("") fails
-// with "exec: no command", leaving the sessions/accounts census UNMEASURED on
-// the default invocation — the very smoke the issue's witness exercises. This
-// mirrors cadencereport.CollectWithScores, which resolves the default before
-// the same RunPyEnvelope call.
-func resolvePython(p string) string {
-	if p == "" {
-		return gardenbundle.DefaultPython()
+// loadCensus reads the legacy offline fleet_sessions.py JSON contract from a
+// captured file/stdin. The default path never calls it and never starts Python.
+func loadCensus(from string) (map[string]any, string) {
+	m, err := readJSONObject(from)
+	if err != nil {
+		return nil, err.Error()
 	}
-	return p
+	return m, ""
 }
 
-// censusSessions maps the fleet_sessions `rows` into sidecar SessionRows, skipping
-// the synthetic `_probe` rows. The disposition word is normalized so the fold's
-// live tally is stable.
+// censusSessions maps legacy --from rows into sidecar SessionRows, skipping the
+// synthetic `_probe` rows. Default collection uses sidecarRowsFromFleetCensus.
 func censusSessions(census map[string]any) []sidecar.SessionRow {
 	rows, _ := census["rows"].([]any)
 	out := make([]sidecar.SessionRow, 0, len(rows))
@@ -206,7 +253,7 @@ func censusSessions(census map[string]any) []sidecar.SessionRow {
 		out = append(out, sidecar.SessionRow{
 			Session:     asStr(m["session"]),
 			Account:     asStr(m["account"]),
-			Harness:     "claude", // fleet_sessions is the ~/.claude census; codex/opencode/aider join is a follow-on (B1)
+			Harness:     "claude", // the legacy capture only enumerated ~/.claude
 			Disposition: dispositionWord(asStr(m["disp"])),
 		})
 	}

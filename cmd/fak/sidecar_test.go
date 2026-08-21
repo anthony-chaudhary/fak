@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/fleetmon"
 )
 
 // captured fleet_sessions.py json payload — the existing contract the sidecar
@@ -131,16 +134,111 @@ func TestSidecarMutuallyExclusiveSurfaces(t *testing.T) {
 	}
 }
 
-// TestSidecarResolvesDefaultPython guards the live-smoke contract: an empty
-// --python (the default) MUST resolve to the workspace interpreter, not reach
-// exec.Command("") and fail with "exec: no command". The sessions/accounts
-// census is the census the issue's "live smoke on this host shows >=1 claude
-// row" witness drives off the DEFAULT invocation (no flags).
-func TestSidecarResolvesDefaultPython(t *testing.T) {
-	if got := resolvePython(""); got == "" {
-		t.Fatal("resolvePython(\"\") is empty: default invocation would hit exec.Command(\"\") and fail with 'exec: no command'")
+// TestSidecarDefaultSessionCollectorJoinsCrossHarnessDescriptors is the #8292
+// spine witness: the DEFAULT collector sees both harness namespaces through the
+// in-process census/descriptor join. The deliberately-invalid Python command is
+// the no-subprocess fence: any legacy collector launch makes this test fail.
+func TestSidecarDefaultSessionCollectorJoinsCrossHarnessDescriptors(t *testing.T) {
+	home := t.TempDir()
+	const claudeID = "11111111-1111-4111-8111-111111111111"
+	const codexID = "22222222-2222-4222-8222-222222222222"
+	writeSessionFixture(t, filepath.Join(home, ".claude", "projects", "fixture-project", claudeID+".jsonl"))
+	writeSessionFixture(t, filepath.Join(home, ".codex", "sessions", "2026", "08", "20",
+		"rollout-2026-08-20T00-00-00-"+codexID+".jsonl"))
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	var stdout, stderr bytes.Buffer
+	rc := runSidecar(&stdout, &stderr, []string{"--json", "--python", "definitely-not-a-python-binary"})
+	if rc != 0 {
+		t.Fatalf("runSidecar rc=%d stderr=%q", rc, stderr.String())
 	}
-	if got := resolvePython("/usr/bin/python3.13"); got != "/usr/bin/python3.13" {
-		t.Errorf("resolvePython ignored an explicit interpreter: got %q", got)
+	var pane struct {
+		Sessions struct {
+			Measured bool `json:"measured"`
+			Note     string
+			Rows     []struct {
+				Session string
+				Harness string
+			}
+		}
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &pane); err != nil {
+		t.Fatalf("decode default sidecar JSON: %v\n%s", err, stdout.String())
+	}
+	if !pane.Sessions.Measured {
+		t.Fatalf("default sessions are unmeasured: note=%q stderr=%q", pane.Sessions.Note, stderr.String())
+	}
+
+	got := make(map[string]string, len(pane.Sessions.Rows))
+	for _, row := range pane.Sessions.Rows {
+		got[row.Session] = row.Harness
+	}
+	if got[claudeID] != "claude" || got[codexID] != "codex" {
+		t.Fatalf("cross-harness descriptor rows = %#v, want claude=%s codex=%s", got, claudeID, codexID)
+	}
+	if !strings.Contains(pane.Sessions.Note, "NO_NAMESPACE") || !strings.Contains(pane.Sessions.Note, "openai-generic") {
+		t.Fatalf("typed unavailable source missing from rendered note %q", pane.Sessions.Note)
+	}
+}
+
+func TestSidecarSessionDescriptorAdapterContract(t *testing.T) {
+	t.Run("generic profile identity", func(t *testing.T) {
+		rows, note, err := sidecarRowsFromFleetCensus([]fleetmon.CensusRow{{
+			Agent: "custom-harness", Kind: fleetmon.KindSession, Session: "generic-session", Liveness: fleetmon.LivenessLive,
+		}})
+		if err != nil {
+			t.Fatalf("sidecarRowsFromFleetCensus: %v", err)
+		}
+		if len(rows) != 1 || rows[0].Harness != "custom-harness" || rows[0].Disposition != "live" {
+			t.Fatalf("generic descriptor rows = %+v", rows)
+		}
+		if !strings.Contains(note, "fak.session.descriptor.v1") {
+			t.Fatalf("descriptor provenance missing from note %q", note)
+		}
+	})
+
+	t.Run("measured empty", func(t *testing.T) {
+		rows, note, err := sidecarRowsFromFleetCensus(nil)
+		if err != nil || len(rows) != 0 || !strings.Contains(note, "measured empty") {
+			t.Fatalf("empty census rows=%+v note=%q err=%v", rows, note, err)
+		}
+	})
+
+	for _, tc := range []struct {
+		name string
+		rows []fleetmon.CensusRow
+	}{
+		{
+			name: "empty identity",
+			rows: []fleetmon.CensusRow{{Agent: "claude", Kind: fleetmon.KindSession, Session: ""}},
+		},
+		{
+			name: "exact id collision",
+			rows: []fleetmon.CensusRow{
+				{Agent: "claude", Kind: fleetmon.KindSession, Session: "same-id"},
+				{Agent: "codex", Kind: fleetmon.KindSession, Session: "same-id"},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := sidecarRowsFromFleetCensus(tc.rows); err == nil {
+				t.Fatalf("sidecarRowsFromFleetCensus(%+v) succeeded; want fail-closed refusal", tc.rows)
+			}
+		})
+	}
+}
+
+func writeSessionFixture(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir session fixture: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(`{"type":"user"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write session fixture: %v", err)
+	}
+	now := time.Now()
+	if err := os.Chtimes(path, now, now); err != nil {
+		t.Fatalf("stamp session fixture: %v", err)
 	}
 }
