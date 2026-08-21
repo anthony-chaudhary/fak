@@ -7,7 +7,7 @@ import (
 )
 
 func TestPublishedComponentContractsEdgeAndAdversarialInputs(t *testing.T) {
-	valid := `{"schema":"fak-component-contract/1","component":{"id":"runtime","kind":"runtime","version":"1","provides":["runtime"]}}`
+	valid := `{"schema":"fak-component-contract/1","component":{"id":"runtime","kind":"runtime","version":"1","provides":["runtime"],"evidence":{"authority":"fixture","source":"runtime-contract"}}}`
 	parseCases := []struct {
 		name string
 		raw  string
@@ -46,12 +46,16 @@ func TestPublishedComponentContractsEdgeAndAdversarialInputs(t *testing.T) {
 	}
 	for _, tc := range composeCases {
 		t.Run("compose/"+tc.name, func(t *testing.T) {
+			var receipt Receipt
 			manifest, err := ComposeContracts(tc.workload, tc.roots, tc.contracts)
 			if err == nil {
-				_, err = Resolve(context.Background(), manifest.Workload, manifest.Roots, ManifestProvider{Manifest: manifest})
+				receipt, err = Resolve(context.Background(), manifest.Workload, manifest.Roots, ManifestProvider{Manifest: manifest})
 			}
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("ComposeContracts error = %v, want text %q", err, tc.want)
+			if err != nil && strings.Contains(err.Error(), tc.want) {
+				return
+			}
+			if err != nil || receipt.Status != "refuse" || receipt.Conflict == nil || !strings.Contains(strings.ToLower(receipt.Conflict.Code), tc.want) {
+				t.Fatalf("contract outcome error=%v receipt=%+v, want text %q", err, receipt, tc.want)
 			}
 		})
 	}

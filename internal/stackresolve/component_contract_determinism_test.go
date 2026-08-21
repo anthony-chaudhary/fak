@@ -9,9 +9,9 @@ import (
 
 func TestPublishedComponentContractsDeterminism(t *testing.T) {
 	contracts := []ComponentContract{
-		{Schema: ComponentContractSchema, Component: Component{ID: "runtime", Kind: "runtime", Version: "1", Provides: []string{"runtime"}}},
-		{Schema: ComponentContractSchema, Component: Component{ID: "engine", Kind: "engine", Version: "1", Provides: []string{"engine"}}},
-		{Schema: ComponentContractSchema, Component: Component{ID: "gateway", Kind: "gateway", Version: "1", Provides: []string{"gateway"}}},
+		{Schema: ComponentContractSchema, Component: Component{ID: "runtime", Kind: "runtime", Version: "1", Provides: []string{"runtime"}, Evidence: Evidence{Authority: "fixture", Source: "runtime-contract"}}},
+		{Schema: ComponentContractSchema, Component: Component{ID: "engine", Kind: "engine", Version: "1", Provides: []string{"engine"}, Evidence: Evidence{Authority: "fixture", Source: "engine-contract"}}},
+		{Schema: ComponentContractSchema, Component: Component{ID: "gateway", Kind: "gateway", Version: "1", Provides: []string{"gateway"}, Evidence: Evidence{Authority: "fixture", Source: "gateway-contract"}}},
 	}
 	baselineManifest, err := ComposeContracts("serve", []string{"runtime", "engine", "gateway"}, contracts)
 	if err != nil {
