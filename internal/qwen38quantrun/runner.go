@@ -60,8 +60,47 @@ type chatResponse struct {
 	} `json:"choices"`
 	Usage        map[string]int `json:"usage"`
 	UsageDetails struct {
-		CachedTokens int `json:"cached_tokens"`
-	} `json:"prompt_tokens_details"`
+		CachedTokens int
+	}
+}
+
+func (r *chatResponse) UnmarshalJSON(data []byte) error {
+	type wireResponse chatResponse
+	var wire struct {
+		wireResponse
+		Usage json.RawMessage `json:"usage"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*r = chatResponse(wire.wireResponse)
+	if len(wire.Usage) == 0 || bytes.Equal(wire.Usage, []byte("null")) {
+		return nil
+	}
+	var usage map[string]json.RawMessage
+	if err := json.Unmarshal(wire.Usage, &usage); err != nil {
+		return fmt.Errorf("usage: %w", err)
+	}
+	r.Usage = make(map[string]int)
+	for _, name := range []string{"prompt_tokens", "completion_tokens", "total_tokens"} {
+		if raw := usage[name]; len(raw) != 0 {
+			var value int
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return fmt.Errorf("usage.%s: %w", name, err)
+			}
+			r.Usage[name] = value
+		}
+	}
+	if raw := usage["prompt_tokens_details"]; len(raw) != 0 && !bytes.Equal(raw, []byte("null")) {
+		var details struct {
+			CachedTokens int `json:"cached_tokens"`
+		}
+		if err := json.Unmarshal(raw, &details); err != nil {
+			return fmt.Errorf("usage.prompt_tokens_details: %w", err)
+		}
+		r.UsageDetails.CachedTokens = details.CachedTokens
+	}
+	return nil
 }
 
 func (r Runner) Run(ctx context.Context, cfg Config, corpus qwen38quant.Corpus) ([]Result, error) {

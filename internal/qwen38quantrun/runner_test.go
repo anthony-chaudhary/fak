@@ -164,3 +164,27 @@ func TestRunOneCarriesExplicitEffectContracts(t *testing.T) {
 		})
 	}
 }
+func TestRunOneDecodesOpenAIUsageObject(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"model":   "exact",
+			"choices": []any{map[string]any{"message": map[string]any{"content": "Q38"}}},
+			"usage": map[string]any{
+				"prompt_tokens": 41, "completion_tokens": 2, "total_tokens": 43,
+				"prompt_tokens_details": map[string]any{"cached_tokens": 17},
+			},
+		})
+	}))
+	defer s.Close()
+
+	got, err := runOne(context.Background(), s.Client(), Config{Endpoint: s.URL, APIKey: "secret", Model: "exact"}, qwen38quant.Fixture{ID: "usage", Workload: "text", Prompt: "reply Q38", MaxOutputTokens: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Usage, map[string]int{"prompt_tokens": 41, "completion_tokens": 2, "total_tokens": 43}) {
+		t.Fatalf("usage = %#v", got.Usage)
+	}
+	if got.UsageDetails.CachedTokens != 17 {
+		t.Fatalf("cached tokens = %d", got.UsageDetails.CachedTokens)
+	}
+}
