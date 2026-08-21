@@ -9,7 +9,8 @@ import (
 )
 
 func TestDefaultPlanCoversNativeTestsAndFleetSpine(t *testing.T) {
-	t.Setenv("LOCALAPPDATA", filepath.Join(t.TempDir(), "Local"))
+	local := filepath.Join(t.TempDir(), "Local")
+	t.Setenv("LOCALAPPDATA", local)
 	t.Setenv("GOPATH", filepath.Join(t.TempDir(), "go"))
 	repo := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example"), 0o600); err != nil {
@@ -19,9 +20,26 @@ func TestDefaultPlanCoversNativeTestsAndFleetSpine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	joined := strings.ToLower(strings.Join(p.Paths, "\n"))
-	for _, want := range []string{strings.ToLower(repo), `go-build`, `\fleet`, `\fak`, `.codex`, `.claude`} {
-		if !strings.Contains(joined, strings.ToLower(want)) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		repo,
+		filepath.Join(local, "go-build"),
+		filepath.Join(local, "Fleet"),
+		filepath.Join(local, "fak"),
+		filepath.Join(home, ".codex"),
+		filepath.Join(home, ".claude"),
+	} {
+		found := false
+		for _, got := range p.Paths {
+			if strings.EqualFold(filepath.Clean(got), filepath.Clean(want)) {
+				found = true
+				break
+			}
+		}
+		if !found {
 			t.Errorf("paths omit %q: %v", want, p.Paths)
 		}
 	}

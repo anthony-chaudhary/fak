@@ -325,7 +325,7 @@ func TestRunDispatchesCodexHookProfileUsage(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
 	}
-	if !strings.Contains(errOut.String(), "Usage of codex-hook-profile") {
+	if !strings.Contains(errOut.String(), "usage: fak-dev codex-hook-profile") {
 		t.Fatalf("stderr=%s", errOut.String())
 	}
 }
