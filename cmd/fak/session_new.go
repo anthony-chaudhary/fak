@@ -203,7 +203,7 @@ func sessionNewPrompt(args []string, stdin, clipboard bool, deps sessionNewDeps)
 	case clipboard:
 		s, err := deps.readClip(deps.goos)
 		if err != nil {
-			return "", "", fmt.Errorf("read clipboard: %w", err)
+			return "", "", fmt.Errorf("read clipboard: %w; copy text again or provide prompt text directly", err)
 		}
 		return "clipboard", s, nil
 	default:
