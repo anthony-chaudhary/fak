@@ -66,10 +66,28 @@ type TaskSpec struct {
 	EngineRef  string    `json:"engine_ref,omitempty"`
 }
 
+type ChildAccessMode string
+
+const (
+	ChildAccessObserve ChildAccessMode = "observe"
+	ChildAccessEffect  ChildAccessMode = "effect"
+)
+
+// ChildAccess is the provider-neutral capability declaration compiled by a
+// native launch adapter. Observe carries no write footprint. Effect names the
+// one bounded write region and tool set that the child may exercise.
+type ChildAccess struct {
+	Mode      ChildAccessMode `json:"mode"`
+	Lane      string          `json:"lane,omitempty"`
+	WriteTree string          `json:"write_tree,omitempty"`
+	Tools     []string        `json:"tools,omitempty"`
+}
+
 type Role struct {
-	ID      string `json:"id"`
-	Purpose string `json:"purpose"`
-	TaskID  string `json:"task_id"`
+	ID      string      `json:"id"`
+	Purpose string      `json:"purpose"`
+	TaskID  string      `json:"task_id"`
+	Access  ChildAccess `json:"access"`
 }
 type Edge struct {
 	From string `json:"from"`
@@ -312,12 +330,12 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 	if req.Strict && len(deg) > 0 {
 		return Resolution{}, fmt.Errorf("%w: %s", ErrStrictDegradation, deg[0].Reason)
 	}
-	roles := []Role{{"lead", "decompose and reconcile", task.ID}}
+	roles := []Role{{ID: "lead", Purpose: "decompose and reconcile", TaskID: task.ID, Access: ChildAccess{Mode: ChildAccessObserve}}}
 	var dag []Edge
 	if multi {
 		for i := 1; i < workers; i++ {
 			id := fmt.Sprintf("worker-%d", i)
-			roles = append(roles, Role{id, "execute leased task", task.ID})
+			roles = append(roles, Role{ID: id, Purpose: "execute leased task", TaskID: task.ID, Access: ChildAccess{Mode: ChildAccessObserve}})
 			dag = append(dag, Edge{id, "lead"})
 		}
 	}
