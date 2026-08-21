@@ -355,7 +355,7 @@ func buildHookCensus(home, logHome, workspace, threadID, observations string, si
 	}
 	r := hookCensusReport{Schema: codexHookCensusSchema, GeneratedAt: now, Window: since.String(), PostToolSettlement: codexPostToolSettlementWindow.String(), CodexHome: absHome, LogStore: absLog, Workspace: absWork, ObservationStore: absObs, ProfileMatch: samePath(absHome, absLog), DispatchedCalls: len(calls), DispatchSource: filepath.Join(absLog, "sessions"), NewestReceipt: newest, TelemetryFresh: !newest.IsZero() && now.Sub(newest) <= 5*time.Minute}
 	r.PreToolUse = phaseCountsForCalls(calls, receipts["pretool"], absHome, absWork, absObs)
-	r.PostToolUse = phaseCountsForCalls(calls, receipts["posttool"], absHome, absWork, absObs)
+	r.PostToolUse = phaseCountsForCalls(postToolEligibleDispatches(calls, now.Add(-codexPostToolSettlementWindow)), receipts["posttool"], absHome, absWork, absObs)
 	if !r.TelemetryFresh {
 		r.Reasons = append(r.Reasons, "STALE_TELEMETRY")
 	}
