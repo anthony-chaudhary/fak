@@ -93,7 +93,7 @@ The original manifest is untouched. To continue investigating, use the trace's w
 `adjudicator.Adjudicator` leads to [`internal/adjudicator`](internal/adjudicator), while the
 manifest format and safe editing workflow live in
 [`docs/fak/policy-guide.md`](docs/fak/policy-guide.md). This is the pattern for every later
-course: predict → run → locate → adjust one thing → rerun.
+course: predict → run → locate → adjust one thing → rerun. For a cross-process map of the deciding evidence and owned knobs, use the [`mystery-free adjustment atlas`](docs/fak/mystery-free-adjustment-atlas.md).
 
 ## How to read a course
 
