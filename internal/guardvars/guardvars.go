@@ -19,6 +19,14 @@
 // both roles correctly. This package imports nothing: it is pure data.
 package guardvars
 
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+)
+
 // SessionVars is one /debug/vars sessions row: every session running through the gateway, with
 // the remaining budget axes and live wall-clock the `fak info` agents pane renders.
 //
@@ -242,4 +250,67 @@ type ShrinkLeverVars struct {
 	// otherwise, so the field's PRESENCE is itself the alarm — the same convention
 	// ManagedCacheVars.Finding and CacheAttributionVars.FakDeferFinding follow.
 	Finding string `json:"finding,omitempty"`
+}
+
+// ObservationSchemaV1 is the first compatibility contract for typed observations.
+const ObservationSchemaV1 = "fak-observation/1"
+
+// Availability states whether data was measured and how a consumer must interpret it.
+type Availability string
+
+const (
+	AvailabilityObserved      Availability = "OBSERVED"
+	AvailabilityEmpty         Availability = "EMPTY"
+	AvailabilityUnavailable   Availability = "UNAVAILABLE"
+	AvailabilityStale         Availability = "STALE"
+	AvailabilityNotApplicable Availability = "NOT_APPLICABLE"
+)
+
+// ObservationEnvelope carries observation provenance without conflating absent data with zero.
+// Data remains raw JSON so each observation family can retain its own versioned payload.
+type ObservationEnvelope struct {
+	Schema       string          `json:"schema"`
+	Source       string          `json:"source"`
+	ObservedAt   string          `json:"observed_at,omitempty"`
+	Revision     string          `json:"revision,omitempty"`
+	Provenance   string          `json:"provenance"`
+	Availability Availability    `json:"availability"`
+	Data         json.RawMessage `json:"data,omitempty"`
+	Reason       string          `json:"reason,omitempty"`
+}
+
+// Validate enforces the state laws. Unknown schema and availability values fail explicitly.
+func (o ObservationEnvelope) Validate() error {
+	if o.Schema != ObservationSchemaV1 {
+		return fmt.Errorf("unsupported observation schema %q; expected %q", o.Schema, ObservationSchemaV1)
+	}
+	if strings.TrimSpace(o.Source) == "" || strings.TrimSpace(o.Provenance) == "" {
+		return errors.New("observation source and provenance are required")
+	}
+	hasData := len(bytes.TrimSpace(o.Data)) > 0 && string(bytes.TrimSpace(o.Data)) != "null"
+	hasReason := strings.TrimSpace(o.Reason) != ""
+	switch o.Availability {
+	case AvailabilityObserved:
+		if !hasData || hasReason {
+			return errors.New("OBSERVED requires data and forbids reason")
+		}
+	case AvailabilityEmpty:
+		if hasData || hasReason {
+			return errors.New("EMPTY forbids data and reason")
+		}
+	case AvailabilityUnavailable, AvailabilityStale:
+		if hasData || !hasReason {
+			return fmt.Errorf("%s requires reason and forbids data", o.Availability)
+		}
+	case AvailabilityNotApplicable:
+		if hasData || !hasReason {
+			return errors.New("NOT_APPLICABLE requires reason and forbids data")
+		}
+	default:
+		return fmt.Errorf("unknown observation availability %q", o.Availability)
+	}
+	if o.ObservedAt == "" && o.Revision == "" {
+		return errors.New("observation requires observed_at or revision")
+	}
+	return nil
 }

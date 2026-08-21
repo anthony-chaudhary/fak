@@ -650,3 +650,42 @@ func mustMarshal(t *testing.T, v any) []byte {
 	}
 	return raw
 }
+
+func TestObservationEnvelopeGoldenAndStateLaws(t *testing.T) {
+	observedZero := ObservationEnvelope{Schema: ObservationSchemaV1, Source: "gateway", Revision: "r1", Provenance: "measured", Availability: AvailabilityObserved, Data: json.RawMessage(`{"hits":0}`)}
+	if err := observedZero.Validate(); err != nil {
+		t.Fatalf("measured zero: %v", err)
+	}
+	got, err := json.Marshal(observedZero)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"schema":"fak-observation/1","source":"gateway","revision":"r1","provenance":"measured","availability":"OBSERVED","data":{"hits":0}}`
+	if string(got) != want {
+		t.Fatalf("golden = %s, want %s", got, want)
+	}
+
+	valid := []ObservationEnvelope{
+		{Schema: ObservationSchemaV1, Source: "gateway", Revision: "r1", Provenance: "measured", Availability: AvailabilityEmpty},
+		{Schema: ObservationSchemaV1, Source: "gateway", ObservedAt: "2026-08-21T00:00:00Z", Provenance: "probe", Availability: AvailabilityUnavailable, Reason: "probe failed"},
+		{Schema: ObservationSchemaV1, Source: "gateway", Revision: "r1", Provenance: "cache", Availability: AvailabilityStale, Reason: "ttl elapsed"},
+		{Schema: ObservationSchemaV1, Source: "gateway", Revision: "r1", Provenance: "platform", Availability: AvailabilityNotApplicable, Reason: "unsupported platform"},
+	}
+	for _, envelope := range valid {
+		if err := envelope.Validate(); err != nil {
+			t.Errorf("%s: %v", envelope.Availability, err)
+		}
+	}
+
+	invalid := []ObservationEnvelope{
+		{Schema: "fak-observation/2", Source: "gateway", Revision: "r1", Provenance: "measured", Availability: AvailabilityEmpty},
+		{Schema: ObservationSchemaV1, Source: "gateway", Revision: "r1", Provenance: "measured", Availability: Availability("FUTURE")},
+		{Schema: ObservationSchemaV1, Source: "gateway", Revision: "r1", Provenance: "probe", Availability: AvailabilityUnavailable, Data: json.RawMessage(`0`)},
+		{Schema: ObservationSchemaV1, Source: "gateway", Revision: "r1", Provenance: "cache", Availability: AvailabilityStale},
+	}
+	for i, envelope := range invalid {
+		if err := envelope.Validate(); err == nil {
+			t.Errorf("invalid case %d accepted: %+v", i, envelope)
+		}
+	}
+}
