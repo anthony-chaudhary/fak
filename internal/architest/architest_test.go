@@ -470,6 +470,7 @@ var tier = map[string]int{
 	"ociartifact":         2, // activation-neutral OCI collection transport and MCP metadata bridge
 	"portabilityswitch":   2, // context-switch transaction coordinator; composes lifecycle/processforest authorities, off the hot path.
 	"orchestration":       2, // pure portable workflow-plan/profile resolution contract; stdlib-only, no provider adapters, off the hot path.
+	"ultracodebench":      2, // pure paired-run fold and verdict contract; stdlib-only, off the serving hot path.
 	"devexmeter":          1, // pure dev-ex friction meter + RSI close gate; stdlib-only, off the hot path.
 	"toolproc":            3,
 	"regionadmit":         3,

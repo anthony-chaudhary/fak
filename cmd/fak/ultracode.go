@@ -7,13 +7,15 @@ import (
 	"strings"
 )
 
-const ultracodeUsage = `usage: fak ultracode [status] [orchestration plan flags]
+const ultracodeUsage = `usage: fak ultracode [status|bench] [orchestration plan flags]
 
 Run a bounded concurrent coding-agent fleet through fak's canonical orchestration path.
 
   fak ultracode --task-text "split independent checks and reconcile them"
   fak ultracode --task task.json --launch --json
   fak ultracode status [--json]
+  fak ultracode bench --selfcheck
+  fak ultracode bench --pair paired-run.json --json
   fak ultracode --selfcheck
 
 The ultracode profile requires leases, independent effect readback, and reconciliation.
@@ -30,6 +32,9 @@ func runUltracode(stdout, stderr io.Writer, args []string) int {
 	if len(args) > 0 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help") {
 		fmt.Fprintln(stdout, ultracodeUsage)
 		return 0
+	}
+	if len(args) > 0 && args[0] == "bench" {
+		return runUltracodeBench(stdout, stderr, args[1:])
 	}
 	if len(args) > 0 && args[0] == "status" {
 		return runOrchestration(stdout, stderr, args)

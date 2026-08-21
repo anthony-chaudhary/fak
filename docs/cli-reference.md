@@ -282,6 +282,17 @@ fak ultracode --selfcheck
 
 The offline selfcheck proves plan shape and safety invariants, not a speedup or intelligence gain. A real value claim needs paired single-agent and fleet runs over the same accepted-outcome workload, reporting wall time, billed/input/output/cache tokens, spend, and witness acceptance. Use `fak orchestration plan --profile off|auto|ultracode` when comparing profiles explicitly.
 
+### `fak ultracode bench`
+
+`fak ultracode bench` folds an identical single-agent/fleet pair into one replayable `fak-ultracode-paired/1` report:
+
+```bash
+fak ultracode bench --selfcheck
+fak ultracode bench --pair paired-run.json --json
+```
+
+The report keeps concurrency, caching/token, and quality evidence separate, then couples them as accepted effects per wall second and per billed token. It emits `GAIN` only when both witnessed runs pass the same acceptance workload without retries, the fleet preserves quality, and both coupled efficiency axes improve. Unequal identities, outcomes, missing witnesses, or retries return an error or `ABSTAIN`; a faster but lower-quality or token-worse fleet returns `NO_GAIN`. The selfcheck is an offline fixture and is explicitly not live model-performance evidence.
+
 ## `fak orchestration status`
 
 `fak orchestration status` joins the newest local orchestration launch receipt, worker process liveness, and JSONL turn progress into one read-only fleet view. Select an older launch with `--session ID`; use `--home DIR` when runtime artifacts live outside the current directory.

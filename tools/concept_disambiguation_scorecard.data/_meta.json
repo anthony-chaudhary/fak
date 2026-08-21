@@ -1012,6 +1012,11 @@
           "category": "incidental",
           "reason": "Identity hash helper within the positioned Qwen3.8 cache campaign",
           "token": "qwen38CacheKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "A derived ratio in one paired benchmark report, not a cache mechanism or identity",
+          "token": "CachedInputShare"
         }
       ],
       "id": "cache",
@@ -1038,6 +1043,7 @@
         "CacheValueFacts",
         "CacheValueGateDebtKey",
         "CacheWriteCost",
+        "CachedInputShare",
         "CalibrationStatus",
         "CodeCacheScope",
         "CodeKVCache",
