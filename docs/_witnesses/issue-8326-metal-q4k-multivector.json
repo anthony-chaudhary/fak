@@ -1,0 +1,112 @@
+{
+  "schema": "fak.metal-q4k-multivector-witness.v1",
+  "issue": 8326,
+  "captured_at": "2026-08-20",
+  "base_commit": "9516bcb8483767b00029bc4f93e062cc423e6d68",
+  "device": {
+    "chip": "Apple M3 Pro",
+    "memory_gb": 36,
+    "os": "darwin",
+    "arch": "arm64"
+  },
+  "failure_before": {
+    "tree": "committed base plus internal/metalgemm/q4k_multivector_test.go only",
+    "command": "GOTOOLCHAIN=auto go test ./internal/metalgemm -run TestQ4KGEMVBatchMultiVectorRouteBoundary -count=1",
+    "exit_code": 1,
+    "diagnostic": "internal/metalgemm/q4k_multivector_test.go:78:13: undefined: q4kUseMultiVector"
+  },
+  "correctness": {
+    "command": "GOTOOLCHAIN=auto go test ./internal/metalgemm -run 'TestQ4KGEMVBatch(FallbackMatchesExistingRoute|MultiVectorRouteBoundary|MultiVectorMatchesRepeatedGEMV)' -count=1 -v",
+    "exit_code": 0,
+    "thresholds": {
+      "cosine_min": 0.9999,
+      "max_relative_error_max": 0.005
+    },
+    "fallback_exact_p": [1, 3, 9, 16],
+    "cases": [
+      {"name": "hidden-p4", "shape": [5120, 5120], "p": 4, "cosine": 1.0, "max_relative_error": 0.000002362754140633365},
+      {"name": "hidden-p5", "shape": [5120, 5120], "p": 5, "cosine": 1.0, "max_relative_error": 0.000002573038387339215},
+      {"name": "hidden-p6", "shape": [5120, 5120], "p": 6, "cosine": 1.0, "max_relative_error": 0.0000019585300840013555},
+      {"name": "hidden-p7", "shape": [5120, 5120], "p": 7, "cosine": 1.0, "max_relative_error": 0.0000019585300840013555},
+      {"name": "ffn-up-p8", "shape": [17408, 5120], "p": 8, "cosine": 1.0, "max_relative_error": 0.000002485010132150927}
+    ]
+  },
+  "benchmark": {
+    "command": "GOTOOLCHAIN=auto go test ./internal/metalgemm -run '^$' -bench '^BenchmarkQ4KGEMVBatchCrossover$' -benchtime=500ms -count=3 -benchmem",
+    "shapes": {
+      "hidden": {
+        "matrix": [5120, 5120],
+        "samples_ns_per_op": {
+          "p1": {
+            "repeated_gemv": [316701, 316921, 316564],
+            "routed_batch": [316745, 316914, 316991],
+            "gemm": [2807603, 2806950, 2807163]
+          },
+          "p4": {
+            "repeated_gemv": [833785, 833943, 833597],
+            "routed_batch": [512646, 513186, 512506],
+            "gemm": [2816639, 2820983, 2818771]
+          },
+          "p8": {
+            "repeated_gemv": [1479229, 1479794, 1480657],
+            "routed_batch": [899053, 898602, 902079],
+            "gemm": [2840025, 2837776, 2838194]
+          },
+          "p16": {
+            "repeated_gemv": [2797248, 2797357, 2797838],
+            "routed_batch": [2798098, 2797661, 2797732],
+            "gemm": [2871732, 2871232, 2870531]
+          }
+        }
+      },
+      "ffn_up": {
+        "matrix": [17408, 5120],
+        "samples_ns_per_op": {
+          "p1": {
+            "repeated_gemv": [695049, 696630, 693583],
+            "routed_batch": [694306, 695410, 694425],
+            "gemm": [7876557, 7876423, 7874524]
+          },
+          "p4": {
+            "repeated_gemv": [2212822, 2211748, 2212585],
+            "routed_batch": [1408418, 1407994, 1407754],
+            "gemm": [7899339, 7899326, 7894087]
+          },
+          "p8": {
+            "repeated_gemv": [4279635, 4282794, 4277614],
+            "routed_batch": [2503257, 2503400, 2505174],
+            "gemm": [7963803, 7958578, 7965919]
+          },
+          "p16": {
+            "repeated_gemv": [8484736, 8484975, 8460524],
+            "routed_batch": [8435672, 8476187, 8489661],
+            "gemm": [8066363, 8051458, 8060947]
+          }
+        }
+      }
+    },
+    "median_decisions": [
+      {"shape": "hidden", "p": 1, "route": "existing repeated GEMV", "repeated_gemv_ns": 316701, "repeated_vectors_per_second": 3157.6, "routed_vectors_per_second": 3155.4, "gemm_vectors_per_second": 356.2},
+      {"shape": "hidden", "p": 4, "route": "specialized multi-vector", "repeated_gemv_ns": 833785, "specialized_ns": 512646, "repeated_vectors_per_second": 4797.4, "specialized_vectors_per_second": 7802.7, "gemm_vectors_per_second": 1419.1, "speedup": 1.626, "latency_reduction_percent": 38.5},
+      {"shape": "hidden", "p": 8, "route": "specialized multi-vector", "repeated_gemv_ns": 1479794, "specialized_ns": 899053, "repeated_vectors_per_second": 5406.2, "specialized_vectors_per_second": 8898.3, "gemm_vectors_per_second": 2818.7, "speedup": 1.646, "latency_reduction_percent": 39.2},
+      {"shape": "hidden", "p": 16, "route": "existing repeated GEMV", "repeated_gemv_ns": 2797357, "repeated_vectors_per_second": 5719.7, "routed_vectors_per_second": 5718.9, "gemm_vectors_per_second": 5572.5},
+      {"shape": "ffn_up", "p": 1, "route": "existing repeated GEMV", "repeated_gemv_ns": 695049, "repeated_vectors_per_second": 1438.7, "routed_vectors_per_second": 1440.0, "gemm_vectors_per_second": 127.0},
+      {"shape": "ffn_up", "p": 4, "route": "specialized multi-vector", "repeated_gemv_ns": 2212585, "specialized_ns": 1407994, "repeated_vectors_per_second": 1807.8, "specialized_vectors_per_second": 2840.9, "gemm_vectors_per_second": 506.4, "speedup": 1.571, "latency_reduction_percent": 36.4},
+      {"shape": "ffn_up", "p": 8, "route": "specialized multi-vector", "repeated_gemv_ns": 4279635, "specialized_ns": 2503400, "repeated_vectors_per_second": 1869.3, "specialized_vectors_per_second": 3195.7, "gemm_vectors_per_second": 1004.5, "speedup": 1.710, "latency_reduction_percent": 41.5},
+      {"shape": "ffn_up", "p": 16, "route": "existing repeated GEMV", "repeated_gemv_ns": 8484736, "repeated_vectors_per_second": 1885.7, "routed_vectors_per_second": 1887.6, "gemm_vectors_per_second": 1984.9}
+    ]
+  },
+  "routing": {
+    "specialized_p_min": 4,
+    "specialized_p_max": 8,
+    "fallback": "the pre-existing repeated-GEMV command-buffer encoder",
+    "decision": "select the specialized kernel only for P=4..8; P=1 and unsupported sizes retain the existing route"
+  },
+  "prior_art": {
+    "project": "llama.cpp",
+    "revision": "0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd",
+    "license": "MIT",
+    "source": "ggml/src/ggml-metal/ggml-metal.metal:4086-4190",
+    "adaptation": "compile-time small-batch specialization and four-row SIMD-group topology; fak retains its Q4_K byte layout, API, scratch buffers, and fallback encoder"
+  }
+}

@@ -109,6 +109,113 @@ kernel void q4k_gemv(device const uchar* W [[buffer(0)]],
     if (lid == 0) Y[o] = acc;
 }
 
+// q4k_gemv_multi is the P=4..8 decode kernel. Following llama.cpp's small-batch Metal
+// topology, each SIMD group carries four output rows and each 8-lane subgroup splits one
+// row's Q4_K blocks. Scalar accumulators and compile-time P specializations keep the vector
+// panel in registers: a decoded weight is applied to every active row before it is discarded.
+inline float q4k_sum8(float v) {
+    v += simd_shuffle_down(v, 4);
+    v += simd_shuffle_down(v, 2);
+    v += simd_shuffle_down(v, 1);
+    return v;
+}
+
+template <int N>
+inline void q4k_gemv_multi_impl(device const uchar* W,
+                                device const float* X,
+                                device float* Y,
+                                constant int& nblk,
+                                constant int& out,
+                                uint tg,
+                                uint lane,
+                                uint sg) {
+    const uint tx = lane & 7;
+    const uint o = tg * 8 + sg * 4 + lane / 8;
+    const bool valid = o < (uint)out;
+    const long xstride = (long)nblk * 256;
+    float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+    float a4 = 0.0f, a5 = 0.0f, a6 = 0.0f, a7 = 0.0f;
+
+    if (valid) {
+        device const uchar* row = W + (long)o * nblk * 144;
+        for (int b = (int)tx; b < nblk; b += 8) {
+            device const uchar* blk = row + (long)b * 144;
+            float d  = (float)(*(device const half*)(blk + 0));
+            float dm = (float)(*(device const half*)(blk + 2));
+            device const uchar* scales = blk + 4;
+            device const uchar* q = blk + 16;
+            const long xbase = (long)b * 256;
+            int qi = 0;
+            int is = 0;
+            for (int j = 0; j < 256; j += 64) {
+                float2 sm0 = q4k_scale_min(is,     scales);
+                float2 sm1 = q4k_scale_min(is + 1, scales);
+                float d1 = d * sm0.x, m1 = dm * sm0.y;
+                float d2 = d * sm1.x, m2 = dm * sm1.y;
+                for (int l = 0; l < 32; l++) {
+                    const long xi = xbase + j + l;
+                    const float w = d1 * (float)(q[qi + l] & 0x0f) - m1;
+                    a0 += w * X[xi];
+                    a1 += w * X[xstride + xi];
+                    a2 += w * X[2 * xstride + xi];
+                    a3 += w * X[3 * xstride + xi];
+                    if (N >= 5) a4 += w * X[4 * xstride + xi];
+                    if (N >= 6) a5 += w * X[5 * xstride + xi];
+                    if (N >= 7) a6 += w * X[6 * xstride + xi];
+                    if (N >= 8) a7 += w * X[7 * xstride + xi];
+                }
+                for (int l = 0; l < 32; l++) {
+                    const long xi = xbase + j + 32 + l;
+                    const float w = d2 * (float)(q[qi + l] >> 4) - m2;
+                    a0 += w * X[xi];
+                    a1 += w * X[xstride + xi];
+                    a2 += w * X[2 * xstride + xi];
+                    a3 += w * X[3 * xstride + xi];
+                    if (N >= 5) a4 += w * X[4 * xstride + xi];
+                    if (N >= 6) a5 += w * X[5 * xstride + xi];
+                    if (N >= 7) a6 += w * X[6 * xstride + xi];
+                    if (N >= 8) a7 += w * X[7 * xstride + xi];
+                }
+                qi += 32;
+                is += 2;
+            }
+        }
+    }
+
+    a0 = q4k_sum8(a0); a1 = q4k_sum8(a1);
+    a2 = q4k_sum8(a2); a3 = q4k_sum8(a3);
+    if (N >= 5) a4 = q4k_sum8(a4);
+    if (N >= 6) a5 = q4k_sum8(a5);
+    if (N >= 7) a6 = q4k_sum8(a6);
+    if (N >= 8) a7 = q4k_sum8(a7);
+    if (tx == 0 && valid) {
+        Y[o] = a0; Y[(long)out + o] = a1;
+        Y[2 * (long)out + o] = a2; Y[3 * (long)out + o] = a3;
+        if (N >= 5) Y[4 * (long)out + o] = a4;
+        if (N >= 6) Y[5 * (long)out + o] = a5;
+        if (N >= 7) Y[6 * (long)out + o] = a6;
+        if (N >= 8) Y[7 * (long)out + o] = a7;
+    }
+}
+
+#define Q4K_MULTI_KERNEL(N) \
+kernel void q4k_gemv_multi##N(device const uchar* W [[buffer(0)]], \
+                               device const float* X [[buffer(1)]], \
+                               device float* Y [[buffer(2)]], \
+                               constant int& nblk [[buffer(3)]], \
+                               constant int& out [[buffer(4)]], \
+                               uint tg [[threadgroup_position_in_grid]], \
+                               uint lane [[thread_index_in_simdgroup]], \
+                               uint sg [[simdgroup_index_in_threadgroup]]) { \
+    q4k_gemv_multi_impl<N>(W, X, Y, nblk, out, tg, lane, sg); \
+}
+
+Q4K_MULTI_KERNEL(4)
+Q4K_MULTI_KERNEL(5)
+Q4K_MULTI_KERNEL(6)
+Q4K_MULTI_KERNEL(7)
+Q4K_MULTI_KERNEL(8)
+
 // q4k_gemm: the REGISTER-BLOCKED TILED prefill GEMM (issue #1085 — the prefill kernel lever from
 // MAC-QWEN36-27B-Q4K-METAL-PERF-DIAGNOSIS-2026-06-26).
 //
@@ -404,7 +511,7 @@ kernel void q6k_gemm(device const uchar* W [[buffer(0)]],
 }
 )MSL";
 
-static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemm, psoQ4KGemmMM, psoQ4KSwiGLU, psoQ6KGemv, psoQ6KGemm;
+static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemvMulti[5], psoQ4KGemm, psoQ4KGemmMM, psoQ4KSwiGLU, psoQ6KGemv, psoQ6KGemm;
 static int gQ4KReady;
 static int gQ4KUseMM = 0; // 1 → prefer the simdgroup-matrix GEMM (mg_q4k_set_use_mm / FAK_Q4K_MM)
 
@@ -427,6 +534,10 @@ static int q4k_init(void) {
     id<MTLLibrary> lib = [gDev newLibraryWithSource:kQ4KSrc options:nil error:&err];
     if (lib == nil) { NSLog(@"q4k: library compile failed: %@", err); return 0; }
     psoQ4KGemv = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemv"] error:&err];
+    for (int n = 4; n <= 8; n++) {
+        NSString *name = [NSString stringWithFormat:@"q4k_gemv_multi%d", n];
+        psoQ4KGemvMulti[n - 4] = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:name] error:&err];
+    }
     psoQ4KGemm = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemm"] error:&err];
     // q4k_gemm_mm (simdgroup-matrix variant) is optional: if the MSL feature is unavailable or the
     // pipeline fails to build, psoQ4KGemmMM stays nil and the dispatcher falls back to psoQ4KGemm.
@@ -434,7 +545,9 @@ static int q4k_init(void) {
     psoQ4KSwiGLU = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_swiglu"] error:&err];
     psoQ6KGemv = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q6k_gemv"] error:&err];
     psoQ6KGemm = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q6k_gemm"] error:&err];
-    if (!psoQ4KGemv || !psoQ4KGemm || !psoQ4KSwiGLU || !psoQ6KGemv || !psoQ6KGemm) { NSLog(@"q4k: pipeline build failed: %@", err); return 0; }
+    if (!psoQ4KGemv || !psoQ4KGemvMulti[0] || !psoQ4KGemvMulti[1] || !psoQ4KGemvMulti[2] ||
+        !psoQ4KGemvMulti[3] || !psoQ4KGemvMulti[4] || !psoQ4KGemm || !psoQ4KSwiGLU ||
+        !psoQ6KGemv || !psoQ6KGemm) { NSLog(@"q4k: pipeline build failed: %@", err); return 0; }
     gQ4KReady = 1;
     return 1;
 }
@@ -954,6 +1067,36 @@ void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat) {
             [e dispatchThreadgroups:MTLSizeMake((NSUInteger)W.out, 1, 1)
                 threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
         }
+        [e endEncoding];
+        [cb commit];
+        [cb waitUntilCompleted];
+
+        memcpy(Ycat, yb.contents, (size_t)n * W.out * 4);
+    }
+}
+
+// mg_q4k_gemv_batch_multi applies one Q4_K weight to 4-8 activation rows in a single dispatch.
+// q4k_gemv_multi owns the tile-reuse contract; the host side only copies the panel and binds it.
+void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat) {
+    if (wid < 0 || wid >= gNQ4 || n < 4 || n > 8) return;
+    @autoreleasepool {
+        Q4KW W = gQ4[wid];
+        q4k_grow_scratch((long)n * W.in, (long)n * W.out);
+        id<MTLBuffer> wbuf = (__bridge id<MTLBuffer>)W.buf;
+        id<MTLBuffer> xb = gQXBuf;
+        id<MTLBuffer> yb = gQYBuf;
+        memcpy(xb.contents, Xcat, (size_t)n * W.in * 4);
+
+        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+        [e setComputePipelineState:psoQ4KGemvMulti[n - 4]];
+        [e setBuffer:wbuf offset:0 atIndex:0];
+        [e setBuffer:xb   offset:0 atIndex:1];
+        [e setBuffer:yb   offset:0 atIndex:2];
+        [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
+        [e setBytes:&W.out  length:sizeof(int) atIndex:4];
+        [e dispatchThreadgroups:MTLSizeMake((NSUInteger)(W.out + 7) / 8, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
         [e endEncoding];
         [cb commit];
         [cb waitUntilCompleted];
