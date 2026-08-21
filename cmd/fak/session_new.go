@@ -107,7 +107,7 @@ func runSessionNewWith(stdout, stderr io.Writer, argv []string, deps sessionNewD
 		sourceCount++
 	}
 	if sourceCount != 1 || fs.NArg() > 1 {
-		fmt.Fprintln(stderr, "session new: choose exactly one prompt source: one positional argument, --stdin, or --clipboard")
+		fmt.Fprintln(stderr, "session new: choose exactly one prompt source: provide prompt text directly, pipe it with --stdin, or use --clipboard")
 		return 2
 	}
 	if strings.TrimSpace(*agent) == "" {
@@ -160,7 +160,7 @@ func runSessionNewWith(stdout, stderr io.Writer, argv []string, deps sessionNewD
 		Terminal: terminalName, WorkingDir: workdir, Executable: terminalBin, Arguments: redactSessionNewArgs(terminalArgs, prompt, receiptPromptMarker(sum))}
 	if !*dryRun {
 		if err := deps.start(terminalBin, terminalArgs, workdir); err != nil {
-			fmt.Fprintf(stderr, "session new: start %s: %v\n", terminalName, err)
+			fmt.Fprintf(stderr, "session new: start terminal %s: %v; inspect with --dry-run or select another adapter with --terminal\n", terminalName, err)
 			return 1
 		}
 		receipt.Status = "launched"
@@ -249,7 +249,7 @@ func buildSessionTerminal(requested, commandOverride, goos string, lookPath func
 		}
 		misses = append(misses, command)
 	}
-	return "", "", nil, fmt.Errorf("no supported terminal found (%s)", strings.Join(misses, ", "))
+	return "", "", nil, fmt.Errorf("no supported terminal found (%s); install one of those terminal commands or select an installed adapter with --terminal", strings.Join(misses, ", "))
 }
 
 func readSessionClipboard(goos string) (string, error) {

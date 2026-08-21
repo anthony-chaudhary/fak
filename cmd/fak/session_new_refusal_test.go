@@ -16,13 +16,13 @@ func TestSessionNewErrorsNameActionableRecovery(t *testing.T) {
 	}{
 		{"no source", nil, nil, []string{"provide prompt text", "--stdin", "--clipboard"}},
 		{"clipboard unavailable", []string{"--clipboard"}, func(d *sessionNewDeps) {
-			d.readClipboard = func(string) (string, error) { return "", errors.New("offline") }
+			d.readClip = func(string) (string, error) { return "", errors.New("offline") }
 		}, []string{"provide prompt text directly"}},
 		{"terminal unavailable", []string{"text"}, func(d *sessionNewDeps) {
 			d.lookPath = func(string) (string, error) { return "", errors.New("missing") }
 		}, []string{"install", "--terminal"}},
 		{"launch refused", []string{"--terminal", "windows-terminal", "text"}, func(d *sessionNewDeps) {
-			d.start = func(string, string, []string) error { return errors.New("denied") }
+			d.start = func(string, []string, string) error { return errors.New("denied") }
 		}, []string{"--dry-run", "--terminal"}},
 	}
 	for _, tc := range cases {

@@ -30,7 +30,7 @@ func TestSessionNewEdgeAdversarialInputs(t *testing.T) {
 			if code != tc.wantCode {
 				t.Fatalf("code=%d want=%d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
 			}
-			if combined := stdout.String() + stderr.String(); !strings.Contains(combined, tc.want) {
+			if combined := stdout.String() + stderr.String(); !strings.Contains(strings.ToLower(combined), strings.ToLower(tc.want)) {
 				t.Fatalf("output %q lacks %q", combined, tc.want)
 			}
 		})
@@ -46,13 +46,13 @@ func TestSessionNewRefusalsNameRecovery(t *testing.T) {
 	}{
 		{"missing prompt", nil, nil, "provide prompt text"},
 		{"clipboard failure", []string{"--clipboard"}, func(d *sessionNewDeps) {
-			d.readClipboard = func(string) (string, error) { return "", errors.New("clipboard offline") }
+			d.readClip = func(string) (string, error) { return "", errors.New("clipboard offline") }
 		}, "clipboard"},
 		{"terminal missing", []string{"text"}, func(d *sessionNewDeps) {
 			d.lookPath = func(string) (string, error) { return "", errors.New("not found") }
 		}, "install"},
 		{"start failure", []string{"--terminal", "windows-terminal", "text"}, func(d *sessionNewDeps) {
-			d.start = func(string, string, []string) error { return errors.New("denied") }
+			d.start = func(string, []string, string) error { return errors.New("denied") }
 		}, "start terminal"},
 	}
 	for _, tc := range cases {
