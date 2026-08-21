@@ -1,0 +1,21 @@
+{
+  "schema": "fak/upstream-runtime-provenance/v1",
+  "retrieved_at": "2026-08-21",
+  "source": {
+    "runtime": "vllm",
+    "repository": "https://github.com/vllm-project/vllm",
+    "version": "v0.17.1",
+    "revision": "95c0f928cdeeaa21c4906e73cee6a156e1b3b995",
+    "source_path": "vllm/distributed/kv_events.py",
+    "subscriber_reference": "examples/online_serving/kv_events_subscriber.py",
+    "symbols": ["EventBatch", "KVCacheEvent", "BlockStored", "BlockRemoved", "AllBlocksCleared", "KVEventBatch"],
+    "license": "Apache-2.0",
+    "reuse": "The fixture and decoder field order are adapted from vLLM's msgspec array_like tagged structures. fak retains extra_keys losslessly and lowers the decoded lifecycle into provider-independent residency and cache telemetry."
+  },
+  "fixture": {
+    "path": "block_stored_v0.17.1.json",
+    "encoding": "msgspec JSON rendering of the native msgpack generic value",
+    "batch_fields": ["ts", "events", "data_parallel_rank"],
+    "BlockStored_fields": ["tag", "block_hashes", "parent_block_hash", "token_ids", "block_size", "lora_id", "medium", "lora_name", "extra_keys"]
+  }
+}

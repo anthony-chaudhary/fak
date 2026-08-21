@@ -483,20 +483,123 @@ type VLLMKVEventBatch struct {
 // event variants. Block hashes are kept as JSON values because vLLM's
 // ExternalBlockHash is versioned; fak only needs a stable digest string.
 type VLLMKVEvent struct {
-	Type                         string `json:"type,omitempty"`
-	Event                        string `json:"event,omitempty"`
-	Kind                         string `json:"kind,omitempty"`
-	BlockHashes                  []any  `json:"block_hashes,omitempty"`
-	ParentBlockHash              any    `json:"parent_block_hash,omitempty"`
-	TokenIDs                     []int  `json:"token_ids,omitempty"`
-	BlockSize                    int    `json:"block_size,omitempty"`
-	LoraID                       *int   `json:"lora_id,omitempty"`
-	Medium                       string `json:"medium,omitempty"`
-	LoraName                     string `json:"lora_name,omitempty"`
-	GroupIdx                     *int   `json:"group_idx,omitempty"`
-	KVCacheSpecKind              string `json:"kv_cache_spec_kind,omitempty"`
-	KVCacheSpecSlidingWindow     *int   `json:"kv_cache_spec_sliding_window,omitempty"`
-	KVCacheSpecSlidingWindowJSON *int   `json:"kv_cache_spec_sliding_window_json,omitempty"`
+	Type                         string          `json:"type,omitempty"`
+	Event                        string          `json:"event,omitempty"`
+	Kind                         string          `json:"kind,omitempty"`
+	BlockHashes                  []any           `json:"block_hashes,omitempty"`
+	ParentBlockHash              any             `json:"parent_block_hash,omitempty"`
+	TokenIDs                     []int           `json:"token_ids,omitempty"`
+	BlockSize                    int             `json:"block_size,omitempty"`
+	LoraID                       *int            `json:"lora_id,omitempty"`
+	Medium                       string          `json:"medium,omitempty"`
+	LoraName                     string          `json:"lora_name,omitempty"`
+	ExtraKeys                    json.RawMessage `json:"extra_keys,omitempty"`
+	GroupIdx                     *int            `json:"group_idx,omitempty"`
+	KVCacheSpecKind              string          `json:"kv_cache_spec_kind,omitempty"`
+	KVCacheSpecSlidingWindow     *int            `json:"kv_cache_spec_sliding_window,omitempty"`
+	KVCacheSpecSlidingWindowJSON *int            `json:"kv_cache_spec_sliding_window_json,omitempty"`
+}
+
+// UnmarshalJSON accepts both fak's object-shaped bridge and vLLM's native
+// msgspec tagged-array representation. The array indexes are pinned by the
+// upstream provenance fixture in testdata/vllm_kv_events.
+func (ev *VLLMKVEvent) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 {
+		return fmt.Errorf("vllm: empty KV event")
+	}
+	if data[0] == '{' {
+		type object VLLMKVEvent
+		return json.Unmarshal(data, (*object)(ev))
+	}
+	var fields []json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("vllm: decode tagged KV event: %w", err)
+	}
+	if len(fields) == 0 {
+		return fmt.Errorf("vllm: tagged KV event has no tag")
+	}
+	if err := json.Unmarshal(fields[0], &ev.Type); err != nil {
+		return fmt.Errorf("vllm: decode KV event tag: %w", err)
+	}
+	decode := func(index int, dst any) error {
+		if index >= len(fields) {
+			return nil
+		}
+		if err := json.Unmarshal(fields[index], dst); err != nil {
+			return fmt.Errorf("vllm: decode %s field %d: %w", ev.Type, index, err)
+		}
+		return nil
+	}
+	switch ev.Type {
+	case "BlockStored":
+		if len(fields) < 8 || len(fields) > 9 {
+			return fmt.Errorf("vllm: BlockStored has %d fields, want 8 or 9", len(fields))
+		}
+		for _, field := range []struct {
+			index int
+			dst   any
+		}{{1, &ev.BlockHashes}, {2, &ev.ParentBlockHash}, {3, &ev.TokenIDs}, {4, &ev.BlockSize}, {5, &ev.LoraID}, {6, &ev.Medium}, {7, &ev.LoraName}} {
+			if err := decode(field.index, field.dst); err != nil {
+				return err
+			}
+		}
+		if len(fields) == 9 {
+			ev.ExtraKeys = append(ev.ExtraKeys[:0], fields[8]...)
+		}
+	case "BlockRemoved":
+		if len(fields) != 3 {
+			return fmt.Errorf("vllm: BlockRemoved has %d fields, want 3", len(fields))
+		}
+		if err := decode(1, &ev.BlockHashes); err != nil {
+			return err
+		}
+		if err := decode(2, &ev.Medium); err != nil {
+			return err
+		}
+	case "AllBlocksCleared":
+		if len(fields) != 1 {
+			return fmt.Errorf("vllm: AllBlocksCleared has %d fields, want 1", len(fields))
+		}
+	default:
+		return fmt.Errorf("vllm: unsupported tagged KV event %q", ev.Type)
+	}
+	return nil
+}
+
+// UnmarshalJSON accepts the native array-like KVEventBatch emitted by msgspec
+// as well as the object-shaped NDJSON bridge retained for compatibility.
+func (batch *VLLMKVEventBatch) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 {
+		return fmt.Errorf("vllm: empty KV event batch")
+	}
+	if data[0] == '{' {
+		type object VLLMKVEventBatch
+		if err := json.Unmarshal(data, (*object)(batch)); err != nil {
+			return err
+		}
+		batch.Raw = map[string]any{"encoding": "object"}
+		return nil
+	}
+	var fields []json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("vllm: decode array-like KV event batch: %w", err)
+	}
+	if len(fields) < 2 || len(fields) > 3 {
+		return fmt.Errorf("vllm: KV event batch has %d fields, want 2 or 3", len(fields))
+	}
+	if err := json.Unmarshal(fields[0], &batch.TS); err != nil {
+		return fmt.Errorf("vllm: decode KV event batch timestamp: %w", err)
+	}
+	if err := json.Unmarshal(fields[1], &batch.Events); err != nil {
+		return fmt.Errorf("vllm: decode KV event batch events: %w", err)
+	}
+	if len(fields) == 3 && string(fields[2]) != "null" {
+		if err := json.Unmarshal(fields[2], &batch.DataParallelRank); err != nil {
+			return fmt.Errorf("vllm: decode KV event batch data parallel rank: %w", err)
+		}
+	}
+	batch.Raw = map[string]any{"encoding": "msgspec-array"}
+	return nil
 }
 
 func (ev VLLMKVEvent) eventType() string {

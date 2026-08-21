@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -239,5 +240,71 @@ func TestJoinEndpointNormalizesPathQueryAndFragment(t *testing.T) {
 		t.Fatalf("JoinEndpoint(no scheme) must refuse")
 	} else if err.Error() != "invalid example.invalid/v1" {
 		t.Fatalf("JoinEndpoint refusal = %q, want the caller-supplied wording", err.Error())
+	}
+}
+
+func TestVLLMKVEventPinnedTaggedArrayPreservesIdentityAndLowers(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/vllm_kv_events/block_stored_v0.17.1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := NewVLLMJSONKVEventSource(io.NopCloser(strings.NewReader(string(fixture) + "\n")))
+	batch, err := src.Next(context.Background())
+	if err != nil {
+		t.Fatalf("decode upstream-derived fixture: %v", err)
+	}
+	if batch.DataParallelRank == nil || *batch.DataParallelRank != 3 || batch.Raw["encoding"] != "msgspec-array" {
+		t.Fatalf("native batch boundary was not retained: %+v", batch)
+	}
+	if len(batch.Events) != 1 {
+		t.Fatalf("got %d events, want 1", len(batch.Events))
+	}
+	ev := batch.Events[0]
+	wantExtra := `[["mm","image-1"],null,["salt",42]]`
+	if string(ev.ExtraKeys) != wantExtra {
+		t.Fatalf("extra_keys = %s, want %s", ev.ExtraKeys, wantExtra)
+	}
+	if ev.LoraID == nil || *ev.LoraID != 7 || ev.LoraName != "adapter" || ev.ParentBlockHash != "parent" {
+		t.Fatalf("BlockStored identity fields were not preserved: %+v", ev)
+	}
+
+	idx := NewPrefixResidencyIndex()
+	rec := NewCacheEventRecorder()
+	got := RecordVLLMKVEventBatch("worker-a", "model-a", "tokenizer-a", idx, rec, batch)
+	if len(got) != 2 || !idx.Has("worker-a", "h1") || !idx.Has("worker-a", "h2") {
+		t.Fatalf("native event was not lowered into two resident blocks: results=%+v rows=%+v", got, idx.Snapshot("worker-a"))
+	}
+	rows := idx.Snapshot("worker-a")
+	if len(rows) != 2 || rows[0].ModelID != "model-a" || rows[0].TokenizerID != "tokenizer-a" {
+		t.Fatalf("residency scope was not retained: %+v", rows)
+	}
+	if snap := rec.Metrics().Snapshot(); snap.Events != 2 || snap.Hits != 2 {
+		t.Fatalf("cache-create telemetry not emitted: %+v", snap)
+	}
+}
+
+func TestVLLMKVEventPinnedFieldOrderRejectsDrift(t *testing.T) {
+	var batch VLLMKVEventBatch
+	err := json.Unmarshal([]byte(`[1,[["BlockStored",["h"],null,[1],1,null,"GPU","",null,"unexpected"]],null]`), &batch)
+	if err == nil || !strings.Contains(err.Error(), "want 8 or 9") {
+		t.Fatalf("schema drift was not rejected: %v", err)
+	}
+}
+
+func TestVLLMKVEventProvenancePinsUpstreamRevision(t *testing.T) {
+	data, err := os.ReadFile("testdata/vllm_kv_events/upstream_provenance.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"revision": "95c0f928cdeeaa21c4906e73cee6a156e1b3b995"`,
+		`"license": "Apache-2.0"`,
+		`"source_path": "vllm/distributed/kv_events.py"`,
+		`"BlockStored_fields"`,
+		`"extra_keys"`,
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("provenance missing %s: %s", want, data)
+		}
 	}
 }
