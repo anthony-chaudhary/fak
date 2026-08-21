@@ -19,7 +19,7 @@ func TestBuildHookCensusClassifiesCompleteLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
-	rows := `{"timestamp":"2026-08-17T11:59:00Z","type":"session_meta","payload":{"session_id":"thread-1","cwd":"` + filepath.ToSlash(home) + `"}}` + "\n" + `{"timestamp":"2026-08-17T11:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"a"}}` + "\n" + `{"timestamp":"2026-08-17T11:01:00Z","type":"response_item","payload":{"type":"custom_tool_call","call_id":"b"}}` + "\n"
+	rows := `{"timestamp":"2026-08-17T11:59:00Z","type":"session_meta","payload":{"session_id":"thread-1","cwd":"` + filepath.ToSlash(home) + `"}}` + "\n" + `{"timestamp":"2026-08-17T11:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"a"}}` + "\n" + `{"timestamp":"2026-08-17T11:01:00Z","type":"response_item","payload":{"type":"custom_tool_call","call_id":"b"}}` + "\n" + `{"timestamp":"2026-08-17T11:02:00Z","type":"response_item","payload":{"type":"function_call_output","call_id":"a"}}` + "\n" + `{"timestamp":"2026-08-17T11:03:00Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"b"}}` + "\n"
 	if err := os.WriteFile(filepath.Join(sessions, "r.jsonl"), []byte(rows), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -41,6 +41,44 @@ func TestBuildHookCensusClassifiesCompleteLifecycle(t *testing.T) {
 		t.Fatalf("report=%+v", got)
 	}
 }
+func TestBuildHookCensusPostToolUseExcludesActiveCalls(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "profile")
+	sessions := filepath.Join(home, "sessions")
+	if err := os.MkdirAll(sessions, 0755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	rows := `{"timestamp":"2026-08-17T11:59:00Z","type":"session_meta","payload":{"session_id":"thread-1","cwd":"` + filepath.ToSlash(home) + `"}}` + "\n" +
+		`{"timestamp":"2026-08-17T11:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"complete"}}` + "\n" +
+		`{"timestamp":"2026-08-17T11:01:00Z","type":"response_item","payload":{"type":"function_call","call_id":"active"}}` + "\n" +
+		`{"timestamp":"2026-08-17T11:02:00Z","type":"response_item","payload":{"type":"function_call_output","call_id":"complete"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(sessions, "r.jsonl"), []byte(rows), 0644); err != nil {
+		t.Fatal(err)
+	}
+	obs := filepath.Join(root, "observations.jsonl")
+	var b bytes.Buffer
+	for _, o := range []hookObservation{
+		{CallID: "complete", SessionID: "thread-1", Workspace: home, Profile: home, PhaseState: "succeeded", Verb: "pretool", TS: now.Add(-time.Minute)},
+		{CallID: "active", SessionID: "thread-1", Workspace: home, Profile: home, PhaseState: "succeeded", Verb: "pretool", TS: now.Add(-time.Minute)},
+		{CallID: "complete", SessionID: "thread-1", Workspace: home, Profile: home, PhaseState: "succeeded", Verb: "posttool", TS: now.Add(-time.Minute)},
+	} {
+		_ = json.NewEncoder(&b).Encode(o)
+	}
+	if err := os.WriteFile(obs, b.Bytes(), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := buildHookCensus(home, home, home, "", obs, time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DispatchedCalls != 2 || got.PreToolUse.Denominator != 2 || got.PreToolUse.Succeeded != 2 {
+		t.Fatalf("pretool=%+v dispatched=%d", got.PreToolUse, got.DispatchedCalls)
+	}
+	if got.PostToolUse.Denominator != 1 || got.PostToolUse.Succeeded != 1 || got.PostToolUse.Unknown != 0 {
+		t.Fatalf("posttool=%+v", got.PostToolUse)
+	}
+}
 func TestBuildHookCensusFailsClosedOnUnknownFailureAndProfileMismatch(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "active")
@@ -49,7 +87,7 @@ func TestBuildHookCensusFailsClosedOnUnknownFailureAndProfileMismatch(t *testing
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
-	row := `{"timestamp":"2026-08-17T11:59:00Z","type":"session_meta","payload":{"session_id":"thread-1","cwd":"` + filepath.ToSlash(logHome) + `"}}` + "\n" + `{"timestamp":"2026-08-17T11:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"a"}}` + "\n"
+	row := `{"timestamp":"2026-08-17T11:59:00Z","type":"session_meta","payload":{"session_id":"thread-1","cwd":"` + filepath.ToSlash(logHome) + `"}}` + "\n" + `{"timestamp":"2026-08-17T11:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"a"}}` + "\n" + `{"timestamp":"2026-08-17T11:01:00Z","type":"response_item","payload":{"type":"function_call_output","call_id":"a"}}` + "\n"
 	_ = os.WriteFile(filepath.Join(logHome, "sessions", "r.jsonl"), []byte(row), 0644)
 	obs := filepath.Join(root, "o.jsonl")
 	o := hookObservation{CallID: "a", SessionID: "thread-1", Workspace: logHome, Profile: home, PhaseState: "failed", Exit: 3, Verb: "posttool", TS: now.Add(-time.Minute)}
@@ -78,7 +116,7 @@ func TestBuildHookCensusRejectsAbsentTelemetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
-	row := `{"timestamp":"2026-08-17T11:59:00Z","type":"session_meta","payload":{"session_id":"thread-1","cwd":"` + filepath.ToSlash(home) + `"}}` + "\n" + `{"timestamp":"2026-08-17T11:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"a"}}` + "\n"
+	row := `{"timestamp":"2026-08-17T11:59:00Z","type":"session_meta","payload":{"session_id":"thread-1","cwd":"` + filepath.ToSlash(home) + `"}}` + "\n" + `{"timestamp":"2026-08-17T11:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"a"}}` + "\n" + `{"timestamp":"2026-08-17T11:01:00Z","type":"response_item","payload":{"type":"function_call_output","call_id":"a"}}` + "\n"
 	_ = os.WriteFile(filepath.Join(home, "sessions", "r.jsonl"), []byte(row), 0644)
 	obs := filepath.Join(root, "o.jsonl")
 	_ = os.WriteFile(obs, nil, 0644)

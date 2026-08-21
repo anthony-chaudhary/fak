@@ -68,6 +68,7 @@ type dispatchedCall struct {
 	CallID    string
 	SessionID string
 	Workspace string
+	Completed bool
 }
 
 type stopLifecycleRow struct {
@@ -420,6 +421,15 @@ func phaseCounts(den int, obs []hookObservation, source string) lifecycleCounts 
 	return c
 }
 
+func completedDispatches(calls []dispatchedCall) []dispatchedCall {
+	out := make([]dispatchedCall, 0, len(calls))
+	for _, call := range calls {
+		if call.Completed {
+			out = append(out, call)
+		}
+	}
+	return out
+}
 func phaseCountsForCalls(calls []dispatchedCall, obs []hookObservation, profile, workspace, source string) lifecycleCounts {
 	c := lifecycleCounts{Denominator: len(calls), Source: source}
 	wanted := make(map[string]dispatchedCall, len(calls))
@@ -517,12 +527,19 @@ func readCodexDispatches(root, workspace, threadID string, after time.Time) ([]d
 			return s.Err()
 		}
 		for _, row := range rows {
-			if row.Payload.Type == "function_call" || row.Payload.Type == "custom_tool_call" {
-				id := row.Payload.CallID
+			id := row.Payload.CallID
+			switch row.Payload.Type {
+			case "function_call", "custom_tool_call":
 				if id == "" {
 					id = path + fmt.Sprint(len(seen))
 				}
 				seen[sessionID+"\x00"+id] = dispatchedCall{CallID: id, SessionID: sessionID, Workspace: rowWorkspace}
+			case "function_call_output", "custom_tool_call_output":
+				key := sessionID + "\x00" + id
+				if call, ok := seen[key]; ok {
+					call.Completed = true
+					seen[key] = call
+				}
 			}
 		}
 		return s.Err()
