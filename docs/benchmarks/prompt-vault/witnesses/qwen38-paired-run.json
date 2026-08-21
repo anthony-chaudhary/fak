@@ -1,0 +1,13 @@
+{
+  "schema":"fak-ultracode-paired/1",
+  "single":{
+    "mode":"single",
+    "identity":{"task":"Prompt-Vault Easy Color Palette Generator under frozen 12-check contract","task_digest":"sha256:prompt-vault-color-palette-v1","model":"Qwen3.8-27B-Q4_K_M","environment":"fak-realmodel L4 image sha256:d8c8a0677e85dd33501bd5e7e3ef69a40952584c8c02f22270b3e0545e9002c5","wall_budget_ms":1200000,"token_budget":1536,"spend_budget_usd":0},
+    "critical_path_ms":179570,"total_worker_ms":179570,"input_tokens":78,"output_tokens":575,"cache_read_tokens":448,"cache_write_tokens":0,"billed_tokens":653,"spend_usd":0,"expected_effects":12,"accepted_effects":2,"contradictions":0,"acceptance_passed":false,"retries":0,"witness_digest":"sha256:bfdc5196691ca6a24da90b45692733d3ab41dba937b2c03233b966fc58a6039e"
+  },
+  "fleet":{
+    "mode":"fleet",
+    "identity":{"task":"Prompt-Vault Easy Color Palette Generator under frozen 12-check contract","task_digest":"sha256:prompt-vault-color-palette-v1","model":"Qwen3.8-27B-Q4_K_M","environment":"fak-realmodel L4 image sha256:d8c8a0677e85dd33501bd5e7e3ef69a40952584c8c02f22270b3e0545e9002c5","wall_budget_ms":1200000,"token_budget":1536,"spend_budget_usd":0},
+    "critical_path_ms":393337,"total_worker_ms":393337,"input_tokens":266,"output_tokens":1536,"cache_read_tokens":0,"cache_write_tokens":0,"billed_tokens":1802,"spend_usd":0,"expected_effects":12,"accepted_effects":0,"contradictions":1,"acceptance_passed":false,"retries":0,"witness_digest":"sha256:6058d646d80eed874c82572bebb1f009"
+  }
+}

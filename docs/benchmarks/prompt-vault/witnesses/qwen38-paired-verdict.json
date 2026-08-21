@@ -1,0 +1,56 @@
+{
+  "schema": "fak-ultracode-paired/1",
+  "verdict": "ABSTAIN",
+  "reasons": [
+    "acceptance outcome is not equal and passing"
+  ],
+  "identity": {
+    "task": "Prompt-Vault Easy Color Palette Generator under frozen 12-check contract",
+    "task_digest": "sha256:prompt-vault-color-palette-v1",
+    "model": "Qwen3.8-27B-Q4_K_M",
+    "environment": "fak-realmodel L4 image sha256:d8c8a0677e85dd33501bd5e7e3ef69a40952584c8c02f22270b3e0545e9002c5",
+    "wall_budget_ms": 1200000,
+    "token_budget": 1536,
+    "spend_budget_usd": 0
+  },
+  "single": {
+    "critical_path_ms": 179570,
+    "total_worker_ms": 179570,
+    "input_tokens": 78,
+    "output_tokens": 575,
+    "cache_read_tokens": 448,
+    "cache_write_tokens": 0,
+    "billed_tokens": 653,
+    "spend_usd": 0,
+    "accepted_effects": 2,
+    "expected_effects": 12,
+    "pass_rate": 0.166667,
+    "contradiction_rate": 0,
+    "accepted_per_wall_second": 0.011138,
+    "accepted_per_billed_ktoken": 3.062787
+  },
+  "fleet": {
+    "critical_path_ms": 393337,
+    "total_worker_ms": 393337,
+    "input_tokens": 266,
+    "output_tokens": 1536,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "billed_tokens": 1802,
+    "spend_usd": 0,
+    "accepted_effects": 0,
+    "expected_effects": 12,
+    "pass_rate": 0,
+    "contradiction_rate": 0.083333,
+    "accepted_per_wall_second": 0,
+    "accepted_per_billed_ktoken": 0
+  },
+  "gains": {
+    "concurrency_speedup": 0.45653,
+    "billed_token_reduction": -1.759571,
+    "cached_input_share": 0,
+    "accepted_effect_delta": -2,
+    "outcome_per_wall_gain": -1,
+    "outcome_per_billed_token_gain": -1
+  }
+}

@@ -80,3 +80,11 @@ Run order:
 Until the native and Ultracode rows exist, the honest result is **two arms accepted; four-arm head-to-head result pending**.
 
 
+
+## Qwen3.8 one-L4 paired verdict (2026-08-21)
+
+The exact Qwen3.8 checkpoint now reaches readiness on one NVIDIA L4 when the streamed loader runs with `GOMEMLIMIT=20GiB`; that is a hardware-placement result, not a quality win. The normalized single arm produced a valid artifact but passed only 2/12 checks. The evaluator-guided micro-context arm exhausted its 1,536-token completion budget before closing the forced `Write` call, so it produced no gradeable artifact.
+
+`fak ultracode bench --pair witnesses/qwen38-paired-run.json --json` returned **`ABSTAIN`**: `acceptance outcome is not equal and passing`. Therefore this run does not beat either accepted 12/12 baseline and does not prove Ultracode gain. The next bounded device-residency work is tracked in [#8377](https://github.com/anthony-chaudhary/fak/issues/8377).
+
+Evidence: [`qwen38-single.json`](prompt-vault/witnesses/qwen38-single.json), [`qwen38-single.png`](prompt-vault/witnesses/qwen38-single.png), and [`qwen38-paired-run.json`](prompt-vault/witnesses/qwen38-paired-run.json).

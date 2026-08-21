@@ -1,0 +1,84 @@
+{
+  "schema": "fak.prompt-vault-color-palette-grade/1",
+  "artifact_id": "qwen38-single",
+  "artifact_sha256": "bfdc5196691ca6a24da90b45692733d3ab41dba937b2c03233b966fc58a6039e",
+  "observed_at": "2026-08-21T08:16:17.593Z",
+  "browser": {
+    "name": "chromium",
+    "version": "151.0.7922.173",
+    "channel": "chrome"
+  },
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "acceptance_passed": 2,
+  "acceptance_total": 12,
+  "terminal_verdict": "FAIL",
+  "render": {
+    "file": "qwen38-single.png",
+    "sha256": "6e7f341c185c10a51c7efd331f76a593122e7a3b200b90ad5eca3fc3225d8de9"
+  },
+  "checks": [
+    {
+      "id": "single_file_vanilla",
+      "passed": true,
+      "detail": "index.html with 0 external runtime resource(s)"
+    },
+    {
+      "id": "five_equal_desktop_swatches",
+      "passed": false,
+      "detail": "0 swatch(es); equal full-width geometry=false"
+    },
+    {
+      "id": "centered_hex_labels",
+      "passed": false,
+      "detail": "0/5 labels centered and matched to the background"
+    },
+    {
+      "id": "contrast_aware_text",
+      "passed": false,
+      "detail": "minimum HEX/background contrast 0.00:1"
+    },
+    {
+      "id": "smooth_color_transition",
+      "passed": false,
+      "detail": "0/5 swatches transition background color within one second"
+    },
+    {
+      "id": "generate_button_replaces_unlocked",
+      "passed": false,
+      "detail": "Generate control not found"
+    },
+    {
+      "id": "lock_toggles_both_states",
+      "passed": false,
+      "detail": "lock controls not found"
+    },
+    {
+      "id": "locked_color_survives_regeneration",
+      "passed": false,
+      "detail": "lock controls not found"
+    },
+    {
+      "id": "spacebar_regenerates_unlocked",
+      "passed": false,
+      "detail": " -> "
+    },
+    {
+      "id": "hex_click_copies_value",
+      "passed": false,
+      "detail": "HEX control not found"
+    },
+    {
+      "id": "copy_shows_confirmation",
+      "passed": false,
+      "detail": "HEX control not found"
+    },
+    {
+      "id": "desktop_render_captured",
+      "passed": true,
+      "detail": "1440x900 PNG sha256:6e7f341c185c10a51c7efd331f76a593122e7a3b200b90ad5eca3fc3225d8de9"
+    }
+  ]
+}
