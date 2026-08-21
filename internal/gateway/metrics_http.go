@@ -333,26 +333,40 @@ const traceHeader = "X-Trace-Id"
 
 func ensureHTTPTrace(s *Server, w http.ResponseWriter, r *http.Request) string {
 	var ctx traceContext
+	var traceID string
 	if parsed, err := parseTraceparent(r.Header.Get(traceparentHeader)); err == nil {
 		ctx = newTraceContext(parsed.TraceID, parsed.Flags)
+		traceID = ctx.TraceID
 	} else {
 		if strings.TrimSpace(r.Header.Get(traceparentHeader)) != "" && s != nil {
 			atomic.AddUint64(&s.traceparentInvalid, 1)
 		}
-		legacy := requestTraceID(r)
-		if len(legacy) == 32 {
-			if _, err := hex.DecodeString(legacy); err != nil {
-				legacy = ""
-			}
+		traceID = requestTraceID(r)
+		if traceID == "" && s != nil {
+			traceID = s.traceFor("")
 		}
-		ctx = newTraceContext(legacy, 0)
+		ctx = newTraceContext(w3cTraceID(traceID), 0)
 	}
-	r.Header.Set(traceHeader, ctx.TraceID)
+	if traceID == "" {
+		traceID = ctx.TraceID
+	}
+	r.Header.Set(traceHeader, traceID)
 	r.Header.Set(traceparentHeader, ctx.String())
 	*r = *r.WithContext(agent.WithTraceContext(r.Context(), ctx.String(), r.Header.Get("tracestate")))
-	w.Header().Set(traceHeader, ctx.TraceID)
+	w.Header().Set(traceHeader, traceID)
 	w.Header().Set(traceparentHeader, ctx.String())
-	return ctx.TraceID
+	return traceID
+}
+
+func w3cTraceID(traceID string) string {
+	traceID = strings.TrimSpace(traceID)
+	if len(traceID) != 32 || allZeroHex(traceID) {
+		return ""
+	}
+	if _, err := hex.DecodeString(traceID); err != nil {
+		return ""
+	}
+	return strings.ToLower(traceID)
 }
 
 func requestTraceID(r *http.Request) string {

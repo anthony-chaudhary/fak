@@ -222,15 +222,13 @@ func startFollowerRank(t *testing.T) chan string {
 	return mirrored
 }
 
-// TestInKernelPlannerIsNotAStreamingPlanner pins the PREMISE of the repro below: the
-// real in-kernel planner — the one the pure-fak sharded serve runs — implements only
-// Complete, so streamChatLive declines it and every stream:true request it serves goes
-// down the buffered path. If this ever stops being true, the model in
-// collectivePlanner no longer stands for anything and the repro should be retired.
-func TestInKernelPlannerIsNotAStreamingPlanner(t *testing.T) {
+// TestEPStreamingPlannerContracts pins both paths exercised below: the real in-kernel
+// planner supports live streaming, while collectivePlanner deliberately models the
+// buffered fallback whose preamble must still open before its collective completes.
+func TestEPStreamingPlannerContracts(t *testing.T) {
 	var p agent.Planner = (*agent.InKernelPlanner)(nil)
-	if _, ok := p.(agent.StreamingPlanner); ok {
-		t.Fatal("agent.InKernelPlanner now implements agent.StreamingPlanner — retire this repro's premise")
+	if _, ok := p.(agent.StreamingPlanner); !ok {
+		t.Fatal("agent.InKernelPlanner must implement agent.StreamingPlanner")
 	}
 	var modeled agent.Planner = newCollectivePlanner("m", "", nil)
 	if _, ok := modeled.(agent.StreamingPlanner); ok {

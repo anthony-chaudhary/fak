@@ -110,8 +110,25 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 		s.serveNativeMessages(w, r, req, reqTrace)
 		return
 	}
+	cursorRaw := r.Header.Get("Last-Event-ID")
+	if cursorRaw == "" {
+		cursorRaw = r.URL.Query().Get("since")
+	}
+	var replay []agent.ProgressEvent
+	if cursorRaw != "" {
+		cursor, err := nativeProgressCursor(cursorRaw)
+		if err != nil {
+			writeErrCode(w, http.StatusBadRequest, "PROGRESS_CURSOR_INVALID", "progress cursor must be an unsigned integer")
+			return
+		}
+		replay, err = s.nativeProgress.after(reqTrace, cursor)
+		if err != nil {
+			writeErrCode(w, http.StatusConflict, "PROGRESS_CURSOR_TOO_OLD", err.Error())
+			return
+		}
+	}
 	sp, ok := s.planner.(agent.StreamingPlanner)
-	if !ok || !sp.StreamingSupported() {
+	if cursorRaw == "" && (!ok || !sp.StreamingSupported()) {
 		s.serveNativeMessages(w, r, req, reqTrace)
 		return
 	}
@@ -148,22 +165,7 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 		_, _ = fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", ev.Seq, ev.Kind, b)
 		flusher.Flush()
 	}
-	cursorRaw := r.Header.Get("Last-Event-ID")
-	if cursorRaw == "" {
-		cursorRaw = r.URL.Query().Get("since")
-	}
-	resumeOnly := cursorRaw != ""
-	if resumeOnly {
-		cursor, err := nativeProgressCursor(cursorRaw)
-		if err != nil {
-			writeErrCode(w, http.StatusBadRequest, "PROGRESS_CURSOR_INVALID", "progress cursor must be an unsigned integer")
-			return
-		}
-		replay, err := s.nativeProgress.after(reqTrace, cursor)
-		if err != nil {
-			writeErrCode(w, http.StatusConflict, "PROGRESS_CURSOR_TOO_OLD", err.Error())
-			return
-		}
+	if cursorRaw != "" {
 		for _, ev := range replay {
 			sendProgress(ev)
 		}

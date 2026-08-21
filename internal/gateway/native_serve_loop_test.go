@@ -439,6 +439,7 @@ func (p *nativeEditTestDiffPlanner) Complete(_ context.Context, _ []agent.Messag
 }
 
 func TestNativeServeFixtureEditTestDiffWitness(t *testing.T) {
+	abi.ResetForTest()
 	agent.Configure()
 	abi.RegisterRegionBackend(inlineBackend{})
 	root := t.TempDir()
@@ -450,6 +451,9 @@ func TestNativeServeFixtureEditTestDiffWitness(t *testing.T) {
 	write("go.mod", "module fixture\n\ngo 1.26\n")
 	write("fixture.go", "package fixture\n\nfunc Value() int { return 1 }\n")
 	write("fixture_test.go", "package fixture\n\nimport \"testing\"\n\nfunc TestValue(t *testing.T) { if Value() != 2 { t.Fatal(Value()) } }\n")
+	if _, err := codetools.Register(codetools.Config{Root: root, FocusedCommands: true}, 20); err != nil {
+		t.Fatal(err)
+	}
 	if err := exec.Command("git", "init", "-q", root).Run(); err != nil {
 		t.Fatal(err)
 	}

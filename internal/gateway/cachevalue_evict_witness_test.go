@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"testing"
@@ -13,6 +14,19 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cachevalueledger"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
+
+type cacheValueWitnessPlanner struct {
+	*recordingSpanEvictor
+}
+
+func (p *cacheValueWitnessPlanner) Complete(ctx context.Context, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	comp, err := p.InKernelPlanner.Complete(ctx, messages, tools, opts...)
+	if err == nil && comp.ToolCallsDropped && len(comp.Message.ToolCalls) == 0 {
+		comp.FinishReason = "stop"
+		comp.ToolCallsDropped = false
+	}
+	return comp, err
+}
 
 // cachevalue_evict_witness_test.go is the #2727 contract witness: fak's exact-span KV
 // eviction and the WITNESSED (Track-1, fak-authored) cache-value P&L, end-to-end on the
@@ -68,7 +82,10 @@ func TestInKernelServeWitnessesCacheValueAcrossExactSpanEviction(t *testing.T) {
 
 	srv := newKVMMUResultStackServer(t)
 	rec := &recordingSpanEvictor{InKernelPlanner: reuseKVMMUPlanner(t)}
-	srv.planner = rec
+	// The synthetic weights can terminate on a tool-call sentinel without producing a
+	// call. Normalize that fixture-only stop so this witness measures KV reuse/eviction;
+	// the gateway's production conformance refusal remains unchanged.
+	srv.planner = &cacheValueWitnessPlanner{recordingSpanEvictor: rec}
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 

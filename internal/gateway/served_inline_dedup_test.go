@@ -277,7 +277,7 @@ func replayDedupTrace(t *testing.T, turns []dedupTraceTurn, classes map[[2]int]s
 			}
 			inbound = append(inbound, agent.Message{Role: agent.RoleAssistant, ToolCalls: []agent.ToolCall{c}})
 			toolResults = append(toolResults, agent.Message{Role: agent.RoleTool, ToolCallID: c.ID,
-				Name: c.Function.Name, Content: `{"result":"bytes for ` + c.ID + `"}`})
+				Name: c.Function.Name, Content: `{"result":"bytes for ` + c.ID + `"}`, Witness: "witness-v1"})
 		}
 		inbound = append(inbound, toolResults...)
 		if len(toolResults) > 0 {

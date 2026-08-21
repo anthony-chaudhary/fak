@@ -2,14 +2,19 @@ package gateway
 
 import (
 	"context"
-	"github.com/anthony-chaudhary/fak/internal/agent"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/privacy"
 )
 
 func TestProviderSpanContextCreatesChild(t *testing.T) {
-	e := &otlpExporter{queue: make(chan otlpSpan, 2)}
+	policy := privacy.DefaultPolicy()
+	policy.LocalOnly = false
+	policy.Telemetry.Enabled = true
+	e := &otlpExporter{privacy: policy, queue: make(chan otlpSpan, 2)}
 	ctx := agent.WithTraceContext(context.Background(), "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "")
 	ctx = providerSpanContext(ctx, e)
 	req, _ := http.NewRequestWithContext(ctx, "POST", "https://provider.invalid/v1", nil)
