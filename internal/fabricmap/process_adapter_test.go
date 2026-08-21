@@ -51,6 +51,9 @@ func withHelperEnv(t *testing.T, mode string) {
 	t.Helper()
 	t.Setenv("FAK_FABRICMAP_HELPER", "1")
 	t.Setenv("FAK_FABRICMAP_HELPER_MODE", mode)
+	// The race runtime otherwise holds a successful helper open for one second,
+	// which tests instrumentation shutdown instead of the adapter deadline.
+	t.Setenv("GORACE", "atexit_sleep_ms=0")
 }
 func helperTransfer() (Link, Access, Transfer) {
 	link := Link{ID: "ssd-gpu", From: "ssd", To: "gpu", Transport: "gds-v99"}
