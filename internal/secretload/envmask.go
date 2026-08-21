@@ -17,6 +17,28 @@ const SandboxEnvAllowKey = "FAK_SANDBOX_ENV_ALLOW"
 // disables inherited-env filtering for that child.
 const SandboxEnvInheritKey = "FAK_SANDBOX_INHERIT_ENV"
 
+// defaultSandboxEnvAllow is the deny-by-default floor's allow-list: the parent
+// variables a sandboxed child may inherit without the operator naming them.
+//
+// The trust and cloud-route rows (#8172) are the enterprise set written DOWN
+// rather than implicitly stripped. Deny-by-default is unchanged — this list just
+// stops being a secret the operator has to rediscover one failed launch at a time.
+// Before it was widened, the list covered OpenSSL and Python requests and missed
+// every other trust store a fak child actually uses, so a Claude Code invocation
+// that worked in the operator's shell stopped working the moment fak wrapped it,
+// with an error naming neither fak nor the stripped variable. FAK_SANDBOX_ENV_ALLOW
+// was a real escape hatch that required already knowing the answer, and
+// FAK_SANDBOX_INHERIT_ENV=1 traded the whole containment property to fix a
+// certificate.
+//
+// Every added name is a POINTER or a SELECTOR — a path to public certificates, a
+// region, a profile name, a which-cloud boolean. None is a credential: the
+// credential-shaped members of the AWS/GCP chains (AWS_SECRET_ACCESS_KEY,
+// AWS_SESSION_TOKEN, GOOGLE_APPLICATION_CREDENTIALS, …) are deliberately ABSENT
+// here, because a static allow-list must never become a blanket credential
+// conduit. A launch that genuinely needs one declares it per-launch through
+// policy.StripInheritedSecretsExcept's keep-set, which internal/cloudroute builds
+// only for names already present and only when a cloud route was detected.
 var defaultSandboxEnvAllow = []string{
 	"PATH", "PATHEXT", "COMSPEC", "SystemRoot", "SYSTEMROOT", "WINDIR",
 	"HOME", "USER", "USERNAME", "LOGNAME", "SHELL",
@@ -24,6 +46,22 @@ var defaultSandboxEnvAllow = []string{
 	"PWD", "OLDPWD",
 	"LANG", "LC_ALL", "LC_CTYPE", "TERM", "COLORTERM", "NO_COLOR", "CI",
 	"SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE",
+	// Trust stores, one per runtime that reads its own variable. NODE_EXTRA_CA_CERTS
+	// is the load-bearing one: Node is Claude Code itself, the primary wrapped
+	// harness, so stripping it meant the wrapped agent could not validate its own
+	// upstream. See internal/httptrust.ChildTrustVars, which derives this same set
+	// from one declared bundle.
+	"NODE_EXTRA_CA_CERTS", "AWS_CA_BUNDLE", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO",
+	// Cloud model-route selection and configuration. A child that loses these loses
+	// its provider AND its credential resolution, then falls back to a subscription
+	// login it cannot complete. See internal/cloudroute.NonSecretEnvNames, which is
+	// the same vocabulary from the detector's side.
+	"CLAUDE_CODE_USE_BEDROCK", "ANTHROPIC_BEDROCK_BASE_URL", "CLAUDE_CODE_SKIP_BEDROCK_AUTH",
+	"AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION",
+	"AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE", "AWS_SDK_LOAD_CONFIG",
+	"AWS_EC2_METADATA_DISABLED", "AWS_ROLE_ARN", "AWS_ROLE_SESSION_NAME",
+	"CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_VERTEX_PROJECT_ID", "CLAUDE_CODE_SKIP_VERTEX_AUTH",
+	"CLOUD_ML_REGION", "GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_QUOTA_PROJECT", "GCLOUD_PROJECT",
 	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
 }
 

@@ -75,6 +75,9 @@ var bailConstNames = map[string]string{
 	bailRouteManifestInvalid:   "bailRouteManifestInvalid",
 	bailWeightsRequired:        "bailWeightsRequired",
 	bailUnauthenticatedBind:    "bailUnauthenticatedBind",
+
+	bailUpstreamTrustUnverified: "bailUpstreamTrustUnverified",
+	bailUpstreamUnsupported:     "bailUpstreamUnsupported",
 }
 
 // bailEmitterAliases lets a reason be cited through an equivalent constant. The

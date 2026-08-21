@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/httptrust"
 )
 
 // DefaultProfileURL is Anthropic's OAuth profile endpoint. Overridable in ProbeToken for tests.
@@ -57,7 +59,11 @@ func ProbeToken(client *http.Client, url, token string) (ProbedIdentity, error) 
 		url = DefaultProfileURL
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 20 * time.Second}
+		// #8172: the identity probe is an outbound HTTPS call like any other, so it
+		// validates against the declared corporate trust source. A caller-supplied
+		// client is left alone; an unconfigured host gets the same plain client as
+		// before.
+		client = httptrust.Client(20 * time.Second)
 	}
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {

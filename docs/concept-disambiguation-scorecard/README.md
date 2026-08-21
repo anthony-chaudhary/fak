@@ -15,9 +15,9 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **35** (clarity 22 + coverage 13) |
+| **Disambiguation-debt (drive to 0)** | **40** (clarity 19 + coverage 21) |
 | **Crystal-clear concepts (and climbing)** | **754** crystal of 2467 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2596 / 2609** (99.5% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2598 / 2619** (99.2% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 197 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **74** of 3426 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
@@ -28,7 +28,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2467 concepts - score 91.4/100 (grade A) - disambiguation-debt 35
+concept-disambiguation chart - 2467 concepts - score 91.4/100 (grade A) - disambiguation-debt 40
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ############................ 754
@@ -62,11 +62,14 @@ clarity mix by family (each cell = one concept):
   witness-proof    ********************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (148 concept(s); 68 crystal)
 
 coverage by family (positioned / discovered):
-  cache            ############################ 281/285
-  plan             ############################ 360/364
-  guard-gate       ############################ 461/464
+  cache            ############################ 281/286
+  guard-gate       ############################ 462/467
+  plan             ############################ 361/365
+  support-maturity ###########################. 55/58
+  pool             ###########################. 39/41
   context-ctx      ############################ 226/227
-  support-maturity ############################ 55/56
+  policy-capability ############################ 184/185
+  session-runtime  ############################ 251/252
   attention        ############################ 76/76
   cross-cluster    ............................ 0/0
   decision         ############################ 57/57
@@ -75,16 +78,13 @@ coverage by family (positioned / discovered):
   gateway-engine   ############################ 182/182
   layout           ############################ 15/15
   loop             ############################ 88/88
-  policy-capability ############################ 184/184
-  pool             ############################ 39/39
   render-materialize ############################ 198/198
   score-debt       ############################ 87/87
-  session-runtime  ############################ 251/251
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
   witness-proof    ############################ 156/156
 
-namespace coverage  [################################] 99.5%  (2596/2609 confusable tokens positioned)
+namespace coverage  [################################] 99.2%  (2598/2619 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 196
@@ -2737,7 +2737,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| grounded | `grounded` | 0 | 9 | 9 ungrounded concept(s) |
+| grounded | `grounded` | 4 | 6 | 6 ungrounded concept(s) |
 | separation | `reference_resolves` | 16 | 6 | 6 dangling distinct_from reference(s) |
 | honesty | `clarity_consistent` | 46 | 3 | 3 verdict overclaim(s) |
 | indexed | `index_resolves` | 64 | 2 | 2 unresolvable shared lookup name(s) |
@@ -2756,11 +2756,14 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| cache | 281 | 285 | 4 |
-| plan | 360 | 364 | 4 |
-| guard-gate | 461 | 464 | 3 |
+| cache | 281 | 286 | 5 |
+| guard-gate | 462 | 467 | 5 |
+| plan | 361 | 365 | 4 |
+| support-maturity | 55 | 58 | 3 |
+| pool | 39 | 41 | 2 |
 | context-ctx | 226 | 227 | 1 |
-| support-maturity | 55 | 56 | 1 |
+| policy-capability | 184 | 185 | 1 |
+| session-runtime | 251 | 252 | 1 |
 | attention | 76 | 76 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | decision | 57 | 57 | 0 |
@@ -2769,11 +2772,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | gateway-engine | 182 | 182 | 0 |
 | layout | 15 | 15 | 0 |
 | loop | 88 | 88 | 0 |
-| policy-capability | 184 | 184 | 0 |
-| pool | 39 | 39 | 0 |
 | render-materialize | 198 | 198 | 0 |
 | score-debt | 87 | 87 | 0 |
-| session-runtime | 251 | 251 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
 | witness-proof | 156 | 156 | 0 |

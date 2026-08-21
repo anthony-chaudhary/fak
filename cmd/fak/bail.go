@@ -58,6 +58,22 @@ const (
 	bailRouteManifestInvalid   = "ROUTE_MANIFEST_INVALID"
 	bailWeightsRequired        = "WEIGHTS_REQUIRED"
 
+	// bailUpstreamTrustUnverified (#8172) is the intercepted-chain case: a corporate
+	// trust source was DECLARED and fak is not using it — the bundle did not read,
+	// parsed to no certificate, or the platform trust store it must widen was
+	// unavailable. It is its own token because the operator's next step is unlike
+	// every other config bail here: nothing about fak is misconfigured, a file on
+	// the host is, and the fix is a certificate rather than a flag.
+	bailUpstreamTrustUnverified = "UPSTREAM_TRUST_UNVERIFIED"
+
+	// bailUpstreamUnsupported (#8172) is the request-signed-upstream case: the
+	// wrapped agent is routed to a cloud gateway (Bedrock SigV4, Vertex ADC) that
+	// authenticates each request itself, so fak's base-URL repoint is inert and the
+	// gateway would adjudicate nothing. Naming it is the whole point — the launch
+	// used to refuse for a credential the operator did not lack, or park for a day
+	// waiting for a re-login that could not change which token was sent.
+	bailUpstreamUnsupported = "UPSTREAM_UNSUPPORTED"
+
 	// bailUnauthenticatedBind is NOT a new spelling: serve_bind_safety.go has
 	// named this exact token in its refusal text since the bind guard landed. It
 	// was a token with nothing behind it — `fak recover UNAUTHENTICATED_OFF_HOST_BIND`
@@ -80,6 +96,8 @@ var bailReasons = []string{
 	bailBackendUnavailable,
 	bailRouteManifestInvalid,
 	bailWeightsRequired,
+	bailUpstreamTrustUnverified,
+	bailUpstreamUnsupported,
 	bailUnauthenticatedBind,
 }
 

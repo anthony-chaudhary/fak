@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/httptrust"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
@@ -400,7 +401,11 @@ func (p DeepSeekAnthropicProfile) PostMessages(ctx context.Context, client *http
 	}
 	agent.ApplyTraceContext(req)
 	if client == nil {
-		client = &http.Client{Timeout: durEnv("FAK_DEEPSEEK_ANTHROPIC_TIMEOUT_S", 120*time.Second)}
+		// #8172: this is a second outbound provider client alongside the HTTPPlanner,
+		// so it needs the same declared trust source — otherwise pointing fak at an
+		// Anthropic-compatible provider works everywhere except the managed hosts the
+		// seam exists for.
+		client = httptrust.Client(durEnv("FAK_DEEPSEEK_ANTHROPIC_TIMEOUT_S", 120*time.Second))
 	}
 	resp, err := client.Do(req)
 	if err != nil {

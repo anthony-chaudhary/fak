@@ -28,6 +28,47 @@ func TestSandboxEnvMasksInheritedByDefaultAndKeepsExplicit(t *testing.T) {
 	}
 }
 
+// TestSandboxEnvKeepsEnterpriseTrustAndRouteSelectors pins the #8172 widening: a
+// child inherits the trust POINTERS and cloud-route SELECTORS its runtimes need,
+// and still inherits no credential. Before this, a Claude Code invocation that
+// worked in the operator's shell stopped working the moment fak wrapped it —
+// NODE_EXTRA_CA_CERTS is the sharpest case, since Node is the wrapped harness
+// itself and without it the agent cannot validate its own upstream.
+func TestSandboxEnvKeepsEnterpriseTrustAndRouteSelectors(t *testing.T) {
+	env := []string{
+		"NODE_EXTRA_CA_CERTS=/etc/corp/roots.pem",
+		"AWS_CA_BUNDLE=/etc/corp/roots.pem",
+		"CURL_CA_BUNDLE=/etc/corp/roots.pem",
+		"GIT_SSL_CAINFO=/etc/corp/roots.pem",
+		"CLAUDE_CODE_USE_BEDROCK=1",
+		"AWS_PROFILE=corp-sso",
+		"AWS_REGION=us-east-1",
+		"CLAUDE_CODE_USE_VERTEX=1",
+		"GOOGLE_CLOUD_PROJECT=corp-ml",
+		// The credential-shaped members of the same chains. They must NOT ride a
+		// static allow-list: a launch that needs one declares it per-launch through
+		// policy.StripInheritedSecretsExcept.
+		"AWS_SECRET_ACCESS_KEY=nope",
+		"AWS_SESSION_TOKEN=nope",
+		"GOOGLE_APPLICATION_CREDENTIALS=/home/u/adc.json",
+	}
+	got := SandboxEnvWithLoader(New(), env)
+	for _, want := range []string{
+		"NODE_EXTRA_CA_CERTS", "AWS_CA_BUNDLE", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO",
+		"CLAUDE_CODE_USE_BEDROCK", "AWS_PROFILE", "AWS_REGION",
+		"CLAUDE_CODE_USE_VERTEX", "GOOGLE_CLOUD_PROJECT",
+	} {
+		if !envHasKey(got, want) {
+			t.Fatalf("%s was stripped; a child that loses it loses its trust store or its provider: %v", want, got)
+		}
+	}
+	for _, deny := range []string{"AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS"} {
+		if envHasKey(got, deny) {
+			t.Fatalf("%s crossed the boundary on the STATIC allow-list; deny-by-default must still hold for credentials: %v", deny, got)
+		}
+	}
+}
+
 func TestSandboxEnvAllowListComesFromLoader(t *testing.T) {
 	l := New(mapSource{name: "policy", m: map[string]string{SandboxEnvAllowKey: "CUSTOM_KEEP; ALSO_KEEP"}})
 	env := []string{"CUSTOM_KEEP=1", "ALSO_KEEP=2", "DROP_ME=3"}

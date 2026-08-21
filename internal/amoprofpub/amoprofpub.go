@@ -94,12 +94,12 @@ func Generate(o Options) (Manifest, error) {
 	if err = writePage(filepath.Join(o.Out, pages[0]), meta(o.Title, o.Space, o.ParentID)+parentBody(o.Title, m)); err != nil {
 		return Manifest{}, err
 	}
-	sourceTitle := o.Title + " â€” Original AMOProf report"
+	sourceTitle := o.Title + " — Original AMOProf report"
 	body := sourceBody(sourceTitle, stage, defaultHTML, files)
 	if err = writePage(filepath.Join(o.Out, pages[1]), meta(sourceTitle, o.Space, "PARENT_PAGE_ID")+body); err != nil {
 		return Manifest{}, err
 	}
-	usefulTitle := o.Title + " â€” What this report is useful for"
+	usefulTitle := o.Title + " — What this report is useful for"
 	analysisTitle := o.Title + " — AMOProf analysis"
 	if err = writePage(filepath.Join(o.Out, pages[2]), meta(analysisTitle, o.Space, "PARENT_PAGE_ID")+analysisBody(analysisTitle, stage, files)); err != nil {
 		return Manifest{}, err
