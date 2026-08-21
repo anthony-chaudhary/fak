@@ -79,6 +79,12 @@ func Install(ctx context.Context, run Runner, swap Swapper, opts Options) Result
 	if tmp == "" {
 		tmp = opts.Target + ".new"
 	}
+	cleanupBuildArtifact := true
+	defer func() {
+		if cleanupBuildArtifact {
+			_ = os.Remove(tmp)
+		}
+	}()
 
 	// 1. build the candidate, baking the tree's VERSION into it as appversion.BuildVersion
 	//    (see versionLDFlags for why this is load-bearing, not cosmetic). -buildvcs=true
@@ -123,6 +129,7 @@ func Install(ctx context.Context, run Runner, swap Swapper, opts Options) Result
 		return Result{Stage: StageSmoke, Detail: "candidate binary is UNSTAMPED — `version` reports no VCS provenance; refusing to swap an unattestable binary over the fleet: " + trim(out)}
 	}
 	// 4. swap: only now is the candidate trusted over the running fleet.
+	cleanupBuildArtifact = false
 	if err := swap(tmp, opts.Target); err != nil {
 		return Result{Stage: StageSwap, Detail: err.Error()}
 	}
