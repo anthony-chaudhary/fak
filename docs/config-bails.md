@@ -118,6 +118,8 @@ deliberate gap has to be written down rather than discovered later.
 | `WEIGHTS_REQUIRED` | The requested artifact is derived from the model's own header and no weights were given. | `serve --plan-json` |
 | `POLICY_CHECK_NO_FILE` | `--policy-check` validates a manifest and none was given. | `serve --policy-check` |
 | `NOT_A_WORKSPACE` | The working directory is not inside a fak workspace (no `dos.toml` upward), so the corpus, devindex, and session-state planes bind the wrong tree. A warning, not a refusal. | `serve` startup |
+| `UPSTREAM_TRUST_UNVERIFIED` | A corporate CA bundle was declared in `FAK_CA_BUNDLE` and fak is not validating with it — the file did not read, held no `CERTIFICATE` block, or the platform trust store it must widen was unavailable. | `guard` launch, `doctor trust` |
+| `UPSTREAM_UNSUPPORTED` | The wrapped agent is routed to a request-signed cloud gateway (Bedrock SigV4, Vertex ADC), so it ignores `ANTHROPIC_BASE_URL` and fak's gateway would adjudicate nothing. | `guard` launch |
 
 `fak recover --list` prints this live, merged with the tree-class tokens
 (`OFF_TRUNK`, `COLLISION_RISK`, `MERGE_IN_PROGRESS`, …) that cover working-tree
@@ -143,6 +145,26 @@ or use `--stdio`, which binds no socket at all. If the host really is meant to
 serve an unauthenticated interface,
 `--unsafe-allow-unauthenticated-bind` proceeds and says so loudly on every boot.
 That is the intended escape, not a workaround to hide.
+
+**`UPSTREAM_TRUST_UNVERIFIED` is a certificate problem on the host, not a fak
+misconfiguration.** Behind a TLS-intercepting proxy nothing is blocked — a private
+root re-signs every connection and the chain simply does not validate. Every tool
+reports it differently (`x509: certificate signed by unknown authority`,
+`SELF_SIGNED_CERT_IN_CHAIN`, `CRYPT_E_NO_REVOCATION_CHECK`, `self-signed
+certificate in certificate chain`) and all four read as "the network is down".
+Point `FAK_CA_BUNDLE` at a PEM file holding your corporate root; fak validates
+against the platform store **plus** that root, never the root alone, and derives
+the per-runtime variables children need from the same file. There is deliberately
+no skip-verify escape. See [Managed hosts and corporate TLS](managed-hosts.md).
+
+**`UPSTREAM_UNSUPPORTED` is not a credential failure.** Your cloud credential is
+fine. A child running with `CLAUDE_CODE_USE_BEDROCK=1` (or `CLAUDE_CODE_USE_VERTEX=1`)
+signs each request itself and never reads `ANTHROPIC_BASE_URL`, so fak's gateway
+repoint is inert and there is no traffic for it to adjudicate. The supported route
+on that posture is `fak serve --stdio --policy FILE` — fak as an MCP server the
+agent calls, which is provider-agnostic. To run the guard anyway for its other
+properties with the model traffic unadjudicated,
+`FAK_GUARD_ALLOW_UNSUPPORTED_UPSTREAM=1` proceeds and says so on every launch.
 
 ## Not to be confused with
 

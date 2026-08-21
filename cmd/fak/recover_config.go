@@ -160,6 +160,38 @@ func configRecoveryPlans() map[string]recoveryPlan {
 				"if this host really is meant to serve an unauthenticated interface, --unsafe-allow-unauthenticated-bind proceeds and says so loudly on every boot — that is the intended escape, not a workaround to hide",
 			},
 		},
+		bailUpstreamTrustUnverified: {
+			Reason:     bailUpstreamTrustUnverified,
+			Summary:    "a corporate CA bundle was declared and fak is not validating with it, so every outbound call would fail on a chain fak cannot verify",
+			Executable: true,
+			Steps: []recoveryStep{
+				{Argv: []string{"fak", "doctor", "trust"}, Summary: "report the declared trust source, the CA subjects it carries, and which child runtimes would not inherit it (read-only)", Safe: true},
+				{Argv: []string{"openssl", "x509", "-noout", "-subject", "-issuer", "-enddate", "-in", "<path>"}, Summary: "confirm the file really is a PEM certificate and has not expired", Safe: true},
+			},
+			Notes: []string{
+				"the bail's `file` line says which half failed: the bundle could not be READ (a wrong path, or a path relative to a working directory that is not yours under an MCP launcher), it read but held no CERTIFICATE block (a DER/.crt export, or the ticket text rather than the attachment), or the platform trust store fak must widen was unavailable",
+				"fak always ADDS your root to the system pool, never replaces it — that is why an unavailable system pool is a refusal and not a fallback: validating against your bundle alone would break every endpoint the bundle does not cover, which an operator would read as fak breaking their network",
+				"export the root as PEM (`-----BEGIN CERTIFICATE-----`), not DER: on Windows, certmgr's \"Base-64 encoded X.509\" is the right export option and \"DER encoded binary\" is not",
+				"a bundle may hold several roots; a site with more than one interceptor usually needs all of them concatenated, because the CA in front of the model endpoint is often not the CA in front of the cloud control plane",
+				"there is deliberately no --insecure or skip-verify escape: interception is a trust problem, and a governance tool that normalizes unverified TLS has given up the property it exists to assert",
+				"once it loads, fak derives NODE_EXTRA_CA_CERTS / AWS_CA_BUNDLE / CURL_CA_BUNDLE / SSL_CERT_FILE / REQUESTS_CA_BUNDLE / GIT_SSL_CAINFO for children from the same file, so the wrapped agent and its hooks stop needing their own answer",
+			},
+		},
+		bailUpstreamUnsupported: {
+			Reason:     bailUpstreamUnsupported,
+			Summary:    "the wrapped agent is routed to a request-signed cloud gateway (Bedrock SigV4 / Vertex ADC), so fak's base-URL repoint is inert and the gateway would adjudicate nothing",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"fak", "serve", "--stdio", "--policy", "<policy>"}, Summary: "the path that DOES work on this posture: fak as an MCP server the agent calls, provider-agnostic because the agent is the client"},
+			},
+			Notes: []string{
+				"this is not a credential failure. Your cloud credential is fine — the problem is that a signed-request child never reads ANTHROPIC_BASE_URL, so pointing it at fak's gateway changes nothing and fak would see none of the traffic it is supposed to adjudicate",
+				"the supported route on this posture is the MCP server: register `fak serve --stdio --policy FILE` with the agent and the capability floor is enforced on every tool call, whatever the model wire is",
+				"docs/supported/clouds.md marks Bedrock Partial for exactly this reason — the native path needs SigV4 or a Bedrock bearer key, not an endpoint swap",
+				"to run the guard anyway for its OTHER properties (hook floor, tool brokering, transcript, sandbox) with the model traffic unadjudicated, set FAK_GUARD_ALLOW_UNSUPPORTED_UPSTREAM=1; it proceeds and says so loudly on every launch, which is the intended escape and not a workaround to hide",
+				"to route this session through fak's gateway instead, unset the cloud selector (CLAUDE_CODE_USE_BEDROCK / CLAUDE_CODE_USE_VERTEX) and give the agent a bearer credential fak can front",
+			},
+		},
 		bailNotAWorkspace: {
 			Reason:     bailNotAWorkspace,
 			Summary:    "the working directory is not inside a fak workspace (no dos.toml upward), so the corpus, devindex, and session-state planes will bind the wrong tree",

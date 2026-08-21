@@ -16,6 +16,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/cloudroute"
 	"github.com/anthony-chaudhary/fak/internal/dormancy"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/guard"
@@ -814,7 +815,27 @@ func guardChildCommandEnv(command []string, injected [][2]string, pinUpstream bo
 	// posture: guard already resolved and captured its own upstream OAuth token in
 	// THIS (parent) process before spawning, and the provider API keys an
 	// API-billing child needs are spared by StripInheritedSecrets.
-	env, _ := policy.StripInheritedSecrets(os.Environ())
+	ambient := os.Environ()
+	// #8172: a request-signed cloud route (Bedrock SigV4 / Vertex ADC) resolves its
+	// credential through the cloud SDK chain, and the credential-shaped members of
+	// that chain (AWS_SESSION_TOKEN, GOOGLE_APPLICATION_CREDENTIALS, …) are exactly
+	// what the floor above strips by name and value shape. Stripping them is right
+	// by default and wrong here: this IS the child's configured credential, so it is
+	// declared through the floor's own keep-set rather than by widening the floor.
+	// Narrow on both axes — only when the route selector is actually set, and only
+	// for names already present in the ambient environment (declaring is permission
+	// for a variable to cross, never an instruction to invent one).
+	var declaredCloudCreds []string
+	if r, routed := cloudroute.Detect(ambient); routed {
+		declaredCloudCreds = r.CredentialNames(ambient)
+	}
+	env, _ := policy.StripInheritedSecretsExcept(ambient, declaredCloudCreds)
+	// #8172: derive the per-runtime trust variables from the ONE declared CA bundle
+	// so the wrapped agent (Node), the AWS SDKs, curl, git, and Python all validate
+	// against the same root fak does. Fills only the names the parent left unset —
+	// an operator who pointed NODE_EXTRA_CA_CERTS at a fuller bundle keeps it. Empty
+	// when no bundle is declared, so an unconfigured box is unchanged.
+	env = append(env, guardChildTrustEnv(env)...)
 	for _, kv := range injected {
 		env = append(env, kv[0]+"="+kv[1])
 	}

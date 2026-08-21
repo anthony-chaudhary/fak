@@ -1440,6 +1440,8 @@ func cmdManageCommand(commandName string, argv []string) {
 		maxDurationLimit:     maxDurationLimit,
 		auditJournal:         auditJournal,
 		bannerMode:           bannerMode,
+		upstreamTrustNote:    posture.upstreamTrustNote,
+		cloudRouteWaived:     posture.cloudRouteWaived,
 	}
 	startupReport := renderGuardStartupReport(view)
 	srv.SetStartupReport(startupReport)

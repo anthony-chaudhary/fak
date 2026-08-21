@@ -76,6 +76,17 @@ type guardUpstreamPosture struct {
 	// now" function the gateway serves at POST /v1/fak/account/rehome (`fak accounts
 	// rehome`) — the on-demand form of the failover above.
 	accountRehome func(reason string) (gateway.AccountRehome, error)
+	// upstreamTrustNote is the startup-report line naming the trust store this session
+	// validates with, empty when no corporate CA bundle is declared (#8172). Carried on
+	// the posture rather than printed at gate time so it lands in the durable startup
+	// report and obeys --banner.
+	upstreamTrustNote string
+	// cloudRouteWaived records that a request-signed cloud route was detected and
+	// the operator waived the UPSTREAM_UNSUPPORTED refusal (#8172). The session runs
+	// with the hook floor, tool brokering, transcript, and sandbox intact but fak
+	// sees NONE of its model traffic, so the startup report must not claim upstream
+	// adjudication it is not performing.
+	cloudRouteWaived bool
 }
 
 // resolveGuardUpstreamPosture resolves the upstream wire + credential posture. Two worlds:
@@ -98,6 +109,16 @@ type guardUpstreamPosture struct {
 func resolveGuardUpstreamPosture(in guardUpstreamPostureInputs) guardUpstreamPosture {
 	var p guardUpstreamPosture
 	command := in.command
+	// #8172, FIRST: the two enterprise-posture gates. Both run before every
+	// credential gate below — including the local-only short-circuit, because a
+	// cloud-routed child ignores the base-URL repoint whether the model behind the
+	// gateway is remote or in-kernel — so a managed host is refused for its REAL
+	// cause instead of a subscription credential it does not lack, and never parks
+	// 24h for a re-login that cannot change which credential is sent. Both are
+	// no-ops when no CA bundle is declared and no cloud selector is set, which is
+	// every non-enterprise host. See guard_upstream_trust.go.
+	p.upstreamTrustNote = guardUpstreamTrustGate(in.quiet)
+	p.cloudRouteWaived = guardCloudRouteGate(in.quiet)
 	if in.localModel && !in.localAlongside {
 		p.up, p.providerAutodetected = resolveGuardProvider(in.provider, command[0])
 		return p

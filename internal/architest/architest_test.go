@@ -668,6 +668,8 @@ var tier = map[string]int{
 	"modelsetreceipt":       2, // startup receipts compose model-set resolution with current tier-1 evidence.
 
 	"harnessmodelsetconformance": 3, // captured end-to-end model-set artifact and CLI witness; off the hot path.
+	"httptrust":                  2, // the ONE corporate-trust seam (#8172): resolves a declared CA bundle through secretload(2), widens the platform pool with it, and hands every fak-originated HTTPS client the same RootCAs plus the derived child-runtime trust vars; imports secretload(2)+stdlib, off the hot path.
+	"cloudroute":                 1, // stdlib-only detector for a request-signed cloud model route (Bedrock SigV4 / Vertex ADC) whose base-URL repoint cannot take effect (#8172); pure over an environ snapshot, imports nothing internal.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
