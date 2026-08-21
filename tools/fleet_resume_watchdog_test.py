@@ -336,6 +336,7 @@ def _run_ps1_live(tmp_path, paths, *, spacing=0, max_attempts=8, env_extra=None)
     ps1 = Path(__file__).with_name("fleet_resume_watchdog.ps1")
     env = dict(os.environ)
     env["FLEET_STATE_DIR"] = str(tmp_path / "state")
+    env["FLEET_CLAUDE_DISABLE_MARKER"] = str(tmp_path / "claude.disabled")
     env["FAK_RESUME_SOURCE_POLICY"] = str(tmp_path / "policy.json")  # hermetic (missing = permissive)
     env.pop("FAK_EXE", None)
     # hermetic posture: pin EXPLICIT auto (guard's own billing-gated passive) unless a test opts
