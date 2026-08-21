@@ -15,6 +15,12 @@ func helperCommand(t *testing.T, mode, rollout string) []string {
 	return []string{os.Args[0], "-test.run=TestResumeHelperProcess", "--", mode, rollout}
 }
 
+// The race runtime otherwise holds the helper open for one second after main
+// exits, which tests instrumentation shutdown rather than Run's drain boundary.
+func helperEnv() []string {
+	return append(os.Environ(), "GO_WANT_CODEXRESUME_HELPER=1", "GORACE=atexit_sleep_ms=0")
+}
+
 func TestResumeHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_CODEXRESUME_HELPER") != "1" {
 		return
@@ -70,7 +76,7 @@ func runHelper(t *testing.T, mode string, deadline time.Duration) Result {
 	if err := os.WriteFile(rollout, []byte("seed\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{Command: helperCommand(t, mode, rollout), RolloutPath: rollout, Deadline: deadline, PollInterval: 20 * time.Millisecond, Drain: 30 * time.Millisecond, Env: append(os.Environ(), "GO_WANT_CODEXRESUME_HELPER=1")}
+	cfg := Config{Command: helperCommand(t, mode, rollout), RolloutPath: rollout, Deadline: deadline, PollInterval: 20 * time.Millisecond, Drain: 30 * time.Millisecond, Env: helperEnv()}
 	r, err := Run(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)

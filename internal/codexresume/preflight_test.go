@@ -210,7 +210,7 @@ func TestRecoverCorrectedHistoryReachesAuthoritativeCompletion(t *testing.T) {
 		CheckConfig{ThreadID: threadID, RolloutPath: rollout, CodexHome: home},
 		Config{
 			Command:      helperCommand(t, "exit", rollout),
-			Env:          append(os.Environ(), "GO_WANT_CODEXRESUME_HELPER=1"),
+			Env:          helperEnv(),
 			Deadline:     time.Second,
 			PollInterval: 20 * time.Millisecond,
 			Drain:        30 * time.Millisecond,
