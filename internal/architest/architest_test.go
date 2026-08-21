@@ -590,6 +590,7 @@ var tier = map[string]int{
 	"quantroute":            2, // ordered quantization compatibility routing contract (#6225); imports quantcompat(2).
 	"quantfixture":          1, // stdlib-only synthetic redistributable artifact fixtures and verifier (#6230).
 	"quantmeta":             1, // stdlib-only neutral quantization descriptor, parser, and typed adjudication contract (#6222).
+	"qwen38quant":           1, // stdlib-only evidence contract and validator for the Qwen3.8 quantization campaign (#8307).
 	"quantdetect":           1,
 	"fp4runtime":            2, // stdlib-only FP4/microscaling runtime, GPU-architecture, and accumulator compatibility contract; no model kernel.
 	"fp4meta":               1, // stdlib-only neutral FP4 artifact, recipe, scale, runtime, and hardware metadata contract; no model kernel.
