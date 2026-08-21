@@ -558,7 +558,7 @@ func goPackageForInput(in Input) (string, error) {
 		packages["./"+parts[0]+"/"+parts[1]] = true
 	}
 	if len(packages) == 0 {
-		return "", refusef("issuefanout: paths do not identify a Go package under cmd/ or internal/ — include one representative package path so QA witnesses are runnable")
+		return "", refusef("issuefanout: paths do not identify a Go package under cmd/ or internal/ — use one representative package path so QA witnesses are runnable")
 	}
 	if len(packages) > 1 {
 		names := make([]string, 0, len(packages))
@@ -566,7 +566,7 @@ func goPackageForInput(in Input) (string, error) {
 			names = append(names, name)
 		}
 		sort.Strings(names)
-		return "", refusef("issuefanout: paths identify multiple Go packages (%s) — pass one representative package plus any non-Go companion paths", strings.Join(names, ", "))
+		return "", refusef("issuefanout: paths identify multiple Go packages (%s) — pick one representative package and keep any non-Go companion paths", strings.Join(names, ", "))
 	}
 	for name := range packages {
 		return name, nil

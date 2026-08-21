@@ -73,7 +73,7 @@ var refusalContract = []struct {
 			}
 			return err
 		},
-		want: []string{"do not identify a Go package", "include one representative package path"},
+		want: []string{"do not identify a Go package", "use one representative package path"},
 	},
 	{
 		site: "paths with multiple Go packages",
@@ -86,7 +86,7 @@ var refusalContract = []struct {
 			}
 			return err
 		},
-		want: []string{"identify multiple Go packages", "pass one representative package"},
+		want: []string{"identify multiple Go packages", "pick one representative package"},
 	},
 	{
 		site: "live filing without parent accounting",
