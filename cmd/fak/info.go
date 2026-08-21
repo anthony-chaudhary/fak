@@ -53,6 +53,10 @@ import (
 // OMITS the block until a turn carries provider cache activity (vcacheVarsFromSnapshot
 // returns nil), so "no cache yet" is distinguishable from "cache proved zero saving".
 type guardInfoVars struct {
+	// Observation is the shared semantic view consumed by every output surface.
+	// It is populated from /v1/fak/observation, or explicitly marked
+	// legacy/unknown when an older gateway only serves /debug/vars.
+	Observation *guardInfoObservationView       `json:"observation,omitempty"`
 	WorkDone    *guardInfoWorkDone              `json:"work_done,omitempty"`
 	WorkHistory *guardInfoWorkHistoryComparison `json:"work_history,omitempty"`
 	Gateway     struct {
@@ -330,11 +334,12 @@ func cmdInfo(argv []string) {
 	os.Exit(runInfo(os.Stdout, os.Stderr, argv))
 }
 
-// fetchGuardInfoVars GETs /debug/vars into a guardInfoVars, printing the house error and
-// returning ok=false on failure — the probe the --json and --once paths share.
+// fetchGuardInfoVars reads the versioned observation view plus the compatible
+// /debug/vars projection, printing the house error and returning ok=false on
+// failure — the probe the --json and --once paths share.
 func fetchGuardInfoVars(c *claudeMacDebugClient, stderr io.Writer) (guardInfoVars, bool) {
-	var v guardInfoVars
-	if err := c.get("/debug/vars", &v); err != nil {
+	v, err := readGuardInfoVars(c)
+	if err != nil {
 		fmt.Fprintln(stderr, guardInfoFetchErrorLine(c.base, err))
 		return v, false
 	}
@@ -933,8 +938,8 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 	// watch loop should END — the gateway was healthy and has now been unreachable for a few
 	// ticks, i.e. the guarded session exited and tore its in-process gateway down.
 	emit := func() (ok, stop bool) {
-		var v guardInfoVars
-		if err := c.get("/debug/vars", &v); err != nil {
+		v, err := readGuardInfoVars(c)
+		if err != nil {
 			misses++
 			if sawHealthy && misses >= 3 {
 				writeNote(stdout, "fak info: gateway closed — guarded session ended")
@@ -1117,9 +1122,14 @@ func guardInfoOverlayIntro(stdout io.Writer, c *claudeMacDebugClient, interval t
 // because Anthropic generates the tokens), then what fak blocked or fixed to keep you safe,
 // then a small liveness summary. Every value is the gateway's real running total.
 func renderGuardInfoLine(v guardInfoVars) string {
-	cache := "cache: nothing yet" // until a turn re-uses any text
-	if v.VCache != nil {
-		cache = guardCacheWord(v.VCache.Status, v.VCache.Multiplier, v.VCache.SavedTokenEquiv, v.VCache.HitRate)
+	cache := ""
+	if source := guardInfoCacheSourceWord(v); source != "" {
+		cache = "cache: " + source
+	} else {
+		cache = "cache: nothing yet" // legacy/synthetic view until a turn re-uses any text
+		if v.VCache != nil {
+			cache = guardCacheWord(v.VCache.Status, v.VCache.Multiplier, v.VCache.SavedTokenEquiv, v.VCache.HitRate)
+		}
 	}
 	if split := guardInfoCacheAttributionText(v); split != "" {
 		cache += " · " + split
@@ -1131,6 +1141,9 @@ func renderGuardInfoLine(v guardInfoVars) string {
 		cache,
 		guardSafetyWord(v),
 		v.Inference.Turns, v.Gateway.InflightRequests, humanUptime(v.Gateway.UptimeSeconds))
+	if source := guardInfoObservationSummary(v.Observation); source != "" {
+		line += " · source " + source
+	}
 	// The adjudication "why" rides right after the safety word so the reason a call was refused
 	// stays adjacent to the count, and survives a narrow-pane width-trim (which keeps the front).
 	if why := guardInfoAdjudicationDetail(v.Adjudication); why != "" {

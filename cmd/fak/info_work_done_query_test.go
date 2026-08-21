@@ -90,10 +90,18 @@ func TestGuardInfoWorkDoneQueryHasNoNaNOrImplicitZero(t *testing.T) {
 
 func TestRunInfoWorkDoneQueryIsIntegrationFacingReadPath(t *testing.T) {
 	fixture := workDoneFixture()
-	var requests atomic.Int64
+	var debugRequests, observationRequests atomic.Int64
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests.Add(1)
-		_ = json.NewEncoder(w).Encode(fixture)
+		switch r.URL.Path {
+		case "/debug/vars":
+			debugRequests.Add(1)
+			_ = json.NewEncoder(w).Encode(fixture)
+		case "/v1/fak/observation":
+			observationRequests.Add(1)
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	defer ts.Close()
 	c := &claudeMacDebugClient{base: ts.URL, hc: ts.Client()}
@@ -105,8 +113,8 @@ func TestRunInfoWorkDoneQueryIsIntegrationFacingReadPath(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &q); err != nil {
 		t.Fatal(err)
 	}
-	if requests.Load() != 1 || q.Schema != guardInfoWorkDoneQuerySchema || q.WorkDone.Schema != guardInfoWorkDoneSchema {
-		t.Fatalf("integration result = %#v requests=%d", q, requests.Load())
+	if debugRequests.Load() != 1 || observationRequests.Load() != 1 || q.Schema != guardInfoWorkDoneQuerySchema || q.WorkDone.Schema != guardInfoWorkDoneSchema {
+		t.Fatalf("integration result = %#v debug_requests=%d observation_requests=%d", q, debugRequests.Load(), observationRequests.Load())
 	}
 }
 

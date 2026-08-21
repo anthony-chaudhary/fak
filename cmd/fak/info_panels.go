@@ -189,14 +189,18 @@ func composeGuardInfoPanels(ctx guardInfoPanelCtx, panels []guardInfoPanel, heig
 func guardInfoTrendsPanelRows(ctx guardInfoPanelCtx, level guardInfoPanelLevel) []string {
 	v := ctx.v
 	saveRow := " save  " + sparklineTUI(ctx.tr.saved, ctx.sparkW) + "  " + signedTokens(guardInfoSaved(v)) + " tok"
+	cacheObserved := guardInfoCacheSourceObserved(v)
+	if !cacheObserved {
+		saveRow = " cache  " + guardInfoSavingWord(v)
+	}
 	if level == guardPanelMini {
 		return []string{saveRow}
 	}
-	rows := []string{
-		saveRow,
-		fmt.Sprintf(" hit   %s  %.0f%%  ×%.2f", sparklineTUI(ctx.tr.hit, ctx.sparkW), guardInfoHitPct(v), guardInfoMult(v)),
-		fmt.Sprintf(" work  %s  %d replies · busy %d", sparklineTUI(ctx.tr.turns, ctx.sparkW), v.Inference.Turns, v.Gateway.InflightRequests),
+	rows := []string{saveRow}
+	if cacheObserved {
+		rows = append(rows, fmt.Sprintf(" hit   %s  %.0f%%  ×%.2f", sparklineTUI(ctx.tr.hit, ctx.sparkW), guardInfoHitPct(v), guardInfoMult(v)))
 	}
+	rows = append(rows, fmt.Sprintf(" work  %s  %d replies · busy %d", sparklineTUI(ctx.tr.turns, ctx.sparkW), v.Inference.Turns, v.Gateway.InflightRequests))
 	if ctx.tr.baselineChanges > 0 {
 		rows = append(rows, fmt.Sprintf(" base  changed ×%d · trend restarted at %s", ctx.tr.baselineChanges, ctx.tr.baseline.ID))
 	}
@@ -228,7 +232,10 @@ func guardInfoTrendsPanelRows(ctx guardInfoPanelCtx, level guardInfoPanelLevel) 
 // owner split when reported) and the safety floor summary. Mini keeps the cache gauge.
 func guardInfoTasksPanelRows(ctx guardInfoPanelCtx, level guardInfoPanelLevel) []string {
 	v := ctx.v
-	cacheRow := fmt.Sprintf(" cache  %s %.0f%%  %s", gaugeBarTUI(guardInfoHitFrac(v), ctx.gaugeW), guardInfoHitPct(v), guardInfoSavingWord(v))
+	cacheRow := " cache  " + guardInfoSavingWord(v)
+	if guardInfoCacheSourceObserved(v) {
+		cacheRow = fmt.Sprintf(" cache  %s %.0f%%  %s", gaugeBarTUI(guardInfoHitFrac(v), ctx.gaugeW), guardInfoHitPct(v), guardInfoSavingWord(v))
+	}
 	if split := guardInfoCacheAttributionText(v); split != "" {
 		cacheRow += " · " + split
 	}

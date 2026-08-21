@@ -177,6 +177,15 @@ func writeInfoVarsFixture(t *testing.T, v guardInfoVars) string {
 func TestRunInfoFixtureFrameRendersEachTab(t *testing.T) {
 	v := richVisualVars()
 	path := writeInfoVarsFixture(t, v)
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	present := map[string]json.RawMessage{}
+	if err := json.Unmarshal(raw, &present); err != nil {
+		t.Fatal(err)
+	}
+	applyLegacyGuardInfoObservation(&v, present, "FIXTURE_LEGACY_DEBUG_VARS")
 
 	// The reference trend the offline path seeds: the same count of the same snapshot.
 	refTrend := newGuardInfoTrend(guardInfoTrendCap)

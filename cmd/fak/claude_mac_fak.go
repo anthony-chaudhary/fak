@@ -435,6 +435,10 @@ type claudeMacDebugClient struct {
 	workHistoryPath string
 	workloadKey     string
 	runKey          string
+	// infoObservationMode caches whether this gateway serves the versioned
+	// /v1/fak/observation endpoint. Zero probes once, 1 keeps using it, and 2
+	// skips it for an older gateway after a definitive compatibility miss.
+	infoObservationMode uint8
 }
 
 // do issues an authenticated GET to c.base+path with the shared client-resolution and

@@ -182,6 +182,10 @@ func healthyThenGoneClient(t *testing.T, serveHealthy int) *claudeMacDebugClient
 	// Wrap the stub: count healthy responses; once we've served enough, close the server so
 	// subsequent dials are refused (the "session ended" signal the overlay watches for).
 	mux := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/fak/observation" {
+			http.NotFound(w, r)
+			return
+		}
 		hits++
 		if hits > serveHealthy {
 			http.Error(w, "gone", http.StatusServiceUnavailable)
@@ -194,6 +198,7 @@ func healthyThenGoneClient(t *testing.T, serveHealthy int) *claudeMacDebugClient
 		}
 		defer func() { _ = resp.Body.Close() }()
 		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(resp.StatusCode)
 		_, _ = io.Copy(w, resp.Body)
 	}))
 	t.Cleanup(mux.Close)

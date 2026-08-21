@@ -33,6 +33,9 @@ func renderGuardInfoInteractiveBlock(state infoViewState, v guardInfoVars, tr *g
 	if state.launchNotice != "" {
 		rows = append(rows, state.launchNotice)
 	}
+	// The semantic source rows stay pinned under every tab. Switching views must
+	// never turn typed availability/provenance into a renderer-local guess.
+	rows = append(rows, guardInfoObservationRows(v.Observation)...)
 
 	// bodyHeight is the room left under the tab bar; 0/negative height (unknown pane) means
 	// "roomy", so the body renders in full and the loop's own cap pins it.
@@ -213,6 +216,9 @@ func clampInfoScrollToSample(s infoViewState, v guardInfoVars, tr *guardInfoTren
 func renderInfoAgentsView(v guardInfoVars) []string {
 	rows := renderInfoFleetRows(v.Fleet)
 	if len(v.Sessions) == 0 {
+		if v.Observation != nil {
+			return append(rows, " agents: "+guardInfoObservationMetricText("sessions", v.Observation.Sessions))
+		}
 		return append(rows, " agents: none running (no session registry wired, or nothing live)")
 	}
 	rows = append(rows, " agents: "+guardInfoAgentsSummary(v.Sessions))
@@ -270,12 +276,19 @@ func guardInfoSeatDetail(a gateway.SessionAccount) string {
 // place instead of split across the overview's trends + tasks panels.
 func renderInfoCacheView(ctx guardInfoPanelCtx) []string {
 	v := ctx.v
-	cacheRow := fmt.Sprintf(" cache  %s %.0f%%  %s", gaugeBarTUI(guardInfoHitFrac(v), ctx.gaugeW), guardInfoHitPct(v), guardInfoSavingWord(v))
+	cacheRow := " cache  " + guardInfoSavingWord(v)
+	if guardInfoCacheSourceObserved(v) {
+		cacheRow = fmt.Sprintf(" cache  %s %.0f%%  %s", gaugeBarTUI(guardInfoHitFrac(v), ctx.gaugeW), guardInfoHitPct(v), guardInfoSavingWord(v))
+	}
 	if split := guardInfoCacheAttributionText(v); split != "" {
 		cacheRow += " · " + split
 	}
 	w := guardInfoWorkDoneFromVars(v)
-	rows := []string{cacheRow, fmt.Sprintf(" saved  %s tokens so far · vs %s r%d", signedTokens(guardInfoSaved(v)), w.Baseline.Label, w.Baseline.Revision)}
+	savedRow := fmt.Sprintf(" saved  %s tokens so far · vs %s r%d", signedTokens(guardInfoSaved(v)), w.Baseline.Label, w.Baseline.Revision)
+	if !guardInfoCacheSourceObserved(v) {
+		savedRow = " saved  " + guardInfoSavingWord(v)
+	}
+	rows := []string{cacheRow, savedRow}
 	rows = append(rows, guardInfoWorkDoneBaselineDetailRows(w)...)
 	rows = append(rows, guardInfoWorkDoneSourceRows(w)...)
 	rows = append(rows, renderInfoCacheAblationRows(ctx)...)

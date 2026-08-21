@@ -177,7 +177,18 @@ func renderGuardInfoVisualBlock(v guardInfoVars, tr *guardInfoTrend, width, heig
 	// Sparkline / gauge widths scale with the pane but stay bounded so the trailing label+value
 	// always has room; on a narrow pane they shrink rather than push the value off-screen.
 	ctx := newGuardInfoPanelCtx(v, tr, width)
-	rows := composeGuardInfoPanels(ctx, guardInfoPanels(), height)
+	observationRows := guardInfoObservationRows(v.Observation)
+	panelHeight := height
+	if panelHeight > 0 {
+		panelHeight -= len(observationRows)
+		if panelHeight < 1 {
+			panelHeight = 1
+		}
+	}
+	rows := composeGuardInfoPanels(ctx, guardInfoPanels(), panelHeight)
+	if len(observationRows) > 0 {
+		rows = append(append(append([]string{}, rows[:1]...), observationRows...), rows[1:]...)
+	}
 	// Height-cap, width-cap and join: see joinPaneRowsTUI for why the width cap is
 	// takeCellsTUI rather than trimTUI (this pane's gauges and sparklines align on interior
 	// spacing that a whitespace-collapsing trim would destroy).
@@ -346,6 +357,9 @@ func guardInfoMult(v guardInfoVars) float64 {
 // yet (the same three states the status line uses), so the gauge bar carries a meaning, not just a
 // number.
 func guardInfoSavingWord(v guardInfoVars) string {
+	if source := guardInfoCacheSourceWord(v); source != "" {
+		return source
+	}
 	if v.VCache == nil {
 		return "no cache yet"
 	}

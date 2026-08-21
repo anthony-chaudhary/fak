@@ -84,6 +84,12 @@ func runInfoFixtureFrame(stdout, stderr io.Writer, path, tab string, frame bool,
 		fmt.Fprintf(stderr, "fak info: parsing fixture %s as a /debug/vars snapshot: %v\n", path, err)
 		return 1
 	}
+	if v.Observation == nil {
+		present := map[string]json.RawMessage{}
+		if err := json.Unmarshal(raw, &present); err == nil {
+			applyLegacyGuardInfoObservation(&v, present, "FIXTURE_LEGACY_DEBUG_VARS")
+		}
+	}
 
 	// Seed the trend with a few identical samples so the sparklines render a flat-but-present line
 	// rather than an empty gutter — a single static snapshot has no history, and a docs frame that
