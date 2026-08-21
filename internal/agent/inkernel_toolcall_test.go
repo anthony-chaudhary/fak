@@ -2,6 +2,8 @@ package agent
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -263,5 +265,68 @@ func TestForcedToolArgumentsFromMessages(t *testing.T) {
 	got, ok := forcedToolArgumentsFromMessages("record_probe", tools, []Message{{Role: RoleUser, Content: "Set hardware to A100-SXM4-40GB. Set passed to the boolean true."}})
 	if !ok || got != `{"hardware":"A100-SXM4-40GB","passed":true}` {
 		t.Fatalf("got %q, %v", got, ok)
+	}
+}
+
+func TestForcedWriteArgumentsCreateCapturedArtifact(t *testing.T) {
+	root := t.TempDir()
+	defer DisarmCodeTools()
+	tools, err := ArmFocusedCodeTools(root)
+	if err != nil {
+		t.Fatalf("arm code tools: %v", err)
+	}
+	assistant := "```html\n<!doctype html><html><body>palette</body></html>\n```"
+	args, ok := forcedToolArgumentsFromMessages("Write", tools, []Message{{Role: RoleUser, Content: "Create index.html with the complete color palette generator."}}, assistant)
+	if !ok {
+		t.Fatal("forced Write arguments were not grounded")
+	}
+	metrics, _ := runCodeToolLoop(t, root, []codeToolScript{{tool: "Write", args: args}})
+	body, err := os.ReadFile(filepath.Join(root, "index.html"))
+	if err != nil {
+		t.Fatalf("read captured artifact: %v", err)
+	}
+	want := "<!doctype html><html><body>palette</body></html>\n"
+	if string(body) != want {
+		t.Fatalf("artifact bytes = %q, want %q", body, want)
+	}
+	if metrics.EngineCalls != 1 {
+		t.Fatalf("EngineCalls=%d, want 1", metrics.EngineCalls)
+	}
+}
+
+func TestForcedWriteArgumentsRejectUngroundedSuccessClaim(t *testing.T) {
+	tools := []ToolDef{{Type: "function", Function: ToolDefFunction{Name: "Write", Parameters: json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"content":{"type":"string"},"mode":{"type":"string"}},"required":["file_path","content","mode"]}`)}}}
+	if args, ok := forcedToolArgumentsFromMessages("Write", tools, []Message{{Role: RoleUser, Content: "Create index.html."}}, "Index.html contains a complete color palette generator. Read to verify."); ok {
+		t.Fatalf("ungrounded success claim synthesized Write args %q", args)
+	}
+}
+
+func TestEnforceForcedWriteRejectsTextualSuccessWithoutArtifactCall(t *testing.T) {
+	choice := json.RawMessage(`{"type":"function","function":{"name":"Write"}}`)
+	tools := []ToolDef{{Type: "function", Function: ToolDefFunction{Name: "Write", Parameters: json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"content":{"type":"string"},"mode":{"type":"string"}},"required":["file_path","content","mode"]}`)}}}
+	comp := &Completion{Message: Message{Role: RoleAssistant, Content: "Index.html contains a complete color palette generator. Read to verify."}}
+	got := enforceForcedToolChoice(comp, choice, tools, []Message{{Role: RoleUser, Content: "Create index.html."}})
+	if !got.ToolCallsDropped || len(got.Message.ToolCalls) != 0 {
+		t.Fatalf("forced Write failure was not closed: %+v", got)
+	}
+}
+
+func TestEnforceForcedWriteLiftsGeneratedArtifact(t *testing.T) {
+	choice := json.RawMessage(`{"type":"function","function":{"name":"Write"}}`)
+	tools := []ToolDef{{Type: "function", Function: ToolDefFunction{Name: "Write", Parameters: json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"content":{"type":"string"},"mode":{"type":"string"}},"required":["file_path","content","mode"]}`)}}}
+	comp := &Completion{Message: Message{Role: RoleAssistant, Content: "```html\n<!doctype html><html></html>\n```"}}
+	got := enforceForcedToolChoice(comp, choice, tools, []Message{{Role: RoleUser, Content: "Create index.html."}})
+	if got.ToolCallsDropped || len(got.Message.ToolCalls) != 1 || got.Message.ToolCalls[0].Function.Name != "Write" {
+		t.Fatalf("generated artifact was not lifted: %+v", got)
+	}
+}
+
+func TestEnforceForcedWriteRejectsTruncatedArtifact(t *testing.T) {
+	choice := json.RawMessage(`{"type":"function","function":{"name":"Write"}}`)
+	tools := []ToolDef{{Type: "function", Function: ToolDefFunction{Name: "Write", Parameters: json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"content":{"type":"string"},"mode":{"type":"string"}},"required":["file_path","content","mode"]}`)}}}
+	comp := &Completion{Message: Message{Role: RoleAssistant, Content: "<!doctype html><html>"}, FinishReason: "length"}
+	got := enforceForcedToolChoice(comp, choice, tools, []Message{{Role: RoleUser, Content: "Create index.html."}})
+	if !got.ToolCallsDropped || len(got.Message.ToolCalls) != 0 {
+		t.Fatalf("truncated artifact was not refused: %+v", got)
 	}
 }

@@ -204,7 +204,29 @@ func renderTranscriptTools(messages []Message, tools []ToolDef) string {
 	return b.String()
 }
 
-func forcedToolArgumentsFromMessages(name string, tools []ToolDef, messages []Message) (string, bool) {
+func enforceForcedToolChoice(comp *Completion, choice json.RawMessage, tools []ToolDef, messages []Message) *Completion {
+	if comp == nil || len(comp.Message.ToolCalls) > 0 {
+		return comp
+	}
+	if comp.FinishReason == "length" {
+		comp.ToolCallsDropped = true
+		return comp
+	}
+	name := inKernelForcedToolName(choice)
+	if name == "" {
+		return comp
+	}
+	args, ok := forcedToolArgumentsFromMessages(name, tools, messages, comp.Message.Content)
+	if !ok {
+		comp.ToolCallsDropped = true
+		return comp
+	}
+	comp.Message.Content = ""
+	comp.Message.ToolCalls = []ToolCall{{ID: "call_forced_0", Type: "function", Function: Func{Name: name, Arguments: args}}}
+	comp.FinishReason = "tool_calls"
+	return comp
+}
+func forcedToolArgumentsFromMessages(name string, tools []ToolDef, messages []Message, assistantContent ...string) (string, bool) {
 	var required []string
 	for _, tool := range tools {
 		if tool.Function.Name != name {
@@ -232,6 +254,9 @@ func forcedToolArgumentsFromMessages(name string, tools []ToolDef, messages []Me
 		pattern := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(key) + `\b\s+(?:to\s+|=\s*|is\s+)?(?:the\s+boolean\s+)?("[^"]*"|'[^']*'|[^.,;\n]+)`)
 		match := pattern.FindStringSubmatch(text)
 		if len(match) < 2 {
+			if name == "Write" {
+				return forcedWriteArguments(text, assistantContent)
+			}
 			return "", false
 		}
 		valueText := strings.Trim(strings.TrimSpace(match[1]), `"'`)
@@ -242,6 +267,24 @@ func forcedToolArgumentsFromMessages(name string, tools []ToolDef, messages []Me
 		args[key] = value
 	}
 	encoded, err := json.Marshal(args)
+	return string(encoded), err == nil
+}
+
+func forcedWriteArguments(userText string, assistantContent []string) (string, bool) {
+	pathMatch := regexp.MustCompile(`(?i)(?:^|[\s"''` + "`" + `])([a-z0-9_./\\-]+\.(?:html?|css|js|json|md|txt|go|py|rs|java|c|cc|cpp|h|hpp|yaml|yml|toml))(?:$|[\s"''` + "`" + `,.;:])`).FindStringSubmatch(userText)
+	if len(pathMatch) < 2 || len(assistantContent) == 0 {
+		return "", false
+	}
+	content := strings.TrimSpace(assistantContent[len(assistantContent)-1])
+	if fenced := regexp.MustCompile("(?s)```(?:[a-zA-Z0-9_+-]+)?\\s*\\n(.*?)```").FindStringSubmatch(content); len(fenced) == 2 {
+		content = fenced[1]
+	} else if !strings.HasPrefix(strings.ToLower(content), "<!doctype") && !strings.HasPrefix(strings.ToLower(content), "<html") {
+		return "", false
+	}
+	if strings.TrimSpace(content) == "" {
+		return "", false
+	}
+	encoded, err := json.Marshal(map[string]any{"file_path": pathMatch[1], "content": content, "mode": "create"})
 	return string(encoded), err == nil
 }
 
