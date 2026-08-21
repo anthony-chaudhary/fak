@@ -1,17 +1,17 @@
-// Package idempotency gives retryable mutating tool ops a keyed, time-windowed
-// dedup so a retried call after a hang/timeout is a safe no-op that returns the
-// ORIGINAL result instead of double-applying (#2093, part of epic #2063).
+// Package idempotency gives mutating tool ops a durable keyed state machine that
+// replays proven results and blocks ambiguous outcomes until read-back resolves
+// whether the effect landed (#2093, #8284, part of epic #2063).
 //
 // The problem: after a tool hang an agent often retries, but a non-idempotent op
 // (create a GitHub issue, push, append to a ledger) can double-apply if the first
 // attempt actually landed before the hang signal reached the caller. The caller
 // cannot tell, so it either risks a duplicate or wastes a turn checking.
 //
-// The fix: derive an idempotency key from the op label + a caller-supplied token
-// and record each applied op in an append-only JSONL ledger. A repeated key seen
-// within the dedup window replays the recorded result WITHOUT re-running the op;
-// a fresh key (a genuinely new op) proceeds and is recorded. The ledger is on
-// disk, so a post-hang retry that arrives in a FRESH PROCESS still dedupes.
+// The fix: derive an idempotency key from the op label + a caller-supplied token,
+// fsync a PENDING intent before apply, and append the outcome to a JSONL ledger.
+// A response-loss error becomes UNKNOWN_APPLIED and never expires into a retry;
+// operation-specific read-back must prove APPLIED or ABSENT first. The ledger is
+// on disk, so this fail-closed behavior survives a fresh process.
 //
 // This is the pure core (window logic + ledger). The thin CLI shell that turns it
 // into an executor a real op can ride is cmd/fak/idempotency.go (`fak
@@ -49,10 +49,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
 
-// DefaultWindow is the dedup horizon: a key applied within this span replays; an
-// older record is treated as expired so a reused token eventually proceeds again.
-// A post-hang retry arrives seconds-to-minutes later, so a generous default still
-// catches it while never pinning a token forever.
+// DefaultWindow is the dedup horizon for proven APPLIED results. Ambiguous PENDING
+// and UNKNOWN_APPLIED records never expire into automatic reapplication.
 const DefaultWindow = 24 * time.Hour
 
 // DefaultLockWait is how long Do polls for the per-ledger cross-process lock before
@@ -68,19 +66,52 @@ const DefaultLockWait = 2 * time.Minute
 // rather than risk a double-apply by proceeding unlocked.
 var ErrBusy = errors.New("idempotency: another process holds the ledger lock")
 
+// ErrUnknownApplied means apply may have landed and the same key is blocked until
+// Resolve proves the effect applied or absent.
+var ErrUnknownApplied = errors.New("idempotency: outcome UNKNOWN_APPLIED; resolution required")
+
+// ErrNotFound means no durable intent or outcome exists for a key.
+var ErrNotFound = errors.New("idempotency: key not found")
+
 // lockPoll is the gap between flock.TryLock attempts while waiting for the ledger
 // lock. flock is non-blocking by design (see internal/flock), so a blocking
 // acquire IS this poll — the same idiom loopmgr.withLedgerLock uses.
 const lockPoll = 25 * time.Millisecond
 
-// Record is one applied op: the derived key, the op label, the captured original
-// result, and when it was applied (unix nanoseconds). One JSON object per ledger
-// line.
+// State is one durable stage in a key's append-only state machine.
+type State string
+
+const (
+	StatePending        State = "PENDING"
+	StateUnknownApplied State = "UNKNOWN_APPLIED"
+	StateApplied        State = "APPLIED"
+	StateProvenAbsent   State = "PROVEN_ABSENT"
+)
+
+// Resolution is an operation-specific read-back verdict.
+type Resolution string
+
+const (
+	ResolutionApplied Resolution = "APPLIED"
+	ResolutionAbsent  Resolution = "ABSENT"
+	ResolutionUnknown Resolution = "UNKNOWN"
+)
+
+// Readback resolves an ambiguous intent using operation-specific state. APPLIED
+// carries the original result to replay; ABSENT permits one new apply; UNKNOWN
+// keeps the key blocked.
+type Readback func(Record) (Resolution, string, error)
+
+// Record is one state transition. AppliedAt is retained for compatibility with
+// success-only ledgers written before states existed; a missing State on read is
+// interpreted as APPLIED.
 type Record struct {
 	Key       string `json:"key"`
 	Op        string `json:"op"`
-	Result    string `json:"result"`
-	AppliedAt int64  `json:"applied_at"`
+	State     State  `json:"state,omitempty"`
+	Result    string `json:"result,omitempty"`
+	AppliedAt int64  `json:"applied_at,omitempty"`
+	UpdatedAt int64  `json:"updated_at,omitempty"`
 }
 
 // Key derives a stable idempotency key from an op label and a caller-supplied
@@ -108,7 +139,11 @@ type Store struct {
 	LockWait time.Duration
 
 	mu   sync.Mutex
-	recs map[string]Record // key -> latest applied record
+	recs map[string]Record // key -> latest durable state
+
+	// appendRecord is a package-test fault seam for post-apply ledger failures.
+	// Production stores leave it nil and use appendLocked.
+	appendRecord func(Record) error
 }
 
 // Open loads (or begins) the ledger at path with the given dedup window. A
@@ -154,11 +189,24 @@ func (s *Store) loadLocked() error {
 		if r.Key == "" {
 			continue
 		}
-		if prev, ok := s.recs[r.Key]; !ok || r.AppliedAt >= prev.AppliedAt {
+		if r.State == "" {
+			r.State = StateApplied
+		}
+		if r.UpdatedAt == 0 {
+			r.UpdatedAt = r.AppliedAt
+		}
+		if prev, ok := s.recs[r.Key]; !ok || recordTime(r) >= recordTime(prev) {
 			s.recs[r.Key] = r
 		}
 	}
 	return nil
+}
+
+func recordTime(r Record) int64 {
+	if r.UpdatedAt != 0 {
+		return r.UpdatedAt
+	}
+	return r.AppliedAt
 }
 
 // withLock runs fn while holding an exclusive cross-process advisory lock on
@@ -207,8 +255,7 @@ func (s *Store) withLock(fn func() error) error {
 	return fn()
 }
 
-// Lookup returns the recorded result for key if it was applied within the window,
-// else (zero, false). An expired record reports a miss so the op proceeds again.
+// Lookup returns a proven result if key is APPLIED within the dedup window.
 func (s *Store) Lookup(key string) (Record, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -217,7 +264,7 @@ func (s *Store) Lookup(key string) (Record, bool) {
 
 func (s *Store) lookupLocked(key string) (Record, bool) {
 	r, ok := s.recs[key]
-	if !ok {
+	if !ok || r.State != StateApplied {
 		return Record{}, false
 	}
 	if s.now().Sub(time.Unix(0, r.AppliedAt)) > s.window {
@@ -226,15 +273,28 @@ func (s *Store) lookupLocked(key string) (Record, bool) {
 	return r, true
 }
 
-// Do runs apply for a fresh or expired key and records its result, or replays the
-// recorded result WITHOUT calling apply for a key already applied within the
-// window (replayed=true). This is the executor-dedup a retried op rides: the first
-// attempt applies and records; a post-hang retry with the same key is a safe
-// no-op that returns the original result, so a non-idempotent op never
-// double-applies.
-//
-// An apply error is returned and nothing is recorded, so a failed op stays
-// retryable (a failure is not a landed effect to dedupe).
+// Status reloads the ledger under the cross-process lock and returns the latest
+// durable state. Unlike Lookup, status does not hide expired or ambiguous rows.
+func (s *Store) Status(key string) (Record, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var rec Record
+	var ok bool
+	err := s.withLock(func() error {
+		if err := s.loadLocked(); err != nil {
+			return err
+		}
+		rec, ok = s.recs[key]
+		return nil
+	})
+	return rec, ok, err
+}
+
+// Do fsyncs PENDING before apply. A proven APPLIED result within the window is
+// replayed; PROVEN_ABSENT permits one new apply; PENDING or UNKNOWN_APPLIED fails
+// closed with ErrUnknownApplied. Any apply error, or a failure to record a
+// successful apply, transitions to UNKNOWN_APPLIED before returning.
 //
 // The whole check-and-apply runs under a cross-process lock on <ledger>.lock, and
 // re-reads the ledger once inside it, so two CONCURRENT same-key applies in
@@ -254,25 +314,130 @@ func (s *Store) Do(key, op string, apply func() (string, error)) (result string,
 		if err := s.loadLocked(); err != nil {
 			return err
 		}
-		if r, ok := s.lookupLocked(key); ok {
-			res, rep = r.Result, true
-			return nil
+		if r, ok := s.recs[key]; ok {
+			switch r.State {
+			case StateApplied:
+				if applied, fresh := s.lookupLocked(key); fresh {
+					res, rep = applied.Result, true
+					return nil
+				}
+			case StatePending, StateUnknownApplied:
+				return unknownAppliedError(key, nil)
+			case StateProvenAbsent:
+				// Operation-specific read-back proved retry is safe.
+			default:
+				return fmt.Errorf("idempotency: key %s has invalid state %q", key, r.State)
+			}
+		}
+
+		now := s.now().UnixNano()
+		intent := Record{Key: key, Op: op, State: StatePending, UpdatedAt: now}
+		if err := s.appendAndRememberLocked(intent); err != nil {
+			return err
 		}
 		out, err := apply()
 		if err != nil {
-			return err
+			unknown := Record{Key: key, Op: op, State: StateUnknownApplied, UpdatedAt: s.now().UnixNano()}
+			persistErr := s.appendAndRememberLocked(unknown)
+			return unknownAppliedError(key, errors.Join(err, persistErr))
 		}
-		rec := Record{Key: key, Op: op, Result: out, AppliedAt: s.now().UnixNano()}
-		if err := s.appendLocked(rec); err != nil {
-			return err
+		appliedAt := s.now().UnixNano()
+		rec := Record{
+			Key: key, Op: op, State: StateApplied, Result: out,
+			AppliedAt: appliedAt, UpdatedAt: appliedAt,
 		}
-		s.recs[key] = rec
+		if err := s.appendAndRememberLocked(rec); err != nil {
+			unknown := Record{Key: key, Op: op, State: StateUnknownApplied, UpdatedAt: s.now().UnixNano()}
+			persistErr := s.appendAndRememberLocked(unknown)
+			return unknownAppliedError(key, errors.Join(err, persistErr))
+		}
 		res, rep = out, false
 		return nil
 	}); err != nil {
 		return "", false, err
 	}
 	return res, rep, nil
+}
+
+// Resolve records an operation-specific read-back verdict for an ambiguous key.
+// APPLIED makes the supplied result replayable; ABSENT permits one new apply;
+// UNKNOWN and read-back failures retain the fail-closed state.
+func (s *Store) Resolve(key string, readback Readback) (Record, error) {
+	if readback == nil {
+		return Record{}, errors.New("idempotency: nil read-back resolver")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var resolved Record
+	err := s.withLock(func() error {
+		if err := s.loadLocked(); err != nil {
+			return err
+		}
+		current, ok := s.recs[key]
+		if !ok {
+			return fmt.Errorf("%w: %s", ErrNotFound, key)
+		}
+		if current.State == StateApplied || current.State == StateProvenAbsent {
+			resolved = current
+			return nil
+		}
+		if current.State != StatePending && current.State != StateUnknownApplied {
+			return fmt.Errorf("idempotency: key %s has invalid state %q", key, current.State)
+		}
+
+		verdict, result, readErr := readback(current)
+		if readErr != nil {
+			return s.retainUnknownLocked(current, readErr)
+		}
+		now := s.now().UnixNano()
+		switch verdict {
+		case ResolutionApplied:
+			resolved = Record{
+				Key: key, Op: current.Op, State: StateApplied, Result: result,
+				AppliedAt: now, UpdatedAt: now,
+			}
+		case ResolutionAbsent:
+			resolved = Record{Key: key, Op: current.Op, State: StateProvenAbsent, UpdatedAt: now}
+		case ResolutionUnknown:
+			return s.retainUnknownLocked(current, nil)
+		default:
+			return s.retainUnknownLocked(current, fmt.Errorf("idempotency: invalid resolution %q", verdict))
+		}
+		if err := s.appendAndRememberLocked(resolved); err != nil {
+			return s.retainUnknownLocked(current, err)
+		}
+		return nil
+	})
+	return resolved, err
+}
+
+func (s *Store) retainUnknownLocked(current Record, cause error) error {
+	unknown := Record{
+		Key: current.Key, Op: current.Op, State: StateUnknownApplied,
+		UpdatedAt: s.now().UnixNano(),
+	}
+	persistErr := s.appendAndRememberLocked(unknown)
+	return unknownAppliedError(current.Key, errors.Join(cause, persistErr))
+}
+
+func unknownAppliedError(key string, cause error) error {
+	if cause == nil {
+		return fmt.Errorf("%w for key %s", ErrUnknownApplied, key)
+	}
+	return fmt.Errorf("%w for key %s: %w", ErrUnknownApplied, key, cause)
+}
+
+func (s *Store) appendAndRememberLocked(rec Record) error {
+	appendRecord := s.appendRecord
+	if appendRecord == nil {
+		appendRecord = s.appendLocked
+	}
+	if err := appendRecord(rec); err != nil {
+		return err
+	}
+	s.recs[rec.Key] = rec
+	return nil
 }
 
 func (s *Store) appendLocked(rec Record) error {
@@ -292,6 +457,9 @@ func (s *Store) appendLocked(rec Record) error {
 	defer f.Close()
 	if _, err := f.Write(append(line, '\n')); err != nil {
 		return fmt.Errorf("idempotency: append ledger %s: %w", s.path, err)
+	}
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("idempotency: fsync ledger %s: %w", s.path, err)
 	}
 	return nil
 }

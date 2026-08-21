@@ -3,7 +3,9 @@ package idempotency
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -121,10 +123,7 @@ func TestWindowExpiryLetsReusedKeyProceed(t *testing.T) {
 	}
 }
 
-// TestApplyErrorIsNotRecorded proves a failed op stays retryable: an apply error
-// records nothing, so the next attempt with the same key runs the op instead of
-// replaying a phantom "success".
-func TestApplyErrorIsNotRecorded(t *testing.T) {
+func TestMarkerThenErrorBlocksRetryUntilProvenApplied(t *testing.T) {
 	ledger := filepath.Join(t.TempDir(), "idem.jsonl")
 	store, err := Open(ledger, DefaultWindow)
 	if err != nil {
@@ -132,15 +131,257 @@ func TestApplyErrorIsNotRecorded(t *testing.T) {
 	}
 	key := Key("issue-create", "tok")
 	boom := errors.New("hang")
-	if _, _, err := store.Do(key, "issue-create", func() (string, error) { return "", boom }); !errors.Is(err, boom) {
-		t.Fatalf("Do surfaced %v, want the apply error", err)
+	var markers int
+	if _, _, err := store.Do(key, "issue-create", func() (string, error) {
+		markers++
+		return "", boom
+	}); !errors.Is(err, ErrUnknownApplied) || !errors.Is(err, boom) {
+		t.Fatalf("Do error = %v, want UNKNOWN_APPLIED wrapping apply error", err)
 	}
-	if _, ok := store.Lookup(key); ok {
-		t.Fatal("a failed apply must not record a dedup entry")
+	rec, ok, err := store.Status(key)
+	if err != nil || !ok || rec.State != StateUnknownApplied {
+		t.Fatalf("Status = (%+v, %v, %v), want UNKNOWN_APPLIED", rec, ok, err)
 	}
-	res, replayed, err := store.Do(key, "issue-create", func() (string, error) { return "ok", nil })
-	if err != nil || replayed || res != "ok" {
-		t.Fatalf("retry after failure: res=%q replayed=%v err=%v, want a fresh apply", res, replayed, err)
+	if _, _, err := store.Do(key, "issue-create", func() (string, error) {
+		markers++
+		return "duplicate", nil
+	}); !errors.Is(err, ErrUnknownApplied) {
+		t.Fatalf("retry error = %v, want UNKNOWN_APPLIED", err)
+	}
+	if markers != 1 {
+		t.Fatalf("ambiguous retry applied %d times, want 1", markers)
+	}
+	if _, err := store.Resolve(key, func(Record) (Resolution, string, error) {
+		return ResolutionApplied, "created issue #1", nil
+	}); err != nil {
+		t.Fatalf("Resolve applied: %v", err)
+	}
+	res, replayed, err := store.Do(key, "issue-create", func() (string, error) {
+		markers++
+		return "duplicate", nil
+	})
+	if err != nil || !replayed || res != "created issue #1" {
+		t.Fatalf("resolved replay = (%q, %v, %v)", res, replayed, err)
+	}
+	if markers != 1 {
+		t.Fatalf("proven-applied key re-executed: markers=%d", markers)
+	}
+}
+
+func TestPendingIntentExistsBeforeApplyAndSurvivesReopen(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "idem.jsonl")
+	store, err := Open(ledger, DefaultWindow)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	key := Key("push", "intent")
+	if _, _, err := store.Do(key, "push", func() (string, error) {
+		b, readErr := os.ReadFile(ledger)
+		if readErr != nil {
+			t.Fatalf("read intent during apply: %v", readErr)
+		}
+		if !strings.Contains(string(b), `"state":"PENDING"`) {
+			t.Fatalf("ledger before apply lacks PENDING intent: %s", b)
+		}
+		return "ok", nil
+	}); err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+
+	crashKey := Key("push", "crash-after-intent")
+	if err := store.appendLocked(Record{
+		Key: crashKey, Op: "push", State: StatePending, UpdatedAt: time.Now().UnixNano(),
+	}); err != nil {
+		t.Fatalf("append crash intent: %v", err)
+	}
+	reopened, err := Open(ledger, DefaultWindow)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	calls := 0
+	if _, _, err := reopened.Do(crashKey, "push", func() (string, error) {
+		calls++
+		return "duplicate", nil
+	}); !errors.Is(err, ErrUnknownApplied) {
+		t.Fatalf("crash retry error = %v, want UNKNOWN_APPLIED", err)
+	}
+	if calls != 0 {
+		t.Fatalf("crash-after-intent retry called apply %d times", calls)
+	}
+}
+
+func TestApplySuccessThenLedgerErrorStaysUnknown(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "idem.jsonl")
+	store, err := Open(ledger, DefaultWindow)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	realAppend := store.appendLocked
+	ledgerErr := errors.New("success record fsync failed")
+	store.appendRecord = func(rec Record) error {
+		if rec.State == StateApplied {
+			return ledgerErr
+		}
+		return realAppend(rec)
+	}
+	key := Key("provision", "tok")
+	calls := 0
+	if _, _, err := store.Do(key, "provision", func() (string, error) {
+		calls++
+		return "vm-1", nil
+	}); !errors.Is(err, ErrUnknownApplied) || !errors.Is(err, ledgerErr) {
+		t.Fatalf("Do error = %v, want UNKNOWN_APPLIED wrapping ledger failure", err)
+	}
+	reopened, err := Open(ledger, DefaultWindow)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if _, _, err := reopened.Do(key, "provision", func() (string, error) {
+		calls++
+		return "vm-2", nil
+	}); !errors.Is(err, ErrUnknownApplied) {
+		t.Fatalf("retry error = %v, want UNKNOWN_APPLIED", err)
+	}
+	if calls != 1 {
+		t.Fatalf("post-apply ledger failure re-executed: calls=%d", calls)
+	}
+}
+
+func TestProvenAbsentAllowsOneFreshApply(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "idem.jsonl")
+	store, err := Open(ledger, DefaultWindow)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	key := Key("append", "tok")
+	calls := 0
+	if _, _, err := store.Do(key, "append", func() (string, error) {
+		calls++
+		return "", errors.New("transport lost")
+	}); !errors.Is(err, ErrUnknownApplied) {
+		t.Fatalf("ambiguous apply: %v", err)
+	}
+	if _, err := store.Resolve(key, func(Record) (Resolution, string, error) {
+		return ResolutionAbsent, "", nil
+	}); err != nil {
+		t.Fatalf("Resolve absent: %v", err)
+	}
+	if rec, ok, err := store.Status(key); err != nil || !ok || rec.State != StateProvenAbsent {
+		t.Fatalf("resolved status = (%+v, %v, %v), want PROVEN_ABSENT", rec, ok, err)
+	}
+	res, replayed, err := store.Do(key, "append", func() (string, error) {
+		calls++
+		return "appended", nil
+	})
+	if err != nil || replayed || res != "appended" || calls != 2 {
+		t.Fatalf("retry after proven absent = (%q, %v, %v), calls=%d", res, replayed, err, calls)
+	}
+}
+
+func TestStillUnknownResolutionRetainsBlock(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "idem.jsonl")
+	store, err := Open(ledger, DefaultWindow)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	key := Key("provision", "readback-unknown")
+	calls := 0
+	if _, _, err := store.Do(key, "provision", func() (string, error) {
+		calls++
+		return "", errors.New("response lost")
+	}); !errors.Is(err, ErrUnknownApplied) {
+		t.Fatalf("ambiguous apply: %v", err)
+	}
+	if _, err := store.Resolve(key, func(Record) (Resolution, string, error) {
+		return ResolutionUnknown, "", nil
+	}); !errors.Is(err, ErrUnknownApplied) {
+		t.Fatalf("unknown read-back error = %v, want UNKNOWN_APPLIED", err)
+	}
+	if _, _, err := store.Do(key, "provision", func() (string, error) {
+		calls++
+		return "duplicate", nil
+	}); !errors.Is(err, ErrUnknownApplied) {
+		t.Fatalf("retry after unknown read-back = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("unknown read-back allowed reapply: calls=%d", calls)
+	}
+}
+
+func TestUnknownNeverExpiresIntoReapplication(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "idem.jsonl")
+	clk := &fixedClock{t: time.Unix(1_700_000_000, 0)}
+	store, err := OpenClock(ledger, time.Hour, clk.now)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	key := Key("push", "unknown-expiry")
+	calls := 0
+	if _, _, err := store.Do(key, "push", func() (string, error) {
+		calls++
+		return "", errors.New("connection reset")
+	}); !errors.Is(err, ErrUnknownApplied) {
+		t.Fatalf("ambiguous apply: %v", err)
+	}
+	clk.add(10 * time.Hour)
+	if _, _, err := store.Do(key, "push", func() (string, error) {
+		calls++
+		return "duplicate", nil
+	}); !errors.Is(err, ErrUnknownApplied) {
+		t.Fatalf("expired unknown error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expired unknown re-applied: calls=%d", calls)
+	}
+}
+
+func TestConcurrentAmbiguousApplyRunsOnce(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "idem.jsonl")
+	store1, err := Open(ledger, DefaultWindow)
+	if err != nil {
+		t.Fatalf("Open store1: %v", err)
+	}
+	store2, err := Open(ledger, DefaultWindow)
+	if err != nil {
+		t.Fatalf("Open store2: %v", err)
+	}
+	key := Key("issue-create", "concurrent-unknown")
+	var calls int32
+	apply := func() (string, error) {
+		atomic.AddInt32(&calls, 1)
+		return "", errors.New("response lost")
+	}
+	results := make(chan error, 2)
+	go func() { _, _, err := store1.Do(key, "issue-create", apply); results <- err }()
+	go func() { _, _, err := store2.Do(key, "issue-create", apply); results <- err }()
+	for i := 0; i < 2; i++ {
+		if err := <-results; !errors.Is(err, ErrUnknownApplied) {
+			t.Fatalf("concurrent Do error = %v, want UNKNOWN_APPLIED", err)
+		}
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("concurrent ambiguous apply ran %d times, want 1", got)
+	}
+}
+
+func TestLegacySuccessRecordStillReplays(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "idem.jsonl")
+	key := Key("issue-create", "legacy")
+	legacy := fmt.Sprintf(`{"key":%q,"op":"issue-create","result":"issue #1","applied_at":%d}`+"\n", key, time.Now().UnixNano())
+	if err := os.WriteFile(ledger, []byte(legacy), 0o644); err != nil {
+		t.Fatalf("write legacy ledger: %v", err)
+	}
+	store, err := Open(ledger, DefaultWindow)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	calls := 0
+	res, replayed, err := store.Do(key, "issue-create", func() (string, error) {
+		calls++
+		return "duplicate", nil
+	})
+	if err != nil || !replayed || res != "issue #1" || calls != 0 {
+		t.Fatalf("legacy replay = (%q, %v, %v), calls=%d", res, replayed, err, calls)
 	}
 }
 
