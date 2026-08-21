@@ -39,6 +39,62 @@ reading them in the wrong order.
 > page and [`START-HERE.md`](START-HERE.md) routes a job you already have; this page is the
 > *concept* front door.
 
+## Learn without mysteries
+
+Do not memorize fak's nouns first. Use the same five-step loop whenever you want to
+understand or change a process:
+
+1. **Predict** one observable result in plain language.
+2. **Run** the smallest real command that can prove you wrong.
+3. **Locate** the winning rule in the output and then in the named config or source.
+4. **Adjust one input** while keeping everything else fixed.
+5. **Rerun** and explain why the result changed. If you cannot, the mechanism is still a
+   mystery; follow the winning rule one level deeper before adding machinery.
+
+That loop separates three questions that are easy to conflate:
+
+- **What happened?** Read the verdict or measurement.
+- **Why did it happen?** Read the winning rung and reason; `DEFER` means “this rung did
+  not decide,” not “allow.”
+- **What can I change?** Change the input owned by that winning rung, not an unrelated
+  downstream setting.
+
+### Five-minute policy lab: predict, inspect, adjust
+
+This lab needs no key, model, or GPU. It uses the real policy fold rather than a diagram.
+Start by predicting all three outcomes, then run:
+
+```powershell
+fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}" --explain
+fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}" --explain
+fak preflight --policy examples/customer-support-readonly-policy.json --tool mystery_action --args "{}" --explain
+```
+
+The expected winners are deliberately different:
+
+| Tool | Result | Plain-language reason | Policy input to inspect |
+|---|---|---|---|
+| `refund_payment` | `DENY / POLICY_BLOCK` | The manifest names this tool in `deny`. | `deny.refund_payment` |
+| `search_kb` | `ALLOW` | The tool matches the `search_` allow prefix. | `allow_prefix` |
+| `mystery_action` | `DENY / DEFAULT_DENY` | No rule grants the unknown tool. | `posture: fail_closed` |
+
+Now change exactly one policy fact in a temporary copy and predict the new result:
+
+```powershell
+$p = Get-Content examples/customer-support-readonly-policy.json | ConvertFrom-Json
+$p.allow += "mystery_action"
+$tmp = Join-Path $env:TEMP "fak-learning-policy.json"
+$p | ConvertTo-Json -Depth 10 | Set-Content $tmp
+fak preflight --policy $tmp --tool mystery_action --args "{}" --explain
+```
+
+The last verdict should be `ALLOW`: the same call now has one affirmative policy rule.
+The original manifest is untouched. To continue investigating, use the trace's winner:
+`adjudicator.Adjudicator` leads to [`internal/adjudicator`](internal/adjudicator), while the
+manifest format and safe editing workflow live in
+[`docs/fak/policy-guide.md`](docs/fak/policy-guide.md). This is the pattern for every later
+course: predict → run → locate → adjust one thing → rerun.
+
 ## How to read a course
 
 Each course is one entry shaped like a syllabus line:
