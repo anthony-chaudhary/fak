@@ -18,6 +18,14 @@ import (
 	"time"
 )
 
+const proxyResponseHeaderTimeout = 30 * time.Second
+
+var fallbackProxyClient = func() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = proxyResponseHeaderTimeout
+	return &http.Client{Transport: transport}
+}()
+
 type Proxy struct {
 	Backend *url.URL
 	Ledger  string
@@ -64,7 +72,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	req.Header.Set("X-Fak-Observation-ID", id)
 	client := p.Client
 	if client == nil {
-		client = http.DefaultClient
+		client = fallbackProxyClient
 	}
 	resp, err := client.Do(req)
 	if err != nil {

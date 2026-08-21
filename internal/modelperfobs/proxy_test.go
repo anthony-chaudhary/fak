@@ -68,6 +68,19 @@ func TestProxyCapturesStreamingTimingAndUsage(t *testing.T) {
 	}
 }
 
+func TestFallbackProxyClientBoundsHeadersWithoutCappingStreams(t *testing.T) {
+	if fallbackProxyClient.Timeout != 0 {
+		t.Fatalf("fallback client timeout=%v, want no whole-stream deadline", fallbackProxyClient.Timeout)
+	}
+	transport, ok := fallbackProxyClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("fallback transport=%T, want *http.Transport", fallbackProxyClient.Transport)
+	}
+	if transport.DialContext == nil || transport.TLSHandshakeTimeout <= 0 || transport.ResponseHeaderTimeout != proxyResponseHeaderTimeout {
+		t.Fatalf("fallback transport lacks bounded connect/header deadlines: %+v", transport)
+	}
+}
+
 func TestSummarizeNamesPrefillOrQueueBottleneck(t *testing.T) {
 	rows := []Observation{
 		{Schema: Schema, Status: 200, PromptTokens: 4000, CompletionTokens: 20, DurationMS: 2500, TTFTMS: 1800, TPOTMS: 36, OutputTokensPerSec: 27},
