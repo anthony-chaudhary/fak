@@ -69,12 +69,13 @@ type hookObservation struct {
 	Outcome    string    `json:"outcome"`
 }
 type dispatchedCall struct {
-	CallID      string
-	SessionID   string
-	Workspace   string
-	ToolName    string
-	Completed   bool
-	CompletedAt time.Time
+	CallID       string
+	SessionID    string
+	Workspace    string
+	ToolName     string
+	DispatchedAt time.Time
+	Completed    bool
+	CompletedAt  time.Time
 }
 
 type stopLifecycleRow struct {
@@ -355,7 +356,7 @@ func buildHookCensus(home, logHome, workspace, threadID, observations string, si
 	}
 	r := hookCensusReport{Schema: codexHookCensusSchema, GeneratedAt: now, Window: since.String(), PostToolSettlement: codexPostToolSettlementWindow.String(), CodexHome: absHome, LogStore: absLog, Workspace: absWork, ObservationStore: absObs, ProfileMatch: samePath(absHome, absLog), DispatchedCalls: len(calls), DispatchSource: filepath.Join(absLog, "sessions"), NewestReceipt: newest, TelemetryFresh: !newest.IsZero() && now.Sub(newest) <= 5*time.Minute}
 	r.PreToolUse = phaseCountsForCalls(calls, receipts["pretool"], absHome, absWork, absObs)
-	r.PostToolUse = phaseCountsForCalls(postToolEligibleDispatches(calls, now.Add(-codexPostToolSettlementWindow)), receipts["posttool"], absHome, absWork, absObs)
+	r.PostToolUse = postToolPhaseCounts(postToolEligibleDispatches(calls, now.Add(-codexPostToolSettlementWindow)), receipts["posttool"], absHome, absWork, absObs)
 	if !r.TelemetryFresh {
 		r.Reasons = append(r.Reasons, "STALE_TELEMETRY")
 	}
@@ -446,6 +447,76 @@ func codexPostToolMatcher(toolName string) bool {
 	}
 }
 
+func postToolPhaseCounts(calls []dispatchedCall, obs []hookObservation, profile, workspace, source string) lifecycleCounts {
+	c := lifecycleCounts{Denominator: len(calls), Source: source}
+	filtered := make([]hookObservation, 0, len(obs))
+	byExact := make(map[string]hookObservation, len(obs))
+	for _, o := range obs {
+		if !samePath(o.Workspace, workspace) || !samePath(o.Profile, profile) {
+			continue
+		}
+		filtered = append(filtered, o)
+		byExact[o.SessionID+"\x00"+o.CallID] = o
+	}
+
+	// Reserve stable-ID receipts before considering host-generated IDs. Otherwise an
+	// earlier missing call can consume a later call's exact receipt and shift the queue.
+	used := make(map[string]bool, len(filtered))
+	unmatched := make([]dispatchedCall, 0, len(calls))
+	for _, call := range calls {
+		key := call.SessionID + "\x00" + call.CallID
+		if o, ok := byExact[key]; ok {
+			used[key] = true
+			classifyPhase(&c, o)
+			continue
+		}
+		unmatched = append(unmatched, call)
+	}
+	sort.Slice(unmatched, func(i, j int) bool {
+		if unmatched[i].SessionID != unmatched[j].SessionID {
+			return unmatched[i].SessionID < unmatched[j].SessionID
+		}
+		return unmatched[i].CompletedAt.Before(unmatched[j].CompletedAt)
+	})
+	sort.Slice(filtered, func(i, j int) bool {
+		if filtered[i].SessionID != filtered[j].SessionID {
+			return filtered[i].SessionID < filtered[j].SessionID
+		}
+		return filtered[i].TS.Before(filtered[j].TS)
+	})
+	for _, call := range unmatched {
+		for _, o := range filtered {
+			observationKey := o.SessionID + "\x00" + o.CallID
+			if used[observationKey] || !postObservationCorrelates(call, o) {
+				continue
+			}
+			used[observationKey] = true
+			classifyPhase(&c, o)
+			break
+		}
+	}
+	accounted := c.Succeeded + c.Failed + c.Skipped + c.Disabled
+	c.Unknown = len(calls) - accounted
+	return c
+}
+
+func postObservationCorrelates(call dispatchedCall, observation hookObservation) bool {
+	if call.SessionID != observation.SessionID || !strings.HasPrefix(call.CallID, "call_") {
+		return false
+	}
+	if !strings.EqualFold(call.ToolName, "exec") && !strings.EqualFold(call.ToolName, "exec_command") {
+		return false
+	}
+	if !strings.HasPrefix(strings.ToLower(observation.CallID), "exec-") {
+		return false
+	}
+	// DOS timestamps have second precision while rollout completion timestamps have
+	// milliseconds. A Post receipt belongs at completion, never merely after dispatch.
+	earliest := call.CompletedAt.Truncate(time.Second)
+	latest := call.CompletedAt.Add(codexPostToolSettlementWindow)
+	return !observation.TS.Before(earliest) && !observation.TS.After(latest)
+}
+
 func phaseCountsForCalls(calls []dispatchedCall, obs []hookObservation, profile, workspace, source string) lifecycleCounts {
 	c := lifecycleCounts{Denominator: len(calls), Source: source}
 	wanted := make(map[string]dispatchedCall, len(calls))
@@ -525,11 +596,15 @@ func readCodexDispatches(root, workspace, threadID string, after time.Time) ([]d
 			if raw.Type == "session_meta" {
 				var meta struct {
 					CWD       string `json:"cwd"`
+					ID        string `json:"id"`
 					SessionID string `json:"session_id"`
 				}
 				_ = json.Unmarshal(raw.Payload, &meta)
 				rowWorkspace = meta.CWD
-				sessionID = meta.SessionID
+				sessionID = meta.ID
+				if sessionID == "" {
+					sessionID = meta.SessionID
+				}
 			}
 			if raw.Timestamp.Before(after) || raw.Type != "response_item" {
 				continue
@@ -549,7 +624,7 @@ func readCodexDispatches(root, workspace, threadID string, after time.Time) ([]d
 				if id == "" {
 					id = path + fmt.Sprint(len(seen))
 				}
-				seen[sessionID+"\x00"+id] = dispatchedCall{CallID: id, SessionID: sessionID, Workspace: rowWorkspace, ToolName: row.Payload.Name}
+				seen[sessionID+"\x00"+id] = dispatchedCall{CallID: id, SessionID: sessionID, Workspace: rowWorkspace, ToolName: row.Payload.Name, DispatchedAt: row.Timestamp}
 			case "function_call_output", "custom_tool_call_output":
 				key := sessionID + "\x00" + id
 				if call, ok := seen[key]; ok {

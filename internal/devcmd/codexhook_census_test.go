@@ -275,3 +275,55 @@ func TestStopLifecycleDuplicateCompletedRunCountsOnce(t *testing.T) {
 		t.Fatalf("stop=%+v", r.Stop)
 	}
 }
+
+func TestPostToolPhaseCountsCorrelatesHostGeneratedExecIDsAtCompletion(t *testing.T) {
+	when := time.Date(2026, 8, 21, 16, 0, 0, 0, time.UTC)
+	calls := []dispatchedCall{
+		{CallID: "call_host_a", SessionID: "thread", Workspace: `C:\repo`, ToolName: "exec_command", DispatchedAt: when, CompletedAt: when.Add(10 * time.Second)},
+		{CallID: "call_host_b", SessionID: "thread", Workspace: `C:\repo`, ToolName: "exec_command", DispatchedAt: when.Add(time.Second), CompletedAt: when.Add(20 * time.Second)},
+	}
+	observations := []hookObservation{
+		{CallID: "exec-native-b", SessionID: "thread", Workspace: `C:\repo`, Profile: `C:\profile`, PhaseState: "succeeded", TS: when.Add(20 * time.Second)},
+		{CallID: "exec-native-a", SessionID: "thread", Workspace: `C:\repo`, Profile: `C:\profile`, PhaseState: "succeeded", TS: when.Add(10 * time.Second)},
+	}
+	got := postToolPhaseCounts(calls, observations, `C:\profile`, `C:\repo`, "observations")
+	if got.Denominator != 2 || got.Succeeded != 2 || got.Unknown != 0 {
+		t.Fatalf("posttool=%+v", got)
+	}
+}
+
+func TestPostToolPhaseCountsReservesExactReceiptsBeforeFallback(t *testing.T) {
+	when := time.Date(2026, 8, 21, 16, 0, 0, 0, time.UTC)
+	calls := []dispatchedCall{
+		{CallID: "call_missing", SessionID: "thread", ToolName: "exec_command", CompletedAt: when},
+		{CallID: "call_exact", SessionID: "thread", ToolName: "exec_command", CompletedAt: when},
+	}
+	observations := []hookObservation{
+		{CallID: "call_exact", SessionID: "thread", Workspace: `C:\repo`, Profile: `C:\profile`, PhaseState: "succeeded", TS: when},
+		{CallID: "exec-host", SessionID: "thread", Workspace: `C:\repo`, Profile: `C:\profile`, PhaseState: "failed", TS: when},
+	}
+	got := postToolPhaseCounts(calls, observations, `C:\profile`, `C:\repo`, "observations")
+	if got.Succeeded != 1 || got.Failed != 1 || got.Unknown != 0 {
+		t.Fatalf("posttool=%+v", got)
+	}
+}
+
+func TestPostToolPhaseCountsLeavesTrulyMissingReceiptUnknown(t *testing.T) {
+	when := time.Date(2026, 8, 21, 16, 0, 0, int(500*time.Millisecond), time.UTC)
+	calls := []dispatchedCall{{CallID: "call_host", SessionID: "thread", ToolName: "exec_command", CompletedAt: when}}
+	observations := []hookObservation{{CallID: "exec-too-early", SessionID: "thread", Workspace: `C:\repo`, Profile: `C:\profile`, PhaseState: "succeeded", TS: when.Add(-2 * time.Second)}}
+	got := postToolPhaseCounts(calls, observations, `C:\profile`, `C:\repo`, "observations")
+	if got.Succeeded != 0 || got.Unknown != 1 {
+		t.Fatalf("posttool=%+v", got)
+	}
+}
+
+func TestPostToolPhaseCountsDoesNotFallbackAcrossToolFamilies(t *testing.T) {
+	when := time.Date(2026, 8, 21, 16, 0, 0, 0, time.UTC)
+	calls := []dispatchedCall{{CallID: "call_host", SessionID: "thread", ToolName: "read", CompletedAt: when}}
+	observations := []hookObservation{{CallID: "exec-native", SessionID: "thread", Workspace: `C:\repo`, Profile: `C:\profile`, PhaseState: "succeeded", TS: when}}
+	got := postToolPhaseCounts(calls, observations, `C:\profile`, `C:\repo`, "observations")
+	if got.Succeeded != 0 || got.Unknown != 1 {
+		t.Fatalf("posttool=%+v", got)
+	}
+}
