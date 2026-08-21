@@ -205,6 +205,9 @@ var tierName=[]string{"root","primitive","foundation","mechanism"}
 	writeArchitectureFixture(t, root, "internal/a/a.go", `package a
 import (_ "github.com/anthony-chaudhary/fak/internal/b"; _ "github.com/anthony-chaudhary/fak/internal/c"; _ "github.com/anthony-chaudhary/fak/internal/d")
 `)
+	writeArchitectureFixture(t, root, "internal/a/more.go", `package a
+import _ "github.com/anthony-chaudhary/fak/internal/d"
+`)
 	writeArchitectureFixture(t, root, "internal/b/b.go", `package b
 import _ "github.com/anthony-chaudhary/fak/internal/d"
 `)
@@ -230,7 +233,14 @@ import _ "github.com/anthony-chaudhary/fak/internal/d"
 	if len(scoped.Leaves) != 1 || !reflect.DeepEqual(scoped.Leaves[0], selected) {
 		t.Fatalf("scoped leaf=%+v whole leaf=%+v", scoped.Leaves, selected)
 	}
-	want := []RedundantDependency{{Dependency: "d", AlternatePath: []string{"a", "b", "d"}}}
+	want := []RedundantDependency{{
+		Dependency:    "d",
+		AlternatePath: []string{"a", "b", "d"},
+		Sources: []SourceImport{
+			{Path: "internal/a/a.go", Line: 2, Column: 109},
+			{Path: "internal/a/more.go", Line: 2, Column: 10},
+		},
+	}}
 	if !reflect.DeepEqual(selected.RedundantDependencies, want) {
 		t.Fatalf("redundant dependencies=%v want=%v", selected.RedundantDependencies, want)
 	}
@@ -960,9 +970,9 @@ import (
 		t.Fatal(err)
 	}
 	want := []ArchitectureEdge{
-		{From: "low", FromTier: 2, FromTierName: "foundation-composite", To: "high", ToTier: 3, ToTierName: "mechanism", TierDelta: 1, Direction: "upward"},
-		{From: "low", FromTier: 2, FromTierName: "foundation-composite", To: "peer", ToTier: 2, ToTierName: "foundation-composite", TierDelta: 0, Direction: "lateral"},
-		{From: "low", FromTier: 2, FromTierName: "foundation-composite", To: "root", ToTier: 1, ToTierName: "primitive", TierDelta: -1, Direction: "rootward"},
+		{From: "low", FromTier: 2, FromTierName: "foundation-composite", To: "high", ToTier: 3, ToTierName: "mechanism", TierDelta: 1, Direction: "upward", Sources: []SourceImport{{Path: "internal/low/low.go", Line: 5, Column: 4}}},
+		{From: "low", FromTier: 2, FromTierName: "foundation-composite", To: "peer", ToTier: 2, ToTierName: "foundation-composite", TierDelta: 0, Direction: "lateral", Sources: []SourceImport{{Path: "internal/low/low.go", Line: 4, Column: 4}}},
+		{From: "low", FromTier: 2, FromTierName: "foundation-composite", To: "root", ToTier: 1, ToTierName: "primitive", TierDelta: -1, Direction: "rootward", Sources: []SourceImport{{Path: "internal/low/low.go", Line: 3, Column: 4}}},
 	}
 	if !reflect.DeepEqual(r.Edges, want) {
 		t.Fatalf("edges=%+v want=%+v", r.Edges, want)

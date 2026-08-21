@@ -95,10 +95,30 @@ import _ "github.com/anthony-chaudhary/fak/internal/d"
 	if code := runArchitecture(&out, &errOut, []string{"--workspace", root, "--leaf", "a"}); code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
 	}
-	for _, want := range []string{"redundant dependency edges:", "d alternate=a -> b -> d"} {
+	for _, want := range []string{
+		"redundant dependency edges:",
+		"d alternate=a -> b -> d source=internal/a/a.go:2:60",
+	} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("output %q missing %q", out.String(), want)
 		}
+	}
+
+	out.Reset()
+	if code := runArchitecture(&out, &errOut, []string{"--workspace", root, "--leaf", "a", "--json"}); code != 0 {
+		t.Fatalf("json code=%d stderr=%s", code, errOut.String())
+	}
+	var report archreport.Report
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	wantRedundant := []archreport.RedundantDependency{{
+		Dependency:    "d",
+		AlternatePath: []string{"a", "b", "d"},
+		Sources:       []archreport.SourceImport{{Path: "internal/a/a.go", Line: 2, Column: 60}},
+	}}
+	if !reflect.DeepEqual(report.Leaves[0].RedundantDependencies, wantRedundant) {
+		t.Fatalf("json redundant dependencies=%+v want=%+v", report.Leaves[0].RedundantDependencies, wantRedundant)
 	}
 }
 

@@ -54,8 +54,16 @@ type DependencyPath struct {
 }
 
 type RedundantDependency struct {
-	Dependency    string   `json:"dependency"`
-	AlternatePath []string `json:"alternate_path"`
+	Dependency    string         `json:"dependency"`
+	AlternatePath []string       `json:"alternate_path"`
+	Sources       []SourceImport `json:"sources,omitempty"`
+}
+
+// SourceImport identifies the exact source-owned import that creates a package edge.
+type SourceImport struct {
+	Path   string `json:"path"`
+	Line   int    `json:"line"`
+	Column int    `json:"column"`
 }
 
 type BlastPath struct {
@@ -161,14 +169,15 @@ type DependencyCycleEdge struct {
 }
 
 type ArchitectureEdge struct {
-	From         string `json:"from"`
-	FromTier     int    `json:"from_tier"`
-	FromTierName string `json:"from_tier_name"`
-	To           string `json:"to"`
-	ToTier       int    `json:"to_tier"`
-	ToTierName   string `json:"to_tier_name"`
-	TierDelta    int    `json:"tier_delta"`
-	Direction    string `json:"direction"`
+	From         string         `json:"from"`
+	FromTier     int            `json:"from_tier"`
+	FromTierName string         `json:"from_tier_name"`
+	To           string         `json:"to"`
+	ToTier       int            `json:"to_tier"`
+	ToTierName   string         `json:"to_tier_name"`
+	TierDelta    int            `json:"tier_delta"`
+	Direction    string         `json:"direction"`
+	Sources      []SourceImport `json:"sources,omitempty"`
 }
 
 type RootwardLayerSkip struct {
@@ -261,6 +270,7 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 	sort.Strings(leaves)
 	allLeaves := make([]Leaf, 0, len(leaves))
 	byName := make(map[string]int, len(leaves))
+	importSources := make(map[string]map[string][]SourceImport, len(leaves))
 	for _, name := range leaves {
 		dir := filepath.Join(root, "internal", name)
 		if _, err := os.Stat(dir); err != nil {
@@ -275,10 +285,11 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 			}
 			return Report{}, fmt.Errorf("inspect declared leaf %q: stat declared package directory %s: %w; restore access and retry", name, dir, err)
 		}
-		deps, err := internalImports(dir)
+		deps, sources, err := internalImports(root, dir)
 		if err != nil {
 			return Report{}, fmt.Errorf("inspect declared leaf %q: %w", name, err)
 		}
+		importSources[name] = sources
 		declared, floor := tiers[name], 1
 		if name == "abi" {
 			floor = 0
@@ -312,7 +323,7 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 			} else if delta > 0 {
 				direction = "upward"
 			}
-			report.Edges = append(report.Edges, ArchitectureEdge{From: leaf.Name, FromTier: leaf.DeclaredTier, FromTierName: leaf.DeclaredTierName, To: dep, ToTier: toTier, ToTierName: tierName(names, toTier), TierDelta: delta, Direction: direction})
+			report.Edges = append(report.Edges, ArchitectureEdge{From: leaf.Name, FromTier: leaf.DeclaredTier, FromTierName: leaf.DeclaredTierName, To: dep, ToTier: toTier, ToTierName: tierName(names, toTier), TierDelta: delta, Direction: direction, Sources: importSources[leaf.Name][dep]})
 			if direction == "rootward" && -delta > 1 {
 				report.RootwardLayerSkips = append(report.RootwardLayerSkips, RootwardLayerSkip{From: leaf.Name, FromTier: leaf.DeclaredTier, FromTierName: leaf.DeclaredTierName, To: dep, ToTier: toTier, ToTierName: tierName(names, toTier), TierDistance: -delta, SkippedTiers: -delta - 1})
 			}
@@ -368,6 +379,10 @@ func Analyze(root, onlyLeaf string) (Report, error) {
 		allLeaves[i].DependencyPaths = dependencyPaths(allLeaves[i].Name, allLeaves, byName)
 		allLeaves[i].DependencyDominators = dependencyDominators(allLeaves[i].Name, allLeaves, byName, allLeaves[i].DependencyPaths)
 		allLeaves[i].RedundantDependencies = redundantDependencies(allLeaves[i].Name, allLeaves, byName)
+		for j := range allLeaves[i].RedundantDependencies {
+			dep := allLeaves[i].RedundantDependencies[j].Dependency
+			allLeaves[i].RedundantDependencies[j].Sources = importSources[allLeaves[i].Name][dep]
+		}
 		allLeaves[i].TransitiveDependencies = make([]string, len(allLeaves[i].DependencyPaths))
 		for j, path := range allLeaves[i].DependencyPaths {
 			allLeaves[i].TransitiveDependencies[j] = path.Dependency

@@ -12,6 +12,14 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/archreport"
 )
 
+func formatArchitectureSources(sources []archreport.SourceImport) string {
+	parts := make([]string, 0, len(sources))
+	for _, source := range sources {
+		parts = append(parts, fmt.Sprintf("%s:%d:%d", source.Path, source.Line, source.Column))
+	}
+	return strings.Join(parts, ",")
+}
+
 func cmdArchitecture(argv []string) { os.Exit(runArchitecture(os.Stdout, os.Stderr, argv)) }
 
 func runArchitecture(stdout, stderr io.Writer, argv []string) int {
@@ -231,7 +239,11 @@ func runArchitecture(stdout, stderr io.Writer, argv []string) int {
 			if *leaf != "" && len(l.RedundantDependencies) > 0 {
 				fmt.Fprintln(stdout, "    redundant dependency edges:")
 				for _, redundant := range l.RedundantDependencies {
-					fmt.Fprintf(stdout, "      %s alternate=%s\n", redundant.Dependency, strings.Join(redundant.AlternatePath, " -> "))
+					fmt.Fprintf(stdout, "      %s alternate=%s", redundant.Dependency, strings.Join(redundant.AlternatePath, " -> "))
+					if len(redundant.Sources) > 0 {
+						fmt.Fprintf(stdout, " source=%s", formatArchitectureSources(redundant.Sources))
+					}
+					fmt.Fprintln(stdout)
 				}
 			}
 			if *leaf != "" && len(l.BlastPaths) > 0 {

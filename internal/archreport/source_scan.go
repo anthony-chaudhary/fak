@@ -2,7 +2,6 @@ package archreport
 
 import (
 	"fmt"
-	"github.com/anthony-chaudhary/fak/internal/stringset"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -65,33 +64,64 @@ func parseContract(path string) (map[string]int, []string, error) {
 	}
 	return tiers, names, nil
 }
-func internalImports(dir string) ([]string, error) {
+func internalImports(root, dir string) ([]string, map[string][]SourceImport, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("declared package directory %s does not exist; create the package or remove its stale tier declaration", dir)
-		}
-		return nil, fmt.Errorf("read declared package directory %s: %w; restore read access and retry", dir, err)
+		return nil, nil, err
 	}
-	set := map[string]bool{}
+	set := map[string]struct{}{}
+	sources := map[string][]SourceImport{}
 	fset := token.NewFileSet()
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
 			continue
 		}
-		f, err := parser.ParseFile(fset, filepath.Join(dir, e.Name()), nil, parser.ImportsOnly)
+		path := filepath.Join(dir, e.Name())
+		f, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
 		if err != nil {
-			return nil, fmt.Errorf("parse imports in %s: %w; repair the Go syntax before reporting", filepath.Join(dir, e.Name()), err)
+			return nil, nil, fmt.Errorf("parse imports in %s: %w; repair the Go syntax before reporting", e.Name(), err)
 		}
 		for _, imp := range f.Imports {
-			p, err := strconv.Unquote(imp.Path.Value)
-			if err == nil && strings.HasPrefix(p, modulePrefix) {
-				leaf := strings.SplitN(strings.TrimPrefix(p, modulePrefix), "/", 2)[0]
-				set[leaf] = true
+			importPath, err := strconv.Unquote(imp.Path.Value)
+			if err != nil {
+				return nil, nil, fmt.Errorf("unquote import in %s: %w", e.Name(), err)
 			}
+			const prefix = "github.com/anthony-chaudhary/fak/internal/"
+			if !strings.HasPrefix(importPath, prefix) {
+				continue
+			}
+			leaf := strings.Split(strings.TrimPrefix(importPath, prefix), "/")[0]
+			if leaf == "" {
+				continue
+			}
+			set[leaf] = struct{}{}
+			position := fset.Position(imp.Path.Pos())
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return nil, nil, fmt.Errorf("relativize import source %s: %w", path, err)
+			}
+			sources[leaf] = append(sources[leaf], SourceImport{
+				Path:   filepath.ToSlash(rel),
+				Line:   position.Line,
+				Column: position.Column,
+			})
 		}
 	}
-	return stringset.Sorted(set), nil
+	out := make([]string, 0, len(set))
+	for dep := range set {
+		out = append(out, dep)
+		sort.Slice(sources[dep], func(i, j int) bool {
+			if sources[dep][i].Path != sources[dep][j].Path {
+				return sources[dep][i].Path < sources[dep][j].Path
+			}
+			if sources[dep][i].Line != sources[dep][j].Line {
+				return sources[dep][i].Line < sources[dep][j].Line
+			}
+			return sources[dep][i].Column < sources[dep][j].Column
+		})
+	}
+	sort.Strings(out)
+	return out, sources, nil
 }
 
 func cloneStringSet(source map[string]struct{}) map[string]struct{} {
@@ -101,6 +131,7 @@ func cloneStringSet(source map[string]struct{}) map[string]struct{} {
 	}
 	return out
 }
+
 func stringSetsEqual(left, right map[string]struct{}) bool {
 	if len(left) != len(right) {
 		return false
@@ -112,7 +143,17 @@ func stringSetsEqual(left, right map[string]struct{}) bool {
 	}
 	return true
 }
+
 func dominatorOrder(left, right string, dominators map[string]map[string]struct{}) bool {
+	_, leftDominatesRight := dominators[right][left]
+	_, rightDominatesLeft := dominators[left][right]
+	if leftDominatesRight != rightDominatesLeft {
+		return leftDominatesRight
+	}
+	return left < right
+}
+
+func compareDependencyDominator(left, right string, dominators map[string]map[string]struct{}) bool {
 	_, leftDominatesRight := dominators[right][left]
 	_, rightDominatesLeft := dominators[left][right]
 	if leftDominatesRight != rightDominatesLeft {
