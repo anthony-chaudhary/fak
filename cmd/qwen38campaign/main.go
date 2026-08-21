@@ -20,14 +20,21 @@ func run(stdout, stderr io.Writer, args []string) int {
 	corpus := fs.String("corpus", "docs/benchmarks/qwen38-quant/corpus.json", "frozen corpus JSON")
 	report := fs.String("report", "", "validator-clean report output")
 	archive := fs.String("archive", "", "secret-scrubbed raw archive output")
+	soak := fs.Bool("soak", false, "run the three-finalist production soak")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if *config == "" || *report == "" || *archive == "" || fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "usage: qwen38campaign --config CONFIG.json --report REPORT.json --archive ARCHIVE.json [--corpus CORPUS.json]")
+		fmt.Fprintln(stderr, "usage: qwen38campaign [--soak] --config CONFIG.json --report REPORT.json --archive ARCHIVE.json [--corpus CORPUS.json]")
 		return 2
 	}
-	if err := qwen38quantrun.RunAdapter(context.Background(), *config, *corpus, *report, *archive); err != nil {
+	var err error
+	if *soak {
+		err = qwen38quantrun.RunSoakAdapter(context.Background(), *config, *corpus, *report, *archive)
+	} else {
+		err = qwen38quantrun.RunAdapter(context.Background(), *config, *corpus, *report, *archive)
+	}
+	if err != nil {
 		fmt.Fprintf(stderr, "qwen38campaign: %v\n", err)
 		return 1
 	}

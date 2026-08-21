@@ -8,22 +8,28 @@ import (
 	"testing"
 )
 
-func TestRunRequiresOutputs(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	if got := run(&stdout, &stderr, []string{"--config", "config.json"}); got != 2 || !strings.Contains(stderr.String(), "--report REPORT.json") {
-		t.Fatalf("code=%d stderr=%q", got, stderr.String())
-	}
-}
-
-func TestRunRejectsUnknownConfig(t *testing.T) {
+func TestRunSoakDispatchesToProductionSoakAdapter(t *testing.T) {
 	dir := t.TempDir()
 	config := filepath.Join(dir, "config.json")
-	if err := os.WriteFile(config, []byte(`{"unknown":true}`), 0o600); err != nil {
+	if err := os.WriteFile(config, []byte(`{}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	got := run(&stdout, &stderr, []string{"--config", config, "--report", filepath.Join(dir, "report.json"), "--archive", filepath.Join(dir, "archive.json")})
-	if got != 1 || !strings.Contains(stderr.String(), "unknown field") {
-		t.Fatalf("code=%d stderr=%q", got, stderr.String())
+	exit := run(&stdout, &stderr, []string{
+		"--soak",
+		"--config", config,
+		"--corpus", filepath.Join("..", "..", "docs", "benchmarks", "qwen38-quant", "corpus.json"),
+		"--report", filepath.Join(dir, "report.json"),
+		"--archive", filepath.Join(dir, "archive.json"),
+	})
+	if exit != 1 || !strings.Contains(stderr.String(), "soak config requires") {
+		t.Fatalf("exit=%d stderr=%q", exit, stderr.String())
+	}
+}
+
+func TestRunRequiresExplicitOutputs(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if exit := run(&stdout, &stderr, []string{"--soak"}); exit != 2 || !strings.Contains(stderr.String(), "usage:") {
+		t.Fatalf("exit=%d stderr=%q", exit, stderr.String())
 	}
 }
