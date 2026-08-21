@@ -87,6 +87,36 @@ func SpecDecodeGreedy(target, drafter *Session, prompt []int, n, k int) (polymod
 	})
 }
 
+// SpecDecodeGreedyWithDrafter runs greedy speculative decoding with a
+// model-independent token proposer. The target session remains the sole authority: every
+// proposal is checked by VerifyForward and rejected KV positions are evicted before the
+// next round. Pass a fresh target session; this function prefills it with prompt.
+func SpecDecodeGreedyWithDrafter(target *Session, prompt []int, n, k int, drafter polymodel.Drafter) (polymodel.SpecDecodeRun, error) {
+	tl := target.Prefill(prompt)
+	var targetBase, draftLen int
+	verify := func(committed, draft []int) []int {
+		for _, token := range committed[target.Cache.Len():] {
+			tl = target.Step(token)
+		}
+		targetBase = target.Cache.Len()
+		draftLen = len(draft)
+		argmax := make([]int, 0, len(draft)+1)
+		argmax = append(argmax, argmaxF32(tl))
+		for _, row := range target.VerifyForward(draft, nil, nil) {
+			argmax = append(argmax, argmaxF32(row))
+		}
+		return argmax
+	}
+
+	return polymodel.SpecDecode(prompt, drafter, verify, polymodel.SpecDecodeConfig{
+		MaxNewTokens: n,
+		MaxDraft:     k,
+		Rollback: func(evictKV int) {
+			target.Cache.Evict(targetBase+(draftLen-evictKV), evictKV)
+		},
+	})
+}
+
 // SpecDecodeGreedyResolved is the GATED request-path entry. It runs greedy speculative decode
 // of `verifier` ONLY when polymodel.Enabled() (FAK_POLYMODEL, default off) AND a co-resident
 // drafter resolves against the residency Pool: polymodel.PickDrafter picks the cheapest
