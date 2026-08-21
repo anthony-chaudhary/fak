@@ -352,3 +352,28 @@ func TestGuardedLaunchCommandDeterminism(t *testing.T) {
 		t.Fatalf("returned argv aliases caller command: %#v", command)
 	}
 }
+
+func TestBuildWorkerCommandRefusalsNameRecovery(t *testing.T) {
+	tests := []struct {
+		name    string
+		backend string
+		launch  WorkerLaunch
+		want    []string
+	}{
+		{name: "opencode account binding", backend: "opencode", launch: WorkerLaunch{RequireAccountBound: true}, want: []string{"resolved account record", "task tier"}},
+		{name: "unknown backend", backend: "bogus", want: []string{"expected", "claude", "opencode", "codex"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := BuildWorkerCommand(tc.backend, "task", tc.launch)
+			if err == nil {
+				t.Fatal("expected refusal")
+			}
+			for _, recovery := range tc.want {
+				if !strings.Contains(err.Error(), recovery) {
+					t.Errorf("refusal %q does not name recovery %q", err, recovery)
+				}
+			}
+		})
+	}
+}
