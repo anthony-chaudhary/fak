@@ -19,7 +19,7 @@ func TestBuildHookCensusClassifiesCompleteLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
-	rows := `{"timestamp":"2026-08-17T11:59:00Z","type":"session_meta","payload":{"session_id":"thread-1","cwd":"` + filepath.ToSlash(home) + `"}}` + "\n" + `{"timestamp":"2026-08-17T11:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"a"}}` + "\n" + `{"timestamp":"2026-08-17T11:01:00Z","type":"response_item","payload":{"type":"custom_tool_call","call_id":"b"}}` + "\n" + `{"timestamp":"2026-08-17T11:02:00Z","type":"response_item","payload":{"type":"function_call_output","call_id":"a"}}` + "\n" + `{"timestamp":"2026-08-17T11:03:00Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"b"}}` + "\n"
+	rows := `{"timestamp":"2026-08-17T11:59:00Z","type":"session_meta","payload":{"session_id":"thread-1","cwd":"` + filepath.ToSlash(home) + `"}}` + "\n" + `{"timestamp":"2026-08-17T11:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"a","name":"Read"}}` + "\n" + `{"timestamp":"2026-08-17T11:01:00Z","type":"response_item","payload":{"type":"custom_tool_call","call_id":"b","name":"exec"}}` + "\n" + `{"timestamp":"2026-08-17T11:02:00Z","type":"response_item","payload":{"type":"function_call_output","call_id":"a","name":"Read"}}` + "\n" + `{"timestamp":"2026-08-17T11:03:00Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"b","name":"exec"}}` + "\n"
 	if err := os.WriteFile(filepath.Join(sessions, "r.jsonl"), []byte(rows), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -50,9 +50,9 @@ func TestBuildHookCensusPostToolUseExcludesActiveCalls(t *testing.T) {
 	}
 	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
 	rows := `{"timestamp":"2026-08-17T11:59:00Z","type":"session_meta","payload":{"session_id":"thread-1","cwd":"` + filepath.ToSlash(home) + `"}}` + "\n" +
-		`{"timestamp":"2026-08-17T11:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"complete"}}` + "\n" +
-		`{"timestamp":"2026-08-17T11:01:00Z","type":"response_item","payload":{"type":"function_call","call_id":"active"}}` + "\n" +
-		`{"timestamp":"2026-08-17T11:02:00Z","type":"response_item","payload":{"type":"function_call_output","call_id":"complete"}}` + "\n"
+		`{"timestamp":"2026-08-17T11:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"complete","name":"Read"}}` + "\n" +
+		`{"timestamp":"2026-08-17T11:01:00Z","type":"response_item","payload":{"type":"function_call","call_id":"active","name":"Read"}}` + "\n" +
+		`{"timestamp":"2026-08-17T11:02:00Z","type":"response_item","payload":{"type":"function_call_output","call_id":"complete","name":"Read"}}` + "\n"
 	if err := os.WriteFile(filepath.Join(sessions, "r.jsonl"), []byte(rows), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -79,6 +79,62 @@ func TestBuildHookCensusPostToolUseExcludesActiveCalls(t *testing.T) {
 		t.Fatalf("posttool=%+v", got.PostToolUse)
 	}
 }
+func TestBuildHookCensusExcludesToolsOutsidePostMatcher(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "profile")
+	sessions := filepath.Join(home, "sessions")
+	if err := os.MkdirAll(sessions, 0755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	rows := `{"timestamp":"2026-08-17T11:59:00Z","type":"session_meta","payload":{"session_id":"thread-1","cwd":"` + filepath.ToSlash(home) + `"}}` + "\n" +
+		`{"timestamp":"2026-08-17T11:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"plan","name":"update_plan"}}` + "\n" +
+		`{"timestamp":"2026-08-17T11:01:00Z","type":"response_item","payload":{"type":"function_call_output","call_id":"plan"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(sessions, "r.jsonl"), []byte(rows), 0644); err != nil {
+		t.Fatal(err)
+	}
+	obs := filepath.Join(root, "observations.jsonl")
+	o := hookObservation{CallID: "plan", SessionID: "thread-1", Workspace: home, Profile: home, PhaseState: "succeeded", Verb: "pretool", TS: now.Add(-time.Minute)}
+	raw, _ := json.Marshal(o)
+	if err := os.WriteFile(obs, append(raw, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := buildHookCensus(home, home, home, "", obs, time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PreToolUse.Denominator != 1 || got.PostToolUse.Denominator != 0 || got.PostToolUse.Unknown != 0 {
+		t.Fatalf("pretool=%+v posttool=%+v", got.PreToolUse, got.PostToolUse)
+	}
+}
+func TestBuildHookCensusSettlesFreshPostToolReceipt(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "profile")
+	sessions := filepath.Join(home, "sessions")
+	if err := os.MkdirAll(sessions, 0755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	rows := `{"timestamp":"2026-08-17T11:59:00Z","type":"session_meta","payload":{"session_id":"thread-1","cwd":"` + filepath.ToSlash(home) + `"}}` + "\n" +
+		`{"timestamp":"2026-08-17T11:59:56Z","type":"response_item","payload":{"type":"function_call","call_id":"fresh","name":"Read"}}` + "\n" +
+		`{"timestamp":"2026-08-17T11:59:58Z","type":"response_item","payload":{"type":"function_call_output","call_id":"fresh","name":"Read"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(sessions, "r.jsonl"), []byte(rows), 0644); err != nil {
+		t.Fatal(err)
+	}
+	obs := filepath.Join(root, "observations.jsonl")
+	o := hookObservation{CallID: "fresh", SessionID: "thread-1", Workspace: home, Profile: home, PhaseState: "succeeded", Verb: "pretool", TS: now.Add(-time.Minute)}
+	raw, _ := json.Marshal(o)
+	if err := os.WriteFile(obs, append(raw, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := buildHookCensus(home, home, home, "", obs, time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PostToolSettlement != "5s" || got.PostToolUse.Denominator != 0 || got.PostToolUse.Unknown != 0 {
+		t.Fatalf("settlement=%q posttool=%+v", got.PostToolSettlement, got.PostToolUse)
+	}
+}
 func TestBuildHookCensusFailsClosedOnUnknownFailureAndProfileMismatch(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "active")
@@ -87,7 +143,7 @@ func TestBuildHookCensusFailsClosedOnUnknownFailureAndProfileMismatch(t *testing
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
-	row := `{"timestamp":"2026-08-17T11:59:00Z","type":"session_meta","payload":{"session_id":"thread-1","cwd":"` + filepath.ToSlash(logHome) + `"}}` + "\n" + `{"timestamp":"2026-08-17T11:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"a"}}` + "\n" + `{"timestamp":"2026-08-17T11:01:00Z","type":"response_item","payload":{"type":"function_call_output","call_id":"a"}}` + "\n"
+	row := `{"timestamp":"2026-08-17T11:59:00Z","type":"session_meta","payload":{"session_id":"thread-1","cwd":"` + filepath.ToSlash(logHome) + `"}}` + "\n" + `{"timestamp":"2026-08-17T11:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"a","name":"Read"}}` + "\n" + `{"timestamp":"2026-08-17T11:01:00Z","type":"response_item","payload":{"type":"function_call_output","call_id":"a","name":"Read"}}` + "\n"
 	_ = os.WriteFile(filepath.Join(logHome, "sessions", "r.jsonl"), []byte(row), 0644)
 	obs := filepath.Join(root, "o.jsonl")
 	o := hookObservation{CallID: "a", SessionID: "thread-1", Workspace: logHome, Profile: home, PhaseState: "failed", Exit: 3, Verb: "posttool", TS: now.Add(-time.Minute)}
@@ -116,7 +172,7 @@ func TestBuildHookCensusRejectsAbsentTelemetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
-	row := `{"timestamp":"2026-08-17T11:59:00Z","type":"session_meta","payload":{"session_id":"thread-1","cwd":"` + filepath.ToSlash(home) + `"}}` + "\n" + `{"timestamp":"2026-08-17T11:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"a"}}` + "\n" + `{"timestamp":"2026-08-17T11:01:00Z","type":"response_item","payload":{"type":"function_call_output","call_id":"a"}}` + "\n"
+	row := `{"timestamp":"2026-08-17T11:59:00Z","type":"session_meta","payload":{"session_id":"thread-1","cwd":"` + filepath.ToSlash(home) + `"}}` + "\n" + `{"timestamp":"2026-08-17T11:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"a","name":"Read"}}` + "\n" + `{"timestamp":"2026-08-17T11:01:00Z","type":"response_item","payload":{"type":"function_call_output","call_id":"a","name":"Read"}}` + "\n"
 	_ = os.WriteFile(filepath.Join(home, "sessions", "r.jsonl"), []byte(row), 0644)
 	obs := filepath.Join(root, "o.jsonl")
 	_ = os.WriteFile(obs, nil, 0644)

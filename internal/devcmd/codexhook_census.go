@@ -14,7 +14,10 @@ import (
 	"time"
 )
 
-const codexHookCensusSchema = "fak/codex-hook-census/v2"
+const (
+	codexHookCensusSchema         = "fak/codex-hook-census/v2"
+	codexPostToolSettlementWindow = 5 * time.Second
+)
 
 type lifecycleCounts struct {
 	Denominator int    `json:"denominator"`
@@ -30,27 +33,28 @@ type lifecycleCounts struct {
 }
 
 type hookCensusReport struct {
-	Schema           string             `json:"schema"`
-	GeneratedAt      time.Time          `json:"generated_at"`
-	Window           string             `json:"window"`
-	CodexHome        string             `json:"codex_home"`
-	LogStore         string             `json:"log_store"`
-	Workspace        string             `json:"workspace"`
-	ObservationStore string             `json:"observation_store"`
-	ProfileMatch     bool               `json:"profile_match"`
-	DispatchedCalls  int                `json:"dispatched_calls"`
-	DispatchSource   string             `json:"dispatch_source"`
-	PreToolUse       lifecycleCounts    `json:"pre_tool_use"`
-	PostToolUse      lifecycleCounts    `json:"post_tool_use"`
-	Stop             lifecycleCounts    `json:"stop"`
-	StopFailure      lifecycleCounts    `json:"stop_failure"`
-	SubagentStop     lifecycleCounts    `json:"subagent_stop"`
-	StopSource       string             `json:"stop_source,omitempty"`
-	StopRuns         []stopLifecycleRow `json:"stop_runs,omitempty"`
-	TelemetryFresh   bool               `json:"telemetry_fresh"`
-	NewestReceipt    time.Time          `json:"newest_receipt,omitempty"`
-	Verdict          string             `json:"verdict"`
-	Reasons          []string           `json:"reasons,omitempty"`
+	Schema             string             `json:"schema"`
+	GeneratedAt        time.Time          `json:"generated_at"`
+	Window             string             `json:"window"`
+	CodexHome          string             `json:"codex_home"`
+	LogStore           string             `json:"log_store"`
+	Workspace          string             `json:"workspace"`
+	ObservationStore   string             `json:"observation_store"`
+	ProfileMatch       bool               `json:"profile_match"`
+	DispatchedCalls    int                `json:"dispatched_calls"`
+	DispatchSource     string             `json:"dispatch_source"`
+	PreToolUse         lifecycleCounts    `json:"pre_tool_use"`
+	PostToolUse        lifecycleCounts    `json:"post_tool_use"`
+	Stop               lifecycleCounts    `json:"stop"`
+	StopFailure        lifecycleCounts    `json:"stop_failure"`
+	SubagentStop       lifecycleCounts    `json:"subagent_stop"`
+	StopSource         string             `json:"stop_source,omitempty"`
+	StopRuns           []stopLifecycleRow `json:"stop_runs,omitempty"`
+	TelemetryFresh     bool               `json:"telemetry_fresh"`
+	NewestReceipt      time.Time          `json:"newest_receipt,omitempty"`
+	Verdict            string             `json:"verdict"`
+	PostToolSettlement string             `json:"post_tool_settlement"`
+	Reasons            []string           `json:"reasons,omitempty"`
 }
 
 type hookObservation struct {
@@ -65,10 +69,12 @@ type hookObservation struct {
 	Outcome    string    `json:"outcome"`
 }
 type dispatchedCall struct {
-	CallID    string
-	SessionID string
-	Workspace string
-	Completed bool
+	CallID      string
+	SessionID   string
+	Workspace   string
+	ToolName    string
+	Completed   bool
+	CompletedAt time.Time
 }
 
 type stopLifecycleRow struct {
@@ -267,6 +273,7 @@ type rolloutRow struct {
 	Payload   struct {
 		Type   string `json:"type"`
 		CallID string `json:"call_id"`
+		Name   string `json:"name"`
 	} `json:"payload"`
 }
 
@@ -346,7 +353,7 @@ func buildHookCensus(home, logHome, workspace, threadID, observations string, si
 	if err != nil {
 		return hookCensusReport{}, err
 	}
-	r := hookCensusReport{Schema: codexHookCensusSchema, GeneratedAt: now, Window: since.String(), CodexHome: absHome, LogStore: absLog, Workspace: absWork, ObservationStore: absObs, ProfileMatch: samePath(absHome, absLog), DispatchedCalls: len(calls), DispatchSource: filepath.Join(absLog, "sessions"), NewestReceipt: newest, TelemetryFresh: !newest.IsZero() && now.Sub(newest) <= 5*time.Minute}
+	r := hookCensusReport{Schema: codexHookCensusSchema, GeneratedAt: now, Window: since.String(), PostToolSettlement: codexPostToolSettlementWindow.String(), CodexHome: absHome, LogStore: absLog, Workspace: absWork, ObservationStore: absObs, ProfileMatch: samePath(absHome, absLog), DispatchedCalls: len(calls), DispatchSource: filepath.Join(absLog, "sessions"), NewestReceipt: newest, TelemetryFresh: !newest.IsZero() && now.Sub(newest) <= 5*time.Minute}
 	r.PreToolUse = phaseCountsForCalls(calls, receipts["pretool"], absHome, absWork, absObs)
 	r.PostToolUse = phaseCountsForCalls(calls, receipts["posttool"], absHome, absWork, absObs)
 	if !r.TelemetryFresh {
@@ -421,15 +428,24 @@ func phaseCounts(den int, obs []hookObservation, source string) lifecycleCounts 
 	return c
 }
 
-func completedDispatches(calls []dispatchedCall) []dispatchedCall {
+func postToolEligibleDispatches(calls []dispatchedCall, settledBefore time.Time) []dispatchedCall {
 	out := make([]dispatchedCall, 0, len(calls))
 	for _, call := range calls {
-		if call.Completed {
+		if call.Completed && !call.CompletedAt.After(settledBefore) && codexPostToolMatcher(call.ToolName) {
 			out = append(out, call)
 		}
 	}
 	return out
 }
+func codexPostToolMatcher(toolName string) bool {
+	switch strings.ToLower(toolName) {
+	case "read", "bash", "grep", "glob", "exec", "exec_command":
+		return true
+	default:
+		return false
+	}
+}
+
 func phaseCountsForCalls(calls []dispatchedCall, obs []hookObservation, profile, workspace, source string) lifecycleCounts {
 	c := lifecycleCounts{Denominator: len(calls), Source: source}
 	wanted := make(map[string]dispatchedCall, len(calls))
@@ -533,11 +549,12 @@ func readCodexDispatches(root, workspace, threadID string, after time.Time) ([]d
 				if id == "" {
 					id = path + fmt.Sprint(len(seen))
 				}
-				seen[sessionID+"\x00"+id] = dispatchedCall{CallID: id, SessionID: sessionID, Workspace: rowWorkspace}
+				seen[sessionID+"\x00"+id] = dispatchedCall{CallID: id, SessionID: sessionID, Workspace: rowWorkspace, ToolName: row.Payload.Name}
 			case "function_call_output", "custom_tool_call_output":
 				key := sessionID + "\x00" + id
 				if call, ok := seen[key]; ok {
 					call.Completed = true
+					call.CompletedAt = row.Timestamp
 					seen[key] = call
 				}
 			}
