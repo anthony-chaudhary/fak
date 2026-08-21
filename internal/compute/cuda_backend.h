@@ -95,6 +95,24 @@ int fcuda_qwen35_gdn_decode_f32(
 size_t fcuda_qwen35_gdn_operations(void);
 void fcuda_qwen35_gdn_operations_reset(void);
 
+/* Multi-token resident twin of fcuda_qwen35_gdn_decode_f32. dX and dOut are
+ * row-major [tokens,hidden] device panels; mutable state is carried between rows
+ * without any host transfer. Algorithm adapted from llama.cpp gated_delta_net.cu
+ * at 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT). */
+int fcuda_qwen35_gdn_sequence_f32(
+    const float *dX, int tokens,
+    const void *dInQKV, const float *dInQKVScale, int inQKVQ8,
+    const void *dInZ, const float *dInZScale, int inZQ8,
+    const void *dInB, const float *dInBScale, int inBQ8,
+    const void *dInA, const float *dInAScale, int inAQ8,
+    const float *dConvW, const float *dALog, const float *dDtBias,
+    const float *dNorm,
+    const void *dOutW, const float *dOutWScale, int outWQ8,
+    float *dConvState, float *dRecurrentState, float *dOut,
+    float *dMixed, float *dZ, float *dB, float *dA, float *dConvOut,
+    float *dQNorm, float *dKNorm, float *dCore,
+    int hidden, int nK, int nV, int kHd, int vHd, int convKernel, float rmsEps);
+
 /* One-shot deterministic fault seam for package-local -tags cuda tests. stage 2..6
  * simulates that launch check failing (after draining queued work); stage 7 simulates
  * final asynchronous execution failure. Production Go APIs do not expose this knob. */

@@ -596,6 +596,67 @@ extern "C" int fcuda_qwen35_gdn_decode_f32(
   return 0;
 }
 
+/* Sequence spine adapted from llama.cpp gated_delta_net.cu at
+ * 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT). Unlike calling the public
+ * decode ABI from Go, this loop preserves every panel row and recurrent state on
+ * g_stream and synchronizes once at the sequence boundary. */
+extern "C" int fcuda_qwen35_gdn_sequence_f32(
+    const float *dX, int tokens,
+    const void *dInQKV, const float *dInQKVScale, int inQKVQ8,
+    const void *dInZ, const float *dInZScale, int inZQ8,
+    const void *dInB, const float *dInBScale, int inBQ8,
+    const void *dInA, const float *dInAScale, int inAQ8,
+    const float *dConvW, const float *dALog, const float *dDtBias,
+    const float *dNorm,
+    const void *dOutW, const float *dOutWScale, int outWQ8,
+    float *dConvState, float *dRecurrentState, float *dOut,
+    float *dMixed, float *dZ, float *dB, float *dA, float *dConvOut,
+    float *dQNorm, float *dKNorm, float *dCore,
+    int hidden, int nK, int nV, int kHd, int vHd, int convKernel, float rmsEps) {
+  if (tokens <= 0 || !dX || !dOut) return -1;
+  const int convDim = 2 * nK * kHd + nV * vHd;
+  const int fusedRows = convDim + nV * vHd + 2 * nV;
+  if (hidden <= 0 || nK <= 0 || nV <= 0 || kHd <= 0 || vHd <= 0 || convKernel <= 0 ||
+      !dInQKV || !dInZ || !dInB || !dInA || !dConvW || !dALog || !dDtBias || !dNorm ||
+      !dOutW || !dConvState || !dRecurrentState || !dMixed || !dZ || !dB || !dA ||
+      !dConvOut || !dQNorm || !dKNorm || !dCore) return -1;
+  cudaGetLastError();
+  for (int token = 0; token < tokens; token++) {
+    const float *x = dX + (size_t) token * hidden;
+    float *out = dOut + (size_t) token * hidden;
+    k_qwen35_gdn_fused_in_proj<<<fusedRows, 256, 0, g_stream>>>(
+        x, dInQKV, dInQKVScale, inQKVQ8, dInZ, dInZScale, inZQ8,
+        dInB, dInBScale, inBQ8, dInA, dInAScale, inAQ8,
+        dMixed, dZ, dB, dA, hidden, convDim, nV * vHd, nV);
+    int status = qwen35_gdn_launch_status(2);
+    if (status != 0) return qwen35_gdn_drain_after_error(status);
+    int convBlocks = (convDim + 255) / 256;
+    k_qwen35_gdn_conv_state<<<convBlocks, 256, 0, g_stream>>>(
+        dMixed, dConvW, dConvState, dConvOut, convDim, convKernel);
+    status = qwen35_gdn_launch_status(3);
+    if (status != 0) return qwen35_gdn_drain_after_error(status);
+    int qThreads = qwen35_gdn_threads(kHd);
+    k_qwen35_gdn_qk_norm<<<nK, qThreads, (size_t) 2 * qThreads * sizeof(float), g_stream>>>(
+        dConvOut, dQNorm, dKNorm, nK, kHd);
+    status = qwen35_gdn_launch_status(4);
+    if (status != 0) return qwen35_gdn_drain_after_error(status);
+    int vThreads = qwen35_gdn_threads(vHd);
+    k_qwen35_gdn_recurrent_gated_norm<<<nV, vThreads, (size_t) vThreads * sizeof(float), g_stream>>>(
+        dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm,
+        dRecurrentState, dCore, nK, nV, kHd, vHd, rmsEps);
+    status = qwen35_gdn_launch_status(5);
+    if (status != 0) return qwen35_gdn_drain_after_error(status);
+    k_qwen35_gdn_out_proj<<<hidden, 256, 0, g_stream>>>(
+        dOutW, dOutWScale, outWQ8, dCore, out, hidden, nV * vHd);
+    status = qwen35_gdn_launch_status(6);
+    if (status != 0) return qwen35_gdn_drain_after_error(status);
+  }
+  cudaError_t sync = cudaStreamSynchronize(g_stream);
+  if (sync != cudaSuccess) return 70000 + (int) sync;
+  g_qwen35_gdn_operations += (size_t) tokens;
+  return 0;
+}
+
 extern "C" size_t fcuda_qwen35_gdn_operations(void) { return g_qwen35_gdn_operations; }
 extern "C" void fcuda_qwen35_gdn_operations_reset(void) { g_qwen35_gdn_operations = 0; }
 
