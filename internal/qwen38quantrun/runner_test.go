@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/qwen38quant"
@@ -101,5 +102,65 @@ func TestModelIdentityMismatchDeniedBeforeMeasurement(t *testing.T) {
 	_, err := (Runner{}).Run(context.Background(), Config{Endpoint: s.URL, APIKey: "secret", Model: "exact"}, qwen38quant.DefaultCorpus())
 	if err == nil || !contains(err.Error(), "exact model") || chatCalls != 0 {
 		t.Fatalf("err=%v chatCalls=%d", err, chatCalls)
+	}
+}
+
+func TestRunOneCarriesExplicitEffectContracts(t *testing.T) {
+	tests := []struct {
+		name    string
+		fixture qwen38quant.Fixture
+		assert  func(*testing.T, map[string]any)
+	}{
+		{
+			name: "JSON schema",
+			fixture: qwen38quant.Fixture{
+				ID: "strict-json", Workload: "json_schema", Prompt: "return JSON", MaxOutputTokens: 32,
+				ExpectedJSON: map[string]any{"ok": true, "count": float64(1)},
+			},
+			assert: func(t *testing.T, body map[string]any) {
+				t.Helper()
+				format, ok := body["response_format"].(map[string]any)
+				if !ok || format["type"] != "json_schema" {
+					t.Fatalf("response_format=%#v", body["response_format"])
+				}
+				wrapped := format["json_schema"].(map[string]any)
+				if wrapped["name"] != "strict-json" || wrapped["strict"] != true {
+					t.Fatalf("json_schema=%#v", wrapped)
+				}
+				schema := wrapped["schema"].(map[string]any)
+				if schema["additionalProperties"] != false || !reflect.DeepEqual(schema["required"], []any{"count", "ok"}) {
+					t.Fatalf("schema=%#v", schema)
+				}
+			},
+		},
+		{
+			name: "required tool",
+			fixture: qwen38quant.Fixture{
+				ID: "required-tool", Workload: "correlated_tools", Prompt: "call it", MaxOutputTokens: 32,
+				Tools: []map[string]any{{"type": "function", "function": map[string]any{"name": "lookup"}}},
+			},
+			assert: func(t *testing.T, body map[string]any) {
+				t.Helper()
+				if body["tool_choice"] != "required" || len(body["tools"].([]any)) != 1 {
+					t.Fatalf("tool contract=%#v", body)
+				}
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var captured map[string]any
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+					t.Fatal(err)
+				}
+				json.NewEncoder(w).Encode(map[string]any{"model": "exact", "choices": []any{map[string]any{"message": map[string]any{"content": "ok"}}}})
+			}))
+			defer s.Close()
+			if _, err := runOne(context.Background(), s.Client(), Config{Endpoint: s.URL, APIKey: "secret", Model: "exact"}, tc.fixture); err != nil {
+				t.Fatal(err)
+			}
+			tc.assert(t, captured)
+		})
 	}
 }

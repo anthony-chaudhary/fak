@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -175,6 +176,16 @@ func cachePhase(f qwen38quant.Fixture, repetition int) string {
 func runOne(ctx context.Context, client *http.Client, cfg Config, f qwen38quant.Fixture) (chatResponse, error) {
 	prompt := materialize(f)
 	body := map[string]any{"model": cfg.Model, "messages": []map[string]string{{"role": "user", "content": prompt}}, "temperature": 0, "max_tokens": f.MaxOutputTokens}
+	if f.Workload == "json_schema" {
+		body["response_format"] = map[string]any{
+			"type": "json_schema",
+			"json_schema": map[string]any{
+				"name":   f.ID,
+				"strict": true,
+				"schema": jsonSchemaFor(f.ExpectedJSON),
+			},
+		}
+	}
 	if len(f.Tools) > 0 {
 		body["tools"] = f.Tools
 		body["tool_choice"] = "required"
@@ -211,6 +222,35 @@ func runOne(ctx context.Context, client *http.Client, cfg Config, f qwen38quant.
 	return out, nil
 }
 
+func jsonSchemaFor(value any) map[string]any {
+	switch value := value.(type) {
+	case map[string]any:
+		properties := make(map[string]any, len(value))
+		required := make([]string, 0, len(value))
+		for name, child := range value {
+			properties[name] = jsonSchemaFor(child)
+			required = append(required, name)
+		}
+		slices.Sort(required)
+		return map[string]any{"type": "object", "properties": properties, "required": required, "additionalProperties": false}
+	case []any:
+		items := map[string]any{}
+		if len(value) > 0 {
+			items = jsonSchemaFor(value[0])
+		}
+		return map[string]any{"type": "array", "items": items}
+	case string:
+		return map[string]any{"type": "string"}
+	case bool:
+		return map[string]any{"type": "boolean"}
+	case float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return map[string]any{"type": "number"}
+	case nil:
+		return map[string]any{"type": "null"}
+	default:
+		return map[string]any{}
+	}
+}
 func grade(res *Result, f qwen38quant.Fixture, r chatResponse) {
 	m := r.Choices[0].Message
 	res.Output = strings.TrimSpace(m.Content)
