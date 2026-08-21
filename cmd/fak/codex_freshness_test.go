@@ -74,6 +74,13 @@ func TestRunCodexFreshnessAdmissionShowsSelfUpdate(t *testing.T) {
 	}
 }
 
+func TestCodexFreshnessSelfUpdateUsesSupportedFlags(t *testing.T) {
+	want := []string{"self-update", "--root", `C:\work\fak`, "--target", `C:\bin\fak.exe`}
+	if got := codexFreshnessSelfUpdateArgs(`C:\work\fak`, `C:\bin\fak.exe`); !reflect.DeepEqual(got, want) {
+		t.Fatalf("self-update args=%q, want %q", got, want)
+	}
+}
+
 func TestRunCodexFreshnessAdmissionStalePreservesFilteredArguments(t *testing.T) {
 	restore := stubCodexFreshness(t, codexFreshnessAssessment{Verdict: codexFreshnessBehind, RunningCommit: "old", TargetCommit: "new"})
 	defer restore()

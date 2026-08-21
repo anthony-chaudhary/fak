@@ -59,7 +59,7 @@ var (
 		return codexFreshnessInspection{Assessment: assessment}
 	}
 	codexFreshnessUpdate = func(root, executable string) error {
-		cmd := exec.Command(executable, "self-update", "--root", root, "--target", executable, "--yes")
+		cmd := exec.Command(executable, codexFreshnessSelfUpdateArgs(root, executable)...)
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 		return cmd.Run()
 	}
@@ -74,6 +74,10 @@ var (
 	}
 	codexFreshnessResolveCheckout = codexFreshnessCheckout
 )
+
+func codexFreshnessSelfUpdateArgs(root, executable string) []string {
+	return []string{"self-update", "--root", root, "--target", executable}
+}
 
 type codexStartupStatus struct {
 	w           io.Writer
