@@ -25,6 +25,8 @@ package leaseref
 // AnnounceFromRecord, the bridge from a fenced lock-lease Record onto this plane.
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -37,6 +39,8 @@ import (
 // a hand-editing human) reflows the surrounding markdown. Versioned so a future field
 // addition can bump it without silently mis-parsing an old comment.
 const AnnounceSchema = "fak-leaseref-announce/1"
+
+const PublicAnnounceSchema = "fak-leaseref-public-announce/1"
 
 // The closed set of lifecycle actions an announce carries — the same acquire|renew|
 // release transitions the fenced lock lease (fence.go) already distinguishes. Kept as a
@@ -65,12 +69,44 @@ func ValidAnnounceAction(action string) bool {
 // into one view. Encoded as one JSON object (the fenced line the comment carries), with
 // omitempty on the derived fields so a minimal release announce stays compact.
 type AnnounceRecord struct {
-	LeaseID    string   `json:"lease_id"`              // the lease id (ref basename under refs/fak/locks/)
-	Holder     string   `json:"holder"`                // who holds it (machine/session identity, free-form or the <node>/<session> convention)
-	Generation int64    `json:"generation,omitempty"`  // the fencing token at announce time (0 = legacy/unfenced)
-	Tree       []string `json:"tree,omitempty"`        // the repo-relative tree globs the lease covers
-	TTLSeconds int64    `json:"ttl_seconds,omitempty"` // the lease lifetime in seconds (0 = no expiry)
-	Action     string   `json:"action"`                // acquire | renew | release
+	LeaseID           string   `json:"lease_id,omitempty"`    // the lease id (ref basename under refs/fak/locks/)
+	Holder            string   `json:"holder,omitempty"`      // who holds it (machine/session identity, free-form or the <node>/<session> convention)
+	Generation        int64    `json:"generation,omitempty"`  // the fencing token at announce time (0 = legacy/unfenced)
+	Tree              []string `json:"tree,omitempty"`        // the repo-relative tree globs the lease covers
+	TTLSeconds        int64    `json:"ttl_seconds,omitempty"` // the lease lifetime in seconds (0 = no expiry)
+	Action            string   `json:"action"`                // acquire | renew | release
+	LeaseFingerprint  string   `json:"lease_fingerprint,omitempty"`
+	HolderFingerprint string   `json:"holder_fingerprint,omitempty"`
+	TreeFingerprints  []string `json:"tree_fingerprints,omitempty"`
+}
+
+// PublicSafeAnnounce replaces raw coordination identifiers with domain-separated HMAC
+// fingerprints. Nodes sharing key can compare exact values without publishing them.
+func PublicSafeAnnounce(rec AnnounceRecord, key []byte) (AnnounceRecord, error) {
+	if len(key) == 0 {
+		return AnnounceRecord{}, fmt.Errorf("public-safe announce key is empty")
+	}
+	out := AnnounceRecord{LeaseFingerprint: announceFingerprint(key, "lease", rec.LeaseID), HolderFingerprint: announceFingerprint(key, "holder", rec.Holder), Generation: rec.Generation, TTLSeconds: rec.TTLSeconds, Action: rec.Action}
+	for _, tree := range rec.Tree {
+		out.TreeFingerprints = append(out.TreeFingerprints, announceFingerprint(key, "tree", tree))
+	}
+	return out, nil
+}
+
+func announceFingerprint(key []byte, domain, value string) string {
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write([]byte(domain))
+	_, _ = mac.Write([]byte{0})
+	_, _ = mac.Write([]byte(value))
+	return fmt.Sprintf("hmac-sha256:%x", mac.Sum(nil))
+}
+
+func (r AnnounceRecord) publicSafe() bool { return r.LeaseFingerprint != "" }
+func (r AnnounceRecord) identity() string {
+	if r.publicSafe() {
+		return r.LeaseFingerprint
+	}
+	return r.LeaseID
 }
 
 // AnnounceFromRecord projects a fenced lock-lease Record (fence.go's AcquireFenced /
@@ -104,15 +140,24 @@ type announceWire struct {
 // back). Pure and deterministic — the JSON field order is the struct field order, so the
 // same record always renders byte-identically.
 func RenderAnnounce(rec AnnounceRecord) string {
-	line, err := json.Marshal(announceWire{Schema: AnnounceSchema, AnnounceRecord: rec})
+	schema := AnnounceSchema
+	if rec.publicSafe() {
+		schema = PublicAnnounceSchema
+	}
+	line, err := json.Marshal(announceWire{Schema: schema, AnnounceRecord: rec})
 	if err != nil {
 		// AnnounceRecord is all stdlib-serializable scalars/strings, so Marshal cannot
 		// fail in practice; degrade to an empty object rather than panic in a best-effort
 		// announce path.
 		line = []byte("{}")
 	}
-	tree := "-"
-	if len(rec.Tree) > 0 {
+	tree, lease, holder := "-", rec.LeaseID, rec.Holder
+	if rec.publicSafe() {
+		lease, holder = rec.LeaseFingerprint, rec.HolderFingerprint
+		if len(rec.TreeFingerprints) > 0 {
+			tree = strings.Join(rec.TreeFingerprints, ", ")
+		}
+	} else if len(rec.Tree) > 0 {
 		tree = strings.Join(rec.Tree, ", ")
 	}
 	gen := ""
@@ -127,7 +172,7 @@ func RenderAnnounce(rec AnnounceRecord) string {
 		"**leaseref announce — %s** · lease `%s` · holder `%s`%s · tree `%s` · ttl %s\n\n"+
 			"```json\n%s\n```\n\n"+
 			"_Plane 2 (GH-comment backup, #2300): advisory evidence of lease intent, never an admission input — admission stays the refs/fak/locks compare-and-swap._",
-		rec.Action, rec.LeaseID, rec.Holder, gen, tree, ttl, line)
+		rec.Action, lease, holder, gen, tree, ttl, line)
 }
 
 // ParseAnnounce extracts the FIRST fak announce record from a comment body, or
@@ -152,14 +197,17 @@ func scanAnnouncements(body string) []AnnounceRecord {
 	var out []AnnounceRecord
 	for _, line := range strings.Split(body, "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "{") || !strings.Contains(line, AnnounceSchema) {
+		if !strings.HasPrefix(line, "{") || !strings.Contains(line, AnnounceSchema) && !strings.Contains(line, PublicAnnounceSchema) {
 			continue
 		}
 		var w announceWire
 		if err := json.Unmarshal([]byte(line), &w); err != nil {
 			continue
 		}
-		if w.Schema != AnnounceSchema || !ValidAnnounceAction(w.Action) {
+		if (w.Schema != AnnounceSchema && w.Schema != PublicAnnounceSchema) || !ValidAnnounceAction(w.Action) {
+			continue
+		}
+		if (w.Schema == AnnounceSchema && w.LeaseID == "") || (w.Schema == PublicAnnounceSchema && w.LeaseFingerprint == "") {
 			continue
 		}
 		out = append(out, w.AnnounceRecord)
@@ -178,16 +226,16 @@ func FoldAnnouncements(bodies []string) []AnnounceRecord {
 	for _, body := range bodies {
 		for _, rec := range scanAnnouncements(body) {
 			if rec.Action == AnnounceRelease {
-				delete(held, rec.LeaseID)
+				delete(held, rec.identity())
 				continue
 			}
-			held[rec.LeaseID] = rec
+			held[rec.identity()] = rec
 		}
 	}
 	out := make([]AnnounceRecord, 0, len(held))
 	for _, r := range held {
 		out = append(out, r)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].LeaseID < out[j].LeaseID })
+	sort.Slice(out, func(i, j int) bool { return out[i].identity() < out[j].identity() })
 	return out
 }

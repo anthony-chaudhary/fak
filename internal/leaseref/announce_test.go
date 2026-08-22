@@ -151,3 +151,50 @@ func TestAnnounceFromRecord(t *testing.T) {
 		t.Fatalf("AnnounceFromRecord mismatch\n want: %+v\n  got: %+v", want, got)
 	}
 }
+
+func TestPublicSafeAnnounceHidesRawValuesAndRoundTrips(t *testing.T) {
+	raw := AnnounceRecord{LeaseID: "lease-secret", Holder: "workstation/session-9", Generation: 7, Tree: []string{"internal/private/**", "cmd/fak/**"}, TTLSeconds: 90, Action: "acquire"}
+	a, err := PublicSafeAnnounce(raw, []byte("shared-test-key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := PublicSafeAnnounce(raw, []byte("shared-test-key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(a, b) {
+		t.Fatalf("same shared key must match across nodes:\n%+v\n%+v", a, b)
+	}
+	if a.LeaseFingerprint == a.HolderFingerprint {
+		t.Fatal("domain separation failed")
+	}
+	body := RenderAnnounce(a)
+	for _, secret := range []string{raw.LeaseID, raw.Holder, raw.Tree[0], raw.Tree[1], "shared-test-key"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("public body leaked %q:\n%s", secret, body)
+		}
+	}
+	if !strings.Contains(body, PublicAnnounceSchema) {
+		t.Fatalf("missing public schema: %s", body)
+	}
+	got, ok := ParseAnnounce(body)
+	if !ok || !reflect.DeepEqual(got, a) {
+		t.Fatalf("round trip got (%+v, %v), want %+v", got, ok, a)
+	}
+}
+
+func TestPublicSafeAnnounceFoldReleaseUsesFingerprint(t *testing.T) {
+	raw := AnnounceRecord{LeaseID: "L", Holder: "node/session", Tree: []string{"internal/leaseref/**"}, TTLSeconds: 60, Action: "acquire"}
+	acquire, _ := PublicSafeAnnounce(raw, []byte("key"))
+	raw.Action = "release"
+	release, _ := PublicSafeAnnounce(raw, []byte("key"))
+	if got := FoldAnnouncements([]string{RenderAnnounce(acquire), RenderAnnounce(release)}); len(got) != 0 {
+		t.Fatalf("held = %+v, want empty", got)
+	}
+}
+
+func TestPublicSafeAnnounceRejectsEmptyKey(t *testing.T) {
+	if _, err := PublicSafeAnnounce(AnnounceRecord{LeaseID: "L"}, nil); err == nil {
+		t.Fatal("expected empty-key error")
+	}
+}

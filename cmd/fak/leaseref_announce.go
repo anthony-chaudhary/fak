@@ -18,6 +18,7 @@ package main
 //       EVIDENCE, never an admission input — advisory visibility when planes 0/1 are down.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -57,6 +58,7 @@ func runLeaserefAnnounce(stdout, stderr io.Writer, argv []string) int {
 	action := fs.String("action", "", "lifecycle action: acquire|renew|release")
 	repo := fs.String("repo", "", "gh repo (OWNER/REPO); default the current repo")
 	dryRun := fs.Bool("dry-run", false, "render the comment body to stdout without posting")
+	publicSafeKeyFile := fs.String("public-safe-key-file", "", "file containing the shared key used to fingerprint public lease fields")
 	var trees repeatedString
 	fs.Var(&trees, "tree", "repo-relative tree glob this lease covers (repeatable)")
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
@@ -71,14 +73,20 @@ func runLeaserefAnnounce(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak leaseref announce: --action must be one of acquire|renew|release (got %q)\n", *action)
 		return 2
 	}
-	body := hooks.ScrubHardwareNames(leaseref.RenderAnnounce(leaseref.AnnounceRecord{
-		LeaseID:    *id,
-		Holder:     *holder,
-		Generation: *gen,
-		Tree:       trees,
-		TTLSeconds: *ttl,
-		Action:     *action,
-	}))
+	rec := leaseref.AnnounceRecord{LeaseID: *id, Holder: *holder, Generation: *gen, Tree: trees, TTLSeconds: *ttl, Action: *action}
+	if *publicSafeKeyFile != "" {
+		key, err := os.ReadFile(pathutil.ExpandTilde(*publicSafeKeyFile))
+		if err != nil {
+			fmt.Fprintf(stderr, "fak leaseref announce: read --public-safe-key-file: %v\n", err)
+			return 2
+		}
+		rec, err = leaseref.PublicSafeAnnounce(rec, bytes.TrimSpace(key))
+		if err != nil {
+			fmt.Fprintf(stderr, "fak leaseref announce: %v\n", err)
+			return 2
+		}
+	}
+	body := hooks.ScrubHardwareNames(leaseref.RenderAnnounce(rec))
 	if *dryRun {
 		fmt.Fprintln(stdout, body)
 		return 0

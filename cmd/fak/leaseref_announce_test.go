@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -61,5 +64,39 @@ func TestRunLeaserefAnnounceScrubsProtectedHolder(t *testing.T) {
 	code := runLeaserefAnnounce(&out, &errb, []string{"--id", "foo", "--holder", cpu + "/sess", "--generation", "3", "--tree", "internal/foo/**", "--ttl", "3600", "--action", "acquire", "--dry-run"})
 	if code != 0 || !strings.Contains(out.String(), "CPU server/sess") || strings.Contains(strings.ToLower(out.String()), cpu) {
 		t.Fatalf("body not scrubbed: code=%d body=%q stderr=%q", code, out.String(), errb.String())
+	}
+}
+
+func TestRunLeaserefAnnouncePublicSafeDryRun(t *testing.T) {
+	d := t.TempDir()
+	keyPath := filepath.Join(d, "announce.key")
+	if err := os.WriteFile(keyPath, []byte("shared-key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := runLeaserefAnnounce(&stdout, &stderr, []string{"--id", "private-lease", "--holder", "private-host/session", "--tree", "internal/private/**", "--action", "acquire", "--public-safe-key-file", keyPath, "--dry-run"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	body := stdout.String()
+	for _, secret := range []string{"private-lease", "private-host/session", "internal/private/**", "shared-key"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("output leaked %q: %s", secret, body)
+		}
+	}
+	if !strings.Contains(body, leaseref.PublicAnnounceSchema) {
+		t.Fatalf("missing public schema: %s", body)
+	}
+}
+
+func TestRunLeaserefAnnouncePublicSafeRejectsEmptyKey(t *testing.T) {
+	keyPath := filepath.Join(t.TempDir(), "empty.key")
+	if err := os.WriteFile(keyPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := runLeaserefAnnounce(&stdout, &stderr, []string{"--id", "L", "--holder", "H", "--action", "acquire", "--public-safe-key-file", keyPath, "--dry-run"})
+	if code != 2 || !strings.Contains(stderr.String(), "key is empty") {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
 	}
 }

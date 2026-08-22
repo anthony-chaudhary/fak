@@ -558,7 +558,23 @@ fak leaseref session-publish --session $ME --ttl 2400   # publish/refresh refs/f
 fak leaseref audit          # READ-ONLY staleness report (control-pane envelope); reaps nothing
 fak leaseref reap           # delete the expired (reapable) records — a crashed holder is bounded
 fak leaseref release --id L --holder $ME   # the release twin of acquire: hand the lease back NOW instead of waiting out the TTL (holder-checked; exit 3 on a refusal)
+
+# public-repository backup plane: participating machines share this key out of band
+fak leaseref announce --issue 123 --id L --holder "$ME" --tree 'docs/**' --ttl 900 --action acquire --public-safe-key-file ~/.config/fak/lease-announce.key
 ```
+
+`announce --public-safe-key-file` projects the raw lease ID, holder, and each exact tree
+entry into domain-separated HMAC-SHA256 fingerprints before posting. The issue comment
+therefore carries a versioned, machine-readable advisory record without publishing machine
+or session names, repository paths, or the key. Nodes that share the same private key derive
+the same fingerprints and can recognize exact-scope duplicates in `announce-view`.
+
+Keep the key outside the repository and distribute it through an existing secret channel;
+passing it by file avoids command-line exposure. Fingerprints hide raw values but do not hide
+transition timing, generation, TTL, action, or the number of tree entries. This plane is
+advisory visibility only: it neither grants a lease nor detects overlap between different glob
+spellings. Omit `--public-safe-key-file` only for a coordination issue whose readers may see
+the raw holder and tree values.
 
 `audit` is the read-only counterpart of `reap`: it classifies every lease live-vs-expired and
 emits the `fak garden` control-pane envelope (`ok`/`verdict`/`reason`, `verdict ACTION` when an
