@@ -1,0 +1,67 @@
+{
+  "cache": [
+    {
+      "cached_input_tokens": 0,
+      "latency_ms": 431.996,
+      "phase": "cold"
+    },
+    {
+      "cached_input_tokens": 0,
+      "latency_ms": 304.715,
+      "phase": "warm"
+    },
+    {
+      "cached_input_tokens": 0,
+      "latency_ms": 16669.673,
+      "phase": "warm_after_restart"
+    }
+  ],
+  "cleanup_ok": true,
+  "evidence_class": "CAMPAIGN",
+  "load_latency_ms": 75336,
+  "peak_memory_bytes": 72796340224,
+  "peak_power_watts": 319.29,
+  "post_cleanup_memory_mib": 536.0,
+  "quality": {
+    "coding_reasoning": {
+      "fail": 0,
+      "latency_p50_ms": 162.699,
+      "pass": 3
+    },
+    "correlated_tools": {
+      "fail": 0,
+      "latency_p50_ms": 1139.019,
+      "pass": 3
+    },
+    "json_schema": {
+      "fail": 0,
+      "latency_p50_ms": 1082.534,
+      "pass": 3
+    },
+    "long_context_retrieval": {
+      "fail": 0,
+      "latency_p50_ms": 525.099,
+      "pass": 3
+    },
+    "repeated_workflow_cache": {
+      "fail": 0,
+      "latency_p50_ms": 431.996,
+      "pass": 3
+    },
+    "text": {
+      "fail": 0,
+      "latency_p50_ms": 198.395,
+      "pass": 3
+    }
+  },
+  "raw_archive_sha256": "ed057a1c492bb5117b8b1be578f2cf59a60d67cdb3fe0035bcf681bcfe35d4fe",
+  "report_sha256": "8baf30202b2d0d3594b80cc48402a19cfed2173815a49bc5e5f8ab563cc9ce7f",
+  "reproduce": "$src/qwen38campaign --config campaign-config.private.json --corpus corpus.json --report report.json --archive archive.json",
+  "restart_ready": true,
+  "rollback": "stop/remove issue8308-bf16; retain the prior service; reject on the declared threshold",
+  "runner_exit": 0,
+  "schema": "fak.qwen38-bf16-summary/1",
+  "throughput_completion_tokens_per_second_p50": 17.338910026836945,
+  "trials": 18,
+  "verdict": "PROMOTE"
+}

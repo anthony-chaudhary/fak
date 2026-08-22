@@ -1,0 +1,174 @@
+{
+  "Schema": "fak.qwen38-quant-report/1",
+  "CorpusID": "qwen38-27b-agentic-v1",
+  "CorpusSHA256": "531927d25f4e314fff8649007b96921af29d3e30809831f47eb43aeb7e80915d",
+  "Arm": "bf16",
+  "identity": {
+    "Model": "Qwen3.8-27B-BF16",
+    "CheckpointSHA256": "f5e9eb121362eac4d112889bcdbd53ac49d4a2a7a2fe6b1b9bad21c3efeaaf22",
+    "ArtifactSHA256": "f5e9eb121362eac4d112889bcdbd53ac49d4a2a7a2fe6b1b9bad21c3efeaaf22",
+    "TokenizerSHA256": "0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3",
+    "TemplateSHA256": "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041",
+    "QuantizerRevision": "none:bf16-reference",
+    "RuntimeRevision": "sglang@0.5.13.post1 image@sha256:111ae1c2ea80cd2bd94b05a904bda6cf49f8e84e4a29f5dea14fc301a0e7d249",
+    "FakModuleRev": "internal/qwen38quantrun r4+g28ed87a517"
+  },
+  "environment": {
+    "command": [
+      "docker",
+      "run",
+      "--gpus",
+      "device=2",
+      "config-sglang_service:latest",
+      "python3",
+      "-m",
+      "sglang.launch_server",
+      "--model-path",
+      "\u003cpinned-snapshot\u003e",
+      "--dtype",
+      "bfloat16",
+      "--context-length",
+      "32768",
+      "--reasoning-parser",
+      "qwen3",
+      "--tool-call-parser",
+      "qwen3_coder"
+    ],
+    "hardware": "1x NVIDIA A100-SXM4-80GB (80 GiB), sm_80",
+    "software": "sglang=0.5.13.post1 torch=2.11.0+cu130 transformers=5.8.1 cuda=13.0 driver=580.173.02",
+    "context_tokens": 32768,
+    "cache_mode": "sglang-radix-cache",
+    "require_device": "A100-SXM4-80GB",
+    "deny_fallback": true
+  },
+  "trials": [
+    {
+      "workload": "text",
+      "repetition": 1,
+      "quality": "FAIL",
+      "latency_ms": 14990.931,
+      "failure": "exact effect mismatch: got \"\""
+    },
+    {
+      "workload": "text",
+      "repetition": 2,
+      "quality": "FAIL",
+      "latency_ms": 624.689,
+      "failure": "exact effect mismatch: got \"\""
+    },
+    {
+      "workload": "text",
+      "repetition": 3,
+      "quality": "FAIL",
+      "latency_ms": 623.204,
+      "failure": "exact effect mismatch: got \"\""
+    },
+    {
+      "workload": "json_schema",
+      "repetition": 1,
+      "quality": "FAIL",
+      "latency_ms": 3042.83,
+      "failure": "invalid JSON"
+    },
+    {
+      "workload": "json_schema",
+      "repetition": 2,
+      "quality": "FAIL",
+      "latency_ms": 2739.03,
+      "failure": "invalid JSON"
+    },
+    {
+      "workload": "json_schema",
+      "repetition": 3,
+      "quality": "FAIL",
+      "latency_ms": 2336.698,
+      "failure": "invalid JSON"
+    },
+    {
+      "workload": "correlated_tools",
+      "repetition": 1,
+      "quality": "PASS",
+      "latency_ms": 2632.213
+    },
+    {
+      "workload": "correlated_tools",
+      "repetition": 2,
+      "quality": "PASS",
+      "latency_ms": 2355.853
+    },
+    {
+      "workload": "correlated_tools",
+      "repetition": 3,
+      "quality": "PASS",
+      "latency_ms": 2354.229
+    },
+    {
+      "workload": "coding_reasoning",
+      "repetition": 1,
+      "quality": "FAIL",
+      "latency_ms": 1316.245,
+      "failure": "exact effect mismatch: got \"\""
+    },
+    {
+      "workload": "coding_reasoning",
+      "repetition": 2,
+      "quality": "FAIL",
+      "latency_ms": 1195.389,
+      "failure": "exact effect mismatch: got \"\""
+    },
+    {
+      "workload": "coding_reasoning",
+      "repetition": 3,
+      "quality": "FAIL",
+      "latency_ms": 1198.388,
+      "failure": "exact effect mismatch: got \"\""
+    },
+    {
+      "workload": "long_context_retrieval",
+      "repetition": 1,
+      "quality": "FAIL",
+      "latency_ms": 141.328,
+      "failure": "HTTP 400: {\"object\":\"error\",\"message\":\"The input (32839 tokens) is longer than the model's context length (32768 tokens).\",\"type\":\"BadRequestError\",\"param\":null,\"code\":400}"
+    },
+    {
+      "workload": "long_context_retrieval",
+      "repetition": 2,
+      "quality": "FAIL",
+      "latency_ms": 105.324,
+      "failure": "HTTP 400: {\"object\":\"error\",\"message\":\"The input (32839 tokens) is longer than the model's context length (32768 tokens).\",\"type\":\"BadRequestError\",\"param\":null,\"code\":400}"
+    },
+    {
+      "workload": "long_context_retrieval",
+      "repetition": 3,
+      "quality": "FAIL",
+      "latency_ms": 102.228,
+      "failure": "HTTP 400: {\"object\":\"error\",\"message\":\"The input (32839 tokens) is longer than the model's context length (32768 tokens).\",\"type\":\"BadRequestError\",\"param\":null,\"code\":400}"
+    },
+    {
+      "workload": "repeated_workflow_cache",
+      "repetition": 1,
+      "quality": "FAIL",
+      "latency_ms": 1331.243,
+      "failure": "exact effect mismatch: got \"\""
+    },
+    {
+      "workload": "repeated_workflow_cache",
+      "repetition": 2,
+      "quality": "FAIL",
+      "latency_ms": 1197.512,
+      "failure": "exact effect mismatch: got \"\""
+    },
+    {
+      "workload": "repeated_workflow_cache",
+      "repetition": 3,
+      "quality": "FAIL",
+      "latency_ms": 17359.97,
+      "failure": "exact effect mismatch: got \"\""
+    }
+  ],
+  "Verdict": "HOLD",
+  "EvidenceClass": "CAMPAIGN",
+  "raw_archive_sha256": "e2d156e4520ef47a56259afe6151e86f6802793e2548234ce265fee2922fab2a",
+  "stale_after": "2026-09-20",
+  "rollback_threshold": "any quality failure or fallback; identity/hash drift; cleanup failure"
+}

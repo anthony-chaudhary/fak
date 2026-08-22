@@ -1,0 +1,159 @@
+{
+  "Schema": "fak.qwen38-quant-report/1",
+  "CorpusID": "qwen38-27b-agentic-v1",
+  "CorpusSHA256": "531927d25f4e314fff8649007b96921af29d3e30809831f47eb43aeb7e80915d",
+  "Arm": "bf16",
+  "identity": {
+    "Model": "Qwen3.8-27B-BF16",
+    "CheckpointSHA256": "f5e9eb121362eac4d112889bcdbd53ac49d4a2a7a2fe6b1b9bad21c3efeaaf22",
+    "ArtifactSHA256": "f5e9eb121362eac4d112889bcdbd53ac49d4a2a7a2fe6b1b9bad21c3efeaaf22",
+    "TokenizerSHA256": "0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3",
+    "TemplateSHA256": "20158f9b80605efa9f0794b988d970861f5020d9f10b82bc65f1b38e0abf59bc",
+    "QuantizerRevision": "none:bf16-reference",
+    "RuntimeRevision": "sglang@0.5.13.post1 image@sha256:111ae1c2ea80cd2bd94b05a904bda6cf49f8e84e4a29f5dea14fc301a0e7d249",
+    "FakModuleRev": "internal/qwen38quantrun r4+g28ed87a517"
+  },
+  "environment": {
+    "command": [
+      "docker",
+      "run",
+      "--gpus",
+      "device=2",
+      "config-sglang_service:latest",
+      "python3",
+      "-m",
+      "sglang.launch_server",
+      "--model-path",
+      "\u003cpinned-snapshot\u003e",
+      "--dtype",
+      "bfloat16",
+      "--context-length",
+      "65536",
+      "--chat-template",
+      "\u003csha256:20158f9b80605efa9f0794b988d970861f5020d9f10b82bc65f1b38e0abf59bc\u003e",
+      "--tool-call-parser",
+      "qwen3_coder"
+    ],
+    "hardware": "1x NVIDIA A100-SXM4-80GB (80 GiB), sm_80",
+    "software": "sglang=0.5.13.post1 torch=2.11.0+cu130 transformers=5.8.1 cuda=13.0 driver=580.173.02",
+    "context_tokens": 65536,
+    "cache_mode": "sglang-radix-cache",
+    "require_device": "A100-SXM4-80GB",
+    "deny_fallback": true
+  },
+  "trials": [
+    {
+      "workload": "text",
+      "repetition": 1,
+      "quality": "PASS",
+      "latency_ms": 15109.095
+    },
+    {
+      "workload": "text",
+      "repetition": 2,
+      "quality": "PASS",
+      "latency_ms": 198.395
+    },
+    {
+      "workload": "text",
+      "repetition": 3,
+      "quality": "PASS",
+      "latency_ms": 196.778
+    },
+    {
+      "workload": "json_schema",
+      "repetition": 1,
+      "quality": "PASS",
+      "latency_ms": 1379.937
+    },
+    {
+      "workload": "json_schema",
+      "repetition": 2,
+      "quality": "PASS",
+      "latency_ms": 1082.534
+    },
+    {
+      "workload": "json_schema",
+      "repetition": 3,
+      "quality": "PASS",
+      "latency_ms": 695.802
+    },
+    {
+      "workload": "correlated_tools",
+      "repetition": 1,
+      "quality": "PASS",
+      "latency_ms": 1739.075
+    },
+    {
+      "workload": "correlated_tools",
+      "repetition": 2,
+      "quality": "PASS",
+      "latency_ms": 1139.019
+    },
+    {
+      "workload": "correlated_tools",
+      "repetition": 3,
+      "quality": "PASS",
+      "latency_ms": 1136.827
+    },
+    {
+      "workload": "coding_reasoning",
+      "repetition": 1,
+      "quality": "PASS",
+      "latency_ms": 278.3
+    },
+    {
+      "workload": "coding_reasoning",
+      "repetition": 2,
+      "quality": "PASS",
+      "latency_ms": 162.699
+    },
+    {
+      "workload": "coding_reasoning",
+      "repetition": 3,
+      "quality": "PASS",
+      "latency_ms": 161.632
+    },
+    {
+      "workload": "long_context_retrieval",
+      "repetition": 1,
+      "quality": "PASS",
+      "latency_ms": 9469.347
+    },
+    {
+      "workload": "long_context_retrieval",
+      "repetition": 2,
+      "quality": "PASS",
+      "latency_ms": 516.432
+    },
+    {
+      "workload": "long_context_retrieval",
+      "repetition": 3,
+      "quality": "PASS",
+      "latency_ms": 525.099
+    },
+    {
+      "workload": "repeated_workflow_cache",
+      "repetition": 1,
+      "quality": "PASS",
+      "latency_ms": 431.996
+    },
+    {
+      "workload": "repeated_workflow_cache",
+      "repetition": 2,
+      "quality": "PASS",
+      "latency_ms": 304.715
+    },
+    {
+      "workload": "repeated_workflow_cache",
+      "repetition": 3,
+      "quality": "PASS",
+      "latency_ms": 16669.673
+    }
+  ],
+  "Verdict": "PROMOTE",
+  "EvidenceClass": "CAMPAIGN",
+  "raw_archive_sha256": "ed057a1c492bb5117b8b1be578f2cf59a60d67cdb3fe0035bcf681bcfe35d4fe",
+  "stale_after": "2026-09-20",
+  "rollback_threshold": "any quality failure or fallback; identity/hash drift; cleanup failure"
+}

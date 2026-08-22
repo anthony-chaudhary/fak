@@ -1,0 +1,1 @@
+{"cuda":"13.0","driver":"580.173.02","execution_template_sha256":"20158f9b80605efa9f0794b988d970861f5020d9f10b82bc65f1b38e0abf59bc","image_id":"sha256:111ae1c2ea80cd2bd94b05a904bda6cf49f8e84e4a29f5dea14fc301a0e7d249","model_revision":"1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0","versions":"sglang=0.5.13.post1 torch=2.11.0+cu130 transformers=5.8.1"}
