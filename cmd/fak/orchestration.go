@@ -115,6 +115,10 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	}
 	sessionID := strings.TrimSpace(os.Getenv("CODEX_THREAD_ID"))
 	if *launch {
+		if orchestrationChildProcess() {
+			fmt.Fprintln(stderr, "fak orchestration plan: nested --launch is refused; orchestration children must finish their assigned role within the parent wave budget")
+			return 2
+		}
 		if err := validateCodexOrchestrationArtifactHome(*codexHome); err != nil {
 			fmt.Fprintf(stderr, "fak orchestration plan: %v\n", err)
 			return 1
@@ -178,6 +182,10 @@ type codexOrchestrationInvocationReceipt struct {
 	Resolved   orchestration.Profile   `json:"resolved_profile"`
 	WorkClass  orchestration.WorkClass `json:"work_class"`
 	MaxWorkers int                     `json:"max_workers"`
+}
+
+func orchestrationChildProcess() bool {
+	return strings.TrimSpace(os.Getenv(orchestrationChildEnv)) != ""
 }
 
 func codexOrchestrationInvocationReceiptPath(codexHome, sessionID string) (string, error) {

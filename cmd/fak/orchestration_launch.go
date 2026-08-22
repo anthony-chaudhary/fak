@@ -55,6 +55,8 @@ func validateCodexOrchestrationArtifactHome(codexHome string) error {
 	return fmt.Errorf("unsafe Codex home %q is inside Git worktree %q; omit --codex-home to use $CODEX_HOME, or choose an external path allocated for scratch/runtime state", absHome, worktree)
 }
 
+const orchestrationChildEnv = "FAK_ORCHESTRATION_CHILD"
+
 type codexOrchestrationWorkerLaunch struct {
 	RoleID     string `json:"role_id"`
 	PID        int    `json:"pid,omitempty"`
@@ -303,15 +305,15 @@ func refusedOrchestrationWorker(role orchestration.Role, access orchestrationCom
 }
 
 func orchestrationWorkerEnv(env []string) []string {
-	out := make([]string, 0, len(env))
+	out := make([]string, 0, len(env)+1)
 	for _, item := range env {
 		key, _, _ := strings.Cut(item, "=")
-		if strings.EqualFold(key, "CODEX_THREAD_ID") || strings.HasPrefix(strings.ToUpper(key), "FAK_GUARD_") {
+		if strings.EqualFold(key, "CODEX_THREAD_ID") || strings.EqualFold(key, orchestrationChildEnv) || strings.HasPrefix(strings.ToUpper(key), "FAK_GUARD_") {
 			continue
 		}
 		out = append(out, item)
 	}
-	return out
+	return append(out, orchestrationChildEnv+"=1")
 }
 
 func newCodexOrchestrationRunID() (string, error) {

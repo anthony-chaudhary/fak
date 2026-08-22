@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -152,6 +153,30 @@ func TestOrchestrationLaunchRejectsGitWorktreeArtifactHomeBeforeWriting(t *testi
 	for _, name := range []string{"fak-orchestration-invocations", "fak-orchestration-launches", "fak-orchestration-runs"} {
 		if _, err := os.Stat(filepath.Join(home, "nested", "state", name)); !os.IsNotExist(err) {
 			t.Fatalf("%s exists after rejected launch: %v", name, err)
+		}
+	}
+}
+
+func TestOrchestrationWorkerEnvMarksChildAndStripsParentIdentity(t *testing.T) {
+	got := orchestrationWorkerEnv([]string{"PATH=keep", "CODEX_THREAD_ID=parent", "FAK_GUARD_PARENT=strip", orchestrationChildEnv + "=stale"})
+	want := []string{"PATH=keep", orchestrationChildEnv + "=1"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("env = %q, want %q", got, want)
+	}
+}
+
+func TestOrchestrationLaunchRefusesChildBeforeWritingReceipts(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_THREAD_ID", "child-session")
+	t.Setenv(orchestrationChildEnv, "1")
+	var stdout, stderr bytes.Buffer
+	code := runOrchestration(&stdout, &stderr, []string{"plan", "--task-text", "split independent checks and reconcile them", "--codex-home", home, "--launch", "--json"})
+	if code != 2 || !strings.Contains(stderr.String(), "nested --launch is refused") {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	for _, name := range []string{"fak-orchestration-invocations", "fak-orchestration-launches", "fak-orchestration-runs"} {
+		if _, err := os.Stat(filepath.Join(home, name)); !os.IsNotExist(err) {
+			t.Fatalf("%s exists after nested refusal: %v", name, err)
 		}
 	}
 }
