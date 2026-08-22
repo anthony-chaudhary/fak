@@ -1,0 +1,78 @@
+{
+  "schema": "fak.qwen38-ladder-evidence/1",
+  "concept": "no-thinking-campaign-requests-v1",
+  "corpus_sha256": "466632a99592cfae8ed3725dc5be4642f4af45d5686a3fb0cfd5208950593d82",
+  "baseline_runtime_sha": "764328d54289e5685ac1ca12878c0c39d00e9c76",
+  "candidate_runtime_sha": "b0ce51b599718cb1a08a886ac61af928a5209b78",
+  "metric": "p95_ms_to_first_correct_answer",
+  "direction": "lower",
+  "minimum_improvement_pct": 5,
+  "results": [
+    {
+      "stage_id": "smoke",
+      "model": "Qwen/Qwen3.5-0.8B",
+      "revision": "2fc06364715b967f1860aea9cf38778875588b17",
+      "environment_sha256": "aed1212dcbf579f469dd52d9871cb404b262015a088fa72c59bb8a522bfe1cf3",
+      "trials": 3,
+      "baseline_passed": 3,
+      "candidate_passed": 3,
+      "baseline_metric": 6671.7386,
+      "candidate_metric": 183.7214
+    },
+    {
+      "stage_id": "behavior",
+      "model": "Qwen/Qwen3.5-2B",
+      "revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+      "environment_sha256": "ad300437a81920f9436761b3aa422c86ca5f5fcd12c317ed38d02e3857212e75",
+      "trials": 3,
+      "baseline_passed": 3,
+      "candidate_passed": 3,
+      "baseline_metric": 9946.7602,
+      "candidate_metric": 272.113
+    },
+    {
+      "stage_id": "width",
+      "model": "Qwen/Qwen3.5-4B",
+      "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+      "environment_sha256": "430eabf0b2d9468fbc5bfd3b8f02ec90b64ad90b67e1c8b0910cca49d0c6098a",
+      "trials": 3,
+      "baseline_passed": 3,
+      "candidate_passed": 3,
+      "baseline_metric": 17905.787,
+      "candidate_metric": 517.8081
+    },
+    {
+      "stage_id": "quality-proxy",
+      "model": "Qwen/Qwen3.5-9B",
+      "revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+      "environment_sha256": "30254e1314b4e0a31e8eb01117eb1bd0f52bcbd877619ea6a7d728cc282a6752",
+      "trials": 3,
+      "baseline_passed": 3,
+      "candidate_passed": 3,
+      "baseline_metric": 45372.2273,
+      "candidate_metric": 948.282
+    },
+    {
+      "stage_id": "scale-rehearsal",
+      "model": "Qwen/Qwen3.5-27B",
+      "revision": "fc05daec18b0a78c049392ed2e771dde82bdf654",
+      "environment_sha256": "d963ac634d187d864786d1b6314e9bde7616cb796f0dd3769d43904fcbdc71d4",
+      "trials": 3,
+      "baseline_passed": 3,
+      "candidate_passed": 3,
+      "baseline_metric": 6881.530965,
+      "candidate_metric": 386.215312
+    },
+    {
+      "stage_id": "target",
+      "model": "Qwen/Qwen3.8-27B",
+      "revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+      "environment_sha256": "7b8ee9c0fb632d0eb66e6b5c0cb0df3e7585be76e3b0c89ede2a5c904c94d60a",
+      "trials": 3,
+      "baseline_passed": 3,
+      "candidate_passed": 3,
+      "baseline_metric": 3378.019733,
+      "candidate_metric": 376.181809
+    }
+  ]
+}

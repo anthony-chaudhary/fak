@@ -1,0 +1,5 @@
+{
+  "verdict": "PASS",
+  "improvement_pct": 88.86383624923602,
+  "reason": "exact Qwen3.8-27B target passed the paired baseline/candidate experiment"
+}

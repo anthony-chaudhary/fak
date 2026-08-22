@@ -1,0 +1,949 @@
+{
+  "schema": "fak.qwen38-ladder-raw-run/1",
+  "environment_sha256": "7b8ee9c0fb632d0eb66e6b5c0cb0df3e7585be76e3b0c89ede2a5c904c94d60a",
+  "corpus_sha256": "4c1292921a94403cb0c1d03e7c7a359b230bf9145e44d211e6156d7dee552468",
+  "rows": [
+    {
+      "trial": 1,
+      "arm": "baseline",
+      "enable_thinking": true,
+      "elapsed_ms": 3362.942039,
+      "passed": true,
+      "decoded_to_stop": "We need to respond to user: \"What is 2+2? Reply with only the number.\" Final only number.\n\n\n4",
+      "events": [
+        {
+          "elapsed_ms": 238.110607,
+          "pieces": [],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 238.178059,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "We"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 457.199305,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " need"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 567.693204,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " to"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 677.725483,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " respond"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 788.081779,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " to"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 897.478628,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " user"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1005.435851,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ":"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1114.36565,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " \""
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1222.743036,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "What"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1329.472689,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " is"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1436.884665,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1544.13494,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1651.026282,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "+"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1758.831979,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1866.179739,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "?"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1973.125948,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Reply"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2080.571571,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " with"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2187.501466,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " only"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2294.62394,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " the"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2401.759726,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " number"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2509.380889,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ".\""
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2616.840328,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Final"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2723.937697,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " only"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2831.222225,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " number"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2938.369467,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "."
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3046.010659,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "\n"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3362.942039,
+          "pieces": [
+            {
+              "field": "content",
+              "text": "\n\n4"
+            }
+          ],
+          "finish_reason": null
+        }
+      ]
+    },
+    {
+      "trial": 1,
+      "arm": "candidate",
+      "enable_thinking": false,
+      "elapsed_ms": 368.914661,
+      "passed": true,
+      "decoded_to_stop": "4",
+      "events": [
+        {
+          "elapsed_ms": 368.861246,
+          "pieces": [],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 368.914661,
+          "pieces": [
+            {
+              "field": "content",
+              "text": "4"
+            }
+          ],
+          "finish_reason": null
+        }
+      ]
+    },
+    {
+      "trial": 2,
+      "arm": "baseline",
+      "enable_thinking": true,
+      "elapsed_ms": 3328.876965,
+      "passed": true,
+      "decoded_to_stop": "We need to respond to user: \"What is 2+2? Reply with only the number.\" Final only number.\n\n\n4",
+      "events": [
+        {
+          "elapsed_ms": 368.141933,
+          "pieces": [],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 368.205724,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "We"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 473.209695,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " need"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 578.476963,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " to"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 683.392244,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " respond"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 788.202587,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " to"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 894.052158,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " user"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 999.1721,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ":"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1104.255832,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " \""
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1209.342075,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "What"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1314.941338,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " is"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1420.217794,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1525.478883,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1630.535545,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "+"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1735.642525,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1840.708682,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "?"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1946.79707,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Reply"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2053.662797,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " with"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2159.396701,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " only"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2265.557152,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " the"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2371.678428,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " number"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2477.966309,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ".\""
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2584.001122,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Final"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2690.003922,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " only"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2795.890295,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " number"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2901.946782,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "."
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3007.955282,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "\n"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3328.876965,
+          "pieces": [
+            {
+              "field": "content",
+              "text": "\n\n4"
+            }
+          ],
+          "finish_reason": null
+        }
+      ]
+    },
+    {
+      "trial": 2,
+      "arm": "candidate",
+      "enable_thinking": false,
+      "elapsed_ms": 372.159683,
+      "passed": true,
+      "decoded_to_stop": "4",
+      "events": [
+        {
+          "elapsed_ms": 372.105859,
+          "pieces": [],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 372.159683,
+          "pieces": [
+            {
+              "field": "content",
+              "text": "4"
+            }
+          ],
+          "finish_reason": null
+        }
+      ]
+    },
+    {
+      "trial": 3,
+      "arm": "baseline",
+      "enable_thinking": true,
+      "elapsed_ms": 3378.019733,
+      "passed": true,
+      "decoded_to_stop": "We need to respond to user: \"What is 2+2? Reply with only the number.\" Final only number.\n\n\n4",
+      "events": [
+        {
+          "elapsed_ms": 377.016375,
+          "pieces": [],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 377.067034,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "We"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 484.134413,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " need"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 591.279904,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " to"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 698.292675,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " respond"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 805.456163,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " to"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 912.718651,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " user"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1019.982996,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ":"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1126.268077,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " \""
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1232.551162,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "What"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1339.832386,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " is"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1447.429825,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1555.022539,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1662.642631,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "+"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1770.777141,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1878.782729,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "?"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1987.249258,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Reply"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2094.987184,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " with"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2202.172033,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " only"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2309.4278,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " the"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2417.34671,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " number"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2526.131851,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ".\""
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2632.95122,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Final"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2738.847196,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " only"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2846.031877,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " number"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2953.323202,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "."
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3059.668028,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "\n"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3378.019733,
+          "pieces": [
+            {
+              "field": "content",
+              "text": "\n\n4"
+            }
+          ],
+          "finish_reason": null
+        }
+      ]
+    },
+    {
+      "trial": 3,
+      "arm": "candidate",
+      "enable_thinking": false,
+      "elapsed_ms": 376.181809,
+      "passed": true,
+      "decoded_to_stop": "4",
+      "events": [
+        {
+          "elapsed_ms": 376.130793,
+          "pieces": [],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 376.181809,
+          "pieces": [
+            {
+              "field": "content",
+              "text": "4"
+            }
+          ],
+          "finish_reason": null
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "baseline": {
+      "passed": 3,
+      "trials": 3,
+      "p95_ms": 3378.019733
+    },
+    "candidate": {
+      "passed": 3,
+      "trials": 3,
+      "p95_ms": 376.181809
+    }
+  }
+}

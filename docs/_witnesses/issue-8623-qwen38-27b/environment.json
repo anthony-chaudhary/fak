@@ -1,0 +1,42 @@
+{
+  "schema": "fak.qwen38-ladder-environment/1",
+  "captured_at": "2026-08-22T14:12:32.298303-07:00",
+  "host_class": "sanctioned-datacenter-gpu-tp2",
+  "platform": "Linux-x86_64-with-glibc2.35",
+  "python": "3.12.14",
+  "torch": "2.13.0+cu130",
+  "transformers": "5.15.1",
+  "vllm": "0.27.1",
+  "cuda_available": true,
+  "gpu_before": [
+    "0, datacenter GPU, 40960, 35725, 4716",
+    "1, datacenter GPU, 40960, 35725, 4716"
+  ],
+  "model": "Qwen/Qwen3.8-27B",
+  "served_model": "qwen38-bf16",
+  "revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+  "dtype": "bfloat16",
+  "tensor_parallel_size": 2,
+  "max_model_len": 16384,
+  "gpu_memory_utilization": 0.85,
+  "seed": 0,
+  "temperature": 0,
+  "max_new_tokens": 256,
+  "scorer": "decoded SSE stream contains standalone expected answer; client closes stream at shared semantic early-stop",
+  "metric": "p95 wall milliseconds to first correct answer; nearest-rank",
+  "arms": {
+    "baseline": {
+      "enable_thinking": true,
+      "runtime_sha": "764328d54289e5685ac1ca12878c0c39d00e9c76"
+    },
+    "candidate": {
+      "enable_thinking": false,
+      "runtime_sha": "b0ce51b599718cb1a08a886ac61af928a5209b78"
+    }
+  },
+  "environment_sha256": "7b8ee9c0fb632d0eb66e6b5c0cb0df3e7585be76e3b0c89ede2a5c904c94d60a",
+  "gpu_after": [
+    "0, datacenter GPU, 40960, 35729, 4712",
+    "1, datacenter GPU, 40960, 35729, 4712"
+  ]
+}
