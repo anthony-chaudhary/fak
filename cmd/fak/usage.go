@@ -237,10 +237,12 @@ const usageCoreText = `usage:
                 It fixes the canonical profile to ultracode: leases, independent
                 effect readback, and reconciliation remain mandatory. Planning and
                 --selfcheck are offline; --launch starts resolved harness workers.
-  fak agent     [--task STR] [--provider openai|anthropic|gemini|xai]
+  fak agent     [--native] [--task STR] [--provider openai|anthropic|gemini|xai]
                 [--base-url URL --model M --api-key-env VAR | --offline]
                 [--max-turns N] [--out agent-report.json] [--policy FILE]
-                [--route-manifest FILE]   (LIVE turn-count A/B)
+                [--route-manifest FILE]
+                (--native runs one kernel-mediated arm and prints its final answer;
+                 without it, the command preserves the LIVE turn-count A/B report)
   fak api-host  readiness|acceptance
                 (native no-spend API-host bridge probes: /models readiness and typed
                  acceptance classification over target specs, an api-host roster, or a

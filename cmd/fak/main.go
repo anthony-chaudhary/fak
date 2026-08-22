@@ -1129,6 +1129,7 @@ func cmdAgent(argv []string) {
 	apiKeyEnv := fs.String("api-key-env", "GEMINI_API_KEY", "env var holding the API key")
 	anthropicAuth := fs.String("anthropic-auth", "auto", "(--provider anthropic) how to present the credential: auto (sniff the token shape - correct for api.anthropic.com), bearer, or x-api-key. Pass bearer for a THIRD-PARTY Anthropic-compatible endpoint whose tenant token is not an sk-ant-* key: auto would send x-api-key and the call would 401 even with a correct base URL, model, and body")
 	offline := fs.Bool("offline", false, "use the deterministic mock planner (no network)")
+	native := fs.Bool("native", false, "run one kernel-mediated arm and print its final answer (basic terminal mode)")
 	maxTurns := fs.Int("max-turns", 10, "max model turns per arm")
 	out := fs.String("out", "agent-report.json", "report output path")
 	logOut := fs.String("log", "", "optional path to write the per-call trace log")
@@ -1208,6 +1209,19 @@ func cmdAgent(argv []string) {
 		}
 		p.AnthropicAuthScheme = scheme
 		planner = p
+	}
+
+	if *native {
+		if *logOut != "" {
+			must(errors.New("fak agent: --native does not support --log; use --out for its receipt"))
+		}
+		metrics, err := agent.RunArm(ctx(), planner, *task, true, *maxTurns, nil, runOpts...)
+		must(err)
+		receipt := newNativeAgentReceipt(*task, planner.Model(), metrics)
+		must(os.WriteFile(*out, jsonIndent(receipt), 0o644))
+		fmt.Fprintln(os.Stdout, metrics.FinalAnswer)
+		announceAgentReport(os.Stderr, *out)
+		return
 	}
 
 	res, trace, err := agent.Run(ctx(), planner, *task, *maxTurns, runOpts...)
