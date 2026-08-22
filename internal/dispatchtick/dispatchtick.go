@@ -378,7 +378,13 @@ func GuardedLaunchCommand(command []string, fakBin, lane, backend, workspace, ba
 	if backend == "codex" {
 		args = append(args, "--codex-loop-gate", "off")
 	}
-	args = append(args, "--provider", GuardProvider(backend))
+	// Codex guard auto-detection must see the selected CODEX_HOME before choosing its
+	// upstream. Forcing --provider openai turns an unrelated ambient OPENAI_API_KEY
+	// into an API-billing opt-in and bypasses an otherwise-ready ChatGPT subscription.
+	// Other backends still need their explicit wire selection.
+	if backend != "codex" {
+		args = append(args, "--provider", GuardProvider(backend))
+	}
 	if backend != "claude" {
 		if strings.TrimSpace(baseURL) == "" && backend != "codex" {
 			return append([]string(nil), command...), false

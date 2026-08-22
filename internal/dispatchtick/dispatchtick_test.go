@@ -253,12 +253,12 @@ func TestGuardedLaunchCommand(t *testing.T) {
 	}
 
 	subscriptionCodex, guarded := GuardedLaunchCommand([]string{"codex", "exec", "-"}, "fak", "docs", "codex", "/repo", "")
-	if !guarded || !strings.Contains(strings.Join(subscriptionCodex, " "), "guard --codex-loop-gate off --provider openai") || slices.Contains(subscriptionCodex, "--base-url") {
+	if !guarded || slices.Contains(subscriptionCodex, "--provider") || slices.Contains(subscriptionCodex, "--base-url") {
 		t.Fatalf("subscription Codex dispatch must defer upstream selection to guard: %v", subscriptionCodex)
 	}
 
 	codex, guarded := GuardedLaunchCommand([]string{"codex", "exec", "-"}, "fak", "docs", "codex", "/repo", "http://127.0.0.1:18080/v1")
-	if !guarded || !strings.Contains(strings.Join(codex, " "), "guard --codex-loop-gate off --provider openai") {
+	if !guarded || slices.Contains(codex, "--provider") {
 		t.Fatalf("codex dispatch must carry the already-evaluated loop-gate decision: %v", codex)
 	}
 	if runtime.GOOS == "windows" && !strings.Contains(strings.Join(codex, " "), "codex.cmd exec -") {
@@ -312,7 +312,7 @@ func TestGuardedLaunchCommandEdgeAndAdversarialInputs(t *testing.T) {
 		{name: "empty command refuses guard without panic", command: nil, fakBin: "fak", backend: "codex", guarded: false, wantExact: nil},
 		{name: "blank fak binary preserves command", command: []string{"codex", "exec", "-"}, fakBin: " \t", backend: "codex", guarded: false, wantExact: []string{"codex", "exec", "-"}},
 		{name: "non-Codex OpenAI backend requires endpoint", command: []string{"opencode", "run", "prompt"}, fakBin: "fak", backend: "opencode", guarded: false, wantExact: []string{"opencode", "run", "prompt"}},
-		{name: "Codex subscription rejects whitespace endpoint without emitting it", command: []string{"codex", "exec", "--", "hostile;still-argv"}, fakBin: "fak", backend: "codex", baseURL: " \r\n", guarded: true, want: []string{"--provider", "openai", "--codex-loop-gate", "off", "hostile;still-argv"}, notWant: []string{"--base-url"}},
+		{name: "Codex subscription rejects whitespace endpoint without emitting it", command: []string{"codex", "exec", "--", "hostile;still-argv"}, fakBin: "fak", backend: "codex", baseURL: " \r\n", guarded: true, want: []string{"--codex-loop-gate", "off", "hostile;still-argv"}, notWant: []string{"--provider", "--base-url"}},
 		{name: "Codex explicit endpoint remains one argv value", command: []string{"codex", "exec", "-"}, fakBin: "fak", backend: "codex", baseURL: "http://127.0.0.1:18080/v1?x=a;b", guarded: true, want: []string{"--base-url", "http://127.0.0.1:18080/v1?x=a;b"}},
 	}
 	for _, tc := range tests {
