@@ -331,6 +331,7 @@ SCORECARDS: list[dict[str, str]] = [
     # EXCLUDED_SCORECARDS in the test). When commit_quality IS registered + pinned on a green
     # tree, REMOVE this row — folding both double-counts the subject defects in total_debt.
     {"key": "commit_subject", "debt": "commit_debt", "script": "commit_subject_coverage.py", "label": "commit-subject"},
+    {"key": "flow", "debt": "flow_debt", "script": "", "cmd": "go run ./cmd/fak score flow --json", "label": "flow-metrics"},
 ]
 
 # The scorecards folded via `go run ./cmd/fak …` (no python script). When one of
