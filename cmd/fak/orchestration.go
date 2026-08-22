@@ -116,7 +116,7 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 			fmt.Fprintln(stderr, "fak orchestration plan: selfcheck unstable JSON")
 			return 1
 		}
-		fmt.Fprintf(stdout, "SELFCHECK PASS schema=%s offline=true launched=0\n", resolved.Schema)
+		fmt.Fprintf(stderr, "SELFCHECK PASS schema=%s offline=true launched=0\n", resolved.Schema)
 	}
 	sessionID := strings.TrimSpace(os.Getenv("CODEX_THREAD_ID"))
 	if *launch {
