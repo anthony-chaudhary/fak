@@ -11929,6 +11929,26 @@
           "category": "incidental",
           "reason": "Boolean controlling whether a candidate-local receipt is persisted; it is not a planning or candidate-selection concept.",
           "token": "writeCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "private adapter name, not a project planning concept",
+          "token": "measuredPlanner"
+        },
+        {
+          "category": "incidental",
+          "reason": "private execution helper, not a project planning concept",
+          "token": "runWithPlanner"
+        },
+        {
+          "category": "incidental",
+          "reason": "private provider constructor, not a project planning concept",
+          "token": "newLivePlanner"
+        },
+        {
+          "category": "incidental",
+          "reason": "local error variable, not a project planning concept",
+          "token": "plannerErr"
         }
       ],
       "exclude": [
@@ -12045,8 +12065,10 @@
         "indexedPlanStep",
         "inspectCodexMarketplaceCandidate",
         "listPlan",
+        "measuredPlanner",
         "mergePlanDigest",
         "motifDetectPlanFanoutReconcile",
+        "newLivePlanner",
         "notplanned",
         "nplan",
         "orderLaneCandidatesAged",
@@ -12058,6 +12080,7 @@
         "plannedcumtok",
         "plannedcumtokens",
         "planner",
+        "plannerErr",
         "planners",
         "planning",
         "plano",
@@ -12073,6 +12096,7 @@
         "rollbackCodexMarketplaceCandidate",
         "runAblatePlan",
         "runContinuitySyncPlan",
+        "runWithPlanner",
         "rwMergeSessiondiagCandidates",
         "rwSessiondiagCandidates",
         "scanCodexMarketplaceCandidates",

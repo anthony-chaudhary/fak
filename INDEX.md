@@ -270,6 +270,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Native harness live-model and dogfood readout — 2026-08-22](docs/notes/NATIVE-HARNESS-DOGFOOD-2026-08-22.md) -- auto-indexed dated note.
 - [Concept study: mini-sglang's compact serving control loop](docs/notes/CONCEPT-STUDY-MINI-SGLANG-2026-08-22.md) -- auto-indexed dated note.
 - [FlashInfer study — reusable execution plans, workload tuning, and traceable kernels](docs/research/flashinfer-study-2026-08-22.md) -- pinned deep study; files plan/run #8607, offline tuning #8608, and device-event trace #8609.
 
@@ -821,3 +822,5 @@ front page.
 ## Research notes — 2026-08-21
 
 - [`docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.md`](docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.md) — Pinned `/study-repo` + `/field-borrow` comparison of public Claude Code workflow/agent examples, LangGraph, stable A2A, black-box installed Claude behavior, and fak's Ultracode baseline across twelve orchestration axes. Keeps leases and independent effect witness as fak's stronger defaults, deduplicates the existing issue cluster, records effective activation under #8488, and files the sole ownerless recovery join as #8490. A machine companion and deterministic Go checker enforce provenance, license, posture, ownership, benchmark denominators/falsifiers, completeness, and public-leak boundaries.
+
+- [Native harness live-model and dogfood readout (2026-08-22)](docs/notes/NATIVE-HARNESS-DOGFOOD-2026-08-22.md) — real-model bounded microharness witness, weekly usage ledger, and measured HOLD on default promotion.
