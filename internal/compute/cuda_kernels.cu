@@ -355,6 +355,12 @@ __global__ void k_qwen35_gdn_fused_in_proj(
     const void *wA, const float *sA, int qA,
     float *mixed, float *z, float *b, float *a,
     int hidden, int convDim, int valueDim, int nV) {
+  int token = blockIdx.y;
+  x += (size_t)token * hidden;
+  mixed += (size_t)token * convDim;
+  z += (size_t)token * valueDim;
+  b += (size_t)token * nV;
+  a += (size_t)token * nV;
   int globalRow = blockIdx.x;
   int row = globalRow;
   const void *w = wQKV;
@@ -436,6 +442,34 @@ __global__ void k_qwen35_gdn_conv_state(
 
 // Normalize each distinct q/k head once. q is additionally scaled by 1/sqrt(kHd),
 // matching the existing CPU recurrence before value-head group expansion.
+// Panel convolution computes every prompt row from the immutable incoming history and panel,
+// then commits only the final K-1 inputs as the next recurrent history. Channels are independent.
+__global__ void k_qwen35_gdn_conv_panel(
+    const float *mixed, const float *convW, float *convState, float *convOut,
+    int tokens, int convDim, int K) {
+  int c = blockIdx.x * blockDim.x + threadIdx.x;
+  if (c >= convDim) return;
+  const float *cw = convW + (size_t)c * K;
+  for (int token = 0; token < tokens; ++token) {
+    float acc = 0.0f;
+#pragma unroll 1
+    for (int j = 0; j < K; ++j) {
+      int panel = token + j - (K - 1);
+      float value = panel < 0 ? convState[(size_t)(K - 1 + panel) * convDim + c]
+                              : mixed[(size_t)panel * convDim + c];
+      acc += cw[j] * value;
+    }
+    convOut[(size_t)token * convDim + c] = qwen35_gdn_silu(acc);
+  }
+  if (K > 1) {
+    for (int j = 0; j < K - 1; ++j) {
+      int panel = tokens - (K - 1) + j;
+      float value = panel < 0 ? convState[(size_t)(K - 1 + panel) * convDim + c]
+                              : mixed[(size_t)panel * convDim + c];
+      convState[(size_t)j * convDim + c] = value;
+    }
+  }
+}
 __global__ void k_qwen35_gdn_qk_norm(
     const float *convOut, float *qNorm, float *kNorm, int nK, int kHd) {
   int h = blockIdx.x;
@@ -470,6 +504,35 @@ __global__ void k_qwen35_gdn_qk_norm(
 // recurrent_state[h,i,d] element for its d, so it can perform decay, k^T S,
 // rank-1 update, and q^T S without atomics. The block then reduces the per-head
 // readout norm and applies norm[d] * RMS(core[d]) * silu(z[h,d]) in the same launch.
+__global__ void k_qwen35_gdn_qk_norm_panel(
+    const float *convOut, float *qNorm, float *kNorm, int tokens, int convDim, int nK, int kHd) {
+  int token = blockIdx.y;
+  int h = blockIdx.x;
+  int d = threadIdx.x;
+  if (token >= tokens || h >= nK) return;
+  int keyDim = nK * kHd;
+  const float *row = convOut + (size_t)token * convDim;
+  extern __shared__ float smem[];
+  float *qss = smem;
+  float *kss = smem + blockDim.x;
+  float qv = d < kHd ? row[h * kHd + d] : 0.0f;
+  float kv = d < kHd ? row[keyDim + h * kHd + d] : 0.0f;
+  qss[d] = qv * qv;
+  kss[d] = kv * kv;
+  __syncthreads();
+  for (int off = blockDim.x / 2; off > 0; off >>= 1) {
+    if (d < off) { qss[d] += qss[d + off]; kss[d] += kss[d + off]; }
+    __syncthreads();
+  }
+  if (d < kHd) {
+    float qinv = (float)(1.0 / sqrt((double)qss[0] + 1e-6));
+    float kinv = (float)(1.0 / sqrt((double)kss[0] + 1e-6));
+    float scale = (float)(1.0 / sqrt((double)kHd));
+    size_t base = ((size_t)token * nK + h) * kHd + d;
+    qNorm[base] = qv * qinv * scale;
+    kNorm[base] = kv * kinv;
+  }
+}
 __global__ void k_qwen35_gdn_recurrent_gated_norm(
     const float *convOut, const float *qNorm, const float *kNorm,
     const float *z, const float *b, const float *a,
@@ -520,6 +583,64 @@ __global__ void k_qwen35_gdn_recurrent_gated_norm(
   }
 }
 
+// One persistent block per value head owns its recurrent state and advances the whole prompt
+// in token order on device. Different heads are independent; no grid-wide synchronization is needed.
+__global__ void k_qwen35_gdn_recurrent_panel(
+    const float *convOut, const float *qNorm, const float *kNorm,
+    const float *z, const float *b, const float *a,
+    const float *aLog, const float *dtBias, const float *norm,
+    float *state, float *core, int tokens, int convDim,
+    int nK, int nV, int kHd, int vHd, float eps) {
+  int h = blockIdx.x;
+  int d = threadIdx.x;
+  if (h >= nV) return;
+  int repeat = nV / nK;
+  int kh = h / repeat;
+  int keyDim = nK * kHd;
+  extern __shared__ float ss[];
+  for (int token = 0; token < tokens; ++token) {
+    const float *qRow = qNorm + ((size_t)token * nK + kh) * kHd;
+    const float *kRow = kNorm + ((size_t)token * nK + kh) * kHd;
+    const float *convRow = convOut + (size_t)token * convDim;
+    const float *zRow = z + (size_t)token * nV * vHd;
+    const float *bRow = b + (size_t)token * nV;
+    const float *aRow = a + (size_t)token * nV;
+    float beta = 1.0f / (1.0f + (float)exp((double)-bRow[h]));
+    float aa = (float)exp((double)aLog[h]);
+    float dt = qwen35_gdn_softplus(aRow[h] + dtBias[h]);
+    float decay = (float)exp((double)(-aa * dt));
+    float readout = 0.0f;
+    if (d < vHd) {
+      float kvmem = 0.0f;
+      for (int i = 0; i < kHd; ++i) {
+        size_t si = ((size_t)h * kHd + i) * vHd + d;
+        float sd = state[si] * decay;
+        state[si] = sd;
+        kvmem += sd * kRow[i];
+      }
+      float v = convRow[2 * keyDim + h * vHd + d];
+      float delta = (v - kvmem) * beta;
+      for (int i = 0; i < kHd; ++i) {
+        size_t si = ((size_t)h * kHd + i) * vHd + d;
+        float sd = state[si] + kRow[i] * delta;
+        state[si] = sd;
+        readout += sd * qRow[i];
+      }
+    }
+    ss[d] = d < vHd ? readout * readout : 0.0f;
+    __syncthreads();
+    for (int off = blockDim.x / 2; off > 0; off >>= 1) {
+      if (d < off) ss[d] += ss[d + off];
+      __syncthreads();
+    }
+    if (d < vHd) {
+      float inv = (float)(1.0 / sqrt((double)ss[0] / (double)vHd + (double)eps));
+      int vd = h * vHd + d;
+      core[(size_t)token * nV * vHd + vd] = norm[d] * (readout * inv) * qwen35_gdn_silu(zRow[vd]);
+    }
+    __syncthreads();
+  }
+}
 __global__ void k_qwen35_gdn_out_proj(
     const void *w, const float *scale, int q8,
     const float *x, float *out, int hidden, int valueDim) {
@@ -703,37 +824,36 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
       !dOutW || !dConvState || !dRecurrentState || !dMixed || !dZ || !dB || !dA ||
       !dConvOut || !dQNorm || !dKNorm || !dCore) return -1;
   cudaGetLastError();
-  for (int token = 0; token < tokens; token++) {
-    const float *x = dX + (size_t) token * hidden;
-    float *out = dOut + (size_t) token * hidden;
-    k_qwen35_gdn_fused_in_proj<<<fusedRows, 256, 0, g_stream>>>(
-        x, dInQKV, dInQKVScale, inQKVQ8, dInZ, dInZScale, inZQ8,
-        dInB, dInBScale, inBQ8, dInA, dInAScale, inAQ8,
-        dMixed, dZ, dB, dA, hidden, convDim, nV * vHd, nV);
-    int status = qwen35_gdn_launch_status(2);
-    if (status != 0) return qwen35_gdn_drain_after_error(status);
-    int convBlocks = (convDim + 255) / 256;
-    k_qwen35_gdn_conv_state<<<convBlocks, 256, 0, g_stream>>>(
-        dMixed, dConvW, dConvState, dConvOut, convDim, convKernel);
-    status = qwen35_gdn_launch_status(3);
-    if (status != 0) return qwen35_gdn_drain_after_error(status);
-    int qThreads = qwen35_gdn_threads(kHd);
-    k_qwen35_gdn_qk_norm<<<nK, qThreads, (size_t) 2 * qThreads * sizeof(float), g_stream>>>(
-        dConvOut, dQNorm, dKNorm, nK, kHd);
-    status = qwen35_gdn_launch_status(4);
-    if (status != 0) return qwen35_gdn_drain_after_error(status);
-    int vThreads = qwen35_gdn_threads(vHd);
-    k_qwen35_gdn_recurrent_gated_norm<<<nV, vThreads, (size_t) vThreads * sizeof(float), g_stream>>>(
-        dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm,
-        dRecurrentState, dCore, nK, nV, kHd, vHd, rmsEps);
-    status = qwen35_gdn_launch_status(5);
-    if (status != 0) return qwen35_gdn_drain_after_error(status);
+  k_qwen35_gdn_fused_in_proj<<<dim3(fusedRows, tokens), 256, 0, g_stream>>>(
+      dX, dInQKV, dInQKVScale, inQKVQ8, dInZ, dInZScale, inZQ8,
+      dInB, dInBScale, inBQ8, dInA, dInAScale, inAQ8,
+      dMixed, dZ, dB, dA, hidden, convDim, nV * vHd, nV);
+  int status = qwen35_gdn_launch_status(2);
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
+  int convBlocks = (convDim + 255) / 256;
+  k_qwen35_gdn_conv_panel<<<convBlocks, 256, 0, g_stream>>>(
+      dMixed, dConvW, dConvState, dConvOut, tokens, convDim, convKernel);
+  status = qwen35_gdn_launch_status(3);
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
+  int qThreads = qwen35_gdn_threads(kHd);
+  k_qwen35_gdn_qk_norm_panel<<<dim3(nK, tokens), qThreads, (size_t)2 * qThreads * sizeof(float), g_stream>>>(
+      dConvOut, dQNorm, dKNorm, tokens, convDim, nK, kHd);
+  status = qwen35_gdn_launch_status(4);
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
+  int vThreads = qwen35_gdn_threads(vHd);
+  k_qwen35_gdn_recurrent_panel<<<nV, vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
+      dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm,
+      dRecurrentState, dCore, tokens, convDim, nK, nV, kHd, vHd, rmsEps);
+  status = qwen35_gdn_launch_status(5);
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
+  for (int token = 0; token < tokens; ++token) {
     k_qwen35_gdn_out_proj<<<hidden, 256, 0, g_stream>>>(
-        dOutW, dOutWScale, outWQ8, dCore, out, hidden, nV * vHd);
-    status = qwen35_gdn_launch_status(6);
-    if (status != 0) return qwen35_gdn_drain_after_error(status);
+        dOutW, dOutWScale, outWQ8,
+        dCore + (size_t)token * nV * vHd,
+        dOut + (size_t)token * hidden, hidden, nV * vHd);
   }
-  cudaError_t sync = cudaStreamSynchronize(g_stream);
+  status = qwen35_gdn_launch_status(6);
+  if (status != 0) return qwen35_gdn_drain_after_error(status);  cudaError_t sync = cudaStreamSynchronize(g_stream);
   if (sync != cudaSuccess) return 70000 + (int) sync;
   g_qwen35_gdn_operations += (size_t) tokens;
   return 0;

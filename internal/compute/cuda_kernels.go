@@ -242,7 +242,7 @@ func (c *cudaBackend) qwen35SequenceGDNLocked(x Tensor, layer Qwen35SequenceLaye
 	allocations := []struct {
 		name  string
 		shape []int
-	}{{"gdn-mixed", []int{convDim}}, {"gdn-z", []int{valueDim}}, {"gdn-b", []int{req.NumValueHeads}}, {"gdn-a", []int{req.NumValueHeads}}, {"gdn-conv-out", []int{convDim}}, {"gdn-q-norm", []int{keyDim}}, {"gdn-k-norm", []int{keyDim}}, {"gdn-core", []int{valueDim}}, {"gdn-output", []int{tokens, req.Hidden}}}
+	}{{"gdn-mixed", []int{tokens, convDim}}, {"gdn-z", []int{tokens, valueDim}}, {"gdn-b", []int{tokens, req.NumValueHeads}}, {"gdn-a", []int{tokens, req.NumValueHeads}}, {"gdn-conv-out", []int{tokens, convDim}}, {"gdn-q-norm", []int{tokens, keyDim}}, {"gdn-k-norm", []int{tokens, keyDim}}, {"gdn-core", []int{tokens, valueDim}}, {"gdn-output", []int{tokens, req.Hidden}}}
 	tensors := make([]Tensor, 0, len(allocations))
 	buffers := make([]*cudaBuf, 0, len(allocations))
 	for _, allocation := range allocations {
