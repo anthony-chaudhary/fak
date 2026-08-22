@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
 )
 
@@ -242,5 +243,39 @@ func TestDispatchProbeTreeBuildReusesCrossProcessCommittedWitness(t *testing.T) 
 	}
 	if builds != 0 {
 		t.Fatalf("builds=%d want 0 after independent witness", builds)
+	}
+}
+
+func TestDispatchProbeTreeBuildReusesProvenanceMatchedBinary(t *testing.T) {
+	const head = "0123456789abcdef0123456789abcdef01234567"
+	oldHead, oldStamp, oldBuild := dispatchTreeBuildHeadContext, dispatchTreeBuildStamp, dispatchTreeBuildCommandContext
+	dispatchTreeBuildHeadContext = func(context.Context, string) string { return head }
+	dispatchTreeBuildStamp = func() binstamp.Stamp {
+		return binstamp.Stamp{Revision: head, HasVCS: true}
+	}
+	builds := 0
+	dispatchTreeBuildCommandContext = func(context.Context, string) (string, error) {
+		builds++
+		return "", errors.New("matched binary must not rebuild")
+	}
+	dispatchTreeBuildSuccesses.Lock()
+	dispatchTreeBuildSuccesses.byRoot = nil
+	dispatchTreeBuildSuccesses.Unlock()
+	t.Cleanup(func() {
+		dispatchTreeBuildHeadContext, dispatchTreeBuildStamp, dispatchTreeBuildCommandContext = oldHead, oldStamp, oldBuild
+		dispatchTreeBuildSuccesses.Lock()
+		dispatchTreeBuildSuccesses.byRoot = nil
+		dispatchTreeBuildSuccesses.Unlock()
+	})
+
+	check, evidence := dispatchProbeTreeBuildContext(context.Background(), t.TempDir())
+	if check.Poisoned || check.Error != "" {
+		t.Fatalf("matched binary check = %+v", check)
+	}
+	if builds != 0 {
+		t.Fatalf("builds = %d, want 0", builds)
+	}
+	if !evidence.Reused || evidence.Source != "running_binary" || evidence.RequestedCommit != head || evidence.BinaryRevision != head {
+		t.Fatalf("evidence = %+v, want provenance-valid running-binary reuse", evidence)
 	}
 }

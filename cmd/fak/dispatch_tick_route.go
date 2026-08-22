@@ -11,6 +11,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/dispatchcache"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/flock"
 )
 
 type dispatchIssueInfo struct {
@@ -575,6 +577,8 @@ type dispatchBacklogDelta struct {
 }
 
 var dispatchFetchBacklogDeltaIssues = dispatchFetchBacklogDeltaGH
+var dispatchFetchBacklogDeltaIssuesContext = dispatchFetchBacklogDeltaGHContext
+var dispatchFetchBacklogIssuesContext = dispatchFetchOpenIssuesContext
 
 func dispatchBacklogSnapshotPath(root string) string {
 	return filepath.Join(root, ".fak", "dispatch", "backlog.json")
@@ -611,10 +615,119 @@ func dispatchRowsIssues(root string, rows []dispatchcache.BacklogIssue) ([]dispa
 }
 
 func dispatchFetchBacklogIncremental(root string, limit int, now time.Time) ([]dispatchtick.Issue, error) {
+	return dispatchFetchBacklogIncrementalWith(
+		context.Background(), root, limit, now,
+		func(_ context.Context, root string, watermark time.Time, limit int) (dispatchBacklogDelta, error) {
+			return dispatchFetchBacklogDeltaIssues(root, watermark, limit)
+		},
+		func(_ context.Context, root string, limit int) ([]dispatchtick.Issue, error) {
+			return dispatchFetchBacklogIssues(root, limit)
+		},
+	)
+}
+
+const dispatchBacklogFetchReceiptSchema = "fak.dispatch-backlog-fetch.v1"
+
+type dispatchBacklogFetchReceipt struct {
+	Schema      string    `json:"schema"`
+	Key         string    `json:"key"`
+	CompletedAt time.Time `json:"completed_at"`
+}
+
+func dispatchBacklogFetchReceiptPath(snapshotPath string) string {
+	return strings.TrimSuffix(snapshotPath, filepath.Ext(snapshotPath)) + ".fetch.json"
+}
+
+func readDispatchBacklogFetchReceipt(path, key string) (dispatchBacklogFetchReceipt, bool) {
+	var receipt dispatchBacklogFetchReceipt
+	raw, err := os.ReadFile(dispatchBacklogFetchReceiptPath(path))
+	if err != nil || json.Unmarshal(raw, &receipt) != nil || receipt.Schema != dispatchBacklogFetchReceiptSchema || receipt.Key != key || receipt.CompletedAt.IsZero() {
+		return dispatchBacklogFetchReceipt{}, false
+	}
+	return receipt, true
+}
+
+func writeDispatchBacklogFetchReceipt(path, key string, completedAt time.Time) {
+	receipt := dispatchBacklogFetchReceipt{Schema: dispatchBacklogFetchReceiptSchema, Key: key, CompletedAt: completedAt.UTC()}
+	raw, err := json.Marshal(receipt)
+	if err != nil {
+		return
+	}
+	target := dispatchBacklogFetchReceiptPath(path)
+	// The fetch lock serializes every reader and writer of this sidecar. Writing the
+	// tiny receipt in place also works on Windows, where Rename cannot replace an
+	// existing destination and would leave every receipt after the first stale.
+	_ = os.WriteFile(target, append(raw, '\n'), 0o644)
+}
+
+var dispatchBacklogFetchLockWait = func(ctx context.Context) error {
+	timer := time.NewTimer(10 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func acquireDispatchBacklogFetchLock(ctx context.Context, path string) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		err = flock.TryLock(lock)
+		if err == nil {
+			return lock, nil
+		}
+		if !errors.Is(err, flock.ErrLockBusy) {
+			_ = lock.Close()
+			return nil, err
+		}
+		if err := dispatchBacklogFetchLockWait(ctx); err != nil {
+			_ = lock.Close()
+			return nil, err
+		}
+	}
+}
+
+func dispatchFetchBacklogIncrementalContext(ctx context.Context, root string, limit int, now time.Time) ([]dispatchtick.Issue, error) {
+	return dispatchFetchBacklogIncrementalWith(ctx, root, limit, now, dispatchFetchBacklogDeltaIssuesContext, dispatchFetchBacklogIssuesContext)
+}
+
+func dispatchFetchBacklogIncrementalWith(
+	ctx context.Context,
+	root string,
+	limit int,
+	now time.Time,
+	fetchDelta func(context.Context, string, time.Time, int) (dispatchBacklogDelta, error),
+	fetchFull func(context.Context, string, int) ([]dispatchtick.Issue, error),
+) ([]dispatchtick.Issue, error) {
 	key := dispatchcache.Key(root, "", limit)
 	path := dispatchBacklogSnapshotPath(root)
+	started := time.Now()
+	lock, err := acquireDispatchBacklogFetchLock(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = flock.Unlock(lock)
+		_ = lock.Close()
+	}()
+	// A matching fetch that completed after this request began is the identical
+	// concurrent request's answer. Re-read its persisted snapshot instead of paying
+	// for a second GitHub list/delta call.
+	if receipt, ok := readDispatchBacklogFetchReceipt(path, key); ok && !receipt.CompletedAt.Before(started) {
+		if snap, ok := dispatchcache.ReadBacklog(path, key); ok {
+			return dispatchRowsIssues(root, snap.Issues)
+		}
+	}
 	if snap, ok := dispatchcache.ReadBacklog(path, key); ok {
-		delta, err := dispatchFetchBacklogDeltaIssues(root, snap.Watermark, limit)
+		delta, err := fetchDelta(ctx, root, snap.Watermark, limit)
 		if err == nil {
 			watermark := delta.Watermark
 			if watermark.IsZero() {
@@ -624,15 +737,21 @@ func dispatchFetchBacklogIncremental(root string, limit int, now time.Time) ([]d
 			// watermark sidecar instead of the whole multi-megabyte issue array (#6092).
 			merged, werr := dispatchcache.SyncBacklog(path, key, watermark, snap.Issues, dispatchIssueRowsFor(root, delta.Issues), delta.Closed)
 			if werr == nil {
-				return dispatchRowsIssues(root, merged)
+				issues, rerr := dispatchRowsIssues(root, merged)
+				if rerr == nil {
+					writeDispatchBacklogFetchReceipt(path, key, time.Now())
+				}
+				return issues, rerr
 			}
 		}
 	}
-	issues, err := dispatchFetchBacklogIssues(root, limit)
+	issues, err := fetchFull(ctx, root, limit)
 	if err != nil {
 		return nil, err
 	}
-	_ = dispatchcache.WriteBacklog(path, key, now, dispatchIssueRowsFor(root, issues))
+	if err := dispatchcache.WriteBacklog(path, key, now, dispatchIssueRowsFor(root, issues)); err == nil {
+		writeDispatchBacklogFetchReceipt(path, key, time.Now())
+	}
 	return issues, nil
 }
 
@@ -651,6 +770,10 @@ func dispatchRouteIssuesNativeLimit(root string, stderr io.Writer, issueLimit in
 	if err != nil {
 		return payload, err
 	}
+	return dispatchFinalizeRankedBacklog(root, payload, dispatchFetchProjectFields(root)), nil
+}
+
+func dispatchFinalizeRankedBacklog(root string, payload dispatchtick.RouterPayload, fields map[int]dispatchtick.ProjectIssueFields) dispatchtick.RouterPayload {
 	// Operator pause hold (#5031): move each `fak steer pause`d unit's bound issue into the
 	// skipped set under the existing BLOCKED_BY_HUMAN token before anything downstream picks.
 	// Runs BEFORE the prereq hold on purpose -- a paused prerequisite stays in
@@ -668,13 +791,47 @@ func dispatchRouteIssuesNativeLimit(root string, stderr io.Writer, issueLimit in
 	// known-bad on purpose -- a known-bad-held prerequisite stays in SkippedHumanBlocked (still
 	// open), so a dependent of it remains correctly held. Fails open on a closed/absent prerequisite.
 	payload = holdOpenPrereqForRoute(payload)
-	fields := dispatchFetchProjectFields(root)
 	for lane, group := range payload.Lanes {
 		group.Priority, group.Issues = dispatchtick.MergeProjectFields(group.Priority, group.Issues, fields)
 		group.Count = len(group.Issues)
 		payload.Lanes[lane] = group
 	}
-	return payload, nil
+	return payload
+}
+
+type dispatchFetchedBacklog struct {
+	Taxonomy           dispatchtick.LaneTaxonomy
+	Issues             []dispatchtick.Issue
+	IssueLimit         int
+	Injected           bool
+	View               string
+	ViewFallbackReason string
+	FetchErrors        []string
+	CacheKey           string
+}
+
+func dispatchRankFetchedBacklog(root string, fetched dispatchFetchedBacklog) dispatchtick.RouterPayload {
+	payload := dispatchtick.RouteIssues(dispatchtick.RouterInput{
+		Workspace:          root,
+		Taxonomy:           fetched.Taxonomy,
+		Issues:             fetched.Issues,
+		IssueLimit:         fetched.IssueLimit,
+		Injected:           fetched.Injected,
+		FetchError:         strings.Join(fetched.FetchErrors, "; "),
+		DuplicateRiskCache: dispatchDuplicateRiskCache,
+	})
+	payload.View = strings.TrimSpace(fetched.View)
+	if payload.View != "" {
+		if _, query, digest, err := dispatchViewQueryWithDigest(root, payload.View); err == nil {
+			payload.ViewQuery, payload.ViewDigest = query, digest
+		}
+	}
+	payload.ViewFallback = fetched.ViewFallbackReason != ""
+	payload.ViewFallbackReason = fetched.ViewFallbackReason
+	payload = holdKnownBadForRoute(root, payload)
+	_ = persistDispatchLaneQueues(root, fetched.CacheKey, payload, time.Now())
+	dispatchRoutedBacklogCache.Put(fetched.CacheKey, payload, dispatchRoutedBacklogTTL)
+	return payload
 }
 
 // dispatchRoutedBeforePrereqHold fetches, routes, and applies the known-bad scope-hold, but NOT the
@@ -703,32 +860,11 @@ func dispatchRoutedBeforePrereqHoldLimit(root string, stderr io.Writer, issueLim
 	if issueErr != nil {
 		fetchErrs = append(fetchErrs, issueErr.Error())
 	}
-	payload := dispatchtick.RouteIssues(dispatchtick.RouterInput{
-		Workspace:          root,
-		Taxonomy:           taxonomy,
-		Issues:             issues,
-		IssueLimit:         issueLimit,
-		Injected:           injected,
-		FetchError:         strings.Join(fetchErrs, "; "),
-		DuplicateRiskCache: dispatchDuplicateRiskCache,
-	})
-	payload.View = strings.TrimSpace(dispatchTickView)
-	if payload.View != "" {
-		if _, query, digest, err := dispatchViewQueryWithDigest(root, payload.View); err == nil {
-			payload.ViewQuery, payload.ViewDigest = query, digest
-		}
-	}
-	payload.ViewFallback = viewFallbackReason != ""
-	payload.ViewFallbackReason = viewFallbackReason
-	// W4 scope-hold (#2716): after routing, hold back ONLY the issues whose declared paths
-	// intersect a live known-bad signature (internal/knownbad ledger, #2713). Disjoint
-	// issues keep dispatching. Fails open on a missing/broken ledger so it never stalls.
-	payload = holdKnownBadForRoute(root, payload)
-	// Persist the already-scored per-lane order so the next process/tick can pop a
-	// lane head without reconstructing ordering from the whole backlog (#4170).
-	_ = persistDispatchLaneQueues(root, cacheKey, payload, time.Now())
-	dispatchRoutedBacklogCache.Put(cacheKey, payload, dispatchRoutedBacklogTTL)
-	return payload, nil
+	return dispatchRankFetchedBacklog(root, dispatchFetchedBacklog{
+		Taxonomy: taxonomy, Issues: issues, IssueLimit: issueLimit, Injected: injected,
+		View: dispatchTickView, ViewFallbackReason: viewFallbackReason,
+		FetchErrors: fetchErrs, CacheKey: cacheKey,
+	}), nil
 }
 
 // dispatchFetchScopedIssues fetches the open-issue set the router folds. A
@@ -895,10 +1031,17 @@ var dispatchLoadLaneTaxonomy = func(root string) (dispatchtick.LaneTaxonomy, err
 func dispatchLaneTaxonomy(root string) (dispatchtick.LaneTaxonomy, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+	return dispatchLaneTaxonomyContext(ctx, root)
+}
+
+func dispatchLaneTaxonomyContext(ctx context.Context, root string) (dispatchtick.LaneTaxonomy, error) {
 	cmd := exec.CommandContext(ctx, "dos", "doctor", "--workspace", root, "--json")
 	cmd.Dir = root
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return dispatchtick.LaneTaxonomy{}, fmt.Errorf("dos doctor: %w", ctx.Err())
+	}
 	doc, perr := lastJSONObject(out)
 	if perr != nil {
 		if err != nil {
@@ -976,11 +1119,18 @@ func parseDispatchTomlStringArray(raw string) []string {
 func dispatchFetchBacklogDeltaGH(root string, watermark time.Time, limit int) (dispatchBacklogDelta, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
+	return dispatchFetchBacklogDeltaGHContext(ctx, root, watermark, limit)
+}
+
+func dispatchFetchBacklogDeltaGHContext(ctx context.Context, root string, watermark time.Time, limit int) (dispatchBacklogDelta, error) {
 	search := "updated:>=" + watermark.UTC().Format(time.RFC3339)
 	cmd := exec.CommandContext(ctx, "gh", "issue", "list", "--state", "all", "--search", search, "--limit", strconv.Itoa(limit), "--json", "number,title,labels,body,state,createdAt,updatedAt")
 	cmd.Dir = root
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return dispatchBacklogDelta{}, fmt.Errorf("gh issue delta: %w", ctx.Err())
+	}
 	var rows []struct {
 		dispatchIssueSourceRow
 		State string `json:"state"`
@@ -1009,10 +1159,17 @@ func dispatchFetchBacklogDeltaGH(root string, watermark time.Time, limit int) (d
 func dispatchFetchOpenIssues(root string, limit int) ([]dispatchtick.Issue, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
+	return dispatchFetchOpenIssuesContext(ctx, root, limit)
+}
+
+func dispatchFetchOpenIssuesContext(ctx context.Context, root string, limit int) ([]dispatchtick.Issue, error) {
 	cmd := exec.CommandContext(ctx, "gh", "issue", "list", "--state", "open", "--limit", strconv.Itoa(limit), "--json", "number,title,labels,body,createdAt,updatedAt")
 	cmd.Dir = root
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("gh issue list: %w", ctx.Err())
+	}
 	var rows []dispatchIssueSourceRow
 	if uerr := json.Unmarshal(out, &rows); uerr != nil {
 		if err != nil {

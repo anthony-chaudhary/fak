@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
@@ -1095,8 +1096,30 @@ var dispatchTreeBuildHead = func(root string) string {
 	return strings.TrimSpace(string(out))
 }
 
+var dispatchTreeBuildHeadContext = func(ctx context.Context, root string) string {
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "HEAD")
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+var dispatchTreeBuildStamp = binstamp.Self
+
+type dispatchTreeBuildEvidence struct {
+	RequestedCommit string `json:"requested_commit,omitempty"`
+	BinaryRevision  string `json:"binary_revision,omitempty"`
+	Source          string `json:"source"`
+	Reused          bool   `json:"reused"`
+}
+
 func dispatchTreeBuildKey(root string) (string, string) {
-	head := dispatchTreeBuildHead(root)
+	return dispatchTreeBuildKeyForHead(root, dispatchTreeBuildHead(root))
+}
+
+func dispatchTreeBuildKeyForHead(root, head string) (string, string) {
 	if head == "" {
 		return "", ""
 	}
@@ -1145,13 +1168,55 @@ var dispatchTreeBuildCommand = func(root string) (string, error) {
 	return output, nil
 }
 
-func dispatchProbeTreeBuild(root string) dispatchtick.TreeCheck {
-	now := time.Now()
-	cacheRoot, head := dispatchTreeBuildKey(root)
-	if dispatchTreeBuildSucceededRecently(cacheRoot, head, now) || committedbuildwitness.Fresh(cacheRoot, head, now) {
-		return dispatchtick.TreeCheck{}
+var dispatchTreeBuildCommandContext = func(ctx context.Context, root string) (string, error) {
+	builds, output, err := trunkbuildprobe.BuildCommittedTargetContext(ctx, root, "./cmd/fak")
+	if err != nil {
+		return output, err
 	}
-	out, err := dispatchTreeBuildCommand(root)
+	if !builds {
+		return output, errors.New("committed tree build failed")
+	}
+	return output, nil
+}
+
+func dispatchProbeTreeBuild(root string) dispatchtick.TreeCheck {
+	cacheRoot, head := dispatchTreeBuildKey(root)
+	check, _ := dispatchProbeTreeBuildRun(cacheRoot, head, dispatchTreeBuildStamp(), func() (string, error) {
+		return dispatchTreeBuildCommand(root)
+	})
+	return check
+}
+
+func dispatchProbeTreeBuildContext(ctx context.Context, root string) (dispatchtick.TreeCheck, dispatchTreeBuildEvidence) {
+	head := dispatchTreeBuildHeadContext(ctx, root)
+	cacheRoot, head := dispatchTreeBuildKeyForHead(root, head)
+	return dispatchProbeTreeBuildRun(cacheRoot, head, dispatchTreeBuildStamp(), func() (string, error) {
+		return dispatchTreeBuildCommandContext(ctx, root)
+	})
+}
+
+func dispatchProbeTreeBuildRun(cacheRoot, head string, stamp binstamp.Stamp, build func() (string, error)) (dispatchtick.TreeCheck, dispatchTreeBuildEvidence) {
+	now := time.Now()
+	evidence := dispatchTreeBuildEvidence{
+		RequestedCommit: head,
+		BinaryRevision:  strings.TrimSpace(stamp.Revision),
+		Source:          "build",
+	}
+	if binstamp.Compare(stamp, head) == binstamp.Fresh {
+		evidence.Source, evidence.Reused = "running_binary", true
+		dispatchRecordTreeBuildSuccess(cacheRoot, head, now)
+		committedbuildwitness.Record(cacheRoot, head, "dispatch-binary-provenance", now)
+		return dispatchtick.TreeCheck{}, evidence
+	}
+	if dispatchTreeBuildSucceededRecently(cacheRoot, head, now) {
+		evidence.Source, evidence.Reused = "process_cache", true
+		return dispatchtick.TreeCheck{}, evidence
+	}
+	if committedbuildwitness.Fresh(cacheRoot, head, now) {
+		evidence.Source, evidence.Reused = "shared_witness", true
+		return dispatchtick.TreeCheck{}, evidence
+	}
+	out, err := build()
 	if err == nil {
 		// Record the HEAD observed before the build. If HEAD moved during the
 		// probe, the next lookup sees a mismatch and rebuilds rather than
@@ -1159,7 +1224,7 @@ func dispatchProbeTreeBuild(root string) dispatchtick.TreeCheck {
 		completedAt := time.Now()
 		dispatchRecordTreeBuildSuccess(cacheRoot, head, completedAt)
 		committedbuildwitness.Record(cacheRoot, head, "dispatch-preflight", completedAt)
-		return dispatchtick.TreeCheck{}
+		return dispatchtick.TreeCheck{}, evidence
 	}
 	// Missing toolchain/probe infrastructure fails open; a real compiler diagnostic
 	// names a package/file and is the poison witness. A probe root without a Go
@@ -1179,6 +1244,7 @@ func dispatchProbeTreeBuild(root string) dispatchtick.TreeCheck {
 	lowered := strings.ToLower(err.Error() + "\n" + out)
 	if errors.Is(err, exec.ErrNotFound) ||
 		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled) ||
 		strings.Contains(lowered, "executable file not found") ||
 		strings.Contains(lowered, "go.mod file not found") ||
 		strings.Contains(lowered, "cannot find main module") ||
@@ -1190,7 +1256,7 @@ func dispatchProbeTreeBuild(root string) dispatchtick.TreeCheck {
 		if detail == "" {
 			detail = err.Error()
 		}
-		return dispatchtick.TreeCheck{Error: detail}
+		return dispatchtick.TreeCheck{Error: detail}, evidence
 	}
 	line := ""
 	for _, candidate := range strings.Split(strings.TrimSpace(out), "\n") {
@@ -1203,5 +1269,5 @@ func dispatchProbeTreeBuild(root string) dispatchtick.TreeCheck {
 	if line == "" {
 		line = err.Error()
 	}
-	return dispatchtick.TreeCheck{Poisoned: true, Package: line, Error: err.Error()}
+	return dispatchtick.TreeCheck{Poisoned: true, Package: line, Error: err.Error()}, evidence
 }

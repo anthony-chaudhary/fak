@@ -361,6 +361,19 @@ func BuildCommittedHead(root string) (bool, string, error) {
 // A positive timeout bounds only the compiler; archive/extraction failures stay
 // typed as probe infrastructure errors rather than build failures.
 func BuildCommittedTarget(root, target string, timeout time.Duration) (bool, string, error) {
+	ctx := context.Background()
+	cancel := func() {}
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+	return BuildCommittedTargetContext(ctx, root, target)
+}
+
+// BuildCommittedTargetContext bounds the complete external probe, including git archive
+// and compilation. Callers with an operator latency budget must not return while an
+// unbounded archive or compiler child continues consuming the host in the background.
+func BuildCommittedTargetContext(ctx context.Context, root, target string) (bool, string, error) {
 	goBin, err := exec.LookPath("go")
 	if err != nil {
 		return false, "", fmt.Errorf("go toolchain not found on PATH")
@@ -371,25 +384,22 @@ func BuildCommittedTarget(root, target string, timeout time.Duration) (bool, str
 	}
 	defer os.RemoveAll(tmp)
 
-	archive := windowgate.Command("git", "archive", "--format=tar", "HEAD")
+	archive := windowgate.CommandContext(ctx, "git", "archive", "--format=tar", "HEAD")
 	windowgate.ConfigureBackgroundCommand(archive)
 	archive.Dir = root
 	var arBuf, arErr bytes.Buffer
 	archive.Stdout = &arBuf
 	archive.Stderr = &arErr
 	if err := archive.Run(); err != nil {
+		if ctx.Err() != nil {
+			return false, "", fmt.Errorf("committed tree archive timed out: %w", ctx.Err())
+		}
 		return false, "", fmt.Errorf("git archive: %s", trunc(arErr.String(), 400))
 	}
 	if err := extractTar(&arBuf, tmp); err != nil {
 		return false, "", fmt.Errorf("extract: %v", err)
 	}
 
-	ctx := context.Background()
-	cancel := func() {}
-	if timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-	}
-	defer cancel()
 	build := windowgate.CommandContext(ctx, goBin, "build", target)
 	build.Dir = tmp
 	var so, se bytes.Buffer
@@ -397,8 +407,8 @@ func BuildCommittedTarget(root, target string, timeout time.Duration) (bool, str
 	build.Stderr = &se
 	runErr := build.Run()
 	output := se.String() + so.String()
-	if ctx.Err() == context.DeadlineExceeded {
-		return false, output, fmt.Errorf("committed tree build timed out after %s: %w", timeout, context.DeadlineExceeded)
+	if ctx.Err() != nil {
+		return false, output, fmt.Errorf("committed tree build timed out: %w", ctx.Err())
 	}
 	return runErr == nil, output, nil
 }

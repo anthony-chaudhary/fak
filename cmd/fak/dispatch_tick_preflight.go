@@ -38,6 +38,10 @@ func dispatchPreflight(root string, stderr io.Writer, maxWorkers int, workKind, 
 }
 
 func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workKind, product string) (map[string]any, map[string]int64, error) {
+	return dispatchPreflightTimedWithTree(root, stderr, maxWorkers, workKind, product, nil)
+}
+
+func dispatchPreflightTimedWithTree(root string, stderr io.Writer, maxWorkers int, workKind, product string, treeOverride *dispatchtick.TreeCheck) (map[string]any, map[string]int64, error) {
 	timings := map[string]int64{}
 	stamp := func(name string, started time.Time) {
 		ms := time.Since(started).Milliseconds()
@@ -55,6 +59,12 @@ func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workK
 	kernel := dispatchPreflightKernel(root)
 	stamp("kernel_probe", t0)
 	wip := dispatchPreflightWIP(root)
+	tree := dispatchtick.TreeCheck{}
+	if treeOverride != nil {
+		tree = *treeOverride
+	} else {
+		tree = dispatchProbeTreeBuild(root)
+	}
 	// OSWorkerProcs is the PUBLISHED per-worker load (#3376), not the raw per-tick
 	// probe: dispatchPublishWorkerLoad still samples every tick but only lets a CHANGED
 	// value through, and only after it survives a reset-on-change coalescing window.
@@ -62,7 +72,7 @@ func dispatchPreflightTimed(root string, stderr io.Writer, maxWorkers int, workK
 		Workspace:     root,
 		MaxWorkers:    maxWorkers,
 		Host:          dispatchPreflightHostFromProcesses(processes),
-		Tree:          dispatchProbeTreeBuild(root),
+		Tree:          tree,
 		Account:       dispatchPreflightAccount(root, stderr, workKind, product),
 		Kernel:        kernel,
 		Seat:          dispatchPreflightSeat(root, stderr, product),

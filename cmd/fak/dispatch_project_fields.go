@@ -15,14 +15,19 @@ import (
 const dispatchProjectNumberEnv = "FAK_DISPATCH_PROJECT_NUMBER"
 
 var dispatchFetchProjectFields = dispatchFetchProjectFieldsGH
+var dispatchFetchProjectFieldsContext = dispatchFetchProjectFieldsGHContext
 
 func dispatchFetchProjectFieldsGH(root string) map[int]dispatchtick.ProjectIssueFields {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return dispatchFetchProjectFieldsGHContext(ctx, root)
+}
+
+func dispatchFetchProjectFieldsGHContext(ctx context.Context, root string) map[int]dispatchtick.ProjectIssueFields {
 	n, _ := strconv.Atoi(strings.TrimSpace(os.Getenv(dispatchProjectNumberEnv)))
 	if n <= 0 {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
 	query := `query($owner:String!,$number:Int!){repositoryOwner(login:$owner){projectV2(number:$number){items(first:100){nodes{content{... on Issue{number}} fieldValues(first:20){nodes{... on ProjectV2ItemFieldSingleSelectValue{name field{... on ProjectV2SingleSelectField{name}}}}}}}}}}`
 	owner := "anthony-chaudhary"
 	cmd := exec.CommandContext(ctx, "gh", "api", "graphql", "-f", "query="+query, "-F", "owner="+owner, "-F", "number="+strconv.Itoa(n))

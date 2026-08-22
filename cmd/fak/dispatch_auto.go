@@ -20,6 +20,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchauto"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
@@ -35,6 +37,7 @@ import (
 func runDispatchAuto(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("dispatch auto", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	defaults := defaultDispatchAutoBudgets()
 	workspace := fs.String("workspace", "", "workspace root (default: current directory)")
 	maxWorkers := fs.Int("max-workers", dispatchtick.DefaultMaxWorkers, "hard cap on live workers, enforced by each tick's preflight")
 	backend := fs.String("backend", "codex", "worker backend (claude|opencode|codex); default codex")
@@ -47,7 +50,21 @@ func runDispatchAuto(stdout, stderr io.Writer, argv []string) int {
 	contextTokens := fs.Int("context-tokens", 0, "optional fleet context-token budget, sliced evenly across the wave; 0 = unset")
 	live := fs.Bool("live", false, "actually spawn the refill through the priced dispatch wave")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
+	buildTimeout := fs.Duration("build-timeout", defaults.Build, "committed-build phase budget")
+	backlogTimeout := fs.Duration("backlog-timeout", defaults.BacklogFetch, "GitHub backlog-fetch phase budget")
+	rankingTimeout := fs.Duration("ranking-timeout", defaults.Ranking, "backlog ranking phase budget")
+	pricingTimeout := fs.Duration("pricing-timeout", defaults.Pricing, "capacity pricing phase budget")
+	outputTimeout := fs.Duration("render-timeout", defaults.Render, "result render phase budget")
+	totalTimeout := fs.Duration("timeout", defaults.Total, "total dry-run admission budget")
 	if !parseFlags(fs, argv) {
+		return 2
+	}
+	budgets := dispatchAutoBudgets{
+		Build: *buildTimeout, BacklogFetch: *backlogTimeout, Ranking: *rankingTimeout,
+		Pricing: *pricingTimeout, Render: *outputTimeout, Total: *totalTimeout,
+	}
+	if err := budgets.validate(); err != nil {
+		fmt.Fprintf(stderr, "fak dispatch auto: %v\n", err)
 		return 2
 	}
 	root := *workspace
@@ -74,12 +91,19 @@ func runDispatchAuto(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	excluded := splitCommaList(*excludeLane)
-
-	in, notes, probeErrors := probeDispatchAutoInput(root, stderr, *maxWorkers, wk, backendNorm, *lane, excluded)
-	in.RequiredWorkers = *requiredWorkers
-	in.SharedContextTokens = *contextTokens
-	plan := dispatchauto.PlanAuto(in)
-
+	started := time.Now()
+	total, cancel := context.WithTimeout(context.Background(), budgets.Total)
+	defer cancel()
+	var (
+		build     dispatchAutoBuildResult
+		backlog   dispatchAutoBacklogResult
+		router    dispatchtick.RouterPayload
+		pricing   dispatchAutoPricingResult
+		plan      dispatchauto.Plan
+		timings   []dispatchAutoPhaseTiming
+		phaseErrs []dispatchAutoError
+		blocked   bool
+	)
 	rec := map[string]any{
 		"schema":         "fleet-issue-dispatch-auto/1",
 		"workspace":      root,
@@ -90,16 +114,87 @@ func runDispatchAuto(stdout, stderr io.Writer, argv []string) int {
 		"goal_profile":   profile,
 		"lane":           strings.TrimSpace(*lane),
 		"excluded_lanes": excluded,
-		"input":          in,
-		"plan":           plan,
-		"notes":          notes,
-		"ok":             len(probeErrors) == 0,
-	}
-	if len(probeErrors) > 0 {
-		rec["errors"] = probeErrors
+		"budget":         budgets.receipt(),
+		"partial":        true,
+		"ok":             false,
 	}
 
-	if *live && len(probeErrors) == 0 && plan.Refill > 0 {
+	build, timing, phaseErr := runDispatchAutoPhase(total, dispatchAutoPhaseBuild, budgets.Build, func(ctx context.Context) (dispatchAutoBuildResult, error) {
+		return dispatchAutoBuildProbe(ctx, root)
+	})
+	timings = append(timings, timing)
+	rec["build"] = build.Evidence
+	if phaseErr != nil {
+		phaseErrs = append(phaseErrs, *phaseErr)
+		blocked = true
+	}
+
+	if !blocked {
+		backlog, timing, phaseErr = runDispatchAutoPhase(total, dispatchAutoPhaseBacklogFetch, budgets.BacklogFetch, func(ctx context.Context) (dispatchAutoBacklogResult, error) {
+			return dispatchAutoBacklogProbe(ctx, root)
+		})
+		timings = append(timings, timing)
+		rec["backlog"] = map[string]any{"issue_count": len(backlog.Fetched.Issues), "limit": backlog.Fetched.IssueLimit}
+		if phaseErr != nil {
+			phaseErrs = append(phaseErrs, *phaseErr)
+			blocked = true
+		}
+	}
+
+	if !blocked {
+		router, timing, phaseErr = runDispatchAutoPhase(total, dispatchAutoPhaseRanking, budgets.Ranking, func(ctx context.Context) (dispatchtick.RouterPayload, error) {
+			return dispatchAutoRankingProbe(ctx, root, backlog)
+		})
+		timings = append(timings, timing)
+		rec["ranking"] = map[string]any{"routed_issues": len(router.Issues), "lanes": len(router.Lanes), "verdict": router.Verdict}
+		if phaseErr != nil {
+			phaseErrs = append(phaseErrs, *phaseErr)
+			blocked = true
+		}
+	}
+
+	if !blocked {
+		pricing, timing, phaseErr = runDispatchAutoPhase(total, dispatchAutoPhasePricing, budgets.Pricing, func(ctx context.Context) (dispatchAutoPricingResult, error) {
+			return dispatchAutoPricingProbe(ctx, root, stderr, *maxWorkers, wk, backendNorm, *lane, excluded, *requiredWorkers, *contextTokens, build.Tree, router)
+		})
+		timings = append(timings, timing)
+		plan = pricing.Plan
+		rec["input"] = pricing.Input
+		rec["plan"] = plan
+		rec["notes"] = pricing.Notes
+		rec["preflight"] = pricing.Preflight
+		if phaseErr != nil {
+			phaseErrs = append(phaseErrs, *phaseErr)
+			blocked = true
+		}
+	}
+
+	rec["phase_timings"] = dispatchAutoCompleteTimings(timings, budgets)
+	_, timing, phaseErr = runDispatchAutoPhase(total, dispatchAutoPhaseOutput, budgets.Render, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, dispatchAutoRenderProbe(ctx, rec, plan, *asJSON)
+	})
+	timings = append(timings, timing)
+	if phaseErr != nil {
+		phaseErrs = append(phaseErrs, *phaseErr)
+		blocked = true
+	}
+	rec["phase_timings"] = dispatchAutoCompleteTimings(timings, budgets)
+	rec["admission_elapsed_ms"] = elapsedDispatchAutoMS(started)
+	if len(phaseErrs) > 0 {
+		legacy := make([]string, 0, len(phaseErrs))
+		for _, item := range phaseErrs {
+			legacy = append(legacy, item.Message)
+		}
+		rec["error"] = phaseErrs[0]
+		rec["phase_errors"] = phaseErrs
+		rec["errors"] = legacy
+	} else {
+		rec["partial"] = false
+		rec["ok"] = true
+	}
+	cancel()
+
+	if *live && !blocked && plan.Refill > 0 {
 		waveArgv := []string{
 			"--workspace", root,
 			"--count", fmt.Sprint(plan.Refill),
@@ -129,10 +224,21 @@ func runDispatchAuto(stdout, stderr io.Writer, argv []string) int {
 			rec["wave_raw"] = waveOut.String()
 		}
 		rec["ok"] = code == 0
-		return writeDispatchAutoResult(stdout, stderr, rec, plan, *asJSON)
 	}
 
 	return writeDispatchAutoResult(stdout, stderr, rec, plan, *asJSON)
+}
+
+var dispatchAutoRenderProbe = func(ctx context.Context, rec map[string]any, plan dispatchauto.Plan, asJSON bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if asJSON {
+		_, err := json.Marshal(rec)
+		return err
+	}
+	_ = renderDispatchAuto(rec, plan)
+	return ctx.Err()
 }
 
 // probeDispatchAutoInput gathers the live ceilings with the SAME folds tick/wave use: the
