@@ -1,0 +1,1 @@
+{"id":"qwen35-4b-semantic-answer-width-v2","prompts":[{"expected_answer":"4","id":"arithmetic-2-plus-2","max_new_tokens":256,"prompt":"What is 2+2? Reply with only the number.","stop":"first decoded standalone expected_answer"}],"schema":"fak.qwen38-ladder-corpus/1"}

@@ -1,0 +1,66 @@
+[
+  {
+    "file": "corpus-2b.json",
+    "sha256": "7f17a711044df790591f1305f467d80b7c1a5455141d3853df413aaa2ffa21ca"
+  },
+  {
+    "file": "corpus-4b.json",
+    "sha256": "9cb03a489105618b104b471072b616c1b88d56058579afd4c4c8edc051e52b92"
+  },
+  {
+    "file": "corpus.json",
+    "sha256": "466632a99592cfae8ed3725dc5be4642f4af45d5686a3fb0cfd5208950593d82"
+  },
+  {
+    "file": "environment-2b.json",
+    "sha256": "6cf3e05b451ecb0dbb996de866ec83767b15443f2aa9704d02a5eb8cc9974bfb"
+  },
+  {
+    "file": "environment-4b.json",
+    "sha256": "f927f9ac0bdbb4d854ab293e7d1b073f89e37bc98b3329c64d82e5f11e14d5d8"
+  },
+  {
+    "file": "environment.json",
+    "sha256": "81cfd40e578e0c848e68ea1c358d1d0a0f706f16ad0ad40829c01078728957f0"
+  },
+  {
+    "file": "evaluator-output-through-2b.json",
+    "sha256": "ca40759d7c836cfe69764f0505fa889ce2c9a8e4bf3deb298d8c5ab0acd30ff1"
+  },
+  {
+    "file": "evaluator-output-through-4b.json",
+    "sha256": "8a11d933ad528403a1a2d8d64bc579030d710366b03aa6ccf224a7fa506ef719"
+  },
+  {
+    "file": "evaluator-output.json",
+    "sha256": "7037410acdfe6ceca41af6909888328fadd6c93a623908ff5b0b2e04f7ad2037"
+  },
+  {
+    "file": "evidence-through-2b.json",
+    "sha256": "3ee8c42a2bb0b96d392a1a7faa602dda8f523a92e8d49473eaec38e1b8aec4fb"
+  },
+  {
+    "file": "evidence-through-4b.json",
+    "sha256": "935ae3f20a305f67f6df5fcb049174809c731ae37acd147f7fe1dac4d275f47c"
+  },
+  {
+    "file": "evidence.json",
+    "sha256": "9ce786045665cda1e095ed76977c747fbb555ee0c32b18aca298c75906bf1d47"
+  },
+  {
+    "file": "raw-run-2b.json",
+    "sha256": "b1187cc08a3f79d08c2a5eb0c945478663757a9446e217b53e4235a2364325e8"
+  },
+  {
+    "file": "raw-run-4b.json",
+    "sha256": "57d0a2ed77c355936160c033fa2809f509db6e1c89c7240416f27d0c3bbfcebd"
+  },
+  {
+    "file": "raw-run.json",
+    "sha256": "0f6519603e5f59f7a8e95c45746c081613bc2e51774f3e611dc83f71e920ddde"
+  },
+  {
+    "file": "README.md",
+    "sha256": "8930d98ea436a6fed59448e6fa4cff609371afe07010a4e379e6471047712999"
+  }
+]
