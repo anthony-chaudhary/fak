@@ -1,0 +1,1 @@
+{"id":"qwen35-0.8b-no-thinking-smoke-v1","prompts":[{"expected_exact":"Q38","id":"exact-q38","max_new_tokens":32,"prompt":"Reply with exactly Q38"}],"schema":"fak.qwen38-ladder-corpus/1"}

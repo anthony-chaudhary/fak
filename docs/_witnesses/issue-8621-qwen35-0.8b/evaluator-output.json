@@ -1,0 +1,24 @@
+{
+  "verdict": "HOLD",
+  "next_stage": {
+    "id": "smoke",
+    "model": "Qwen/Qwen3.5-0.8B",
+    "revision": "2fc06364715b967f1860aea9cf38778875588b17",
+    "parameters_b": 0.8,
+    "minimum_pass_rate": 1,
+    "proves": [
+      "loader",
+      "tokenizer",
+      "chat-template",
+      "request-shape",
+      "kernel-shape-genericity"
+    ],
+    "does_not_prove": [
+      "quality",
+      "27B-memory",
+      "Qwen3.8-weights"
+    ]
+  },
+  "reason": "smoke baseline pass rate 0.000 is below 1.000; repair the experiment before attributing a candidate gain"
+}
+exit status 1

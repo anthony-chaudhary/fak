@@ -108,6 +108,10 @@ func Evaluate(e Evidence) (Decision, error) {
 		if result.Trials <= 0 || result.BaselinePassed < 0 || result.BaselinePassed > result.Trials || result.CandidatePassed < 0 || result.CandidatePassed > result.Trials {
 			return Decision{}, fmt.Errorf("result %d has invalid trial counts", i)
 		}
+		baselineRate := float64(result.BaselinePassed) / float64(result.Trials)
+		if baselineRate < stage.MinimumPassRate {
+			return Decision{Verdict: "HOLD", NextStage: &stage, Reason: fmt.Sprintf("%s baseline pass rate %.3f is below %.3f; repair the experiment before attributing a candidate gain", stage.ID, baselineRate, stage.MinimumPassRate)}, nil
+		}
 		candidateRate := float64(result.CandidatePassed) / float64(result.Trials)
 		if candidateRate < stage.MinimumPassRate {
 			return Decision{Verdict: "HOLD", NextStage: &stage, Reason: fmt.Sprintf("%s candidate pass rate %.3f is below %.3f; fix at the cheapest reproducing stage", stage.ID, candidateRate, stage.MinimumPassRate)}, nil

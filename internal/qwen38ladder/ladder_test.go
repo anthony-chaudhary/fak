@@ -26,6 +26,17 @@ func TestEvaluatePromotesOneStageAtATime(t *testing.T) {
 	}
 }
 
+func TestEvaluateHoldsWhenBaselineMissesCorrectnessFloor(t *testing.T) {
+	e := evidence(pass(Stages[0]))
+	e.Results[0].BaselinePassed = 0
+	got, err := Evaluate(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != "HOLD" || got.NextStage == nil || got.NextStage.ID != "smoke" || !strings.Contains(got.Reason, "baseline pass rate") {
+		t.Fatalf("decision = %#v", got)
+	}
+}
 func TestEvaluateHoldsAtCheapestCorrectnessFailure(t *testing.T) {
 	e := evidence(pass(Stages[0]), pass(Stages[1]))
 	e.Results[1].CandidatePassed = 8

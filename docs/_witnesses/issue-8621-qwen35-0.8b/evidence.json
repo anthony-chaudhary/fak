@@ -1,0 +1,23 @@
+{
+  "schema": "fak.qwen38-ladder-evidence/1",
+  "concept": "no-thinking-campaign-requests-v1",
+  "corpus_sha256": "2e51cf9470bc166ef569af2bb0b6523fd65c6b25f3900ed5dfb22824d725846a",
+  "baseline_runtime_sha": "764328d54289e5685ac1ca12878c0c39d00e9c76",
+  "candidate_runtime_sha": "b0ce51b599718cb1a08a886ac61af928a5209b78",
+  "metric": "p95_generation_wall_ms",
+  "direction": "lower",
+  "minimum_improvement_pct": 5,
+  "results": [
+    {
+      "stage_id": "smoke",
+      "model": "Qwen/Qwen3.5-0.8B",
+      "revision": "2fc06364715b967f1860aea9cf38778875588b17",
+      "environment_sha256": "0cdda9282549b07c196c07de23559734fa5f218769de9cdc264f0becb65def3d",
+      "trials": 3,
+      "baseline_passed": 0,
+      "candidate_passed": 3,
+      "baseline_metric": 2509.8482,
+      "candidate_metric": 613.7351
+    }
+  ]
+}
