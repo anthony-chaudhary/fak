@@ -69,6 +69,32 @@ Read the markdown report back (the helper prints `wrote <path>`, not the body).
 Do not page through `gh issue list` by hand — the helper already folded the whole
 open backlog into the ranked model.
 
+### Default medium-scale scout: OpenCode Go Ox Alpha
+
+For a broad repository review or a medium-scale gardening batch (25 or more
+issues/candidates), use `opencode-go/ox-alpha-free` as a **read-only proposal
+stage** when that route is available. This is the default model-assisted path,
+not authority to mutate GitHub or the tree. If the route is unavailable, keep
+the deterministic report and continue without a model; do not silently
+substitute a paid model.
+
+Run the scout with OpenCode's permission-constrained `plan` agent. Never pass
+`--auto`, and tell the model that shell commands are read-only too:
+
+```bash
+opencode run --agent plan --model opencode-go/ox-alpha-free --format json \
+  "Read-only review. Inspect the ranked issue report and repository evidence. Do not edit files, create/comment/close issues, or run any mutating command. Return candidate findings only, each with: claim; exact witness command; observed output/count; affected paths or issue numbers; dedupe query and results; current parent issue state; proposed labels/milestone; confidence; and disconfirming evidence."
+```
+
+Save the session ID and the candidate packet beside the dated audit report.
+Treat model prose as an allegation until an independent pass reruns every
+witness. The measured rationale and failure examples are indexed in
+[`docs/notes/OX-ALPHA-DOGFOOD-2026-08-22.md`](../../../docs/notes/OX-ALPHA-DOGFOOD-2026-08-22.md#medium-scale-issue-review-and-gardening-audit).
+
+Ox Alpha's audited failure mode is confident conflation: one true global smell
+can be combined with stale parent state, non-versioned residue, incomplete
+inventories, or incorrect attribution. Therefore the scout and gardener must
+not be the same self-certifying pass.
 ## Step 2 — Read the report, lead with the load-bearing finding
 
 The report's counts line is the headline. Lead the operator summary with the
@@ -96,6 +122,31 @@ fak dispatch issues --issues issue.json --json
 Use `tools/issue_contract.py` or `tools/issue_lane_router.py` only to debug a discrepancy
 with those commands; do not teach them as the default operator path.
 
+For every model-proposed candidate, the independent reconciliation pass must:
+
+1. Rerun the exact witness command and preserve its output.
+2. Check that the measurement actually supports the claim's scope and causal
+   language (for example, filesystem residue outside `go list ./...` cannot
+   explain a Go package build failure).
+3. Read back every named parent/duplicate issue's current state.
+4. Preserve the complete inventory behind any count; samples cannot support a
+   “full list” acceptance condition.
+5. Reject candidates that combine different leaves, non-versioned cleanup, or
+   comment bookkeeping into one issue.
+6. Materialize each survivor as a candidate JSON packet, then run:
+
+```bash
+fak-dev issue contract --file candidate.json --dedupe-checked \
+  --strict-witness --strict-scale --strict-project-work \
+  --strict-born-routed --strict-model-tier --json
+```
+
+A held verdict stays `needs-triage` / `triage-only`; it is not worker-ready.
+Create only passing candidates, with priority, generation, class, and milestone
+set at creation. After creation, read the issue back from GitHub and compare its
+title, body, labels, milestone, and parent against the accepted packet. A
+separate reconciliation pass may retain, rewrite, or close model-filed
+candidates; never use the filing trajectory's own summary as proof.
 Do **not** paste the whole report into chat — link the file. Surface only the
 0–3 findings that matter and the one batch the operator can act on now.
 
