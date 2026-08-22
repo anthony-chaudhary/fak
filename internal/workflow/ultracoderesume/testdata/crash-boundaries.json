@@ -1,0 +1,71 @@
+{
+  "schema": "fak-ultracode-crash-fixture/1",
+  "plan": {
+    "schema": "fak-orchestration-plan/1",
+    "profile": "ultracode",
+    "task_id": "task-crash-boundary",
+    "work_class": "rigor",
+    "roles": [
+      {
+        "id": "observe-config",
+        "purpose": "inspect operator-private prompt material",
+        "task_id": "task-crash-boundary",
+        "access": {
+          "mode": "observe",
+          "read_set": ["C:/private/operator/customer-secret.txt"]
+        }
+      },
+      {
+        "id": "effect-land",
+        "purpose": "apply a witnessed change on secret-host.example",
+        "task_id": "task-crash-boundary",
+        "access": {
+          "mode": "effect",
+          "write_set": ["internal/workflow/ultracoderesume/landed.txt"],
+          "tools": ["write_file"]
+        }
+      },
+      {
+        "id": "effect-partial",
+        "purpose": "resume after the controller credential disappears",
+        "task_id": "task-crash-boundary",
+        "access": {
+          "mode": "effect",
+          "write_set": ["internal/workflow/ultracoderesume/partial.txt"],
+          "tools": ["write_file"]
+        }
+      },
+      {
+        "id": "reconcile",
+        "purpose": "reconcile without storing transcript bodies",
+        "task_id": "task-crash-boundary",
+        "access": {
+          "mode": "observe",
+          "read_set": ["internal/workflow/ultracoderesume"]
+        }
+      }
+    ],
+    "dag": [
+      {"from": "observe-config", "to": "effect-partial"},
+      {"from": "effect-partial", "to": "reconcile"}
+    ],
+    "budget": {"max_workers": 4, "max_tokens": 4096},
+    "leases": {"scheduler": "taskmgr", "required": true},
+    "witness": {"independent": true, "effect_readback": true},
+    "reconcile": {"required": true, "strategy": "effect-readback"},
+    "interaction": {"attended": false, "task_messaging": true, "cancellation": true},
+    "engine_ref": "private-engine@secret-host.example",
+    "degradations": [],
+    "explanation": []
+  },
+  "completed": ["observe-config", "effect-land"],
+  "partial": "effect-partial",
+  "dependency_invalidated": "reconcile",
+  "private_markers": [
+    "operator-private prompt material",
+    "customer-secret.txt",
+    "controller credential",
+    "secret-host.example",
+    "C:/private/operator"
+  ]
+}

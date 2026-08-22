@@ -6439,6 +6439,36 @@
           "category": "incidental",
           "reason": "Private ci-preflight helper compares one canonical generated witness; it does not introduce a distinct witness-proof concept.",
           "token": "armbenchWitnessDrift"
+        },
+        {
+          "category": "incidental",
+          "reason": "opaque field that points to an independent witness; not a distinct witness concept",
+          "token": "WitnessKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "local resume reason constant; not a distinct witness concept",
+          "token": "ReasonWitnessMissing"
+        },
+        {
+          "category": "incidental",
+          "reason": "local resume wire reason; not a distinct witness concept",
+          "token": "witness_missing"
+        },
+        {
+          "category": "incidental",
+          "reason": "local resume reason constant; not a distinct witness concept",
+          "token": "ReasonWitnessUnverified"
+        },
+        {
+          "category": "incidental",
+          "reason": "local resume wire reason; not a distinct witness concept",
+          "token": "witness_unverified"
+        },
+        {
+          "category": "incidental",
+          "reason": "prior-attempt report field; not a distinct witness concept",
+          "token": "PriorWitnessKey"
         }
       ],
       "id": "witness-proof",
@@ -6465,10 +6495,13 @@
         "POPULATION_LIFT_UNWITNESSED",
         "PROFILE_REQUIRES_WITNESS",
         "ParseWitness",
+        "PriorWitnessKey",
         "ProviderWitness",
         "QualityWitness",
         "REVOCABLE",
         "ReasonPopulationUnwitnessed",
+        "ReasonWitnessMissing",
+        "ReasonWitnessUnverified",
         "ReceiptsDigest",
         "RefutesWitness",
         "ResolutionUnwitnessed",
@@ -6489,6 +6522,7 @@
         "WitnessEvidenceStats",
         "WitnessFiles",
         "WitnessID",
+        "WitnessKey",
         "WitnessMove",
         "WitnessRoute",
         "WitnessSHA256",
@@ -6609,7 +6643,9 @@
         "witnessSet",
         "witnessStrandedArchiveSuffix",
         "witness_command",
+        "witness_missing",
         "witness_request",
+        "witness_unverified",
         "witnessable",
         "witnessed",
         "witnessedBytes",
@@ -7946,6 +7982,26 @@
           "category": "incidental",
           "reason": "Model-load planner request field controlling local versus hosted selection; it does not define or enforce a security policy capability.",
           "token": "LocalPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "opaque field in an attempt admission; not a distinct capability concept",
+          "token": "CapabilityID"
+        },
+        {
+          "category": "incidental",
+          "reason": "expiry field in an attempt admission; not a distinct capability concept",
+          "token": "CapabilityExpiresMS"
+        },
+        {
+          "category": "incidental",
+          "reason": "local resume reason constant; not a distinct capability concept",
+          "token": "ReasonCapabilityExpired"
+        },
+        {
+          "category": "incidental",
+          "reason": "local resume wire reason; not a distinct capability concept",
+          "token": "capability_expired"
         }
       ],
       "exclude": [
@@ -7962,6 +8018,8 @@
         "CAPABILITY_NOT_ADVERTISED",
         "CapabilityAdded",
         "CapabilityDocument",
+        "CapabilityExpiresMS",
+        "CapabilityID",
         "CapabilityRemoved",
         "CapabilitySnapshot",
         "ConfigDefaultCoverage",
@@ -7999,6 +8057,7 @@
         "ProgressCallAdjudicated",
         "ReasonArmCapabilityBundled",
         "ReasonArmCapabilityUnnamed",
+        "ReasonCapabilityExpired",
         "RefreshPolicy",
         "RetentionPolicy",
         "RetryPolicy",
@@ -8027,6 +8086,7 @@
         "capabilityProfile",
         "capability_denied",
         "capability_digest",
+        "capability_expired",
         "capability_failure",
         "capability_lines",
         "capabilitynotverdict",
@@ -11526,6 +11586,41 @@
           "category": "incidental",
           "reason": "validation helper for the existing WorkflowPlan contract, not a distinct plan concept",
           "token": "NormalizeWorkflowPlanAccess"
+        },
+        {
+          "category": "incidental",
+          "reason": "local Ultracode resume refusal constant; not a distinct plan concept",
+          "token": "RefusalPlanSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "local Ultracode resume reason token; not a distinct plan concept",
+          "token": "PLAN_SCHEMA_INCOMPATIBLE"
+        },
+        {
+          "category": "incidental",
+          "reason": "local Ultracode resume refusal constant; not a distinct plan concept",
+          "token": "RefusalPlanContract"
+        },
+        {
+          "category": "incidental",
+          "reason": "local Ultracode resume reason token; not a distinct plan concept",
+          "token": "PLAN_CONTRACT_INCOMPATIBLE"
+        },
+        {
+          "category": "incidental",
+          "reason": "hashed field in the Ultracode graph receipt; not a distinct plan concept",
+          "token": "PlanIdentity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Ultracode graph receipt constructor; not a distinct plan concept",
+          "token": "ReceiptForPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "defensive copy helper; not a distinct plan concept",
+          "token": "clonePlan"
         }
       ],
       "exclude": [
@@ -11569,9 +11664,12 @@
         "NormalizeWorkflowPlanAccess",
         "NoteCandidates",
         "OwnershipLaneMismatch",
+        "PLAN_CONTRACT_INCOMPATIBLE",
+        "PLAN_SCHEMA_INCOMPATIBLE",
         "PlanDecodeInterleave",
         "PlanEviction",
         "PlanGoTmp",
+        "PlanIdentity",
         "PlanLog",
         "PlanLogEntry",
         "PlanPayload",
@@ -11586,8 +11684,11 @@
         "QueryPlan",
         "QueryPlanSchema",
         "ReadMergePlan",
+        "ReceiptForPlan",
         "ReconcilePlan",
         "RecoveryReplan",
+        "RefusalPlanContract",
+        "RefusalPlanSchema",
         "RemoteDrainCandidate",
         "RunCodeToolsSelfcheck",
         "SetupSeconds",
@@ -11624,6 +11725,7 @@
         "candidate_requires_auth_relevance",
         "candidatemean",
         "candidates",
+        "clonePlan",
         "dedupCandidate",
         "defaultsCheckPlanner",
         "fitandplanserveggufexpertparallelpathondevice",
