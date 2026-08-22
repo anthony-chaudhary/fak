@@ -77,6 +77,79 @@ The rule that falls out: **one placement decision, one ledger.** No residency ch
 ships without its warmth price, and exactly one context manager owns any given wire —
 everything else is sensed and made coherent, or suppressed.
 
+## Self-management is a control hierarchy, not a model free-for-all
+
+**Self-managed context** means the user chooses the task and constraints, while the
+system owns routine placement. It is a first-class runtime property, not a collection
+of reminders to `/compact`, avoid large files, or manually curate memory. A complete
+implementation has three control levels, in this order:
+
+1. **Kernel and harness policy acts deterministically.** Typed rules admit, defer,
+   pin, page, summarize, invalidate, and restore context from observable state. The
+   same inputs and policy produce the same decision and a receipt explains it. Safe
+   maintenance runs without asking the user or spending a model call.
+2. **The agent adjusts bounded controls and asks for context.** When task semantics
+   matter, the agent may set declared knobs (for example, pin a goal, release a span,
+   select a retrieval scope, or request a query) and invoke context tools. Those
+   actions change policy inputs; they do not bypass budgets, provenance, capability
+   boundaries, or restore guarantees.
+3. **A model resolves only the semantic residue.** Classification, synthesis, or
+   compression may use a model when deterministic evidence cannot decide what remains
+   useful. The call is bounded, typed, attributable, and checked before its result can
+   replace source context. Failure falls back to a safe deterministic action rather
+   than silently dropping evidence.
+
+This hierarchy keeps the useful middle ground: an agent can update configuration or
+run retrieval tools as part of doing its job, but the harness still owns enforcement
+and the kernel still prefers replayable mechanisms. “The agent manages its context”
+is therefore not permission for an unconstrained housekeeping loop inside the same
+window it is trying to repair.
+
+### The placement loop is one structural object
+
+Treat context management as a closed control loop rather than separate compaction,
+memory, retrieval, and cache features:
+
+1. **Sense:** record token pressure, cache warmth, reuse, provenance, tool-result size,
+   goal relevance, dependency edges, and restore cost.
+2. **Plan:** compute a typed placement plan across resident, deferred, summarized,
+   indexed, pinned, invalidated, and restorable states.
+3. **Act:** apply deterministic transitions first; request bounded agent configuration,
+   tool queries, or model judgment only where the plan names semantic uncertainty.
+4. **Verify:** check invariants, task outcome, retrieval success, cache effects, latency,
+   and total billed work against the unmanaged alternative.
+5. **Learn safely:** RSI may propose policy or threshold changes from receipts and
+   benchmark history, but replay, holdout, regression, and rollback gates decide
+   whether a proposal becomes configuration. The online model never rewrites its own
+   safety floor.
+
+The receipt is the integration seam. Native harnesses should expose lifecycle events,
+context controls, and compaction boundaries; tools and memory systems should return
+provenance plus budget metadata; providers should expose cache and usage signals. fak
+can then make one placement decision instead of stacking several opaque summarizers.
+
+### What evidence would prove the property
+
+A token-count reduction alone does not prove self-management. Benchmarks need paired,
+replayable trajectories and must report at least:
+
+- **user burden:** manual compactions, context-curation prompts, recovery actions, and
+  configuration touches required per completed task;
+- **task continuity:** success, retained constraints, long-horizon retrieval, and
+  recovery after compaction, restart, or provider failure;
+- **net-true efficiency:** billed input/output tokens, model housekeeping calls, tool
+  calls, cache reuse, latency, and restore work—not only resident-window size;
+- **determinism:** the fraction of placement transitions resolved without a model,
+  replay agreement for identical evidence, and reasons for every escalation;
+- **safety:** provenance retention, capability isolation, reversible replacement, and
+  fail-closed behavior under malformed summaries or unavailable models;
+- **adaptation:** held-out improvement from an RSI-proposed policy change, including
+  regression and rollback evidence.
+
+Compare four arms where the harness permits it: user-managed baseline, harness-native
+compaction, deterministic fak policy, and deterministic policy plus bounded semantic
+escalation. Segment results by task shape and context pressure so a win on repetitive
+coding traces is not presented as a universal context result.
 ## What is live on the default path today
 
 This is the load-bearing honesty section. From a wiring survey at HEAD (a component is
