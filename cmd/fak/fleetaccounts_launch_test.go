@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/accountprobe"
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
 )
 
@@ -87,6 +88,10 @@ func TestFleetLaunchHelperProcess(t *testing.T) {
 		_, _ = os.Stderr.WriteString("CODEX_HOME=" + got)
 		os.Exit(9)
 	}
+	if mode == "auth" {
+		_, _ = os.Stdout.WriteString(`{"type":"turn.failed","error":{"message":"401 Unauthorized: upstream rejected the credential"}}` + "\n")
+		os.Exit(0)
+	}
 	if mode == "blocked" {
 		_, _ = os.Stdout.WriteString("UserPromptSubmit Blocked\n" + `{"type":"turn.completed"}` + "\n")
 		os.Exit(0)
@@ -104,5 +109,24 @@ func TestOverlayFleetLaunchEnvIsCaseInsensitive(t *testing.T) {
 	joined := strings.Join(got, "\n")
 	if strings.Count(strings.ToUpper(joined), "CODEX_HOME=") != 1 || !strings.Contains(joined, "CODEX_HOME=new") {
 		t.Fatalf("overlay=%v", got)
+	}
+}
+
+func TestExecuteFleetLaunchRecordsGuardedAuthFailure(t *testing.T) {
+	old := fleetLaunchExecCommand
+	fleetLaunchExecCommand = fleetLaunchHelperCommand
+	t.Cleanup(func() { fleetLaunchExecCommand = old })
+	regDir := t.TempDir()
+	t.Setenv("FLEET_REG_DIR", regDir)
+
+	var stdout, stderr bytes.Buffer
+	d := fleetaccounts.LaunchDecision{OK: true, Account: ".codex-four", Product: "codex", Argv: []string{"fak"}}
+	env := []string{"GO_WANT_FLEET_LAUNCH_HELPER=auth"}
+	if code := executeFleetLaunch(d, nil, &stdout, &stderr, env); code != 70 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	entry := accountprobe.LastProbeByAccount(regDir)[".codex-four"]
+	if entry.Status != "AUTH" || entry.BlockReason != "UPSTREAM_AUTH" {
+		t.Fatalf("probe entry = %+v", entry)
 	}
 }

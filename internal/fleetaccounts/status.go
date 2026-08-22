@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/accountprobe"
+
 	configaccounts "github.com/anthony-chaudhary/fak/internal/accounts"
 )
 
@@ -633,6 +634,13 @@ func minAge(rows []Session) (float64, bool) {
 // runtime-status fold; non-worker rows get the static "not offered" shape. The result is
 // sorted by (product, kind != worker, !available, tag) to match annotate_accounts.
 func Annotate(rows []Account, reg Registry) []Account {
+	return AnnotateWithProbes(rows, reg, "")
+}
+
+// AnnotateWithProbes applies the runtime fold plus the latest active-probe verdicts from
+// regDir. A fresh probe is authoritative because it exercised the same provider seam the
+// worker will use; stale entries are ignored so recovered seats become eligible again.
+func AnnotateWithProbes(rows []Account, reg Registry, regDir string) []Account {
 	out := make([]Account, len(rows))
 	copy(out, rows)
 	for i := range out {
@@ -643,6 +651,7 @@ func Annotate(rows []Account, reg Registry) []Account {
 			applyFreshProbeLoginOverride(r)
 			applyLoginGate(r)
 			applyCredExpiryGate(r, time.Now().UTC())
+			applyLatestProbeVerdict(r, regDir, time.Now().UTC())
 		} else {
 			r.Available = boolp(false)
 			r.Blocked = boolp(false)
@@ -859,9 +868,43 @@ func accountLoginBlockReason(r Account) string {
 	return "account login cannot serve"
 }
 
+const activeProbeFreshness = 15 * time.Minute
+
+func applyLatestProbeVerdict(r *Account, regDir string, now time.Time) {
+	entry, ok := accountprobe.LastProbeByAccount(regDir)[r.Account]
+	if !ok {
+		return
+	}
+	observed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(entry.TS))
+	if err != nil || now.Sub(observed) < 0 || now.Sub(observed) > activeProbeFreshness {
+		return
+	}
+	status := strings.ToUpper(strings.TrimSpace(entry.Status))
+	if status == "" || status == "OK" || status == "NEEDS_PROBE" {
+		return
+	}
+	kind := strings.ToLower(strings.TrimSpace(entry.Status))
+	if kind == "" {
+		kind = strings.ToLower(status)
+	}
+	reason := strings.TrimSpace(entry.BlockReason)
+	if reason == "" {
+		reason = "fresh guarded probe: " + status
+	}
+	r.Available = boolp(false)
+	r.Blocked = boolp(true)
+	r.BlockKind = strp(kind)
+	r.BlockReason = strp(reason)
+	r.StatusSource = strp("fresh_probe")
+	if kind == "auth" {
+		r.LoginStatus = strp("needs_login")
+		r.CanServe = boolp(false)
+	}
+}
+
 // AnnotatedRoster is the canonical "give me the live accounts" call: discover + annotate.
 func AnnotatedRoster(home, configHome string, pol Policy, reg Registry) []Account {
-	return Annotate(Discover(home, configHome, pol), reg)
+	return AnnotateWithProbes(Discover(home, configHome, pol), reg, "")
 }
 
 // Available returns worker accounts safe to offer right now (routable + available),

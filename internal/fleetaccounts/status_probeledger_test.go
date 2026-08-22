@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/accountprobe"
 )
 
 // writeAccountConfig writes a minimal .claude.json into a fresh account dir whose
@@ -161,5 +163,44 @@ func TestSyntheticProbeRowWinsOverLedger(t *testing.T) {
 	st := computeRuntimeStatus(".claude-a", "", reg)
 	if st.Available || st.BlockKind != "usage" || st.StatusSource != "probe" {
 		t.Fatalf("synthetic _probe row should win over the ledger, got %+v", st)
+	}
+}
+
+func TestFreshCodexAuthProbeMakesReadySeatUnavailable(t *testing.T) {
+	regDir := t.TempDir()
+	now := time.Now().UTC()
+	if err := accountprobe.AppendLedger(regDir, accountprobe.LedgerEntry{
+		TS: now.Format(time.RFC3339Nano), Account: ".codex-four", Status: "AUTH", BlockReason: "guarded subscription returned HTTP 401",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	row := Account{
+		Account: ".codex-four", Tag: "four", Product: "codex", Kind: KindWorker,
+		LoginStatus: strp("ready"), CanServe: boolp(true),
+	}
+	got := AnnotateWithProbes([]Account{row}, Registry{}, regDir)[0]
+	if derefBool(got.Available) || !derefBool(got.Blocked) || derefStr(got.BlockKind) != "auth" {
+		t.Fatalf("fresh auth probe left seat offerable: %+v", got)
+	}
+	if derefStr(got.LoginStatus) != "needs_login" || derefBool(got.CanServe) {
+		t.Fatalf("login gate did not match guarded auth failure: %+v", got)
+	}
+	if derefStr(got.StatusSource) != "fresh_probe" {
+		t.Fatalf("status source = %q", derefStr(got.StatusSource))
+	}
+}
+
+func TestStaleCodexAuthProbeDoesNotBlockRecoveredSeat(t *testing.T) {
+	regDir := t.TempDir()
+	if err := accountprobe.AppendLedger(regDir, accountprobe.LedgerEntry{
+		TS:      time.Now().UTC().Add(-activeProbeFreshness - time.Minute).Format(time.RFC3339Nano),
+		Account: ".codex-four", Status: "AUTH",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	row := Account{Account: ".codex-four", Product: "codex", Kind: KindWorker, LoginStatus: strp("ready"), CanServe: boolp(true)}
+	got := AnnotateWithProbes([]Account{row}, Registry{}, regDir)[0]
+	if !derefBool(got.Available) || !derefBool(got.CanServe) {
+		t.Fatalf("stale probe blocked recovered seat: %+v", got)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/accountprobe"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/fleetaccounts"
 )
@@ -105,7 +106,7 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 	paths := fleetaccounts.ResolvePaths(toolsDir)
 	pol := fleetaccounts.LoadPolicy(paths)
 	reg := fleetaccounts.LoadRegistry(paths.RegistryPath)
-	rows := fleetaccounts.AnnotatedRoster(paths.Home, paths.ConfigHome, pol, reg)
+	rows := fleetaccounts.AnnotateWithProbes(fleetaccounts.Discover(paths.Home, paths.ConfigHome, pol), reg, paths.RegistryDir)
 
 	switch mode {
 	case "list", "roster":
@@ -497,13 +498,33 @@ func executeFleetLaunch(d fleetaccounts.LaunchDecision, stdin io.Reader, stdout,
 	}
 	if d.Product == "codex" && !codexAssistantCompleted(codexOutput.Bytes()) {
 		reason := "ASSISTANT_RESPONSE_MISSING"
-		if bytes.Contains(bytes.ToLower(codexOutput.Bytes()), []byte("userpromptsubmit blocked")) {
+		kind := "access"
+		lower := bytes.ToLower(codexOutput.Bytes())
+		if bytes.Contains(lower, []byte("userpromptsubmit blocked")) {
 			reason = "PROMPT_HOOK_BLOCK"
+		} else if bytes.Contains(lower, []byte("401 unauthorized")) || bytes.Contains(lower, []byte("upstream rejected the credential")) {
+			reason, kind = "UPSTREAM_AUTH", "auth"
 		}
+		recordFleetCodexProbe(d.Account, strings.ToUpper(kind), kind, reason)
 		fmt.Fprintf(stderr, "fleet-accounts exec: codex turn incomplete (%s): no completed assistant response\n", reason)
 		return 70
 	}
+	if d.Product == "codex" {
+		recordFleetCodexProbe(d.Account, "OK", "", "guarded assistant response completed")
+	}
 	return 0
+}
+
+func recordFleetCodexProbe(account, status, kind, reason string) {
+	if strings.TrimSpace(account) == "" {
+		return
+	}
+	_ = accountprobe.AppendLedger("", accountprobe.LedgerEntry{
+		TS:          time.Now().UTC().Format(time.RFC3339Nano),
+		Account:     account,
+		Status:      status,
+		BlockReason: reason,
+	})
 }
 
 func overlayFleetLaunchEnv(base []string, overlay map[string]string) []string {
