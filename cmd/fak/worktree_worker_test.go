@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -84,6 +86,211 @@ func TestLandJSONShape(t *testing.T) {
 func TestReapJSONShape(t *testing.T) {
 	res := workerworktree.Result{OK: true, Path: "/wt/fak-worker-wt-cmd-abc", Removed: true}
 	mustKeys(t, res, "ok", "path", "removed")
+}
+
+func TestWorktreeWorkerReapCommandHelper(t *testing.T) {
+	if os.Getenv("FAK_REAP_COMMAND_HELPER") != "1" {
+		return
+	}
+	for i, arg := range os.Args {
+		if arg == "--" {
+			worktreeWorkerReap(os.Args[i+1:])
+			return
+		}
+	}
+	os.Exit(2)
+}
+
+type reapCommandResult struct {
+	code    int
+	stdout  string
+	stderr  string
+	elapsed time.Duration
+}
+
+func runReapCommand(t *testing.T, deadline time.Duration, env []string, args ...string) reapCommandResult {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
+	defer cancel()
+	cmdArgs := append([]string{"-test.run=^TestWorktreeWorkerReapCommandHelper$", "--"}, args...)
+	cmd := exec.CommandContext(ctx, os.Args[0], cmdArgs...)
+	cmd.Env = append(os.Environ(), append([]string{
+		"FAK_REAP_COMMAND_HELPER=1",
+		workerworktree.PoolCapEnv + "=0",
+	}, env...)...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	started := time.Now()
+	err := cmd.Run()
+	res := reapCommandResult{stdout: stdout.String(), stderr: stderr.String(), elapsed: time.Since(started)}
+	if err == nil {
+		return res
+	}
+	if ctx.Err() != nil {
+		res.code = -1
+		return res
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		res.code = exitErr.ExitCode()
+		return res
+	}
+	t.Fatalf("run reap helper: %v", err)
+	return reapCommandResult{}
+}
+
+func reapReceipt(t *testing.T, stdout string) map[string]any {
+	t.Helper()
+	for _, line := range strings.Split(stdout, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "{") {
+			continue
+		}
+		var got map[string]any
+		if err := json.Unmarshal([]byte(line), &got); err != nil {
+			t.Fatalf("decode reap receipt %q: %v", line, err)
+		}
+		return got
+	}
+	t.Fatalf("missing reap JSON receipt; stdout=%q", stdout)
+	return nil
+}
+
+func newSingleReapFixture(t *testing.T) (repo, worktree, base string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	t.Setenv(workerworktree.PoolCapEnv, "0")
+	root := t.TempDir()
+	repo = filepath.Join(root, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-q", "-b", "main")
+	git("config", "user.email", "t@t")
+	git("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(repo, "owned.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "owned.txt")
+	git("commit", "-qm", "base")
+	base = git("rev-parse", "HEAD")
+	prepared := workerworktree.Prepare(repo, "cmd", "8503", base, filepath.Join(root, "workers"), nil)
+	if !prepared.OK {
+		t.Fatalf("prepare: %+v", prepared)
+	}
+	worktree = prepared.Path
+	t.Cleanup(func() { _ = workerworktree.ForceReap(repo, worktree, nil) })
+	return repo, worktree, base
+}
+
+func TestSingleReapDirtyWorktreeReturnsTypedRefusalAndPreservesWork(t *testing.T) {
+	repo, worktree, _ := newSingleReapFixture(t)
+	if err := os.WriteFile(filepath.Join(worktree, "owned.txt"), []byte("unlanded\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := runReapCommand(t, 3*time.Second, nil, "--root", repo, "--worktree", worktree, "--max-wait", "500ms")
+	if res.code != 1 {
+		t.Fatalf("dirty reap exit=%d stdout=%q stderr=%q", res.code, res.stdout, res.stderr)
+	}
+	got := reapReceipt(t, res.stdout)
+	if got["code"] != "DIRTY_WORKTREE_REFUSED" || got["ok"] != false || got["preserved"] != true || got["removed"] == true {
+		t.Fatalf("dirty reap receipt=%v", got)
+	}
+	if b, err := os.ReadFile(filepath.Join(worktree, "owned.txt")); err != nil || string(b) != "unlanded\n" {
+		t.Fatalf("dirty work was not preserved: body=%q err=%v", b, err)
+	}
+}
+
+func TestSingleReapExplicitSupersessionRemovesRegisteredDirtyWorktree(t *testing.T) {
+	repo, worktree, _ := newSingleReapFixture(t)
+	want := []byte("already landed\n")
+	if err := os.WriteFile(filepath.Join(worktree, "owned.txt"), want, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "owned.txt"), want, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("add", "owned.txt")
+	git("commit", "-qm", "landed independently")
+	supersededBy := git("rev-parse", "HEAD")
+	res := runReapCommand(t, 3*time.Second, nil, "--root", repo, "--worktree", worktree, "--superseded-by", supersededBy, "--max-wait", "1s")
+	if res.code != 0 {
+		t.Fatalf("authorized reap exit=%d stdout=%q stderr=%q", res.code, res.stdout, res.stderr)
+	}
+	got := reapReceipt(t, res.stdout)
+	if got["code"] != "VERIFIED_WORKTREE_REAPED" || got["removed"] != true {
+		t.Fatalf("authorized reap receipt=%v", got)
+	}
+	if _, err := os.Stat(worktree); !os.IsNotExist(err) {
+		t.Fatalf("authorized reap left directory: %v", err)
+	}
+	if listed := git("worktree", "list", "--porcelain"); strings.Contains(filepath.ToSlash(listed), filepath.ToSlash(worktree)) {
+		t.Fatalf("authorized reap left git registration: %s", listed)
+	}
+}
+
+func TestSingleReapStatusStallReturnsWithinBound(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake git shim is a POSIX script; the acceptance gate runs under WSL")
+	}
+	repo, worktree, _ := newSingleReapFixture(t)
+	if err := os.WriteFile(filepath.Join(worktree, "owned.txt"), []byte("unlanded\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shimDir := t.TempDir()
+	shim := filepath.Join(shimDir, "git")
+	body := "#!/bin/sh\nif [ \"$PWD\" = \"$FAK_REAP_STALL_DIR\" ] && [ \"$1\" = status ]; then sleep 30; fi\nexec \"$FAK_REAP_REAL_GIT\" \"$@\"\n"
+	if err := os.WriteFile(shim, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{
+		"PATH=" + shimDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"FAK_REAP_STALL_DIR=" + worktree,
+		"FAK_REAP_REAL_GIT=" + realGit,
+	}
+	res := runReapCommand(t, 3*time.Second, env, "--root", repo, "--worktree", worktree, "--max-wait", "200ms")
+	if res.code != 1 || res.elapsed > 2*time.Second {
+		t.Fatalf("stalled reap was not bounded: exit=%d elapsed=%s stdout=%q stderr=%q", res.code, res.elapsed, res.stdout, res.stderr)
+	}
+	if !strings.Contains(res.stderr, "REAP_PROGRESS code=REAP_STARTED") {
+		t.Fatalf("stalled reap emitted no progress before refusal: %q", res.stderr)
+	}
+	got := reapReceipt(t, res.stdout)
+	if got["code"] != "REAP_TIMEOUT" || got["ok"] != false || got["preserved"] != true {
+		t.Fatalf("stalled reap receipt=%v", got)
+	}
+	if _, err := os.Stat(worktree); err != nil {
+		t.Fatalf("timed-out reap removed worktree: %v", err)
+	}
 }
 
 // TestGCJSONShape pins the owner-stamped GC CLI's stable top-level report contract.

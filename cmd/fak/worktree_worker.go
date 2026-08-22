@@ -61,8 +61,11 @@ fak worktree <subcommand>
                    CORE_SELF_MODIFY unless the witness claim (flag, or a
                    Core-lock-maintenance-witness: trailer in the commit message)
                    resolves CONFIRMED — the same lock fak commit enforces.
-      reap --worktree D
-                   Force-remove ONE finished worker worktree. Prints {ok, removed, ...}.
+      reap --worktree D [--superseded-by SHA] [--max-wait D]
+                   Release ONE clean worker worktree within a shared deadline. A dirty
+                   worktree is preserved by default. --superseded-by authorizes force
+                   removal only when SHA is on trunk and exactly matches its bytes.
+                   Prints a typed {ok, code, removed|preserved, ...} receipt.
       reap --all-cold [--apply] [--age-floor-min N] [--even-if-unlanded]
                    Bulk cold sweep: enumerate every worker worktree and reap only the
                    COLD ones — lane lease dead, past the age floor, AND working tree
@@ -244,7 +247,9 @@ func worktreeWorkerLand(argv []string) {
 
 func worktreeWorkerReap(argv []string) {
 	flags := flag.NewFlagSet("worktree worker reap", flag.ExitOnError)
-	worktree := flags.String("worktree", "", "the worker's worktree dir to force-remove (single-worktree mode)")
+	worktree := flags.String("worktree", "", "the worker's managed worktree dir (single-worktree mode)")
+	supersededBy := flags.String("superseded-by", "", "single-worktree mode: authorize dirty cleanup only when this commit is on trunk and byte-equivalent to the worktree")
+	maxWait := flags.Duration("max-wait", 10*time.Second, "single-worktree mode: shared wall-clock deadline for inspection, verification, and removal")
 	allCold := flags.Bool("all-cold", false, "bulk mode: enumerate ALL worker worktrees and reap only the COLD ones (dead lane lease, past the age floor, and clean). DRY-RUN unless --apply")
 	apply := flags.Bool("apply", false, "with --all-cold, actually delete the cold worktrees (default: dry-run report only). Env "+worktreeColdApplyEnv+"=apply is equivalent")
 	ageFloorMin := flags.Int("age-floor-min", int(workerworktree.DefaultColdAgeFloor/time.Minute), "with --all-cold, the age grace floor in minutes — a dead-lease worktree younger than this is kept")
@@ -253,23 +258,30 @@ func worktreeWorkerReap(argv []string) {
 	flags.Parse(argv)
 
 	repoRoot := worktreeWorkerRoot(*root)
-	finishLifecycle := beginAutomaticWIPLifecycle(repoRoot, "worker-reap", os.Stderr)
-	defer finishLifecycle()
-
 	if *allCold {
+		finishLifecycle := beginAutomaticWIPLifecycle(repoRoot, "worker-reap", os.Stderr)
+		defer finishLifecycle()
 		worktreeWorkerReapAllCold(repoRoot, *apply, time.Duration(*ageFloorMin)*time.Minute, *evenIfUnlanded)
 		return
 	}
 
 	if strings.TrimSpace(*worktree) == "" {
 		fmt.Fprintln(os.Stderr, "fak worktree worker reap: --worktree is required (or pass --all-cold for the bulk cold sweep)")
-		finishLifecycle()
 		os.Exit(2)
 	}
-	res := workerworktree.Reap(repoRoot, strings.TrimSpace(*worktree), nil)
+	if *maxWait <= 0 {
+		worktreeWorkerEmit(workerworktree.Result{
+			OK: false, Code: workerworktree.ReapCodeTimeout, Path: strings.TrimSpace(*worktree), Preserved: true,
+			Reason: "--max-wait must be positive",
+		})
+		os.Exit(2)
+	}
+	fmt.Fprintf(os.Stderr, "REAP_PROGRESS code=REAP_STARTED max_wait=%s\n", maxWait.String())
+	ctx, cancel := context.WithTimeout(context.Background(), *maxWait)
+	defer cancel()
+	res := workerworktree.ReapChecked(repoRoot, strings.TrimSpace(*worktree), strings.TrimSpace(*supersededBy), workerworktree.BoundedGitRunner(ctx))
 	worktreeWorkerEmit(res)
 	if !res.OK {
-		finishLifecycle()
 		os.Exit(1)
 	}
 }

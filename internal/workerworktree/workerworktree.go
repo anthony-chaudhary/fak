@@ -32,6 +32,7 @@
 package workerworktree
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"math/rand"
@@ -93,7 +94,18 @@ const (
 	// seam routes exactly this transient race class into a bounded re-land (#3613)
 	// instead of matching free text.
 	LandReadbackMismatchToken = "LAND_READBACK_MISMATCH"
-	keyHashLen                = 12
+	// ReapTimeoutExitCode is returned by BoundedGitRunner when the shared reap
+	// deadline expires. It is intentionally distinct from ordinary git failures so
+	// the CLI can emit a stable refusal instead of free-text diagnosis.
+	ReapTimeoutExitCode = 124
+
+	ReapCodeDirtyWorktreeRefused   = "DIRTY_WORKTREE_REFUSED"
+	ReapCodeProofRefused           = "REAP_PROOF_REFUSED"
+	ReapCodeVerifiedWorktreeReaped = "VERIFIED_WORKTREE_REAPED"
+	ReapCodeTimeout                = "REAP_TIMEOUT"
+	ReapCodeRemoved                = "WORKTREE_REAPED"
+	ReapCodeReleased               = "WORKTREE_RELEASED"
+	keyHashLen                     = 12
 )
 
 // LandRefusalRetryable reports whether a refused Land is worth re-attempting on
@@ -162,14 +174,19 @@ func IsolationBackends() []IsolationBackend { return []IsolationBackend{gitWorkt
 // branch on; the rest carries evidence for the record/log.
 type Result struct {
 	OK        bool   `json:"ok"`
+	Code      string `json:"code,omitempty"`
 	Path      string `json:"path,omitempty"`
 	BaseSHA   string `json:"base_sha,omitempty"`
 	Reused    bool   `json:"reused,omitempty"`
 	Applied   bool   `json:"applied,omitempty"`
 	Committed bool   `json:"committed,omitempty"`
 	Removed   bool   `json:"removed,omitempty"`
+	Preserved bool   `json:"preserved,omitempty"`
 	Reason    string `json:"reason,omitempty"`
 	Detail    string `json:"detail,omitempty"`
+	// SupersededBy is populated only after the named commit is proven to be on
+	// current trunk ancestry and byte-equivalent to the managed worktree.
+	SupersededBy string `json:"superseded_by,omitempty"`
 	// DroppedOutOfLane is the number of changed worktree paths outside the
 	// caller-declared lease tree. Path-scoped land commits omit those paths;
 	// surfacing the count makes that otherwise-silent loss observable (#4599).
@@ -204,6 +221,33 @@ func defaultGit(root string, args []string) (int, string) {
 		return 127, string(out)
 	}
 	return 0, string(out)
+}
+
+// BoundedGitRunner binds every git subprocess to one caller-owned deadline. The
+// shared context makes the whole checked reap bounded rather than granting each
+// probe a fresh timeout. WaitDelay also closes inherited pipes after cancellation,
+// so a stuck helper grandchild cannot keep CombinedOutput waiting indefinitely.
+func BoundedGitRunner(ctx context.Context) GitRunner {
+	return func(root string, args []string) (int, string) {
+		if err := ctx.Err(); err != nil {
+			return ReapTimeoutExitCode, err.Error()
+		}
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = root
+		cmd.WaitDelay = 100 * time.Millisecond
+		windowgate.ConfigureBackgroundCommand(cmd)
+		out, err := cmd.CombinedOutput()
+		if ctx.Err() != nil {
+			return ReapTimeoutExitCode, ctx.Err().Error()
+		}
+		if err != nil {
+			if ee, ok := err.(*exec.ExitError); ok {
+				return ee.ExitCode(), string(out)
+			}
+			return 127, string(out)
+		}
+		return 0, string(out)
+	}
 }
 
 func run(git GitRunner, root string, args []string) (int, string) {
@@ -526,6 +570,102 @@ func Reap(root, wtPath string, git GitRunner) Result {
 	return ReapWithBackend(root, wtPath, git, defaultIsolationBackend)
 }
 
+// ReapChecked is the path-local safety gate for the single-worktree CLI. A dirty
+// worktree is preserved unless the caller names a commit that is independently
+// proven to be on current trunk ancestry and to contain the exact checkout state.
+// The caller supplies BoundedGitRunner when it needs a wall-clock deadline.
+func ReapChecked(root, wtPath, supersededBy string, git GitRunner) Result {
+	wtPath = filepath.Clean(strings.TrimSpace(wtPath))
+	refuse := func(code, reason, detail string) Result {
+		return Result{
+			OK: false, Code: code, Path: wtPath, Preserved: true,
+			Reason: reason, Detail: strings.TrimSpace(detail),
+		}
+	}
+	gitFailure := func(reason string, rc int, detail string) Result {
+		if rc == ReapTimeoutExitCode {
+			return refuse(ReapCodeTimeout, "single-worktree reap deadline exceeded", detail)
+		}
+		return refuse(ReapCodeProofRefused, reason, detail)
+	}
+	if !IsWorkerWorktree(wtPath) {
+		return refuse("REAP_PATH_REFUSED", "refusing to reap a non-worker worktree", "")
+	}
+
+	rc, status := run(git, wtPath, []string{"status", "--porcelain=v1", "--untracked-files=all"})
+	if rc != 0 {
+		return gitFailure("cannot inspect worktree status", rc, status)
+	}
+	if strings.TrimSpace(status) == "" {
+		res := Reap(root, wtPath, git)
+		if res.Code == "" {
+			switch {
+			case res.OK && res.Removed:
+				res.Code = ReapCodeRemoved
+			case res.OK:
+				res.Code = ReapCodeReleased
+			default:
+				res.Code = "REAP_FAILED"
+			}
+		}
+		if !res.OK && !res.Removed {
+			res.Preserved = true
+		}
+		return res
+	}
+
+	supersededBy = strings.TrimSpace(supersededBy)
+	if supersededBy == "" {
+		return refuse(ReapCodeDirtyWorktreeRefused,
+			"dirty worktree preserved; pass --superseded-by only after its effect is independently present on trunk", "")
+	}
+	rc, resolved := run(git, root, []string{"rev-parse", "--verify", "--end-of-options", supersededBy + "^{commit}"})
+	if rc != 0 {
+		return gitFailure("supersession commit cannot be resolved", rc, resolved)
+	}
+	resolved = strings.TrimSpace(resolved)
+	rc, detail := run(git, root, []string{"merge-base", "--is-ancestor", resolved, "HEAD"})
+	if rc != 0 {
+		if rc == ReapTimeoutExitCode {
+			return gitFailure("supersession ancestry check timed out", rc, detail)
+		}
+		return refuse(ReapCodeProofRefused,
+			"supersession commit is not on current trunk ancestry", detail)
+	}
+	rc, untracked := run(git, wtPath, []string{"ls-files", "--others", "--exclude-standard", "-z"})
+	if rc != 0 {
+		return gitFailure("cannot inspect untracked worktree paths", rc, untracked)
+	}
+	if len(untracked) != 0 {
+		return refuse(ReapCodeProofRefused,
+			"untracked work cannot be proven byte-equivalent to a supersession commit", "")
+	}
+	rc, detail = run(git, wtPath, []string{"diff", "--no-ext-diff", "--quiet", resolved, "--"})
+	if rc != 0 {
+		if rc == ReapTimeoutExitCode {
+			return gitFailure("supersession content check timed out", rc, detail)
+		}
+		if rc == 1 {
+			return refuse(ReapCodeProofRefused,
+				"worktree bytes differ from the supersession commit", "")
+		}
+		return refuse(ReapCodeProofRefused,
+			"cannot compare worktree bytes to the supersession commit", detail)
+	}
+
+	res := ForceReap(root, wtPath, git)
+	if !res.OK {
+		if res.Code == "" {
+			res.Code = "REAP_FAILED"
+		}
+		res.Preserved = !res.Removed
+		return res
+	}
+	res.Code = ReapCodeVerifiedWorktreeReaped
+	res.SupersededBy = resolved
+	return res
+}
+
 // ReapWithBackend is the injectable form of Reap.
 func ReapWithBackend(root, wtPath string, git GitRunner, backend IsolationBackend) Result {
 	if backend == nil {
@@ -576,6 +716,12 @@ func ForceReap(root, wtPath string, git GitRunner) Result {
 	run(git, root, []string{"worktree", "prune"})
 	res := Result{OK: removed, Path: wtPath, Removed: removed}
 	if !removed {
+		_, statErr := os.Stat(wtPath)
+		res.Preserved = statErr == nil || !os.IsNotExist(statErr)
+		if rc == ReapTimeoutExitCode {
+			res.Code = ReapCodeTimeout
+			res.Reason = "single-worktree reap deadline exceeded"
+		}
 		res.Detail = tail(out, 300)
 		return res
 	}
