@@ -17,6 +17,7 @@ import (
 	"unsafe"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 var desktopConsoleDLL = syscall.NewLazyDLL("kernel32.dll")
@@ -147,6 +148,7 @@ func runDesktopConsoleSelfcheckRoot(stdout, stderr io.Writer) int {
 		childEnv[desktopConsoleSelfcheckLabelEnv] = label
 		childEnv[desktopConsoleSelfcheckDirEnv] = dir
 		cmd := exec.Command(path, "windowgate", "--selfcheck")
+		windowgate.ConfigureBackgroundCommand(cmd)
 		cmd.Env = envSliceFromMap(childEnv)
 		cmd.Stdout, cmd.Stderr = stdout, stderr
 		if err := cmd.Start(); err != nil {
