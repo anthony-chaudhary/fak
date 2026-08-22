@@ -269,6 +269,8 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Learning observation lineage](docs/learning-observation.md) — content-addressed source/candidate/witness/verdict records and closed-enum edges; separate from witness-gated admission.
 
 ## Notes & research (`docs/notes/`)
+
+- [Concept study: FreeToken edge-native MoE serving](docs/notes/CONCEPT-STUDY-FREETOKEN-2026-08-22.md) -- source-pinned deep study; filed semantic state anchors #8601 and idle cache geometry #8603.
 - [OpenCode Go Ox Alpha coding dogfood — 2026-08-22](docs/notes/OX-ALPHA-DOGFOOD-2026-08-22.md) -- auto-indexed dated note.
 - [Guard launch-grant dogfood — 2026-08-22](docs/notes/GUARD-LAUNCH-GRANT-DOGFOOD-2026-08-22.md) -- auto-indexed dated note.
 - [Native-harness dynamic-instruction dogfood — 2026-08-22](docs/notes/NATIVE-HARNESS-DYNAMIC-INSTRUCTIONS-DOGFOOD-2026-08-22.md) -- auto-indexed dated note.
