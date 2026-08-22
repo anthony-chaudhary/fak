@@ -137,7 +137,11 @@ func TestDispatchTickAmbiguousLoopFailsSafeWithCleanupAction(t *testing.T) {
 	}
 	gate := mapAt(got, "codex_loop_gate")
 	life := mapAt(gate, "lifecycle")
-	if life["ambiguous_count"] != float64(1) || dispatchMapString(gate, "verdict") != "AMBIGUOUS" || dispatchMapString(gate, "next_action") == "" {
+	nextAction := dispatchMapString(gate, "next_action")
+	if life["ambiguous_count"] != float64(1) ||
+		dispatchMapString(gate, "verdict") != "AMBIGUOUS" ||
+		!strings.Contains(nextAction, "fak sessions codex-loop --recent --json") ||
+		!strings.Contains(nextAction, "reconcile or clean terminal session registrations") {
 		t.Fatalf("ambiguous lifecycle receipt = %#v", gate)
 	}
 }

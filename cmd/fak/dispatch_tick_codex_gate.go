@@ -78,7 +78,9 @@ func dispatchCodexLoopGateForTick(opts dispatchTickOptions, account dispatchtick
 		}
 		if gateCode != 0 {
 			payload["action"] = "refused"
-			payload["next_action"] = firstString(rep.NextAction, "change approach before retrying the prepared child")
+			if dispatchMapString(payload, "next_action") == "" {
+				payload["next_action"] = firstString(rep.NextAction, "change approach before retrying the prepared child")
+			}
 			return payload, true, nil
 		}
 		if !safeLaunch {
