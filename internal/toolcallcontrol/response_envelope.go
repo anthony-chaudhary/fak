@@ -7,8 +7,9 @@ import "fmt"
 type ResponseDisposition string
 
 const (
-	ResponsePass   ResponseDisposition = "pass"
-	ResponseBranch ResponseDisposition = "branch"
+	ResponsePass    ResponseDisposition = "pass"
+	ResponseProject ResponseDisposition = "project"
+	ResponseBranch  ResponseDisposition = "branch"
 )
 
 // ResponseDimension identifies one independently enforced response envelope.
