@@ -1,0 +1,63 @@
+{
+  "schema": "fak-closure-binding-receipt/1",
+  "repair_issue": 8546,
+  "source_issue": 8534,
+  "disposition": "bind_existing_witnessed_commit",
+  "repair_commit": {
+    "sha": "22285c44fca6483f69612e8c5708a459e4a9b274",
+    "subject": "test(cmd): import bespoke help witness dependency Refs #8526 (fak cmd)",
+    "signed_off": true,
+    "origin_main_at_ancestry_check": "4c9f759c2ef8a38dce1ba179165fe5bf8d7bbc9d",
+    "origin_main_ancestor": true,
+    "changed_paths": [
+      "cmd/fak/help_test.go"
+    ],
+    "effect": "added the missing io import used by TestOverviewBespokeHelpExemptionsRenderUsage"
+  },
+  "dos_commit_audit": {
+    "command": "dos commit-audit --workspace . 22285c44fca6483f69612e8c5708a459e4a9b274 --json",
+    "verdict": "OK",
+    "claim_kind": "test",
+    "witness": "diff-witnessed",
+    "reason": "test claim witnessed by a touched test file"
+  },
+  "wsl_test": {
+    "command": "go test ./cmd/fak -run ^(TestOverviewBespokeHelpExemptionsRenderUsage|TestModelObserveReportSpine|TestModelObserveStateBenchSpine)$ -count=1",
+    "fail_before": {
+      "ref": "1056fb67c4005d2b492bb1df14e2eec5dcf954fc",
+      "exit_code": 1,
+      "diagnostics": [
+        "cmd/fak/help_test.go:221:25: undefined: io",
+        "cmd/fak/help_test.go:229:41: undefined: io"
+      ]
+    },
+    "pass_after": {
+      "ref": "22285c44fca6483f69612e8c5708a459e4a9b274",
+      "exit_code": 0,
+      "result": "ok github.com/anthony-chaudhary/fak/cmd/fak"
+    }
+  },
+  "github_before_binding": {
+    "source_issue_state": "CLOSED",
+    "source_issue_state_reason": "COMPLETED",
+    "source_issue_closed_at": "2026-08-22T07:54:56Z",
+    "repair_issue_state": "OPEN"
+  },
+  "closure_audit_before_binding": {
+    "receipt": "docs/_witnesses/issue-8238-closure-honesty/complete-window.json",
+    "coverage": "COVERAGE_COMPLETE",
+    "source_issue_bucket": "CLAIMED_CLOSED",
+    "resolving_commits": [],
+    "witnessed_commits": []
+  },
+  "closure_binding": {
+    "commit": "the commit containing this receipt",
+    "mechanism": "the commit subject cites #8534 and its body carries Closes #8546",
+    "required_post_push_readback": [
+      "origin/main contains the receipt commit",
+      "dos commit-audit grades the receipt commit OK and diff-witnessed",
+      "GitHub reports #8534 and #8546 closed",
+      "a complete-window closure audit places #8534 in TRUE_RESOLVED"
+    ]
+  }
+}
