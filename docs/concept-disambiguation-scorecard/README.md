@@ -17,7 +17,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **65** (clarity 23 + coverage 42) |
 | **Crystal-clear concepts (and climbing)** | **759** crystal of 2472 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2599 / 2641** (98.4% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2600 / 2642** (98.4% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 197 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **74** of 3435 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
@@ -65,7 +65,7 @@ coverage by family (positioned / discovered):
   guard-gate       ###########################. 461/471
   cache            ###########################. 281/289
   plan             ###########################. 362/370
-  session-runtime  ###########################. 251/257
+  session-runtime  ###########################. 252/258
   policy-capability ###########################. 184/188
   support-maturity ##########################.. 55/59
   context-ctx      ############################ 226/229
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 98.4%  (2599/2641 confusable tokens positioned)
+namespace coverage  [###############################.] 98.4%  (2600/2642 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 196
@@ -2764,7 +2764,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | guard-gate | 461 | 471 | 10 |
 | cache | 281 | 289 | 8 |
 | plan | 362 | 370 | 8 |
-| session-runtime | 251 | 257 | 6 |
+| session-runtime | 252 | 258 | 6 |
 | policy-capability | 184 | 188 | 4 |
 | support-maturity | 55 | 59 | 4 |
 | context-ctx | 226 | 229 | 3 |

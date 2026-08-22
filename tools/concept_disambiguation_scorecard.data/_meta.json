@@ -8218,6 +8218,11 @@
           "category": "incidental",
           "reason": "local resume wire reason; not a distinct capability concept",
           "token": "capability_expired"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #8240 helper name for retaining a serve backend preflight notice; it does not define a policy capability.",
+          "token": "serveBackendForwardPreflightMessage"
         }
       ],
       "exclude": [
@@ -8393,6 +8398,7 @@
         "semanticGold",
         "semanticGrade",
         "semanticSubmission",
+        "serveBackendForwardPreflightMessage",
         "serveDurabilityPosture",
         "sessionCapabilityCorpus",
         "sessionCapabilityDefinition",

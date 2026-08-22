@@ -22,7 +22,7 @@ func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
 }
 
 func serveStartupMessage(kind, level, text string) gateway.StartupMessage {
-	return gateway.StartupMessage{Source: "model-load", Kind: kind, Level: level, Text: text}
+	return newServeStartupMessage("model-load", kind, level, text)
 }
 
 func withServeStartupMessages(p *gateway.ModelLoadProfile, messages ...gateway.StartupMessage) *gateway.ModelLoadProfile {
@@ -255,7 +255,14 @@ func loadResidentQ4KDevice(ggufPath string, tLoad time.Time, memPlan compute.Mem
 // gap — the lower-level /v1/fak/syscall route then NL-tokenizes a call's arguments and
 // returns decoded TEXT (generated_text) instead of raw token ids. With no real tokenizer the
 // engine keeps its byte-level default, so the CI/no-export path is unchanged.
-func resolveServeTokenizer(tokPath, ggufPath string) (*tokenizer.Tokenizer, bool) {
+func resolveServeTokenizer(tokPath, ggufPath string, sinks ...func(gateway.StartupMessage)) (*tokenizer.Tokenizer, bool) {
+	emit := func(message gateway.StartupMessage) {
+		for _, sink := range sinks {
+			if sink != nil {
+				sink(message)
+			}
+		}
+	}
 	if tokPath != "" {
 		tokFile := tokPath
 		if info, err := os.Stat(tokFile); err == nil && info.IsDir() {
@@ -270,7 +277,8 @@ func resolveServeTokenizer(tokPath, ggufPath string) (*tokenizer.Tokenizer, bool
 		if info, err := os.Stat(ggufPath); err == nil && info.IsDir() {
 			tok, err := tokenizer.LoadJSON(filepath.Join(ggufPath, "tokenizer.json"))
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "fak serve: safetensors directory has no usable tokenizer.json (%v);\n", err)
+				emit(serveStartupMessage("tokenizer-fallback", "warning",
+					fmt.Sprintf("safetensors directory has no usable tokenizer.json (%v); chat uses the offline mock planner", err)))
 				return nil, false
 			}
 			modelengine.SetTokenizer(tok)
@@ -286,8 +294,8 @@ func resolveServeTokenizer(tokPath, ggufPath string) (*tokenizer.Tokenizer, bool
 			modelengine.SetTokenizer(tok)
 			return tok, true
 		} else {
-			fmt.Fprintf(os.Stderr, "fak serve: --gguf set without --tokenizer and no embedded BPE tokenizer (%v);\n"+
-				"  /v1/chat/completions will use the offline mock planner. Pass --tokenizer <dir|file> for real chat.\n", err)
+			emit(serveStartupMessage("tokenizer-fallback", "warning",
+				fmt.Sprintf("--gguf has no usable embedded BPE tokenizer (%v); chat uses the offline mock planner; pass --tokenizer <dir|file> for real chat", err)))
 		}
 	}
 	return nil, false

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -166,14 +166,16 @@ func (r *servePreflightTrapReader) ReadAt([]byte, int64) (int, error) {
 func runServePreflightRefusalHarness(
 	be compute.Backend,
 	open serveGGUFHeaderOpener,
-	stderr io.Writer,
+	record func(gateway.StartupMessage),
 	downstream func(string),
 ) error {
 	pf, err := preflightServeBackendForwardWith("synthetic-sparse.gguf", be, open)
 	if err != nil {
 		return err
 	}
-	writeServeBackendForwardPreflight(stderr, pf)
+	if message := serveBackendForwardPreflightMessage(pf); message.Text != "" && record != nil {
+		record(message)
+	}
 	for _, event := range []string{"memory-plan", "model-load", "tokenizer", "planner", "listener"} {
 		downstream(event)
 	}
@@ -182,12 +184,12 @@ func runServePreflightRefusalHarness(
 
 func TestServeBackendForwardPreflightRefusesBeforeSparsePayloadAndDownstreamConstruction(t *testing.T) {
 	trap := &servePreflightTrapReader{}
-	var stderr bytes.Buffer
+	var messages []gateway.StartupMessage
 	var downstream []string
 	err := runServePreflightRefusalHarness(
 		newServePreflightBackend("cuda"),
 		servePreflightOpen(t, "qwen35", trap),
-		&stderr,
+		func(message gateway.StartupMessage) { messages = append(messages, message) },
 		func(event string) { downstream = append(downstream, event) },
 	)
 	var unsupported *fakmodel.UnsupportedBackendForwardError
@@ -200,8 +202,8 @@ func TestServeBackendForwardPreflightRefusesBeforeSparsePayloadAndDownstreamCons
 	if len(downstream) != 0 {
 		t.Fatalf("downstream construction=%v, want zero memory-plan/model/tokenizer/planner/listener events", downstream)
 	}
-	if got := stderr.String(); strings.Contains(got, "BACKEND_FORWARD_PREFLIGHT_OK") || strings.Contains(got, "QWEN36_A100_FAK_SERVE_READY") {
-		t.Fatalf("refusal emitted success/readiness marker: %q", got)
+	if len(messages) != 0 {
+		t.Fatalf("refusal retained success/readiness message: %+v", messages)
 	}
 }
 
@@ -214,11 +216,10 @@ func TestServeBackendForwardPreflightWritesExactCUDAAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var out bytes.Buffer
-	writeServeBackendForwardPreflight(&out, result)
-	want := "BACKEND_FORWARD_PREFLIGHT_OK backend=cuda forward=qwen35-gdn path=cuda/qwen35-gdn-ssm-decode-v1\n"
-	if got := out.String(); got != want {
-		t.Fatalf("stderr marker=%q, want %q", got, want)
+	got := serveBackendForwardPreflightMessage(result)
+	want := gateway.StartupMessage{Source: "model-load", Kind: "backend-forward", Level: "info", Text: "backend=cuda forward=qwen35-gdn path=cuda/qwen35-gdn-ssm-decode-v1"}
+	if got != want {
+		t.Fatalf("startup message=%+v, want %+v", got, want)
 	}
 }
 

@@ -16,11 +16,11 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
@@ -121,20 +121,16 @@ func serveDurabilityOptOutHint() string {
 	return "opt out with --session-state " + serveSessionStateOff + " or " + serveSessionStateEnv + "=" + serveSessionStateOff
 }
 
-// writeServeDurabilityBanner prints the boot line that makes the posture visible BEFORE a
-// session is lost rather than after — the operability half of #1365. A disabled posture is
-// stated just as loudly as an enabled one: silence is what the issue is about.
-func writeServeDurabilityBanner(w io.Writer, p serveDurabilityPosture) {
-	if w == nil {
-		return
-	}
+// serveDurabilityStartupMessage retains the posture before a session is lost.
+func serveDurabilityStartupMessage(p serveDurabilityPosture) gateway.StartupMessage {
 	if !p.Enabled {
-		fmt.Fprintf(w, "fak serve: session durability OFF (%s) — a restart re-attaches nothing; unset the %s opt-out to restore the default\n",
-			p.Source, serveSessionStateEnv)
-		return
+		return newServeStartupMessage("serve", "session-durability", "warning", fmt.Sprintf(
+			"session durability off (%s); a restart re-attaches nothing; unset the %s opt-out to restore the default",
+			p.Source, serveSessionStateEnv))
 	}
-	fmt.Fprintf(w, "fak serve: session durability ON (%s) — %s → %s; flushed on %s (%s)\n",
-		p.Source, strings.Join(p.Persisted, ", "), p.Path, strings.Join(p.Signals, "/"), serveDurabilityOptOutHint())
+	return newServeStartupMessage("serve", "session-durability", "info", fmt.Sprintf(
+		"session durability on (%s); %s -> %s; flushed on %s (%s)",
+		p.Source, strings.Join(p.Persisted, ", "), p.Path, strings.Join(p.Signals, "/"), serveDurabilityOptOutHint()))
 }
 
 // serveDurabilityRow classifies the posture as one `fak doctor serve` readiness row. An

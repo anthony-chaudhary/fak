@@ -39,8 +39,9 @@ import (
 // bound listener: the compute plane, the resident model, the session/auth
 // material, the observer seams, and finally the gateway itself.
 type serveRuntime struct {
-	t0            time.Time
-	startupPhases []gateway.StartupPhase
+	t0              time.Time
+	startupPhases   []gateway.StartupPhase
+	startupMessages []gateway.StartupMessage
 
 	chatBackend compute.Backend
 	useMetal    bool
@@ -67,9 +68,23 @@ type serveRuntime struct {
 	srv             *gateway.Server
 }
 
+func newServeStartupMessage(source, kind, level, text string) gateway.StartupMessage {
+	return gateway.StartupMessage{Source: source, Kind: kind, Level: level, Text: text}
+}
+
+func (rt *serveRuntime) addStartupMessage(message gateway.StartupMessage) {
+	if strings.TrimSpace(message.Text) == "" {
+		return
+	}
+	rt.startupMessages = append(rt.startupMessages, message)
+	if rt.srv != nil {
+		rt.srv.AddStartupMessages(message)
+	}
+}
+
 // resolveServeModelSources normalizes the --gguf/--tokenizer sources before any
 // stage touches them: ~ expansion, registry alias resolution, and hf:// fetch.
-func resolveServeModelSources(sf *serveFlags) {
+func (rt *serveRuntime) resolveServeModelSources(sf *serveFlags) {
 	// Expand a leading ~ in the model/tokenizer paths: PowerShell and most quoting
 	// pass ~ through literally and Go never expands it, so `--gguf ~/...` (as the
 	// docs and the --tokenizer help itself show) would otherwise fail to open.
@@ -82,7 +97,8 @@ func resolveServeModelSources(sf *serveFlags) {
 	// existing path passes through unchanged.
 	if *sf.ggufPath != "" {
 		if resolved, expanded := modelreg.Resolve(*sf.ggufPath); expanded {
-			fmt.Fprintf(os.Stderr, "fak serve: --gguf %s → %s\n", *sf.ggufPath, resolved)
+			rt.addStartupMessage(newServeStartupMessage("serve", "model-alias", "info",
+				fmt.Sprintf("--gguf %s -> %s", *sf.ggufPath, resolved)))
 			*sf.ggufPath = resolved
 		}
 	}
@@ -139,7 +155,8 @@ func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
 		os.Exit(2)
 	}
 	if chatBackend != nil {
-		fmt.Printf("fak: in-kernel chat decode → device backend %q\n", chatBackend.Name())
+		rt.addStartupMessage(newServeStartupMessage("serve", "compute-backend", "info",
+			fmt.Sprintf("in-kernel chat decode -> device backend %q", chatBackend.Name())))
 	}
 	// Resolve the Apple-Silicon Metal GPU forward BEFORE eager loading. On an
 	// Apple-Silicon+cgo binary with a usable device it is the default runtime path; an
@@ -151,7 +168,8 @@ func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
 		os.Exit(2)
 	}
 	if useMetal {
-		fmt.Println("fak: in-kernel chat decode → Apple-Silicon Metal GPU (prefill + resident Q8 decode)")
+		rt.addStartupMessage(newServeStartupMessage("serve", "compute-backend", "info",
+			"in-kernel chat decode -> Apple-Silicon Metal GPU (prefill + resident Q8 decode)"))
 	}
 	// Multi-GPU rank counts (#971). The EP arithmetic is host-proven bit-exact at ranks=1
 	// (the no-op default), but a ranks>1 reduction is only a real multi-GPU serve when it
@@ -207,7 +225,8 @@ func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
 		// × head-dim × positions × 4B/layer), so an operator who wants a large graph context must
 		// budget VRAM for it (or pair with the Q4_K weight lever to free room).
 		compute.SetCUDAGraphKVCapacity(*sf.contextBudgetTokens)
-		fmt.Printf("fak: CUDA-graph decode replay enabled (#483), KV graph capacity=%d positions — witness tok/s before relying on it\n", max(*sf.contextBudgetTokens, 1024))
+		rt.addStartupMessage(newServeStartupMessage("serve", "cuda-graph", "info",
+			fmt.Sprintf("decode replay enabled; KV graph capacity=%d positions", max(*sf.contextBudgetTokens, 1024))))
 	}
 	rt.chatBackend, rt.useMetal, rt.ep = chatBackend, useMetal, ep
 }
@@ -226,7 +245,7 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 
 	pf, err := preflightServeBackendForward(*sf.ggufPath, rt.chatBackend)
 	must(err)
-	writeServeBackendForwardPreflight(os.Stderr, pf)
+	rt.addStartupMessage(serveBackendForwardPreflightMessage(pf))
 
 	// Eager GGUF load: pull the weights resident BEFORE binding the listener so the
 	// (potentially multi-second) load is measured as part of time-to-ready and its
@@ -258,7 +277,8 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 			os.Exit(2)
 		}
 		expertShard = shard
-		fmt.Printf("fak: expert-parallel rank %d/%d loads experts [%d,%d) of %d resident (sharded serve, #971)\n", rt.ep.rank, rt.ep.ranks, shard.Lo, shard.Hi, numExperts)
+		rt.addStartupMessage(newServeStartupMessage("expert-parallel", "shard-residency", "info",
+			fmt.Sprintf("rank %d/%d loads experts [%d,%d) of %d resident", rt.ep.rank, rt.ep.ranks, shard.Lo, shard.Hi, numExperts)))
 	}
 	expertRanks := 1
 	if rt.ep.sharded {
@@ -300,11 +320,13 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 				fmt.Fprintf(os.Stderr, "fak serve: FAK_EP_REQUIRE_DEVICE_PG=1 but expert-parallel rank %d/%d could not join the device-NCCL process group: %v\n", rt.ep.rank, rt.ep.ranks, devErr)
 				os.Exit(2)
 			}
-			fmt.Printf("fak: expert-parallel rank %d/%d: device-NCCL process group unavailable (%v) — falling back to host DistComm reduce\n", rt.ep.rank, rt.ep.ranks, devErr)
+			rt.addStartupMessage(newServeStartupMessage("expert-parallel", "collective-fallback", "warning",
+				fmt.Sprintf("rank %d/%d: device-NCCL process group unavailable (%v); using host DistComm reduce", rt.ep.rank, rt.ep.ranks, devErr)))
 		}
 		if devColl != nil {
 			inKernelModel.SetExpertParallelCollective(devColl)
-			fmt.Printf("fak: expert-parallel rank %d/%d joined the process group (device-NCCL tensor reduce, #971 follow-on)\n", rt.ep.rank, rt.ep.ranks)
+			rt.addStartupMessage(newServeStartupMessage("expert-parallel", "process-group", "info",
+				fmt.Sprintf("rank %d/%d joined the device-NCCL tensor-reduce process group", rt.ep.rank, rt.ep.ranks)))
 		} else {
 			if requireDevicePG {
 				backend := "<nil>"
@@ -315,7 +337,8 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 				os.Exit(2)
 			}
 			inKernelModel.SetExpertParallelCollective(fakmodel.NewDistCommCollective(group))
-			fmt.Printf("fak: expert-parallel rank %d/%d joined the process group (host DistComm reduce, #971) — device-NCCL tensor rung stays separate\n", rt.ep.rank, rt.ep.ranks)
+			rt.addStartupMessage(newServeStartupMessage("expert-parallel", "process-group", "info",
+				fmt.Sprintf("rank %d/%d joined the host DistComm reduce process group", rt.ep.rank, rt.ep.ranks)))
 		}
 	}
 	// Per-GPU residency pre-check for an expert-parallel serve: refuse an --expert-parallel N whose
@@ -328,7 +351,7 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 		os.Exit(2)
 	}
 
-	inKernelTok, tokLoaded := resolveServeTokenizer(*sf.tokPath, *sf.ggufPath)
+	inKernelTok, tokLoaded := resolveServeTokenizer(*sf.tokPath, *sf.ggufPath, rt.addStartupMessage)
 	if tokLoaded {
 		rt.startupPhases = append(rt.startupPhases, gateway.StartupPhase{Name: "tokenizer-load", Dur: 0})
 	}
@@ -511,7 +534,8 @@ func (rt *serveRuntime) wireGateway(sf *serveFlags) {
 	// live serve. Absent the env var this registers nothing and the rung stays out of the
 	// ladder, byte-identical to today. (The live RDMA discovery transport is #3199.)
 	if n := registerPeerDRAMLendersFromEnv(); n > 0 {
-		fmt.Fprintf(os.Stderr, "fak serve: registered %d peer-DRAM lender(s) from %s → remote-DRAM paging rung active (#5083)\n", n, peerDRAMLenderEnvVar)
+		rt.addStartupMessage(newServeStartupMessage("serve", "remote-dram", "info",
+			fmt.Sprintf("registered %d peer-DRAM lender(s) from %s; remote-DRAM paging active", n, peerDRAMLenderEnvVar)))
 	}
 
 	prefixSource := rt.srv.InKernelKVPrefixPressureSource()
@@ -531,7 +555,8 @@ func (rt *serveRuntime) wireGateway(sf *serveFlags) {
 				fmt.Fprintln(os.Stderr, "fak serve: native remote prefix L3:", err)
 				os.Exit(1)
 			}
-			fmt.Fprintln(os.Stderr, "fak serve: native complete-prefix L3 -> l3kv/blobhttp (versioned, scoped, digest-verified)")
+			rt.addStartupMessage(newServeStartupMessage("serve", "prefix-store", "info",
+				"native complete-prefix L3 -> l3kv/blobhttp (versioned, scoped, digest-verified)"))
 		}
 	}
 	prefixBridge := newInKernelPrefixPressureBridge(prefixSource)

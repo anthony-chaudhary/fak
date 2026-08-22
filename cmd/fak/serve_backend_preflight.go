@@ -3,11 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -85,9 +85,10 @@ func preflightServeBackendForwardWith(
 	}, nil
 }
 
-func writeServeBackendForwardPreflight(w io.Writer, result serveBackendForwardPreflight) {
-	if w == nil || result.Backend == "" || result.Forward == "" || result.Path == "" {
-		return
+func serveBackendForwardPreflightMessage(result serveBackendForwardPreflight) gateway.StartupMessage {
+	if result.Backend == "" || result.Forward == "" || result.Path == "" {
+		return gateway.StartupMessage{}
 	}
-	fmt.Fprintf(w, "BACKEND_FORWARD_PREFLIGHT_OK backend=%s forward=%s path=%s\n", result.Backend, result.Forward, result.Path)
+	return newServeStartupMessage("model-load", "backend-forward", "info", fmt.Sprintf(
+		"backend=%s forward=%s path=%s", result.Backend, result.Forward, result.Path))
 }

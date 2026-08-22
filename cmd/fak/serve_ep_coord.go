@@ -189,9 +189,9 @@ func applyEPDecodeRole(rt *serveRuntime, m *fakmodel.Model) {
 			os.Exit(2)
 		}
 		rt.epCoord = coord
-		fmt.Printf("fak: expert-parallel rank 0/%d owns tokenization + sampling; ranks 1-%d contribute local expert work only (coordinated EP decode, #4835 — the HTTP request mirror is OFF)\n", rt.ep.ranks, rt.ep.ranks-1)
+		rt.addStartupMessage(newServeStartupMessage("expert-parallel", "decode-topology", "info",
+			fmt.Sprintf("rank 0/%d owns tokenization and sampling; ranks 1-%d contribute local expert work only; HTTP request mirror off", rt.ep.ranks, rt.ep.ranks-1)))
 	case epDecodeFollower:
-		fmt.Printf("fak: expert-parallel rank %d/%d parks as a coordinated EP follower — no listener, no tokenizer, no sampling; mirroring rank 0's forwards until SHUTDOWN (#4835)\n", rt.ep.rank, rt.ep.ranks)
 		err := runEPFollowerRank(rt.epGroup, m, rt.chatBackend)
 		// os.Exit skips cmdServe's deferred close, so release the group here on both arms.
 		rt.closeEPGroup()

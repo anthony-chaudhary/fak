@@ -310,7 +310,10 @@ func cmdServe(argv []string) {
 		}
 	}
 
-	resolveServeModelSources(sf)
+	rt := &serveRuntime{t0: t0, toolPlugins: toolPlugins, toolPreferences: toolPreferences, startupPhases: []gateway.StartupPhase{
+		{Name: "flag-parse", Dur: parseDur},
+	}}
+	rt.resolveServeModelSources(sf)
 
 	// --policy-check: validate the manifest and exit, binding no listener.
 	if *sf.policyCheck {
@@ -369,10 +372,7 @@ func cmdServe(argv []string) {
 	// startup phase.
 	tPolicy := time.Now()
 	applyPolicy(*sf.policyPath)
-	rt := &serveRuntime{t0: t0, toolPlugins: toolPlugins, toolPreferences: toolPreferences, startupPhases: []gateway.StartupPhase{
-		{Name: "flag-parse", Dur: parseDur},
-		{Name: "policy-load", Dur: time.Since(tPolicy)},
-	}}
+	rt.startupPhases = append(rt.startupPhases, gateway.StartupPhase{Name: "policy-load", Dur: time.Since(tPolicy)})
 	configureServeToolEngines()
 
 	// Boot stages (serve_stages.go). The order is load-bearing: compute before the
@@ -386,12 +386,7 @@ func cmdServe(argv []string) {
 	rt.resolveObservers(sf)
 	rt.buildGateway(sf)
 	rt.wireGateway(sf)
-	bannerOut := io.Writer(os.Stdout)
-	if *sf.stdio {
-		// MCP reserves stdout for newline-delimited JSON-RPC; startup diagnostics belong on stderr.
-		bannerOut = os.Stderr
-	}
-	writeServeDurabilityBanner(bannerOut, durability)
+	rt.addStartupMessage(serveDurabilityStartupMessage(durability))
 	rt.run(sf)
 }
 
@@ -458,7 +453,7 @@ func serveKeyPrincipals(specs []string, lookupEnv func(string) string, stderr io
 // server from the resolved planes, and arms the admission controller for a pure
 // in-kernel serve.
 func (rt *serveRuntime) buildGateway(sf *serveFlags) {
-	var startupMessages []gateway.StartupMessage
+	startupMessages := append([]gateway.StartupMessage(nil), rt.startupMessages...)
 	// Resolve the optional model-routing policy. Off by default: an empty --route-manifest
 	// leaves routeMan nil, so gateway.New gets a nil RouteManifest and Engine stays unset —
 	// byte-for-byte the pre-routing behavior. A malformed file fails loud here rather than

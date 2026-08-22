@@ -226,20 +226,20 @@ func TestRunServeDoctorReportsDurability(t *testing.T) {
 	}
 }
 
-// TestWriteServeDurabilityBannerStatesPosture is the boot-output half of acceptance box 2:
-// the banner names the path and the opt-out when on, and says so loudly when off.
-func TestWriteServeDurabilityBannerStatesPosture(t *testing.T) {
-	var on bytes.Buffer
-	writeServeDurabilityBanner(&on, resolveServeSessionState("/tmp/fak-state.snap", noEnv))
+// TestServeDurabilityStartupMessageStatesPosture is the startup-message half of acceptance box 2.
+func TestServeDurabilityStartupMessageStatesPosture(t *testing.T) {
+	on := serveDurabilityStartupMessage(resolveServeSessionState("/tmp/fak-state.snap", noEnv))
 	for _, want := range []string{"ON", "/tmp/fak-state.snap", serveSessionStateEnv} {
-		if !strings.Contains(on.String(), want) {
-			t.Errorf("enabled banner missing %q: %s", want, on.String())
+		if !strings.Contains(strings.ToUpper(on.Text), strings.ToUpper(want)) {
+			t.Errorf("enabled startup message missing %q: %+v", want, on)
 		}
 	}
+	if on.Source != "serve" || on.Kind != "session-durability" || on.Level != "info" {
+		t.Errorf("enabled startup message labels = %+v", on)
+	}
 
-	var off bytes.Buffer
-	writeServeDurabilityBanner(&off, resolveServeSessionState(serveSessionStateOff, noEnv))
-	if !strings.Contains(off.String(), "OFF") {
-		t.Errorf("disabled banner does not state the OFF posture: %s", off.String())
+	off := serveDurabilityStartupMessage(resolveServeSessionState(serveSessionStateOff, noEnv))
+	if !strings.Contains(strings.ToUpper(off.Text), "OFF") || off.Level != "warning" {
+		t.Errorf("disabled startup message does not state the warning posture: %+v", off)
 	}
 }
