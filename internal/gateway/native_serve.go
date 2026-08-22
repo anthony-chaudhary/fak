@@ -447,6 +447,9 @@ func (s *Server) nativeRunOptions(ctx context.Context, reqTrace string) ([]agent
 	opts = append(opts, agent.WithModelRequestObserver(func(boundary agent.ModelRequestBoundary) error {
 		return appendNativeModelRequest(reqTrace, boundary)
 	}))
+	opts = append(opts, agent.WithInterruptedTurnObserver(func(interrupted agent.InterruptedTurn) error {
+		return appendNativeInterruptedTurn(reqTrace, interrupted)
+	}))
 	if s.decideSession != nil {
 		opts = append(opts, agent.WithSessionGate(agent.SessionGate{
 			Decide: func(trace string) (int, bool, int, string) {
@@ -526,6 +529,21 @@ func appendNativeModelRequest(trace string, boundary agent.ModelRequestBoundary)
 		}
 	}
 	_, err = ledger.AppendModelRequest(trace, request)
+	return err
+}
+
+func appendNativeInterruptedTurn(trace string, interrupted agent.InterruptedTurn) error {
+	ledger, err := openNativeModelRequestLedger()
+	if err != nil {
+		return fmt.Errorf("open session ledger: %w", err)
+	}
+	_, err = ledger.AppendInterruptedTurn(trace, sessionledger.InterruptedTurn{
+		Turn:   interrupted.Turn,
+		Chunks: append([]string(nil), interrupted.Chunks...),
+		Reason: sessionledger.TerminalReason{
+			Cause: interrupted.Reason.Cause, Evidence: interrupted.Reason.Evidence,
+		},
+	})
 	return err
 }
 

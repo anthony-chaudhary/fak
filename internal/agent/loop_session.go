@@ -55,6 +55,27 @@ func WithModelRequestObserver(observer ModelRequestObserver) RunOption {
 	return func(c *runConfig) { c.modelRequestObserver = observer }
 }
 
+// InterruptedTurn is the exact assistant prefix delivered before a streamed
+// model turn ended abnormally. Chunks preserve sink-delivery boundaries; Reason
+// is the closed client-safe terminal classification for the completion error.
+type InterruptedTurn struct {
+	Turn   int
+	Chunks []string
+	Reason Termination
+}
+
+// InterruptedTurnObserver persists or audits an abnormal streamed turn. It is
+// invoked even when Chunks is empty so the terminal reason can close the turn
+// explicitly without inventing an assistant message.
+type InterruptedTurnObserver func(InterruptedTurn) error
+
+// WithInterruptedTurnObserver observes streamed completion failures after any
+// admitted input claim has been released. A nil observer preserves the
+// historical non-durable path.
+func WithInterruptedTurnObserver(observer InterruptedTurnObserver) RunOption {
+	return func(c *runConfig) { c.interruptedTurnObserver = observer }
+}
+
 // AdmittedInputClaim is the exact directive set removed from the live inbox for
 // one turn. Claim runs before prompt assembly, so later arrivals cannot leak into
 // the request being built.
@@ -146,9 +167,10 @@ type runConfig struct {
 	toolCatalog  []ToolDef
 	// modelRequestObserver runs synchronously after directive splicing and the
 	// one context-planning pass, immediately before the Planner call.
-	modelRequestObserver ModelRequestObserver
-	inputClaims          *InputClaimLifecycle
-	promptAssembler      PromptAssembler
+	modelRequestObserver    ModelRequestObserver
+	interruptedTurnObserver InterruptedTurnObserver
+	inputClaims             *InputClaimLifecycle
+	promptAssembler         PromptAssembler
 }
 
 // ToolTerminalWakeKind is the typed reason a background-tool terminal

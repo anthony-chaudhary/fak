@@ -364,7 +364,7 @@ func priceTimeSaved(live, bothCompleted bool, turnsSaved, fakTurns int, fakElaps
 // historical fixed-maxTurns loop.
 func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int, log *[]traceEvent, opts ...RunOption) (ArmMetrics, error) {
 	p = bindPendingCheckpoint(p, resolveRunConfig(opts))
-	return runArm(ctx, task, fak, maxTurns, log, p.Model(), false, func(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
+	return runArm(ctx, task, fak, maxTurns, log, p.Model(), false, nil, func(ctx context.Context, messages []Message, tools []ToolDef, _ StreamSink, opts ...SampleOpt) (*Completion, error) {
 		return p.Complete(ctx, messages, tools, opts...)
 	}, opts...)
 }
@@ -379,14 +379,14 @@ func RunArmStream(ctx context.Context, p Planner, task string, fak bool, maxTurn
 	if !ok || !sp.StreamingSupported() {
 		return ArmMetrics{}, ErrStreamingUnsupported
 	}
-	return runArm(ctx, task, fak, maxTurns, log, p.Model(), true, func(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
-		return sp.CompleteStream(ctx, sink, messages, tools, opts...)
+	return runArm(ctx, task, fak, maxTurns, log, p.Model(), true, sink, func(ctx context.Context, messages []Message, tools []ToolDef, turnSink StreamSink, opts ...SampleOpt) (*Completion, error) {
+		return sp.CompleteStream(ctx, turnSink, messages, tools, opts...)
 	}, opts...)
 }
 
-type armCompleteFunc func(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error)
+type armCompleteFunc func(ctx context.Context, messages []Message, tools []ToolDef, sink StreamSink, opts ...SampleOpt) (*Completion, error)
 
-func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]traceEvent, model string, stream bool, complete armCompleteFunc, opts ...RunOption) (ArmMetrics, error) {
+func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]traceEvent, model string, stream bool, sink StreamSink, complete armCompleteFunc, opts ...RunOption) (ArmMetrics, error) {
 	cfg := resolveRunConfig(opts)
 	// Mid-flight mailbox (#5158): seal the verb mailbox on EVERY return path once the arm
 	// finishes, so a finished run refuses further mid-flight verbs with the closed
@@ -587,14 +587,38 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 			return m, fmt.Errorf("%s arm turn %d model request receipt: %w", m.Arm, turn+1, releaseClaim("REQUEST_RECEIPT_UNWIRED", err))
 		}
 
-		comp, err := complete(ctx, planned, tools, sampleOptsFor(perTurnCap)...)
+		var streamedChunks []string
+		turnSink := sink
+		if stream {
+			turnSink = func(chunk string) error {
+				if sink != nil {
+					if err := sink(chunk); err != nil {
+						return err
+					}
+				}
+				streamedChunks = append(streamedChunks, chunk)
+				return nil
+			}
+		}
+		comp, err := complete(ctx, planned, tools, turnSink, sampleOptsFor(perTurnCap)...)
 		if err != nil {
+			completionErr := err
 			err = releaseClaim("MODEL_DISPATCH_FAILED", err)
 			// A completion error caused by this session's terminate (#2758) — the watcher
 			// cancelled the in-flight call's context — is the op WORKING, not a failure:
 			// stop typed (StoppedBySession=TERMINATED), no error. Any other error keeps
 			// the historical fail-loud path.
-			if stopTerminated() {
+			terminated := stopTerminated()
+			if stream && cfg.interruptedTurnObserver != nil {
+				observed := InterruptedTurn{
+					Turn: turn + 1, Chunks: append([]string(nil), streamedChunks...),
+					Reason: ClassifyTermination(completionErr),
+				}
+				if observeErr := cfg.interruptedTurnObserver(observed); observeErr != nil {
+					return m, fmt.Errorf("%s arm turn %d interrupted output receipt: %v (completion: %w)", m.Arm, turn+1, observeErr, err)
+				}
+			}
+			if terminated {
 				return m, nil
 			}
 			return m, fmt.Errorf("%s arm turn %d: %w", m.Arm, turn+1, err)
