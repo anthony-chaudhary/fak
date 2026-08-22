@@ -128,7 +128,7 @@ func releaseUsage(w io.Writer) {
 usage:
   fak release [status flags...]
   fak release ship [--execute] [--json] [ship flags...]
-  fak release dispatch [--execute] [--json] [--ref main] [--plan-only]
+  fak release dispatch [--execute] [--wait] [--timeout 30m] [--json] [--ref main] [--plan-only]
   fak release prplan [--json] [--base <ref>] [--head <ref>] [--check]
   fak release status|staleness|release-staleness|plan|decide|cut|tag|publish|lock|dry-run|manifest|readiness|release-readiness [helper flags...]
   fak release stable|stable-context [helper flags...]
@@ -136,7 +136,7 @@ usage:
 examples:
   fak release --json
   fak release ship --execute --json
-  fak release dispatch --execute --json
+  fak release dispatch --execute --wait --json
   fak release ship --execute --json --open-pr
   fak release prplan --base origin/main --head main
   fak release prplan --check

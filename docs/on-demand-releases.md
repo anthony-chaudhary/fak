@@ -3,7 +3,7 @@
 Use the existing release cadence workflow through the native front door:
 
 ```bash
-fak release dispatch --execute --json
+fak release dispatch --execute --wait --json
 ```
 
 The command sends an exact, visible input set to `.github/workflows/release-cadence.yml` on
@@ -28,9 +28,18 @@ fak release dispatch --execute --force      # bypass only the substantive-commit
 ```
 
 `--require-ci-green` defaults to true. Disable it only for a deliberate recovery release with
-`--require-ci-green=false`; drift, parse, locking, and publication gates still apply. A successful
-dispatch returns the exact queued run URL (and the workflow Actions URL in JSON) to check. It proves enqueueing, not publication; the
-release is complete only after the workflow's publication-verification step is green.
+`--require-ci-green=false`; drift, parse, locking, and publication gates still apply.
+
+Use `--wait` with `--execute` when the caller needs a final witness. GitHub returns the new run ID
+as part of that dispatch, and fak polls only that ID; concurrent dispatches therefore cannot be
+mistaken for this one. JSON includes `run_id`, `run_url`, `status`, `conclusion`, and a typed
+`verdict` (`passed`, `failed`, `cancelled`, `timed_out`, or `github_refused`). The default timeout
+is 30 minutes and can be bounded explicitly, for example `--timeout 10m`. A failed, cancelled,
+timed-out, malformed, or refused run exits nonzero.
+
+Without `--wait`, successful execution preserves the enqueue-only behavior: it returns a queued
+run URL when GitHub exposes one and the workflow Actions URL in JSON. Enqueueing does not prove
+publication; the release is complete only after publication verification is green.
 
 For a local operator-driven cut, use `fak release ship --execute --json`. That command keeps the
 shared checkout untouched by working from a detached clean worktree and uses the same release
