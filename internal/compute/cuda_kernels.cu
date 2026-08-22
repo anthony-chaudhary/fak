@@ -836,36 +836,35 @@ __global__ void k_q8_quant_act(const float *X, signed char *qX, float *xScale,
     qb[i] = d > 0.f ? q8round_dev(xb[i] * inv) : (signed char)0;
 }
 
-// k_q8_gemm: Y[t,o] = Σ_b (Σ_i qW[o,b,i]·qX[t,b,i]) · dW[o,b] · dX[t,b]. One block per (o,t);
-// threads stride the blocks, each forms its block's integer dot (int32) then scales by the
-// weight·activation block scales — the same per-block scheme as cpuref qdot8scalar (only the
-// reduction order differs, which is what makes the lane Approx, not Reference).
+// k_q8_gemm: Y[t,o] = Σ_b (Σ_i qW[o,b,i]·qX[t,b,i]) · dW[o,b] · dX[t,b]. One warp owns
+// each output row. Its lanes distribute quant blocks, use signed DP4A for the integer dot, then
+// reduce through shuffle instructions. Eight independent rows per CUDA block keep the SM occupied
+// without the former per-row shared-memory reduction and its eight block-wide barriers.
 __global__ void k_q8_gemm(const signed char *W, const float *Wscale,
                           const signed char *qX, const float *xScale,
                           float *Y, int out, int in, int P, int block) {
-  int o = blockIdx.x, t = blockIdx.y;
+  constexpr int warps = 8;
+  int lane = threadIdx.x & 31;
+  int o = blockIdx.x * warps + (threadIdx.x >> 5);
+  int t = blockIdx.y;
   if (o >= out || t >= P) return;
   int nblk = in / block;
   const signed char *wrow = W + (size_t)o * in;
   const float *wsc = Wscale + (size_t)o * nblk;
   const signed char *xrow = qX + (size_t)t * in;
   const float *xsc = xScale + (size_t)t * nblk;
-  __shared__ float red[256];
-  float local = 0.f;
-  for (int b = threadIdx.x; b < nblk; b += blockDim.x) {
-    const signed char *wb = wrow + (size_t)b * block;
-    const signed char *xb = xrow + (size_t)b * block;
+  float sum = 0.f;
+  for (int b = lane; b < nblk; b += 32) {
+    const int *wb = (const int *)(wrow + (size_t)b * block);
+    const int *xb = (const int *)(xrow + (size_t)b * block);
     int acc = 0;
-    for (int i = 0; i < block; i++) acc += (int)wb[i] * (int)xb[i];
-    local += (float)acc * wsc[b] * xsc[b];
+    for (int i = 0; i < block / 4; ++i) acc = __dp4a(wb[i], xb[i], acc);
+    sum += (float)acc * wsc[b] * xsc[b];
   }
-  red[threadIdx.x] = local;
-  __syncthreads();
-  for (int s = blockDim.x / 2; s > 0; s >>= 1) {
-    if (threadIdx.x < s) red[threadIdx.x] += red[threadIdx.x + s];
-    __syncthreads();
-  }
-  if (threadIdx.x == 0) Y[(size_t)t * out + o] = red[0];
+#pragma unroll
+  for (int delta = 16; delta > 0; delta >>= 1)
+    sum += __shfl_down_sync(0xffffffff, sum, delta);
+  if (lane == 0) Y[(size_t)t * out + o] = sum;
 }
 
 // Persistent Q8 activation-quantization scratch (#969), grown ONCE and reused like g_attn_scratch.
@@ -894,7 +893,7 @@ extern "C" void fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, 
     g_q8_xScale_cap = needScale;
   }
   k_q8_quant_act<<<dim3(nblk, P), 64, 0, g_stream>>>(dX, g_q8_qX, g_q8_xScale, P, in, block);
-  k_q8_gemm<<<dim3(out, P), 256, 0, g_stream>>>((const signed char *)dCodes, dScales, g_q8_qX, g_q8_xScale,
+  k_q8_gemm<<<dim3((out + 7) / 8, P), 256, 0, g_stream>>>((const signed char *)dCodes, dScales, g_q8_qX, g_q8_xScale,
                                                 dY, out, in, P, block);
 }
 
