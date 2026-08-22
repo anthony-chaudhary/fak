@@ -66,6 +66,14 @@ import (
 const RosterVersion = "fak-accounts/v1"
 
 const (
+	// OpenCodeGoProviderKey is the account-roster key for an OpenCode Go subscription.
+	OpenCodeGoProviderKey = "opencode-go"
+	// OpenCodeGoAPIKeyEnv names the environment variable holding the subscription key.
+	OpenCodeGoAPIKeyEnv = "OPENCODE_GO_API_KEY"
+	// OpenCodeGoOpenAIBaseURL is OpenCode Go's OpenAI-compatible API root.
+	OpenCodeGoOpenAIBaseURL = "https://opencode.ai/zen/go/v1"
+	// OpenCodeGoOxAlphaModel is the limited-time free Ox Alpha model id.
+	OpenCodeGoOxAlphaModel = "ox-alpha-free"
 	// DeepSeekProviderKey is the account-roster provider key for DeepSeek's
 	// OpenAI-compatible wire.
 	DeepSeekProviderKey = "deepseek"
@@ -796,6 +804,7 @@ func DefaultRoster() Roster {
 			{ID: "openai-work", Kind: KindOpenAI, CredEnv: "OPENAI_WORK_API_KEY", Label: "a SECOND OpenAI account — the switch: same kind, different credential"},
 			{ID: "codex", Kind: KindOpenAIResponses, CredEnv: "OPENAI_API_KEY", Label: "OpenAI Responses API (codex's native wire)"},
 			{ID: "claude-sub", Kind: KindAnthropic, CredEnv: "CLAUDE_CODE_OAUTH_TOKEN", Label: "your Anthropic Pro/Max subscription (sk-ant-oat token; Bearer+oauth-beta scheme applied by the dispatch adapter)"},
+			{ID: OpenCodeGoProviderKey, Kind: KindOpenAI, BaseURL: OpenCodeGoOpenAIBaseURL, CredEnv: OpenCodeGoAPIKeyEnv, Label: "OpenCode Go subscription (OpenAI-compatible; credential stays in OPENCODE_GO_API_KEY)"},
 			{
 				ID:                "july6netra_groq",
 				Kind:              KindOpenAI,
@@ -824,6 +833,7 @@ func DefaultRoster() Roster {
 			{Model: "small", Account: "local", UpstreamModel: "llama3.2"},
 			{Model: "medium", Account: "openai-personal", UpstreamModel: "gpt-5.5"},
 			{Model: "large", Account: "claude-sub", UpstreamModel: "claude-opus-4-6"},
+			{Model: OpenCodeGoOxAlphaModel, Account: OpenCodeGoProviderKey, UpstreamModel: OpenCodeGoOxAlphaModel},
 			{Model: "guard-a", Account: "openai-work", UpstreamModel: "gpt-5.5"},
 			{Model: "guard-b", Account: "claude-sub", UpstreamModel: "claude-opus-4-6"},
 			{Model: "qwen36-groq", Account: "july6netra_groq", UpstreamModel: GroqQwen36Model},

@@ -479,6 +479,17 @@ func TestDefaultRosterIsValidAndMixesProviders(t *testing.T) {
 	if ds.Local() || !strings.HasPrefix(ds.EngineRoute(), "deepseek:") {
 		t.Fatalf("DeepSeek target should be a remote deepseek route: %+v route=%q", ds, ds.EngineRoute())
 	}
+	ox, err := r.Resolve(OpenCodeGoOxAlphaModel)
+	if err != nil {
+		t.Fatalf("resolve Ox Alpha: %v", err)
+	}
+	if ox.Kind != KindOpenAI || ox.Account != OpenCodeGoProviderKey || ox.BaseURL != OpenCodeGoOpenAIBaseURL ||
+		ox.CredEnv != OpenCodeGoAPIKeyEnv || ox.UpstreamModel != OpenCodeGoOxAlphaModel {
+		t.Fatalf("default OpenCode Go Ox Alpha binding wrong: %+v", ox)
+	}
+	if ox.Local() || !strings.HasPrefix(ox.EngineRoute(), "openai:") {
+		t.Fatalf("OpenCode Go target should be a remote OpenAI-compatible route: %+v route=%q", ox, ox.EngineRoute())
+	}
 	groq, err := r.Resolve("qwen36-groq")
 	if err != nil {
 		t.Fatalf("resolve qwen36-groq: %v", err)

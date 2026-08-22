@@ -269,6 +269,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Learning observation lineage](docs/learning-observation.md) — content-addressed source/candidate/witness/verdict records and closed-enum edges; separate from witness-gated admission.
 
 ## Notes & research (`docs/notes/`)
+- [OpenCode Go Ox Alpha coding dogfood — 2026-08-22](docs/notes/OX-ALPHA-DOGFOOD-2026-08-22.md) -- auto-indexed dated note.
 - [Guard launch-grant dogfood — 2026-08-22](docs/notes/GUARD-LAUNCH-GRANT-DOGFOOD-2026-08-22.md) -- auto-indexed dated note.
 - [Native-harness dynamic-instruction dogfood — 2026-08-22](docs/notes/NATIVE-HARNESS-DYNAMIC-INSTRUCTIONS-DOGFOOD-2026-08-22.md) -- auto-indexed dated note.
 - [Dispatch closure honesty: complete-window reconciliation (#8238)](docs/notes/DISPATCH-CLOSURE-HONESTY-8238-2026-08-22.md) -- auto-indexed dated note.
