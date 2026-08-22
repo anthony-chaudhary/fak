@@ -87,24 +87,36 @@ jobs:
           dormantq=$(jq -r '.counts.dormant_question' triage.json)
           needspri=$(jq -r '.counts.needs_priority' triage.json)
           open=$(jq -r '.counts.open' triage.json)
+          fetched=$(jq -r '.census.fetched_count' triage.json)
+          total=$(jq -r '.census.total_count' triage.json)
+          complete=$(jq -r '.census.page_complete' triage.json)
+          reconciliation=$(jq -r '.census.reconciliation' triage.json)
+          scope=$(jq -r '"\(.census.scope):\(.census.state)"' triage.json)
           # The ranked "do next" order: rows are pre-sorted by score desc, so the
           # head is the highest-attention work. Name the top 3.
           donext=$(jq -r '[.rows[:3][] | "#\(.number)"] | join(" ")' triage.json)
           # Guard each integer so the grade step's `-lt` test is safe even if a
           # field is missing (older classifier, empty backlog).
-          for v in orphan stale dormantq needspri open; do
+          for v in orphan stale dormantq needspri open fetched total; do
             eval "n=\$$v"
             case "$n" in ''|*[!0-9]*) eval "$v=0" ;; esac
           done
+          if [ "$complete" != true ] || [ "$reconciliation" != complete ] || [ "$fetched" -ne "$total" ]; then
+            echo "incomplete issue census: scope=$scope fetched=$fetched total=$total complete=$complete reconciliation=$reconciliation" >&2
+            exit 1
+          fi
           {
             echo "orphan=$orphan"
             echo "stale=$stale"
             echo "dormantq=$dormantq"
             echo "needspri=$needspri"
             echo "open=$open"
+            echo "fetched=$fetched"
+            echo "total=$total"
+            echo "scope=$scope"
             echo "donext=${donext:-none}"
           } >> "$GITHUB_OUTPUT"
-          echo "orphan=$orphan stale=$stale dormant-Q=$dormantq needs-priority=$needspri open=$open do-next=$donext"
+          echo "orphan=$orphan stale=$stale dormant-Q=$dormantq needs-priority=$needspri census=$fetched/$total scope=$scope do-next=$donext"
 
       # Orphaned P0/P1 (high-priority work with no claimant) is the most expensive
       # backlog rot, per the triage skill — make it the headline KPI value and
@@ -133,7 +145,7 @@ jobs:
             --value "${{ steps.digest.outputs.orphan }}" \
             --grade "${{ steps.grade.outputs.grade }}" \
             --verdict "${{ steps.grade.outputs.verdict }}" \
-            --detail "orphan P0/P1 ${{ steps.digest.outputs.orphan }} · stale ${{ steps.digest.outputs.stale }} · dormant-Q ${{ steps.digest.outputs.dormantq }} · needs-priority ${{ steps.digest.outputs.needspri }} · do-next ${{ steps.digest.outputs.donext }} (of ${{ steps.digest.outputs.open }} open)" \
+            --detail "orphan P0/P1 ${{ steps.digest.outputs.orphan }} · stale ${{ steps.digest.outputs.stale }} · dormant-Q ${{ steps.digest.outputs.dormantq }} · needs-priority ${{ steps.digest.outputs.needspri }} · do-next ${{ steps.digest.outputs.donext }} (census ${{ steps.digest.outputs.fetched }}/${{ steps.digest.outputs.total }} ${{ steps.digest.outputs.scope }})" \
             --source ci \
             --dry-run | tee backlog-card.txt
           {
@@ -155,7 +167,7 @@ jobs:
             --value "${{ steps.digest.outputs.orphan }}" \
             --grade "${{ steps.grade.outputs.grade }}" \
             --verdict "${{ steps.grade.outputs.verdict }}" \
-            --detail "orphan P0/P1 ${{ steps.digest.outputs.orphan }} · stale ${{ steps.digest.outputs.stale }} · dormant-Q ${{ steps.digest.outputs.dormantq }} · needs-priority ${{ steps.digest.outputs.needspri }} · do-next ${{ steps.digest.outputs.donext }} (of ${{ steps.digest.outputs.open }} open)" \
+            --detail "orphan P0/P1 ${{ steps.digest.outputs.orphan }} · stale ${{ steps.digest.outputs.stale }} · dormant-Q ${{ steps.digest.outputs.dormantq }} · needs-priority ${{ steps.digest.outputs.needspri }} · do-next ${{ steps.digest.outputs.donext }} (census ${{ steps.digest.outputs.fetched }}/${{ steps.digest.outputs.total }} ${{ steps.digest.outputs.scope }})" \
             --source ci
 
       - name: note when posting was skipped

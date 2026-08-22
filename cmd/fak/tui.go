@@ -100,10 +100,11 @@ func runTUIIssues(stdout, stderr io.Writer, argv []string) int {
 	issuesJSON := fs.String("issues-json", "", "read gh issue JSON from a file instead of shelling out to gh")
 	repo := fs.String("repo", "", "owner/repo for gh; default is current repo")
 	state := fs.String("state", "open", "issue state for gh: open|closed|all")
-	limit := fs.Int("limit", 500, "maximum issues to fetch from gh")
+	limit := fs.Int("limit", 100000, "maximum issues to fetch from gh; ranking refuses if the issue-only total exceeds it")
 	asOfText := fs.String("as-of", "", "date used for age/idle math (YYYY-MM-DD, default: today UTC)")
 	epic := fs.Int("epic", 0, "highlight one epic issue number and issues whose title/body references #N")
 	top := fs.Int("top", 25, "number of ranked rows to render in human mode")
+	repairBatchSize := fs.Int("repair-batch-size", 50, "maximum review-only issue numbers per taxonomy repair batch")
 	width := fs.Int("width", 120, "target terminal width for human rendering")
 	asJSON := fs.Bool("json", false, "emit the issue TUI model as JSON")
 	if !parseFlags(fs, argv) {
@@ -121,6 +122,10 @@ func runTUIIssues(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak console issues: --top must be positive")
 		return 2
 	}
+	if *repairBatchSize <= 0 {
+		fmt.Fprintln(stderr, "fak console issues: --repair-batch-size must be positive")
+		return 2
+	}
 	if *width < 72 {
 		*width = 72
 	}
@@ -130,12 +135,16 @@ func runTUIIssues(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	issues, source, err := loadTUIIssues(*issuesJSON, *repo, *state, *limit)
+	snapshot, source, err := loadTUIIssueSnapshot(*issuesJSON, *repo, *state, *limit)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak console issues: %v\n", err)
 		return 2
 	}
-	report := buildTUIIssueReport(issues, source, asOf, *epic)
+	report, err := buildTUIIssueReportWithCensus(snapshot.Issues, source, asOf, *epic, snapshot.Census, *repairBatchSize)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak console issues: %v\n", err)
+		return 3
+	}
 	if *asJSON {
 		return encodeJSONOrFail(stdout, stderr, report, "fak console issues")
 	}

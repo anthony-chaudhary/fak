@@ -115,7 +115,13 @@ DEPENDENCY = {"blocked-by", "blocks"}
 # ---- Thresholds (override via flags) ----------------------------------------
 STALE_DAYS = 60        # open + idle this long + not in-progress => stale
 Q_IDLE_DAYS = 30       # question idle this long => dormant close candidate
-LIST_LIMIT = 500       # gh issue list cap
+LIST_LIMIT = 100_000   # explicit safety ceiling; ranking refuses below the live total
+SNAPSHOT_MAX_AGE_SECONDS = 15 * 60
+DEFAULT_REPAIR_BATCH_SIZE = 50
+
+
+class IncompleteRankingError(RuntimeError):
+    """The issue snapshot cannot support a complete, current ranking."""
 
 
 def _load_config(path: str | None) -> None:
@@ -144,18 +150,107 @@ def _load_config(path: str | None) -> None:
     Q_IDLE_DAYS = int(cfg.get("q_idle_days", Q_IDLE_DAYS))
 
 
-def fetch_issues() -> list[dict]:
-    """All open issues via gh. Raises on infra failure (caller maps to exit 2)."""
-    fields = "number,title,url,state,labels,createdAt,updatedAt,author,assignees,milestone,comments"
+def _run_gh(args: list[str]) -> str:
     proc = subprocess.run(
-        ["gh", "issue", "list", "--state", "open", "--limit", str(LIST_LIMIT),
-         "--json", fields],
-        capture_output=True, text=True, encoding="utf-8",
+        ["gh", *args], capture_output=True, text=True, encoding="utf-8",
     )
     if proc.returncode != 0:
         raise RuntimeError(f"gh failed (rc={proc.returncode}): {proc.stderr.strip()}"
                            or "gh returned nonzero with no stderr (not authed? not a repo?)")
-    return json.loads(proc.stdout or "[]")
+    return proc.stdout or ""
+
+
+def _resolve_repo(repo: str | None = None) -> str:
+    if not repo:
+        raw = _run_gh(["repo", "view", "--json", "nameWithOwner"])
+        repo = str(json.loads(raw).get("nameWithOwner") or "")
+    parts = repo.strip().split("/")
+    if len(parts) != 2 or not all(parts):
+        raise RuntimeError(f"repository must be owner/name, got {repo!r}")
+    return repo
+
+
+def _fetch_issue_total(repo: str, state: str) -> int:
+    owner, name = repo.split("/", 1)
+    state_upper = state.upper()
+    if state_upper not in {"OPEN", "CLOSED", "ALL"}:
+        raise ValueError(f"issue state must be open, closed, or all, got {state!r}")
+    issue_args = "" if state_upper == "ALL" else f"(states:{state_upper})"
+    query = (
+        "query($owner:String!,$name:String!){"
+        f"repository(owner:$owner,name:$name){{issues{issue_args}{{totalCount}}}}"
+        "}"
+    )
+    raw = _run_gh([
+        "api", "graphql", "-f", f"query={query}",
+        "-F", f"owner={owner}", "-F", f"name={name}",
+    ])
+    try:
+        return int(json.loads(raw)["data"]["repository"]["issues"]["totalCount"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(f"gh issue total response has no integer totalCount: {exc}") from exc
+
+
+def reconcile_census(*, scope: str, state: str, fetched_count: int,
+                     total_count: int, snapshot_age_seconds: int,
+                     includes_pull_requests: bool,
+                     snapshot_at: str | None = None) -> dict:
+    """Type the relationship between one fetched snapshot and its declared scope."""
+    scope = scope.strip()
+    state = state.strip().lower()
+    page_complete = fetched_count == total_count
+    reconciliation = "complete"
+    if includes_pull_requests:
+        reconciliation = "pull_requests_included"
+    elif fetched_count < 0 or total_count < 0:
+        reconciliation = "count_mismatch"
+    elif (scope not in {"repository_issues", "provided_issues"}
+          and not scope.startswith("repository_issues:")
+          and not scope.startswith("provided_issues:")):
+        reconciliation = "scope_mismatch"
+    elif snapshot_age_seconds > SNAPSHOT_MAX_AGE_SECONDS:
+        reconciliation = "snapshot_stale"
+    elif fetched_count < total_count:
+        reconciliation = "pagination_truncated"
+    elif fetched_count > total_count:
+        reconciliation = "count_mismatch"
+    out = {
+        "scope": scope,
+        "state": state,
+        "fetched_count": int(fetched_count),
+        "total_count": int(total_count),
+        "page_complete": page_complete,
+        "snapshot_age_seconds": max(0, int(snapshot_age_seconds)),
+        "includes_pull_requests": bool(includes_pull_requests),
+        "reconciliation": reconciliation,
+    }
+    if snapshot_at:
+        out["snapshot_at"] = snapshot_at
+    return out
+
+
+def fetch_issues(*, repo: str | None = None, state: str = "open",
+                 limit: int = LIST_LIMIT) -> tuple[list[dict], dict]:
+    """Fetch repository issues to a known total or return an unrankable census."""
+    repo = _resolve_repo(repo)
+    total_before = _fetch_issue_total(repo, state)
+    fetch_limit = max(1, min(limit, total_before))
+    fields = "number,title,url,state,labels,createdAt,updatedAt,author,assignees,milestone,comments"
+    raw = _run_gh([
+        "issue", "list", "--state", state, "--limit", str(fetch_limit),
+        "--json", fields, "--repo", repo,
+    ])
+    issues = json.loads(raw or "[]")
+    if not isinstance(issues, list):
+        raise RuntimeError("gh issue list returned a non-array payload")
+    total_after = _fetch_issue_total(repo, state)
+    snapshot_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    census = reconcile_census(
+        scope="repository_issues", state=state, fetched_count=len(issues),
+        total_count=total_after, snapshot_age_seconds=0,
+        includes_pull_requests=False, snapshot_at=snapshot_at,
+    )
+    return issues, census
 
 
 def load_injected_issues(source: str) -> list[dict]:
@@ -182,6 +277,54 @@ def load_injected_issues(source: str) -> list[dict]:
     if not isinstance(data, list):
         raise ValueError("--issues input must be a JSON array of gh issue objects")
     return data
+
+
+def load_injected_snapshot(source: str, *, state: str,
+                           now: dt.datetime) -> tuple[list[dict], dict]:
+    """Load a raw provided scope or an explicit ``{issues,census}`` envelope."""
+    raw = sys.stdin.read() if source == "-" else Path(source).read_text(encoding="utf-8")
+    text = raw.strip()
+    if not text:
+        issues: list[dict] = []
+        return issues, reconcile_census(
+            scope="provided_issues", state=state, fetched_count=0, total_count=0,
+            snapshot_age_seconds=0, includes_pull_requests=False,
+            snapshot_at=now.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        )
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise ValueError(f"--issues input is not valid JSON: {exc}") from exc
+    if isinstance(data, list):
+        return data, reconcile_census(
+            scope="provided_issues", state=state, fetched_count=len(data),
+            total_count=len(data), snapshot_age_seconds=0,
+            includes_pull_requests=False,
+            snapshot_at=now.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        )
+    if not isinstance(data, dict) or not isinstance(data.get("issues"), list):
+        raise ValueError("--issues input must be a JSON array or {issues,census} object")
+    raw_census = data.get("census")
+    if not isinstance(raw_census, dict):
+        raise ValueError("--issues envelope must carry census metadata")
+    snapshot_at = str(raw_census.get("snapshot_at") or "")
+    age_seconds = int(raw_census.get("snapshot_age_seconds") or 0)
+    if snapshot_at:
+        try:
+            then = dt.datetime.fromisoformat(snapshot_at.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(f"census snapshot_at is invalid: {exc}") from exc
+        age_seconds = max(0, int((now - then).total_seconds()))
+    census = reconcile_census(
+        scope=str(raw_census.get("scope") or ""),
+        state=str(raw_census.get("state") or state),
+        fetched_count=int(raw_census.get("fetched_count", len(data["issues"]))),
+        total_count=int(raw_census.get("total_count", len(data["issues"]))),
+        snapshot_age_seconds=age_seconds,
+        includes_pull_requests=bool(raw_census.get("includes_pull_requests", False)),
+        snapshot_at=snapshot_at or None,
+    )
+    return data["issues"], census
 
 
 def _label_names(issue: dict) -> set[str]:
@@ -260,6 +403,7 @@ def classify(issue: dict, now: dt.datetime) -> dict:
         "number": issue["number"],
         "title": issue["title"],
         "url": issue["url"],
+        "state": issue.get("state", "OPEN"),
         "labels": sorted(labels),
         "author": (issue.get("author") or {}).get("login", "?"),
         "assignees": [a.get("login") for a in issue.get("assignees", [])],
@@ -343,11 +487,37 @@ def build_actions(rows: list[dict]) -> list[dict]:
     return actions
 
 
+def build_repair_batches(rows: list[dict], batch_size: int) -> list[dict]:
+    """Bound review-only taxonomy queues without inventing labeling commands."""
+    if batch_size <= 0:
+        raise ValueError("repair batch size must be positive")
+    batches: list[dict] = []
+    for axis, tag in (("priority", "needs-priority"),
+                      ("kind", "needs-kind"),
+                      ("area", "needs-area")):
+        numbers = [r["number"] for r in rows if tag in r["tags"]]
+        for start in range(0, len(numbers), batch_size):
+            batches.append({
+                "axis": axis,
+                "batch": start // batch_size + 1,
+                "issues": numbers[start:start + batch_size],
+                "review_only": True,
+            })
+    return batches
+
+
 # ---- Rendering --------------------------------------------------------------
 def render_md(report: dict, as_of: str) -> str:
     c = report["counts"]
+    census = report["census"]
     L = [
         f"# Issue triage — {as_of}",
+        "",
+        (f"**Census:** scope `{census['scope']}:{census['state']}` · fetched "
+         f"{census['fetched_count']} / total {census['total_count']} · page-complete "
+         f"{str(census['page_complete']).lower()} · snapshot-age "
+         f"{census['snapshot_age_seconds']}s · reconciliation "
+         f"`{census['reconciliation']}`"),
         "",
         f"**Open issues:** {c['open']}  ·  needs-priority {c['needs_priority']}  "
         f"·  needs-kind {c['needs_kind']}  ·  needs-area {c['needs_area']}  ·  "
@@ -423,10 +593,39 @@ def render_md(report: dict, as_of: str) -> str:
                  "`--actions` JSON, never run by this helper.")
         L.append("")
 
+    repairs = report.get("repair_batches", [])
+    if repairs:
+        L.append(f"## Taxonomy repair batches ({len(repairs)} review-only)")
+        L.append("")
+        for batch in repairs:
+            L.append(f"- **{batch['axis']} batch {batch['batch']}** — "
+                     f"{len(batch['issues'])} issue(s), review only")
+        L.append("")
+
     return "\n".join(L)
 
 
-def build_report(issues: list[dict], now: dt.datetime) -> dict:
+def build_report(issues: list[dict], now: dt.datetime, *, census: dict | None = None,
+                 repair_batch_size: int = DEFAULT_REPAIR_BATCH_SIZE) -> dict:
+    if census is None:
+        census = reconcile_census(
+            scope="provided_issues", state="all", fetched_count=len(issues),
+            total_count=len(issues), snapshot_age_seconds=0,
+            includes_pull_requests=False,
+        )
+    if census.get("reconciliation") != "complete" or not census.get("page_complete"):
+        raise IncompleteRankingError(
+            "ranking refused: "
+            f"{census.get('reconciliation', 'scope_mismatch')} "
+            f"(scope={census.get('scope', '?')} fetched={census.get('fetched_count', '?')} "
+            f"total={census.get('total_count', '?')} "
+            f"age={census.get('snapshot_age_seconds', '?')}s)"
+        )
+    if int(census.get("fetched_count", -1)) != len(issues):
+        raise IncompleteRankingError(
+            f"ranking refused: count_mismatch (decoded={len(issues)} "
+            f"fetched={census.get('fetched_count')} total={census.get('total_count')})"
+        )
     rows = sorted(
         (classify(i, now) for i in issues),
         key=lambda r: (-r["score"], -r["number"]),
@@ -438,8 +637,9 @@ def build_report(issues: list[dict], now: dt.datetime) -> dict:
 
     return {
         "as_of": now.date().isoformat(),
+        "census": census,
         "counts": {
-            "open": len(rows),
+            "open": sum(1 for r in rows if str(r.get("state", "OPEN")).upper() == "OPEN"),
             "needs_priority": count("needs-priority"),
             "needs_kind": count("needs-kind"),
             "needs_area": count("needs-area"),
@@ -452,6 +652,7 @@ def build_report(issues: list[dict], now: dt.datetime) -> dict:
         },
         "rows": rows,
         "actions": actions,
+        "repair_batches": build_repair_batches(rows, repair_batch_size),
     }
 
 
@@ -461,6 +662,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--markdown", action="store_true")
     ap.add_argument("--actions", action="store_true")
     ap.add_argument("--out", default=None, help="write output to this path")
+    ap.add_argument("--repo", default=None, help="owner/repo for gh; default current repository")
+    ap.add_argument("--state", default="open", choices=("open", "closed", "all"),
+                    help="repository issue state scope (default: open)")
+    ap.add_argument("--limit", type=int, default=LIST_LIMIT,
+                    help="safety ceiling; ranking refuses if the issue-only total exceeds it")
+    ap.add_argument("--repair-batch-size", type=int, default=DEFAULT_REPAIR_BATCH_SIZE,
+                    help="maximum review-only issue numbers per taxonomy repair batch")
     ap.add_argument("--since-days", type=int, default=None,
                     help="only issues updated in the last N days")
     ap.add_argument("--scope", default=None,
@@ -473,10 +681,35 @@ def main(argv: list[str] | None = None) -> int:
                          "pass enough --fields upstream (createdAt for the stale score)")
     a = ap.parse_args(argv)
 
+    if a.limit <= 0 or a.repair_batch_size <= 0:
+        print("ERROR: --limit and --repair-batch-size must be positive", file=sys.stderr)
+        return 2
+
     _load_config(a.config)
 
+    now = dt.datetime.now(dt.timezone.utc)
+    if a.as_of:
+        now = dt.datetime.fromisoformat(a.as_of + "T00:00:00+00:00")
+
     try:
-        issues = load_injected_issues(a.issues) if a.issues else fetch_issues()
+        if a.issues:
+            issues, census = load_injected_snapshot(a.issues, state=a.state, now=now)
+        else:
+            if a.repo is None and a.state == "open" and a.limit == LIST_LIMIT:
+                fetched = fetch_issues()
+            else:
+                fetched = fetch_issues(repo=a.repo, state=a.state, limit=a.limit)
+            # Compatibility with focused tests and older callers that monkeypatch
+            # fetch_issues to return only the legacy list shape.
+            if isinstance(fetched, tuple):
+                issues, census = fetched
+            else:
+                issues = fetched
+                census = reconcile_census(
+                    scope="provided_issues", state=a.state,
+                    fetched_count=len(issues), total_count=len(issues),
+                    snapshot_age_seconds=0, includes_pull_requests=False,
+                )
     except FileNotFoundError:
         msg = f"--issues file not found: {a.issues}" if a.issues else "`gh` not found on PATH."
         print(f"ERROR: {msg}", file=sys.stderr)
@@ -485,13 +718,23 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
-    now = dt.datetime.now(dt.timezone.utc)
-    if a.as_of:
-        now = dt.datetime.fromisoformat(a.as_of + "T00:00:00+00:00")
     if a.since_days is not None:
         issues = [i for i in issues if _days(i.get("updatedAt", ""), now) <= a.since_days]
+        census = reconcile_census(
+            scope=f"{census['scope']}:updated_within_{a.since_days}d",
+            state=census["state"], fetched_count=len(issues), total_count=len(issues),
+            snapshot_age_seconds=int(census.get("snapshot_age_seconds", 0)),
+            includes_pull_requests=bool(census.get("includes_pull_requests", False)),
+            snapshot_at=census.get("snapshot_at"),
+        )
 
-    report = build_report(issues, now)
+    try:
+        report = build_report(
+            issues, now, census=census, repair_batch_size=a.repair_batch_size,
+        )
+    except IncompleteRankingError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 3
 
     scope_map = {
         "priority": "needs-priority", "kind": "needs-kind", "area": "needs-area",
@@ -509,7 +752,12 @@ def main(argv: list[str] | None = None) -> int:
     as_of = (a.as_of or now.date().isoformat())
 
     if a.actions:
-        out = {"as_of": as_of, "actions": report["actions"]}
+        out = {
+            "as_of": as_of,
+            "census": report["census"],
+            "actions": report["actions"],
+            "repair_batches": report["repair_batches"],
+        }
         rendered = json.dumps(out, indent=2)
     elif a.markdown:
         rendered = render_md(report, as_of)

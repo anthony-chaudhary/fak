@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -211,6 +212,92 @@ func TestDecodeTUIIssuesAcceptsLiveCommentsArray(t *testing.T) {
 	}
 	if len(issues) != 1 || int(issues[0].Comments) != 2 {
 		t.Fatalf("issues = %+v, want comments count 2", issues)
+	}
+}
+
+func TestTUIIssueCensusRefusesTruncatedPrefix(t *testing.T) {
+	census := reconcileTUIIssueCensus(
+		"repository_issues", "open", 500, 2222, 0, false,
+	)
+	if census.PageComplete {
+		t.Fatalf("page_complete = true for 500/2222 prefix: %+v", census)
+	}
+	if census.Reconciliation != "pagination_truncated" {
+		t.Fatalf("reconciliation = %q, want pagination_truncated", census.Reconciliation)
+	}
+	if census.FetchedCount != 500 || census.TotalCount != 2222 {
+		t.Fatalf("census counts = %+v", census)
+	}
+	_, err := buildTUIIssueReportWithCensus(
+		fixtureTUIIssues(), "fixture", time.Date(2026, 6, 25, 0, 0, 0, 0, time.UTC), 0,
+		census, 50,
+	)
+	if err == nil || !strings.Contains(err.Error(), "pagination_truncated") {
+		t.Fatalf("incomplete ranking error = %v, want pagination_truncated refusal", err)
+	}
+}
+
+func TestTUIIssueCensusTypesReconciliationCauses(t *testing.T) {
+	cases := []struct {
+		name      string
+		scope     string
+		fetched   int
+		total     int
+		age       int64
+		pulls     bool
+		wantCause string
+	}{
+		{name: "complete", scope: "repository_issues", fetched: 9, total: 9, wantCause: "complete"},
+		{name: "pagination", scope: "repository_issues", fetched: 8, total: 9, wantCause: "pagination_truncated"},
+		{name: "pull requests", scope: "repository_items", fetched: 9, total: 9, pulls: true, wantCause: "pull_requests_included"},
+		{name: "scope", scope: "dispatch_cache", fetched: 9, total: 9, wantCause: "scope_mismatch"},
+		{name: "stale", scope: "repository_issues", fetched: 9, total: 9, age: tuiIssueSnapshotMaxAgeSeconds + 1, wantCause: "snapshot_stale"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := reconcileTUIIssueCensus(tc.scope, "open", tc.fetched, tc.total, tc.age, tc.pulls)
+			if got.Reconciliation != tc.wantCause {
+				t.Fatalf("reconciliation = %q, want %q: %+v", got.Reconciliation, tc.wantCause, got)
+			}
+		})
+	}
+}
+
+func TestTUIIssueReportKeepsMoreThan500AndBoundsRepairBatches(t *testing.T) {
+	const issueCount = 525
+	issues := make([]tuiIssue, 0, issueCount)
+	for n := 1; n <= issueCount; n++ {
+		issues = append(issues, tuiIssue{
+			Number:    n,
+			Title:     fmt.Sprintf("unclassified backlog item %04d", n),
+			State:     "OPEN",
+			CreatedAt: "2026-06-20T00:00:00Z",
+			UpdatedAt: "2026-06-24T00:00:00Z",
+		})
+	}
+	census := reconcileTUIIssueCensus(
+		"repository_issues", "open", len(issues), len(issues), 0, false,
+	)
+	report, err := buildTUIIssueReportWithCensus(
+		issues, "fixture", time.Date(2026, 6, 25, 0, 0, 0, 0, time.UTC), 0,
+		census, 40,
+	)
+	if err != nil {
+		t.Fatalf("complete >500 report: %v", err)
+	}
+	if len(report.Rows) != issueCount || report.Census.FetchedCount != issueCount {
+		t.Fatalf("rows/census = %d/%+v, want %d", len(report.Rows), report.Census, issueCount)
+	}
+	if len(report.RepairBatches) == 0 {
+		t.Fatal("repair_batches empty")
+	}
+	for _, batch := range report.RepairBatches {
+		if len(batch.Issues) == 0 || len(batch.Issues) > 40 {
+			t.Fatalf("batch %s/%d has %d issues, want 1..40", batch.Axis, batch.Batch, len(batch.Issues))
+		}
+		if !batch.ReviewOnly || batch.Command != "" {
+			t.Fatalf("judgment batch must be review-only with no command: %+v", batch)
+		}
 	}
 }
 

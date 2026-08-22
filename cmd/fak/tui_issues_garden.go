@@ -156,45 +156,236 @@ func loadTUIGuard(paths []string) ([]tuiGuardArtifact, error) {
 	return artifacts, nil
 }
 
-func loadTUIIssues(path, repo, state string, limit int) ([]tuiIssue, string, error) {
-	if path != "" {
-		b, err := os.ReadFile(path)
-		if err != nil {
-			return nil, "", err
-		}
-		issues, err := decodeTUIIssues(b)
-		return issues, path, err
-	}
-	args := []string{
-		"issue", "list",
-		"--state", state,
-		"--limit", strconv.Itoa(limit),
-		"--json", "number,title,url,state,body,labels,createdAt,updatedAt,author,assignees,milestone,comments",
-	}
-	if repo != "" {
-		args = append(args, "--repo", repo)
-	}
+const tuiIssueSnapshotMaxAgeSeconds int64 = 15 * 60
+
+type tuiIssueSnapshot struct {
+	Issues []tuiIssue
+	Census tuiIssueCensus
+}
+
+func runTUIIssueGH(args ...string) ([]byte, error) {
 	cmd, cancel := ghexec.CommandTimeout(context.Background(), ghexec.DefaultTimeout, args...)
 	defer cancel()
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
-	if err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = err.Error()
+	if err == nil {
+		return out, nil
+	}
+	msg := strings.TrimSpace(stderr.String())
+	if msg == "" {
+		msg = err.Error()
+	}
+	return nil, fmt.Errorf("gh %s: %s", strings.Join(args, " "), msg)
+}
+
+func reconcileTUIIssueCensus(scope, state string, fetched, total int, ageSeconds int64, includesPullRequests bool) tuiIssueCensus {
+	scope = strings.TrimSpace(scope)
+	state = strings.ToLower(strings.TrimSpace(state))
+	c := tuiIssueCensus{
+		Scope:                scope,
+		State:                state,
+		FetchedCount:         fetched,
+		TotalCount:           total,
+		PageComplete:         fetched == total,
+		SnapshotAgeSeconds:   ageSeconds,
+		IncludesPullRequests: includesPullRequests,
+		Reconciliation:       "complete",
+	}
+	switch {
+	case includesPullRequests:
+		c.Reconciliation = "pull_requests_included"
+	case fetched < 0 || total < 0:
+		c.Reconciliation = "count_mismatch"
+	case scope != "repository_issues" && scope != "provided_issues" && !strings.HasPrefix(scope, "repository_issues:") && !strings.HasPrefix(scope, "provided_issues:"):
+		c.Reconciliation = "scope_mismatch"
+	case ageSeconds > tuiIssueSnapshotMaxAgeSeconds:
+		c.Reconciliation = "snapshot_stale"
+	case fetched < total:
+		c.Reconciliation = "pagination_truncated"
+	case fetched > total:
+		c.Reconciliation = "count_mismatch"
+	}
+	return c
+}
+
+func loadTUIIssueSnapshot(path, repo, state string, limit int) (tuiIssueSnapshot, string, error) {
+	if path != "" {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return tuiIssueSnapshot{}, "", err
 		}
-		return nil, "", fmt.Errorf("gh %s: %s", strings.Join(args, " "), msg)
+		snapshot, err := decodeTUIIssueSnapshot(b, state, time.Now().UTC())
+		return snapshot, path, err
+	}
+	repoName, err := resolveTUIIssueRepo(repo)
+	if err != nil {
+		return tuiIssueSnapshot{}, "", err
+	}
+	totalBefore, err := fetchTUIIssueTotal(repoName, state)
+	if err != nil {
+		return tuiIssueSnapshot{}, "", err
+	}
+	fetchLimit := limit
+	if totalBefore < fetchLimit {
+		fetchLimit = totalBefore
+	}
+	if fetchLimit < 1 {
+		fetchLimit = 1
+	}
+	args := []string{
+		"issue", "list",
+		"--state", state,
+		"--limit", strconv.Itoa(fetchLimit),
+		"--json", "number,title,url,state,body,labels,createdAt,updatedAt,author,assignees,milestone,comments",
+	}
+	args = append(args, "--repo", repoName)
+	out, err := runTUIIssueGH(args...)
+	if err != nil {
+		return tuiIssueSnapshot{}, "", err
 	}
 	issues, err := decodeTUIIssues(out)
 	if err != nil {
+		return tuiIssueSnapshot{}, "", err
+	}
+	totalAfter, err := fetchTUIIssueTotal(repoName, state)
+	if err != nil {
+		return tuiIssueSnapshot{}, "", err
+	}
+	snapshotAt := time.Now().UTC()
+	census := reconcileTUIIssueCensus("repository_issues", state, len(issues), totalAfter, 0, false)
+	census.SnapshotAt = snapshotAt.Format(time.RFC3339)
+	return tuiIssueSnapshot{Issues: issues, Census: census}, "gh issue list --repo " + repoName, nil
+}
+
+func loadTUIIssues(path, repo, state string, limit int) ([]tuiIssue, string, error) {
+	snapshot, source, err := loadTUIIssueSnapshot(path, repo, state, limit)
+	if err != nil {
 		return nil, "", err
 	}
-	source := "gh issue list"
-	if repo != "" {
-		source += " --repo " + repo
+	if snapshot.Census.Reconciliation != "complete" || !snapshot.Census.PageComplete {
+		return nil, "", fmt.Errorf("ranking refused: %s (scope=%s fetched=%d total=%d age=%ds)",
+			snapshot.Census.Reconciliation, snapshot.Census.Scope,
+			snapshot.Census.FetchedCount, snapshot.Census.TotalCount,
+			snapshot.Census.SnapshotAgeSeconds)
 	}
-	return issues, source, nil
+	if snapshot.Census.FetchedCount != len(snapshot.Issues) {
+		return nil, "", fmt.Errorf("ranking refused: count_mismatch (decoded=%d fetched=%d total=%d)",
+			len(snapshot.Issues), snapshot.Census.FetchedCount, snapshot.Census.TotalCount)
+	}
+	return snapshot.Issues, source, nil
+}
+
+func resolveTUIIssueRepo(repo string) (string, error) {
+	repo = strings.TrimSpace(repo)
+	if repo == "" {
+		out, err := runTUIIssueGH("repo", "view", "--json", "nameWithOwner")
+		if err != nil {
+			return "", err
+		}
+		var v struct {
+			NameWithOwner string `json:"nameWithOwner"`
+		}
+		if err := json.Unmarshal(out, &v); err != nil {
+			return "", fmt.Errorf("gh repo view JSON: %w", err)
+		}
+		repo = v.NameWithOwner
+	}
+	parts := strings.Split(repo, "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", fmt.Errorf("repository must be owner/name, got %q", repo)
+	}
+	return repo, nil
+}
+
+func fetchTUIIssueTotal(repo, state string) (int, error) {
+	parts := strings.Split(repo, "/")
+	if len(parts) != 2 {
+		return 0, fmt.Errorf("repository must be owner/name, got %q", repo)
+	}
+	stateArg := ""
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "open":
+		stateArg = "states:OPEN"
+	case "closed":
+		stateArg = "states:CLOSED"
+	case "all":
+	case "":
+		return 0, fmt.Errorf("issue state is required")
+	default:
+		return 0, fmt.Errorf("issue state must be open, closed, or all, got %q", state)
+	}
+	issueArgs := ""
+	if stateArg != "" {
+		issueArgs = "(" + stateArg + ")"
+	}
+	query := fmt.Sprintf("query($owner:String!,$name:String!){repository(owner:$owner,name:$name){issues%s{totalCount}}}", issueArgs)
+	out, err := runTUIIssueGH(
+		"api", "graphql", "-f", "query="+query,
+		"-F", "owner="+parts[0], "-F", "name="+parts[1],
+	)
+	if err != nil {
+		return 0, err
+	}
+	var v struct {
+		Data struct {
+			Repository struct {
+				Issues struct {
+					TotalCount int `json:"totalCount"`
+				} `json:"issues"`
+			} `json:"repository"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(out, &v); err != nil {
+		return 0, fmt.Errorf("gh issue total JSON: %w", err)
+	}
+	return v.Data.Repository.Issues.TotalCount, nil
+}
+
+func decodeTUIIssueSnapshot(b []byte, state string, now time.Time) (tuiIssueSnapshot, error) {
+	text := strings.TrimSpace(string(b))
+	if strings.HasPrefix(text, "[") {
+		issues, err := decodeTUIIssues(b)
+		if err != nil {
+			return tuiIssueSnapshot{}, err
+		}
+		census := reconcileTUIIssueCensus("provided_issues", state, len(issues), len(issues), 0, false)
+		census.SnapshotAt = now.UTC().Format(time.RFC3339)
+		return tuiIssueSnapshot{Issues: issues, Census: census}, nil
+	}
+	var envelope struct {
+		Issues []tuiIssue      `json:"issues"`
+		Census *tuiIssueCensus `json:"census"`
+	}
+	if err := json.Unmarshal(b, &envelope); err != nil {
+		return tuiIssueSnapshot{}, fmt.Errorf("issue JSON must be an array or {issues,census} envelope: %w", err)
+	}
+	if envelope.Census == nil {
+		return tuiIssueSnapshot{}, fmt.Errorf("issue JSON envelope must carry census metadata")
+	}
+	for i := range envelope.Issues {
+		if envelope.Issues[i].State == "" {
+			envelope.Issues[i].State = "OPEN"
+		}
+	}
+	age := envelope.Census.SnapshotAgeSeconds
+	if envelope.Census.SnapshotAt != "" {
+		at, err := time.Parse(time.RFC3339, envelope.Census.SnapshotAt)
+		if err != nil {
+			return tuiIssueSnapshot{}, fmt.Errorf("census snapshot_at: %w", err)
+		}
+		age = int64(now.UTC().Sub(at.UTC()).Seconds())
+		if age < 0 {
+			age = 0
+		}
+	}
+	census := reconcileTUIIssueCensus(
+		envelope.Census.Scope, envelope.Census.State,
+		envelope.Census.FetchedCount, envelope.Census.TotalCount,
+		age, envelope.Census.IncludesPullRequests,
+	)
+	census.SnapshotAt = envelope.Census.SnapshotAt
+	return tuiIssueSnapshot{Issues: envelope.Issues, Census: census}, nil
 }
 
 func decodeTUIIssues(b []byte) ([]tuiIssue, error) {
@@ -211,6 +402,23 @@ func decodeTUIIssues(b []byte) ([]tuiIssue, error) {
 }
 
 func buildTUIIssueReport(issues []tuiIssue, source string, asOf time.Time, epic int) tuiIssueReport {
+	census := reconcileTUIIssueCensus("provided_issues", "all", len(issues), len(issues), 0, false)
+	report, _ := buildTUIIssueReportWithCensus(issues, source, asOf, epic, census, 50)
+	return report
+}
+
+func buildTUIIssueReportWithCensus(issues []tuiIssue, source string, asOf time.Time, epic int, census tuiIssueCensus, repairBatchSize int) (tuiIssueReport, error) {
+	if census.Reconciliation != "complete" || !census.PageComplete {
+		return tuiIssueReport{}, fmt.Errorf("ranking refused: %s (scope=%s fetched=%d total=%d age=%ds)",
+			census.Reconciliation, census.Scope, census.FetchedCount, census.TotalCount, census.SnapshotAgeSeconds)
+	}
+	if census.FetchedCount != len(issues) {
+		return tuiIssueReport{}, fmt.Errorf("ranking refused: count_mismatch (decoded=%d fetched=%d total=%d)",
+			len(issues), census.FetchedCount, census.TotalCount)
+	}
+	if repairBatchSize <= 0 {
+		return tuiIssueReport{}, fmt.Errorf("repair batch size must be positive")
+	}
 	dups := tuiDuplicateGroups(issues)
 	rows := make([]tuiIssueRow, 0, len(issues))
 	var epicRow *tuiIssueRow
@@ -241,15 +449,48 @@ func buildTUIIssueReport(issues []tuiIssue, source string, asOf time.Time, epic 
 		}
 	}
 	return tuiIssueReport{
-		Schema:  tuiIssuesSchema,
-		AsOf:    asOf.Format("2006-01-02"),
-		Source:  source,
-		Epic:    epicRow,
-		Counts:  counts,
-		Lanes:   buildTUILanes(rows),
-		Rows:    rows,
-		Actions: actions,
+		Schema:        tuiIssuesSchema,
+		AsOf:          asOf.Format("2006-01-02"),
+		Source:        source,
+		Census:        census,
+		Epic:          epicRow,
+		Counts:        counts,
+		Lanes:         buildTUILanes(rows),
+		Rows:          rows,
+		Actions:       actions,
+		RepairBatches: buildTUIRepairBatches(rows, repairBatchSize),
+	}, nil
+}
+
+func buildTUIRepairBatches(rows []tuiIssueRow, batchSize int) []tuiIssueRepairBatch {
+	axes := []struct {
+		name string
+		tag  string
+	}{
+		{name: "priority", tag: "needs-priority"},
+		{name: "kind", tag: "needs-kind"},
+		{name: "area", tag: "needs-area"},
 	}
+	var batches []tuiIssueRepairBatch
+	for _, axis := range axes {
+		var numbers []int
+		for _, row := range rows {
+			if tuiHasTag(row, axis.tag) {
+				numbers = append(numbers, row.Number)
+			}
+		}
+		for start, batch := 0, 1; start < len(numbers); start, batch = start+batchSize, batch+1 {
+			end := start + batchSize
+			if end > len(numbers) {
+				end = len(numbers)
+			}
+			batches = append(batches, tuiIssueRepairBatch{
+				Axis: axis.name, Batch: batch,
+				Issues: append([]int(nil), numbers[start:end]...), ReviewOnly: true,
+			})
+		}
+	}
+	return batches
 }
 
 func classifyTUIIssue(issue tuiIssue, asOf time.Time, dups map[int]int) tuiIssueRow {

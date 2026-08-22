@@ -292,6 +292,10 @@ func renderTUIIssues(report tuiIssueReport, top, width int) string {
 	var b strings.Builder
 	title := "fak console issues"
 	fmt.Fprintf(&b, "%s  as_of=%s  source=%s\n", title, report.AsOf, report.Source)
+	fmt.Fprintf(&b, "census scope=%s:%s fetched=%d total=%d complete=%t age=%s reconciliation=%s\n",
+		report.Census.Scope, report.Census.State, report.Census.FetchedCount,
+		report.Census.TotalCount, report.Census.PageComplete,
+		durationTUIText(report.Census.SnapshotAgeSeconds), report.Census.Reconciliation)
 	fmt.Fprintf(&b, "open=%d  P0=%d  P1=%d  P2=%d  orphan=%d  stale=%d  needs: prio=%d kind=%d area=%d\n",
 		report.Counts.Open, report.Counts.P0, report.Counts.P1, report.Counts.P2,
 		report.Counts.Orphan, report.Counts.Stale, report.Counts.NeedsPriority,
@@ -353,6 +357,16 @@ func renderTUIIssues(report tuiIssueReport, top, width int) string {
 		}
 		if len(ordered) > limit {
 			fmt.Fprintf(&b, "... %d more actions in --json\n", len(ordered)-limit)
+		}
+	}
+	if len(report.RepairBatches) > 0 {
+		fmt.Fprintf(&b, "\nTaxonomy repair batches  review-only=%d\n", len(report.RepairBatches))
+		limit := minTUI(6, len(report.RepairBatches))
+		for _, batch := range report.RepairBatches[:limit] {
+			fmt.Fprintf(&b, "   %-8s batch=%d issues=%d\n", batch.Axis, batch.Batch, len(batch.Issues))
+		}
+		if len(report.RepairBatches) > limit {
+			fmt.Fprintf(&b, "... %d more review-only batches in --json\n", len(report.RepairBatches)-limit)
 		}
 	}
 	return b.String()

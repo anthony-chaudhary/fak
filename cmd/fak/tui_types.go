@@ -124,15 +124,37 @@ type tuiIssueAction struct {
 	Resolve     string `json:"resolve,omitempty"`
 }
 
+type tuiIssueCensus struct {
+	Scope                string `json:"scope"`
+	State                string `json:"state"`
+	FetchedCount         int    `json:"fetched_count"`
+	TotalCount           int    `json:"total_count"`
+	PageComplete         bool   `json:"page_complete"`
+	SnapshotAt           string `json:"snapshot_at,omitempty"`
+	SnapshotAgeSeconds   int64  `json:"snapshot_age_seconds"`
+	IncludesPullRequests bool   `json:"includes_pull_requests"`
+	Reconciliation       string `json:"reconciliation"`
+}
+
+type tuiIssueRepairBatch struct {
+	Axis       string `json:"axis"`
+	Batch      int    `json:"batch"`
+	Issues     []int  `json:"issues"`
+	ReviewOnly bool   `json:"review_only"`
+	Command    string `json:"cmd,omitempty"`
+}
+
 type tuiIssueReport struct {
-	Schema  string           `json:"schema"`
-	AsOf    string           `json:"as_of"`
-	Source  string           `json:"source"`
-	Epic    *tuiIssueRow     `json:"epic,omitempty"`
-	Counts  tuiIssueCounts   `json:"counts"`
-	Lanes   []tuiLane        `json:"lanes"`
-	Rows    []tuiIssueRow    `json:"rows"`
-	Actions []tuiIssueAction `json:"actions,omitempty"`
+	Schema        string                `json:"schema"`
+	AsOf          string                `json:"as_of"`
+	Source        string                `json:"source"`
+	Census        tuiIssueCensus        `json:"census"`
+	Epic          *tuiIssueRow          `json:"epic,omitempty"`
+	Counts        tuiIssueCounts        `json:"counts"`
+	Lanes         []tuiLane             `json:"lanes"`
+	Rows          []tuiIssueRow         `json:"rows"`
+	Actions       []tuiIssueAction      `json:"actions,omitempty"`
+	RepairBatches []tuiIssueRepairBatch `json:"repair_batches,omitempty"`
 }
 
 type tuiLoopReport struct {

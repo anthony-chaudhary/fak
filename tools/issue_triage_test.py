@@ -269,6 +269,72 @@ class ReportTest(unittest.TestCase):
             m.fetch_issues = orig
         self.assertEqual(rc, 2)
 
+    def test_truncated_prefix_is_typed_and_refused(self):
+        census = m.reconcile_census(
+            scope="repository_issues", state="open", fetched_count=500,
+            total_count=2222, snapshot_age_seconds=0, includes_pull_requests=False,
+        )
+        self.assertFalse(census["page_complete"])
+        self.assertEqual(census["reconciliation"], "pagination_truncated")
+        with self.assertRaisesRegex(m.IncompleteRankingError, "pagination_truncated"):
+            m.build_report([_issue(1)], NOW, census=census)
+
+    def test_complete_fixture_above_500_keeps_all_rows_and_bounds_repairs(self):
+        issues = [_issue(n, title=f"unclassified backlog item {n:04d}")
+                  for n in range(1, 526)]
+        census = m.reconcile_census(
+            scope="repository_issues", state="open", fetched_count=len(issues),
+            total_count=len(issues), snapshot_age_seconds=0,
+            includes_pull_requests=False,
+        )
+        report = m.build_report(issues, NOW, census=census, repair_batch_size=40)
+        self.assertEqual(len(report["rows"]), 525)
+        self.assertEqual(report["census"]["fetched_count"], 525)
+        self.assertTrue(report["census"]["page_complete"])
+        self.assertTrue(report["repair_batches"])
+        for batch in report["repair_batches"]:
+            self.assertGreater(len(batch["issues"]), 0)
+            self.assertLessEqual(len(batch["issues"]), 40)
+            self.assertTrue(batch["review_only"])
+            self.assertNotIn("cmd", batch)
+
+    def test_reconciliation_causes_are_closed_and_typed(self):
+        cases = [
+            ("repository_issues", 9, 9, 0, False, "complete"),
+            ("repository_issues", 8, 9, 0, False, "pagination_truncated"),
+            ("repository_items", 9, 9, 0, True, "pull_requests_included"),
+            ("dispatch_cache", 9, 9, 0, False, "scope_mismatch"),
+            ("repository_issues", 9, 9, m.SNAPSHOT_MAX_AGE_SECONDS + 1,
+             False, "snapshot_stale"),
+        ]
+        for scope, fetched, total, age, pulls, want in cases:
+            with self.subTest(want=want):
+                got = m.reconcile_census(
+                    scope=scope, state="open", fetched_count=fetched,
+                    total_count=total, snapshot_age_seconds=age,
+                    includes_pull_requests=pulls,
+                )
+                self.assertEqual(got["reconciliation"], want)
+
+    def test_live_fetch_requests_the_issue_only_total_above_500(self):
+        import json
+        from unittest import mock
+        issues = [_issue(n) for n in range(1, 526)]
+        commands = []
+
+        def fake_run(args):
+            commands.append(args)
+            self.assertEqual(args[:2], ["issue", "list"])
+            return json.dumps(issues)
+
+        with mock.patch.object(m, "_resolve_repo", return_value="owner/repo"), \
+             mock.patch.object(m, "_fetch_issue_total", side_effect=[525, 525]), \
+             mock.patch.object(m, "_run_gh", side_effect=fake_run):
+            got_issues, census = m.fetch_issues()
+        self.assertEqual(len(got_issues), 525)
+        self.assertEqual(census["reconciliation"], "complete")
+        self.assertIn("525", commands[0])
+
 
 class InjectedIssuesTest(unittest.TestCase):
     """`--issues PATH|-` lets a named view (issue_views.py show --json) drive triage
