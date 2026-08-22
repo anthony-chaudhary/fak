@@ -64,8 +64,8 @@ func TestServeSizingArtifactDeviceArmRefusalBecomesWarning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildServeSizingArtifact: %v", err)
 	}
-	if art.Arm != "device-lean-q8" {
-		t.Fatalf("arm = %q, want device-lean-q8", art.Arm)
+	if art.Arm != "device-resident-q4k" {
+		t.Fatalf("arm = %q, want device-resident-q4k", art.Arm)
 	}
 	found := false
 	for _, w := range art.Warnings {
