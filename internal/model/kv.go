@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -41,6 +42,8 @@ func (m *Model) SessionFromPrefix(prefix *KVCache) *Session {
 // sessions Cache is sufficient. Device hybrid sessions additionally carry attention
 // KV and recurrent Qwen state; keeping all three in one owner prevents partial restores.
 type PrefixSnapshot struct {
+	owner   *Session
+	epoch   uint64
 	Cache   *KVCache
 	halKV   compute.KVStore
 	qwen35  *qwen35HALState
@@ -50,6 +53,8 @@ type PrefixSnapshot struct {
 
 // PrefixSnapshot captures a deep clone suitable for shared-prefix admission.
 func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
+	s.cacheGeometryMu.RLock()
+	defer s.cacheGeometryMu.RUnlock()
 	if s == nil || s.Cache == nil {
 		return nil, fmt.Errorf("model: cannot snapshot nil session cache")
 	}
@@ -60,7 +65,7 @@ func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
 		// halKV plus recurrent tensors.
 		tokens = s.halKV.Len()
 	}
-	out := &PrefixSnapshot{Cache: s.Cache.Clone(), Backend: s.Backend, Tokens: tokens}
+	out := &PrefixSnapshot{owner: s, epoch: s.cacheGeometryEpoch, Cache: s.Cache.Clone(), Backend: s.Backend, Tokens: tokens}
 	if s.Backend == nil {
 		return out, nil
 	}
@@ -82,7 +87,7 @@ func (p *PrefixSnapshot) Clone() (*PrefixSnapshot, error) {
 	if p == nil || p.Cache == nil {
 		return nil, nil
 	}
-	out := &PrefixSnapshot{Cache: p.Cache.Clone(), Backend: p.Backend, Tokens: p.Tokens}
+	out := &PrefixSnapshot{owner: p.owner, epoch: p.epoch, Cache: p.Cache.Clone(), Backend: p.Backend, Tokens: p.Tokens}
 	if p.Backend == nil {
 		return out, nil
 	}
@@ -101,6 +106,13 @@ func (p *PrefixSnapshot) Clone() (*PrefixSnapshot, error) {
 
 // Restore installs this snapshot into a fresh backend session and transfers ownership.
 func (p *PrefixSnapshot) Restore(s *Session) error {
+	if p != nil && p.owner != nil {
+		p.owner.cacheGeometryMu.RLock()
+		defer p.owner.cacheGeometryMu.RUnlock()
+	}
+	if p != nil && p.owner != nil && p.epoch != p.owner.cacheGeometryEpoch {
+		return fmt.Errorf("model: stale prefix snapshot after cache rebuild")
+	}
 	if p == nil || s == nil || p.Cache == nil {
 		return fmt.Errorf("model: invalid prefix snapshot restore")
 	}
@@ -140,8 +152,11 @@ func (p *PrefixSnapshot) Close() {
 }
 
 type Session struct {
-	M     *Model
-	Cache *KVCache
+	cacheGeometryMu     sync.RWMutex
+	cacheGeometryFailed bool
+	cacheGeometryEpoch  uint64
+	M                   *Model
+	Cache               *KVCache
 	// Backend is non-nil when this session is intentionally running through the
 	// internal/compute HAL instead of the legacy direct []float32 path. The legacy
 	// path stays the default until the full optimized prefill/batch path is adopted.
@@ -713,6 +728,8 @@ func (s *Session) Prefill(ids []int) []float32 {
 	if len(ids) == 0 {
 		return nil
 	}
+	s.cacheGeometryMu.RLock()
+	defer s.cacheGeometryMu.RUnlock()
 	if result, used, err := s.tryQwen35SequencePrefill(ids, true); used {
 		if err != nil {
 			s.failBackendForward(-1, "sequence prefill", err)
@@ -828,6 +845,8 @@ func (s *Session) PrefillNoLogits(ids []int) {
 	if len(ids) == 0 {
 		return
 	}
+	s.cacheGeometryMu.RLock()
+	defer s.cacheGeometryMu.RUnlock()
 	if _, used, err := s.tryQwen35SequencePrefill(ids, false); used {
 		if err != nil {
 			s.failBackendForward(-1, "sequence prefill", err)
@@ -951,6 +970,8 @@ func (s *Session) prefillTokenLoop(ids []int) []float32 {
 // sessions reuse their logits buffer; consume or copy the returned slice before the next
 // quantized Prefill/Step call on the same session.
 func (s *Session) Step(id int) []float32 {
+	s.cacheGeometryMu.RLock()
+	defer s.cacheGeometryMu.RUnlock()
 	// Coordinated expert-parallel serve (#4835) — see the note in Prefill.
 	if rel := s.epAnnounce(epOpStep, []int{id}); rel != nil {
 		defer rel()
