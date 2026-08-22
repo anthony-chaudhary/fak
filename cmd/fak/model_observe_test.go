@@ -36,3 +36,22 @@ func TestModelObserveReportSpine(t *testing.T) {
 		t.Fatal(out.String())
 	}
 }
+
+func TestModelObserveStateBenchSpine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache-state.json")
+	if err := runModelObserveStateBench([]string{"--output", path}); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	report, err := modelperfobs.ReadStateReport(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Verdict != "admitted" || len(report.Arms) != 4 {
+		t.Fatalf("cache-state report = verdict %q, arms %d", report.Verdict, len(report.Arms))
+	}
+}

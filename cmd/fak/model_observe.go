@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"time"
@@ -13,7 +15,7 @@ import (
 
 func cmdModelObserve(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: fak model-observe proxy --backend URL [--listen ADDR --ledger FILE]\n       fak model-observe report --input FILE [--format md|json]")
+		fmt.Fprintln(os.Stderr, modelObserveUsage())
 		os.Exit(2)
 	}
 	switch args[0] {
@@ -64,8 +66,65 @@ func cmdModelObserve(args []string) {
 		if err := modelperfobs.WriteMarkdown(os.Stdout, s); err != nil {
 			os.Exit(1)
 		}
+	case "cache-state-bench":
+		if err := runModelObserveStateBench(args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, "model-observe:", err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "model-observe: unknown subcommand %q\n", args[0])
 		os.Exit(2)
 	}
+}
+
+func runModelObserveStateBench(args []string) error {
+	fs := flag.NewFlagSet("model-observe cache-state-bench", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	output := fs.String("output", "", "write the observed JSON witness to this path (default: stdout)")
+	verify := fs.String("verify", "", "verify a captured cache-state report instead of running")
+	pretty := fs.Bool("pretty", true, "indent JSON output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *verify != "" {
+		f, err := os.Open(*verify)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		report, err := modelperfobs.ReadStateReport(f)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stdout, "STATE_TRANSITION_WITNESS_OK arms=%d provenance=%s scope=%s\n", len(report.Arms), report.Provenance.EvidenceKind, report.Provenance.Scope)
+		return nil
+	}
+	report, err := modelperfobs.RunHermeticStateBenchmark(context.Background())
+	if err != nil {
+		return err
+	}
+	w := io.Writer(os.Stdout)
+	var f *os.File
+	if *output != "" {
+		f, err = os.Create(*output)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		w = f
+	}
+	if err := modelperfobs.WriteStateReport(w, report, *pretty); err != nil {
+		return err
+	}
+	if *output != "" {
+		fmt.Fprintf(os.Stderr, "STATE_TRANSITION_WITNESS_WRITTEN path=%s arms=%d provenance=%s scope=%s\n", *output, len(report.Arms), report.Provenance.EvidenceKind, report.Provenance.Scope)
+	}
+	return nil
+}
+
+func modelObserveUsage() string {
+	return "usage: fak model-observe proxy --backend URL [--listen ADDR --ledger FILE]\n" +
+		"       fak model-observe report --input FILE [--format md|json]\n" +
+		"       fak model-observe cache-state-bench [--output FILE --pretty=true]\n" +
+		"       fak model-observe cache-state-bench --verify FILE"
 }

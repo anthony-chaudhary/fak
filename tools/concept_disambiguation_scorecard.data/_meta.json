@@ -1057,6 +1057,16 @@
           "category": "incidental",
           "reason": "JSON metric key only; it reports external cache evidence and defines no fak cache mechanism",
           "token": "cache_evictions"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire value naming the existing fak workflow-cache layer, not a new cache mechanism.",
+          "token": "fak_workflow_cache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Provenance scope label for the existing fak workflow cache, not a new cache mechanism.",
+          "token": "in_process_fak_workflow_cache"
         }
       ],
       "id": "cache",
@@ -1242,6 +1252,7 @@
         "fak_fleet_goal_cache_value_rows",
         "fak_fleet_goal_cache_value_rows_total",
         "fak_fleet_goal_cache_write_tokens_total",
+        "fak_workflow_cache",
         "fakcachevalueinputpermtokusd",
         "flushcache",
         "formatTurnCachePair",
@@ -1256,6 +1267,7 @@
         "infercachecreationtokens",
         "infercachedhits",
         "infercachedtokens",
+        "in_process_fak_workflow_cache",
         "knownKeyCache",
         "lastcacherd",
         "liveMatrixPrefixCache",
@@ -6499,6 +6511,16 @@
           "category": "incidental",
           "reason": "prior-attempt report field; not a distinct witness concept",
           "token": "PriorWitnessKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI success marker for this report verifier, not a new witness or proof mechanism.",
+          "token": "STATE_TRANSITION_WITNESS_OK"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI success marker emitted when a report is written, not a new witness or proof mechanism.",
+          "token": "STATE_TRANSITION_WITNESS_WRITTEN"
         }
       ],
       "id": "witness-proof",
@@ -6537,6 +6559,8 @@
         "ResolutionUnwitnessed",
         "RuntimeTerminalWitness",
         "SOURCE_WITNESSED",
+        "STATE_TRANSITION_WITNESS_OK",
+        "STATE_TRANSITION_WITNESS_WRITTEN",
         "SessionMoveProviderWitness",
         "StageAttest",
         "StageWitnessRequest",
@@ -9810,6 +9834,16 @@
           "category": "incidental",
           "reason": "Local fleet-task vocabulary guard; it does not declare provider or feature support maturity.",
           "token": "supportedFleetClass"
+        },
+        {
+          "category": "incidental",
+          "reason": "Benchmark result type for a backend-declared unsupported transition, not a capability maturity declaration.",
+          "token": "TransitionUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Receipt reason preserving a backend limitation, not a fak support-maturity claim.",
+          "token": "backend_does_not_support_transition"
         }
       ],
       "id": "support-maturity",
@@ -9905,6 +9939,7 @@
         "TestMaturityBaselinePromotionIsWitnessGatedAndImmediatelyEnforced",
         "TierStatusSupported",
         "TierStatusUnsupported",
+        "TransitionUnsupported",
         "UNKNOWN_FORMAT",
         "UNKNOWN_RUNTIME",
         "UNSUPPORTED_COMBINATION",
@@ -9917,6 +9952,7 @@
         "WatchdogExcludeKind",
         "WitnessDigest",
         "achievedMaturity",
+        "backend_does_not_support_transition",
         "calendar_coverage",
         "cmdLaunchParityCheck",
         "cmdManageParity",
@@ -10122,6 +10158,21 @@
           "category": "incidental",
           "reason": "normalized report field under the existing eviction family, not a new modelperfobs concept",
           "token": "evictions_delta"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed benchmark transition for observing backend pressure eviction, not a new eviction subsystem.",
+          "token": "TransitionPressureEvict"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire value for the pressure-eviction observation arm, not a new eviction subsystem.",
+          "token": "pressure_evict"
+        },
+        {
+          "category": "incidental",
+          "reason": "Validation reason for an unproved backend eviction, not an eviction operation.",
+          "token": "eviction_postcondition_failed"
         }
       ],
       "id": "evict",
@@ -10139,6 +10190,7 @@
         "L2Evictions",
         "NewWithTierBudgetsAndEvictionPolicy",
         "ReasonPinEvictRefused",
+        "TransitionPressureEvict",
         "cache_evictions",
         "digestEvictor",
         "evictIDs",
@@ -10146,11 +10198,13 @@
         "evictable",
         "evicting",
         "eviction",
+        "eviction_postcondition_failed",
         "evictions_delta",
         "evicts",
         "fak_gateway_kv_prefix_tier_evictions_total",
         "kv_evictions_total",
         "noteEviction",
+        "pressure_evict",
         "recordEvictChoice",
         "replayableEvictedCount"
       ],

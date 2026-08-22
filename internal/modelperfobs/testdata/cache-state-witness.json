@@ -1,0 +1,280 @@
+{
+  "schema": "fak-model-cache-state-benchmark/1",
+  "verdict": "admitted",
+  "provenance": {
+    "evidence_kind": "observed",
+    "scope": "in_process_fak_workflow_cache",
+    "external_backend_claims": false,
+    "command": "fak model-observe cache-state-bench",
+    "go_version": "go1.26.6",
+    "goos": "windows",
+    "goarch": "amd64",
+    "code_state": "unknown",
+    "captured_at": "2026-08-22T07:16:05.1021861Z",
+    "note": "Observed from the running hermetic workflow-cache backend; it does not claim external KV or provider-cache behavior."
+  },
+  "arms": [
+    {
+      "label": "cold_start",
+      "measurement_included": true,
+      "transition_receipt": {
+        "schema": "fak-cache-transition-receipt/1",
+        "backend_before": {
+          "name": "modelperfobs-hermetic-workflow-cache",
+          "instance": "in-process",
+          "revision": "1"
+        },
+        "backend_after": {
+          "name": "modelperfobs-hermetic-workflow-cache",
+          "instance": "in-process",
+          "revision": "1"
+        },
+        "layer": "fak_workflow_cache",
+        "transition": "cold_start",
+        "mechanism": {
+          "name": "clear-local-workflow-store",
+          "exit_ok": true
+        },
+        "started_at": "2026-08-22T07:16:05.1021861Z",
+        "ended_at": "2026-08-22T07:16:05.1021861Z",
+        "result": "proved",
+        "pre_metrics": {
+          "captured_at": "2026-08-22T07:16:05.1021861Z",
+          "sample_sequence": 1,
+          "source": "in-process-workflow-cache-counters",
+          "counter_epoch": "process-1",
+          "requests": 1,
+          "reuse_hits": 0,
+          "reused_tokens": 0,
+          "entries": 1,
+          "invalidations": 0,
+          "expirations": 0,
+          "evictions": 0
+        },
+        "post_metrics": {
+          "captured_at": "2026-08-22T07:16:05.1021861Z",
+          "sample_sequence": 2,
+          "source": "in-process-workflow-cache-counters",
+          "counter_epoch": "process-1",
+          "requests": 2,
+          "reuse_hits": 0,
+          "reused_tokens": 0,
+          "entries": 1,
+          "invalidations": 0,
+          "expirations": 0,
+          "evictions": 0
+        },
+        "probes": [
+          {
+            "started_at": "2026-08-22T07:16:05.1021861Z",
+            "completed_at": "2026-08-22T07:16:05.1021861Z",
+            "token_prefix_digest": "sha256:3f376fe4f2838c48beebc0c95f6e9cb84842772652455353136df40adb5b7426",
+            "prompt_tokens": 6,
+            "reused": false,
+            "reused_tokens": 0,
+            "concurrent_requests": 0
+          }
+        ]
+      }
+    },
+    {
+      "label": "warm_admit",
+      "measurement_included": true,
+      "transition_receipt": {
+        "schema": "fak-cache-transition-receipt/1",
+        "backend_before": {
+          "name": "modelperfobs-hermetic-workflow-cache",
+          "instance": "in-process",
+          "revision": "1"
+        },
+        "backend_after": {
+          "name": "modelperfobs-hermetic-workflow-cache",
+          "instance": "in-process",
+          "revision": "1"
+        },
+        "layer": "fak_workflow_cache",
+        "transition": "warm_admit",
+        "mechanism": {
+          "name": "repeat-pinned-token-prefix",
+          "exit_ok": true
+        },
+        "started_at": "2026-08-22T07:16:05.1021861Z",
+        "ended_at": "2026-08-22T07:16:05.1021861Z",
+        "result": "proved",
+        "pre_metrics": {
+          "captured_at": "2026-08-22T07:16:05.1021861Z",
+          "sample_sequence": 3,
+          "source": "in-process-workflow-cache-counters",
+          "counter_epoch": "process-1",
+          "requests": 2,
+          "reuse_hits": 0,
+          "reused_tokens": 0,
+          "entries": 1,
+          "invalidations": 0,
+          "expirations": 0,
+          "evictions": 0
+        },
+        "post_metrics": {
+          "captured_at": "2026-08-22T07:16:05.1021861Z",
+          "sample_sequence": 4,
+          "source": "in-process-workflow-cache-counters",
+          "counter_epoch": "process-1",
+          "requests": 4,
+          "reuse_hits": 2,
+          "reused_tokens": 12,
+          "entries": 1,
+          "invalidations": 0,
+          "expirations": 0,
+          "evictions": 0
+        },
+        "probes": [
+          {
+            "started_at": "2026-08-22T07:16:05.1021861Z",
+            "completed_at": "2026-08-22T07:16:05.1021861Z",
+            "token_prefix_digest": "sha256:3f376fe4f2838c48beebc0c95f6e9cb84842772652455353136df40adb5b7426",
+            "prompt_tokens": 6,
+            "reused": true,
+            "reused_tokens": 6,
+            "concurrent_requests": 0
+          },
+          {
+            "started_at": "2026-08-22T07:16:05.1021861Z",
+            "completed_at": "2026-08-22T07:16:05.1021861Z",
+            "token_prefix_digest": "sha256:3f376fe4f2838c48beebc0c95f6e9cb84842772652455353136df40adb5b7426",
+            "prompt_tokens": 6,
+            "reused": true,
+            "reused_tokens": 6,
+            "concurrent_requests": 0
+          }
+        ]
+      }
+    },
+    {
+      "label": "explicit_invalidate",
+      "measurement_included": true,
+      "transition_receipt": {
+        "schema": "fak-cache-transition-receipt/1",
+        "backend_before": {
+          "name": "modelperfobs-hermetic-workflow-cache",
+          "instance": "in-process",
+          "revision": "1"
+        },
+        "backend_after": {
+          "name": "modelperfobs-hermetic-workflow-cache",
+          "instance": "in-process",
+          "revision": "1"
+        },
+        "layer": "fak_workflow_cache",
+        "transition": "explicit_invalidate",
+        "mechanism": {
+          "name": "invalidate-pinned-token-prefix",
+          "exit_ok": true
+        },
+        "started_at": "2026-08-22T07:16:05.1021861Z",
+        "ended_at": "2026-08-22T07:16:05.1021861Z",
+        "result": "proved",
+        "pre_metrics": {
+          "captured_at": "2026-08-22T07:16:05.1021861Z",
+          "sample_sequence": 5,
+          "source": "in-process-workflow-cache-counters",
+          "counter_epoch": "process-1",
+          "requests": 4,
+          "reuse_hits": 2,
+          "reused_tokens": 12,
+          "entries": 1,
+          "invalidations": 0,
+          "expirations": 0,
+          "evictions": 0
+        },
+        "post_metrics": {
+          "captured_at": "2026-08-22T07:16:05.1021861Z",
+          "sample_sequence": 6,
+          "source": "in-process-workflow-cache-counters",
+          "counter_epoch": "process-1",
+          "requests": 5,
+          "reuse_hits": 2,
+          "reused_tokens": 12,
+          "entries": 1,
+          "invalidations": 1,
+          "expirations": 0,
+          "evictions": 0
+        },
+        "probes": [
+          {
+            "started_at": "2026-08-22T07:16:05.1021861Z",
+            "completed_at": "2026-08-22T07:16:05.1021861Z",
+            "token_prefix_digest": "sha256:3f376fe4f2838c48beebc0c95f6e9cb84842772652455353136df40adb5b7426",
+            "prompt_tokens": 6,
+            "reused": false,
+            "reused_tokens": 0,
+            "concurrent_requests": 0
+          }
+        ]
+      }
+    },
+    {
+      "label": "pressure_evict",
+      "measurement_included": true,
+      "transition_receipt": {
+        "schema": "fak-cache-transition-receipt/1",
+        "backend_before": {
+          "name": "modelperfobs-hermetic-workflow-cache",
+          "instance": "in-process",
+          "revision": "1"
+        },
+        "backend_after": {
+          "name": "modelperfobs-hermetic-workflow-cache",
+          "instance": "in-process",
+          "revision": "1"
+        },
+        "layer": "fak_workflow_cache",
+        "transition": "pressure_evict",
+        "mechanism": {
+          "name": "admit-competing-prefix-to-one-entry-budget",
+          "exit_ok": true,
+          "detail": "admitted a competing prefix into a one-entry cache budget"
+        },
+        "started_at": "2026-08-22T07:16:05.1021861Z",
+        "ended_at": "2026-08-22T07:16:05.1021861Z",
+        "result": "proved",
+        "pre_metrics": {
+          "captured_at": "2026-08-22T07:16:05.1021861Z",
+          "sample_sequence": 7,
+          "source": "in-process-workflow-cache-counters",
+          "counter_epoch": "process-1",
+          "requests": 5,
+          "reuse_hits": 2,
+          "reused_tokens": 12,
+          "entries": 1,
+          "invalidations": 1,
+          "expirations": 0,
+          "evictions": 0
+        },
+        "post_metrics": {
+          "captured_at": "2026-08-22T07:16:05.1021861Z",
+          "sample_sequence": 8,
+          "source": "in-process-workflow-cache-counters",
+          "counter_epoch": "process-1",
+          "requests": 6,
+          "reuse_hits": 2,
+          "reused_tokens": 12,
+          "entries": 1,
+          "invalidations": 1,
+          "expirations": 0,
+          "evictions": 2
+        },
+        "probes": [
+          {
+            "started_at": "2026-08-22T07:16:05.1021861Z",
+            "completed_at": "2026-08-22T07:16:05.1021861Z",
+            "token_prefix_digest": "sha256:3f376fe4f2838c48beebc0c95f6e9cb84842772652455353136df40adb5b7426",
+            "prompt_tokens": 6,
+            "reused": false,
+            "reused_tokens": 0,
+            "concurrent_requests": 0
+          }
+        ]
+      }
+    }
+  ]
+}

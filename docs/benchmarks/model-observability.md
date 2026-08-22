@@ -36,6 +36,34 @@ fak model-observe report \
   --format md
 ```
 
+## Cache-state transition benchmark
+
+Run the hermetic cache-state spine before accepting a cold/warm comparison:
+
+```bash
+fak model-observe cache-state-bench \
+  --output _scratch/modelperfobs/cache-state.json
+fak model-observe cache-state-bench \
+  --verify _scratch/modelperfobs/cache-state.json
+```
+
+The report keeps each arm result beside its transition receipt. A receipt names
+the backend identity, target layer, mechanism, start/end time, pre/post metric
+snapshots, pinned-prefix probes, and the proved, unproved, failed, or unsupported
+result. The runner excludes any arm whose reset exits successfully but still
+reuses the pinned prefix. It also rejects stale samples, counter resets, backend
+identity changes, and request-count or overlap evidence of concurrent traffic.
+
+The built-in backend is deliberately narrow: it observes the running in-process
+fak workflow cache and proves cold start, warm admission, explicit invalidation,
+and capacity-pressure eviction there. Its provenance sets
+`external_backend_claims` to `false`; it does not turn that local observation
+into a claim about process-local model KV, shared KV, or a provider prompt cache.
+Those layers, plus natural expiry, are typed by the contract but remain
+`unsupported` until a backend adapter supplies a safe mechanism and fresh
+counters. This is also why the
+captured witness is reproducible without a model key, network, or GPU.
+
 The JSONL is the query contract, not a dashboard-specific format. Example with
 DuckDB (no import step):
 
