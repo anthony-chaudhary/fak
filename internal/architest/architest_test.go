@@ -237,6 +237,7 @@ var tier = map[string]int{
 	"serverproduct":    2, // independent local-server product contract and readiness receipts; foundation composite over protocol and artifact identities.
 	"serveradapter":    2, // independent llama-server invocation rendering and readiness probes; foundation composite over server product contracts.
 	"harnessserver":    2, // immutable external server-receipt binding and compatibility verification for harness consumers.
+	"serverlifecycle":  3, // direct local-process lifecycle over artifact, adapter, product, and process-start evidence.
 
 	"adjudicator": 3, "ctxmmu": 3, "engine": 3, "enginecache": 3, "grammar": 3, "kernel": 3,
 	"preflight": 3, "vdso": 3, "plancfi": 3, "steward": 3, "witness": 3,
