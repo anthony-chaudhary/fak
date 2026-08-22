@@ -108,3 +108,29 @@ func TestServeSizingArtifactJSONShape(t *testing.T) {
 		t.Fatalf("warnings marshaled to null: %s", out)
 	}
 }
+
+func TestServeDeviceResidentQ4KDefaultsOnWithRollback(t *testing.T) {
+	quantized := serveCapBackend{Backend: compute.Default(), uploadDtype: true}
+
+	t.Setenv("FAK_Q4K", "")
+	if !serveDeviceResidentQ4K(quantized) {
+		t.Fatal("quantized device backend should default to resident Q4_K")
+	}
+	if got := serveSizingArm(quantized, false); got != "device-resident-q4k" {
+		t.Fatalf("default sizing arm = %q, want device-resident-q4k", got)
+	}
+
+	t.Setenv("FAK_Q4K", "0")
+	if serveDeviceResidentQ4K(quantized) {
+		t.Fatal("FAK_Q4K=0 should roll back to legacy Q8 staging")
+	}
+	if got := serveSizingArm(quantized, false); got != "device-lean-q8" {
+		t.Fatalf("rollback sizing arm = %q, want device-lean-q8", got)
+	}
+
+	plain := serveCapBackend{Backend: compute.Default()}
+	t.Setenv("FAK_Q4K", "")
+	if serveDeviceResidentQ4K(plain) {
+		t.Fatal("backend without quantized upload cannot select resident device Q4_K")
+	}
+}

@@ -73,7 +73,7 @@ func serveSizingArm(be compute.Backend, cpuOffloadExperts bool) string {
 	switch {
 	case be != nil && cpuOffloadExperts:
 		return "device-resident-q4k-cpu-offload-experts"
-	case be != nil && os.Getenv("FAK_Q4K") != "" && be.Caps().UploadDtype:
+	case serveDeviceResidentQ4K(be):
 		return "device-resident-q4k"
 	case be != nil && be.Caps().UploadDtype:
 		return "device-lean-q8"

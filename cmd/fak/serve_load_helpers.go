@@ -21,6 +21,14 @@ func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
 	return []ggufload.Q4KLoadOption{ggufload.WithDenseKQuantResident(false)}
 }
 
+func serveDeviceResidentQ4K(backend compute.Backend) bool {
+	if backend == nil || !backend.Caps().UploadDtype {
+		return false
+	}
+	// Resident Q4_K is the efficient device representation; FAK_Q4K=0 remains the
+	// explicit rollback to the legacy Q8 staging path.
+	return os.Getenv("FAK_Q4K") != "0"
+}
 func serveStartupMessage(kind, level, text string) gateway.StartupMessage {
 	return newServeStartupMessage("model-load", kind, level, text)
 }
@@ -121,12 +129,11 @@ func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloa
 		// concurrent large load on a contended box) refuses cleanly here instead of wedging the box.
 		must(compute.RefuseHostScopedPlanIfTooBigForHost(memPlan, serveGGUFHostHeadroom))
 		return loadResidentQ4KDevice(ggufPath, tLoad, memPlan, backend, loadMessages, q4kOpts...)
-	case backend != nil && os.Getenv("FAK_Q4K") != "" && backend.Caps().UploadDtype:
-		// Standard-arch device serve with FAK_Q4K: hold raw Q4_K matmul tensors RESIDENT on the
+	case serveDeviceResidentQ4K(backend):
+		// Standard-arch device serve: hold raw Q4_K matmul tensors RESIDENT on the
 		// device (dequant fused into the GEMM tile, no Q4_K->f32->Q8 round-trip), instead of the
-		// Q8-resident default below. Without this arm the `case backend != nil:` Q8 path matched
-		// first and silently ignored FAK_Q4K — loading ~1 B/param instead of raw Q4_K's
-		// ~0.56 B/param, ~2x the weight VRAM (#949). No expert offload here (that is the
+		// legacy Q8 rollback below. The resident path loads ~0.56 B/param instead of Q8's
+		// ~1 B/param, nearly halving weight VRAM (#949). No expert offload here (that is the
 		// cpuOffloadExperts arm) — all weights are device-resident, so the fit uses the
 		// non-offload device plan (EstimateLoadMemoryPlan, quant-aware), same helper the Q8 arm
 		// uses; only the loader differs. A backend without UploadDtype falls through to the Q8/
