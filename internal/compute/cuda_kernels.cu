@@ -909,47 +909,59 @@ __device__ void getScaleMinK4_dev(int j, const unsigned char *q, unsigned char *
   }
 }
 
-// k_q4k_gemm: Y[t,o] = sum over the row's Q4_K super-blocks. One warp cooperates on each
-// 256-value super-block instead of assigning all 256 serial FMAs to one lane. Qwen3.6's hidden
-// width has only about 20 super-blocks, so the former one-thread-per-super-block mapping left most
-// of this block idle. Eight warps now cover eight super-blocks concurrently; the byte mapping and
-// f32 accumulation semantics remain the GGUF Q4_K definition.
+// k_q4k_gemm: four warps cooperate on each output row. Each warp owns a disjoint stride of
+// 256-value super-blocks, preserving the exact f32-dequantized dot while exposing the short Qwen
+// hidden-width K loop to the GPU. Two rows per block retain 256-thread occupancy; only the four
+// warp totals cross shared memory at the final row reduction.
 __global__ void k_q4k_gemm(const unsigned char *Q4K, const float *X, float *Y, int out, int in, int P) {
-  constexpr int warps = 8;
+  constexpr int warps_per_row = 4;
+  constexpr int rows_per_block = 2;
   int lane = threadIdx.x & 31;
   int warp = threadIdx.x >> 5;
-  int o = blockIdx.x * warps + warp;
+  int row_warp = warp & (warps_per_row - 1);
+  int row = warp / warps_per_row;
+  int o = blockIdx.x * rows_per_block + row;
   int t = blockIdx.y;
-  if (o >= out || t >= P) return;
+  bool active = o < out && t < P;
   int nsb = in / 256;
-  const unsigned char *wrow = Q4K + (size_t)o * nsb * 144;
-  const float *xrow = X + (size_t)t * in;
+  const unsigned char *wrow = active ? Q4K + (size_t)o * nsb * 144 : Q4K;
+  const float *xrow = active ? X + (size_t)t * in : X;
   float sum = 0.f;
-  for (int sb = 0; sb < nsb; sb++) {
-    const unsigned char *blk = wrow + (size_t)sb * 144;
-    float d = __half2float(*(const __half *)(blk));
-    float dmin = __half2float(*(const __half *)(blk + 2));
-    const unsigned char *scales = blk + 4;
-    const unsigned char *q = blk + 16;
-    const float *xb = xrow + (size_t)sb * 256;
+  if (active) {
+    for (int sb = row_warp; sb < nsb; sb += warps_per_row) {
+      const unsigned char *blk = wrow + (size_t)sb * 144;
+      float d = __half2float(*(const __half *)(blk));
+      float dmin = __half2float(*(const __half *)(blk + 2));
+      const unsigned char *scales = blk + 4;
+      const unsigned char *q = blk + 16;
+      const float *xb = xrow + (size_t)sb * 256;
 #pragma unroll
-    for (int group = 0; group < 8; group++) {
-      unsigned char sc, mn;
-      getScaleMinK4_dev(group, scales, &sc, &mn);
-      int qi = (group >> 1) * 32 + lane;
-      unsigned char packed = q[qi];
-      int code = (group & 1) ? (packed >> 4) : (packed & 0x0f);
-      sum += (d * (float)sc * (float)code - dmin * (float)mn) * xb[group * 32 + lane];
+      for (int group = 0; group < 8; group++) {
+        unsigned char sc, mn;
+        getScaleMinK4_dev(group, scales, &sc, &mn);
+        int qi = (group >> 1) * 32 + lane;
+        unsigned char packed = q[qi];
+        int code = (group & 1) ? (packed >> 4) : (packed & 0x0f);
+        sum += (d * (float)sc * (float)code - dmin * (float)mn) * xb[group * 32 + lane];
+      }
     }
   }
 #pragma unroll
   for (int delta = 16; delta > 0; delta >>= 1) sum += __shfl_down_sync(0xffffffff, sum, delta);
-  if (lane == 0) Y[(size_t)t * out + o] = sum;
+  __shared__ float row_sums[rows_per_block][warps_per_row];
+  if (lane == 0) row_sums[row][row_warp] = sum;
+  __syncthreads();
+  if (active && row_warp == 0 && lane == 0) {
+    float total = row_sums[row][0];
+#pragma unroll
+    for (int i = 1; i < warps_per_row; ++i) total += row_sums[row][i];
+    Y[(size_t)t * out + o] = total;
+  }
 }
 
 extern "C" void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY,
                                      int out, int in, int P) {
-  k_q4k_gemm<<<dim3((out + 7) / 8, P), 256, 0, g_stream>>>(
+  k_q4k_gemm<<<dim3((out + 1) / 2, P), 256, 0, g_stream>>>(
       (const unsigned char *)dQ4K, dX, dY, out, in, P);
 }
 
