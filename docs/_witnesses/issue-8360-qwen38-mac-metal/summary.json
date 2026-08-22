@@ -1,0 +1,64 @@
+{
+  "schema": "fak.qwen38-mac-campaign-summary/1",
+  "issue": 8360,
+  "status": "PROMOTE",
+  "evidence_class": "CAMPAIGN",
+  "arm": "q4_k_m",
+  "corpus_id": "qwen38-27b-agentic-v1",
+  "corpus_sha256": "531927d25f4e314fff8649007b96921af29d3e30809831f47eb43aeb7e80915d",
+  "quality": {
+    "passed": 18,
+    "total": 18
+  },
+  "hardware": "Apple M3 Pro, 36 GiB unified memory",
+  "software": "llama.cpp 9828 ebd048fc5 Metal",
+  "context_tokens": 65536,
+  "cache_mode": "unified KV; transient restart",
+  "resident_before_bytes": 21316747264,
+  "resident_after_bytes": 21876391936,
+  "restart_ready": true,
+  "cleanup_ok": true,
+  "workload_latency": {
+    "coding_reasoning": {
+      "median_ms": 643.008,
+      "min_ms": 639.687,
+      "max_ms": 1463.619,
+      "repetitions": 3
+    },
+    "correlated_tools": {
+      "median_ms": 4780.226,
+      "min_ms": 4771.122,
+      "max_ms": 7888.076,
+      "repetitions": 3
+    },
+    "json_schema": {
+      "median_ms": 3424.411,
+      "min_ms": 3416.332,
+      "max_ms": 4058.74,
+      "repetitions": 3
+    },
+    "long_context_retrieval": {
+      "median_ms": 9300.481,
+      "min_ms": 9280.49,
+      "max_ms": 400679.356,
+      "repetitions": 3
+    },
+    "repeated_workflow_cache": {
+      "median_ms": 1660.681,
+      "min_ms": 1183.273,
+      "max_ms": 2460.868,
+      "repetitions": 3
+    },
+    "text": {
+      "median_ms": 776.743,
+      "min_ms": 772.361,
+      "max_ms": 1400.874,
+      "repetitions": 3
+    }
+  },
+  "raw_archive_sha256": "ecf32c1f01e64f838b55cdc139ecef13138b840b47f41afa300918cdbae57905",
+  "report_sha256": "58638d810d4d849f279121034cabd7e5b7c0c089638d0952210fe44096248d75",
+  "platform_sha256": "97c6c50b766f753fa3bd7f7a41bc930f3d48d58e714fc12d170d3e7d491fe8ac",
+  "source_module_rev": "internal/qwen38quantrun@r8+gb0ce51b59",
+  "captured_at": "2026-08-22T17:06:00Z"
+}

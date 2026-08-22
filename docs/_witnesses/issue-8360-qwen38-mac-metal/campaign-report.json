@@ -1,0 +1,172 @@
+{
+  "Schema": "fak.qwen38-quant-report/1",
+  "CorpusID": "qwen38-27b-agentic-v1",
+  "CorpusSHA256": "531927d25f4e314fff8649007b96921af29d3e30809831f47eb43aeb7e80915d",
+  "Arm": "q4_k_m",
+  "identity": {
+    "Model": "unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+    "CheckpointSHA256": "cdab4573be479b1f3aff6dff082079d76bfcfe47389a743f4a59eeb186b9d23d",
+    "ArtifactSHA256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "TokenizerSHA256": "6a48b037b7624b59afc6cb9996ace151f5897a9b9c670065582f09856fb54928",
+    "TemplateSHA256": "e51c2fda630622a2d425d8b4d32afd2347ed0debbe423952253de6ae74642efc",
+    "QuantizerRevision": "unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe:Q4_K_M:gguf-qv2",
+    "RuntimeRevision": "ebd048fc5",
+    "FakModuleRev": "internal/qwen38quantrun@r8+gb0ce51b59"
+  },
+  "environment": {
+    "command": [
+      "~/llama-b9828/llama-b9828/llama-server",
+      "-m",
+      "~/Library/Caches/fak-models/hub/unsloth/Qwen3.8-27B-GGUF/main/Qwen3.8-27B-Q4_K_M.gguf",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "18169",
+      "--ctx-size",
+      "65536",
+      "--parallel",
+      "1",
+      "-ngl",
+      "99"
+    ],
+    "hardware": "Apple M3 Pro, 36 GiB unified memory",
+    "software": "llama.cpp 9828 ebd048fc5 Metal",
+    "context_tokens": 65536,
+    "cache_mode": "unified KV; transient restart",
+    "require_device": "Metal",
+    "deny_fallback": true
+  },
+  "trials": [
+    {
+      "workload": "text",
+      "repetition": 1,
+      "quality": "PASS",
+      "latency_ms": 1400.874,
+      "completion_tokens": 4
+    },
+    {
+      "workload": "text",
+      "repetition": 2,
+      "quality": "PASS",
+      "latency_ms": 772.361,
+      "completion_tokens": 4
+    },
+    {
+      "workload": "text",
+      "repetition": 3,
+      "quality": "PASS",
+      "latency_ms": 776.743333,
+      "completion_tokens": 4
+    },
+    {
+      "workload": "json_schema",
+      "repetition": 1,
+      "quality": "PASS",
+      "latency_ms": 4058.739583,
+      "completion_tokens": 23
+    },
+    {
+      "workload": "json_schema",
+      "repetition": 2,
+      "quality": "PASS",
+      "latency_ms": 3416.3325,
+      "completion_tokens": 23
+    },
+    {
+      "workload": "json_schema",
+      "repetition": 3,
+      "quality": "PASS",
+      "latency_ms": 3424.410667,
+      "completion_tokens": 23
+    },
+    {
+      "workload": "correlated_tools",
+      "repetition": 1,
+      "quality": "PASS",
+      "latency_ms": 7888.076,
+      "completion_tokens": 30
+    },
+    {
+      "workload": "correlated_tools",
+      "repetition": 2,
+      "quality": "PASS",
+      "latency_ms": 4780.225958,
+      "completion_tokens": 30
+    },
+    {
+      "workload": "correlated_tools",
+      "repetition": 3,
+      "quality": "PASS",
+      "latency_ms": 4771.122084,
+      "completion_tokens": 30
+    },
+    {
+      "workload": "coding_reasoning",
+      "repetition": 1,
+      "quality": "PASS",
+      "latency_ms": 1463.618708,
+      "completion_tokens": 3
+    },
+    {
+      "workload": "coding_reasoning",
+      "repetition": 2,
+      "quality": "PASS",
+      "latency_ms": 639.686958,
+      "completion_tokens": 3
+    },
+    {
+      "workload": "coding_reasoning",
+      "repetition": 3,
+      "quality": "PASS",
+      "latency_ms": 643.00825,
+      "completion_tokens": 3
+    },
+    {
+      "workload": "long_context_retrieval",
+      "repetition": 1,
+      "quality": "PASS",
+      "latency_ms": 400679.355583,
+      "completion_tokens": 9
+    },
+    {
+      "workload": "long_context_retrieval",
+      "repetition": 2,
+      "quality": "PASS",
+      "latency_ms": 9280.489833,
+      "completion_tokens": 9
+    },
+    {
+      "workload": "long_context_retrieval",
+      "repetition": 3,
+      "quality": "PASS",
+      "latency_ms": 9300.481042,
+      "completion_tokens": 9
+    },
+    {
+      "workload": "repeated_workflow_cache",
+      "repetition": 1,
+      "quality": "PASS",
+      "latency_ms": 2460.867958,
+      "completion_tokens": 7
+    },
+    {
+      "workload": "repeated_workflow_cache",
+      "repetition": 2,
+      "quality": "PASS",
+      "latency_ms": 1183.273333,
+      "completion_tokens": 7
+    },
+    {
+      "workload": "repeated_workflow_cache",
+      "repetition": 3,
+      "quality": "PASS",
+      "latency_ms": 1660.680917,
+      "completion_tokens": 7
+    }
+  ],
+  "Verdict": "PROMOTE",
+  "EvidenceClass": "CAMPAIGN",
+  "raw_archive_sha256": "ecf32c1f01e64f838b55cdc139ecef13138b840b47f41afa300918cdbae57905",
+  "stale_after": "24h",
+  "rollback_threshold": "any quality failure"
+}

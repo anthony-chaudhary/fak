@@ -1,0 +1,69 @@
+{
+  "schema": "fak.qwen38-mac-platform-witness/1",
+  "captured_at": "2026-08-22T17:08:58.985526+00:00",
+  "hardware": {
+    "chip": "Apple M3 Pro",
+    "memory_bytes": 38654705664,
+    "cpu_count": 12
+  },
+  "os": "ProductName:\t\tmacOS\nProductVersion:\t\t26.6.2\nBuildVersion:\t\t25G83",
+  "swap": "vm.swapusage: total = 5120.00M  used = 4346.06M  free = 773.94M  (encrypted)",
+  "process": {
+    "pid": 9354,
+    "rss_bytes": 21716877312,
+    "command": "~/llama-b9828/llama-b9828/llama-server -m ~/Library/Caches/fak-models/hub/unsloth/Qwen3.8-27B-GGUF/main/Qwen3.8-27B-Q4_K_M.gguf --host 127.0.0.1 --port 18169 --ctx-size 65536 --parallel 1 -ngl 99"
+  },
+  "models": {
+    "models": [
+      {
+        "name": "~/Library/Caches/fak-models/hub/unsloth/Qwen3.8-27B-GGUF/main/Qwen3.8-27B-Q4_K_M.gguf",
+        "model": "~/Library/Caches/fak-models/hub/unsloth/Qwen3.8-27B-GGUF/main/Qwen3.8-27B-Q4_K_M.gguf",
+        "modified_at": "",
+        "size": "",
+        "digest": "",
+        "type": "model",
+        "description": "",
+        "tags": [
+          ""
+        ],
+        "capabilities": [
+          "completion"
+        ],
+        "parameters": "",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "",
+          "families": [
+            ""
+          ],
+          "parameter_size": "",
+          "quantization_level": ""
+        }
+      }
+    ],
+    "object": "list",
+    "data": [
+      {
+        "id": "~/Library/Caches/fak-models/hub/unsloth/Qwen3.8-27B-GGUF/main/Qwen3.8-27B-Q4_K_M.gguf",
+        "aliases": [
+          "~/Library/Caches/fak-models/hub/unsloth/Qwen3.8-27B-GGUF/main/Qwen3.8-27B-Q4_K_M.gguf"
+        ],
+        "tags": [],
+        "object": "model",
+        "created": 1787418539,
+        "owned_by": "llamacpp",
+        "meta": {
+          "vocab_type": 2,
+          "n_vocab": 248320,
+          "n_ctx": 65536,
+          "n_ctx_train": 262144,
+          "n_embd": 5120,
+          "n_params": 27320697856,
+          "size": 17095778304
+        }
+      }
+    ]
+  },
+  "metal_log_lines": []
+}
