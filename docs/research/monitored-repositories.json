@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-20T13:14:26-07:00",
+  "updated_at": "2026-08-21T20:12:17-07:00",
   "methodology": "Harness-related repositories absent by exact owner/name from tracked fak docs were ranked by direct seam relevance, current development activity, adoption signal, and license clarity. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -177,6 +177,42 @@
       "stars_at_check": 5809,
       "last_push_at_check": "2026-08-18T21:14:10Z",
       "study_note": "docs/notes/CONCEPT-STUDY-DFLASH2-2026-08-20.md"
+    },
+    {
+      "repository": "anthropics/claude-code",
+      "url": "https://github.com/anthropics/claude-code",
+      "status": "studied",
+      "priority": 16,
+      "why": "Public plugin agents, coordinator workflows, advanced recovery recipes, release claims, and proprietary-license boundary were studied against fak's twelve-axis Ultracode orchestration contract. Public examples inspire composition, but do not replace fak leases, effect receipts, or independent witness.",
+      "last_checked": "2026-08-21",
+      "checked_revision": "16440d0f6ee8c47f34169687044b89eafa8b0f8d",
+      "stars_at_check": 142314,
+      "last_push_at_check": "2026-08-21T19:54:23Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.md"
+    },
+    {
+      "repository": "langchain-ai/langgraph",
+      "url": "https://github.com/langchain-ai/langgraph",
+      "status": "studied",
+      "priority": 17,
+      "why": "Pregel task preparation, deterministic writes, bounded concurrency, checkpoint lineage, pending-write idempotency, and selective resume were studied as public implementation evidence. Fak should borrow selective recovery while retaining stronger ownership and independent effect proof.",
+      "last_checked": "2026-08-21",
+      "checked_revision": "f09cfe8ffc1eeffd68f4b628ed69c30f7cad229f",
+      "stars_at_check": 40204,
+      "last_push_at_check": "2026-08-21T20:04:35Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.md"
+    },
+    {
+      "repository": "a2aproject/A2A",
+      "url": "https://github.com/a2aproject/A2A",
+      "status": "studied",
+      "priority": 18,
+      "why": "Stable cross-vendor task, context, lifecycle, message, artifact, cancellation, authorization, and snapshot-before-resubscribe semantics were studied as a public standard. Fak should interoperate at this envelope and keep planning, leases, effects, and witness above it.",
+      "last_checked": "2026-08-21",
+      "checked_revision": "16ba52690519bf55b9388e34d4db356efa88aa51",
+      "stars_at_check": 25448,
+      "last_push_at_check": "2026-08-21T19:46:58Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.md"
     }
   ]
 }

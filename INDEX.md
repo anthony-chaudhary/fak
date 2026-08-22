@@ -806,3 +806,7 @@ front page.
 - [`docs/notes/OTLP-ZERO-DEPENDENCY-DECISION-2026-08-19.md`](docs/notes/OTLP-ZERO-DEPENDENCY-DECISION-2026-08-19.md) — OTLP exporter dependency, privacy, cardinality, and adoption-threshold decision.
 - [docs/notes/SESSION-HISTORY-REFRESH-SLO-2026-08-19.md](docs/notes/SESSION-HISTORY-REFRESH-SLO-2026-08-19.md) — Reproducible cold/warm/change-one session-history benchmark, default-on SLOs, and aggregate-only real-corpus witness.
 - [docs/provider-cost-reconciliation.md](docs/provider-cost-reconciliation.md) — Authoritative provider billing-export import, exact session-to-root attribution, coverage, and reconciliation contract.
+
+## Research notes — 2026-08-21
+
+- [`docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.md`](docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.md) — Pinned `/study-repo` + `/field-borrow` comparison of public Claude Code workflow/agent examples, LangGraph, stable A2A, black-box installed Claude behavior, and fak's Ultracode baseline across twelve orchestration axes. Keeps leases and independent effect witness as fak's stronger defaults, deduplicates the existing issue cluster, records effective activation under #8488, and files the sole ownerless recovery join as #8490. A machine companion and deterministic Go checker enforce provenance, license, posture, ownership, benchmark denominators/falsifiers, completeness, and public-leak boundaries.

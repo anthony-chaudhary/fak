@@ -1,0 +1,768 @@
+{
+  "schema": "fak.ultracode-workflow-borrow/v1",
+  "issue": 8484,
+  "observed_at": "2026-08-21T20:12:17-07:00",
+  "note": "docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.md",
+  "sources": [
+    {
+      "id": "claude-code-public",
+      "role": "primary",
+      "kind": "public-repository",
+      "locator": "https://github.com/anthropics/claude-code",
+      "revision": "16440d0f6ee8c47f34169687044b89eafa8b0f8d",
+      "observed_at": "2026-08-21T20:12:17-07:00",
+      "source_event_at": "2026-08-21T19:54:17Z",
+      "state": "public examples and release claims; proprietary runtime implementation absent",
+      "platform": "GitHub public repository",
+      "refresh_trigger": "repository revision or public plugin workflow changes",
+      "license": {
+        "spdx": "LicenseRef-Proprietary",
+        "boundary": "root LICENSE.md reserves rights and points to Anthropic commercial terms",
+        "redistribution": "citations and independently authored analysis only; no source copied",
+        "disposition": "INSPIRE-ONLY"
+      },
+      "provenance": "Pinned public anthropics/claude-code tree; examples and changelog are evidence of public workflow design and release claims, not runtime source.",
+      "anchors": [
+        {
+          "id": "license",
+          "ref": "LICENSE.md:1@16440d0f6ee8c47f34169687044b89eafa8b0f8d",
+          "url": "https://github.com/anthropics/claude-code/blob/16440d0f6ee8c47f34169687044b89eafa8b0f8d/LICENSE.md#L1"
+        },
+        {
+          "id": "feature-workflow",
+          "ref": "plugins/feature-dev/commands/feature-dev.md:20-123@16440d0f6ee8c47f34169687044b89eafa8b0f8d",
+          "url": "https://github.com/anthropics/claude-code/blob/16440d0f6ee8c47f34169687044b89eafa8b0f8d/plugins/feature-dev/commands/feature-dev.md#L20-L123"
+        },
+        {
+          "id": "code-review",
+          "ref": "plugins/code-review/commands/code-review.md:30-77@16440d0f6ee8c47f34169687044b89eafa8b0f8d",
+          "url": "https://github.com/anthropics/claude-code/blob/16440d0f6ee8c47f34169687044b89eafa8b0f8d/plugins/code-review/commands/code-review.md#L30-L77"
+        },
+        {
+          "id": "advanced-workflows",
+          "ref": "plugins/plugin-dev/skills/command-development/references/advanced-workflows.md:279-635@16440d0f6ee8c47f34169687044b89eafa8b0f8d",
+          "url": "https://github.com/anthropics/claude-code/blob/16440d0f6ee8c47f34169687044b89eafa8b0f8d/plugins/plugin-dev/skills/command-development/references/advanced-workflows.md#L279-L635"
+        },
+        {
+          "id": "release-claims",
+          "ref": "CHANGELOG.md:243-249,396-398,599-601,1142,1416@16440d0f6ee8c47f34169687044b89eafa8b0f8d",
+          "url": "https://github.com/anthropics/claude-code/blob/16440d0f6ee8c47f34169687044b89eafa8b0f8d/CHANGELOG.md#L243-L249"
+        }
+      ]
+    },
+    {
+      "id": "langgraph-public",
+      "role": "alternative",
+      "kind": "public-repository",
+      "locator": "https://github.com/langchain-ai/langgraph",
+      "revision": "f09cfe8ffc1eeffd68f4b628ed69c30f7cad229f",
+      "observed_at": "2026-08-21T20:12:17-07:00",
+      "source_event_at": "2026-08-20T07:02:48Z",
+      "state": "public implementation and tests",
+      "platform": "GitHub public repository; Python package implementation",
+      "refresh_trigger": "repository revision or checkpoint/runtime schema changes",
+      "license": {
+        "spdx": "MIT",
+        "boundary": "root LICENSE; no root NOTICE or git submodules observed",
+        "redistribution": "MIT notice retention required; this study copies no code",
+        "disposition": "INSPIRE-ONLY"
+      },
+      "provenance": "Pinned LangGraph implementation, recovery tests, and license at the inspected revision.",
+      "anchors": [
+        {
+          "id": "license",
+          "ref": "LICENSE:1-21@f09cfe8ffc1eeffd68f4b628ed69c30f7cad229f",
+          "url": "https://github.com/langchain-ai/langgraph/blob/f09cfe8ffc1eeffd68f4b628ed69c30f7cad229f/LICENSE"
+        },
+        {
+          "id": "task-plan",
+          "ref": "libs/langgraph/langgraph/pregel/_algo.py:392-624@f09cfe8ffc1eeffd68f4b628ed69c30f7cad229f",
+          "url": "https://github.com/langchain-ai/langgraph/blob/f09cfe8ffc1eeffd68f4b628ed69c30f7cad229f/libs/langgraph/langgraph/pregel/_algo.py#L392-L624"
+        },
+        {
+          "id": "child-context-messaging",
+          "ref": "libs/langgraph/langgraph/types.py:637-824@f09cfe8ffc1eeffd68f4b628ed69c30f7cad229f",
+          "url": "https://github.com/langchain-ai/langgraph/blob/f09cfe8ffc1eeffd68f4b628ed69c30f7cad229f/libs/langgraph/langgraph/types.py#L637-L824"
+        },
+        {
+          "id": "parallel-cancel",
+          "ref": "libs/langgraph/langgraph/pregel/_executor.py:122-217@f09cfe8ffc1eeffd68f4b628ed69c30f7cad229f",
+          "url": "https://github.com/langchain-ai/langgraph/blob/f09cfe8ffc1eeffd68f4b628ed69c30f7cad229f/libs/langgraph/langgraph/pregel/_executor.py#L122-L217"
+        },
+        {
+          "id": "pending-writes",
+          "ref": "libs/checkpoint/langgraph/checkpoint/memory/__init__.py:467-503@f09cfe8ffc1eeffd68f4b628ed69c30f7cad229f",
+          "url": "https://github.com/langchain-ai/langgraph/blob/f09cfe8ffc1eeffd68f4b628ed69c30f7cad229f/libs/checkpoint/langgraph/checkpoint/memory/__init__.py#L467-L503"
+        },
+        {
+          "id": "selective-resume",
+          "ref": "libs/langgraph/langgraph/types.py:851-974;libs/langgraph/tests/test_large_cases.py:4645-4732@f09cfe8ffc1eeffd68f4b628ed69c30f7cad229f",
+          "url": "https://github.com/langchain-ai/langgraph/blob/f09cfe8ffc1eeffd68f4b628ed69c30f7cad229f/libs/langgraph/langgraph/types.py#L851-L974"
+        }
+      ]
+    },
+    {
+      "id": "a2a-public",
+      "role": "alternative",
+      "kind": "public-standard",
+      "locator": "https://github.com/a2aproject/A2A",
+      "revision": "16ba52690519bf55b9388e34d4db356efa88aa51",
+      "observed_at": "2026-08-21T20:12:17-07:00",
+      "source_event_at": "2026-08-18T17:09:55Z",
+      "state": "current public main inspected; stable release v1.0.1 pinned at 3303592588e388e62e0f69f701af531d2f4e3991",
+      "platform": "Linux Foundation public protocol standard",
+      "refresh_trigger": "stable A2A release or canonical protobuf change",
+      "license": {
+        "spdx": "Apache-2.0",
+        "boundary": "root Apache License 2.0; no root NOTICE or git submodules observed",
+        "redistribution": "license, attribution, change, and conditional NOTICE terms apply; this study copies no code",
+        "disposition": "INSPIRE-ONLY"
+      },
+      "provenance": "Pinned canonical protobuf, specification, task-lifecycle topic, and stable v1.0.1 release metadata.",
+      "anchors": [
+        {
+          "id": "license",
+          "ref": "LICENSE:2-122@16ba52690519bf55b9388e34d4db356efa88aa51",
+          "url": "https://github.com/a2aproject/A2A/blob/16ba52690519bf55b9388e34d4db356efa88aa51/LICENSE#L2-L122"
+        },
+        {
+          "id": "task-lifecycle",
+          "ref": "specification/a2a.proto:18-218@16ba52690519bf55b9388e34d4db356efa88aa51",
+          "url": "https://github.com/a2aproject/A2A/blob/16ba52690519bf55b9388e34d4db356efa88aa51/specification/a2a.proto#L18-L218"
+        },
+        {
+          "id": "messages-artifacts",
+          "ref": "specification/a2a.proto:221-322@16ba52690519bf55b9388e34d4db356efa88aa51",
+          "url": "https://github.com/a2aproject/A2A/blob/16ba52690519bf55b9388e34d4db356efa88aa51/specification/a2a.proto#L221-L322"
+        },
+        {
+          "id": "snapshot-resubscribe",
+          "ref": "docs/specification.md:182-311@16ba52690519bf55b9388e34d4db356efa88aa51",
+          "url": "https://github.com/a2aproject/A2A/blob/16ba52690519bf55b9388e34d4db356efa88aa51/docs/specification.md#L182-L311"
+        },
+        {
+          "id": "reliability-limits",
+          "ref": "docs/specification.md:679-885@16ba52690519bf55b9388e34d4db356efa88aa51",
+          "url": "https://github.com/a2aproject/A2A/blob/16ba52690519bf55b9388e34d4db356efa88aa51/docs/specification.md#L679-L885"
+        },
+        {
+          "id": "authorization",
+          "ref": "docs/specification.md:3079-3225@16ba52690519bf55b9388e34d4db356efa88aa51",
+          "url": "https://github.com/a2aproject/A2A/blob/16ba52690519bf55b9388e34d4db356efa88aa51/docs/specification.md#L3079-L3225"
+        }
+      ]
+    },
+    {
+      "id": "claude-code-installed",
+      "role": "behavioral",
+      "kind": "proprietary-black-box",
+      "locator": "installed-cli:claude-code@2.1.237",
+      "revision": "2.1.237",
+      "observed_at": "2026-08-21T20:12:17-07:00",
+      "source_event_at": "2026-08-20T20:28:50Z",
+      "state": "black-box behavioral evidence only",
+      "platform": "installed CLI help and redacted local structural transcript aggregate",
+      "refresh_trigger": "installed CLI version changes",
+      "license": {
+        "spdx": "LicenseRef-Proprietary",
+        "boundary": "installed proprietary binary and private local transcripts",
+        "redistribution": "no binary, transcript bodies, private paths, prompts, accounts, or hosts redistributed",
+        "disposition": "DO-NOT-USE"
+      },
+      "provenance": "Version/help strings and a one-way redacted structural aggregate; no decompilation or runtime redistribution.",
+      "anchors": [
+        {
+          "id": "help-surface",
+          "ref": "claude --help@2.1.237",
+          "url": ""
+        },
+        {
+          "id": "trajectory-structure",
+          "ref": "sha256:b618b92d3ca15b53372ba28f9787dcd4fedb7fb0495eb7aa94ae2cb16a28a2a4",
+          "url": ""
+        }
+      ]
+    },
+    {
+      "id": "fak-current",
+      "role": "target",
+      "kind": "local-source",
+      "locator": "https://github.com/anthony-chaudhary/fak",
+      "revision": "cb72859bce041963185d8cc83703c933509f49cc",
+      "observed_at": "2026-08-21T20:12:17-07:00",
+      "source_event_at": "2026-08-21T17:10:12Z",
+      "state": "committed trunk baseline plus read-only live selfchecks",
+      "platform": "Go module and fak CLI",
+      "refresh_trigger": "Ultracode, workflow, task manager, or benchmark module revision changes",
+      "license": {
+        "spdx": "Apache-2.0",
+        "boundary": "repository root license",
+        "redistribution": "project Apache-2.0 terms apply",
+        "disposition": "DIRECT-PORT"
+      },
+      "provenance": "Pinned committed fak baseline; dirty peer paths excluded from the audit and witnesses.",
+      "anchors": [
+        {
+          "id": "ultracode-plan",
+          "ref": "internal/orchestration/orchestration.go@cb72859bce041963185d8cc83703c933509f49cc",
+          "url": "https://github.com/anthony-chaudhary/fak/blob/cb72859bce041963185d8cc83703c933509f49cc/internal/orchestration/orchestration.go"
+        },
+        {
+          "id": "effect-successor",
+          "ref": "internal/orchestration/successor.go@cb72859bce041963185d8cc83703c933509f49cc",
+          "url": "https://github.com/anthony-chaudhary/fak/blob/cb72859bce041963185d8cc83703c933509f49cc/internal/orchestration/successor.go"
+        },
+        {
+          "id": "task-manager",
+          "ref": "internal/taskmgr/taskmgr.go;internal/taskmgr/evidence.go@cb72859bce041963185d8cc83703c933509f49cc",
+          "url": "https://github.com/anthony-chaudhary/fak/tree/cb72859bce041963185d8cc83703c933509f49cc/internal/taskmgr"
+        },
+        {
+          "id": "workflow-resume",
+          "ref": "internal/workflow/journal.go@cb72859bce041963185d8cc83703c933509f49cc",
+          "url": "https://github.com/anthony-chaudhary/fak/blob/cb72859bce041963185d8cc83703c933509f49cc/internal/workflow/journal.go"
+        },
+        {
+          "id": "ultracode-benchmark",
+          "ref": "internal/ultracodebench@cb72859bce041963185d8cc83703c933509f49cc",
+          "url": "https://github.com/anthony-chaudhary/fak/tree/cb72859bce041963185d8cc83703c933509f49cc/internal/ultracodebench"
+        },
+        {
+          "id": "message-bus",
+          "ref": "internal/a2achan@cb72859bce041963185d8cc83703c933509f49cc",
+          "url": "https://github.com/anthony-chaudhary/fak/tree/cb72859bce041963185d8cc83703c933509f49cc/internal/a2achan"
+        }
+      ]
+    }
+  ],
+  "local_trajectories": [
+    {
+      "id": "claude-structural-aggregate-2026-08-19",
+      "source_id": "claude-code-installed",
+      "version": "2.1.237",
+      "observed_at": "2026-08-21T20:12:17-07:00",
+      "source_event_at": "2026-08-19T02:25:52Z",
+      "state": "black-box-behavior",
+      "structure_digest": "sha256:b618b92d3ca15b53372ba28f9787dcd4fedb7fb0495eb7aa94ae2cb16a28a2a4",
+      "records": 517,
+      "event_types": {
+        "assistant": 125,
+        "atis-latch": 31,
+        "attachment": 199,
+        "last-prompt": 31,
+        "queue-operation": 8,
+        "user": 123
+      },
+      "orchestration_tool_counts": {
+        "Agent": 3
+      },
+      "privacy": "Counts and one-way structure digest only; raw path, prompts, message bodies, account, host, and session identifiers omitted."
+    }
+  ],
+  "existing_owners": [
+    {
+      "issue": 5964,
+      "title": "epic(agent-runtime): fak-native ultracode as a harness-neutral orchestration profile",
+      "state": "OPEN",
+      "mechanism_ids": ["plan-task-graph", "ownership-leases", "independent-witness"],
+      "decision": "Parent owns the canonical plan, execution, witness, and reconcile envelope."
+    },
+    {
+      "issue": 5970,
+      "title": "feat(agent-runtime): adapt canonical ultracode plans to Codex workers",
+      "state": "OPEN",
+      "mechanism_ids": ["parallelism", "messaging", "cancellation"],
+      "decision": "Owns Codex-specific parallel launch, messaging, cancellation, and cleanup."
+    },
+    {
+      "issue": 5973,
+      "title": "feat(agent-runtime): adapt canonical ultracode plans to Claude Code capabilities",
+      "state": "OPEN",
+      "mechanism_ids": ["activation", "cancellation"],
+      "decision": "Owns Claude capability negotiation, adapter cancellation, and cleanup."
+    },
+    {
+      "issue": 8156,
+      "title": "feat(ultracode): add a first-class fleet workflow command",
+      "state": "OPEN",
+      "mechanism_ids": ["activation", "plan-task-graph"],
+      "decision": "First-class CLI plan and offline selfcheck shipped; issue remains open administratively."
+    },
+    {
+      "issue": 8168,
+      "title": "bench(ultracode): prove fleet speed, token, cache, and quality value in one paired run",
+      "state": "OPEN",
+      "mechanism_ids": ["usage-quality-observability"],
+      "decision": "Owns the live treatment/control value proof; the shipped selfcheck is fixture-only."
+    },
+    {
+      "issue": 8334,
+      "title": "feat(ultracode): expose child context, lease, effect, and witness state per graph node",
+      "state": "OPEN",
+      "mechanism_ids": ["child-context", "ownership-leases", "progress", "effect-receipts", "independent-witness"],
+      "decision": "Owns per-node operational status and the effect-successor receipt/witness join."
+    },
+    {
+      "issue": 8337,
+      "title": "bench(ultracode): map the read-only scout versus effectful worker value frontier",
+      "state": "OPEN",
+      "mechanism_ids": ["parallelism", "effect-receipts", "usage-quality-observability"],
+      "decision": "Owns the read-only versus effectful worker value frontier, not another scheduler."
+    },
+    {
+      "issue": 8404,
+      "title": "feat(trajectory): make cross-harness efficiency audit queryable",
+      "state": "OPEN",
+      "mechanism_ids": ["usage-quality-observability"],
+      "decision": "Owns queryable cross-harness trajectory efficiency and attribution."
+    },
+    {
+      "issue": 8488,
+      "title": "feat(ultracode): prove effective activation per launched child",
+      "state": "OPEN",
+      "mechanism_ids": ["activation", "usage-quality-observability"],
+      "decision": "Owns the deduplicated uncovered effective-activation receipt and benchmark join."
+    }
+  ],
+  "mechanisms": [
+    {
+      "id": "activation",
+      "axis": "profile activation and per-child acknowledgement",
+      "status": "PARTIAL",
+      "posture": "DEFAULT",
+      "fact_state": "FACT",
+      "source_refs": ["claude-code-public:release-claims", "claude-code-installed:help-surface", "fak-current:ultracode-plan"],
+      "fak_witness": {
+        "observed_at": "2026-08-21T20:12:17-07:00",
+        "queries": [
+          {
+            "command": "fak capabilities \"bounded concurrent coding agent fleet\"",
+            "result": "Returned general fleet-commit-health and capability-floor cards, not an effective per-child Ultracode activation receipt.",
+            "top_cards": ["fleet-commit-health", "capability-floor"]
+          }
+        ],
+        "seams": ["internal/orchestration/orchestration.go:22,254,316@cb72859b", "fak ultracode --selfcheck => PASS"],
+        "result": "The profile resolves and plans, but the latest live status cannot prove that each child accepted the posture."
+      },
+      "license_disposition": "INSPIRE-ONLY",
+      "owner": {"kind": "existing-gap", "reference": "#8488", "scope": "effective per-child activation receipt"},
+      "benchmark_id": "bench-activation",
+      "decision": "Keep typed activation as a default and require explicit accepted/unknown/degraded child state before causal value claims."
+    },
+    {
+      "id": "plan-task-graph",
+      "axis": "typed plan and dependency graph",
+      "status": "PRESENT",
+      "posture": "DEFAULT",
+      "fact_state": "FACT",
+      "source_refs": ["claude-code-public:feature-workflow", "langgraph-public:task-plan", "fak-current:ultracode-plan"],
+      "fak_witness": {
+        "observed_at": "2026-08-21T20:12:17-07:00",
+        "queries": [
+          {
+            "command": "fak-dev feature query \"ultracode plan graph roles leases witness reconcile\" --limit 3",
+            "result": "Returned the Ultracode dogfood and orchestration surfaces.",
+            "top_cards": ["ultracode-dogfood", "leaf:orchestration"]
+          }
+        ],
+        "seams": ["internal/orchestration/orchestration.go:86-115,254@cb72859b", "fak ultracode --task-text ... --json => fak-orchestration-plan/1"],
+        "result": "A canonical role/edge/budget/lease/witness/reconcile plan is already shipped."
+      },
+      "license_disposition": "INSPIRE-ONLY",
+      "owner": {"kind": "existing", "reference": "#5964", "scope": "canonical harness-neutral graph"},
+      "benchmark_id": "bench-plan-task-graph",
+      "decision": "Retain fak's typed graph; borrow declarative examples as fixtures, not as a second planner."
+    },
+    {
+      "id": "child-context",
+      "axis": "bounded child input and returned context",
+      "status": "PARTIAL",
+      "posture": "DEFAULT",
+      "fact_state": "FACT",
+      "source_refs": ["claude-code-public:feature-workflow", "langgraph-public:child-context-messaging", "fak-current:ultracode-plan"],
+      "fak_witness": {
+        "observed_at": "2026-08-21T20:12:17-07:00",
+        "queries": [
+          {
+            "command": "fak-dev feature query \"ultracode child context per graph node\" --limit 3",
+            "result": "Located the plan/profile documentation and the explicit per-node child-context owner.",
+            "top_cards": ["ultracode-dogfood", "#8334"]
+          }
+        ],
+        "seams": ["internal/orchestration/orchestration.go:86-115@cb72859b", "issue #8334 per-node status contract"],
+        "result": "Role inputs are typed, but per-node child context and returned context are not yet exposed end to end."
+      },
+      "license_disposition": "INSPIRE-ONLY",
+      "owner": {"kind": "existing", "reference": "#8334", "scope": "per-node child context status"},
+      "benchmark_id": "bench-child-context",
+      "decision": "Default to minimal role-specific context and measure accepted output per admitted context token."
+    },
+    {
+      "id": "parallelism",
+      "axis": "bounded parallel child execution",
+      "status": "PARTIAL",
+      "posture": "DEFAULT",
+      "fact_state": "FACT",
+      "source_refs": ["claude-code-public:feature-workflow", "langgraph-public:parallel-cancel", "fak-current:ultracode-plan"],
+      "fak_witness": {
+        "observed_at": "2026-08-21T20:12:17-07:00",
+        "queries": [
+          {
+            "command": "fak capabilities \"bounded concurrent coding agent fleet\"",
+            "result": "Found fleet health/capability cards; the live Ultracode run had three exited workers and no verified completed turn.",
+            "top_cards": ["fleet-commit-health", "capability-floor"]
+          }
+        ],
+        "seams": ["internal/orchestration/orchestration.go:45,254@cb72859b", "fak ultracode status --json => 3 exited, outcome unverified"],
+        "result": "Admission and concurrency limits exist; accepted parallel outcome remains an adapter/live-run gap."
+      },
+      "license_disposition": "INSPIRE-ONLY",
+      "owner": {"kind": "existing", "reference": "#5970", "scope": "Codex bounded parallel execution"},
+      "benchmark_id": "bench-parallelism",
+      "decision": "Keep bounded concurrency behind capability negotiation; do not equate spawned workers with completed work."
+    },
+    {
+      "id": "messaging",
+      "axis": "typed parent-child and peer message exchange",
+      "status": "PARTIAL",
+      "posture": "DEFAULT",
+      "fact_state": "FACT",
+      "source_refs": ["claude-code-public:release-claims", "langgraph-public:child-context-messaging", "a2a-public:messages-artifacts", "fak-current:message-bus"],
+      "fak_witness": {
+        "observed_at": "2026-08-21T20:12:17-07:00",
+        "queries": [
+          {
+            "command": "fak capabilities \"agent message task artifact\"",
+            "result": "Returned no direct capability card although internal/a2achan provides a typed capability-floored bus; this is a lexical discovery miss.",
+            "top_cards": []
+          }
+        ],
+        "seams": ["internal/a2achan@cb72859b", "internal/orchestration/orchestration.go:112-115@cb72859b"],
+        "result": "A message bus and interaction policy exist, but adapter delivery/readback is not witnessed for the current Ultracode run."
+      },
+      "license_disposition": "INSPIRE-ONLY",
+      "owner": {"kind": "existing", "reference": "#5970", "scope": "Codex worker message delivery and readback"},
+      "benchmark_id": "bench-messaging",
+      "decision": "Use typed messages for progress and coordination, durable artifacts for critical outputs, and delivery/readback as the oracle."
+    },
+    {
+      "id": "ownership-leases",
+      "axis": "exclusive ownership and expiring leases",
+      "status": "PARTIAL",
+      "posture": "DEFAULT",
+      "fact_state": "FACT",
+      "source_refs": ["a2a-public:authorization", "langgraph-public:pending-writes", "fak-current:effect-successor"],
+      "fak_witness": {
+        "observed_at": "2026-08-21T20:12:17-07:00",
+        "queries": [
+          {
+            "command": "fak-dev feature query \"ultracode lease effect successor ownership\" --limit 3",
+            "result": "Located the orchestration lease policy and effect-successor identity contract.",
+            "top_cards": ["leaf:orchestration", "#8334"]
+          }
+        ],
+        "seams": ["internal/orchestration/orchestration.go:100-108@cb72859b", "internal/orchestration/successor.go:88,115-186@cb72859b"],
+        "result": "Lease identity and effect-successor checks exist; graph-node status/readback remains incomplete."
+      },
+      "license_disposition": "INSPIRE-ONLY",
+      "owner": {"kind": "existing", "reference": "#8334", "scope": "per-node lease ownership and readback"},
+      "benchmark_id": "bench-ownership-leases",
+      "decision": "Keep exact-tree/effect leases as fak's stronger default; A2A task authorization and LangGraph checkpoint identity are not lease substitutes."
+    },
+    {
+      "id": "progress",
+      "axis": "structured task and node progress",
+      "status": "PARTIAL",
+      "posture": "DEFAULT",
+      "fact_state": "FACT",
+      "source_refs": ["a2a-public:task-lifecycle", "langgraph-public:child-context-messaging", "fak-current:task-manager"],
+      "fak_witness": {
+        "observed_at": "2026-08-21T20:12:17-07:00",
+        "queries": [
+          {
+            "command": "fak-dev feature query \"task progress witness graph node\" --limit 3",
+            "result": "Located task-manager progress and per-node status work.",
+            "top_cards": ["leaf:taskmgr", "#8334"]
+          }
+        ],
+        "seams": ["internal/taskmgr/taskmgr.go:114,168,336@cb72859b", "fak ultracode status --json"],
+        "result": "Structured task progress exists, while the latest Ultracode run exposes process exit rather than accepted graph-node completion."
+      },
+      "license_disposition": "INSPIRE-ONLY",
+      "owner": {"kind": "existing", "reference": "#8334", "scope": "per-node progress and terminal status"},
+      "benchmark_id": "bench-progress",
+      "decision": "Report node progress and terminal state separately from process liveness; current snapshot precedes stream recovery."
+    },
+    {
+      "id": "cancellation",
+      "axis": "bounded cancellation and orphan cleanup",
+      "status": "PARTIAL",
+      "posture": "DEFAULT",
+      "fact_state": "FACT",
+      "source_refs": ["a2a-public:snapshot-resubscribe", "langgraph-public:parallel-cancel", "fak-current:task-manager"],
+      "fak_witness": {
+        "observed_at": "2026-08-21T20:12:17-07:00",
+        "queries": [
+          {
+            "command": "fak-dev feature query \"ultracode cancellation orphan cleanup\" --limit 3",
+            "result": "Located task cancellation plus adapter-specific owners #5970 and #5973.",
+            "top_cards": ["leaf:taskmgr", "#5973"]
+          }
+        ],
+        "seams": ["internal/taskmgr/taskmgr.go:22,344,452@cb72859b", "issues #5970 and #5973"],
+        "result": "Task cancellation is shipped; adapter process cleanup and post-cancel readback are not fully witnessed."
+      },
+      "license_disposition": "INSPIRE-ONLY",
+      "owner": {"kind": "existing", "reference": "#5973", "scope": "Claude adapter cancellation and orphan cleanup"},
+      "benchmark_id": "bench-cancellation",
+      "decision": "Cancellation stays best-effort until terminal state and cleanup are read back; never imply compensation of completed effects."
+    },
+    {
+      "id": "effect-receipts",
+      "axis": "effect-successor receipt and state readback",
+      "status": "PARTIAL",
+      "posture": "DEFAULT",
+      "fact_state": "FACT",
+      "source_refs": ["claude-code-public:code-review", "langgraph-public:pending-writes", "fak-current:effect-successor"],
+      "fak_witness": {
+        "observed_at": "2026-08-21T20:12:17-07:00",
+        "queries": [
+          {
+            "command": "fak-dev feature query \"effect successor receipt witness\" --limit 3",
+            "result": "Located the effect-successor receipt schema and per-node exposure owner.",
+            "top_cards": ["leaf:orchestration", "#8334"]
+          }
+        ],
+        "seams": ["internal/orchestration/successor.go:115-186@cb72859b", "issue #8334"],
+        "result": "The receipt contract binds snapshot epoch and lease identity, but live graph-node readback is not yet complete."
+      },
+      "license_disposition": "INSPIRE-ONLY",
+      "owner": {"kind": "existing", "reference": "#8334", "scope": "effect-successor receipt and node exposure"},
+      "benchmark_id": "bench-effect-receipts",
+      "decision": "Retain fak's effect-specific readback; self-authored checkpoint writes or artifacts alone do not prove an external effect."
+    },
+    {
+      "id": "independent-witness",
+      "axis": "independent completion and effect corroboration",
+      "status": "PARTIAL",
+      "posture": "DEFAULT",
+      "fact_state": "FACT",
+      "source_refs": ["claude-code-public:code-review", "langgraph-public:pending-writes", "a2a-public:messages-artifacts", "fak-current:task-manager"],
+      "fak_witness": {
+        "observed_at": "2026-08-21T20:12:17-07:00",
+        "queries": [
+          {
+            "command": "fak capabilities \"witnessed workflow resume recovery\"",
+            "result": "General capability search missed the workflow witness leaf; feature query found the shipped generic resume and Ultracode witness contracts.",
+            "top_cards": ["context-reuse", "session-control"]
+          }
+        ],
+        "seams": ["internal/taskmgr/evidence.go:42,150@cb72859b", "internal/orchestration/orchestration.go:104-108@cb72859b"],
+        "result": "Witness records and plan requirements exist; the latest live Ultracode run reports independent witness not observed."
+      },
+      "license_disposition": "INSPIRE-ONLY",
+      "owner": {"kind": "existing", "reference": "#5964", "scope": "harness-neutral independent completion witness"},
+      "benchmark_id": "bench-independent-witness",
+      "decision": "Independent witness remains a default completion gate; Claude reviewer redundancy, LangGraph pending writes, and A2A artifacts are inputs, not proof by themselves."
+    },
+    {
+      "id": "recovery-resume",
+      "axis": "controller restart and witness-keyed selective resume",
+      "status": "PARTIAL",
+      "posture": "DEFAULT",
+      "fact_state": "FACT",
+      "source_refs": ["claude-code-public:advanced-workflows", "langgraph-public:selective-resume", "a2a-public:snapshot-resubscribe", "a2a-public:reliability-limits", "fak-current:workflow-resume"],
+      "fak_witness": {
+        "observed_at": "2026-08-21T20:12:17-07:00",
+        "queries": [
+          {
+            "command": "fak-dev feature query \"witnessed workflow resume recovery\" --limit 3",
+            "result": "Found shipped generic workflow journal/resume (#2444) but no Ultracode graph-to-journal launch integration.",
+            "top_cards": ["leaf:workflow", "verified-resume"]
+          }
+        ],
+        "seams": ["internal/workflow/journal.go:169-235@cb72859b", "cmd/fak/workflow_resume.go@cb72859b", "issue #2444 CLOSED"],
+        "result": "Generic witness-keyed resume is shipped; Ultracode does not persist its graph/launch receipts into that journal."
+      },
+      "license_disposition": "INSPIRE-ONLY",
+      "owner": {"kind": "uncovered-gap", "reference": "#8490", "scope": "Ultracode graph-to-journal restart recovery"},
+      "benchmark_id": "bench-recovery-resume",
+      "decision": "Connect the existing seams; skip an effect only after independent corroboration and re-lease every incomplete effect node."
+    },
+    {
+      "id": "usage-quality-observability",
+      "axis": "accepted outcome, speed, token, cache, and quality attribution",
+      "status": "PARTIAL",
+      "posture": "DEFAULT",
+      "fact_state": "FACT",
+      "source_refs": ["claude-code-public:release-claims", "a2a-public:reliability-limits", "fak-current:ultracode-benchmark"],
+      "fak_witness": {
+        "observed_at": "2026-08-21T20:12:17-07:00",
+        "queries": [
+          {
+            "command": "fak capabilities \"accepted outcome token cache quality benchmark\"",
+            "result": "Returned context-reuse and savings cards; internal/ultracodebench supplies the paired GAIN/NO_GAIN/ABSTAIN schema but its selfcheck is offline.",
+            "top_cards": ["context-reuse", "savings", "turn-savings"]
+          }
+        ],
+        "seams": ["internal/ultracodebench@cb72859b", "fak ultracode bench --selfcheck => offline fixture GAIN", "fak ultracode status --json => outcome unverified"],
+        "result": "The measurement schema is shipped; live paired accepted-outcome evidence remains open and effective activation is not yet joinable."
+      },
+      "license_disposition": "INSPIRE-ONLY",
+      "owner": {"kind": "existing", "reference": "#8168", "scope": "live paired speed/token/cache/quality proof"},
+      "benchmark_id": "bench-usage-quality-observability",
+      "decision": "Keep a paired, accepted-outcome benchmark with activation coverage; #8337 owns role frontier and #8404 owns cross-harness trajectory attribution."
+    }
+  ],
+  "benchmarks": [
+    {
+      "id": "bench-activation",
+      "mechanism_id": "activation",
+      "treatment": "Ultracode requested and explicitly acknowledged active by every admitted child",
+      "control": "same harness/workload with Ultracode explicitly off",
+      "workload": "matched small repository task with identical model, budget, tools, and starting revision",
+      "quality_oracle": "same independently witnessed accepted outcome; unknown activation abstains",
+      "denominators": {"speed": "accepted outcomes per wall-second", "token": "accepted outcomes per billed token", "cache": "accepted reused input tokens per eligible repeated input token"},
+      "falsification_condition": "Any treatment child lacks explicit activation readback, or outcome quality/regression fails the oracle."
+    },
+    {
+      "id": "bench-plan-task-graph",
+      "mechanism_id": "plan-task-graph",
+      "treatment": "typed graph with declared roles, edges, budgets, leases, witness, and reconcile policy",
+      "control": "single unstructured coordinator prompt over the same task",
+      "workload": "same bounded multi-file task and source revision",
+      "quality_oracle": "accepted diff covers all graph obligations with no duplicate ownership",
+      "denominators": {"speed": "accepted graph obligations per wall-second", "token": "accepted graph obligations per billed token", "cache": "reused stable-plan tokens per eligible stable-plan token"},
+      "falsification_condition": "Graph arm adds coordination cost without improving accepted coverage or collision rate."
+    },
+    {
+      "id": "bench-child-context",
+      "mechanism_id": "child-context",
+      "treatment": "role-minimal declared child context with curated result return",
+      "control": "full parent transcript copied to each child",
+      "workload": "same two-role repository investigation and implementation task",
+      "quality_oracle": "same independently accepted findings and implementation witness",
+      "denominators": {"speed": "accepted child outputs per wall-second", "token": "accepted child outputs per admitted context token", "cache": "reused resident child-prefix tokens per eligible child-prefix token"},
+      "falsification_condition": "Minimal context drops an acceptance-critical fact or costs more accepted-output tokens."
+    },
+    {
+      "id": "bench-parallelism",
+      "mechanism_id": "parallelism",
+      "treatment": "bounded admitted parallel children on disjoint trees",
+      "control": "the same children executed sequentially",
+      "workload": "three independent read/implementation packets with fixed budgets",
+      "quality_oracle": "same accepted artifacts and witnesses with zero path collisions",
+      "denominators": {"speed": "accepted packets per wall-second", "token": "accepted packets per billed token", "cache": "reused shared-prefix tokens per eligible shared-prefix token"},
+      "falsification_condition": "Parallelism increases collision, duplicate work, or total accepted-work latency."
+    },
+    {
+      "id": "bench-messaging",
+      "mechanism_id": "messaging",
+      "treatment": "typed bounded messages plus durable critical artifacts",
+      "control": "parent polling child transcript/progress text",
+      "workload": "same dependency handoff with one mid-run correction",
+      "quality_oracle": "delivery/readback and final artifact agree on dependency state",
+      "denominators": {"speed": "accepted dependency handoffs per wall-second", "token": "accepted handoffs per message token", "cache": "reused message-schema tokens per eligible schema token"},
+      "falsification_condition": "A critical output exists only in an unrecoverable message or typed messaging adds more correction work."
+    },
+    {
+      "id": "bench-ownership-leases",
+      "mechanism_id": "ownership-leases",
+      "treatment": "exact-tree and effect lease admission with expiry/readback",
+      "control": "concurrent workers without exclusive ownership",
+      "workload": "same overlapping candidate packets including one intentional collision",
+      "quality_oracle": "one owner per effect/tree and no unleased mutation lands",
+      "denominators": {"speed": "accepted noncolliding effects per wall-second", "token": "accepted effects per coordination token", "cache": "reused lease-contract tokens per eligible contract token"},
+      "falsification_condition": "Lease arm admits duplicate ownership, blocks disjoint work, or leaves a stale effect unaccounted."
+    },
+    {
+      "id": "bench-progress",
+      "mechanism_id": "progress",
+      "treatment": "typed node progress plus current snapshot on reconnect",
+      "control": "process liveness and free-form logs only",
+      "workload": "same multi-node run with one disconnect/reconnect",
+      "quality_oracle": "reported node states rederive from task/effect evidence",
+      "denominators": {"speed": "correct state transitions per wall-second", "token": "correct transitions per progress token", "cache": "reused state-schema tokens per eligible schema token"},
+      "falsification_condition": "A process exit is reported as accepted completion or reconnect loses terminal state."
+    },
+    {
+      "id": "bench-cancellation",
+      "mechanism_id": "cancellation",
+      "treatment": "typed cancel followed by terminal snapshot and orphan readback",
+      "control": "terminate controller without task/child cleanup protocol",
+      "workload": "same three-child run canceled during one effectful node",
+      "quality_oracle": "all child/task states accounted; completed effects are not described as reversed",
+      "denominators": {"speed": "accounted cancellations per wall-second", "token": "accounted cancellations per control token", "cache": "reused cancel-schema tokens per eligible schema token"},
+      "falsification_condition": "Any orphan persists, terminal state is unknown, or cancellation claims compensation without readback."
+    },
+    {
+      "id": "bench-effect-receipts",
+      "mechanism_id": "effect-receipts",
+      "treatment": "effect successor receipt bound to epoch, lease, and state readback",
+      "control": "worker self-report or artifact existence alone",
+      "workload": "same effectful fixture with one stale lease and one forged self-report",
+      "quality_oracle": "only the correct successor state is accepted",
+      "denominators": {"speed": "accepted effects per wall-second", "token": "accepted effects per receipt token", "cache": "reused receipt-schema tokens per eligible schema token"},
+      "falsification_condition": "A stale/forged receipt passes or the treatment repeats a corroborated effect."
+    },
+    {
+      "id": "bench-independent-witness",
+      "mechanism_id": "independent-witness",
+      "treatment": "completion requires independent repository/effect readback",
+      "control": "worker declares completion without independent readback",
+      "workload": "same task with one plausible false done claim",
+      "quality_oracle": "witness matches committed paths, tests, and effect state",
+      "denominators": {"speed": "true accepted completions per wall-second", "token": "true completions per witness token", "cache": "reused witness-contract tokens per eligible contract token"},
+      "falsification_condition": "False done is accepted or witness cost outweighs avoided rework at equal quality."
+    },
+    {
+      "id": "bench-recovery-resume",
+      "mechanism_id": "recovery-resume",
+      "treatment": "restart from journal, skip corroborated effects, and re-lease incomplete nodes",
+      "control": "restart the same Ultracode plan from its initial node",
+      "workload": "fixed graph crashed after one corroborated effect and one uncorroborated launch",
+      "quality_oracle": "same final accepted graph with zero repeated corroborated effects",
+      "denominators": {"speed": "accepted recovered nodes per recovery wall-second", "token": "accepted recovered nodes per post-restart token", "cache": "reused journal-bound context tokens per eligible pre-crash token"},
+      "falsification_condition": "Resume repeats a corroborated effect, skips an uncorroborated effect, or crosses graph epoch."
+    },
+    {
+      "id": "bench-usage-quality-observability",
+      "mechanism_id": "usage-quality-observability",
+      "treatment": "live acknowledged Ultracode run with joined outcome, usage, cache, and trajectory evidence",
+      "control": "matched live non-Ultracode run",
+      "workload": "same model/provider/repository/task/start revision and fixed budget",
+      "quality_oracle": "independently accepted outcome and no quality regression",
+      "denominators": {"speed": "accepted outcomes per end-to-end wall-second", "token": "accepted outcomes per billed input plus output token", "cache": "accepted cache-read tokens per provider-eligible repeated input token"},
+      "falsification_condition": "Activation is unknown, outcomes differ, denominators are missing, or treatment fails to beat the control on its declared claim."
+    }
+  ],
+  "uncovered_gaps": [
+    {
+      "mechanism_id": "recovery-resume",
+      "issue": 8490,
+      "contract_key": "ultracode-graph-witnessed-resume",
+      "done": "Persist Ultracode graph/receipt identities into the existing workflow journal; after a simulated controller crash, skip only independently corroborated effects and re-lease/rerun incomplete nodes with deterministic redacted JSON."
+    }
+  ],
+  "completeness_critic": {
+    "source_classes_checked": [
+      "public Claude Code plugin agents, workflow examples, advanced workflow guidance, changelog, license, releases, pull requests, and issue search",
+      "installed Claude Code version/help and one redacted local structural transcript aggregate as black-box behavioral evidence",
+      "LangGraph implementation, tests, history, releases, license, and checkpoint/recovery seams",
+      "A2A canonical protobuf, specification, lifecycle topics, stable release, Python SDK behavior, official samples, proposals, license, and public tracker",
+      "current fak Ultracode plan, task manager, message bus, effect successor, workflow resume, benchmark, self-query, selfcheck, and live status",
+      "dedupe issues #5964, #5970, #5973, #8156, #8168, #8334, #8337, #8404, plus #2444 and #8488"
+    ],
+    "unavailable": [
+      "Claude Code proprietary runtime source and internal design materials",
+      "private provider telemetry beyond the redacted local structural aggregate",
+      "nonpublic A2A or LangGraph design work"
+    ],
+    "skipped": [
+      "No decompilation, binary extraction, transcript-body publication, or private path/account/host inspection was used.",
+      "Other A2A language SDKs were not exhaustively read because the canonical schema/spec plus the official Python SDK cover the ownership/cancel/reconnect seams used here.",
+      "Unreleased A2A v1.1 generation/OCC and coherent-history proposals are WATCH evidence only and are not scored as shipped stable behavior."
+    ],
+    "verdict": "Complete for the issue envelope: five pinned provenance sources, two public alternatives, twelve required mechanisms, one redacted black-box trajectory, named dedupe owners, benchmark falsifiers, and one contract-ready uncovered implementation gap. Negative claims are bounded to the inspected public revisions and current fak baseline."
+  }
+}
