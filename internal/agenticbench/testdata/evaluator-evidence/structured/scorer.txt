@@ -1,0 +1,1 @@
+component-scorer/v3: weighted mean over the declared checks.

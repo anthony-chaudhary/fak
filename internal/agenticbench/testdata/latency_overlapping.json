@@ -1,0 +1,43 @@
+{
+  "schema": "fak.agentic-benchmark-result-packet.v1",
+  "issue": 871,
+  "packet": "C",
+  "status": "PASS_RESULT",
+  "result_claim_allowed": true,
+  "benchmark_native": true,
+  "same_task_ids": true,
+  "same_model": true,
+  "same_budget": true,
+  "official_grader": {"available": true},
+  "arms": [
+    {
+      "role": "raw",
+      "name": "raw-opus",
+      "latency": {
+        "total": {"duration": 140, "unit": "s", "source": "ale.lifecycle", "start": 0, "end": 140},
+        "queue_wait": {"duration": 10, "unit": "s", "source": "ale.queue_wait_s", "start": 0, "end": 10},
+        "agent_execution": {"duration": 100, "unit": "s", "source": "ale.execution_duration", "start": 9, "end": 109},
+        "evaluation": {"duration": 30, "unit": "s", "source": "ale.evaluation_duration", "start": 109, "end": 139}
+      }
+    },
+    {
+      "role": "fak",
+      "name": "fak-opus",
+      "latency": {
+        "total": {"duration": 140, "unit": "s", "source": "ale.lifecycle", "start": 0, "end": 140},
+        "queue_wait": {"duration": 10, "unit": "s", "source": "ale.queue_wait_s", "start": 0, "end": 10},
+        "agent_execution": {"duration": 100, "unit": "s", "source": "ale.execution_duration", "start": 10, "end": 110},
+        "evaluation": {"duration": 30, "unit": "s", "source": "ale.evaluation_duration", "start": 110, "end": 140}
+      }
+    }
+  ],
+  "metric_categories": {
+    "task_success": true,
+    "safe_success": true,
+    "cost_or_token_budget": true,
+    "latency": true,
+    "policy_events": true,
+    "evidence_completeness": true
+  },
+  "artifacts": ["experiments/agent-live/result-opus/compare.json"]
+}

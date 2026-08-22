@@ -26,15 +26,16 @@ var requiredMetricCategories = []string{
 }
 
 type ResultPacketStatus struct {
-	Path               string   `json:"path"`
-	Issue              int      `json:"issue"`
-	Packet             string   `json:"packet,omitempty"`
-	Status             string   `json:"status"`
-	ResultClaimAllowed bool     `json:"result_claim_allowed"`
-	Gate               string   `json:"gate"`
-	Detail             string   `json:"detail"`
-	Missing            []string `json:"missing,omitempty"`
-	Artifacts          []string `json:"artifacts,omitempty"`
+	Path               string             `json:"path"`
+	Issue              int                `json:"issue"`
+	Packet             string             `json:"packet,omitempty"`
+	Status             string             `json:"status"`
+	ResultClaimAllowed bool               `json:"result_claim_allowed"`
+	Gate               string             `json:"gate"`
+	Detail             string             `json:"detail"`
+	Missing            []string           `json:"missing,omitempty"`
+	Artifacts          []string           `json:"artifacts,omitempty"`
+	Latency            []ArmLatencyStatus `json:"latency_phases,omitempty"`
 }
 
 func scanResultPackets(root string) []ResultPacketStatus {
@@ -116,6 +117,9 @@ func checkResultPacket(root, rel string, doc map[string]any) ResultPacketStatus 
 			missing = append(missing, "metric_categories."+category+" must be true")
 		}
 	}
+	latency, latencyRefusals := checkLatencyArms(doc)
+	packet.Latency = latency
+	missing = append(missing, latencyRefusals...)
 	for _, artifact := range packet.Artifacts {
 		if !artifactExists(root, artifact) {
 			missing = append(missing, "artifact missing: "+artifact)
@@ -133,7 +137,7 @@ func checkResultPacket(root, rel string, doc map[string]any) ResultPacketStatus 
 		return packet
 	}
 	packet.Gate = "PASS_RESULT"
-	packet.Detail = fmt.Sprintf("result packet for #%d passes raw/fak external harness evidence gate", packet.Issue)
+	packet.Detail = fmt.Sprintf("result packet for #%d passes raw/fak external harness evidence gate with independently attributed latency phases", packet.Issue)
 	return packet
 }
 

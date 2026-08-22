@@ -1,0 +1,14 @@
+{
+  "components": [
+    {
+      "name": "spreadsheet_formula",
+      "score": 1,
+      "reason": "The required formula is present."
+    },
+    {
+      "name": "chart_title",
+      "score": 0.2,
+      "reason": "The chart exists but its title is incomplete."
+    }
+  ]
+}

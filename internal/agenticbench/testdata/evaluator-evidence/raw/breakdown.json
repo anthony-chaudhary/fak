@@ -1,0 +1,14 @@
+{
+  "checks": [
+    {
+      "name": "task_completion",
+      "score": 1,
+      "reason": "The requested artifact was created."
+    },
+    {
+      "name": "presentation_quality",
+      "score": 0.6,
+      "reason": "The artifact is usable but one label is ambiguous."
+    }
+  ]
+}

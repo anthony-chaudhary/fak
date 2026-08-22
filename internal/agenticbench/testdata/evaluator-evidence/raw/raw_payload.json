@@ -1,0 +1,11 @@
+{
+  "request_id": "judge-request-fixture-1",
+  "raw_response": {
+    "verdict": "partial_credit",
+    "score": 0.8,
+    "reasoning": [
+      "The requested artifact exists.",
+      "One label remains ambiguous."
+    ]
+  }
+}

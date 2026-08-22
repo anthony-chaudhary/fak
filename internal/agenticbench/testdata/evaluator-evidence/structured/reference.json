@@ -1,0 +1,4 @@
+{
+  "required_formula": "=SUM(B2:B5)",
+  "required_chart_title": "Quarterly revenue"
+}

@@ -1,0 +1,1 @@
+Inspect the candidate artifact and return a rubric-grounded score with reasons.

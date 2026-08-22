@@ -92,35 +92,11 @@ func TestBuildAcceptsWitnessedResultPacketButKeepsEpicPending(t *testing.T) {
 	} {
 		write(t, root, rel, `{"ok": true}`)
 	}
-	write(t, root, "experiments/agent-live/agentic-benchmark-result-packets/opus.json", `{
-  "schema": "fak.agentic-benchmark-result-packet.v1",
-  "issue": 871,
-  "packet": "C",
-  "status": "PASS_RESULT",
-  "result_claim_allowed": true,
-  "benchmark_native": true,
-  "same_task_ids": true,
-  "same_model": true,
-  "same_budget": true,
-  "official_grader": {"available": true},
-  "arms": [
-    {"role": "raw", "name": "raw-opus"},
-    {"role": "fak", "name": "fak-opus"}
-  ],
-  "metric_categories": {
-    "task_success": true,
-    "safe_success": true,
-    "cost_or_token_budget": true,
-    "latency": true,
-    "policy_events": true,
-    "evidence_completeness": true
-  },
-  "artifacts": [
-    "experiments/agent-live/result-opus/raw-report.json",
-    "experiments/agent-live/result-opus/fak-report.json",
-    "experiments/agent-live/result-opus/compare.json"
-  ]
-}`)
+	fixture, err := os.ReadFile("testdata/latency_good.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, "experiments/agent-live/agentic-benchmark-result-packets/opus.json", string(fixture))
 	report, err := Build(root, time.Unix(0, 0))
 	if err != nil {
 		t.Fatal(err)
