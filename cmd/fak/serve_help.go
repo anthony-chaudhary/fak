@@ -25,7 +25,7 @@ var serveHelpCategories = []serveHelpCategory{
 	{name: "policy", summary: "Policy, routing, plans, and invalidation.", flags: strings.Fields("policy policy-check plan-json vdso invalidation route-manifest route-accounts")},
 	{name: "session", summary: "Session identity, persistence, and spend controls.", flags: strings.Fields("session-id session-state session-registry budget-webhook budget-warn-fraction spend-cap spend-scope-trace")},
 	{name: "native", summary: "Owned agent loop, coding tools, and speculation.", flags: strings.Fields("native native-max-turns native-code-tools native-code-workspace native-speculate vdso-proxy-fill")},
-	{name: "observe", summary: "Notifications, metrics, debug stats, and dojo mode.", flags: strings.Fields("notify-native notify-webhook notify-slack debug-stats metrics-snapshot dojo")},
+	{name: "observe", summary: "Notifications, metrics, debug stats, and dojo mode.", flags: strings.Fields("notify-native notify-webhook notify-slack otlp-traces-endpoint debug-stats metrics-snapshot dojo")},
 	{name: "fleet", summary: "Fleet control-bus membership and identity.", flags: strings.Fields("fleet-bus fleet-bus-dir fleet-bus-id fleet-bus-interval")},
 }
 

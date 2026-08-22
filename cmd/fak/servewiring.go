@@ -70,6 +70,10 @@ type wiringRow struct {
 // regression. A "" Field marks a seam wired through a session.Table observer, not Config;
 // the serve.go-sets check is skipped for those (tracked by Flag presence instead).
 var servewiringData = []wiringRow{
+	{"otlp", "--otlp-traces-endpoint", "OTLPEndpoint", verdictOffByDefault, "internal/gateway/gateway.go:2081", "enables bounded asynchronous OTLP/HTTP JSON trace export; empty disables it"},
+	{"orgaudit", "(organization audit config)", "OrgAudit", verdictOffByDefault, "internal/gateway/gateway.go:2085", "enables enrolled privacy-screened adjudication receipts; zero config disables it"},
+	{"trajctlmetrics", "(trajectory metrics observer)", "TrajctlMetrics", verdictOffByDefault, "internal/gateway/metrics.go", "projects bounded objective health onto /metrics when configured"},
+	{"vcachecalibration", "(provider calibration)", "VCacheCalibration", verdictOffByDefault, "internal/gateway/gateway.go:2145", "applies fresh measured provider cacheability floors when available"},
 	{"inkernelchat", "--gguf / --tokenizer", "InKernelModel", verdictWired, "internal/gateway/gateway.go:861", "with model+tokenizer and no --base-url, /v1/chat/completions and /v1/messages serve the in-kernel model"},
 	{"replica", "--replica-base-url", "ReplicaBaseURLs", verdictWired, "internal/gateway/gateway.go:715", "2+ endpoints -> ReplicaRouter round-robin"},
 	{"vdso", "--vdso / --invalidation", "VDSO", verdictWired, "internal/kernel/kernel.go:348", "dedup fast path + tier-2 invalidation granularity"},

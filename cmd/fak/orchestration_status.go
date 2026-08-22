@@ -65,6 +65,10 @@ type orchestrationRunStatus struct {
 func runOrchestrationStatus(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("orchestration status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: fak orchestration status [--session ID] [--home DIR] [--json]")
+		fs.PrintDefaults()
+	}
 	home := fs.String("home", "", "state root (default: current directory)")
 	sessionID := fs.String("session", "", "specific launch session id (default: newest)")
 	asJSON := fs.Bool("json", false, "emit versioned machine-readable status")
@@ -137,7 +141,7 @@ func newestOrchestrationReceipt(home, sessionID string) (codexOrchestrationLaunc
 			return r, nil
 		}
 	}
-	return codexOrchestrationLaunchReceipt{}, fmt.Errorf("no launch receipts under %s", filepath.Join(home, "fak-orchestration-launches"))
+	return codexOrchestrationLaunchReceipt{}, fmt.Errorf("no launch receipts under %s; pass --session with a session id from a completed launch", filepath.Join(home, "fak-orchestration-launches"))
 }
 
 func inspectOrchestrationRun(home string, receipt codexOrchestrationLaunchReceipt) orchestrationRunStatus {
