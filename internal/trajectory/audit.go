@@ -250,7 +250,7 @@ func auditSource(source AuditSource, opts AuditOptions) (AuditDenominatorRow, []
 	case AuditSourceClaude:
 		denominator.TokenSemantics = "message usage buckets are disjoint; duplicate message ids are counted once"
 	case AuditSourceCodex:
-		denominator.TokenSemantics = "final cumulative input includes cached/cache-write subsets; fresh input is exact subtraction"
+		denominator.TokenSemantics = "final cumulative input per segment; only a versioned task_started boundary may begin a segment after a decrease; cached/cache-write subsets remain exact subtraction"
 	default:
 		return denominator, nil, nil, nil, fmt.Errorf("trajectory audit: source %q has no parser", source.Name)
 	}

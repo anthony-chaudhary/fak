@@ -35,6 +35,9 @@ type auditParseState struct {
 	hookDurations   []int64
 	claudeUsageByID map[string]AuditTokens
 	codexRawTotal   *auditCodexRawTokens
+	codexCompleted  AuditTokens
+	codexVersion    string
+	codexResetArmed bool
 	usageSeen       int
 	usageExact      int
 	usageDuplicates int
@@ -132,7 +135,7 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 	}
 	state.row.HookP95MS = auditPercentile(state.hookDurations, 95)
 	if source == AuditSourceCodex && state.codexRawTotal != nil {
-		state.row.UsageRecords = 1
+		state.row.UsageRecords++
 		denominator.UsageRecordsApplied++
 	}
 	return state.row, refusals, append([]int64(nil), state.hookDurations...), nil
@@ -269,6 +272,9 @@ func parseCodexAuditRecord(record map[string]any, line int, rel string, state *a
 	payload, _ := record["payload"].(map[string]any)
 	switch recordType {
 	case "session_meta":
+		if version, ok := payload["cli_version"].(string); ok {
+			state.codexVersion = strings.TrimSpace(version)
+		}
 		for _, key := range []string{"id", "session_id"} {
 			if id, ok := payload[key].(string); ok && strings.TrimSpace(id) != "" {
 				state.row.TranscriptID = id
@@ -280,7 +286,11 @@ func parseCodexAuditRecord(record map[string]any, line int, rel string, state *a
 			state.models[model] = struct{}{}
 		}
 	case "event_msg":
-		if payload["type"] == "token_count" {
+		switch payload["type"] {
+		case "task_started":
+			turnID, _ := payload["turn_id"].(string)
+			state.codexResetArmed = state.codexRawTotal != nil && state.codexVersion != "" && strings.TrimSpace(turnID) != ""
+		case "token_count":
 			parseCodexAuditUsage(payload, line, rel, state, refusals)
 		}
 	case "response_item":
@@ -331,20 +341,30 @@ func parseCodexAuditUsage(payload map[string]any, line int, rel string, state *a
 	}
 	raw := auditCodexRawTokens{Input: input, Output: output, CacheRead: cacheRead, CacheWrite: cacheWrite}
 	if state.codexRawTotal != nil && !raw.atLeast(*state.codexRawTotal) {
-		*refusals = append(*refusals, newAuditRefusal(AuditSourceCodex, rel, line, "codex_total_usage_decreased", "cumulative total_token_usage decreased"))
-		return
+		if !state.codexResetArmed {
+			*refusals = append(*refusals, newAuditRefusal(AuditSourceCodex, rel, line, "codex_total_usage_decreased", "cumulative total_token_usage decreased without a versioned task_started boundary"))
+			return
+		}
+		state.codexCompleted.add(state.codexRawTotal.normalized())
+		state.row.UsageRecords++
 	}
+	state.codexResetArmed = false
 	state.codexRawTotal = &raw
 	state.usageExact++
-	state.row.Tokens = AuditTokens{
-		InputTokens: input - cacheRead - cacheWrite, OutputTokens: output,
-		CacheReadTokens: cacheRead, CacheCreateTokens: cacheWrite,
-	}
+	state.row.Tokens = state.codexCompleted
+	state.row.Tokens.add(raw.normalized())
 }
 
 func (t auditCodexRawTokens) atLeast(previous auditCodexRawTokens) bool {
 	return t.Input >= previous.Input && t.Output >= previous.Output &&
 		t.CacheRead >= previous.CacheRead && t.CacheWrite >= previous.CacheWrite
+}
+
+func (t auditCodexRawTokens) normalized() AuditTokens {
+	return AuditTokens{
+		InputTokens: t.Input - t.CacheRead - t.CacheWrite, OutputTokens: t.Output,
+		CacheReadTokens: t.CacheRead, CacheCreateTokens: t.CacheWrite,
+	}
 }
 
 func parseCodexResponseItem(payload map[string]any, line int, rel string, state *auditParseState, refusals *[]AuditRefusalRow) {

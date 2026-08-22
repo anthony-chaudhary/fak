@@ -1,0 +1,4 @@
+{"timestamp":"2026-08-21T00:01:00Z","type":"session_meta","payload":{"id":"codex-unversioned-reset-session","model_provider":"openai"}}
+{"timestamp":"2026-08-21T00:01:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":2,"cached_input_tokens":3,"cache_write_input_tokens":1,"total_tokens":12}}}}
+{"timestamp":"2026-08-21T00:01:02Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-b","model_context_window":258400}}
+{"timestamp":"2026-08-21T00:01:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":4,"output_tokens":1,"cached_input_tokens":1,"cache_write_input_tokens":0,"total_tokens":5}}}}

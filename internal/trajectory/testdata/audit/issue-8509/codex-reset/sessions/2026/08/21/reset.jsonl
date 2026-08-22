@@ -1,0 +1,8 @@
+{"timestamp":"2026-08-21T00:01:00Z","type":"session_meta","payload":{"id":"codex-reset-session","cli_version":"0.148.0","model_provider":"openai"}}
+{"timestamp":"2026-08-21T00:01:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-a","model_context_window":258400}}
+{"timestamp":"2026-08-21T00:01:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":2,"cached_input_tokens":3,"cache_write_input_tokens":1,"total_tokens":12}}}}
+{"timestamp":"2026-08-21T00:01:03Z","type":"compacted","payload":{"first_window_id":"window-a","previous_window_id":"window-a","window_id":"window-b","window_number":2}}
+{"timestamp":"2026-08-21T00:01:04Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":20,"output_tokens":4,"cached_input_tokens":6,"cache_write_input_tokens":2,"total_tokens":24}}}}
+{"timestamp":"2026-08-21T00:01:05Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-b","model_context_window":258400}}
+{"timestamp":"2026-08-21T00:01:06Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":4,"output_tokens":1,"cached_input_tokens":1,"cache_write_input_tokens":0,"total_tokens":5}}}}
+{"timestamp":"2026-08-21T00:01:07Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":8,"output_tokens":3,"cached_input_tokens":2,"cache_write_input_tokens":0,"total_tokens":11}}}}

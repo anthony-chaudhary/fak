@@ -230,6 +230,49 @@ func TestAuditEdgeMatrix(t *testing.T) {
 	}
 }
 
+func TestAuditCodexCumulativeUsageResetAtTaskBoundary(t *testing.T) {
+	root := filepath.Join("testdata", "audit", "issue-8509", "codex-reset", "sessions")
+	result, err := RunAudit(AuditOptions{Sources: []AuditSource{{Name: AuditSourceCodex, Root: root, RootLabel: "codex/sessions"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Refusals) != 0 {
+		t.Fatalf("refusals = %+v, want none", result.Refusals)
+	}
+	if len(result.Transcripts) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(result.Transcripts))
+	}
+	wantTokens := AuditTokens{InputTokens: 18, OutputTokens: 7, CacheReadTokens: 8, CacheCreateTokens: 2}
+	if got := result.Transcripts[0]; got.Tokens != wantTokens || got.UsageRecords != 2 {
+		t.Fatalf("Codex reset accounting = tokens:%+v applied:%d, want tokens:%+v applied:2", got.Tokens, got.UsageRecords, wantTokens)
+	}
+	if got := result.Denominators[0]; got.UsageRecordsSeen != 4 || got.UsageRecordsExact != 4 || got.UsageRecordsApplied != 2 || got.TokenSemantics != "final cumulative input per segment; only a versioned task_started boundary may begin a segment after a decrease; cached/cache-write subsets remain exact subtraction" {
+		t.Fatalf("Codex reset denominator = %+v", got)
+	}
+}
+
+func TestAuditCodexResetBoundaryFailsClosed(t *testing.T) {
+	root := filepath.Join("testdata", "audit", "issue-8509")
+	for _, test := range []struct {
+		name string
+		dir  string
+	}{
+		{name: "unversioned task boundary", dir: "codex-unversioned-reset"},
+		{name: "task boundary without turn id", dir: "codex-untyped-reset"},
+		{name: "consumed task boundary", dir: "codex-consumed-boundary"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := RunAudit(AuditOptions{Sources: []AuditSource{{Name: AuditSourceCodex, Root: filepath.Join(root, test.dir, "sessions"), RootLabel: "codex/sessions"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Refusals) != 1 || result.Refusals[0].Code != "codex_total_usage_decreased" || !strings.Contains(result.Refusals[0].Detail, "without a versioned task_started boundary") {
+				t.Fatalf("refusals = %+v, want one unexplained-decrease refusal", result.Refusals)
+			}
+		})
+	}
+}
+
 func TestAuditRefusalMatrix(t *testing.T) {
 	root := filepath.Join("testdata", "audit", "issue-8493", "refusals")
 	tests := []struct {
