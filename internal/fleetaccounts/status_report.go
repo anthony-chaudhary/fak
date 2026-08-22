@@ -396,7 +396,7 @@ func providerKey(raw string) string {
 		return "nvidia-nim"
 	case "gemini", "gcp", "vertex":
 		return "google"
-	case "gpt":
+	case "codex", "gpt":
 		return "openai"
 	case "glm", "z-ai":
 		return "zai"
