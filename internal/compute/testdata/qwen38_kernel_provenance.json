@@ -1,0 +1,86 @@
+{
+  "schema": "fak.kernel-provenance/1",
+  "upstreams": [
+    {
+      "id": "llama.cpp",
+      "repository": "https://github.com/ggml-org/llama.cpp",
+      "sha": "0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd",
+      "license": "MIT",
+      "license_file": "LICENSE",
+      "copyright_notice": "Copyright (c) 2023-2026 The ggml authors",
+      "notice_file": "LICENSE",
+      "notice_rule": "Retain the copyright and permission notice in copies or substantial portions."
+    },
+    {
+      "id": "mlx-lm",
+      "repository": "https://github.com/ml-explore/mlx-lm",
+      "sha": "d5b6c8c49774ed7fd40c97f964b1e7f10e2f0ccb",
+      "license": "MIT",
+      "license_file": "LICENSE",
+      "copyright_notice": "Copyright © 2023 Apple Inc.",
+      "notice_file": "LICENSE",
+      "notice_rule": "Retain the copyright and permission notice in copies or substantial portions."
+    },
+    {
+      "id": "exllamav2",
+      "repository": "https://github.com/turboderp/exllamav2",
+      "sha": "7dc12af3a81f34ac3f27cd7602ed539b638933ca",
+      "license": "MIT",
+      "license_file": "LICENSE",
+      "copyright_notice": "No copyright line is present in LICENSE; retain the complete LICENSE and any source-file copyright headers.",
+      "notice_file": "LICENSE",
+      "notice_rule": "Retain the permission notice in copies or substantial portions."
+    },
+    {
+      "id": "vllm",
+      "repository": "https://github.com/vllm-project/vllm",
+      "sha": "e85d1b69cf2f1c6101cfc7c799bb0c457cacc4b3",
+      "license": "Apache-2.0",
+      "license_file": "LICENSE",
+      "copyright_notice": "Retain copyright and attribution headers from each copied or adapted source file.",
+      "notice_file": "NONE",
+      "notice_rule": "No root NOTICE exists at the pinned revision; retain LICENSE, source headers, and changed-file notices required by Apache-2.0."
+    },
+    {
+      "id": "sglang",
+      "repository": "https://github.com/sgl-project/sglang",
+      "sha": "e7a37c85505ff0a4ba643574704ea6de36c631c5",
+      "license": "Apache-2.0",
+      "license_file": "LICENSE",
+      "copyright_notice": "Retain copyright and attribution headers from each copied or adapted source file.",
+      "notice_file": "NONE",
+      "notice_rule": "No root NOTICE exists at the pinned revision; retain LICENSE, source headers, and changed-file notices required by Apache-2.0."
+    },
+    {
+      "id": "tensorrt-llm",
+      "repository": "https://github.com/NVIDIA/TensorRT-LLM",
+      "sha": "b024d1dbd8fa80234641b68f7350be31e4e29d8b",
+      "license": "Apache-2.0",
+      "license_file": "LICENSE",
+      "copyright_notice": "Retain copyright and attribution headers from each copied or adapted source file.",
+      "notice_file": "NONE",
+      "notice_rule": "No root NOTICE exists at the pinned revision; retain LICENSE, source headers, and changed-file notices required by Apache-2.0."
+    },
+    {
+      "id": "mlc-llm",
+      "repository": "https://github.com/mlc-ai/mlc-llm",
+      "sha": "9fa644f54b04983adea4d0168f49fc6af4a893ba",
+      "license": "Apache-2.0",
+      "license_file": "LICENSE",
+      "copyright_notice": "Retain copyright and attribution headers from each copied or adapted source file.",
+      "notice_file": "NOTICE",
+      "notice_rule": "Retain LICENSE, NOTICE, source headers, and changed-file notices required by Apache-2.0."
+    }
+  ],
+  "kernels": [
+    {
+      "id": "qwen38-cuda-gdn-sequence",
+      "upstream": "llama.cpp",
+      "source_path": "ggml/src/ggml-cuda/gated_delta_net.cu",
+      "destination": "internal/compute/cuda_qwen35_gdn_sequence.go",
+      "decision": "ADAPT",
+      "attribution": "Sequence algorithm adapted from llama.cpp gated_delta_net.cu at\n// 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).",
+      "parity_witness": "internal/compute/cuda_qwen35_gdn_sequence_test.go"
+    }
+  ]
+}
