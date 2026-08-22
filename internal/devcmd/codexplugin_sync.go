@@ -58,6 +58,14 @@ type codexPluginSyncOps struct {
 }
 
 func RunCodexPluginSync(stdout, stderr io.Writer, args []string) int {
+	if len(args) > 0 {
+		switch args[0] {
+		case "marketplace-maintenance":
+			return runCodexMarketplaceMaintenance(stdout, stderr, args[1:])
+		case "marketplace-upgrade":
+			return runCodexMarketplaceUpgrade(stdout, stderr, args[1:])
+		}
+	}
 	fs := flag.NewFlagSet("codex-plugin-sync", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	home := fs.String("codex-home", os.Getenv("CODEX_HOME"), "active Codex home")

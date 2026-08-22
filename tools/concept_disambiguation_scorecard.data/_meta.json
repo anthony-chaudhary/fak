@@ -11903,6 +11903,26 @@
           "category": "incidental",
           "reason": "defensive copy helper; not a distinct plan concept",
           "token": "clonePlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal filesystem enumeration helper; it does not create or represent an execution plan.",
+          "token": "scanCodexMarketplaceCandidates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal candidate validation helper; it observes one directory and does not create or represent an execution plan.",
+          "token": "inspectCodexMarketplaceCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal recovery helper that restores one exact quarantined directory; it does not create or represent an execution plan.",
+          "token": "rollbackCodexMarketplaceCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Boolean controlling whether a candidate-local receipt is persisted; it is not a planning or candidate-selection concept.",
+          "token": "writeCandidate"
         }
       ],
       "exclude": [
@@ -12017,6 +12037,7 @@
         "inKernelPlannerEPCoordinated",
         "indexPlanSteps",
         "indexedPlanStep",
+        "inspectCodexMarketplaceCandidate",
         "listPlan",
         "mergePlanDigest",
         "motifDetectPlanFanoutReconcile",
@@ -12043,10 +12064,12 @@
         "register_bench_plan_doc",
         "relationCandidates",
         "reportFromSessions",
+        "rollbackCodexMarketplaceCandidate",
         "runAblatePlan",
         "runContinuitySyncPlan",
         "rwMergeSessiondiagCandidates",
         "rwSessiondiagCandidates",
+        "scanCodexMarketplaceCandidates",
         "seedCandidate",
         "seen_candidates",
         "stablePlanID",
@@ -12054,7 +12077,8 @@
         "watchdogCandidates",
         "watchdogExclusionReason",
         "wipLandOptions",
-        "wipLandWith"
+        "wipLandWith",
+        "writeCandidate"
       ],
       "known_tokens": [],
       "min_files": 2,
