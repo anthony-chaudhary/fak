@@ -30,6 +30,29 @@ import (
 // breaks an existing positional call site.
 type RunOption func(*runConfig)
 
+// ModelRequestBoundary is the exact logical request handed to one Planner call.
+// Messages is the single context-planned slice; Injected identifies directives
+// spliced immediately before planning that survived into this boundary.
+type ModelRequestBoundary struct {
+	Model     string
+	Turn      int
+	Stream    bool
+	MaxTokens int
+	Messages  []Message
+	Tools     []ToolDef
+	Injected  []Message
+}
+
+// ModelRequestObserver persists or audits one model boundary. Returning an error
+// refuses the Planner call so the wire cannot advance without its receipt.
+type ModelRequestObserver func(ModelRequestBoundary) error
+
+// WithModelRequestObserver observes each exact model-boundary request. A nil
+// observer is a literal no-op and preserves the historical loop.
+func WithModelRequestObserver(observer ModelRequestObserver) RunOption {
+	return func(c *runConfig) { c.modelRequestObserver = observer }
+}
+
 // WithFinalGate requires an independently checked post-condition before a model
 // final answer may end the owned loop. A failed check returns the fact to the model
 // in-band and the next iteration re-runs the normal session/budget gate first.
@@ -81,6 +104,9 @@ type runConfig struct {
 	// => the historical fixed seed (system prompt + task, ToolCatalog()).
 	conversation []Message
 	toolCatalog  []ToolDef
+	// modelRequestObserver runs synchronously after directive splicing and the
+	// one context-planning pass, immediately before the Planner call.
+	modelRequestObserver ModelRequestObserver
 }
 
 // ToolTerminalWakeKind is the typed reason a background-tool terminal

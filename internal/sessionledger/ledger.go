@@ -35,6 +35,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/anthony-chaudhary/fak/internal/blobfs"
 )
 
 // Bounds. Exported so a caller (and the tests) can reason about them.
@@ -71,11 +73,13 @@ type record struct {
 }
 
 type Ledger struct {
-	mu    sync.RWMutex
-	path  string
-	heads map[string]Hash
-	nodes map[Hash]Entry
-	order []Hash // insertion order, for oldest-first eviction
+	mu          sync.RWMutex
+	path        string
+	heads       map[string]Hash
+	nodes       map[Hash]Entry
+	order       []Hash // insertion order, for oldest-first eviction
+	objectStore *blobfs.Store
+	objects     map[string][]byte // Memory() model-request CAS
 }
 
 // LogName is the append-only log's filename within a ledger directory.
@@ -87,10 +91,21 @@ const LogName = "ledger.jsonl"
 const legacyName = "ledger.json"
 
 func Open(dir string) (*Ledger, error) {
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, fmt.Errorf("sessionledger: create directory: %w", err)
+	}
+	_ = os.Chmod(dir, 0700)
+	objectDir := filepath.Join(dir, modelRequestObjectDir)
+	objects, err := blobfs.NewWithBudget(objectDir, 0)
+	if err != nil {
+		return nil, fmt.Errorf("sessionledger: open model-request objects: %w", err)
+	}
+	_ = os.Chmod(objectDir, 0700)
 	l := &Ledger{
-		path:  filepath.Join(dir, LogName),
-		heads: map[string]Hash{},
-		nodes: map[Hash]Entry{},
+		path:        filepath.Join(dir, LogName),
+		heads:       map[string]Hash{},
+		nodes:       map[Hash]Entry{},
+		objectStore: objects,
 	}
 	retireLegacy(dir)
 	f, err := os.Open(l.path)
@@ -213,7 +228,9 @@ func OpenDefault() (*Ledger, error) {
 	return defaultLedger, defaultErr
 }
 
-func Memory() *Ledger { return &Ledger{heads: map[string]Hash{}, nodes: map[Hash]Entry{}} }
+func Memory() *Ledger {
+	return &Ledger{heads: map[string]Hash{}, nodes: map[Hash]Entry{}, objects: map[string][]byte{}}
+}
 
 func digest(parent Hash, kind string, content []byte) Hash {
 	h := sha256.New()

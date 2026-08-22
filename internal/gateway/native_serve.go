@@ -26,6 +26,7 @@ package gateway
 // declaration they cannot honor with a typed 400 before the loop runs.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -37,8 +38,12 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/codetools"
 	"github.com/anthony-chaudhary/fak/internal/grammar"
+	"github.com/anthony-chaudhary/fak/internal/promptaudit"
+	"github.com/anthony-chaudhary/fak/internal/sessionledger"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
+
+var openNativeModelRequestLedger = sessionledger.OpenDefault
 
 // nativeMaxTurnsOr resolves the configured native loop turn cap, defaulting a
 // non-positive value to DefaultNativeMaxTurns.
@@ -417,7 +422,7 @@ func ensureGrammarRung() {
 // caller: the registry entry is what a control-plane verb looks the live run up by, so
 // leaving it behind would let a later verb address a finished run.
 func (s *Server) nativeRunOptions(ctx context.Context, reqTrace string) ([]agent.RunOption, func()) {
-	opts := make([]agent.RunOption, 0, 4)
+	opts := make([]agent.RunOption, 0, 5)
 	// #2403 write half: open this run's mid-flight mailbox under the request trace — the
 	// same id the typed progress events carry — so POST /v1/fak/session/{trace}/{interrupt|
 	// drop-pending-call|set-budget} reaches THIS live run and lands at its next clean turn
@@ -427,6 +432,12 @@ func (s *Server) nativeRunOptions(ctx context.Context, reqTrace string) ([]agent
 	// accepts as the historical (mailbox-free) loop.
 	mfOpt, release := s.midflightRunOption(reqTrace)
 	opts = append(opts, mfOpt)
+	// The receipt observes the exact planned message slice immediately before the
+	// Planner call. Persistence is synchronous and fail-closed: a native request
+	// never reaches the model when its durable reconstruction witness did not land.
+	opts = append(opts, agent.WithModelRequestObserver(func(boundary agent.ModelRequestBoundary) error {
+		return appendNativeModelRequest(reqTrace, boundary)
+	}))
 	if s.decideSession != nil {
 		opts = append(opts, agent.WithSessionGate(agent.SessionGate{
 			Decide: func(trace string) (int, bool, int, string) {
@@ -476,6 +487,80 @@ func (s *Server) nativeRunOptions(ctx context.Context, reqTrace string) ([]agent
 		agent.WithRoutePrincipal(principalFromContext(ctx)),
 	)
 	return opts, release
+}
+
+func appendNativeModelRequest(trace string, boundary agent.ModelRequestBoundary) error {
+	ledger, err := openNativeModelRequestLedger()
+	if err != nil {
+		return fmt.Errorf("open session ledger: %w", err)
+	}
+	segments, err := nativeModelRequestSegments(boundary.Messages, boundary.Injected)
+	if err != nil {
+		return err
+	}
+	tools, err := json.Marshal(boundary.Tools)
+	if err != nil {
+		return fmt.Errorf("marshal model request tools: %w", err)
+	}
+	_, err = ledger.AppendModelRequest(trace, sessionledger.ModelRequest{
+		Identity: sessionledger.ModelRequestIdentity{
+			Model: boundary.Model, Turn: boundary.Turn, Stream: boundary.Stream,
+			MaxTokens: boundary.MaxTokens,
+		},
+		Segments: segments,
+		Tools:    tools,
+	})
+	return err
+}
+
+func nativeModelRequestSegments(messages, injected []agent.Message) ([]sessionledger.ModelRequestSegment, error) {
+	injectedJSON := make([][]byte, len(injected))
+	for i, message := range injected {
+		raw, err := json.Marshal(message)
+		if err != nil {
+			return nil, fmt.Errorf("marshal injected model request segment %d: %w", i, err)
+		}
+		injectedJSON[i] = raw
+	}
+	usedInjected := make([]bool, len(injectedJSON))
+	segments := make([]sessionledger.ModelRequestSegment, 0, len(messages))
+	for i, message := range messages {
+		raw, err := json.Marshal(message)
+		if err != nil {
+			return nil, fmt.Errorf("marshal model request segment %d: %w", i, err)
+		}
+		kind, source := nativeModelRequestAttribution(i, message)
+		for j, candidate := range injectedJSON {
+			if !usedInjected[j] && bytes.Equal(raw, candidate) {
+				kind = "injected_directive"
+				source = promptaudit.SourceUserConfig
+				usedInjected[j] = true
+				break
+			}
+		}
+		segments = append(segments, sessionledger.ModelRequestSegment{
+			Kind: kind, Source: source, Content: raw,
+		})
+	}
+	return segments, nil
+}
+
+func nativeModelRequestAttribution(index int, message agent.Message) (string, promptaudit.Source) {
+	switch message.Role {
+	case agent.RoleSystem:
+		if index == 0 {
+			return "system", promptaudit.SourceFakPolicy
+		}
+		return "system", promptaudit.SourceUserConfig
+	case agent.RoleUser:
+		return "user_input", promptaudit.SourceUserConfig
+	case agent.RoleAssistant:
+		return "assistant", promptaudit.SourceUnknown
+	case agent.RoleTool:
+		return "tool_result", promptaudit.SourceIntegration
+	default:
+		return "message", promptaudit.SourceUnknown
+	}
 }
 
 func sendAnthropicTerminalWithNativeArm(send func(string, any), stop string, usage anthropicUsage, arm *agent.ArmMetrics) {

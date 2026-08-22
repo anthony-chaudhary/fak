@@ -364,7 +364,7 @@ func priceTimeSaved(live, bothCompleted bool, turnsSaved, fakTurns int, fakElaps
 // historical fixed-maxTurns loop.
 func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int, log *[]traceEvent, opts ...RunOption) (ArmMetrics, error) {
 	p = bindPendingCheckpoint(p, resolveRunConfig(opts))
-	return runArm(ctx, task, fak, maxTurns, log, func(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
+	return runArm(ctx, task, fak, maxTurns, log, p.Model(), false, func(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
 		return p.Complete(ctx, messages, tools, opts...)
 	}, opts...)
 }
@@ -379,14 +379,14 @@ func RunArmStream(ctx context.Context, p Planner, task string, fak bool, maxTurn
 	if !ok || !sp.StreamingSupported() {
 		return ArmMetrics{}, ErrStreamingUnsupported
 	}
-	return runArm(ctx, task, fak, maxTurns, log, func(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
+	return runArm(ctx, task, fak, maxTurns, log, p.Model(), true, func(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
 		return sp.CompleteStream(ctx, sink, messages, tools, opts...)
 	}, opts...)
 }
 
 type armCompleteFunc func(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error)
 
-func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]traceEvent, complete armCompleteFunc, opts ...RunOption) (ArmMetrics, error) {
+func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]traceEvent, model string, stream bool, complete armCompleteFunc, opts ...RunOption) (ArmMetrics, error) {
 	cfg := resolveRunConfig(opts)
 	// Mid-flight mailbox (#5158): seal the verb mailbox on EVERY return path once the arm
 	// finishes, so a finished run refuses further mid-flight verbs with the closed
@@ -545,9 +545,25 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 		// context-spike advisory (#2197), folded into THIS turn's input in that order.
 		// Every drain is a no-op without a wired trace/table/gate, so the historical
 		// loop is byte-for-byte unchanged.
+		beforeDirectives := len(messages)
 		messages = spliceTurnDirectives(cfg, messages)
+		injected := append([]Message(nil), messages[beforeDirectives:]...)
+		// Render the model-facing prompt exactly once. SessionPlanner.RenderTurn is
+		// stateful, so a second call for evidence could itself change the request.
+		planned := cfg.promptMessages(ctx, messages)
+		if cfg.modelRequestObserver != nil {
+			boundary := ModelRequestBoundary{
+				Model: model, Turn: turn + 1, Stream: stream, MaxTokens: perTurnCap,
+				Messages: append([]Message(nil), planned...),
+				Tools:    append([]ToolDef(nil), tools...),
+				Injected: injected,
+			}
+			if err := cfg.modelRequestObserver(boundary); err != nil {
+				return m, fmt.Errorf("%s arm turn %d model request receipt: %w", m.Arm, turn+1, err)
+			}
+		}
 
-		comp, err := complete(ctx, cfg.promptMessages(ctx, messages), tools, sampleOptsFor(perTurnCap)...)
+		comp, err := complete(ctx, planned, tools, sampleOptsFor(perTurnCap)...)
 		if err != nil {
 			// A completion error caused by this session's terminate (#2758) — the watcher
 			// cancelled the in-flight call's context — is the op WORKING, not a failure:
