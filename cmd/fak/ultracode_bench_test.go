@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/orchestration"
 	"github.com/anthony-chaudhary/fak/internal/ultracodebench"
 )
 
@@ -85,7 +86,7 @@ func TestUltracodeBenchAbstainsOnUnacknowledgedTreatment(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.Verdict != "ABSTAIN" || report.Attribution != ultracodebench.AttributionUnverified || len(report.Reasons) != 1 || report.Reasons[0] != ultracodebench.AttributionUnverified {
+	if report.Verdict != "ABSTAIN" || report.Attribution != ultracodebench.AttributionUnverified || len(report.Reasons) != 2 || report.Reasons[0] != ultracodebench.AttributionUnverified || report.Reasons[1] != orchestration.UltracodeBudgetReasonIncomplete {
 		t.Fatalf("report=%+v", report)
 	}
 }

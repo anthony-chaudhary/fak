@@ -24,7 +24,7 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 		return runOrchestrationStatus(stdout, stderr, args[1:])
 	}
 	if len(args) == 0 || args[0] != "plan" {
-		fmt.Fprintln(stderr, "usage: fak orchestration plan --profile off|auto|ultracode (--task FIXTURE | --task-text TEXT) [--json] [--strict] [--launch] [--selfcheck]")
+		fmt.Fprintln(stderr, "usage: fak orchestration plan --profile off|auto|ultracode (--task FIXTURE | --task-text TEXT) [--json] [--strict] [--launch] [--max-wall DURATION] [--selfcheck]")
 		return 2
 	}
 	fs := flag.NewFlagSet("orchestration plan", flag.ContinueOnError)
@@ -40,6 +40,7 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	capset := fs.String("capabilities", "native", "harness fixture: native or unsupported")
 	maxWorkers := orchestrationOptionalInt{}
 	maxTokens := orchestrationOptionalInt64{}
+	maxWall := fs.Duration("max-wall", defaultUltracodeWallBudget, "one parent wall deadline shared by launch staggering and all workers")
 	attended := orchestrationOptionalBool{}
 	fs.Var(&maxWorkers, "max-workers", "operator worker cap")
 	fs.Var(&maxTokens, "max-tokens", "operator token cap")
@@ -49,6 +50,10 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	}
 	if (*taskPath == "") == (strings.TrimSpace(*taskText) == "") || fs.NArg() != 0 || (*launch && *selfcheck) {
 		fmt.Fprintln(stderr, "fak orchestration plan: exactly one of --task or --task-text is required, positional arguments are not accepted, and --launch conflicts with --selfcheck")
+		return 2
+	}
+	if *launch && *maxWall <= 0 {
+		fmt.Fprintln(stderr, "fak orchestration plan: --launch requires a positive --max-wall parent envelope")
 		return 2
 	}
 	var task orchestration.TaskSpec
@@ -145,7 +150,7 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 		if *capset == "unsupported" {
 			capabilityProfile = "unsupported"
 		}
-		launched, launchErr := launchCodexOrchestrationWorkers(*codexHome, sessionID, *profile, capabilityProfile, *taskText, resolved)
+		launched, launchErr := launchCodexOrchestrationWorkers(*codexHome, sessionID, *profile, capabilityProfile, *taskText, resolved, *maxWall)
 		if launchErr != nil {
 			fmt.Fprintf(stderr, "fak orchestration plan: %v\n", launchErr)
 			return 1

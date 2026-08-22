@@ -15,7 +15,8 @@ const ultracodeBenchUsage = `usage: fak ultracode bench --pair PAIR.json [--json
 Evaluate identical single-agent and ultracode-fleet runs as one paired artifact.
 The pair's cost_comparison requests billed_tokens, spend_usd, or both. The verdict is
 GAIN only when witnessed, equal-quality outcomes improve wall efficiency and every
-requested provider-billing axis; unavailable, noisy, or unequal pairs ABSTAIN.`
+requested provider-billing axis; unavailable, noisy, or unequal pairs ABSTAIN.
+Fleet pairs without a complete provider-authoritative aggregate budget receipt ABSTAIN.`
 
 func runUltracodeBench(stdout, stderr io.Writer, args []string) int {
 	var pairPath string
@@ -46,8 +47,10 @@ func runUltracodeBench(stdout, stderr io.Writer, args []string) int {
 		return 2
 	}
 	var pair ultracodebench.Pair
+	var budgetReceipt ultracodeBenchBudgetReceipt
 	if selfcheck {
 		pair = ultracodeBenchSelfcheckPair()
+		budgetReceipt = ultracodeBenchSelfcheckBudget(pair)
 	} else {
 		b, err := os.ReadFile(pairPath)
 		if err != nil {
@@ -58,12 +61,18 @@ func runUltracodeBench(stdout, stderr io.Writer, args []string) int {
 			fmt.Fprintf(stderr, "fak ultracode bench: decode pair: %v\n", err)
 			return 1
 		}
+		budgetReceipt, err = decodeUltracodeBenchBudget(b)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak ultracode bench: decode budget receipt: %v\n", err)
+			return 1
+		}
 	}
 	report, err := ultracodebench.Evaluate(pair)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak ultracode bench: %v\n", err)
 		return 1
 	}
+	report = applyUltracodeBenchBudgetReceipt(report, pair, budgetReceipt)
 	if jsonOutput {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/orchestration"
 	"github.com/anthony-chaudhary/fak/internal/processalive"
 )
 
@@ -27,16 +28,22 @@ type orchestrationOutcomeStatus struct {
 }
 
 type orchestrationWorkerStatus struct {
-	RoleID       string    `json:"role_id"`
-	PID          int       `json:"pid,omitempty"`
-	State        string    `json:"state"`
-	ProcessAlive bool      `json:"process_alive"`
-	LogPath      string    `json:"log_path,omitempty"`
-	LogBytes     int64     `json:"log_bytes"`
-	UpdatedAt    time.Time `json:"updated_at,omitempty"`
-	TurnsStarted int       `json:"turns_started"`
-	TurnsDone    int       `json:"turns_completed"`
-	LastEvent    string    `json:"last_event,omitempty"`
+	RoleID            string    `json:"role_id"`
+	PID               int       `json:"pid,omitempty"`
+	State             string    `json:"state"`
+	ProcessAlive      bool      `json:"process_alive"`
+	LogPath           string    `json:"log_path,omitempty"`
+	LogBytes          int64     `json:"log_bytes"`
+	UpdatedAt         time.Time `json:"updated_at,omitempty"`
+	TurnsStarted      int       `json:"turns_started"`
+	TurnsDone         int       `json:"turns_completed"`
+	LastEvent         string    `json:"last_event,omitempty"`
+	InputTokens       int64     `json:"input_tokens,omitempty"`
+	CachedInputTokens int64     `json:"cached_input_tokens,omitempty"`
+	OutputTokens      int64     `json:"output_tokens,omitempty"`
+	ProviderTokens    int64     `json:"provider_tokens,omitempty"`
+	UsageCovered      bool      `json:"usage_covered"`
+	UsageAuthority    string    `json:"usage_authority"`
 }
 
 type orchestrationRunStatus struct {
@@ -189,7 +196,12 @@ func inspectOrchestrationLog(path string, ws *orchestrationWorkerStatus) {
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
 		var event struct {
-			Type string `json:"type"`
+			Type  string `json:"type"`
+			Usage *struct {
+				InputTokens       int64 `json:"input_tokens"`
+				CachedInputTokens int64 `json:"cached_input_tokens"`
+				OutputTokens      int64 `json:"output_tokens"`
+			} `json:"usage,omitempty"`
 		}
 		if json.Unmarshal(scanner.Bytes(), &event) != nil || event.Type == "" {
 			continue
@@ -200,6 +212,14 @@ func inspectOrchestrationLog(path string, ws *orchestrationWorkerStatus) {
 		}
 		if event.Type == "turn.completed" {
 			ws.TurnsDone++
+			if event.Usage != nil && (event.Usage.InputTokens != 0 || event.Usage.CachedInputTokens != 0 || event.Usage.OutputTokens != 0) {
+				ws.InputTokens += event.Usage.InputTokens
+				ws.CachedInputTokens += event.Usage.CachedInputTokens
+				ws.OutputTokens += event.Usage.OutputTokens
+				ws.ProviderTokens += event.Usage.InputTokens + event.Usage.OutputTokens
+				ws.UsageCovered = true
+				ws.UsageAuthority = orchestration.UltracodeBudgetAuthorityProvider
+			}
 		}
 	}
 }

@@ -8,11 +8,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/orchestration"
 	"github.com/anthony-chaudhary/fak/internal/ultracodebench"
 )
 
 const ultracodeStatusSchema = "fak.ultracode_status.v1"
+
+var ultracodeStatusNow = time.Now
 
 type ultracodeWorkerStatus struct {
 	ChildID        string                         `json:"child_id"`
@@ -24,15 +28,16 @@ type ultracodeWorkerStatus struct {
 }
 
 type ultracodeStatus struct {
-	Schema           string                           `json:"schema"`
-	SessionID        string                           `json:"session_id"`
-	RunID            string                           `json:"run_id"`
-	RequestedProfile string                           `json:"requested_profile"`
-	ResolvedProfile  string                           `json:"resolved_profile"`
-	State            string                           `json:"state"`
-	Outcome          orchestrationOutcomeStatus       `json:"outcome"`
-	Activation       ultracodebench.ActivationSummary `json:"activation"`
-	Workers          []ultracodeWorkerStatus          `json:"workers"`
+	Schema           string                                 `json:"schema"`
+	SessionID        string                                 `json:"session_id"`
+	RunID            string                                 `json:"run_id"`
+	RequestedProfile string                                 `json:"requested_profile"`
+	ResolvedProfile  string                                 `json:"resolved_profile"`
+	State            string                                 `json:"state"`
+	Outcome          orchestrationOutcomeStatus             `json:"outcome"`
+	Activation       ultracodebench.ActivationSummary       `json:"activation"`
+	Budget           orchestration.UltracodeEnvelopeReceipt `json:"budget"`
+	Workers          []ultracodeWorkerStatus                `json:"workers"`
 }
 
 func runUltracodeStatus(stdout, stderr io.Writer, argv []string) int {
@@ -67,6 +72,11 @@ func runUltracodeStatus(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak ultracode status: %v\n", err)
 		return 1
 	}
+	receipt.Budget = status.Budget
+	if err := persistCodexOrchestrationLaunchReceipt(root, receipt); err != nil {
+		fmt.Fprintf(stderr, "fak ultracode status: persist budget receipt: %v\n", err)
+		return 1
+	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -79,6 +89,11 @@ func runUltracodeStatus(stdout, stderr io.Writer, argv []string) int {
 	fmt.Fprintf(stdout, "Ultracode %s - %s\n", status.RunID, status.State)
 	fmt.Fprintf(stdout, "  activation %.1f%% verified | active=%d inactive=%d degraded=%d unknown=%d\n",
 		status.Activation.Ratio*100, status.Activation.Active, status.Activation.Inactive, status.Activation.Degraded, status.Activation.Unknown)
+	fmt.Fprintf(stdout, "  budget tokens=%d/%d remaining=%d | children=%d/%d | wall=%d/%dms remaining=%dms | authority=%s | overrun=%t | admitted=%t\n",
+		status.Budget.ConsumedTokens, status.Budget.DeclaredTokens, status.Budget.RemainingTokens,
+		status.Budget.CoveredChildren, status.Budget.TotalChildren, status.Budget.ConsumedWallMS,
+		status.Budget.WallBudgetMS, status.Budget.RemainingWallMS, status.Budget.Authority,
+		status.Budget.Overrun, status.Budget.Admitted)
 	for _, worker := range status.Workers {
 		fmt.Fprintf(stdout, "  %-12s %-9s activation=%s turns=%d/%d\n", worker.ChildID, worker.State, worker.Activation, worker.TurnsCompleted, worker.TurnsStarted)
 	}
@@ -86,7 +101,7 @@ func runUltracodeStatus(stdout, stderr io.Writer, argv []string) int {
 }
 
 func projectUltracodeStatus(root string, receipt codexOrchestrationLaunchReceipt) (ultracodeStatus, error) {
-	orchestration := inspectOrchestrationRun(root, receipt)
+	runStatus := inspectOrchestrationRun(root, receipt)
 	coverage, err := ultracodebench.SummarizeActivation(receipt.Activations)
 	if err != nil {
 		return ultracodeStatus{}, err
@@ -95,7 +110,7 @@ func projectUltracodeStatus(root string, receipt codexOrchestrationLaunchReceipt
 	for _, child := range coverage.Children {
 		states[child.ChildID] = child.State
 	}
-	for _, worker := range orchestration.Workers {
+	for _, worker := range runStatus.Workers {
 		if _, ok := states[worker.RoleID]; ok {
 			continue
 		}
@@ -111,19 +126,57 @@ func projectUltracodeStatus(root string, receipt codexOrchestrationLaunchReceipt
 	if coverage.Total > 0 {
 		coverage.Ratio = float64(coverage.Verified) / float64(coverage.Total)
 	}
+	budget := receipt.Budget
+	if budget.Schema == orchestration.UltracodeEnvelopeReceiptSchema && budget.DeclaredTokens > 0 && budget.WallBudgetMS > 0 {
+		usage := make([]orchestration.UltracodeChildUsage, 0, len(runStatus.Workers))
+		for _, worker := range runStatus.Workers {
+			if worker.UsageCovered {
+				usage = append(usage, orchestration.UltracodeChildUsage{
+					ChildID: worker.RoleID, ProviderTokens: worker.ProviderTokens, Authority: worker.UsageAuthority,
+				})
+			}
+		}
+		var err error
+		budget, err = orchestration.FoldUltracodeEnvelopeReceipt(budget, usage, ultracodeStatusNow().UTC())
+		if err != nil {
+			return ultracodeStatus{}, err
+		}
+	} else {
+		budget = legacyIncompleteUltracodeBudget(receipt)
+	}
 	out := ultracodeStatus{
 		Schema: ultracodeStatusSchema, SessionID: receipt.SessionID, RunID: receipt.RunID,
 		RequestedProfile: receipt.RequestedProfile, ResolvedProfile: receipt.ResolvedProfile,
-		State: orchestration.State, Outcome: orchestration.Outcome, Activation: coverage,
-		Workers: make([]ultracodeWorkerStatus, 0, len(orchestration.Workers)),
+		State: runStatus.State, Outcome: runStatus.Outcome, Activation: coverage, Budget: budget,
+		Workers: make([]ultracodeWorkerStatus, 0, len(runStatus.Workers)),
 	}
-	for _, worker := range orchestration.Workers {
+	if budget.Overrun || (runStatus.Running == 0 && !budget.Complete) {
+		out.State = "invalid"
+		out.Outcome.Verdict = "invalid"
+		out.Outcome.Reason = budget.Reason
+	}
+	for _, worker := range runStatus.Workers {
 		out.Workers = append(out.Workers, ultracodeWorkerStatus{
 			ChildID: worker.RoleID, State: worker.State, TurnsStarted: worker.TurnsStarted,
 			TurnsCompleted: worker.TurnsDone, LastEvent: worker.LastEvent, Activation: states[worker.RoleID],
 		})
 	}
 	return out, nil
+}
+
+func legacyIncompleteUltracodeBudget(receipt codexOrchestrationLaunchReceipt) orchestration.UltracodeEnvelopeReceipt {
+	children := make([]orchestration.UltracodeChildBudget, 0, len(receipt.Workers))
+	for _, worker := range receipt.Workers {
+		children = append(children, orchestration.UltracodeChildBudget{
+			ChildID: worker.RoleID, Authority: orchestration.UltracodeBudgetAuthorityIncomplete,
+		})
+	}
+	return orchestration.UltracodeEnvelopeReceipt{
+		Schema:        orchestration.UltracodeEnvelopeReceiptSchema,
+		Authority:     orchestration.UltracodeBudgetAuthorityIncomplete,
+		TotalChildren: len(children), Reason: orchestration.UltracodeBudgetReasonIncomplete,
+		Children: children,
+	}
 }
 
 func codexOrchestrationActivation(launch codexOrchestrationLaunchReceipt, childID string) (ultracodebench.ActivationReceipt, error) {

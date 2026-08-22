@@ -21,6 +21,10 @@ import (
 
 const codexOrchestrationLaunchSchema = "fak.codex_orchestration_launch.v1"
 
+const defaultUltracodeWallBudget = 30 * time.Minute
+
+var orchestrationLaunchNow = time.Now
+
 func validateCodexOrchestrationArtifactHome(codexHome string) error {
 	home, err := resolvedCodexLoopHome(codexHome)
 	if err != nil {
@@ -59,35 +63,38 @@ func validateCodexOrchestrationArtifactHome(codexHome string) error {
 const orchestrationChildEnv = "FAK_ORCHESTRATION_CHILD"
 
 type codexOrchestrationWorkerLaunch struct {
-	RoleID     string `json:"role_id"`
-	PID        int    `json:"pid,omitempty"`
-	Status     string `json:"status"`
-	LogPath    string `json:"log_path,omitempty"`
-	Model      string `json:"model"`
-	Mode       string `json:"mode"`
-	Effort     string `json:"reasoning_effort"`
-	AccessMode string `json:"access_mode,omitempty"`
-	ReadOnly   bool   `json:"read_only"`
-	WriteTree  string `json:"write_tree,omitempty"`
-	PolicyPath string `json:"policy_path,omitempty"`
-	Refusal    string `json:"refusal,omitempty"`
+	RoleID         string    `json:"role_id"`
+	PID            int       `json:"pid,omitempty"`
+	Status         string    `json:"status"`
+	LogPath        string    `json:"log_path,omitempty"`
+	Model          string    `json:"model"`
+	Mode           string    `json:"mode"`
+	Effort         string    `json:"reasoning_effort"`
+	AccessMode     string    `json:"access_mode,omitempty"`
+	ReadOnly       bool      `json:"read_only"`
+	WriteTree      string    `json:"write_tree,omitempty"`
+	PolicyPath     string    `json:"policy_path,omitempty"`
+	ReservedTokens int64     `json:"reserved_tokens,omitempty"`
+	DeadlineAt     time.Time `json:"deadline_at,omitempty"`
+	Refusal        string    `json:"refusal,omitempty"`
 }
 
 type codexOrchestrationLaunchReceipt struct {
-	Schema            string                             `json:"schema"`
-	SessionID         string                             `json:"session_id"`
-	RunID             string                             `json:"run_id"`
-	LaunchedAt        time.Time                          `json:"launched_at"`
-	TaskID            string                             `json:"task_id"`
-	RequestedProfile  string                             `json:"requested_profile"`
-	ResolvedProfile   string                             `json:"resolved_profile"`
-	WorkClass         string                             `json:"work_class"`
-	CapabilityProfile string                             `json:"capability_profile"`
-	Degradations      []string                           `json:"degradations"`
-	Status            string                             `json:"status"`
-	DeclineReason     string                             `json:"decline_reason,omitempty"`
-	Workers           []codexOrchestrationWorkerLaunch   `json:"workers"`
-	Activations       []ultracodebench.ActivationReceipt `json:"activations"`
+	Schema            string                                 `json:"schema"`
+	SessionID         string                                 `json:"session_id"`
+	RunID             string                                 `json:"run_id"`
+	LaunchedAt        time.Time                              `json:"launched_at"`
+	TaskID            string                                 `json:"task_id"`
+	RequestedProfile  string                                 `json:"requested_profile"`
+	ResolvedProfile   string                                 `json:"resolved_profile"`
+	WorkClass         string                                 `json:"work_class"`
+	CapabilityProfile string                                 `json:"capability_profile"`
+	Degradations      []string                               `json:"degradations"`
+	Status            string                                 `json:"status"`
+	DeclineReason     string                                 `json:"decline_reason,omitempty"`
+	Workers           []codexOrchestrationWorkerLaunch       `json:"workers"`
+	Activations       []ultracodebench.ActivationReceipt     `json:"activations"`
+	Budget            orchestration.UltracodeEnvelopeReceipt `json:"budget"`
 }
 
 func orchestrationDegradationNames(items []orchestration.Degradation) []string {
@@ -99,27 +106,32 @@ func orchestrationDegradationNames(items []orchestration.Degradation) []string {
 }
 
 type orchestrationWorkerLaunchRequest struct {
-	Role      orchestration.Role
-	Access    orchestrationCompiledChildAccess
-	WorkClass orchestration.WorkClass
-	TaskText  string
-	Root      string
-	RunDir    string
-	Model     string
-	Mode      orchestration.SOLMode
-	Effort    string
+	Role          orchestration.Role
+	Access        orchestrationCompiledChildAccess
+	WorkClass     orchestration.WorkClass
+	TaskText      string
+	Root          string
+	RunDir        string
+	Model         string
+	Mode          orchestration.SOLMode
+	Effort        string
+	TokenBudget   int64
+	DeadlineAt    time.Time
+	RemainingWall time.Duration
+	RunID         string
 }
 
 var orchestrationWorkerLauncher = launchGuardedCodexOrchestrationWorker
 
-func launchCodexOrchestrationWorkers(home, sessionID, requestedProfile, capabilityProfile, taskText string, resolution orchestration.Resolution) (codexOrchestrationLaunchReceipt, error) {
+func launchCodexOrchestrationWorkers(home, sessionID, requestedProfile, capabilityProfile, taskText string, resolution orchestration.Resolution, wallLimitArg ...time.Duration) (codexOrchestrationLaunchReceipt, error) {
 	runID, err := newCodexOrchestrationRunID()
 	if err != nil {
 		return codexOrchestrationLaunchReceipt{}, err
 	}
+	launchedAt := orchestrationLaunchNow().UTC()
 	receipt := codexOrchestrationLaunchReceipt{
 		Schema: codexOrchestrationLaunchSchema, SessionID: sessionID, RunID: runID,
-		LaunchedAt: time.Now().UTC(), TaskID: resolution.Resolved.TaskID,
+		LaunchedAt: launchedAt, TaskID: resolution.Resolved.TaskID,
 		RequestedProfile: requestedProfile, ResolvedProfile: string(resolution.Resolved.Profile),
 		WorkClass: string(resolution.Resolved.WorkClass), CapabilityProfile: capabilityProfile,
 		Degradations: orchestrationDegradationNames(resolution.Degradations), Workers: []codexOrchestrationWorkerLaunch{},
@@ -129,6 +141,29 @@ func launchCodexOrchestrationWorkers(home, sessionID, requestedProfile, capabili
 		receipt.Status = "declined"
 		receipt.DeclineReason = "resolved-direct"
 		return receipt, persistCodexOrchestrationLaunchReceipt(home, receipt)
+	}
+	wallLimit := defaultUltracodeWallBudget
+	if len(wallLimitArg) > 0 {
+		wallLimit = wallLimitArg[0]
+	}
+	childIDs := make([]string, 0, len(resolution.Resolved.Roles)-1)
+	for _, role := range resolution.Resolved.Roles {
+		if role.ID != "lead" {
+			childIDs = append(childIDs, role.ID)
+		}
+	}
+	receipt.Budget, err = orchestration.NewUltracodeEnvelopeReceipt(resolution.Resolved.Budget.MaxTokens, wallLimit, launchedAt, childIDs)
+	if err != nil {
+		receipt.Status = "declined"
+		receipt.DeclineReason = err.Error()
+		if persistErr := persistCodexOrchestrationLaunchReceipt(home, receipt); persistErr != nil {
+			return receipt, persistErr
+		}
+		return receipt, err
+	}
+	childBudgets := make(map[string]orchestration.UltracodeChildBudget, len(receipt.Budget.Children))
+	for _, child := range receipt.Budget.Children {
+		childBudgets[child.ChildID] = child
 	}
 	runDir := filepath.Join(home, "fak-orchestration-runs", runID)
 	if err := os.MkdirAll(runDir, 0o700); err != nil {
@@ -173,7 +208,6 @@ func launchCodexOrchestrationWorkers(home, sessionID, requestedProfile, capabili
 		if err != nil {
 			return receipt, fmt.Errorf("persist %s child policy: %w", role.ID, err)
 		}
-		request := orchestrationWorkerLaunchRequest{Role: role, Access: access, WorkClass: resolution.Resolved.WorkClass, TaskText: taskText, Root: root, RunDir: runDir, Model: route.Model, Mode: route.Mode, Effort: route.ReasoningEffort}
 		activation, activationErr := codexOrchestrationActivation(receipt, role.ID)
 		if activationErr != nil {
 			return receipt, fmt.Errorf("activation receipt %s: %w", role.ID, activationErr)
@@ -182,6 +216,21 @@ func launchCodexOrchestrationWorkers(home, sessionID, requestedProfile, capabili
 		if err := persistCodexOrchestrationLaunchReceipt(home, receipt); err != nil {
 			return receipt, fmt.Errorf("persist pre-spawn activation %s: %w", role.ID, err)
 		}
+		remainingWall := receipt.Budget.DeadlineAt.Sub(orchestrationLaunchNow())
+		if remainingWall <= 0 {
+			deadlineErr := fmt.Errorf("%s: parent wall deadline elapsed before child %q launch", orchestration.UltracodeBudgetReasonWallOverrun, role.ID)
+			receipt.Workers = append(receipt.Workers, refusedOrchestrationWorker(role, access, deadlineErr))
+			receipt.Status = "invalid"
+			receipt.DeclineReason = orchestration.UltracodeBudgetReasonWallOverrun
+			_ = persistCodexOrchestrationLaunchReceipt(home, receipt)
+			return receipt, deadlineErr
+		}
+		request := orchestrationWorkerLaunchRequest{
+			Role: role, Access: access, WorkClass: resolution.Resolved.WorkClass, TaskText: taskText,
+			Root: root, RunDir: runDir, Model: route.Model, Mode: route.Mode, Effort: route.ReasoningEffort,
+			TokenBudget: childBudgets[role.ID].ReservedTokens, DeadlineAt: receipt.Budget.DeadlineAt,
+			RemainingWall: remainingWall, RunID: receipt.RunID,
+		}
 		launched, launchErr := orchestrationWorkerLauncher(request)
 		launched.Model = route.Model
 		launched.Mode = string(route.Mode)
@@ -189,6 +238,8 @@ func launchCodexOrchestrationWorkers(home, sessionID, requestedProfile, capabili
 		launched.AccessMode = string(access.Mode)
 		launched.ReadOnly = access.Admission.ReadOnly
 		launched.PolicyPath = access.PolicyPath
+		launched.ReservedTokens = request.TokenBudget
+		launched.DeadlineAt = request.DeadlineAt
 		if len(access.Admission.Tree) > 0 {
 			launched.WriteTree = access.Admission.Tree[0]
 		}
@@ -231,6 +282,15 @@ func orchestrationWorkerArgs(req orchestrationWorkerLaunchRequest, auditPath str
 			lease += ",tree=" + tree
 		}
 		args = append(args, "--lease", lease)
+	}
+	if req.TokenBudget > 0 {
+		args = append(args, "--context-budget-tokens", strconv.FormatInt(req.TokenBudget, 10))
+	}
+	if req.RemainingWall > 0 {
+		args = append(args, "--max-duration", req.RemainingWall.String())
+	}
+	if req.RunID != "" && req.Role.ID != "" {
+		args = append(args, "--session-id", req.RunID+"-"+req.Role.ID)
 	}
 	return append(args,
 		"--", "codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "--dangerously-bypass-hook-trust", "--json",
