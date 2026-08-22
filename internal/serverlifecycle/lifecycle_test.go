@@ -12,19 +12,36 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/serverlifecycle"
 )
 
+var (
+	sharedFakOnce sync.Once
+	sharedFakBin  string
+	sharedFakDir  string
+	sharedFakErr  error
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if sharedFakDir != "" {
+		_ = os.RemoveAll(sharedFakDir)
+	}
+	os.Exit(code)
+}
+
 func TestServerLifecyclePublicCLISpine(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds and exercises the public fak binary")
 	}
 	root := filepath.Clean(filepath.Join("..", ".."))
-	fakBin := buildGoBinary(t, root, "fak", "./cmd/fak")
+	fakBin := buildSharedFakBinary(t, root)
 	fixture := buildFixtureServer(t, root)
 	modelBytes := []byte("fixture gguf bytes")
 	modelPath := filepath.Join(t.TempDir(), "model.gguf")
@@ -136,6 +153,121 @@ func TestServerLifecyclePublicCLISpine(t *testing.T) {
 	assertStatus(t, fakBin, failedDir, serverlifecycle.StateFailed)
 }
 
+func TestServerLifecycleRecoversLockAfterOwnerCrash(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and exercises the public fak binary")
+	}
+	root := filepath.Clean(filepath.Join("..", ".."))
+	fakBin := buildSharedFakBinary(t, root)
+	fixture := buildFixtureServer(t, root)
+	modelBytes := []byte("crash recovery fixture")
+	modelPath := filepath.Join(t.TempDir(), "model.gguf")
+	if err := os.WriteFile(modelPath, modelBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(modelBytes)
+	initDir := func(t *testing.T, name string) string {
+		t.Helper()
+		dir := filepath.Join(t.TempDir(), name)
+		if result, stderr, err := runCLI(fakBin, nil, "server", "init",
+			"--dir", dir,
+			"--name", "crash-recovery",
+			"--model", modelPath,
+			"--sha256", hex.EncodeToString(digest[:]),
+			"--executable", fixture,
+			"--port", fmt.Sprint(freePort(t)),
+			"--json",
+		); err != nil {
+			t.Fatalf("server init: result=%+v err=%v stderr=%s", result, err, stderr)
+		}
+		return dir
+	}
+
+	t.Run("ambiguous-owner", func(t *testing.T) {
+		dir := initDir(t, "ambiguous-owner")
+		lockPath := filepath.Join(dir, serverlifecycle.LockFilename)
+		writeObject(t, lockPath, map[string]any{
+			"process_id":             os.Getpid(),
+			"process_start_identity": "",
+			"acquired_at":            time.Now().UTC().Format(time.RFC3339Nano),
+		})
+		before := readText(t, lockPath)
+		for _, operation := range []string{"up", "down"} {
+			result, _, err := runCLI(fakBin, nil, "server", operation, "--dir", dir, "--json")
+			if err == nil || !result.Refused || result.Reason != serverlifecycle.ReasonInstanceLocked {
+				t.Fatalf("%s with ambiguous owner: result=%+v err=%v, want INSTANCE_LOCKED", operation, result, err)
+			}
+		}
+		status, stderr, err := runCLI(fakBin, nil, "server", "status", "--dir", dir, "--json")
+		if err != nil || status.State != serverlifecycle.StateConfigured || !status.Evidence.LockHeld {
+			t.Fatalf("status with ambiguous owner: result=%+v err=%v stderr=%s", status, err, stderr)
+		}
+		if after := readText(t, lockPath); after != before {
+			t.Fatal("ambiguous-owner refusal changed the lock record")
+		}
+	})
+
+	for _, operation := range []string{"status", "down", "up"} {
+		t.Run(operation, func(t *testing.T) {
+			dir := initDir(t, "crashed-owner")
+
+			owner, blockerPID, ownerStdout, ownerStderr := startBlockedLifecycleOwner(t, fakBin, dir)
+			lockPath := filepath.Join(dir, serverlifecycle.LockFilename)
+			lockBytes := waitForLockRecord(t, lockPath, owner.Process.Pid)
+
+			if operation == "status" {
+				liveStatus, stderr, err := runCLI(fakBin, nil, "server", "status", "--dir", dir, "--json")
+				if err != nil || liveStatus.State != serverlifecycle.StateStarting || !liveStatus.Evidence.LockHeld {
+					t.Fatalf("live owner status: result=%+v err=%v stderr=%s", liveStatus, err, stderr)
+				}
+				liveDown, _, err := runCLI(fakBin, nil, "server", "down", "--dir", dir, "--json")
+				if err == nil || !liveDown.Refused || liveDown.Reason != serverlifecycle.ReasonInstanceLocked {
+					t.Fatalf("live owner down: result=%+v err=%v, want INSTANCE_LOCKED", liveDown, err)
+				}
+				if after := readText(t, lockPath); after != string(lockBytes) {
+					t.Fatal("live-owner refusal changed the lock record")
+				}
+			}
+
+			if err := owner.Process.Kill(); err != nil {
+				t.Fatalf("kill lifecycle owner: %v", err)
+			}
+			_ = owner.Wait()
+			killProcess(blockerPID)
+			if _, err := os.Stat(lockPath); err != nil {
+				t.Fatalf("crashed owner did not strand its lock: %v\nstdout=%s\nstderr=%s", err, ownerStdout.String(), ownerStderr.String())
+			}
+
+			var result serverlifecycle.Result
+			var stderr string
+			var err error
+			switch operation {
+			case "status":
+				result, stderr, err = runCLI(fakBin, nil, "server", "status", "--dir", dir, "--json")
+				if err != nil || result.State != serverlifecycle.StateStale || result.Evidence.LockHeld {
+					t.Fatalf("status after crash: result=%+v err=%v stderr=%s", result, err, stderr)
+				}
+			case "down":
+				result, stderr, err = runCLI(fakBin, nil, "server", "down", "--dir", dir, "--json")
+				if err != nil || result.State != serverlifecycle.StateStopped {
+					t.Fatalf("down after crash: result=%+v err=%v stderr=%s", result, err, stderr)
+				}
+			case "up":
+				result, stderr, err = runCLI(fakBin, nil, "server", "up", "--dir", dir, "--readiness-timeout", "5s", "--json")
+				if err != nil || result.State != serverlifecycle.StateReady {
+					t.Fatalf("up after crash: result=%+v err=%v stderr=%s", result, err, stderr)
+				}
+				t.Cleanup(func() {
+					_, _, _ = runCLI(fakBin, nil, "server", "down", "--dir", dir, "--stop-timeout", "5s", "--json")
+				})
+			}
+			if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+				t.Fatalf("recovered lock remains at %s: %v", lockPath, err)
+			}
+		})
+	}
+}
+
 func buildFixtureServer(t *testing.T, root string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -163,6 +295,10 @@ func event(value string) {
 }
 func main() {
     if len(os.Args) == 2 && os.Args[1] == "--version" {
+		if marker := os.Getenv("FAK_SERVER_FIXTURE_BLOCK_VERSION_FILE"); marker != "" {
+			if err := os.WriteFile(marker, []byte(strconv.Itoa(os.Getpid())), 0600); err != nil { panic(err) }
+			for { time.Sleep(time.Hour) }
+		}
         fmt.Println("llama.cpp version: fixture-b8157")
         return
     }
@@ -200,6 +336,66 @@ func main() {
 	return buildGoBinary(t, root, "llama-server", source)
 }
 
+func startBlockedLifecycleOwner(t *testing.T, binary, dir string) (*exec.Cmd, int, *bytes.Buffer, *bytes.Buffer) {
+	t.Helper()
+	marker := filepath.Join(t.TempDir(), "version-owner.pid")
+	cmd := exec.Command(binary, "server", "up", "--dir", dir, "--readiness-timeout", "30s", "--json")
+	cmd.Env = append(os.Environ(), "FAK_SERVER_FIXTURE_BLOCK_VERSION_FILE="+marker)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		killProcess(cmd.Process.Pid)
+	})
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		raw, err := os.ReadFile(marker)
+		if err == nil {
+			pid, parseErr := strconv.Atoi(strings.TrimSpace(string(raw)))
+			if parseErr == nil && pid > 0 {
+				t.Cleanup(func() { killProcess(pid) })
+				return cmd, pid, &stdout, &stderr
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("blocked version fixture did not start\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
+	return nil, 0, nil, nil
+}
+
+func waitForLockRecord(t *testing.T, path string, wantPID int) []byte {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		raw, err := os.ReadFile(path)
+		if err == nil {
+			var record map[string]any
+			decodeErr := json.Unmarshal(raw, &record)
+			pid, pidOK := record["process_id"].(float64)
+			if decodeErr == nil && pidOK && int(pid) == wantPID {
+				identity, _ := record["process_start_identity"].(string)
+				if _, parseErr := time.Parse(time.RFC3339Nano, identity); parseErr == nil {
+					return raw
+				}
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("lock record for pid %d not observed at %s", wantPID, path)
+	return nil
+}
+
+func killProcess(pid int) {
+	if pid <= 0 {
+		return
+	}
+	if process, err := os.FindProcess(pid); err == nil {
+		_ = process.Kill()
+	}
+}
+
 func buildGoBinary(t *testing.T, root, name string, target ...string) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -214,6 +410,31 @@ func buildGoBinary(t *testing.T, root, name string, target ...string) string {
 		t.Fatalf("build %s: %v\n%s", name, err, output)
 	}
 	return path
+}
+
+func buildSharedFakBinary(t *testing.T, root string) string {
+	t.Helper()
+	sharedFakOnce.Do(func() {
+		sharedFakDir, sharedFakErr = os.MkdirTemp("", "fak-serverlifecycle-test-")
+		if sharedFakErr != nil {
+			return
+		}
+		name := "fak"
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		sharedFakBin = filepath.Join(sharedFakDir, name)
+		cmd := exec.Command("go", "build", "-o", sharedFakBin, "./cmd/fak")
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "GOWORK=off")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			sharedFakErr = fmt.Errorf("build fak: %w\n%s", err, output)
+		}
+	})
+	if sharedFakErr != nil {
+		t.Fatal(sharedFakErr)
+	}
+	return sharedFakBin
 }
 
 func runCLI(binary string, extraEnv []string, argv ...string) (serverlifecycle.Result, string, error) {

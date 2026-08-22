@@ -137,6 +137,20 @@ type lockRecord struct {
 	AcquiredAt           string `json:"acquired_at"`
 }
 
+type lockOwnerState uint8
+
+const (
+	lockOwnerAbsent lockOwnerState = iota
+	lockOwnerLive
+	lockOwnerStale
+	lockOwnerAmbiguous
+)
+
+type lockInspection struct {
+	state  lockOwnerState
+	detail string
+}
+
 type instance struct {
 	dir     string
 	spec    serverproduct.ServerSpec
@@ -388,8 +402,11 @@ func Status(ctx context.Context, dir string, opts Options) (Result, error) {
 	}
 	result := resultFor("status", inst.dir)
 	result.Evidence.SpecValid = true
-	_, lockErr := os.Stat(filepath.Join(inst.dir, LockFilename))
-	result.Evidence.LockHeld = lockErr == nil
+	lockHeld, _, err := recoverLifecycleLock(filepath.Join(inst.dir, LockFilename))
+	if err != nil {
+		return result, err
+	}
+	result.Evidence.LockHeld = lockHeld
 	state, err := readState(inst.dir)
 	if errors.Is(err, os.ErrNotExist) {
 		result.State = StateConfigured
@@ -751,7 +768,10 @@ func waitForOriginalProcess(pid int, identity string, timeout time.Duration) boo
 	return !processMatches(pid, identity)
 }
 
-type instanceLock struct{ path string }
+type instanceLock struct {
+	path string
+	info os.FileInfo
+}
 
 func acquireLock(dir string) (instanceLock, error) {
 	path := filepath.Join(dir, LockFilename)
@@ -763,32 +783,116 @@ func acquireLock(dir string) (instanceLock, error) {
 	if err != nil {
 		return instanceLock{}, err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	tmp, err := os.CreateTemp(dir, ".server-lifecycle-owner-*.tmp")
 	if err != nil {
 		return instanceLock{}, err
 	}
-	accepted := false
+	tmpPath := tmp.Name()
 	defer func() {
-		_ = file.Close()
-		if !accepted {
-			_ = os.Remove(path)
-		}
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
 	}()
-	if _, err := file.Write(record); err != nil {
+	if err := tmp.Chmod(0o600); err != nil {
 		return instanceLock{}, err
 	}
-	if err := file.Sync(); err != nil {
+	if _, err := tmp.Write(record); err != nil {
 		return instanceLock{}, err
 	}
-	accepted = true
-	return instanceLock{path: path}, nil
+	if err := tmp.Sync(); err != nil {
+		return instanceLock{}, err
+	}
+	if err := tmp.Close(); err != nil {
+		return instanceLock{}, err
+	}
+	for attempts := 0; attempts < 4; attempts++ {
+		held, detail, err := recoverLifecycleLock(path)
+		if err != nil {
+			return instanceLock{}, err
+		}
+		if held {
+			return instanceLock{}, errors.New(detail)
+		}
+		if err := os.Link(tmpPath, path); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				continue
+			}
+			return instanceLock{}, err
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			_ = os.Remove(path)
+			return instanceLock{}, err
+		}
+		return instanceLock{path: path, info: info}, nil
+	}
+	return instanceLock{}, errors.New("lifecycle lock changed during acquisition")
 }
 
 func (lock instanceLock) release() error {
 	if lock.path == "" {
 		return nil
 	}
+	info, err := os.Stat(lock.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if lock.info == nil || !os.SameFile(lock.info, info) {
+		return errors.New("lifecycle lock ownership changed before release")
+	}
 	return os.Remove(lock.path)
+}
+
+func recoverLifecycleLock(path string) (held bool, detail string, err error) {
+	for attempts := 0; attempts < 4; attempts++ {
+		inspection := inspectLifecycleLock(path)
+		switch inspection.state {
+		case lockOwnerAbsent:
+			return false, "", nil
+		case lockOwnerLive, lockOwnerAmbiguous:
+			return true, inspection.detail, nil
+		case lockOwnerStale:
+			if err := os.Remove(path); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					continue
+				}
+				return true, inspection.detail, fmt.Errorf("recover stale lifecycle lock: %w", err)
+			}
+		}
+	}
+	return true, "lifecycle lock changed during stale-owner recovery", nil
+}
+
+func inspectLifecycleLock(path string) lockInspection {
+	var record lockRecord
+	if err := readStrict(path, &record); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return lockInspection{state: lockOwnerAbsent}
+		}
+		return lockInspection{state: lockOwnerAmbiguous, detail: "lifecycle lock owner identity is unreadable: " + err.Error()}
+	}
+	if record.ProcessID <= 0 || strings.TrimSpace(record.ProcessStartIdentity) == "" || strings.TrimSpace(record.AcquiredAt) == "" {
+		return lockInspection{state: lockOwnerAmbiguous, detail: "lifecycle lock owner identity is incomplete"}
+	}
+	if _, err := time.Parse(time.RFC3339Nano, record.ProcessStartIdentity); err != nil {
+		return lockInspection{state: lockOwnerAmbiguous, detail: "lifecycle lock process start identity is invalid"}
+	}
+	if _, err := time.Parse(time.RFC3339Nano, record.AcquiredAt); err != nil {
+		return lockInspection{state: lockOwnerAmbiguous, detail: "lifecycle lock acquisition time is invalid"}
+	}
+	current, identified := processIdentity(record.ProcessID)
+	if processDefinitelyGone(record.ProcessID) {
+		return lockInspection{state: lockOwnerStale, detail: fmt.Sprintf("lifecycle lock owner process %d is gone", record.ProcessID)}
+	}
+	if !identified {
+		return lockInspection{state: lockOwnerAmbiguous, detail: fmt.Sprintf("lifecycle lock owner process %d cannot be identified", record.ProcessID)}
+	}
+	if current != record.ProcessStartIdentity {
+		return lockInspection{state: lockOwnerStale, detail: fmt.Sprintf("lifecycle lock owner process %d has been replaced", record.ProcessID)}
+	}
+	return lockInspection{state: lockOwnerLive, detail: fmt.Sprintf("lifecycle lock owner process %d is still live", record.ProcessID)}
 }
 
 func readState(dir string) (stateRecord, error) {
