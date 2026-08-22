@@ -1,0 +1,1 @@
+{"type":"assistant","sessionId":"unsupported","message":{"id":"bad-usage","model":"claude-opus-4-8","usage":{"input_tokens":"100","output_tokens":5},"content":[]}}

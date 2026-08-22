@@ -1,0 +1,2 @@
+{"timestamp":"2026-08-21T00:02:00Z","type":"session_meta","payload":{"id":"unsupported-codex"}}
+{"timestamp":"2026-08-21T00:02:01Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":20,"cache_write_input_tokens":0,"output_tokens":5,"total_tokens":105}}}}

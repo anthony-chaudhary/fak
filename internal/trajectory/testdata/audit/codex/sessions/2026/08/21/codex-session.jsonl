@@ -1,0 +1,10 @@
+{"timestamp":"2026-08-21T00:01:00Z","type":"session_meta","payload":{"id":"codex-session","model_provider":"openai"}}
+{"timestamp":"2026-08-21T00:01:01Z","type":"turn_context","payload":{"model":"gpt-5.6-codex","turn_id":"turn-1"}}
+{"timestamp":"2026-08-21T00:01:02Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"rg fixture\"}","call_id":"call-1"}}
+{"timestamp":"2026-08-21T00:01:03Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-1","output":"{\"exit_code\":0,\"output\":\"ok\"}"}}
+{"timestamp":"2026-08-21T00:01:04Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":5,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":110},"total_token_usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":5,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":110}}}}
+{"timestamp":"2026-08-21T00:01:05Z","type":"response_item","payload":{"type":"custom_tool_call","name":"edit_file","input":"{\"path\":\"codex.go\"}","call_id":"call-2","status":"completed"}}
+{"timestamp":"2026-08-21T00:01:06Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call-2","output":[{"type":"input_text","text":"ok"}]}}
+{"timestamp":"2026-08-21T00:01:07Z","type":"response_item","payload":{"type":"custom_tool_call","name":"edit_file","input":"{\"path\":\"codex.go\"}","call_id":"call-3","status":"completed"}}
+{"timestamp":"2026-08-21T00:01:08Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call-3","output":[{"type":"input_text","text":"ok"}]}}
+{"timestamp":"2026-08-21T00:01:09Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":80,"cached_input_tokens":40,"cache_write_input_tokens":5,"output_tokens":20,"reasoning_output_tokens":3,"total_tokens":100},"total_token_usage":{"input_tokens":180,"cached_input_tokens":80,"cache_write_input_tokens":10,"output_tokens":30,"reasoning_output_tokens":5,"total_tokens":210}}}}

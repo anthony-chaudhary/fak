@@ -223,6 +223,8 @@ func dispatchCoreVerbB(name string, args []string) bool {
 		cmdSnapshot(args)
 	case "traj":
 		cmdTraj(args)
+	case "trajectory":
+		cmdTrajectory(args)
 	case "quantwatch":
 		cmdQuantwatch(args)
 	case "work-delivery":

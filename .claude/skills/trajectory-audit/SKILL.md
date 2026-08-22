@@ -1,203 +1,104 @@
 ---
 name: trajectory-audit
-description: Sweep recent Claude Code session transcripts (.jsonl) for token-weighted cost/efficiency problems visible only across runs — machine-wide input:output ratio, prompt-cache / KV reuse, the cache-CREATE burst / suffix-cache-thrash lens (#3069) that a flattering read-share hides, per-session distributions (tool calls, I:O, cache-hit, read-only fraction), the global tool mix, and the heaviest sessions by output tokens — plus the behavioral stuck/churn lens (#2365): per-tool error rates, shell timeout kills, foreground sleep-polls, Edit/Write read-discipline churn, repeated identical failure signatures, per-file mutation churn, and transcript-native hook outcomes/latency (including non-blocking errors and cancellations). Wraps the project's auditor `tools/session_audit.py` (EXACT token accounting from the transcript usage records). Use when the operator says "audit recent claude trajectories/chats/sessions", "where is the token/cost going", "what are the heaviest sessions", "which sessions are stuck/looping/churning", or wants cross-session efficiency or behavior numbers. Read-only — emits a dated report, never edits code.
+description: Audit recent Claude and Codex transcript JSONL with the first-class Go `fak trajectory audit` verb: exact token/cache buckets, source coverage, behavior, deterministic bottlenecks, and baseline regressions. Use for cross-session cost/efficiency and churn questions.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep, Glob, Bash
-argument-hint: "[--since-days N] [--md OUT | --json OUT] [--all]   (drill: deep <session.jsonl>)"
+argument-hint: "[--since 7d] [--jsonl OUT] [--md OUT] [--baseline PRIOR.jsonl]"
 output_root: none
 metadata:
-  opencode: claude-only   # #422: read-only allowed-tools boundary is load-bearing and Claude-only — exclude from the opencode skills.paths scan
+  opencode: claude-only
 ---
 
-# /trajectory-audit — cross-session token & cache-efficiency sweep
+# /trajectory-audit — cross-harness efficiency audit
 
-> Wraps `tools/session_audit.py` (exact token accounting from the transcript
-> `message.usage` records). Two lenses now run on every sweep:
-> the *token-weighted* lens — exact I:O ratio, cache reuse, the **cache-CREATE
-> burst share** (#3069), cost (split by billing bucket), tool mix, heaviest
-> sessions — and the *behavioral* stuck/churn lens
-> (#2365): per-tool call/error counts + an honest raw-vs-genuine shell error rate
-> (genuine discounts policy-refusals and no-TTY hangs a shell change can't move),
-> shell timeout kills (exit 143 / "timed out"), interactive-editor/pager hangs
-> (`INTERACTIVE_HANG`), foreground sleep-polls (`sleep`/`Start-Sleep` command prefix),
-> Edit/Write read-discipline churn — sub-classified into post-resume (a `--resume`
-> read-state reset), self-duplicate (a guard-caught duplicate write), and the real
-> defect true-never-read — repeated identical failure signatures (≥3×), per-file
-> mutation churn (≥5 edits of one file — the rewrite-loop smell), and loops of
-> *successful* identical calls (read-loops / glob-storms / output-file poll loops,
-> ≥8× the same tool+args — Monitor/TaskOutput excluded as the sanctioned poll surface).
-> **Honest scope:** it does **not** join the transcript to any external run-id spine.
->
-> **Cache-CREATE burst lens (#3069) — the read-share blind spot.** A high
-> cache-read share looks healthy, but it *hides* the inverse waste: when a cached
-> suffix is invalidated mid-session the provider RE-writes it, billing a
-> `cache_create` **burst** — and because the re-created suffix is read back the
-> next turn, a thrashing session looks *more* cached, not less. The auditor
-> surfaces this with a **cache-CREATE burst share** + **create:read ratio** on the
-> headline, and a per-turn **suffix-cache-reset** detector (a `cache_read`
-> snap-back `>20,000` tok to a stable floor ≈ system-prompt+tools) that names the
-> **high-burst long sessions** (≥8 billed turns with ≥1 reset) the heaviest-by-
-> output table never shows. Reset counting is post `message.id` de-dup, so a
-> retried/re-serialized turn never double-counts.
->
-> **Billing buckets — the one cost rule.** Each model's tokens land on its vendor's
-> invoice: `claude-*` is the Anthropic bucket; a `gemini-*` / `gpt-*` / local model
-> is a **different bill entirely**. The auditor (a) breaks cost out per provider and
-> **never sums across buckets**, (b) refuses to price a non-Claude model at Claude
-> rates — an unknown model is reported with its tokens but **no fabricated cost**
-> (add its card to `PRICING` + `PROVIDER_BUCKETS` to price it), and (c) treats
-> `<synthetic>` (harness-injected) as **non-billed, $0**. A single blended "cost"
-> across providers is meaningless — read the per-bucket / per-model tables, not just
-> the headline.
-
-Reads the most recent Claude Code session transcripts and rolls up **what only
-shows up across many runs**: where the tokens and cost actually went, how much of
-the ingested context was prompt-cache reuse vs fresh billed input, and which
-sessions were the expensive ones. The transcripts carry EXACT token accounting
-(`message.usage`), so every number here is ground truth — only the cost line uses
-an assumed price table (flagged in the output; edit `PRICING` in the tool).
-
-The auditor discovers transcripts under the Claude Code projects root
-(`~/.claude/projects` by default; the tool's own defaults govern which roots and
-namespace prefix it scans). Pass `--root` only if your transcripts live elsewhere.
-
-## Inputs
-
-```
-/trajectory-audit [--since-days N] [--md OUT] [--json OUT] [--all] [--include-subagents]
-/trajectory-audit deep <path-to-session.jsonl>     # follow ONE trajectory top-to-bottom
-```
-
-- `--since-days N` — only sessions touched in the last N days (default: all discovered).
-- `--md OUT` / `--json OUT` — write the report to a file instead of stdout. Use
-  `--md` for the human report; `--json` when the window is large and you want to
-  skim programmatically.
-- `--all` — drop the namespace filter (audit every project, not just the current repo family).
-- `deep <session.jsonl>` — single-trajectory drill-down (the user asks in order,
-  per-turn token spend, plus the behavior line: errors / timeout kills /
-  sleep-polls / churn / worst repeats) — use when a heaviest-session or
-  behavioral-offender row needs a root cause.
-
-## Procedure
-
-### Step 0 — Discover, then run the rollup (one read per session, no polling)
-
-This skill **never** tails or re-reads logs in a loop — that is the very
-anti-pattern it audits for. The tool does a single sequential read of each file.
+Use the Go data path for every operational audit:
 
 ```bash
-# what's in the window (cheap):
-python tools/session_audit.py discover --since-days 7
-
-# the rollup, written to a dated report:
-python tools/session_audit.py audit --since-days 7 --md trajectory-audit-$(date +%Y%m%d).md
+fak trajectory audit --since 7d \
+  --jsonl trajectory-audit-$(date +%Y%m%d).jsonl \
+  --md trajectory-audit-$(date +%Y%m%d).md
 ```
 
-Successful lifecycle hooks such as `UserPromptSubmit` may appear only in Claude's live stream, not in the persisted
-session transcript. Capture that stream with receive timestamps, then add it to the audit:
+The verb discovers both supported transcript homes by default:
+
+- Claude: `$CLAUDE_CONFIG_DIR/projects`, else `~/.claude/projects`.
+- Codex: `$CODEX_HOME/sessions`, else `~/.codex/sessions`.
+
+Pass `--claude-root` or `--codex-root` only for an explicit alternate corpus or
+a pinned fixture. The paths persisted in artifacts are relative to those roots;
+machine-private absolute roots are never emitted.
+
+## Exact accounting contract
+
+Every JSONL row uses schema `fak-trajectory-audit/1`. Claude usage is folded once
+per unique `message.id`, matching the provider-billed turn identity. Codex
+`token_count` records are cumulative: the parser uses the final monotonic
+`total_token_usage` record and does not sum repeated `last_token_usage` snapshots.
+Codex `input_tokens` includes its cached/cache-write subsets, so fresh input is
+the exact subtraction `input - cached - cache_write`. The resulting input,
+output, cache-create, and cache-read buckets are disjoint across both harnesses.
+
+An unknown or malformed usage shape is never estimated. The verb writes a
+`refusal` row and the markdown diagnostic, prints
+`TRAJECTORY_SCHEMA_REFUSED`, and exits non-zero. Treat that as a parser-version
+gap, not as zero usage.
+
+## Baseline comparison
+
+Use a prior versioned JSONL artifact as the baseline:
 
 ```bash
-python tools/session_audit.py capture-hooks --out hook-stream.jsonl -- \
-  claude -p --output-format stream-json --verbose --include-hook-events "PROMPT"
-python tools/session_audit.py audit --since-days 7 --hook-stream hook-stream.jsonl \
-  --md report.md --json report.json
+fak trajectory audit --since 7d --baseline prior.jsonl \
+  --jsonl current.jsonl --md current.md
 ```
 
-`--hook-stream` is repeatable. The audit pairs `hook_started`/`hook_response` by hook ID, derives elapsed time from
-capture timestamps, and suppresses matching session/event/outcome records already present in transcript attachments.
+The report always emits comparable delta rows for:
 
-For a large window prefer `--json` and skim, rather than rendering a giant table.
-A bare report name lands at the repo root; pass a path under a gitignored dir
-(e.g. `.dos/audits/`) if you don't want it tracked.
+- input:output ratio;
+- cache-create burden;
+- repeated failures; and
+- hook p95 latency.
 
-### Step 1 — Read the rollup, not the raw sessions
+Each is higher-is-worse. A positive comparable delta carries
+`"regression": true`; a missing denominator or hook sample is explicit and not
+silently converted to zero.
 
-The report gives you, in order:
+## Reading the result
 
-1. **Machine-wide totals (EXACT)** — output tokens (the real work), fresh billed
-   input, cache-read (prompt-cache / KV reuse), the **I:O ratio**, the
-   **cache-read share** of all ingested context, the **cache-CREATE burst share**
-   + **create:read ratio** (context re-written into the provider cache at write
-   rates — the burst counterpart the read-share hides, #3069), web search/fetch,
-   multi-iteration count, **Anthropic-billed cost** (assumed-price, flagged), plus
-   a line for any **other billing bucket** present and the non-billed
-   `<synthetic>` turn count.
-2. **Cost by billing bucket (provider)** — the answer to "is this Claude money or
-   Gemini money?". Never sum across rows; an unpriced bucket shows "— (no card)".
-3. **Per-model breakdown** — the tier split (opus vs sonnet vs haiku), so a blended
-   number can be read as opus-heavy vs haiku-heavy. This is where you confirm *which*
-   model drove the cost before you quote a figure.
-4. **Per-namespace rollup** — which project the spend lands in, with its top model.
-5. **Per-session distributions** — median/p90 of tool-calls, output tokens, I:O
-   ratio, cache-hit fraction, read-only fraction. The tails are where the waste is.
-6. **Global tool mix** — a tool dominating the call count is the first thing to question.
-7. **Behavioral lens — stuck/churn detectors** — per-tool error rates (raw vs
-   **genuine**, where genuine discounts policy-refusals and no-TTY hangs a shell
-   change can't move), timeout kills, interactive-editor/pager hangs, sleep-polls,
-   Edit/Write churn, then the two worst-offender tables:
-   sessions with a repeated identical failure (≥3× the same signature = a stuck
-   loop) and sessions with file churn (≥5 mutations of one file = a rewrite-loop
-   smell). This section also carries the **cache-CREATE burst** rows (#3069): the
-   count of **suffix-cache invalidations** (per-turn `cache_read` snap-backs
-   `>20,000` tok, with the modal reset floor) and the **high-burst long-session**
-   table (≥8 turns with ≥1 reset — cache-create tok, cc-share, resets, floor, est.
-   $). These rows are the behavior audit the token lens can't see — each one
-   names a session worth a `deep` drill.
-8. **Hook execution lens** — transcript-native hook outcomes, non-blocking failures/cancellations, failure signatures, and p90/max latency by event. When the current workspace has `.dos/metrics/observations.jsonl`, reconcile it as an independent execution witness (especially for PostToolUse, whose successful attachments may be absent), and surface ledger/transcript amplification plus same-second collision pressure without claiming the differently-scoped sources are one-to-one. For a rollout or wiring cutover, pass `--dos-since <timezone-qualified ISO-8601 instant>` to isolate ledger evidence at the exact boundary; the report records that inclusive bound and emits counts above 100 ms, 500 ms, and 1 s alongside p90/p99/max. This overrides `--since-days` only for the ledger. Missing transcript events mean no outcome attachment was recorded, not proof the hook never ran.
-9. **Top 15 sessions by output tokens** — the fastest path to the expensive runs.
+Read the markdown first, then query the JSONL only for drill-down:
 
-The `trend` subcommand carries the same detectors per time bucket (`err%` /
-`t/o` / `hang` / `slp` / `chrn` columns, plus a `behavior` object in `--json` rows), so a
-regression in fleet behavior is visible week-over-week, not just in one sweep.
+1. Confirm source coverage: roots present, files scanned/discovered, records,
+   exact/applied usage records, duplicates, and unsupported records.
+2. Read the exact four-bucket totals and input:output/cache-create ratios.
+3. Read rank 1 in the `bottleneck` rows. Ranking uses exact accounted tokens;
+   ties sort by source, session, then relative path, so the highest-cost row is
+   deterministic without inventing cross-vendor prices.
+4. Check tool errors, repeated failures, mutation churn, and hook p95 on the
+   session rows.
+5. If `--baseline` was supplied, surface only the delta rows that are comparable
+   regressions.
 
-Do **not** open the individual `.jsonl` files unless a heaviest-session row needs
-a root cause the rollup can't name. If you do, run `deep <session>` once — don't
-re-read it in a loop.
+Do not infer that a missing root means zero activity; the coverage row records
+`root_present: false`. Do not sum a vendor price across harnesses: this spine is
+token-exact and deliberately does not fabricate a blended dollar rate.
 
-### Step 2 — Separate signal from expected
+## Python parity boundary
 
-- A high cache-read share is **good** (it's KV reuse the harness already captures),
-  not waste — a healthy long-running machine sits in the ~90%+ band. A *low*
-  cache-read share on a long session is the smell worth chasing.
-- The **cache-CREATE burst share** reads the *opposite* way: it is context billed
-  at write rates, so a high burst share / create:read ratio — or a session in the
-  high-burst table — is the smell, **not** reassurance (#3069). Because a burst
-  inflates the read-share the line above, don't let a healthy-looking ~90% read
-  share talk you out of chasing a session that also shows many suffix-cache resets.
-- A `--include-subagents` run counts sidechain/workflow transcripts that are
-  normally uncounted; note them but don't double-count against the main thread.
-- A high I:O ratio is expected for read/research-heavy work; flag it only when it
-  pairs with a heavy session whose output was small (lots of context in, little
-  produced).
-- **Quote cost per bucket, never blended.** Before you state a dollar figure, read
-  the per-bucket and per-model tables: say "Anthropic-billed, ~99% opus-4-8", not a
-  lone total. If a non-Anthropic bucket appears with "— (no card)", say its cost is
-  **unknown** (a separate invoice), not zero — zero would imply it was free.
-  `<synthetic>` is genuinely $0 (never hit a vendor) and must not be counted as work.
-
-### Step 3 — Surface the 0–2 that matter
-
-End with a short operator summary: the headline machine-wide numbers (I:O,
-cache-read share, **cost named by bucket + dominant model**), the single heaviest
-session and its likely cause, the single worst behavioral offender (a repeated
-identical failure or a file-churn loop) if one crossed the threshold, and any
-distribution tail that crosses a sane bar.
-Don't dump the whole table into chat — link the report file.
+`tools/session_audit.py` remains only the Claude fixture parity oracle while the
+Go parser is established. Use it during parser development to verify selected
+exact fixture totals; do not use it as the operational audit path and do not
+publish its markdown-first output as the cross-harness contract. The pinned
+oracle values live beside the Go fixtures under
+`internal/trajectory/testdata/audit/`.
 
 ## Output
 
-- Dated report: stdout by default, or the `--md` / `--json` path you pass.
-- A 3–5 line operator summary in chat.
-- Writes **no code** and edits **no plan/memory file** — read-only by construction.
+- Versioned JSONL for automation and direct analytical queries.
+- Markdown carrying the same totals, coverage, bottleneck, baseline, and
+  unsupported-shape evidence.
+- A short operator summary naming the exact totals, rank-1 bottleneck, any
+  comparable regression, and the artifact paths.
 
-## Notes
-
-- Token figures are exact; the cost line uses an ASSUMED price table — edit
-  `PRICING` in `tools/session_audit.py` to match the current card. `PRICING` is
-  **Anthropic-only** and matched by model substring (`opus`/`sonnet`/`haiku`/`fable`).
-- To price another vendor, add its rate card to `PRICING` **and** its model
-  substrings to `PROVIDER_BUCKETS` (the bucket map). Without both, that vendor's
-  sessions are reported with exact tokens but shown as "— (no card)" — never folded
-  into the Anthropic total and never mispriced at Opus rates.
-- `<synthetic>` / `?` / blank models are in `NONBILLED_MODELS` → always $0.
+This skill audits existing transcripts and writes only the requested report
+artifacts. It does not edit code, plans, or memory.
