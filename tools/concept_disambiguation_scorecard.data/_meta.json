@@ -5778,6 +5778,7 @@
         "writeGuardCodexSessionBinding",
         "writeSessionMoveJSON"
       ],
+      "incidental_tokens": [],
       "known_tokens": [],
       "min_files": 3,
       "name": "Session / scheduling family",
@@ -5816,8 +5817,7 @@
         "sessionNewReceipt",
         "sessionNewUsage",
         "sessionOpenClient"
-      ],
-      "incidental_tokens": []
+      ]
     },
     {
       "classifications": [
@@ -8230,6 +8230,21 @@
           "category": "incidental",
           "reason": "Issue #8240 helper name for retaining a serve backend preflight notice; it does not define a policy capability.",
           "token": "serveBackendForwardPreflightMessage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Runtime admit refusal code, not a distinct policy capability",
+          "token": "AdmitPolicyWidening"
+        },
+        {
+          "category": "incidental",
+          "reason": "Machine-readable runtime admit refusal value, not a distinct policy capability",
+          "token": "POLICY_FLOOR_WIDENING"
+        },
+        {
+          "category": "incidental",
+          "reason": "Runtime admit refusal code, not a distinct policy capability",
+          "token": "AdmitPolicyDeny"
         }
       ],
       "exclude": [
@@ -8241,6 +8256,8 @@
         "ARM_CAPABILITY_UNNAMED",
         "AdjudicatorAgreement",
         "AdjudicatorSHA256",
+        "AdmitPolicyDeny",
+        "AdmitPolicyWidening",
         "ArmFakCapability",
         "AssistancePolicy",
         "CAPABILITY_NOT_ADVERTISED",
@@ -8274,6 +8291,7 @@
         "OrgPolicyCachePathEnv",
         "OrgPolicyURLEnv",
         "POLICY_CONFLICT",
+        "POLICY_FLOOR_WIDENING",
         "ParsePolicy",
         "PayloadPolicy",
         "PolicyHash",
