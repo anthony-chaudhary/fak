@@ -13,13 +13,18 @@ func TestFoldVerifiedReceiptRoutesRPCCompletionBeforeRootFold(t *testing.T) {
 	newReceipt := func(t *testing.T) microagent.CompletionReceipt {
 		t.Helper()
 		exec := scriptExec(t, []string{"lookup"}, "private child transcript payload")
-		subagent, err := microagent.NewRPCSubagent("child-1", exec, 4096, nil)
+		decisionJournal, _ := openJournal(t)
+		subagent, err := microagent.NewRPCSubagent("child-1", exec, 4096, decisionJournal)
 		if err != nil {
 			t.Fatalf("NewRPCSubagent: %v", err)
 		}
 		subagent.WithSummarizer(func(string, []microagent.RPCStep) string { return "verified result" })
 		result := subagent.RunScript(context.Background(), []microagent.ToolAction{{Tool: "lookup"}})
-		return result.Receipt("child-1")
+		receipt, err := result.Receipt("child-1")
+		if err != nil {
+			t.Fatalf("Receipt: %v", err)
+		}
+		return receipt
 	}
 
 	t.Run("accept", func(t *testing.T) {

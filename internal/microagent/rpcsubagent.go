@@ -102,14 +102,15 @@ func (s RPCStep) Allowed() bool { return s.Verdict.Kind == abi.VerdictAllow && s
 // deliberately does NOT carry the intermediate transcript — that is the zero-
 // context-cost collapse: the orchestrator gets Collapsed, not the chatter.
 type RPCResult struct {
-	Steps              []RPCStep // one per script action, in order
-	Collapsed          string    // the bounded summary the orchestrator may fold (the collapsed turn)
-	Allowed            int       // count of adjudicated+executed calls
-	Denied             int       // count of floor-refused calls (contained, never executed)
-	Errored            int       // count of allowed-but-not-dispatched calls (config faults, not decisions)
-	IntermediateTokens int       // bounded child-context tokens retained after the script
-	FoldedTokens       int       // standalone estimate for the Collapsed message
-	SavedTokens        int       // max(IntermediateTokens-FoldedTokens, 0)
+	Steps              []RPCStep     // one per script action, in order
+	Collapsed          string        // the bounded summary the orchestrator may fold (the collapsed turn)
+	Provenance         []EvidenceRef // stable journal-row references for adjudicated steps
+	Allowed            int           // count of adjudicated+executed calls
+	Denied             int           // count of floor-refused calls (contained, never executed)
+	Errored            int           // count of allowed-but-not-dispatched calls (config faults, not decisions)
+	IntermediateTokens int           // bounded child-context tokens retained after the script
+	FoldedTokens       int           // standalone estimate for the Collapsed message
+	SavedTokens        int           // max(IntermediateTokens-FoldedTokens, 0)
 }
 
 // RPCSubagent runs a fixed multi-call tool SCRIPT on behalf of an orchestrator,
@@ -164,13 +165,17 @@ func (s *RPCSubagent) RunScript(ctx context.Context, script []ToolAction) RPCRes
 			// Contained: the floor refused BEFORE dispatch, so the call never ran.
 			// Record the REAL deny verdict as a DENY row and keep the refusal in the
 			// subagent's own transcript — never the orchestrator's.
-			s.journalDecision(act, res.Verdict, abi.EvDeny)
+			if ref := s.journalDecision(act, res, abi.EvDeny); ref.Ref != "" {
+				out.Provenance = append(out.Provenance, ref)
+			}
 			out.Denied++
 			s.ctx.Append("assistant", fmt.Sprintf("call %s refused: %s", act.Tool, abi.ReasonName(res.Verdict.Reason)))
 		case err == nil && res.Verdict.Kind == abi.VerdictAllow:
 			// Adjudicated + executed: record the REAL allow as a DECIDE row and append
 			// the call + its result to the subagent's transcript (the collapsed-out chatter).
-			s.journalDecision(act, res.Verdict, abi.EvDecide)
+			if ref := s.journalDecision(act, res, abi.EvDecide); ref.Ref != "" {
+				out.Provenance = append(out.Provenance, ref)
+			}
 			out.Allowed++
 			s.ctx.Append("assistant", "call "+act.Tool)
 			s.ctx.Append("tool", string(res.Stdout))
@@ -204,17 +209,34 @@ func (s *RPCSubagent) RunScript(ctx context.Context, script []ToolAction) RPCRes
 // are the adjudicated ones, and emits the production event kind (EvDecide for an
 // allow, EvDeny for a refusal) — the row is derived from the real verdict, never
 // stubbed. A nil journal makes this a no-op.
-func (s *RPCSubagent) journalDecision(act ToolAction, v abi.Verdict, kind abi.EventKind) {
+func (s *RPCSubagent) journalDecision(act ToolAction, result ToolResult, kind abi.EventKind) EvidenceRef {
 	if s.jrnl == nil {
-		return
+		return EvidenceRef{}
 	}
 	call, err := toolCall(act)
 	if err != nil {
-		return // an unmarshalable action never reached the floor either
+		return EvidenceRef{} // an unmarshalable action never reached the floor either
 	}
 	s.seq++
 	call.TraceID = s.id
 	call.SeqNo = s.seq
-	vv := v
-	s.jrnl.Emit(abi.Event{Kind: kind, Call: call, Verdict: &vv})
+	vv := result.Verdict
+	event := abi.Event{Kind: kind, Call: call, Verdict: &vv}
+	if result.Ran {
+		event.Result = &abi.Result{Payload: abi.Ref{Kind: abi.RefInline, Inline: append([]byte(nil), result.Stdout...), Len: int64(len(result.Stdout))}}
+	}
+	_, _, writeErrorsBefore := s.jrnl.Stats()
+	s.jrnl.Emit(event)
+	_, _, writeErrorsAfter := s.jrnl.Stats()
+	if s.jrnl.Path() == "" || writeErrorsAfter != writeErrorsBefore {
+		return EvidenceRef{}
+	}
+	rows := s.jrnl.Recent(0)
+	for i := len(rows) - 1; i >= 0; i-- {
+		row := rows[i]
+		if row.TraceID == s.id && row.CallSeq == s.seq && row.Tool == act.Tool {
+			return EvidenceRef{Kind: "journal-row", Ref: "sha256:" + row.Hash}
+		}
+	}
+	return EvidenceRef{}
 }
