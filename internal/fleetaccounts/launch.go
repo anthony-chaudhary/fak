@@ -82,7 +82,18 @@ func DecideLaunch(req LaunchRequest) LaunchDecision {
 		}
 		d.Env = map[string]string{"CLAUDE_CONFIG_DIR": a.ConfigDir}
 	case "codex":
-		d.Argv = []string{"codex", "exec"}
+		// Keep account isolation in CODEX_HOME while routing the child through the
+		// same guard used by `fak codex`. JSON events let exec independently prove
+		// that an admitted prompt produced an assistant response.
+		d.Argv = []string{
+			"fak", "guard",
+			"--provider", "openai-responses",
+			"--codex-home", a.ConfigDir,
+			"--codex-loop-gate", "off",
+			"--", "codex", "exec",
+			"--dangerously-bypass-hook-trust",
+			"--json",
+		}
 		if model != "" {
 			d.Argv = append(d.Argv, "--model", model)
 		}

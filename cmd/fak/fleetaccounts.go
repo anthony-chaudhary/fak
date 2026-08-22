@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -200,17 +201,7 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 		if mode == "launch" {
 			return 0
 		}
-		cmd := exec.Command(decision.Argv[0], decision.Argv[1:]...)
-		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
-		cmd.Env = os.Environ()
-		for key, value := range decision.Env {
-			cmd.Env = append(cmd.Env, key+"="+value)
-		}
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(stderr, "fleet-accounts exec: %v\n", err)
-			return 1
-		}
-		return 0
+		return executeFleetLaunch(decision, os.Stdin, stdout, stderr, os.Environ())
 	case "resolve":
 		taskClass := fleetAccountsTaskClass(*t1, *t2, *t3)
 		strict := *t1 || *t2 || *t3
@@ -478,4 +469,71 @@ func appendFleetLaunchLedger(path string, decision fleetaccounts.LaunchDecision)
 		OperatorOverride bool   `json:"operator_override,omitempty"`
 	}{time.Now().UTC().Format(time.RFC3339Nano), decision.Account, decision.Product, decision.ConfiguredModel, decision.InvokedModel, decision.EndpointClass, decision.TaskTier, decision.OK, decision.Reason, decision.OperatorOverride}
 	return json.NewEncoder(f).Encode(record)
+}
+
+var fleetLaunchExecCommand = exec.Command
+
+func executeFleetLaunch(d fleetaccounts.LaunchDecision, stdin io.Reader, stdout, stderr io.Writer, environ []string) int {
+	if len(d.Argv) == 0 {
+		fmt.Fprintln(stderr, "fleet-accounts exec: empty command")
+		return 2
+	}
+	cmd := fleetLaunchExecCommand(d.Argv[0], d.Argv[1:]...)
+	cmd.Stdin, cmd.Stderr = stdin, stderr
+	cmd.Env = overlayFleetLaunchEnv(environ, d.Env)
+
+	var codexOutput bytes.Buffer
+	if d.Product == "codex" {
+		cmd.Stdout = io.MultiWriter(stdout, &codexOutput)
+	} else {
+		cmd.Stdout = stdout
+	}
+	if err := cmd.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return ee.ExitCode()
+		}
+		fmt.Fprintf(stderr, "fleet-accounts exec: %v\n", err)
+		return 1
+	}
+	if d.Product == "codex" && !codexAssistantCompleted(codexOutput.Bytes()) {
+		reason := "ASSISTANT_RESPONSE_MISSING"
+		if bytes.Contains(bytes.ToLower(codexOutput.Bytes()), []byte("userpromptsubmit blocked")) {
+			reason = "PROMPT_HOOK_BLOCK"
+		}
+		fmt.Fprintf(stderr, "fleet-accounts exec: codex turn incomplete (%s): no completed assistant response\n", reason)
+		return 70
+	}
+	return 0
+}
+
+func overlayFleetLaunchEnv(base []string, overlay map[string]string) []string {
+	out := append([]string(nil), base...)
+	for key, value := range overlay {
+		prefix := strings.ToUpper(key) + "="
+		kept := out[:0]
+		for _, entry := range out {
+			if !strings.HasPrefix(strings.ToUpper(entry), prefix) {
+				kept = append(kept, entry)
+			}
+		}
+		out = append(kept, key+"="+value)
+	}
+	return out
+}
+
+func codexAssistantCompleted(output []byte) bool {
+	for _, line := range bytes.Split(output, []byte{'\n'}) {
+		var event struct {
+			Type string `json:"type"`
+			Item struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"item"`
+		}
+		if json.Unmarshal(bytes.TrimSpace(line), &event) == nil &&
+			event.Type == "item.completed" && event.Item.Type == "agent_message" && strings.TrimSpace(event.Item.Text) != "" {
+			return true
+		}
+	}
+	return false
 }

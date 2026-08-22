@@ -53,7 +53,7 @@ func TestDecideLaunchAllProductsCaptureArgvEnvAndMetadata(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.product, func(t *testing.T) {
 			d := DecideLaunch(LaunchRequest{Account: resolved(tt.product, tt.product+"-seat", "configured", "/accounts/"+tt.product, 1), TaskTier: 1, InvokedModel: "invoked", Prompt: "fix #6534"})
-			if !d.OK || d.Argv[0] != tt.binary || d.Env[tt.envKey] == "" {
+			if !d.OK || !launchesBinary(d.Argv, tt.binary) || d.Env[tt.envKey] == "" {
 				t.Fatalf("decision = %#v", d)
 			}
 			if d.Account != tt.product+"-seat" || d.ConfiguredModel != "configured" || d.InvokedModel != "invoked" || d.TaskTier != 1 {
@@ -89,4 +89,41 @@ func TestTier3OverrideIsExplicitAndNarrow(t *testing.T) {
 	if !got.OK || !got.OperatorOverride {
 		t.Fatalf("override decision = %#v", got)
 	}
+}
+
+func TestDecideLaunchCodexUsesGuardedHookCompatibleExec(t *testing.T) {
+	seat := resolved("codex", "codex-four", "gpt-5-codex", "/accounts/codex-four", 1)
+	d := DecideLaunch(LaunchRequest{Account: seat, TaskTier: 1, Prompt: "return ok"})
+	want := []string{
+		"fak", "guard", "--provider", "openai-responses",
+		"--codex-home", "/accounts/codex-four", "--codex-loop-gate", "off",
+		"--", "codex", "exec", "--dangerously-bypass-hook-trust", "--json",
+		"--model", "gpt-5-codex", "return ok",
+	}
+	if !d.OK || !reflect.DeepEqual(d.Argv, want) {
+		t.Fatalf("decision argv = %#v, want %#v", d.Argv, want)
+	}
+	if d.Env["CODEX_HOME"] != "/accounts/codex-four" {
+		t.Fatalf("CODEX_HOME = %q", d.Env["CODEX_HOME"])
+	}
+}
+
+func TestDecideLaunchCodexAccountsRemainProcessIsolated(t *testing.T) {
+	one := DecideLaunch(LaunchRequest{Account: resolved("codex", "one", "gpt", "/accounts/one", 1), TaskTier: 1, Prompt: "one"})
+	two := DecideLaunch(LaunchRequest{Account: resolved("codex", "two", "gpt", "/accounts/two", 1), TaskTier: 1, Prompt: "two"})
+	if one.Env["CODEX_HOME"] == two.Env["CODEX_HOME"] || one.Argv[5] == two.Argv[5] {
+		t.Fatalf("account launches cross-wired: one=%#v two=%#v", one, two)
+	}
+	if one.Env["CODEX_HOME"] != "/accounts/one" || two.Env["CODEX_HOME"] != "/accounts/two" {
+		t.Fatalf("isolated homes lost: one=%q two=%q", one.Env["CODEX_HOME"], two.Env["CODEX_HOME"])
+	}
+}
+
+func launchesBinary(argv []string, binary string) bool {
+	for _, arg := range argv {
+		if arg == binary {
+			return true
+		}
+	}
+	return false
 }

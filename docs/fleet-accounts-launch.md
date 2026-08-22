@@ -14,7 +14,11 @@ fak fleet-accounts launch --product codex --task-tier 1 --task "hard engineering
 
 Use `exec` instead of `launch` to run the returned command. Every supported worker product
 is bound to its own configuration root: Claude uses `CLAUDE_CONFIG_DIR`, Codex uses
-`CODEX_HOME`, and OpenCode uses `XDG_CONFIG_HOME`. OpenCode fleet dispatch additionally
+`CODEX_HOME`, and OpenCode uses `XDG_CONFIG_HOME`. These are child-process overlays, not
+ambient account switches, so two or more launches can safely use different Codex homes at
+the same time. Codex launches run through `fak guard` and emit JSON events; `exec` returns
+nonzero with `PROMPT_HOOK_BLOCK` or `ASSISTANT_RESPONSE_MISSING` when Codex exits without a
+completed assistant response. OpenCode fleet dispatch additionally
 refuses to build `opencode run` unless both a resolved account record and a task tier reach
 the typed launch-decision seam; an environment-only fallback is not accepted.
 
