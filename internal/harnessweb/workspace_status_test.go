@@ -11,11 +11,14 @@ import (
 
 func TestLiveAdapterDiscoversArmedWorkspaceAndStatusProjectsIt(t *testing.T) {
 	fak := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/healthz" {
+		switch r.URL.Path {
+		case "/healthz":
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "native_code_workspace": map[string]any{"armed": true, "tools": []string{"Read", "Write", "Edit", "Bash", "Grep", "Glob"}}})
+		case "/debug/vars":
+			_ = json.NewEncoder(w).Encode(map[string]any{})
+		default:
 			http.NotFound(w, r)
-			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "native_code_workspace": map[string]any{"armed": true, "tools": []string{"Read", "Write", "Edit", "Bash", "Grep", "Glob"}}})
 	}))
 	defer fak.Close()
 	live := &liveAdapter{baseURL: fak.URL, client: fak.Client()}
