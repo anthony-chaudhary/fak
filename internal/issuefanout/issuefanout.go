@@ -16,6 +16,8 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -562,13 +564,19 @@ func goPackageForInput(in Input) (string, error) {
 	for _, raw := range in.Paths {
 		path := strings.Trim(strings.TrimPrefix(strings.ReplaceAll(strings.TrimSpace(raw), `\`, "/"), "./"), "/")
 		parts := strings.Split(path, "/")
-		if len(parts) < 2 || (parts[0] != "cmd" && parts[0] != "internal") {
+		if len(parts) < 2 {
 			continue
 		}
-		packages["./"+parts[0]+"/"+parts[1]] = true
+		if parts[0] == "cmd" || parts[0] == "internal" {
+			packages["./"+parts[0]+"/"+parts[1]] = true
+			continue
+		}
+		if parts[0] == "examples" && examplePathCanIdentifyPackage(parts) && runnableExamplePackage(filepath.Join(parts[0], parts[1])) {
+			packages["./"+parts[0]+"/"+parts[1]] = true
+		}
 	}
 	if len(packages) == 0 {
-		return "", refusef("issuefanout: paths do not identify a Go package under cmd/ or internal/ — use one representative package path so QA witnesses are runnable")
+		return "", refusef("issuefanout: paths do not identify a Go package runnable under cmd/, internal/, or examples/ — use one representative package path so QA witnesses are runnable")
 	}
 	if len(packages) > 1 {
 		names := make([]string, 0, len(packages))
@@ -585,6 +593,55 @@ func goPackageForInput(in Input) (string, error) {
 }
 
 // Render prints the plan for a human: one line per candidate plus the next step.
+func examplePathCanIdentifyPackage(parts []string) bool {
+	if len(parts) == 2 {
+		return true
+	}
+	name := parts[2]
+	return name == "**" || strings.HasSuffix(name, ".go")
+}
+
+func runnableExamplePackage(path string) bool {
+	root, ok := workspaceRoot()
+	if !ok {
+		return false
+	}
+	entries, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(path)))
+	if err != nil {
+		return false
+	}
+	hasGo, hasTest := false, false
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasSuffix(name, "_test.go") {
+			hasTest = true
+		} else if strings.HasSuffix(name, ".go") {
+			hasGo = true
+		}
+	}
+	return hasGo && hasTest
+}
+
+func workspaceRoot() (string, bool) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", false
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
+}
+
 func Render(p Plan) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "fanout: %d contract-ready follow-ons for %s (spine: %s)\n",

@@ -122,10 +122,35 @@ func TestBuildDerivesQAPackageFromDeclaredPaths(t *testing.T) {
 	}
 }
 
+func TestBuildAdmitsRunnableExamplePackage(t *testing.T) {
+	in := spineInput()
+	in.Leaf = "independent-server"
+	in.Paths = []string{"examples/independent-server/**", "docs/integrations/independent-server.md"}
+	in.Areas = []string{"qa"}
+	in.Max = 3
+
+	plan, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Candidates) != 3 {
+		t.Fatalf("got %d candidates, want 3", len(plan.Candidates))
+	}
+	for _, candidate := range plan.Candidates {
+		for field, value := range map[string]string{"witness": candidate.Witness, "gate": candidate.AcceptanceGate} {
+			if !strings.Contains(value, "./examples/independent-server") {
+				t.Fatalf("%s %s = %q, want exact example package", candidate.Key, field, value)
+			}
+		}
+	}
+}
+
 func TestBuildRefusesAmbiguousOrNonGoPackagePaths(t *testing.T) {
 	for name, paths := range map[string][]string{
-		"ambiguous": {"cmd/fak/guard.go", "internal/issuefanout/issuefanout.go"},
-		"non-go":    {"docs/integrations/openai-codex.md"},
+		"ambiguous":       {"cmd/fak/guard.go", "internal/issuefanout/issuefanout.go"},
+		"non-go":          {"docs/integrations/openai-codex.md"},
+		"docs-example":    {"examples/independent-server/README.md"},
+		"missing-example": {"examples/not-a-package/**"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			in := spineInput()
