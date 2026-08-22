@@ -88,7 +88,11 @@ func TestSessionRecoverPreviewNeedsNoFakDevExecutable(t *testing.T) {
 	path := strings.Join([]string{filepath.Dir(os.Args[0]), filepath.Dir(python), os.Getenv("SystemRoot") + `\System32`, os.Getenv("SystemRoot")}, string(os.PathListSeparator))
 	cmd := exec.Command(os.Args[0], "-test.run=^TestSessionRecoverPreviewNeedsNoFakDevExecutable$", "-test.count=1")
 	cmd.Dir = t.TempDir()
-	cmd.Env = append(os.Environ(), "FAK_RECOVERY_INSTALLED_HELPER=1", "PATH="+path)
+	codexHome := filepath.Join(cmd.Dir, ".codex")
+	if err := os.Mkdir(codexHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd.Env = append(os.Environ(), "FAK_RECOVERY_INSTALLED_HELPER=1", "CODEX_HOME="+codexHome, "PATH="+path)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("installed-style preview: %v\n%s", err, output)
