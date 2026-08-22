@@ -23,9 +23,9 @@ func TestOrchestrationStatusRefusalsNameRecovery(t *testing.T) {
 			if code := runOrchestrationStatus(&stdout, &stderr, tc.argv); code == 0 {
 				t.Fatalf("expected refusal: %s", stdout.String())
 			}
-			message := strings.ToLower(stderr.String())
+			message := stderr.String()
 			for _, want := range tc.want {
-				if !strings.Contains(message, strings.ToLower(want)) {
+				if !strings.Contains(message, want) {
 					t.Fatalf("message %q lacks recovery %q", stderr.String(), want)
 				}
 			}
