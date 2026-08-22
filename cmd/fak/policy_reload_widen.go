@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/policy"
@@ -85,6 +86,85 @@ func (d policyWideningDelta) String() string {
 	return strings.Join(parts, "; ")
 }
 
+func declaredClassForField(field string) string {
+	if knob, ok := policy.KnobByField(field); ok {
+		return string(knob.Class)
+	}
+	return string(policy.AmendGatedWiden)
+}
+
+func liveReloadGrantEntrySource(fallback, knob, value string) string {
+	if knob != "Allow" && knob != "AllowPrefix" {
+		return fallback
+	}
+	layers := guardAllowEffectiveReadLayers()
+	for i := len(layers) - 1; i >= 0; i-- {
+		layer := layers[i]
+		ov, err := loadGuardAllowOverlay(layer.Path)
+		if err != nil {
+			continue
+		}
+		entries := ov.Allow
+		if knob == "AllowPrefix" {
+			entries = ov.AllowPrefix
+		}
+		for _, entry := range entries {
+			if entry == value {
+				return layer.Path
+			}
+		}
+	}
+	return fallback
+}
+
+func liveReloadGrantSource(j *journal.Journal, fallback, knob, value string) string {
+	source := liveReloadGrantEntrySource(fallback, knob, value)
+	if j == nil || knob != "Allow" {
+		return source
+	}
+	rows := j.Recent(0)
+	for i := len(rows) - 1; i >= 0; i-- {
+		row := rows[i]
+		if row.Verdict == "DENY" && row.Reason == abi.ReasonName(abi.ReasonDefaultDeny) && row.Tool == value {
+			return fmt.Sprintf("%s#source-denial-seq=%d", source, row.Seq)
+		}
+	}
+	return source
+}
+
+func recordLiveWidenings(j *journal.Journal, current adjudicator.Policy, widening policyWideningDelta, source, reason string) {
+	if j == nil || widening.Empty() {
+		return
+	}
+	appendGrant := func(knob, old, next string) {
+		j.AppendCapabilityGrant(journal.CapabilityGrantRow{
+			Knob:    knob,
+			Class:   declaredClassForField(knob),
+			Old:     old,
+			New:     next,
+			Channel: journal.GrantChannelLiveReload,
+			Actor:   "operator",
+			Source:  liveReloadGrantSource(j, source, knob, next),
+			Reason:  reason,
+		})
+	}
+	for _, tool := range widening.AddedAllow {
+		appendGrant("Allow", "", tool)
+	}
+	for _, prefix := range widening.AddedAllowPrefix {
+		appendGrant("AllowPrefix", "", prefix)
+	}
+	for _, tool := range widening.RemovedDeny {
+		appendGrant("Deny", abi.ReasonName(current.Deny[tool]), "")
+	}
+	for _, glob := range widening.RemovedSelfModifyGlobs {
+		appendGrant("SelfModifyGlobs", glob, "")
+	}
+	if widening.PostureLoosened {
+		appendGrant("Posture", "fail_closed", "admit_and_log")
+	}
+}
+
 func policyReloadWidenConfirmed() bool {
 	value := strings.TrimSpace(os.Getenv(policyReloadWidenConfirmEnv))
 	return value == "1" || strings.EqualFold(value, "true") || strings.EqualFold(value, "yes")
@@ -126,6 +206,10 @@ func applyPolicyRuntimeLocked(rt policy.Runtime, source, digest, warning string,
 		}
 		warning += "confirmed_widening: " + widening.String()
 	}
-	journal.Active().AppendConfigSwap(journal.ConfigSwapFloor, source, digest, journal.ConfigSwapOK, warning)
+	j := journal.Active()
+	j.AppendConfigSwap(journal.ConfigSwapFloor, source, digest, journal.ConfigSwapOK, warning)
+	if enforceWideningGate && !widening.Empty() {
+		recordLiveWidenings(j, current, widening, source, "operator confirmed policy reload")
+	}
 	return warning, nil
 }

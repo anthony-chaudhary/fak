@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/journal"
+	"github.com/anthony-chaudhary/fak/internal/policy"
 )
 
 func TestDiffPolicyWideningReportsCapabilityDeltaDeterministically(t *testing.T) {
@@ -115,9 +117,94 @@ func TestReloadPolicyRejectsWideningKeepsLastGoodAndJournalsDelta(t *testing.T) 
 	if verdict := adjudicateToolForReloadTest("danger"); verdict.Kind != abi.VerdictAllow {
 		t.Fatalf("confirmed reload did not apply: %+v", verdict)
 	}
-	last = j.Recent(10)[len(j.Recent(10))-1]
-	if last.ConfigSwap == nil || last.ConfigSwap.Outcome != journal.ConfigSwapOK || !strings.Contains(last.ConfigSwap.Reason, "confirmed_widening: added_allow=danger") {
-		t.Fatalf("journal lacks confirmed widening delta: %+v", last)
+	var confirmedSwap, exactGrant journal.Row
+	for _, row := range j.Recent(0) {
+		if row.ConfigSwap != nil && row.ConfigSwap.Outcome == journal.ConfigSwapOK && strings.Contains(row.ConfigSwap.Reason, "confirmed_widening: added_allow=danger") {
+			confirmedSwap = row
+		}
+		if row.Grant != nil && row.Grant.Knob == "Allow" && row.Grant.New == "danger" {
+			exactGrant = row
+		}
+	}
+	if confirmedSwap.ConfigSwap == nil {
+		t.Fatalf("journal lacks confirmed widening CONFIG_SWAP: %+v", j.Recent(0))
+	}
+	if exactGrant.Grant == nil || exactGrant.Grant.Old != "" || exactGrant.Grant.Actor != "operator" || exactGrant.Grant.Channel != journal.GrantChannelLiveReload || exactGrant.Grant.Source != widePath || exactGrant.Grant.Reason != "operator confirmed policy reload" {
+		t.Fatalf("journal lacks exact confirmed-reload grant provenance: %+v", exactGrant)
+	}
+}
+
+func TestGuardReloadDefaultFloorJournalsLiveExactGrantProvenance(t *testing.T) {
+	journal.ResetActiveForTest()
+	t.Cleanup(journal.ResetActiveForTest)
+	t.Cleanup(func() { adjudicator.Default.SetPolicy(adjudicator.DefaultPolicy()) })
+
+	dir := t.TempDir()
+	overlayPath := filepath.Join(dir, "allow.json")
+	auditPath := filepath.Join(dir, "audit.jsonl")
+	t.Setenv(guardAllowOverlayEnv, overlayPath)
+	t.Setenv("FAK_GUARD_DENY_OVERLAY", filepath.Join(dir, "missing-deny.json"))
+
+	// Establish the live floor before enabling the journal so the witness contains
+	// only the source denial and the one operator widening under test.
+	if _, _, err := guardReloadDefaultFloor(); err != nil {
+		t.Fatalf("establish live floor: %v", err)
+	}
+	j, err := journal.Enable(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const tool = "issue_8235_exact_tool"
+	j.Emit(abi.Event{
+		Kind: abi.EvDeny,
+		Call: &abi.ToolCall{Tool: tool, Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{}`)}},
+		Verdict: &abi.Verdict{
+			Kind:   abi.VerdictDeny,
+			Reason: abi.ReasonDefaultDeny,
+			By:     "guard-floor",
+		},
+	})
+	sourceDenial := j.Recent(1)[0]
+	if err := os.WriteFile(overlayPath, []byte(`{"allow":["`+tool+`"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := guardReloadDefaultFloor(); err != nil {
+		t.Fatalf("live overlay reload: %v", err)
+	}
+	if _, _, err := guardReloadDefaultFloor(); err != nil {
+		t.Fatalf("idempotent live overlay reload: %v", err)
+	}
+
+	rows, err := journal.ReadRows(auditPath)
+	if err != nil {
+		t.Fatalf("read persisted journal: %v", err)
+	}
+	var grants []journal.Row
+	for _, row := range rows {
+		if row.Kind == journal.KindCapabilityGrant {
+			grants = append(grants, row)
+		}
+	}
+	if len(grants) != 1 {
+		t.Fatalf("persisted CAPABILITY_GRANT rows = %d after repeated reload, want exactly 1; rows=%+v", len(grants), rows)
+	}
+	got := grants[0]
+	if got.Grant == nil {
+		t.Fatal("CAPABILITY_GRANT payload missing")
+	}
+	wantSource := fmt.Sprintf("%s#source-denial-seq=%d", overlayPath, sourceDenial.Seq)
+	if got.Grant.Knob != "Allow" || got.Grant.Class != string(policy.AmendGatedWiden) || got.Grant.Old != "" || got.Grant.New != tool {
+		t.Fatalf("grant lost exact knob/value provenance: %+v", got.Grant)
+	}
+	if got.Grant.Actor != "operator" || got.Grant.Channel != journal.GrantChannelLiveReload || got.Grant.Reason != "operator allow overlay reloaded" || got.Grant.Source != wantSource {
+		t.Fatalf("grant lost actor/channel/reason/source-denial provenance: %+v, want source %q", got.Grant, wantSource)
+	}
+	if got.Tool != "Allow" || got.By != "operator" || got.Reason != journal.GrantChannelLiveReload || got.Seq <= sourceDenial.Seq || got.Hash == "" {
+		t.Fatalf("grant row is not a chained live-reload witness after denial seq %d: %+v", sourceDenial.Seq, got)
+	}
+	if n, err := journal.Verify(auditPath); err != nil || n != len(rows) {
+		t.Fatalf("Verify = (%d, %v), want (%d, nil)", n, err, len(rows))
 	}
 }
 

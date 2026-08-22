@@ -365,18 +365,22 @@ func guardReloadDefaultFloor() (policy.Runtime, string, error) {
 	// and a widening is refused BEFORE SetPolicy, leaving the last-good floor standing.
 	// The refusal is an error (not a warning) so the watcher reports "rejected; keeping
 	// last-good floor" and the reload route answers non-2xx rather than silently no-oping.
-	if admit, reason := guardCoreLockAllAdmitAmendment(adjudicator.Default.PolicySnapshot(), rt.Adjudicator); !admit {
+	current := adjudicator.Default.PolicySnapshot()
+	if admit, reason := guardCoreLockAllAdmitAmendment(current, rt.Adjudicator); !admit {
 		err := fmt.Errorf("guard floor reload refused: %s", reason)
 		journal.Active().AppendConfigSwap(journal.ConfigSwapFloor, "built-in guard floor", guardPolicyDigest(guardDefaultPolicyJSON), journal.ConfigSwapRejected, err.Error())
 		return policy.Runtime{}, "", err
 	}
+	widening := diffPolicyWidening(current, rt.Adjudicator)
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)
 	// Audit parity with the --policy reload path (reloadPolicy): the security boundary was
 	// just re-applied, so record which bytes are authoritative. The embedded floor digest
 	// is stable; the mutable part an operator changes between reloads is the overlay, folded
 	// into rt above. journal.Active() no-ops on an unjournaled run, keeping it byte-identical.
-	journal.Active().AppendConfigSwap(journal.ConfigSwapFloor, "built-in guard floor", guardPolicyDigest(guardDefaultPolicyJSON), journal.ConfigSwapOK, "")
+	j := journal.Active()
+	j.AppendConfigSwap(journal.ConfigSwapFloor, "built-in guard floor", guardPolicyDigest(guardDefaultPolicyJSON), journal.ConfigSwapOK, "")
+	recordLiveWidenings(j, current, widening, strings.Join(guardAllowOverlayLayerPaths(), ","), "operator allow overlay reloaded")
 	return rt, overlayWarning, nil
 }
 
