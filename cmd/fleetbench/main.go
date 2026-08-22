@@ -18,6 +18,8 @@
 //	           [--turn-max 50 --agent-max 50 --grid full|log]   (generated grids)
 //	           [--trials 24] [--seed N]
 //	           [--out fleet-sweep.json] [--csv fleet-sweep.csv]
+//	fleetbench --development-scaling
+//	fleetbench --selfcheck
 //
 // The world version is process-global, so a sweep is SERIAL within one process. To
 // use many cores, shard the grid across processes with --turns/--agents subsets
@@ -55,7 +57,16 @@ func main() {
 	granArg := fs.String("granularity", "global", "vDSO invalidation eraser: global (v0.1 full flush) | namespace | resource (the finer erasers)")
 	out := fs.String("out", "fleet-sweep.json", "JSON artifact path")
 	csv := fs.String("csv", "fleet-sweep.csv", "CSV artifact path (one row per cell)")
+	developmentScaling := fs.Bool("development-scaling", false, "report deterministic useful-work scaling from canonical dispatch receipts")
+	selfcheck := fs.Bool("selfcheck", false, "run the 1/4/8/16/30-seat development-scaling fixture and negative accounting guards")
 	_ = fs.Parse(os.Args[1:])
+	if *developmentScaling || *selfcheck {
+		if err := runDevelopmentScaling(*selfcheck, os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, "fleetbench:", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	p, ok := profileByName(*profileName)
 	if !ok {
