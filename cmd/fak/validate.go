@@ -32,6 +32,7 @@ type validateResult struct {
 	Tip      string               `json:"tip"`
 	Mine     []string             `json:"mine"`
 	Tested   []string             `json:"tested,omitempty"`
+	Runner   string               `json:"runner,omitempty"`
 	OK       bool                 `json:"ok"`
 	Failures []ciPreflightFailure `json:"failures"`
 }
@@ -46,7 +47,7 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 	ref := fs.String("ref", "HEAD", "committed base ref or sha")
 	asJSON := fs.Bool("json", false, "emit the result as JSON")
 	testOnly := fs.Bool("test-only", false, "skip full build/vet and run only affected tests in the isolated checkout")
-	wslTests := fs.Bool("wsl-tests", false, "run isolated affected tests through WSL (Windows hosts only)")
+	wslTests := fs.Bool("wsl-tests", defaultValidateWSLTests(runtime.GOOS), "run isolated affected tests through WSL (default on Windows hosts)")
 	testRun := fs.String("test-run", "", "go test -run expression for isolated affected tests")
 	var mine pathList
 	fs.Var(&mine, "mine", "owned changed path to overlay (repeatable; files and directories accepted)")
@@ -133,6 +134,7 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 			}
 		}
 		if len(res.Tested) > 0 {
+			res.Runner = validateTestRunner(runtime.GOOS, *wslTests)
 			testTargets := packagePatternsForRoot(dir, res.Tested, fileToPkg)
 			args := []string{"test"}
 			if strings.TrimSpace(*testRun) != "" {
@@ -346,17 +348,26 @@ func appendUniqueStrings(dst []string, values ...string) []string {
 	return dst
 }
 
+func defaultValidateWSLTests(goos string) bool { return goos == "windows" }
+
+func validateTestRunner(goos string, wsl bool) string {
+	if goos == "windows" && wsl {
+		return "wsl.exe bash -lc go test"
+	}
+	return "go test"
+}
+
 func runValidateTests(repo, dir, tip string, args []string, wsl bool) (string, bool) {
-	// The archive checkout is isolated from peer WIP. On Windows, --wsl-tests keeps the
-	// same archive question but executes test binaries under Linux, avoiding host
-	// application-control stalls on freshly compiled native test executables.
+	// The archive checkout is isolated from peer WIP. Windows defaults to WSL so test
+	// binaries execute under Linux rather than the host application-control boundary.
+	useWSL := runtime.GOOS == "windows" && wsl
 	if wsl {
 		if err := prepareValidateGitIdentity(repo, dir, tip); err != nil {
 			return "prepare isolated Git identity: " + err.Error(), false
 		}
 	}
 	var cmd *exec.Cmd
-	if wsl && runtime.GOOS == "windows" {
+	if useWSL {
 		// Stream the isolated archive into WSL-native /tmp. A tar stream is cheaper
 		// than per-file NTFS copies and lets Go compile/test from ext4.
 		wslDir := "/tmp/fak-validate-" + filepath.Base(dir)
@@ -374,7 +385,7 @@ func runValidateTests(repo, dir, tip string, args []string, wsl bool) (string, b
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.CombinedOutput()
 	detail := strings.TrimSpace(string(out))
-	if wsl && strings.Contains(detail, "__FAK_VALIDATE_TEST_OK__") {
+	if useWSL && strings.Contains(detail, "__FAK_VALIDATE_TEST_OK__") {
 		detail = strings.TrimSpace(strings.ReplaceAll(detail, "__FAK_VALIDATE_TEST_OK__", ""))
 		return detail, true
 	}
@@ -425,12 +436,18 @@ func runGoCheck(dir string, args ...string) (string, bool) {
 
 func renderValidate(w io.Writer, res validateResult) {
 	if res.OK {
+		if res.Runner != "" {
+			fmt.Fprintf(w, "runner: %s\n", res.Runner)
+		}
 		if res.Mode == "test-only" {
 			fmt.Fprintf(w, "OK: committed tip %s + %d owned path(s) affected-test clean (isolated test-only mode)\n", short(res.Tip), len(res.Mine))
 		} else {
 			fmt.Fprintf(w, "OK: committed tip %s + %d owned path(s) build, vet, and affected-test clean\n", short(res.Tip), len(res.Mine))
 		}
 		return
+	}
+	if res.Runner != "" {
+		fmt.Fprintf(w, "runner: %s\n", res.Runner)
 	}
 	fmt.Fprintf(w, "RED: committed tip %s + owned delta failed\n", short(res.Tip))
 	for _, f := range res.Failures {

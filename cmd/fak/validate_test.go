@@ -68,6 +68,42 @@ func TestAdd(t *testing.T) {
 	}
 }
 
+func TestValidateTestRunnerSelectsWSLOnWindows(t *testing.T) {
+	if !defaultValidateWSLTests("windows") {
+		t.Fatal("Windows must default to WSL tests")
+	}
+	if defaultValidateWSLTests("linux") {
+		t.Fatal("non-Windows hosts must retain native tests")
+	}
+	if got := validateTestRunner("windows", true); got != "wsl.exe bash -lc go test" {
+		t.Fatalf("Windows runner = %q, want WSL", got)
+	}
+	if got := validateTestRunner("linux", true); got != "go test" {
+		t.Fatalf("Linux runner = %q, want native Go", got)
+	}
+	if got := validateTestRunner("windows", false); got != "go test" {
+		t.Fatalf("opt-out runner = %q, want native Go", got)
+	}
+}
+
+func TestRenderValidateReportsRunnerOnFailure(t *testing.T) {
+	var out bytes.Buffer
+	renderValidate(&out, validateResult{
+		Tip:    "0123456789abcdef",
+		Runner: "wsl.exe bash -lc go test",
+		Failures: []ciPreflightFailure{{
+			Step:   "test",
+			Detail: "deliberate fixture failure",
+		}},
+	})
+	got := out.String()
+	for _, want := range []string{"runner: wsl.exe bash -lc go test", "test: deliberate fixture failure"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("render = %q; want %q", got, want)
+		}
+	}
+}
+
 func TestValidateRequiresExplicitMine(t *testing.T) {
 	_, code, stderr := runValidateJSON(t, []string{"--json"})
 	if code != 2 || !bytes.Contains([]byte(stderr), []byte("at least one --mine")) {
