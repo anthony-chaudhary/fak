@@ -86,6 +86,9 @@ func (t *Toolset) resolveMutation(arg string) (mutationTarget, *Refusal) {
 	if r != nil {
 		return mutationTarget{}, r
 	}
+	if protectedMutationPath(res.Rel) {
+		return mutationTarget{}, refuse(CodeProtectedPath, "mutation target is inside a protected control subtree")
+	}
 	if info, err := os.Lstat(res.Abs); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return mutationTarget{}, refuse(CodeSymlinkEscape, "mutation refuses a symlink target")
@@ -111,6 +114,11 @@ func (t *Toolset) resolveMutation(arg string) (mutationTarget, *Refusal) {
 		return mutationTarget{}, refuse(CodeSymlinkEscape, "canonical mutation target escapes the workspace root")
 	}
 	return mutationTarget{Resolved: Resolved{Abs: abs, Rel: res.Rel}, Key: abs}, nil
+}
+
+func protectedMutationPath(rel string) bool {
+	first := strings.SplitN(filepath.ToSlash(rel), "/", 2)[0]
+	return first == ".git" || first == ".dos"
 }
 
 // evalWithin denies a path whose REAL location — after resolving every symlink on the

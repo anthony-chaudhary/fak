@@ -374,3 +374,22 @@ func TestMutationRungDefaultDenyAndCacheContract(t *testing.T) {
 		t.Fatalf("canonicalization did not precede cache matching: %+v", v)
 	}
 }
+
+func TestMutationsRefuseProtectedControlSubtrees(t *testing.T) {
+	ts, root := newTestToolset(t)
+	for _, rel := range []string{".git/config", ".dos/leases.json"} {
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		mustWrite(t, path, "protected")
+		out, bad := ts.write(context.Background(), argsOf(t, WriteArgs{FilePath: rel, Content: "changed", Mode: "overwrite", ExpectedVersion: "irrelevant"}))
+		if !bad || errCode(t, out) != CodeProtectedPath {
+			t.Fatalf("write %s = %s", rel, out)
+		}
+		out, bad = ts.edit(context.Background(), argsOf(t, EditArgs{FilePath: rel, OldString: "protected", NewString: "changed", ExpectedVersion: "irrelevant"}))
+		if !bad || errCode(t, out) != CodeProtectedPath {
+			t.Fatalf("edit %s = %s", rel, out)
+		}
+		if got, err := os.ReadFile(path); err != nil || string(got) != "protected" {
+			t.Fatalf("protected bytes %s = %q, %v", rel, got, err)
+		}
+	}
+}

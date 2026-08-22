@@ -22,6 +22,7 @@ import (
 const (
 	CodePathEscape    = "PATH_ESCAPE"      // the canonical path resolves outside the workspace root
 	CodeSymlinkEscape = "SYMLINK_ESCAPE"   // an in-tree symlink resolves outside the workspace root
+	CodeProtectedPath = "PROTECTED_PATH"   // the mutation target lies inside a protected control subtree (.git, .dos)
 	CodeMalformed     = "MALFORMED"        // missing/unknown/ill-typed argument
 	CodeDefaultDeny   = "DEFAULT_DENY"     // no policy affirmatively admitted the tool (fail-closed)
 	CodeNotFound      = "NOT_FOUND"        // the target path does not exist
