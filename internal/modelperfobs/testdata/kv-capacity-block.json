@@ -1,0 +1,25 @@
+{
+  "schema": "fak-kv-block-metrics/1",
+  "scraped_at": "2026-08-21T12:00:00Z",
+  "model_id": "fixture-model",
+  "runtime_id": "fixture-runtime",
+  "metrics": {
+    "kv_used_blocks": 1024,
+    "kv_total_blocks": 2048,
+    "kv_block_size_tokens": 16,
+    "kv_reusable_blocks": 256,
+    "kv_configured_bytes": 4294967296,
+    "kv_allocatable_bytes": 4294967296,
+    "kv_occupancy_ratio": 0.5,
+    "kv_high_water_blocks": 1200,
+    "kv_evictions_total": 7,
+    "kv_preemptions_total": 2
+  },
+  "geometry": {
+    "layers": 32,
+    "kv_heads": 8,
+    "head_dimension": 128,
+    "dtype": "bf16",
+    "dtype_bytes": 2
+  }
+}

@@ -10112,6 +10112,16 @@
           "category": "incidental",
           "reason": "adapter counter name only; it observes external evictions and performs no eviction operation",
           "token": "CounterCacheEvictions"
+        },
+        {
+          "category": "incidental",
+          "reason": "backend metric label under the existing eviction family, not a new modelperfobs concept",
+          "token": "kv_evictions_total"
+        },
+        {
+          "category": "incidental",
+          "reason": "normalized report field under the existing eviction family, not a new modelperfobs concept",
+          "token": "evictions_delta"
         }
       ],
       "id": "evict",
@@ -10136,8 +10146,10 @@
         "evictable",
         "evicting",
         "eviction",
+        "evictions_delta",
         "evicts",
         "fak_gateway_kv_prefix_tier_evictions_total",
+        "kv_evictions_total",
         "noteEviction",
         "recordEvictChoice",
         "replayableEvictedCount"
