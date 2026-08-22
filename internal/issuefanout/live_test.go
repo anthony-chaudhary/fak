@@ -102,6 +102,87 @@ func TestFileLiveFilesUnseenSkipsSeenAndRerunsClean(t *testing.T) {
 	}
 }
 
+func TestFileLiveScopesDedupeToShippedSpineAndKeepsLegacyCompatibility(t *testing.T) {
+	build := func(spine string) Plan {
+		t.Helper()
+		plan, err := Build(Input{
+			Title:              "modelperfobs shared-counter attribution",
+			Leaf:               "modelperfobs",
+			SpineRef:           spine,
+			ParentIssue:        8426,
+			ParentBaseline:     100,
+			CompletionStandard: "integrated",
+			Areas:              []string{"qa"},
+		})
+		if err != nil {
+			t.Fatalf("Build(%q): %v", spine, err)
+		}
+		return plan
+	}
+
+	const firstSpine = "3505f2c7d40762c86a5521c31ddb27516e36e53a"
+	const secondSpine = "1056fb67d75b083f8992e60ae2d7354dc0bb8f30"
+	first := build(firstSpine)
+	second := build(secondSpine)
+	for i := range first.Candidates {
+		if first.Candidates[i].Key == second.Candidates[i].Key {
+			t.Fatalf("candidate %d key %q is leaf-wide; distinct spines need distinct marker identities", i, first.Candidates[i].Key)
+		}
+	}
+
+	legacySlugs := []string{"qa-edge-sweep", "qa-failure-paths", "qa-determinism"}
+	legacy := make([]Issue, 0, len(legacySlugs))
+	for i, slug := range legacySlugs {
+		legacy = append(legacy, Issue{
+			Number: 8515 + i,
+			Body: fmt.Sprintf(
+				"<!-- fanout-modelperfobs-%s -->\n## Parent context\n\n#8403\n\nSpine: `%s`.\n",
+				slug, firstSpine,
+			),
+		})
+	}
+
+	firstRun, err := FileLive(first, legacy, LiveOptions{Runner: (&fakeGh{}).run})
+	if err != nil {
+		t.Fatalf("FileLive(first legacy rerun): %v", err)
+	}
+	if firstRun.Filed != 0 || firstRun.Skipped != 3 {
+		t.Fatalf("legacy exact rerun filed/skipped = %d/%d, want 0/3\n%s", firstRun.Filed, firstRun.Skipped, RenderLive(firstRun))
+	}
+	for _, row := range firstRun.Rows {
+		if row.MatchedSpine != firstSpine || !strings.Contains(row.Reason, firstSpine) {
+			t.Fatalf("legacy skip row does not report matched spine: %+v", row)
+		}
+	}
+
+	gh := &fakeGh{}
+	secondRun, err := FileLive(second, legacy, LiveOptions{Runner: gh.run})
+	if err != nil {
+		t.Fatalf("FileLive(second spine): %v", err)
+	}
+	if secondRun.Filed != 3 || secondRun.Skipped != 0 || len(gh.calls) != 3 {
+		t.Fatalf("distinct spine filed/skipped/calls = %d/%d/%d, want 3/0/3\n%s",
+			secondRun.Filed, secondRun.Skipped, len(gh.calls), RenderLive(secondRun))
+	}
+
+	secondExisting := append([]Issue{}, legacy...)
+	for i, candidate := range second.Candidates {
+		secondExisting = append(secondExisting, Issue{Number: 900 + i, Body: LiveBody(candidate)})
+	}
+	runAgain, err := FileLive(second, secondExisting, LiveOptions{Runner: (&fakeGh{}).run})
+	if err != nil {
+		t.Fatalf("FileLive(second exact rerun): %v", err)
+	}
+	if runAgain.Filed != 0 || runAgain.Skipped != 3 {
+		t.Fatalf("exact rerun filed/skipped = %d/%d, want 0/3\n%s", runAgain.Filed, runAgain.Skipped, RenderLive(runAgain))
+	}
+	for _, row := range runAgain.Rows {
+		if row.MatchedSpine != secondSpine || !strings.Contains(row.Reason, secondSpine) {
+			t.Fatalf("qualified skip row does not report matched spine: %+v", row)
+		}
+	}
+}
+
 // The nil-runner refusal is covered by the refusalContract table in
 // failure_paths_test.go, which pins every refusef site exhaustively.
 

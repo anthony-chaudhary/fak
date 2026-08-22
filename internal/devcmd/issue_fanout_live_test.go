@@ -23,9 +23,25 @@ func writeFanoutExistingFixture(t *testing.T, body string) string {
 }
 
 func TestIssueFanoutLiveFilesUnseenAndRerunFilesZero(t *testing.T) {
+	plan, err := issuefanout.Build(issuefanout.Input{
+		Title:             "fanout live test",
+		Leaf:              "fanoutlivetest",
+		SpineRef:          "deadbeef",
+		ParentIssue:       36,
+		ParentBaseline:    100,
+		TargetEnvelope:    "- concurrent users: 10 users\n- sustained duration: 60 minutes",
+		WitnessedEnvelope: "- concurrent users: 10 users\n- sustained duration: 60 minutes",
+		Areas:             []string{"qa"},
+	})
+	if err != nil {
+		t.Fatalf("Build fixture plan: %v", err)
+	}
+	if !strings.Contains(plan.Candidates[0].Key, "fanout-fanoutlivetest-spine-") {
+		t.Fatalf("fixture key is not spine-qualified: %q", plan.Candidates[0].Key)
+	}
 	// The fixture tracker already carries the qa-edge-sweep marker key, so the
 	// first live run files the other two qa candidates and skips it.
-	fixture := writeFanoutExistingFixture(t, "carries fanout-fanoutlivetest-qa-edge-sweep already")
+	fixture := writeFanoutExistingFixture(t, "carries "+plan.Candidates[0].Key+" already")
 	var calls [][]string
 	gh := func(args []string) (string, string, bool) {
 		calls = append(calls, args)
@@ -42,13 +58,19 @@ func TestIssueFanoutLiveFilesUnseenAndRerunFilesZero(t *testing.T) {
 	if !strings.Contains(out.String(), "filed 2, skipped 1, failed 0") {
 		t.Fatalf("first run output missing filed/skipped fold:\n%s", out.String())
 	}
+	if !strings.Contains(out.String(), "marker key for spine deadbeef already in issue #42") {
+		t.Fatalf("first run output missing matched spine:\n%s", out.String())
+	}
 	if len(calls) != 2 {
 		t.Fatalf("gh create calls = %d, want 2", len(calls))
 	}
 
 	// Rerun against a tracker carrying every key: files zero, spams nothing.
-	all := writeFanoutExistingFixture(t,
-		"fanout-fanoutlivetest-qa-edge-sweep fanout-fanoutlivetest-qa-failure-paths fanout-fanoutlivetest-qa-determinism")
+	keys := make([]string, 0, len(plan.Candidates))
+	for _, candidate := range plan.Candidates {
+		keys = append(keys, candidate.Key)
+	}
+	all := writeFanoutExistingFixture(t, strings.Join(keys, " "))
 	calls = nil
 	out.Reset()
 	argv[len(argv)-1] = all

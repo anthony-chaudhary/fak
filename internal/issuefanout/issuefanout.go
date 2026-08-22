@@ -13,6 +13,7 @@
 package issuefanout
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"sort"
@@ -489,7 +490,7 @@ func expand(t template, in Input, goPackage string) issuepolicy.Candidate {
 	)
 	c := issuepolicy.Candidate{
 		ProblemFrame:  fanoutProblemFrame(t),
-		Key:           "fanout-" + in.Leaf + "-" + t.slug,
+		Key:           fanoutMarkerKey(in.Leaf, in.SpineRef, t.slug),
 		Title:         r.Replace(t.title),
 		Generation:    t.generation,
 		ParentRef:     parent,
@@ -533,6 +534,15 @@ func expand(t template, in Input, goPackage string) issuepolicy.Candidate {
 		}
 	}
 	return c
+}
+
+func fanoutMarkerKey(leaf, spineRef, slug string) string {
+	return fmt.Sprintf("fanout-%s-spine-%s-%s", leaf, spineMarkerID(spineRef), slug)
+}
+
+func spineMarkerID(spineRef string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(spineRef)))
+	return fmt.Sprintf("%x", sum[:8])
 }
 
 // goPackageForInput selects the one Go package the generic QA templates can

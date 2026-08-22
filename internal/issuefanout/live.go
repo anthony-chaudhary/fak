@@ -1,7 +1,7 @@
 // Live filing (#2531): the decision layer behind `fak issue fanout --live`.
 // It follows the gh-touching creator pattern (dogfoodissues, learningdebt):
 // plan offline, shell to gh only behind the explicit flag, and dedupe by
-// marker key FIRST — a candidate whose `fanout-<leaf>-<slug>` key already
+// marker key FIRST — a candidate whose spine-qualified key already
 // appears in any existing issue body (open or closed) is skipped, so a rerun
 // files zero and spams nothing. That batch policy is what makes automated
 // filing safe.
@@ -52,13 +52,14 @@ type LiveOptions struct {
 
 // FileRow is one per-candidate outcome of a live run.
 type FileRow struct {
-	Key    string `json:"key"`
-	Title  string `json:"title"`
-	Action string `json:"action"` // "filed" | "skipped" | "failed"
-	Number *int   `json:"number,omitempty"`
-	URL    string `json:"url,omitempty"`
-	SeenIn *int   `json:"seen_in,omitempty"` // issue whose body already carries the marker key
-	Reason string `json:"reason,omitempty"`
+	Key          string `json:"key"`
+	Title        string `json:"title"`
+	Action       string `json:"action"` // "filed" | "skipped" | "failed"
+	Number       *int   `json:"number,omitempty"`
+	URL          string `json:"url,omitempty"`
+	SeenIn       *int   `json:"seen_in,omitempty"` // issue whose body already carries the marker key
+	MatchedSpine string `json:"matched_spine,omitempty"`
+	Reason       string `json:"reason,omitempty"`
 }
 
 // LiveResult is the machine-readable fold of one live filing run.
@@ -109,7 +110,7 @@ func LiveLabels(c issuepolicy.Candidate) []string {
 
 // LiveBody renders the marker-stamped issue body for one candidate. It leads
 // with the dedupe marker (a member of issuecontract's fak-*-key grammar whose
-// value is the candidate's `fanout-<leaf>-<slug>` key), then the standard
+// value is the candidate's spine-qualified key), then the standard
 // contract sections, so the filed issue re-parses as a dispatchable candidate
 // and a rerun's substring scan finds the key.
 func LiveBody(c issuepolicy.Candidate) string {
@@ -212,10 +213,11 @@ func FileLive(plan Plan, existing []Issue, opt LiveOptions) (LiveResult, error) 
 			return res, refusef("issuefanout: live filing requires --parent-issue and --parent-baseline-points — set both flags to the parent issue number and its declared scope baseline")
 		}
 		row := FileRow{Key: c.Key, Title: c.Title}
-		if n, seen := seenIn(existing, c.Key); seen {
+		if n, seen := seenIn(existing, c.Key, legacyMarkerKey(plan.Input, c.Key), plan.Input.SpineRef); seen {
 			row.Action = "skipped"
 			row.SeenIn = &n
-			row.Reason = fmt.Sprintf("marker key already in issue #%d", n)
+			row.MatchedSpine = plan.Input.SpineRef
+			row.Reason = fmt.Sprintf("marker key for spine %s already in issue #%d", plan.Input.SpineRef, n)
 			res.Skipped++
 			res.Rows = append(res.Rows, row)
 			continue
@@ -268,16 +270,41 @@ func FileLive(plan Plan, existing []Issue, opt LiveOptions) (LiveResult, error) 
 	return res, nil
 }
 
-// seenIn returns the first existing issue whose body carries the marker key.
-// The scan is a plain substring match so hand-filed issues that mention the
-// key in prose dedupe the same as marker-stamped ones.
-func seenIn(existing []Issue, key string) (int, bool) {
+// seenIn returns the first existing issue carrying either the qualified key or
+// a legacy leaf-wide key paired with structured evidence for the same spine.
+func seenIn(existing []Issue, key, legacyKey, spineRef string) (int, bool) {
 	for _, issue := range existing {
-		if strings.Contains(issue.Body, key) {
+		if strings.Contains(issue.Body, key) ||
+			(legacyKey != "" && strings.Contains(issue.Body, legacyKey) && bodyCarriesSpine(issue.Body, spineRef)) {
 			return issue.Number, true
 		}
 	}
 	return 0, false
+}
+
+func legacyMarkerKey(in Input, qualifiedKey string) string {
+	prefix := fmt.Sprintf("fanout-%s-spine-", in.Leaf)
+	qualifiedPrefix := prefix + spineMarkerID(in.SpineRef) + "-"
+	if !strings.HasPrefix(qualifiedKey, qualifiedPrefix) {
+		return ""
+	}
+	return "fanout-" + in.Leaf + "-" + strings.TrimPrefix(qualifiedKey, qualifiedPrefix)
+}
+
+func bodyCarriesSpine(body, spineRef string) bool {
+	spineRef = strings.TrimSpace(spineRef)
+	if spineRef == "" {
+		return false
+	}
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "Spine: `"+spineRef+"`." || line == "Spine: `"+spineRef+"`" ||
+			line == "Spine: "+spineRef+"." || line == "Spine: "+spineRef {
+			return true
+		}
+	}
+	return strings.Contains(body, "exists ("+spineRef+"); this follow-on has not started.") ||
+		strings.Contains(body, "The spine at "+spineRef+" still builds/runs on trunk.")
 }
 
 // createdIssue parses the URL gh prints after `gh issue create`.
