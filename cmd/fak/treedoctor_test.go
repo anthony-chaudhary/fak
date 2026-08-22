@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -111,6 +112,50 @@ func TestCmdTreeDoctorScratchPathCreatesNamespacedParent(t *testing.T) {
 	}
 	if !strings.HasSuffix(filepath.ToSlash(path), "/_scratch/fleet-loop/tick.json") {
 		t.Fatalf("path = %q", path)
+	}
+}
+
+func TestScratchProducerReceiptHumanAndJSON(t *testing.T) {
+	receipt := treedoctor.ScratchProducerReceipt{
+		Schema:         treedoctor.ScratchProducerReceiptSchema,
+		Producer:       "selected",
+		ResolvedTarget: filepath.Join("repo", "_scratch", "selected"),
+		Verdict:        treedoctor.ScratchProducerReaped,
+		RemovedCount:   3,
+	}
+	var human bytes.Buffer
+	writeScratchProducerReceipt(&human, receipt, false)
+	for _, want := range []string{"reaped 3 entries", receipt.ResolvedTarget, `producer "selected"`} {
+		if !strings.Contains(human.String(), want) {
+			t.Fatalf("human receipt missing %q:\n%s", want, human.String())
+		}
+	}
+
+	var machine bytes.Buffer
+	writeScratchProducerReceipt(&machine, receipt, true)
+	var got treedoctor.ScratchProducerReceipt
+	if err := json.Unmarshal(machine.Bytes(), &got); err != nil {
+		t.Fatalf("decode JSON receipt: %v\n%s", err, machine.String())
+	}
+	if got.Schema != treedoctor.ScratchProducerReceiptSchema || got.ResolvedTarget != receipt.ResolvedTarget || got.Verdict != treedoctor.ScratchProducerReaped || got.RemovedCount != 3 {
+		t.Fatalf("JSON receipt = %+v", got)
+	}
+}
+
+func TestReapScratchRejectsOtherModesAndExtraTargets(t *testing.T) {
+	fs := flag.NewFlagSet("tree-doctor-test", flag.ContinueOnError)
+	fs.Bool("json", false, "")
+	fs.Bool("apply", false, "")
+	fs.String("reap-scratch", "", "")
+	if err := fs.Parse([]string{"--reap-scratch", "selected", "--apply", "peer"}); err != nil {
+		t.Fatal(err)
+	}
+	got := disallowedTreeDoctorFlags(fs, "reap-scratch", "root", "json")
+	if len(got) != 1 || got[0] != "--apply" {
+		t.Fatalf("disallowed flags = %v, want [--apply]", got)
+	}
+	if args := fs.Args(); len(args) != 1 || args[0] != "peer" {
+		t.Fatalf("extra targets = %v, want [peer]", args)
 	}
 }
 

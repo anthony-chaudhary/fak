@@ -318,14 +318,19 @@ the *committed* tip (not the peer-dirty tree) with `fak-dev ci-preflight`.
     (or a single gitignored `_scratch/`), never loose in the repo root. Do not invent a
     root-level output name and rely on `.gitignore`: allocate it first with `fak tree-doctor
     --scratch-dir <producer>` (a run directory) or `fak tree-doctor --scratch-path
-    <producer>/<file>` (one generated file), then redirect there. `fak tree-doctor`
-    `--sweep-scratch` reaps gitignored scratch via `git clean -Xdf` (ignored-only: it can
-    never touch a tracked file or a real untracked WIP file); `--sweep-scratch --dry-run`
-    previews (`git clean -Xdn`) before reaping (#3211). See
+    <producer>/<file>` (one generated file), then redirect there. Close one producer with
+    `fak tree-doctor --reap-scratch <producer> --json`; it resolves one exact top-level
+    `_scratch/<producer>` directory, refuses roots/paths/globs/reparse escapes, and receipts the
+    resolved target, verdict, and removed-entry count. Never substitute
+    `git clean -Xdf -- _scratch/<producer>`: Git may traverse unrelated ignored siblings because
+    `_scratch/` is the ignored ancestor (#8254). `--sweep-scratch --dry-run` /
+    `--sweep-scratch` remain the explicit whole-namespace preview/reap pair (#3211), not a
+    producer cleanup. See
     [`docs/generated-output-defaults.md`](docs/generated-output-defaults.md).
   - *Control prompts and fixtures are durable WIP too:* `.claude/` admits reusable project
     infrastructure, not per-run residue. Put issue-numbered launch/recovery fuel and transcripts
-    under an allocated `_scratch/<producer>/` or private path, then delete them when the run closes.
+    under an allocated `_scratch/<producer>/` or private path, then reap that producer with the
+    exact `--reap-scratch <producer>` verb when the run closes.
     Put a file under `testdata/` only when a test consumes it and land both together; generated
     fixture candidates and reports stay in scratch. `fak tree-doctor` inventories untracked
     `.claude/` files as `park-or-delete` and untracked `testdata/` files as `land-or-delete`.

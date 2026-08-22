@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -43,6 +44,13 @@ func cmdTreeDoctor(argv []string) {
 	abandonAfter := fs.Duration("abandon-after", treedoctor.DefaultAbandonAfter, "an untracked source file older than this and not held by a live owner is surfaced as an abandonment candidate")
 	sweepScratch := fs.Bool("sweep-scratch", false, "reap gitignored scratch under the repo root via `git clean -Xdf` (ignored-only: can never touch a tracked file or a real untracked WIP file)")
 	dryRun := fs.Bool("dry-run", false, "with --sweep-scratch, preview via `git clean -Xdn` — list what would be reaped, delete nothing")
+	var reapScratch string
+	reapScratchSet := false
+	fs.Func("reap-scratch", "remove exactly one declared _scratch/<producer> directory; paths, globs, and reparse points are refused", func(value string) error {
+		reapScratchSet = true
+		reapScratch = value
+		return nil
+	})
 	goTmp := fs.Bool("go-tmp", false, "inventory and safely bound the configured repository Go compiler scratch (preview by default; --apply quarantines and reclaims only proven stale unreferenced children)")
 	goTmpRoot := fs.String("go-tmp-root", "", "repository Go temp root (default: $GOTMPDIR, then <repo>/_scratch/go-tmp)")
 	goTmpGrace := fs.Duration("go-tmp-grace", treedoctor.DefaultGoTmpMinAge, "minimum quiet age before a Go temp child can be quarantined")
@@ -55,6 +63,28 @@ func cmdTreeDoctor(argv []string) {
 	if repoRoot == "" {
 		fmt.Fprintln(os.Stderr, "tree-doctor: could not resolve a git repo root (pass --root)")
 		os.Exit(2)
+	}
+	if reapScratchSet {
+		if disallowed := disallowedTreeDoctorFlags(fs, "reap-scratch", "root", "json"); len(disallowed) > 0 || fs.NArg() > 0 {
+			detail := fmt.Sprintf("--reap-scratch accepts one producer and only --root/--json; disallowed flags=%v arguments=%v", disallowed, fs.Args())
+			receipt := treedoctor.ScratchProducerReceipt{
+				Schema:   treedoctor.ScratchProducerReceiptSchema,
+				Producer: reapScratch,
+				Verdict:  treedoctor.ScratchProducerRefused,
+				Error:    detail,
+			}
+			writeScratchProducerReceipt(os.Stdout, receipt, *asJSON)
+			os.Exit(2)
+		}
+		receipt, err := treedoctor.CleanScratchProducer(repoRoot, reapScratch)
+		writeScratchProducerReceipt(os.Stdout, receipt, *asJSON)
+		if err != nil {
+			if errors.Is(err, treedoctor.ErrUnsafeScratchProducer) {
+				os.Exit(2)
+			}
+			os.Exit(1)
+		}
+		return
 	}
 
 	if *scratchDir != "" || *scratchPath != "" {
@@ -209,6 +239,50 @@ func renderScratchSweepJSON(w io.Writer, payload scratchSweepJSON) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
+}
+
+func writeScratchProducerReceipt(w io.Writer, receipt treedoctor.ScratchProducerReceipt, asJSON bool) {
+	if asJSON {
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(receipt); err != nil {
+			fmt.Fprintf(os.Stderr, "tree-doctor: encode producer cleanup JSON: %v\n", err)
+		}
+		return
+	}
+	label := "entry"
+	if receipt.RemovedCount != 1 {
+		label = "entries"
+	}
+	switch receipt.Verdict {
+	case treedoctor.ScratchProducerReaped:
+		fmt.Fprintf(w, "reap-scratch: reaped %d %s from %s (producer %q)\n", receipt.RemovedCount, label, receipt.ResolvedTarget, receipt.Producer)
+	case treedoctor.ScratchProducerAbsent:
+		fmt.Fprintf(w, "reap-scratch: absent; removed 0 entries from %s (producer %q)\n", receipt.ResolvedTarget, receipt.Producer)
+	default:
+		fmt.Fprintf(w, "reap-scratch: %s; removed %d %s", strings.ToUpper(receipt.Verdict), receipt.RemovedCount, label)
+		if receipt.ResolvedTarget != "" {
+			fmt.Fprintf(w, "; resolved target %s", receipt.ResolvedTarget)
+		}
+		if receipt.Error != "" {
+			fmt.Fprintf(w, ": %s", receipt.Error)
+		}
+		fmt.Fprintln(w)
+	}
+}
+
+func disallowedTreeDoctorFlags(fs *flag.FlagSet, allowed ...string) []string {
+	allow := make(map[string]bool, len(allowed))
+	for _, name := range allowed {
+		allow[name] = true
+	}
+	var disallowed []string
+	fs.Visit(func(f *flag.Flag) {
+		if !allow[f.Name] {
+			disallowed = append(disallowed, "--"+f.Name)
+		}
+	})
+	return disallowed
 }
 
 func writeGoTmpJSON(w io.Writer, report treedoctor.GoTmpReport) error {

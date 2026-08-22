@@ -33,9 +33,24 @@ a producer directory (for example `coverage/unit.cover`, not a flat `cover.out`)
 runs do not recreate a junk drawer inside `_scratch`.
 
 Use the OS temporary directory instead when an artifact has no value after the command exits.
-Use `fak tree-doctor --sweep-scratch --dry-run` to preview ignored scratch reclamation and
-`fak tree-doctor --sweep-scratch` to reap it. The `.gitignore` rules remain a compatibility
-backstop for older commands and hand-written redirects; they are not the preferred output path.
+When one producer finishes, remove only its declared top-level namespace and retain the receipt:
+
+```powershell
+fak tree-doctor --reap-scratch fleet-loop --json
+```
+
+`--reap-scratch` accepts one literal producer name, resolves the absolute
+`_scratch/<producer>` target, refuses roots, paths, traversal, globs, and symlink/junction
+trees, then removes enumerated exact entries bottom-up. Human and JSON receipts name the
+resolved target, verdict, and removed-entry count; an already-absent producer is an idempotent
+zero-removal result.
+
+Do not substitute `git clean -Xdf -- _scratch/<producer>`: because `_scratch/` is the ignored
+ancestor, Git can traverse unrelated ignored siblings despite the descendant pathspec. The
+explicit whole-namespace maintenance operation remains
+`fak tree-doctor --sweep-scratch --dry-run` followed by `fak tree-doctor --sweep-scratch`;
+never use it for one producer. The `.gitignore` rules remain a compatibility backstop for older
+commands and hand-written redirects; they are not the preferred output path.
 
 ## Repository Go compiler scratch
 
@@ -68,8 +83,9 @@ not a hook installed in every compiler child.
 Treat `.claude/` as project infrastructure, not an automatic home for every Claude run.
 Reusable skills, hooks, and generic goal-prompt templates belong there and should be committed.
 Issue-numbered launch fuel, recovery prompts, transcripts, and per-run state do not: allocate an
-ignored `_scratch/<producer>/` path (or private storage) before launch, then delete it when the
-run closes. `fak tree-doctor` includes any untracked `.claude/` artifact in its durable-WIP
+ignored `_scratch/<producer>/` path (or private storage) before launch, then run
+`fak tree-doctor --reap-scratch <producer>` when the run closes. `fak tree-doctor` includes any
+untracked `.claude/` artifact in its durable-WIP
 inventory and types stale entries `park-or-delete` so a completed run cannot leave silent residue.
 
 `testdata/` is committed test input, not an output directory. A fixture belongs there only when a
