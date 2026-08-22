@@ -21,15 +21,21 @@ func run(stdout, stderr io.Writer, args []string) int {
 	report := fs.String("report", "", "validator-clean report output")
 	archive := fs.String("archive", "", "secret-scrubbed raw archive output")
 	soak := fs.Bool("soak", false, "run the three-finalist production soak")
+	oracle := fs.Bool("oracle", false, "compare pinned llama.cpp and fak evidence")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *config == "" || *report == "" || *archive == "" || fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "usage: qwen38campaign [--soak] --config CONFIG.json --report REPORT.json --archive ARCHIVE.json [--corpus CORPUS.json]")
+	if *config == "" || *report == "" || *archive == "" || fs.NArg() != 0 || *soak && *oracle {
+		fmt.Fprintln(stderr, "usage: qwen38campaign [--soak | --oracle] --config CONFIG.json --report REPORT.json --archive ARCHIVE.json [--corpus CORPUS.json]")
 		return 2
 	}
 	var err error
-	if *soak {
+	verdict := "PASS"
+	if *oracle {
+		var oracleReport qwen38quantrun.OracleReport
+		oracleReport, err = qwen38quantrun.RunOracle(context.Background(), *config, *corpus, *report, *archive)
+		verdict = oracleReport.Verdict
+	} else if *soak {
 		err = qwen38quantrun.RunSoakAdapter(context.Background(), *config, *corpus, *report, *archive)
 	} else {
 		err = qwen38quantrun.RunAdapter(context.Background(), *config, *corpus, *report, *archive)
@@ -38,6 +44,6 @@ func run(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stderr, "qwen38campaign: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "PASS report=%s archive=%s\n", *report, *archive)
+	fmt.Fprintf(stdout, "%s report=%s archive=%s\n", verdict, *report, *archive)
 	return 0
 }

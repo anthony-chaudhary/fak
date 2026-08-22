@@ -1,0 +1,20 @@
+{
+  "verdict": "PROMOTE",
+  "next_stage": {
+    "id": "behavior",
+    "model": "Qwen/Qwen3.5-2B",
+    "revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+    "parameters_b": 2,
+    "minimum_pass_rate": 0.9,
+    "proves": [
+      "fast behavior iteration",
+      "tool/json scoring"
+    ],
+    "does_not_prove": [
+      "target quality",
+      "27B-memory",
+      "Qwen3.8-weights"
+    ]
+  },
+  "reason": "all cheaper stages passed; run the paired experiment at the next stage"
+}

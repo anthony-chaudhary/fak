@@ -1,0 +1,79 @@
+{
+  "schema": "fak.qwen38-ladder-raw-run/1",
+  "environment_sha256": "aed1212dcbf579f469dd52d9871cb404b262015a088fa72c59bb8a522bfe1cf3",
+  "corpus_sha256": "466632a99592cfae8ed3725dc5be4642f4af45d5686a3fb0cfd5208950593d82",
+  "rows": [
+    {
+      "trial": 1,
+      "arm": "baseline",
+      "enable_thinking": true,
+      "input_tokens": 23,
+      "output_tokens": 83,
+      "elapsed_ms": 6671.7386,
+      "passed": true,
+      "output": "Thinking Process:\n\n1.  **Analyze the Request:** The user is asking for the answer to the riddle \"What is 2+2?\" and explicitly requests to reply with *only* the number.\n\n2.  **Identify the Core Question:** The mathematical question is \"What is 2+2?\".\n3.  **Determine the Answer:** The mathematical answer is 4"
+    },
+    {
+      "trial": 1,
+      "arm": "candidate",
+      "enable_thinking": false,
+      "input_tokens": 25,
+      "output_tokens": 1,
+      "elapsed_ms": 174.6429,
+      "passed": true,
+      "output": "4"
+    },
+    {
+      "trial": 2,
+      "arm": "baseline",
+      "enable_thinking": true,
+      "input_tokens": 23,
+      "output_tokens": 83,
+      "elapsed_ms": 6332.6744,
+      "passed": true,
+      "output": "Thinking Process:\n\n1.  **Analyze the Request:** The user is asking for the answer to the riddle \"What is 2+2?\" and explicitly requests to reply with *only* the number.\n\n2.  **Identify the Core Question:** The mathematical question is \"What is 2+2?\".\n3.  **Determine the Answer:** The mathematical answer is 4"
+    },
+    {
+      "trial": 2,
+      "arm": "candidate",
+      "enable_thinking": false,
+      "input_tokens": 25,
+      "output_tokens": 1,
+      "elapsed_ms": 170.218,
+      "passed": true,
+      "output": "4"
+    },
+    {
+      "trial": 3,
+      "arm": "baseline",
+      "enable_thinking": true,
+      "input_tokens": 23,
+      "output_tokens": 83,
+      "elapsed_ms": 6322.3709,
+      "passed": true,
+      "output": "Thinking Process:\n\n1.  **Analyze the Request:** The user is asking for the answer to the riddle \"What is 2+2?\" and explicitly requests to reply with *only* the number.\n\n2.  **Identify the Core Question:** The mathematical question is \"What is 2+2?\".\n3.  **Determine the Answer:** The mathematical answer is 4"
+    },
+    {
+      "trial": 3,
+      "arm": "candidate",
+      "enable_thinking": false,
+      "input_tokens": 25,
+      "output_tokens": 1,
+      "elapsed_ms": 183.7214,
+      "passed": true,
+      "output": "4"
+    }
+  ],
+  "summary": {
+    "baseline": {
+      "passed": 3,
+      "trials": 3,
+      "p95_ms": 6671.7386
+    },
+    "candidate": {
+      "passed": 3,
+      "trials": 3,
+      "p95_ms": 183.7214
+    }
+  }
+}

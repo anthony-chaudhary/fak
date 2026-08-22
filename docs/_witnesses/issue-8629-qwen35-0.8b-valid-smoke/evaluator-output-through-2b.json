@@ -1,0 +1,20 @@
+{
+  "verdict": "PROMOTE",
+  "next_stage": {
+    "id": "width",
+    "model": "Qwen/Qwen3.5-4B",
+    "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+    "parameters_b": 4,
+    "minimum_pass_rate": 0.9,
+    "proves": [
+      "wider-tensor kernels",
+      "behavior trend"
+    ],
+    "does_not_prove": [
+      "target quality",
+      "27B-memory",
+      "Qwen3.8-weights"
+    ]
+  },
+  "reason": "all cheaper stages passed; run the paired experiment at the next stage"
+}
