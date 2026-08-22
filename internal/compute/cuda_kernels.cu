@@ -283,6 +283,46 @@ extern "C" void fcuda_hostxfer_reset(void) { g_host_bytes = 0; }
 extern "C" size_t fcuda_h2dxfer_bytes(void) { return g_h2d_bytes; }
 extern "C" void fcuda_h2dxfer_reset(void) { g_h2d_bytes = 0; }
 
+// Private whole-sequence bindings. They deliberately do not extend cuda_backend.h:
+// the public flat ABI remains the stable primitive surface, while cuda_kernels.go
+// owns these cgo-local entry points and the complete resident-sequence contract.
+__global__ void k_qwen35_embedding_gather(const float *embedding, const int *ids,
+                                           float *out, int tokens, int hidden) {
+  size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+  size_t n = (size_t)tokens * hidden;
+  if (i >= n) return;
+  int token = (int)(i / hidden);
+  int col = (int)(i - (size_t)token * hidden);
+  out[i] = embedding[(size_t)ids[token] * hidden + col];
+}
+
+extern "C" int fak_qwen35_embedding_gather_f32(
+    const float *dEmbedding, const int *hIDs, int *dIDs, float *dOut,
+    int tokens, int hidden) {
+  if (!dEmbedding || !hIDs || !dIDs || !dOut || tokens <= 0 || hidden <= 0) return -1;
+  cudaGetLastError();
+  size_t idsBytes = (size_t)tokens * sizeof(int);
+  cudaError_t copy = cudaMemcpy(dIDs, hIDs, idsBytes, cudaMemcpyHostToDevice);
+  if (copy != cudaSuccess) return 10000 + (int)copy;
+  g_h2d_bytes += idsBytes;
+  size_t n = (size_t)tokens * hidden;
+  k_qwen35_embedding_gather<<<(n + 255) / 256, 256, 0, g_stream>>>(
+      dEmbedding, dIDs, dOut, tokens, hidden);
+  cudaError_t launch = cudaGetLastError();
+  return launch == cudaSuccess ? 0 : 20000 + (int)launch;
+}
+
+extern "C" int fak_qwen35_pointer_is_device(const void *pointer) {
+  if (!pointer) return 0;
+  cudaPointerAttributes attributes;
+  cudaError_t status = cudaPointerGetAttributes(&attributes, pointer);
+  if (status != cudaSuccess) {
+    cudaGetLastError();
+    return 0;
+  }
+  return attributes.type == cudaMemoryTypeDevice ? 1 : 0;
+}
+
 // ---- Qwen3.5/3.6 whole-operation Gated-DeltaNet decode (#4725) -----------------
 
 __device__ __forceinline__ float qwen35_gdn_silu(float x) {
@@ -1139,6 +1179,75 @@ extern "C" void fcuda_split_qwen35_qg_f32(const float *dQG, float *dQ, float *dG
   CK(cudaGetLastError());
 }
 
+__global__ void k_qwen35_split_qg_panel(const float *qg, float *q, float *gate,
+                                         int tokens, int nHeads, int headDim) {
+  size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+  size_t width = (size_t)nHeads * headDim;
+  size_t n = (size_t)tokens * width;
+  if (i >= n) return;
+  int token = (int)(i / width);
+  int within = (int)(i - (size_t)token * width);
+  int head = within / headDim;
+  int dim = within - head * headDim;
+  size_t src = (size_t)token * 2 * width + (size_t)head * 2 * headDim + dim;
+  q[i] = qg[src];
+  gate[i] = qg[src + headDim];
+}
+
+extern "C" int fak_qwen35_split_qg_panel_f32(
+    const float *dQG, float *dQ, float *dGate,
+    int tokens, int nHeads, int headDim) {
+  if (!dQG || !dQ || !dGate || tokens <= 0 || nHeads <= 0 || headDim <= 0) return -1;
+  cudaGetLastError();
+  size_t n = (size_t)tokens * nHeads * headDim;
+  k_qwen35_split_qg_panel<<<(n + 255) / 256, 256, 0, g_stream>>>(
+      dQG, dQ, dGate, tokens, nHeads, headDim);
+  cudaError_t launch = cudaGetLastError();
+  return launch == cudaSuccess ? 0 : 30000 + (int)launch;
+}
+
+__global__ void k_qwen35_partial_rope_panel(
+    float *out, const float *in, int tokens, int startPos,
+    int nHeads, int headDim, int rotaryDim, double theta) {
+  size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+  size_t width = (size_t)nHeads * headDim;
+  size_t n = (size_t)tokens * width;
+  if (i >= n) return;
+  int token = (int)(i / width);
+  int within = (int)(i - (size_t)token * width);
+  int head = within / headDim;
+  int dim = within - head * headDim;
+  if (dim >= rotaryDim) { out[i] = in[i]; return; }
+  int half = rotaryDim / 2;
+  int j = dim < half ? dim : dim - half;
+  double freq = pow(theta, -(2.0 * j) / rotaryDim);
+  double angle = (double)(startPos + token) * freq;
+  float cs = (float)cos(angle), sn = (float)sin(angle);
+  size_t base = (size_t)token * width + (size_t)head * headDim;
+  float a = in[base + j], b = in[base + j + half];
+  out[i] = dim < half ? a * cs - b * sn : b * cs + a * sn;
+}
+
+extern "C" int fak_qwen35_partial_rope_panel_f32(
+    const float *dQ, const float *dK, float *dQOut, float *dKOut,
+    int tokens, int startPos, int nQHeads, int nKHeads, int headDim,
+    int rotaryDim, double theta) {
+  if (!dQ || !dK || !dQOut || !dKOut || tokens <= 0 || startPos < 0 ||
+      nQHeads <= 0 || nKHeads <= 0 || headDim <= 0 || rotaryDim <= 0 ||
+      rotaryDim > headDim || (rotaryDim & 1) != 0 || !(theta > 0.0)) return -1;
+  cudaGetLastError();
+  size_t qn = (size_t)tokens * nQHeads * headDim;
+  size_t kn = (size_t)tokens * nKHeads * headDim;
+  k_qwen35_partial_rope_panel<<<(qn + 255) / 256, 256, 0, g_stream>>>(
+      dQOut, dQ, tokens, startPos, nQHeads, headDim, rotaryDim, theta);
+  cudaError_t launch = cudaGetLastError();
+  if (launch != cudaSuccess) return 40000 + (int)launch;
+  k_qwen35_partial_rope_panel<<<(kn + 255) / 256, 256, 0, g_stream>>>(
+      dKOut, dK, tokens, startPos, nKHeads, headDim, rotaryDim, theta);
+  launch = cudaGetLastError();
+  return launch == cudaSuccess ? 0 : 41000 + (int)launch;
+}
+
 // ---- SwiGLU / residual add / bias add -------------------------------------------
 __global__ void k_swiglu(const float *G, const float *U, float *Y, int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1329,6 +1438,77 @@ extern "C" void fcuda_flash_attention_f32(const float *dQ, const float *dK, cons
   (void)maxPos;
   size_t shmem = ((size_t)hd + FLASH_THREADS) * sizeof(float);
   k_flash_attention<<<nH, FLASH_THREADS, shmem, g_stream>>>(dQ, dK, dV, dOut, nPos, nH, nKV, hd, scale);
+}
+
+// Prompt-panel counterpart of k_flash_attention. K/V already contain the
+// complete appended panel; query row t is restricted to prefix+t+1, preserving
+// causality without materializing a scores panel or replaying rows from Go.
+__global__ void k_qwen35_causal_attention_panel(
+    const float *Q, const float *K, const float *V, float *Out,
+    int tokens, int prefix, int nH, int nKV, int hd, float scale) {
+  int flat = blockIdx.x;
+  int h = flat % nH;
+  int token = flat / nH;
+  if (h >= nH || token >= tokens) return;
+  int grp = nH / nKV;
+  int kvh = h / grp;
+  int width = nKV * hd;
+  int nPos = prefix + token + 1;
+  const float *qh = Q + (size_t)token * nH * hd + (size_t)h * hd;
+  extern __shared__ float smem[];
+  float *qs = smem;
+  float *red = smem + hd;
+  int tid = threadIdx.x;
+  for (int d = tid; d < hd; d += FLASH_THREADS) qs[d] = qh[d];
+  __syncthreads();
+  float m = -1e30f, l = 0.f;
+  float acc[FLASH_ACC_MAX];
+#pragma unroll
+  for (int k = 0; k < FLASH_ACC_MAX; k++) acc[k] = 0.f;
+  for (int j = 0; j < nPos; j++) {
+    const float *kj = K + (size_t)j * width + (size_t)kvh * hd;
+    float partial = 0.f;
+    for (int d = tid; d < hd; d += FLASH_THREADS) partial += qs[d] * kj[d];
+    red[tid] = partial;
+    __syncthreads();
+    for (int s = FLASH_THREADS / 2; s > 0; s >>= 1) {
+      if (tid < s) red[tid] += red[tid + s];
+      __syncthreads();
+    }
+    float score = red[0] * scale;
+    __syncthreads();
+    float nextM = fmaxf(m, score);
+    float correction = expf(m - nextM);
+    float probability = expf(score - nextM);
+    l = l * correction + probability;
+    const float *vj = V + (size_t)j * width + (size_t)kvh * hd;
+    int k = 0;
+    for (int d = tid; d < hd; d += FLASH_THREADS, k++)
+      acc[k] = acc[k] * correction + probability * vj[d];
+    m = nextM;
+  }
+  float inv = l > 0.f ? 1.f / l : 0.f;
+  float *out = Out + (size_t)token * nH * hd + (size_t)h * hd;
+  int k = 0;
+  for (int d = tid; d < hd; d += FLASH_THREADS, k++) out[d] = acc[k] * inv;
+}
+
+extern "C" int fak_qwen35_causal_attention_panel_f32(
+    const float *dQ, const float *dK, const float *dV, float *dOut,
+    int tokens, int prefix, int nH, int nKV, int hd, float scale) {
+  if (!dQ || !dK || !dV || !dOut || tokens <= 0 || prefix < 0 ||
+      nH <= 0 || nKV <= 0 || nH % nKV != 0 || hd <= 0 || hd > 1024) return -1;
+  cudaGetLastError();
+  size_t shmem = ((size_t)hd + FLASH_THREADS) * sizeof(float);
+  k_qwen35_causal_attention_panel<<<tokens * nH, FLASH_THREADS, shmem, g_stream>>>(
+      dQ, dK, dV, dOut, tokens, prefix, nH, nKV, hd, scale);
+  cudaError_t launch = cudaGetLastError();
+  return launch == cudaSuccess ? 0 : 50000 + (int)launch;
+}
+
+extern "C" int fak_qwen35_sequence_sync(void) {
+  cudaError_t completed = cudaStreamSynchronize(g_stream);
+  return completed == cudaSuccess ? 0 : 60000 + (int)completed;
 }
 
 // ---- GLM-MoE-DSA sparse attention over the host-selected key set ------------------
