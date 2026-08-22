@@ -85,6 +85,10 @@ func runWindowgate(stdout, stderr io.Writer, argv []string) int {
 	visibleWindows := fs.Bool("visible-windows", false, "also audit currently visible top-level windows")
 	liveProcesses := fs.Bool("live-processes", false, "also audit live console-prone helper processes")
 	selfcheck := fs.Bool("selfcheck", false, "launch representative Codex descendants and prove their Windows consoles stay hidden")
+	codexMCPSelfcheck := fs.Bool("codex-mcp-selfcheck", false, "launch the configured stdio MCP command through managed and unmanaged attended Codex routes")
+	codexMCPConfig := fs.String("codex-mcp-config", defaultCodexConfigPath(), "Codex config.toml used by --codex-mcp-selfcheck")
+	codexMCPServer := fs.String("codex-mcp-server", "fak", "Codex mcp_servers entry used by --codex-mcp-selfcheck")
+	codexMCPTimeout := fs.Duration("codex-mcp-timeout", 15*time.Second, "per-route initialize and exit timeout for --codex-mcp-selfcheck")
 	soakRuns := fs.Int("soak", 0, "repeat the normal-executable selfcheck N times (max 1000)")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
@@ -99,6 +103,13 @@ func runWindowgate(stdout, stderr io.Writer, argv []string) int {
 	}
 	if *soakRuns > 0 {
 		return runDesktopConsoleSoak(stdout, stderr, *asJSON, *soakRuns)
+	}
+	if *codexMCPSelfcheck {
+		if *codexMCPTimeout <= 0 {
+			fmt.Fprintln(stderr, "fak windowgate: --codex-mcp-timeout must be positive")
+			return 2
+		}
+		return runCodexMCPWindowSelfcheck(stdout, stderr, *codexMCPConfig, *codexMCPServer, *codexMCPTimeout, *asJSON)
 	}
 	if *selfcheck {
 		return runDesktopConsoleSelfcheck(stdout, stderr, *asJSON)
