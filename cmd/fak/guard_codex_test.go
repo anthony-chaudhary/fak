@@ -123,13 +123,16 @@ func TestManagedGuardResolvesWindowsShimOnlyAtExecBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	envAt := bytes.Index(childSource, []byte("command, env := guardChildCommandEnv("))
-	buildAt := bytes.Index(childSource, []byte("child := newResolvedExecCommand(command)"))
-	resolveAt := bytes.Index(childSource, []byte("command = resolveWindowsBatchCommand(command)"))
-	execAt := bytes.Index(childSource, []byte("return exec.Command(command[0]"))
-	brokerAt := bytes.Index(childSource, []byte("child := newResolvedExecCommand(grant.Argv)"))
-	if envAt < 0 || buildAt < envAt || resolveAt < buildAt || execAt < resolveAt || brokerAt < execAt {
-		t.Fatalf("guard child preparation order lost semantic-command wiring: env=%d build=%d resolve=%d exec=%d broker=%d", envAt, buildAt, resolveAt, execAt, brokerAt)
+	for _, want := range []string{
+		"plan, env := guardChildPlanCommandEnv(newGuardLaunchPlan(command)",
+		"child := newResolvedExecCommand(plan.executableCommand())",
+		"command = resolveWindowsBatchCommand(command)",
+		"return exec.Command(command[0]",
+		"child := newResolvedExecCommand(grant.Argv)",
+	} {
+		if !bytes.Contains(childSource, []byte(want)) {
+			t.Fatalf("guard child preparation lost semantic-command wiring %q", want)
+		}
 	}
 }
 

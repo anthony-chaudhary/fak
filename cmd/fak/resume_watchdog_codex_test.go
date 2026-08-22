@@ -33,12 +33,12 @@ func TestWatchdogPlanRowCodexCoordinatesRoundTrip(t *testing.T) {
 }
 
 func TestResumeBrokerSelectsCodexWithoutLeakingGoal(t *testing.T) {
-	p := resume.WatchdogPlanRow{Session: "thread-id", Harness: "codex_exec", CWD: t.TempDir(), Rollout: "rollout.jsonl", GoalFile: "goal.txt", ResultFile: "result.json"}
+	p := resume.WatchdogPlanRow{Session: "thread-id", Harness: "codex", CWD: t.TempDir(), Rollout: "rollout.jsonl", GoalFile: "goal.txt", ResultFile: "result.json"}
 	got := rwResumeBrokerAttempt("fak-bin", "claude-bin", p, "claude-config", nil)
 	if got.Backend != "codex" {
 		t.Fatalf("backend=%q", got.Backend)
 	}
-	want := []string{"fak-bin", "codex-resume", "--json", "--rollout", "rollout.jsonl", "--cwd", p.CWD, "--prompt-file", "goal.txt", "--result-file", "result.json", "thread-id"}
+	want := []string{"fak-bin", "m", "--", "fak-bin", "codex-resume", "--json", "--rollout", "rollout.jsonl", "--cwd", p.CWD, "--prompt-file", "goal.txt", "--result-file", "result.json", "thread-id"}
 	if !reflect.DeepEqual(got.Argv, want) {
 		t.Fatalf("argv=%q want=%q", got.Argv, want)
 	}
@@ -52,11 +52,11 @@ func TestResumeBrokerSelectsCodexWithoutLeakingGoal(t *testing.T) {
 
 func TestResumeBrokerKeepsLegacyClaudeDefault(t *testing.T) {
 	p := resume.WatchdogPlanRow{Session: "claude-session", CWD: t.TempDir()}
-	got := rwResumeBrokerAttempt("", "claude-bin", p, "claude-config", nil)
+	got := rwResumeBrokerAttempt("fak-bin", "claude-bin", p, "claude-config", nil)
 	if got.Backend != "claude" {
 		t.Fatalf("backend=%q", got.Backend)
 	}
-	if len(got.Argv) < 3 || got.Argv[0] != "claude-bin" || got.Argv[1] != "--resume" || got.Argv[2] != p.Session {
+	if len(got.Argv) < 7 || got.Argv[0] != "fak-bin" || got.Argv[1] != "m" || got.Argv[2] != "--" || got.Argv[3] != "claude-bin" || got.Argv[4] != "--resume" || got.Argv[5] != p.Session {
 		t.Fatalf("argv=%q", got.Argv)
 	}
 }

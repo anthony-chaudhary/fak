@@ -23,7 +23,7 @@ func TestCodexOutcomeProgressExemptionDiscriminates(t *testing.T) {
 	}
 	// A real work tool is never exempt, even with fully distinct args (this is
 	// the only thing separating it from update_plan — the exec subagent fixture).
-	work := codexRepeatedOutcome{Tool: "exec", Count: 3, ArgsDigestCount: 3}
+	work := codexRepeatedOutcome{Tool: "exec", Count: 3, LongestRun: 3, ArgsDigestCount: 3}
 	if codexOutcomeIsForwardProgress(work) {
 		t.Fatalf("exec is not a progress tool and must never be exempt: %+v", work)
 	}

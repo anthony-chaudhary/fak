@@ -755,13 +755,20 @@ func newGuardChildSpawnMetadata(agentRunID, policyDigest, backend string, rt pol
 			env.HeartbeatEveryMS = r.HeartbeatEveryMS
 		}
 	}
+	registryPath := strings.TrimSpace(os.Getenv("FAK_CHILD_REGISTRY"))
+	if registryPath == "" {
+		registryPath = sessionregistry.DefaultPath()
+		if strings.TrimSpace(os.Getenv("FAK_SESSION_REGISTRY")) != "" {
+			registryPath += ".children"
+		}
+	}
 	return guardChildSpawnMetadata{
 		AgentRunID:   agentRunID,
 		ToolCallID:   "guard-child:" + agentRunID,
 		PolicyDigest: strings.TrimSpace(policyDigest),
 		Backend:      strings.TrimSpace(backend),
 		Envelope:     env,
-		RegistryPath: sessionregistry.DefaultPath(),
+		RegistryPath: registryPath,
 		LaunchPlan:   launchPlan,
 	}
 }

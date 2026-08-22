@@ -32,8 +32,8 @@ func TestUltracodeSelfcheckNeedsNoTaskInput(t *testing.T) {
 	if code := runUltracode(&stdout, &stderr, []string{"--selfcheck"}); code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "SELFCHECK PASS") || !strings.Contains(stdout.String(), "launched=0") {
-		t.Fatalf("stdout=%q", stdout.String())
+	if !strings.Contains(stderr.String(), "SELFCHECK PASS") || !strings.Contains(stderr.String(), "launched=0") {
+		t.Fatalf("stderr=%q", stderr.String())
 	}
 }
 

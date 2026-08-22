@@ -127,10 +127,17 @@ func runGuardE2E(t *testing.T, args string, env map[string]string) (exitCode int
 	if err := os.WriteFile(filepath.Join(cmd.Dir, "dos.toml"), []byte("[lanes]\n[lanes.trees]\ncmd = [\"cmd/**\"]\n"), 0o644); err != nil {
 		t.Fatalf("write guard e2e lane taxonomy: %v", err)
 	}
-	cmd.Env = append(os.Environ(), guardE2EHelperEnv+"="+args)
+	cmd.Env = make([]string, 0, len(os.Environ())+len(env)+1)
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if _, overridden := env[key]; !overridden {
+			cmd.Env = append(cmd.Env, entry)
+		}
+	}
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
+	cmd.Env = append(cmd.Env, guardE2EHelperEnv+"="+args)
 	cmd.Stdin = devNull // headless: DevNull is a char device on Windows (the bug condition).
 
 	b, runErr := cmd.CombinedOutput()
@@ -224,7 +231,8 @@ func guardE2EGitEnv(binDir, logPath, registryPath string) map[string]string {
 	return map[string]string{
 		"PATH":                   binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"FAK_GUARD_GIT_CALL_LOG": logPath,
-		sessionRegistryEnv:       registryPath,
+		sessionRegistryEnv:       registryPath + ".children",
+		"FAK_SESSION_JOURNAL":    registryPath + ".journal",
 	}
 }
 
@@ -248,17 +256,13 @@ func TestGuardDefaultLaunchDoesNotSpawnGit(t *testing.T) {
 	binDir, logPath := writeGuardE2EFakeGit(t)
 	child := writeGuardE2ENoopChild(t, false)
 	registryPath := filepath.Join(t.TempDir(), "session-registry.json")
-	if err := os.WriteFile(registryPath, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv(sessionRegistryEnv, registryPath)
 	env := guardE2EGitEnv(binDir, logPath, registryPath)
 	// Keep default-on crash recovery enabled: progress probes belong at an actual restart,
 	// not on the successful child-launch critical path.
 	env[guardCrashRestartLimitEnv] = "3"
 
 	code, out, timedOut := runGuardE2E(t,
-		"--provider openai --base-url http://127.0.0.1:9 --quiet --audit off -- "+child,
+		"--provider openai --base-url http://127.0.0.1:9 --quiet --audit off --lease mode=off -- "+child,
 		env,
 	)
 	if timedOut {
@@ -279,10 +283,6 @@ func TestGuardDurableLaunchStillPublishes(t *testing.T) {
 	binDir, logPath := writeGuardE2EFakeGit(t)
 	child := writeGuardE2ENoopChild(t, true)
 	registryPath := filepath.Join(t.TempDir(), "session-registry.json")
-	if err := os.WriteFile(registryPath, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv(sessionRegistryEnv, registryPath)
 	env := guardE2EGitEnv(binDir, logPath, registryPath)
 
 	code, out, timedOut := runGuardE2E(t,
