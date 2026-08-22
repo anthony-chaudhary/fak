@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 )
 
 // guardUpstreamPostureInputs is the launch-time input to step 3 of a `fak guard` launch:
@@ -18,6 +19,7 @@ import (
 // parameters threaded through cmdGuard.
 type guardUpstreamPostureInputs struct {
 	command        []string
+	profile        harnessprofile.HarnessProfile
 	provider       string
 	baseURL        string
 	remoteBase     string
@@ -234,7 +236,7 @@ func resolveGuardUpstreamPosture(in guardUpstreamPostureInputs) guardUpstreamPos
 			os.Exit(2)
 		}
 	}
-	if guardCodexSubscriptionEligible(command, p.up, in.baseURL, in.remoteBase, in.apiKeyEnv) {
+	if guardCodexSubscriptionEligibleForProfile(in.profile, p.up, in.baseURL, in.remoteBase, in.apiKeyEnv) {
 		if cred, err := resolveCodexSubscriptionCredential(in.codexHome); err == nil {
 			p.apiKey = cred.AccessToken
 			p.pinUpstream = true

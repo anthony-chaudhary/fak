@@ -4,10 +4,111 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 )
+
+func TestGuardLaunchPlanIdentityComposition(t *testing.T) {
+	tests := []struct {
+		name         string
+		command      []string
+		wantProfile  string
+		wantWire     harnessprofile.Wire
+		wantRepoints []harnessprofile.RepointMechanism
+	}{
+		{
+			name:         "claude",
+			command:      []string{"claude", "-p", "inspect the repository"},
+			wantProfile:  "claude",
+			wantWire:     harnessprofile.WireAnthropic,
+			wantRepoints: []harnessprofile.RepointMechanism{harnessprofile.RepointEnv, harnessprofile.RepointSettingsFile},
+		},
+		{
+			name:         "codex",
+			command:      []string{"codex", "exec", "inspect the repository"},
+			wantProfile:  "codex",
+			wantWire:     harnessprofile.WireOpenAIResponses,
+			wantRepoints: []harnessprofile.RepointMechanism{harnessprofile.RepointEnv, harnessprofile.RepointCLIConfig},
+		},
+		{
+			name:         "openai-generic",
+			command:      []string{"opencode", "run", "inspect the repository"},
+			wantProfile:  "openai-generic",
+			wantWire:     harnessprofile.WireOpenAI,
+			wantRepoints: []harnessprofile.RepointMechanism{harnessprofile.RepointEnv},
+		},
+	}
+	transforms := []struct {
+		name  string
+		apply func([]string) []string
+	}{
+		{"broker", func(argv []string) []string { return append([]string(nil), argv...) }},
+		{"prompt-stdin", func(argv []string) []string { return append([]string{argv[0], "--prompt-stdin"}, argv[1:]...) }},
+		{"landlock", func(argv []string) []string { return append([]string{"fak", "landlock-exec", "--"}, argv...) }},
+		{"terminal", func(argv []string) []string { return append([]string{"terminal-host", "--"}, argv...) }},
+		{"os-exec", func(argv []string) []string {
+			return append([]string{"node.exe", "agent-entrypoint.js", "--"}, argv...)
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := newGuardLaunchPlan(tc.command)
+			if got := plan.semanticCommand(); !slices.Equal(got, tc.command) {
+				t.Fatalf("semantic argv = %v, want %v", got, tc.command)
+			}
+			if got := plan.harnessProfile(); got.Name != tc.wantProfile || got.Wire != tc.wantWire || !reflect.DeepEqual(got.Repoint, tc.wantRepoints) {
+				t.Fatalf("profile = %+v, want name=%q wire=%q repoint=%v", got, tc.wantProfile, tc.wantWire, tc.wantRepoints)
+			}
+			for _, transform := range transforms {
+				plan = plan.withExecutableCommand(transform.apply(plan.executableCommand()))
+				if got := plan.semanticCommand(); !slices.Equal(got, tc.command) {
+					t.Fatalf("%s changed semantic argv to %v, want %v", transform.name, got, tc.command)
+				}
+				if got := plan.harnessProfile(); got.Name != tc.wantProfile || got.Wire != tc.wantWire || !reflect.DeepEqual(got.Repoint, tc.wantRepoints) {
+					t.Fatalf("%s changed profile to %+v", transform.name, got)
+				}
+			}
+			semantic := plan.semanticCommand()
+			semantic[0] = "mutated"
+			if got := plan.semanticCommand()[0]; got != tc.command[0] {
+				t.Fatalf("semantic argv escaped immutability: got %q want %q", got, tc.command[0])
+			}
+			executable := plan.executableCommand()
+			executable[0] = "mutated"
+			if got := plan.executableCommand()[0]; got == "mutated" {
+				t.Fatal("executable argv escaped immutability")
+			}
+			profile := plan.harnessProfile()
+			profile.Repoint[0] = "mutated"
+			if got := plan.harnessProfile().Repoint[0]; got == "mutated" {
+				t.Fatal("harness profile escaped immutability")
+			}
+		})
+	}
+
+	unknown := newGuardLaunchPlan([]string{"custom-agent", "run"})
+	if unknown.recognized() || unknown.harnessProfile().Recognized() {
+		t.Fatalf("unknown command resolved a profile: %+v", unknown.harnessProfile())
+	}
+	if provider, autodetected := unknown.resolveProvider(""); provider != "anthropic" || autodetected {
+		t.Fatalf("unknown provider fallback = %q autodetected=%v, want anthropic false", provider, autodetected)
+	}
+	for _, path := range []string{"guard.go", "guard_child.go", "guard_upstream_posture.go", "guard_codex_oauth.go", "guard_sessionstart.go"} {
+		source, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(source, []byte("guardIsCodex(")) {
+			t.Fatalf("%s re-detects Codex identity after launch-plan admission", path)
+		}
+	}
+}
 
 func TestManagedGuardResolvesWindowsShimOnlyAtExecBoundary(t *testing.T) {
 	guardSource, err := os.ReadFile("guard.go")

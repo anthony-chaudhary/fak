@@ -132,20 +132,27 @@ func buildComparisonReport(root string) comparisonReport {
 // installManagedNativeHooks installs only documented harness seams. The returned
 // restore function keeps the adapter scoped to this child launch.
 func installManagedNativeHooks(command []string) ([]string, func(), error) {
+	var profile harnessprofile.HarnessProfile
+	if len(command) > 0 {
+		profile, _ = harnessprofile.Lookup(command[0])
+	}
+	return installManagedNativeHooksForProfile(command, profile)
+}
+
+func installManagedNativeHooksForProfile(command []string, profile harnessprofile.HarnessProfile) ([]string, func(), error) {
 	if len(command) == 0 {
 		return command, func() {}, nil
 	}
-	harness := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(strings.ToLower(filepath.Base(command[0])), ".exe"), ".cmd"), ".ps1")
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, nil, err
 	}
-	if harness == "codex" {
+	if profile.Name == "codex" {
 		q := strings.ReplaceAll(exe, `\`, `\\`)
 		config := fmt.Sprintf(`hooks={Stop=[{hooks=[{type="command",command="%s manage hook --harness codex --event Stop"}]}],PreCompact=[{hooks=[{type="command",command="%s manage hook --harness codex --event PreCompact"}]}],PreToolUse=[{hooks=[{type="command",command="%s manage hook --harness codex --event PreToolUse"}]}],PostToolUse=[{hooks=[{type="command",command="%s manage hook --harness codex --event PostToolUse"}]}]}`, q, q, q, q)
 		return append([]string{command[0], "--config", config}, command[1:]...), func() {}, nil
 	}
-	if !guardProfileHasRepoint(command[0], harnessprofile.RepointSystemSettingsEnv) {
+	if !profile.HasRepoint(harnessprofile.RepointSystemSettingsEnv) {
 		return command, func() {}, nil
 	}
 	dir, err := os.MkdirTemp("", "fak-manage-gemini-hooks-")

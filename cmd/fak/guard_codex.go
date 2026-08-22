@@ -75,17 +75,33 @@ const (
 )
 
 func guardCodexGatewayModel(command []string, model, provider string) string {
+	var profile harnessprofile.HarnessProfile
+	if len(command) > 0 {
+		profile, _ = harnessprofile.Lookup(command[0])
+	}
+	return guardCodexGatewayModelForProfile(profile, model, provider)
+}
+
+func guardCodexGatewayModelForProfile(profile harnessprofile.HarnessProfile, model, provider string) string {
 	if strings.TrimSpace(model) != "" {
 		return strings.TrimSpace(model)
 	}
-	if len(command) > 0 && guardIsCodex(command[0]) && strings.TrimSpace(provider) == "openai-responses" {
+	if profile.HasRepoint(harnessprofile.RepointCLIConfig) && strings.TrimSpace(provider) == "openai-responses" {
 		return guardCodexDefaultModelID
 	}
 	return model
 }
 
 func guardCodexLoopGateConfig(command []string, threshold, codexHome string, sinceHours float64, limit int, quiet bool) (codexLoopGateConfig, bool) {
-	if len(command) == 0 || !guardIsCodex(command[0]) {
+	var profile harnessprofile.HarnessProfile
+	if len(command) > 0 {
+		profile, _ = harnessprofile.Lookup(command[0])
+	}
+	return guardCodexLoopGateConfigForProfile(profile, command, threshold, codexHome, sinceHours, limit, quiet)
+}
+
+func guardCodexLoopGateConfigForProfile(profile harnessprofile.HarnessProfile, command []string, threshold, codexHome string, sinceHours float64, limit int, quiet bool) (codexLoopGateConfig, bool) {
+	if len(command) == 0 || !profile.HasRepoint(harnessprofile.RepointCLIConfig) {
 		return codexLoopGateConfig{}, false
 	}
 	return codexLoopGateConfig{
@@ -170,7 +186,15 @@ func guardCodexEnvKey(apiKeyEnv string) string {
 // subcommand. A non-Codex agent, or enabled=false, is returned unchanged (no install), so
 // the path is inert for every other wrapped agent. An empty command is a no-op.
 func installGuardCodexConfig(command []string, enabled bool, gwURL, apiKeyEnv string) ([]string, guardCodexInstall) {
-	if !enabled || len(command) == 0 || !guardIsCodex(command[0]) {
+	var profile harnessprofile.HarnessProfile
+	if len(command) > 0 {
+		profile, _ = harnessprofile.Lookup(command[0])
+	}
+	return installGuardCodexConfigForProfile(command, profile, enabled, gwURL, apiKeyEnv)
+}
+
+func installGuardCodexConfigForProfile(command []string, profile harnessprofile.HarnessProfile, enabled bool, gwURL, apiKeyEnv string) ([]string, guardCodexInstall) {
+	if !enabled || len(command) == 0 || !profile.HasRepoint(harnessprofile.RepointCLIConfig) {
 		return command, guardCodexInstall{}
 	}
 	model := guardCodexDefaultModelID

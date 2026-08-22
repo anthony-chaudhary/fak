@@ -124,8 +124,15 @@ func parseCodexSubscriptionCredential(raw []byte, source string) (codexSubscript
 }
 
 func guardCodexSubscriptionEligible(command []string, provider, baseURLFlag, remoteServeBase, apiKeyEnv string) bool {
-	return len(command) > 0 &&
-		guardIsCodex(command[0]) &&
+	var profile harnessprofile.HarnessProfile
+	if len(command) > 0 {
+		profile, _ = harnessprofile.Lookup(command[0])
+	}
+	return guardCodexSubscriptionEligibleForProfile(profile, provider, baseURLFlag, remoteServeBase, apiKeyEnv)
+}
+
+func guardCodexSubscriptionEligibleForProfile(profile harnessprofile.HarnessProfile, provider, baseURLFlag, remoteServeBase, apiKeyEnv string) bool {
+	return profile.HasRepoint(harnessprofile.RepointCLIConfig) &&
 		strings.TrimSpace(provider) == "openai-responses" &&
 		strings.TrimSpace(baseURLFlag) == "" &&
 		strings.TrimSpace(remoteServeBase) == "" &&

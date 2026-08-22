@@ -25,6 +25,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/goalpark"
 	"github.com/anthony-chaudhary/fak/internal/guard"
 	"github.com/anthony-chaudhary/fak/internal/guardsessions"
+	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 	"github.com/anthony-chaudhary/fak/internal/harnessres"
 	"github.com/anthony-chaudhary/fak/internal/headroom"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
@@ -37,6 +38,86 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 	"github.com/anthony-chaudhary/fak/internal/toolcallcontrol"
 )
+
+// guardLaunchPlan separates the wrapped harness's admitted identity from the argv that
+// launch adapters are free to rewrite. Its fields stay private and every slice accessor
+// clones, so a broker, trampoline, or exec-boundary transform cannot mutate the semantic
+// command or the resolved profile in place.
+type guardLaunchPlan struct {
+	semantic          []string
+	executable        []string
+	baseName          string
+	profile           harnessprofile.HarnessProfile
+	recognizedProfile bool
+	initialized       bool
+}
+
+func newGuardLaunchPlan(command []string) guardLaunchPlan {
+	plan := guardLaunchPlan{
+		semantic:    append([]string(nil), command...),
+		executable:  append([]string(nil), command...),
+		initialized: true,
+	}
+	if len(command) == 0 {
+		return plan
+	}
+	plan.baseName = guardAgentBaseName(command[0])
+	profile, ok := harnessprofile.Lookup(command[0])
+	if !ok {
+		return plan
+	}
+	plan.profile = cloneGuardHarnessProfile(profile)
+	plan.recognizedProfile = true
+	return plan
+}
+
+func cloneGuardHarnessProfile(profile harnessprofile.HarnessProfile) harnessprofile.HarnessProfile {
+	profile.Names = append([]string(nil), profile.Names...)
+	profile.Repoint = append([]harnessprofile.RepointMechanism(nil), profile.Repoint...)
+	return profile
+}
+
+func (p guardLaunchPlan) semanticCommand() []string {
+	return append([]string(nil), p.semantic...)
+}
+
+func (p guardLaunchPlan) executableCommand() []string {
+	return append([]string(nil), p.executable...)
+}
+
+func (p guardLaunchPlan) harnessProfile() harnessprofile.HarnessProfile {
+	return cloneGuardHarnessProfile(p.profile)
+}
+
+func (p guardLaunchPlan) recognized() bool { return p.recognizedProfile }
+
+func (p guardLaunchPlan) withExecutableCommand(command []string) guardLaunchPlan {
+	p.executable = append([]string(nil), command...)
+	return p
+}
+
+func (p guardLaunchPlan) resolveProvider(explicit string) (string, bool) {
+	if provider := strings.ToLower(strings.TrimSpace(explicit)); provider != "" {
+		return provider, false
+	}
+	if p.recognizedProfile {
+		return string(p.profile.Wire), true
+	}
+	return "anthropic", false
+}
+
+func (p guardLaunchPlan) agentName() string {
+	if len(p.semantic) == 0 {
+		return ""
+	}
+	return p.semantic[0]
+}
+
+func (p guardLaunchPlan) agentBaseName() string { return p.baseName }
+
+func (p guardLaunchPlan) interactive() bool {
+	return guardChildInteractive(p.semanticCommand())
+}
 
 func cmdGuard(argv []string) {
 	cmdManageCommand("guard", argv)
@@ -222,6 +303,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	fs.Usage = func() { printGuardUsage(os.Stderr, fs, commandName, guardHelpAll) }
 	argv = rewriteLegacyDenyAllArgs(argv)
 	_ = fs.Parse(argv)
+	launchPlan := newGuardLaunchPlan(fs.Args())
 	setLaunchToolGrant(allowTools)
 	rotateSet := false
 	fs.Visit(func(f *flag.Flag) {
@@ -229,7 +311,7 @@ func cmdManageCommand(commandName string, argv []string) {
 			rotateSet = true
 		}
 	})
-	resolvedRotateMode, rotateErr := normalizeGuardRotateMode(*rotateMode, rotateSet, guardChildInteractive(fs.Args()))
+	resolvedRotateMode, rotateErr := normalizeGuardRotateMode(*rotateMode, rotateSet, launchPlan.interactive())
 	if rotateErr != nil {
 		fmt.Fprintln(os.Stderr, rotateErr)
 		os.Exit(2)
@@ -351,7 +433,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		return
 	}
 
-	command := fs.Args() // everything after the flags (and after `--`) is the wrapped agent.
+	command := launchPlan.executableCommand() // everything after the flags (and after `--`) is the wrapped agent.
 	profilesExplicit := false
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "output-profile" || f.Name == "work-profile" {
@@ -367,7 +449,9 @@ func cmdManageCommand(commandName string, argv []string) {
 		fs.Usage()
 		os.Exit(2)
 	}
-	if cfg, ok := guardCodexLoopGateConfig(command, *codexLoopGate, *codexHome, *codexLoopGateSinceHours, *codexLoopGateLimit, *quiet); ok {
+	launchPlan = launchPlan.withExecutableCommand(command)
+	agentName := launchPlan.agentName()
+	if cfg, ok := guardCodexLoopGateConfigForProfile(launchPlan.harnessProfile(), launchPlan.executableCommand(), *codexLoopGate, *codexHome, *codexLoopGateSinceHours, *codexLoopGateLimit, *quiet); ok {
 		if code := runCodexLoopGate(os.Stderr, cfg); code != 0 {
 			os.Exit(code)
 		}
@@ -400,7 +484,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	// downstream consumer (fak's own OAuth read, the failover seed, the cap-recovery transcript
 	// path, and the child's inherited env — all of which re-read the env var) follows to the live
 	// seat. Fail-open: any doubt leaves the resolved dir untouched (see guardRotateOffCooldown).
-	if provResolved, _ := resolveGuardProvider(*provider, command[0]); provResolved == "anthropic" && strings.TrimSpace(*apiKeyEnv) == "" {
+	if provResolved, _ := launchPlan.resolveProvider(*provider); provResolved == "anthropic" && strings.TrimSpace(*apiKeyEnv) == "" {
 		guardHomeDir, _ := os.UserHomeDir()
 		if newDir, rotated := guardRotateOffCooldown(guardHomeDir, guardDefaultAccountsRegistryPath(guardHomeDir), time.Now(), guardRotateWarnWriter(os.Stderr, *quiet)); rotated {
 			_ = os.Setenv("CLAUDE_CONFIG_DIR", newDir)
@@ -416,13 +500,13 @@ func cmdManageCommand(commandName string, argv []string) {
 	// corrupt). See guardDebugStatsToSharedStderr.
 	debugStatsStderr := guardDebugStatsToSharedStderr(
 		*debugStats, *quiet, guardSetFlags["debug-stats"],
-		cmdGuardStdinInteractive(), guardChildInteractive(command))
+		cmdGuardStdinInteractive(), launchPlan.interactive())
 
 	// Startup-banner verbosity: resolve --banner now, fail-loud on a bad value before
 	// any gateway binds. AUTO compacts only the attended interactive launch — the same
 	// attended-vs-headless split as the debug-stats auto-suppress above — so headless/
 	// piped launches keep the full startup report byte-for-byte. See guard_banner.go.
-	bannerMode, bannerErr := guardBannerModeDecision(*bannerFlag, *quiet, cmdGuardStdinInteractive(), guardChildInteractive(command))
+	bannerMode, bannerErr := guardBannerModeDecision(*bannerFlag, *quiet, cmdGuardStdinInteractive(), launchPlan.interactive())
 	if bannerErr != nil {
 		fmt.Fprintf(os.Stderr, "fak guard: %v\n", bannerErr)
 		os.Exit(2)
@@ -584,9 +668,14 @@ func cmdManageCommand(commandName string, argv []string) {
 	//    the wrapped agent could never repair still fails the launch there, before any
 	//    spawn, exactly as it did inline.
 	tUpstream := time.Now()
+	launchProvider, launchProviderAutodetected := launchPlan.resolveProvider(*provider)
+	if remoteBase != "" {
+		launchProviderAutodetected = false
+	}
 	posture := resolveGuardUpstreamPosture(guardUpstreamPostureInputs{
 		command:        command,
-		provider:       *provider,
+		profile:        launchPlan.harnessProfile(),
+		provider:       launchProvider,
 		baseURL:        *baseURL,
 		remoteBase:     remoteBase,
 		apiKeyEnv:      *apiKeyEnv,
@@ -599,7 +688,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		localAlongside: localAlongside,
 	})
 	upstreamResolveDur = time.Since(tUpstream)
-	up, providerAutodetected, resolvedBase := posture.up, posture.providerAutodetected, posture.resolvedBase
+	up, providerAutodetected, resolvedBase := posture.up, launchProviderAutodetected, posture.resolvedBase
 	apiKey, pinUpstream, oauthSource := posture.apiKey, posture.pinUpstream, posture.oauthSource
 	keychainAPIKey, credPath := posture.keychainAPIKey, posture.credPath
 	apiKeyFunc, extraHeaders, extraHeadersFunc := posture.apiKeyFunc, posture.extraHeaders, posture.extraHeadersFunc
@@ -727,7 +816,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	// actuator-ready crash row independent of the terminal host.
 	if guardOwnsInteractiveTerminal() {
 		cwd, _ := os.Getwd()
-		row := guardsessions.NewInteractiveRow(guardTraceID, command[0], os.Getpid(), cwd, auditJournal.Path(), "", time.Now(), command)
+		row := guardsessions.NewInteractiveRow(guardTraceID, agentName, os.Getpid(), cwd, auditJournal.Path(), "", time.Now(), command)
 		if err := recordInteractiveSessionRows(row); err != nil && !*quiet {
 			fmt.Fprintf(os.Stderr, "fak guard: interactive session registry start: %v\n", err)
 		}
@@ -882,7 +971,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		startupPhases = append(startupPhases, gateway.StartupPhase{Name: "tokenizer-load", Dur: tokenizerLoadDur})
 	}
 	startupPhases = append(startupPhases, gateway.StartupPhase{Name: "listener-bind", Dur: listenDur})
-	gatewayModel := guardCodexGatewayModel(command, *model, up)
+	gatewayModel := guardCodexGatewayModelForProfile(launchPlan.harnessProfile(), *model, up)
 
 	wireErrors := &guardWireErrorGauge{}
 	parkStore := goalpark.Store{Dir: filepath.Join(repoRoot(), ".fak", "goal-park")}
@@ -1239,7 +1328,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	// only failure here. The gateway is up (MarkReady), so gwURL is live for the pane to poll;
 	// the pane is opened BEFORE the agent takes the terminal. FAK_GUARD_SPLIT marks the spawned
 	// pane + child so a nested guard never re-splits.
-	if splitOn, splitErr := guardSplitEnabled(*splitMode, os.Getenv, cmdGuardStdinInteractive(), guardChildInteractive(command)); splitErr != nil {
+	if splitOn, splitErr := guardSplitEnabled(*splitMode, os.Getenv, cmdGuardStdinInteractive(), launchPlan.interactive()); splitErr != nil {
 		cancel()
 		fmt.Fprintf(os.Stderr, "fak guard: %v\n", splitErr)
 		os.Exit(2)
@@ -1284,7 +1373,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	// control back every turn. So auto-OFF it for an interactive child the operator did not gate
 	// explicitly, while keeping enforce for headless/fleet runs. See guard_handoff_mode.go.
 	handoffMode, err := normalizeGuardTaskHandoffMode(
-		guardTaskHandoffEffectiveMode(*taskHandoffMode, guardSetFlags["task-handoff"], guardChildInteractive(command), *probeMode),
+		guardTaskHandoffEffectiveMode(*taskHandoffMode, guardSetFlags["task-handoff"], launchPlan.interactive(), *probeMode),
 	)
 	if err != nil {
 		abortChildWiring(cancel, "task handoff setup", err, 2)
@@ -1309,7 +1398,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	// interactive child an orchestrator marked unattended (guardOperatorUnattended, #4951) — reaches
 	// enforce. Same guardChildInteractive signal the task-handoff gate leans on above, plus the
 	// operator-presence axis that tells an operator-driven interactive session from an attended one.
-	operatorDirectedMode := guardOperatorDirectedEffectiveMode(*operatorDirected, guardSetFlags["operator-directed"], guardChildInteractive(command), guardOperatorUnattended())
+	operatorDirectedMode := guardOperatorDirectedEffectiveMode(*operatorDirected, guardSetFlags["operator-directed"], launchPlan.interactive(), guardOperatorUnattended())
 	var stopHookInstall guardStopHookInstall
 	var stopHookEnv [][2]string
 	command, stopHookEnv, stopHookInstall, err = installGuardStopHook(command, denyAllSettings.Mode, gwURL, preCompactInstall.SettingsPath, denyAllSettings.Warn, denyAllSettings.Final, denyAllSettings.Max, denyAllSettings.SameStop, operatorDirectedMode, handoffCfg)
@@ -1346,17 +1435,18 @@ func cmdManageCommand(commandName string, argv []string) {
 	// managed-context rule (#3512), where keep-going-past-a-long-window matters most and no
 	// human is present to drive it. An attended interactive session gets the base affordance
 	// only. Same headless signal the task-handoff gate leans on above (guardChildInteractive).
-	sessionStartManaged := guardSessionStartManaged(command)
+	sessionStartManaged := !launchPlan.interactive()
 	// Thread the guard trace id into the hook argv so the running SessionStart hook holds both
 	// ids and can record the A1 uuid<->trace identity join (#4112/#4113).
-	command, _, err = installGuardSessionStartHook(command, os.Getenv(guardSessionStartEnvMode), sessionStartManaged, sessionStartSettings, guardTraceID)
+	command, _, err = installGuardSessionStartHookForProfile(command, launchPlan.harnessProfile(), os.Getenv(guardSessionStartEnvMode), sessionStartManaged, sessionStartSettings, guardTraceID)
 	if err != nil {
 		abortChildWiring(cancel, "provider SessionStart hook setup", err, 1)
 	}
 	// First-class `fak guard -- codex`: Codex reads custom upstreams from `-c`
 	// provider overrides, not OPENAI_BASE_URL. Repoint only Codex children, after the
 	// Claude-specific hook installers have had a chance to no-op.
-	command, codexInstall := installGuardCodexConfig(command, *codexConfig, gwURL, *apiKeyEnv)
+	command, codexInstall := installGuardCodexConfigForProfile(command, launchPlan.harnessProfile(), *codexConfig, gwURL, *apiKeyEnv)
+	launchPlan = launchPlan.withExecutableCommand(command)
 	if codexInstall.Applied && pinUpstream && up == "openai-responses" && strings.TrimSpace(oauthSource) != "" {
 		codexInstall.AuthMode = "chatgpt"
 		codexInstall.AuthSource = oauthSource
@@ -1451,18 +1541,19 @@ func cmdManageCommand(commandName string, argv []string) {
 	// durable policy/budget/Stop-ledger paths that already exist before launch.
 	policyEvidence := guardPolicyOriginEvidencePath(guardTraceID, *policyPath)
 	budgetEvidence := writeGuardBudgetEnvelopeEvidence(guardTraceID, contextBudgetLimit, maxDurationLimit.String())
-	registerGuardChildOriginTask(guardTraceID, command[0], policyEvidence, resume.IdentityLedgerPath(resolveSweepRegDir("")), budgetEvidence, stopHookInstall.StopsLedger)
-	command, restoreNativeHooks, err := installManagedNativeHooks(command)
+	registerGuardChildOriginTask(guardTraceID, agentName, policyEvidence, resume.IdentityLedgerPath(resolveSweepRegDir("")), budgetEvidence, stopHookInstall.StopsLedger)
+	command, restoreNativeHooks, err := installManagedNativeHooksForProfile(command, launchPlan.harnessProfile())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fak %s: install native hooks: %v\n", commandName, err)
 		cancel()
 		return
 	}
 	defer restoreNativeHooks()
+	launchPlan = launchPlan.withExecutableCommand(command)
 
 	// 6. Run the wrapped agent, then tear the gateway down and report the session.
-	rotationRuntime := guardRotationRuntimeFor(command, resolvedRotateMode)
-	spawnMeta := newGuardChildSpawnMetadata(guardTraceID, policyDigest, up, rt, command)
+	rotationRuntime := guardRotationRuntimeForProfile(launchPlan.harnessProfile(), resolvedRotateMode)
+	spawnMeta := newGuardChildSpawnMetadata(guardTraceID, policyDigest, up, rt, launchPlan)
 	// On a genuine launch FAILURE, spill the full startup report to stderr — except under
 	// --banner=full, which already streamed it at boot (avoid printing it twice).
 	dumpStartupOnLaunchFail := bannerMode != guardBannerFull
@@ -1482,8 +1573,8 @@ func cmdManageCommand(commandName string, argv []string) {
 	// must be ENFORCED (#2229). A --max-duration-only run routes here with a disabled
 	// restarter (its events channel never fires), gaining only the time-budget ticker.
 	if restarter.Enabled() || maxDurationLimit > 0 {
-		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, restarter, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
+		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, restarter, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, agentName, up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
 		return
 	}
-	runGuardChildAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, command[0], up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
+	runGuardChildAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, agentName, up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
 }

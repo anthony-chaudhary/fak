@@ -20,6 +20,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dormancy"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/guard"
+	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/rehydrate"
 	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
@@ -696,6 +697,7 @@ type guardChildSpawnMetadata struct {
 	Backend      string
 	Envelope     toolprocgate.CapabilityEnvelope
 	RegistryPath string
+	LaunchPlan   guardLaunchPlan
 }
 
 type guardChildLauncher func(toolprocgate.SpawnGrant) (*exec.Cmd, error)
@@ -708,7 +710,11 @@ const (
 var startGuardChildTerminalRestorePulse = windowgate.StartTerminalRestorePulse
 
 func maybeStartGuardChildTerminalRestorePulse(command []string) {
-	if len(command) == 0 || !guardIsCodex(command[0]) {
+	maybeStartGuardChildTerminalRestorePulseForPlan(newGuardLaunchPlan(command))
+}
+
+func maybeStartGuardChildTerminalRestorePulseForPlan(plan guardLaunchPlan) {
+	if !plan.harnessProfile().HasRepoint(harnessprofile.RepointCLIConfig) {
 		return
 	}
 	startGuardChildTerminalRestorePulse(guardCodexTerminalRestorePulseDuration, guardCodexTerminalRestorePulseInterval)
@@ -719,17 +725,22 @@ func maybeStartGuardChildTerminalRestorePulse(command []string) {
 // can perturb the console window; Claude can leave the same stale/hidden terminal state,
 // so production launch paths cover both harnesses through the same restore seam.
 func maybeStartGuardChildHarnessTerminalRestorePulse(command []string) {
-	if len(command) == 0 {
+	maybeStartGuardChildHarnessTerminalRestorePulseForPlan(newGuardLaunchPlan(command))
+}
+
+func maybeStartGuardChildHarnessTerminalRestorePulseForPlan(plan guardLaunchPlan) {
+	profile := plan.harnessProfile()
+	if !plan.recognized() {
 		return
 	}
-	if guardAgentBaseName(command[0]) == "claude" {
+	if profile.Name == "claude" {
 		startGuardChildTerminalRestorePulse(guardCodexTerminalRestorePulseDuration, guardCodexTerminalRestorePulseInterval)
 		return
 	}
-	maybeStartGuardChildTerminalRestorePulse(command)
+	maybeStartGuardChildTerminalRestorePulseForPlan(plan)
 }
 
-func newGuardChildSpawnMetadata(agentRunID, policyDigest, backend string, rt policy.Runtime, command []string) guardChildSpawnMetadata {
+func newGuardChildSpawnMetadata(agentRunID, policyDigest, backend string, rt policy.Runtime, launchPlan guardLaunchPlan) guardChildSpawnMetadata {
 	agentRunID = strings.TrimSpace(agentRunID)
 	if agentRunID == "" {
 		agentRunID = "guard"
@@ -737,8 +748,9 @@ func newGuardChildSpawnMetadata(agentRunID, policyDigest, backend string, rt pol
 	env := toolprocgate.CapabilityEnvelope{
 		Capabilities: []abi.Capability{toolprocgate.CapAgentRunSpawn},
 	}
-	if len(command) > 0 && rt.ToolRuntime != nil {
-		if r, ok := rt.ToolRuntime.EnvelopeFor(guardAgentBaseName(command[0])); ok {
+	runtimeName := launchPlan.agentBaseName()
+	if runtimeName != "" && rt.ToolRuntime != nil {
+		if r, ok := rt.ToolRuntime.EnvelopeFor(runtimeName); ok {
 			env.DeadlineMS = r.DeadlineMS
 			env.HeartbeatEveryMS = r.HeartbeatEveryMS
 		}
@@ -750,6 +762,7 @@ func newGuardChildSpawnMetadata(agentRunID, policyDigest, backend string, rt pol
 		Backend:      strings.TrimSpace(backend),
 		Envelope:     env,
 		RegistryPath: sessionregistry.DefaultPath(),
+		LaunchPlan:   launchPlan,
 	}
 }
 
@@ -760,8 +773,8 @@ func newGuardChildSpawnMetadata(agentRunID, policyDigest, backend string, rt pol
 const guardActiveEnv = "FAK_GUARD_ACTIVE"
 
 func buildGuardChild(command []string, injected [][2]string, pinUpstream bool, extraEnv ...[2]string) *exec.Cmd {
-	command, env := guardChildCommandEnv(command, injected, pinUpstream, extraEnv...)
-	child := newResolvedExecCommand(command)
+	plan, env := guardChildPlanCommandEnv(newGuardLaunchPlan(command), injected, pinUpstream, extraEnv...)
+	child := newResolvedExecCommand(plan.executableCommand())
 	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
 	child.Env = env
 	return child
@@ -810,11 +823,16 @@ func resolveWindowsBatchCommand(command []string) []string {
 }
 
 func guardChildCommandEnv(command []string, injected [][2]string, pinUpstream bool, extraEnv ...[2]string) ([]string, []string) {
+	plan, env := guardChildPlanCommandEnv(newGuardLaunchPlan(command), injected, pinUpstream, extraEnv...)
+	return plan.executableCommand(), env
+}
+
+func guardChildPlanCommandEnv(plan guardLaunchPlan, injected [][2]string, pinUpstream bool, extraEnv ...[2]string) (guardLaunchPlan, []string) {
 	// Landlock hook-floor (opt-in, Linux): rewrite the agent argv so the child is launched
 	// through the fak re-exec trampoline, which applies the read-only-.git/hooks ruleset to
 	// itself before exec'ing the agent. Off by default, no-op on non-Linux or when the hook
 	// dirs cannot be resolved — the original command is used unchanged.
-	command = maybeLandlockCommand(command)
+	plan = plan.withExecutableCommand(maybeLandlockCommand(plan.executableCommand()))
 	// Apply the always-on #2358 secret floor to the AMBIENT parent environment
 	// before it is inherited by the wrapped agent: a spawned child (and anything
 	// it spawns) must not receive inherited credentials it never needed. Only the
@@ -860,32 +878,32 @@ func guardChildCommandEnv(command []string, injected [][2]string, pinUpstream bo
 	// Subscription mode: hand the client a PLACEHOLDER api key (only if it has none) so
 	// it talks to the gateway; the gateway IGNORES the placeholder (pinUpstream) and
 	// authenticates upstream with the real held OAuth token.
-	isCodex := len(command) > 0 && guardIsCodex(command[0])
+	isCodex := plan.harnessProfile().HasRepoint(harnessprofile.RepointCLIConfig)
 	if pinUpstream && !isCodex && os.Getenv("ANTHROPIC_API_KEY") == "" {
 		env = append(env, "ANTHROPIC_API_KEY=fak-guard-oauth-placeholder")
 	}
 	if pinUpstream && isCodex && os.Getenv("OPENAI_API_KEY") == "" {
 		env = append(env, "OPENAI_API_KEY="+guardCodexOAuthPlaceholderAPIKey)
 	}
-	return command, env
+	return plan, env
 }
 
-func guardChildSpawnAttempt(command []string, injected [][2]string, pinUpstream bool, meta guardChildSpawnMetadata, extraEnv ...[2]string) (toolprocgate.SpawnAttempt, error) {
-	command, envStrings := guardChildCommandEnv(command, injected, pinUpstream, extraEnv...)
+func guardChildSpawnAttempt(plan guardLaunchPlan, injected [][2]string, pinUpstream bool, meta guardChildSpawnMetadata, extraEnv ...[2]string) (guardLaunchPlan, toolprocgate.SpawnAttempt, error) {
+	plan, envStrings := guardChildPlanCommandEnv(plan, injected, pinUpstream, extraEnv...)
 	env, err := toolprocgate.EnvFromStrings(envStrings)
 	if err != nil {
-		return toolprocgate.SpawnAttempt{}, err
+		return guardLaunchPlan{}, toolprocgate.SpawnAttempt{}, err
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		return toolprocgate.SpawnAttempt{}, err
+		return guardLaunchPlan{}, toolprocgate.SpawnAttempt{}, err
 	}
-	return toolprocgate.SpawnAttempt{
+	return plan, toolprocgate.SpawnAttempt{
 		AgentRunID:   meta.AgentRunID,
 		ParentRunID:  meta.ParentRunID,
 		ToolCallID:   meta.ToolCallID,
 		PolicyDigest: meta.PolicyDigest,
-		Argv:         command,
+		Argv:         plan.executableCommand(),
 		Env:          env,
 		CWD:          cwd,
 		Backend:      meta.Backend,
@@ -903,17 +921,23 @@ var guardPromptTransportOS = runtime.GOOS
 var guardHeadlessChildWindowMode = windowgate.ConfigureBackgroundCommand
 
 func launchGuardChildWithBroker(command []string, injected [][2]string, pinUpstream bool, meta guardChildSpawnMetadata, broker *toolprocgate.SpawnBroker, launcher guardChildLauncher, extraEnv ...[2]string) (toolprocgate.SpawnGrant, *exec.Cmd, error) {
+	plan := meta.LaunchPlan
+	if !plan.initialized {
+		plan = newGuardLaunchPlan(command)
+	}
+	plan = plan.withExecutableCommand(command)
 	// #3597: decide headless-ness from the ORIGINAL wrapped argv, before the prompt
 	// transport below can move a `-p` prompt off argv (#4852). A headless one-shot
 	// (`claude -p …`, the shape a dispatched worker launches) paints no attended
 	// console, so its child is launched windowless just below; an attended session
 	// stays interactive and unchanged.
-	headlessChild := !guardChildInteractive(command)
-	command, stdinPrompt, promptOnStdin := guardPromptStdinTransportForOS(command, guardPromptTransportOS)
+	headlessChild := !guardChildInteractive(plan.semanticCommand())
+	executable, stdinPrompt, promptOnStdin := guardPromptStdinTransportForOS(plan.executableCommand(), guardPromptTransportOS)
+	plan = plan.withExecutableCommand(executable)
 	if broker == nil {
 		broker = toolprocgate.NewSpawnBroker()
 	}
-	attempt, err := guardChildSpawnAttempt(command, injected, pinUpstream, meta, extraEnv...)
+	plan, attempt, err := guardChildSpawnAttempt(plan, injected, pinUpstream, meta, extraEnv...)
 	if err != nil {
 		return toolprocgate.SpawnGrant{}, nil, err
 	}

@@ -44,12 +44,16 @@ type guardRotationRuntime struct {
 }
 
 func guardRotationRuntimeFor(command []string, mode string) guardRotationRuntime {
-	r := guardRotationRuntime{Mode: mode}
-	if mode == guardRotateOff || len(command) == 0 {
-		return r
+	var profile harnessprofile.HarnessProfile
+	if len(command) > 0 {
+		profile, _ = harnessprofile.Lookup(command[0])
 	}
-	profile, ok := harnessprofile.Lookup(command[0])
-	if !ok || strings.TrimSpace(profile.ConfigHomeGlob) == "" {
+	return guardRotationRuntimeForProfile(profile, mode)
+}
+
+func guardRotationRuntimeForProfile(profile harnessprofile.HarnessProfile, mode string) guardRotationRuntime {
+	r := guardRotationRuntime{Mode: mode}
+	if mode == guardRotateOff || !profile.Recognized() || strings.TrimSpace(profile.ConfigHomeGlob) == "" {
 		return r
 	}
 	home, err := os.UserHomeDir()

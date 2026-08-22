@@ -91,7 +91,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
-		maybeStartGuardChildHarnessTerminalRestorePulse(command)
+		maybeStartGuardChildHarnessTerminalRestorePulseForPlan(spawnMeta.LaunchPlan)
 		childStarted := time.Now()
 		srv.BeginChildStartup(childStarted)
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
@@ -252,7 +252,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
-		maybeStartGuardChildHarnessTerminalRestorePulse(command)
+		maybeStartGuardChildHarnessTerminalRestorePulseForPlan(spawnMeta.LaunchPlan)
 		childStarted := time.Now()
 		srv.BeginChildStartup(childStarted)
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()

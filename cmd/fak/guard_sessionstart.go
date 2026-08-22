@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/negframe"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
@@ -483,13 +484,21 @@ type guardSessionStartInstall struct {
 // Claude merges it into the shared --settings file; Codex receives a trusted per-launch
 // config layer. Off mode or an unsupported child is a no-op. Mirrors installGuardStopHook.
 func installGuardSessionStartHook(command []string, mode string, managed bool, existingSettingsPath, traceID string) ([]string, guardSessionStartInstall, error) {
+	var profile harnessprofile.HarnessProfile
+	if len(command) > 0 {
+		profile, _ = harnessprofile.Lookup(command[0])
+	}
+	return installGuardSessionStartHookForProfile(command, profile, mode, managed, existingSettingsPath, traceID)
+}
+
+func installGuardSessionStartHookForProfile(command []string, profile harnessprofile.HarnessProfile, mode string, managed bool, existingSettingsPath, traceID string) ([]string, guardSessionStartInstall, error) {
 	normalized := normalizeGuardSessionStartMode(mode)
 	install := guardSessionStartInstall{Mode: normalized}
 	if normalized == guardSessionStartModeOff {
 		install.Reason = "disabled"
 		return command, install, nil
 	}
-	if len(command) == 0 || (!guardPreCompactIsClaudeCommand(command) && !guardIsCodex(command[0])) {
+	if len(command) == 0 || (!profile.HasRepoint(harnessprofile.RepointSettingsFile) && !profile.HasRepoint(harnessprofile.RepointCLIConfig)) {
 		install.Reason = "non-claude-child"
 		return command, install, nil
 	}
@@ -504,20 +513,28 @@ func installGuardSessionStartHook(command []string, mode string, managed bool, e
 			return command, guardSessionStartInstall{}, err
 		}
 	}
-	return installGuardSessionStartHookAt(command, mode, managed, fakBin, dir, existingSettingsPath, traceID)
+	return installGuardSessionStartHookAtForProfile(command, profile, mode, managed, fakBin, dir, existingSettingsPath, traceID)
 }
 
 func installGuardSessionStartHookAt(command []string, mode string, managed bool, fakBin, dir, existingSettingsPath, traceID string) ([]string, guardSessionStartInstall, error) {
+	var profile harnessprofile.HarnessProfile
+	if len(command) > 0 {
+		profile, _ = harnessprofile.Lookup(command[0])
+	}
+	return installGuardSessionStartHookAtForProfile(command, profile, mode, managed, fakBin, dir, existingSettingsPath, traceID)
+}
+
+func installGuardSessionStartHookAtForProfile(command []string, profile harnessprofile.HarnessProfile, mode string, managed bool, fakBin, dir, existingSettingsPath, traceID string) ([]string, guardSessionStartInstall, error) {
 	normalized := normalizeGuardSessionStartMode(mode)
 	install := guardSessionStartInstall{Mode: normalized}
 	if normalized == guardSessionStartModeOff {
 		install.Reason = "disabled"
 		return command, install, nil
 	}
-	if len(command) > 0 && guardIsCodex(command[0]) {
+	if len(command) > 0 && profile.HasRepoint(harnessprofile.RepointCLIConfig) {
 		return installGuardCodexSessionStartHookAt(command, managed, fakBin, dir, traceID)
 	}
-	if !guardPreCompactIsClaudeCommand(command) {
+	if !profile.HasRepoint(harnessprofile.RepointSettingsFile) {
 		install.Reason = "non-claude-child"
 		return command, install, nil
 	}
