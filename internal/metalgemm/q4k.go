@@ -121,12 +121,17 @@ func (w *Q4KWeight) GEMV(x, y []float32) {
 }
 
 const (
-	q4kMultiVectorMin = 4
-	q4kMultiVectorMax = 8
+	q4kMultiVectorMin          = 4
+	q4kMultiVectorMax          = 8
+	q4kMultiVectorHidden       = 5120
+	q4kMultiVectorIntermediate = 17408
 )
 
-func q4kUseMultiVector(n int) bool {
-	return n >= q4kMultiVectorMin && n <= q4kMultiVectorMax
+func q4kUseMultiVector(out, in, n int) bool {
+	if n < q4kMultiVectorMin || n > q4kMultiVectorMax || in != q4kMultiVectorHidden {
+		return false
+	}
+	return out == q4kMultiVectorHidden || out == q4kMultiVectorIntermediate
 }
 
 func (w *Q4KWeight) gemvBatchRepeated(Xcat []float32, n int, Ycat []float32) {
@@ -134,14 +139,14 @@ func (w *Q4KWeight) gemvBatchRepeated(Xcat []float32, n int, Ycat []float32) {
 }
 
 // GEMVBatch runs n decode GEMVs of this same weight in ONE command buffer: Xcat is n contiguous
-// activation rows (n*In floats), Ycat receives n result rows (n*Out floats). Batches of 4-8 use
-// the multi-vector kernel that dequantizes each Q4_K tile once for all rows. Every other batch
-// keeps the original repeated-GEMV encoder path byte-for-byte.
+// activation rows (n*In floats), Ycat receives n result rows (n*Out floats). Batches of 4-8 on
+// the measured Qwen projection shapes use the multi-vector kernel that dequantizes each Q4_K tile
+// once for all rows. Every other batch and shape keeps the original repeated-GEMV encoder path.
 func (w *Q4KWeight) GEMVBatch(Xcat []float32, n int, Ycat []float32) {
 	if w == nil || w.id < 0 || n <= 0 || len(Xcat) < n*w.In || len(Ycat) < n*w.Out {
 		return
 	}
-	if q4kUseMultiVector(n) {
+	if q4kUseMultiVector(w.Out, w.In, n) {
 		C.mg_q4k_gemv_batch_multi(w.id, (*C.float)(unsafe.Pointer(&Xcat[0])), C.int(n), (*C.float)(unsafe.Pointer(&Ycat[0])))
 		return
 	}

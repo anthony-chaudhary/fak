@@ -22,7 +22,10 @@
       "cosine_min": 0.9999,
       "max_relative_error_max": 0.005
     },
-    "fallback_exact_p": [1, 3, 9, 16],
+    "fallback_exact": {
+      "supported_shape_outside_p": {"shape": [5120, 5120], "p": [1, 3, 9, 16]},
+      "unsupported_shape_inside_p": {"shape": [512, 512], "p": [4, 8]}
+    },
     "cases": [
       {"name": "hidden-p4", "shape": [5120, 5120], "p": 4, "cosine": 1.0, "max_relative_error": 0.000002362754140633365},
       {"name": "hidden-p5", "shape": [5120, 5120], "p": 5, "cosine": 1.0, "max_relative_error": 0.000002573038387339215},
@@ -99,8 +102,9 @@
   "routing": {
     "specialized_p_min": 4,
     "specialized_p_max": 8,
+    "specialized_shapes": [[5120, 5120], [17408, 5120]],
     "fallback": "the pre-existing repeated-GEMV command-buffer encoder",
-    "decision": "select the specialized kernel only for P=4..8; P=1 and unsupported sizes retain the existing route"
+    "decision": "select the specialized kernel only for P=4..8 on the two measured Qwen shapes; P=1, other batch sizes, and unmeasured matrix shapes retain the existing route"
   },
   "prior_art": {
     "project": "llama.cpp",

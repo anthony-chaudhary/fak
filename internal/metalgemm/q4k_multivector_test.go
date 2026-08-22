@@ -73,11 +73,23 @@ func q4kTestCosineMaxRel(want, got []float32) (float64, float64) {
 
 func TestQ4KGEMVBatchMultiVectorRouteBoundary(t *testing.T) {
 	for _, tc := range []struct {
-		vectors int
-		want    bool
-	}{{1, false}, {3, false}, {4, true}, {5, true}, {6, true}, {7, true}, {8, true}, {9, false}, {16, false}} {
-		if got := q4kUseMultiVector(tc.vectors); got != tc.want {
-			t.Errorf("q4kUseMultiVector(%d) = %v, want %v", tc.vectors, got, tc.want)
+		out, in, vectors int
+		want             bool
+	}{
+		{5120, 5120, 1, false},
+		{5120, 5120, 3, false},
+		{5120, 5120, 4, true},
+		{5120, 5120, 5, true},
+		{5120, 5120, 6, true},
+		{5120, 5120, 7, true},
+		{17408, 5120, 8, true},
+		{5120, 5120, 9, false},
+		{5120, 5120, 16, false},
+		{512, 5120, 4, false},
+		{5120, 512, 8, false},
+	} {
+		if got := q4kUseMultiVector(tc.out, tc.in, tc.vectors); got != tc.want {
+			t.Errorf("q4kUseMultiVector(%d, %d, %d) = %v, want %v", tc.out, tc.in, tc.vectors, got, tc.want)
 		}
 	}
 }
@@ -87,21 +99,31 @@ func TestQ4KGEMVBatchFallbackMatchesExistingRoute(t *testing.T) {
 		t.Skip("Metal unavailable")
 	}
 	defer ResetQ4K()
-	const out, in = 512, 512
-	w := UploadQ4K(q4kTestRaw(out, in, 0x8326), out, in)
-	if w == nil {
-		t.Fatal("UploadQ4K returned nil")
-	}
-	defer w.Release()
-	for _, p := range []int{1, 3, 9, 16} {
-		x := q4kTestVector(p*in, int64(8326+p))
-		got := make([]float32, p*out)
-		want := make([]float32, p*out)
-		w.GEMVBatch(x, p, got)
-		w.gemvBatchRepeated(x, p, want)
-		if !slices.Equal(got, want) {
-			t.Fatalf("P=%d fallback differs from existing repeated-GEMV route", p)
-		}
+	for _, tc := range []struct {
+		name       string
+		out, in    int
+		batchSizes []int
+	}{
+		{"supported-shape-outside-p", 5120, 5120, []int{1, 3, 9, 16}},
+		{"unsupported-shape-inside-p", 512, 512, []int{4, 8}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := UploadQ4K(q4kTestRaw(tc.out, tc.in, 0x8326), tc.out, tc.in)
+			if w == nil {
+				t.Fatal("UploadQ4K returned nil")
+			}
+			defer w.Release()
+			for _, p := range tc.batchSizes {
+				x := q4kTestVector(p*tc.in, int64(8326+p))
+				got := make([]float32, p*tc.out)
+				want := make([]float32, p*tc.out)
+				w.GEMVBatch(x, p, got)
+				w.gemvBatchRepeated(x, p, want)
+				if !slices.Equal(got, want) {
+					t.Fatalf("[%d,%d] P=%d fallback differs from existing repeated-GEMV route", tc.out, tc.in, p)
+				}
+			}
+		})
 	}
 }
 
