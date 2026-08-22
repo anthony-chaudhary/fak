@@ -59,6 +59,9 @@ func runRelease(stdout, stderr io.Writer, argv []string) int {
 		if key == "ship" || key == "auto" {
 			return releaseRunShip(stdout, stderr, argv[1:])
 		}
+		if key == "dispatch" || key == "ondemand" || key == "on-demand" {
+			return runReleaseDispatch(stdout, stderr, argv[1:])
+		}
 		if key == "prplan" {
 			return runReleasePRPlan(stdout, stderr, argv[1:])
 		}
@@ -125,6 +128,7 @@ func releaseUsage(w io.Writer) {
 usage:
   fak release [status flags...]
   fak release ship [--execute] [--json] [ship flags...]
+  fak release dispatch [--execute] [--json] [--ref main] [--plan-only]
   fak release prplan [--json] [--base <ref>] [--head <ref>] [--check]
   fak release status|staleness|release-staleness|plan|decide|cut|tag|publish|lock|dry-run|manifest|readiness|release-readiness [helper flags...]
   fak release stable|stable-context [helper flags...]
@@ -132,6 +136,7 @@ usage:
 examples:
   fak release --json
   fak release ship --execute --json
+  fak release dispatch --execute --json
   fak release ship --execute --json --open-pr
   fak release prplan --base origin/main --head main
   fak release prplan --check
@@ -145,8 +150,11 @@ examples:
   fak release stable-context --codename 2026-06-bedrock --json
   fak release stable --codename 2026-06-bedrock
 
-Canonical order:
+Canonical local order:
   fak release ship --execute
+
+Canonical on-demand CI order:
+  fak release dispatch --execute
 
 Helper order underneath:
   detached worktree at origin/main -> release_decide -> release_lock -> release_cut
