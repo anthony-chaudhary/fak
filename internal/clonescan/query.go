@@ -157,6 +157,12 @@ func BuildTreeIndex(tree map[string]string, cache ...WindowCache) *TreeIndex {
 		}
 		idx.byFile[rel] = fi
 	}
+	// A persistent implementation may coalesce retention at the consumer-owned end
+	// of the batch. The optional hook keeps the WindowCache contract pure for in-memory
+	// implementations while avoiding one shared-directory scan per Put.
+	if maintainer, ok := wc.(interface{ Maintain() }); ok {
+		maintainer.Maintain()
+	}
 	return idx
 }
 

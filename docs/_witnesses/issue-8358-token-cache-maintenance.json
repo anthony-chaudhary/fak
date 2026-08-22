@@ -1,0 +1,19 @@
+{
+  "schema": "fak-token-cache-maintenance/v1",
+  "max_bytes": 1,
+  "max_entries": 1,
+  "temp_grace_seconds": 86400,
+  "before_bytes": 2822110,
+  "before_entries": 5,
+  "after_bytes": 0,
+  "after_entries": 0,
+  "removed_bytes": 2822110,
+  "removed_entries": 5,
+  "stale_temps_before": 1,
+  "stale_temps_removed": 1,
+  "stale_temp_bytes_removed": 922,
+  "stale_temps_after": 0,
+  "skipped_locked_files": 0,
+  "complete": true,
+  "verdict": "pruned"
+}

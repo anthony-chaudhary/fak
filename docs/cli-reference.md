@@ -19,6 +19,24 @@ in-process, served from a local **tool vDSO** when possible, screened by a
 **pre-flight + grammar ladder** before it fires, and admitted through a
 **context-MMU** before tool results enter model context.
 
+## `dup cache-maintain`: bound the shared token-window cache
+
+`fak dup cache-maintain` runs the same nonblocking retention seam used after a
+cache-backed duplication index build. Human output and `--json` receipts include exact
+before/after bytes and entry counts, removed entries, stale atomic-write temps, skipped
+locked files, configured limits, and a typed verdict.
+
+```bash
+fak dup cache-maintain --repo .
+fak dup cache-maintain --repo . --json
+fak dup cache-maintain --repo . --max-bytes 268435456 --max-entries 10000 --temp-grace 24h --json
+```
+
+The default cache is under Git's common directory, bounded to 256 MiB and 10,000 JSON
+entries; `.entry-*.tmp` files receive a 24-hour active-write grace. See
+[`docs/token-cache.md`](token-cache.md) for environment overrides, concurrency behavior,
+disable semantics, and rollback.
+
 ## `goal`: canonical intent across harnesses
 
 `fak goal` keeps durable user intent separate from an execution root or session. Bind only stable identities explicitly supplied by a harness; never derive identity from a title, prompt, task, issue text, or registration ID.

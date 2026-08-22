@@ -9,10 +9,11 @@ import (
 // many Gets hit, and how many Puts (i.e. recomputes) happened. It lets a test prove the
 // index reads from the cache on an unchanged tree and recomputes only on a changed file.
 type spyCache struct {
-	store map[string]cachedWindows
-	gets  int
-	hits  int
-	puts  int
+	store     map[string]cachedWindows
+	gets      int
+	hits      int
+	puts      int
+	maintains int
 }
 
 type cachedWindows struct {
@@ -35,6 +36,8 @@ func (s *spyCache) Put(src string, keys []string, spans []span) {
 	s.puts++
 	s.store[src] = cachedWindows{keys: keys, spans: spans}
 }
+
+func (s *spyCache) Maintain() { s.maintains++ }
 
 // cloneTree is two files that token-clone each other (the drift fixture's real logic
 // block) plus a pure-data file that qualifies no window — so the tree exercises both a
@@ -86,6 +89,9 @@ func TestBuildTreeIndexUsesCache(t *testing.T) {
 	if sc.hits != 0 {
 		t.Fatalf("first build: expected 0 hits on a cold cache, got %d", sc.hits)
 	}
+	if sc.maintains != 1 {
+		t.Fatalf("first build: expected one coalesced maintenance pass, got %d", sc.maintains)
+	}
 
 	putsAfterFirst := sc.puts
 	second := BuildTreeIndex(tree, sc).Query(want, "a.go", 0)
@@ -94,6 +100,9 @@ func TestBuildTreeIndexUsesCache(t *testing.T) {
 	}
 	if sc.puts != putsAfterFirst {
 		t.Fatalf("second build recomputed: puts went %d -> %d, expected no new Put on an all-hit build", putsAfterFirst, sc.puts)
+	}
+	if sc.maintains != 2 {
+		t.Fatalf("second build: expected one additional maintenance pass, got %d", sc.maintains)
 	}
 
 	if !reflect.DeepEqual(uncached, first) || !reflect.DeepEqual(uncached, second) {

@@ -1067,6 +1067,21 @@
           "category": "incidental",
           "reason": "Provenance scope label for the existing fak workflow cache, not a new cache mechanism.",
           "token": "in_process_fak_workflow_cache"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI handler symbol for the existing token-cache maintenance seam (#8358), not a distinct cache concept",
+          "token": "runDupCacheMaintain"
+        },
+        {
+          "category": "incidental",
+          "reason": "Environment knob for the existing token-cache entry ceiling (#8358), not a distinct cache concept",
+          "token": "FAK_TOKEN_CACHE_MAX_ENTRIES"
+        },
+        {
+          "category": "incidental",
+          "reason": "Environment knob for the existing token-cache temporary-file grace (#8358), not a distinct cache concept",
+          "token": "FAK_TOKEN_CACHE_TEMP_GRACE"
         }
       ],
       "id": "cache",
@@ -1106,6 +1121,8 @@
         "FAK_ORG_POLICY_CACHE_PATH",
         "FAK_TOKEN_CACHE",
         "FAK_TOKEN_CACHE_MAX_BYTES",
+        "FAK_TOKEN_CACHE_MAX_ENTRIES",
+        "FAK_TOKEN_CACHE_TEMP_GRACE",
         "FreshRuntimeConstants",
         "InputCached",
         "InputCachedPerMillion",
@@ -1260,6 +1277,7 @@
         "formatTurnDebugStatsWithBudgetAndCache",
         "geminicache",
         "identityCacheLever",
+        "in_process_fak_workflow_cache",
         "inducedCacheCreation",
         "inferCacheCreationTokensHeadOnly",
         "inferCacheCreationTokensMessagePrefix",
@@ -1267,7 +1285,6 @@
         "infercachecreationtokens",
         "infercachedhits",
         "infercachedtokens",
-        "in_process_fak_workflow_cache",
         "knownKeyCache",
         "lastcacherd",
         "liveMatrixPrefixCache",
@@ -1315,6 +1332,7 @@
         "runCacheValueGateScore",
         "runCachevalueQwen38Campaign",
         "runDisambiguationCacheSourceSelfTest",
+        "runDupCacheMaintain",
         "runMicroCacheArm",
         "runMicroCacheWitness",
         "runVCacheCalibrationRecord",

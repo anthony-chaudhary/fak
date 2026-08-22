@@ -25,6 +25,7 @@ import (
 //
 //	query --file F [--json] [--k N]   — sites in the tracked tree similar to F's blocks
 //	query --stdin [--json] [--k N]    — same, reading the candidate block from stdin
+//	cache-maintain [--json]            — converge the shared token-cache retention bounds
 func cmdDup(args []string) {
 	if len(args) == 0 {
 		dupUsage()
@@ -35,6 +36,8 @@ func cmdDup(args []string) {
 		cmdDupQuery(args[1:])
 	case "guard":
 		cmdDupGuard(args[1:])
+	case "cache-maintain":
+		os.Exit(runDupCacheMaintain(os.Stdout, os.Stderr, args[1:]))
 	case "-h", "--help", "help":
 		dupUsage()
 	default:
@@ -48,10 +51,60 @@ func dupUsage() {
 	fmt.Fprintln(os.Stderr, "usage: fak dup query --file <candidate.go> [--k 5] [--json]   (tracked sites similar to the candidate)")
 	fmt.Fprintln(os.Stderr, "       fak dup query --stdin [--k 5] [--json]                  (read the candidate block from stdin)")
 	fmt.Fprintln(os.Stderr, "       fak dup guard [--staged | --range A..B] [--gate N] [--json] (warn if added Go blocks clone a tracked site)")
+	fmt.Fprintln(os.Stderr, "       fak dup cache-maintain [--repo DIR] [--max-bytes N] [--max-entries N] [--temp-grace DURATION] [--json]")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Ask \"does a block like this already exist?\" BEFORE writing it. Same normalized")
 	fmt.Fprintln(os.Stderr, "token-window clone definition as the code-slop scorecard, run as a forward query.")
 	fmt.Fprintln(os.Stderr, "guard is advisory unless --gate N is set; then it exits 1 when warned files exceed N.")
+}
+
+func runDupCacheMaintain(stdout, stderr io.Writer, args []string) int {
+	defaults := tokencache.MaintenanceDefaults()
+	fs := flag.NewFlagSet("dup cache-maintain", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	repo := fs.String("repo", ".", "repository whose git-common-dir owns the shared token cache")
+	maxBytes := fs.Int64("max-bytes", defaults.MaxBytes, "immutable JSON byte ceiling")
+	maxEntries := fs.Int("max-entries", defaults.MaxEntries, "immutable JSON entry-count ceiling")
+	tempGrace := fs.Duration("temp-grace", defaults.TempGrace, "minimum age before an atomic-write temp is stale")
+	asJSON := fs.Bool("json", false, "emit the maintenance receipt as JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 || *maxBytes <= 0 || *maxEntries <= 0 || *tempGrace <= 0 {
+		fmt.Fprintln(stderr, "fak dup cache-maintain: ceilings and temp grace must be positive")
+		return 2
+	}
+	receipt := tokencache.Maintain(*repo, tokencache.MaintenanceOptions{
+		MaxBytes:   *maxBytes,
+		MaxEntries: *maxEntries,
+		TempGrace:  *tempGrace,
+	})
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(receipt); err != nil {
+			fmt.Fprintf(stderr, "fak dup cache-maintain: encode receipt: %v\n", err)
+			return 1
+		}
+	} else {
+		fmt.Fprintln(stdout, "token cache maintenance")
+		fmt.Fprintf(stdout, "before: %d bytes / %d entries\n", receipt.BeforeBytes, receipt.BeforeEntries)
+		fmt.Fprintf(stdout, "after: %d bytes / %d entries\n", receipt.AfterBytes, receipt.AfterEntries)
+		fmt.Fprintf(stdout, "removed: %d entries / %d bytes\n", receipt.RemovedEntries, receipt.RemovedBytes)
+		fmt.Fprintf(stdout, "stale temps: %d removed / %d remain / %d bytes removed\n", receipt.StaleTempsRemoved, receipt.StaleTempsAfter, receipt.StaleTempBytesRemoved)
+		fmt.Fprintf(stdout, "skipped locked files: %d\n", receipt.SkippedLockedFiles)
+		fmt.Fprintf(stdout, "complete: %t\n", receipt.Complete)
+		fmt.Fprintf(stdout, "verdict: %s\n", receipt.Verdict)
+	}
+	switch receipt.Verdict {
+	case tokencache.VerdictError, tokencache.VerdictUnsafePath, tokencache.VerdictUnavailable:
+		if receipt.Detail != "" {
+			fmt.Fprintf(stderr, "fak dup cache-maintain: %s\n", receipt.Detail)
+		}
+		return 1
+	default:
+		return 0
+	}
 }
 
 // cmdDupQuery answers the query against the git-tracked .go tree.
