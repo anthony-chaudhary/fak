@@ -16,6 +16,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/laneadmit"
 	"github.com/anthony-chaudhary/fak/internal/orchestration"
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/ultracodebench"
 )
 
 const codexOrchestrationLaunchSchema = "fak.codex_orchestration_launch.v1"
@@ -73,19 +74,20 @@ type codexOrchestrationWorkerLaunch struct {
 }
 
 type codexOrchestrationLaunchReceipt struct {
-	Schema            string                           `json:"schema"`
-	SessionID         string                           `json:"session_id"`
-	RunID             string                           `json:"run_id"`
-	LaunchedAt        time.Time                        `json:"launched_at"`
-	TaskID            string                           `json:"task_id"`
-	RequestedProfile  string                           `json:"requested_profile"`
-	ResolvedProfile   string                           `json:"resolved_profile"`
-	WorkClass         string                           `json:"work_class"`
-	CapabilityProfile string                           `json:"capability_profile"`
-	Degradations      []string                         `json:"degradations"`
-	Status            string                           `json:"status"`
-	DeclineReason     string                           `json:"decline_reason,omitempty"`
-	Workers           []codexOrchestrationWorkerLaunch `json:"workers"`
+	Schema            string                             `json:"schema"`
+	SessionID         string                             `json:"session_id"`
+	RunID             string                             `json:"run_id"`
+	LaunchedAt        time.Time                          `json:"launched_at"`
+	TaskID            string                             `json:"task_id"`
+	RequestedProfile  string                             `json:"requested_profile"`
+	ResolvedProfile   string                             `json:"resolved_profile"`
+	WorkClass         string                             `json:"work_class"`
+	CapabilityProfile string                             `json:"capability_profile"`
+	Degradations      []string                           `json:"degradations"`
+	Status            string                             `json:"status"`
+	DeclineReason     string                             `json:"decline_reason,omitempty"`
+	Workers           []codexOrchestrationWorkerLaunch   `json:"workers"`
+	Activations       []ultracodebench.ActivationReceipt `json:"activations"`
 }
 
 func orchestrationDegradationNames(items []orchestration.Degradation) []string {
@@ -121,6 +123,7 @@ func launchCodexOrchestrationWorkers(home, sessionID, requestedProfile, capabili
 		RequestedProfile: requestedProfile, ResolvedProfile: string(resolution.Resolved.Profile),
 		WorkClass: string(resolution.Resolved.WorkClass), CapabilityProfile: capabilityProfile,
 		Degradations: orchestrationDegradationNames(resolution.Degradations), Workers: []codexOrchestrationWorkerLaunch{},
+		Activations: []ultracodebench.ActivationReceipt{},
 	}
 	if resolution.Resolved.Profile != orchestration.ProfileUltracode || resolution.Resolved.Budget.MaxWorkers <= 1 {
 		receipt.Status = "declined"
@@ -171,6 +174,14 @@ func launchCodexOrchestrationWorkers(home, sessionID, requestedProfile, capabili
 			return receipt, fmt.Errorf("persist %s child policy: %w", role.ID, err)
 		}
 		request := orchestrationWorkerLaunchRequest{Role: role, Access: access, WorkClass: resolution.Resolved.WorkClass, TaskText: taskText, Root: root, RunDir: runDir, Model: route.Model, Mode: route.Mode, Effort: route.ReasoningEffort}
+		activation, activationErr := codexOrchestrationActivation(receipt, role.ID)
+		if activationErr != nil {
+			return receipt, fmt.Errorf("activation receipt %s: %w", role.ID, activationErr)
+		}
+		receipt.Activations = append(receipt.Activations, activation)
+		if err := persistCodexOrchestrationLaunchReceipt(home, receipt); err != nil {
+			return receipt, fmt.Errorf("persist pre-spawn activation %s: %w", role.ID, err)
+		}
 		launched, launchErr := orchestrationWorkerLauncher(request)
 		launched.Model = route.Model
 		launched.Mode = string(route.Mode)

@@ -464,6 +464,10 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		fmt.Fprintln(stdout, strings.Join(launchArgv, " "))
 		return 0
 	}
+	if err := persistAccountsUltracodeActivation(p.homeDir, grant.Metadata.AgentRunID, command, p.ultracodePosture, ultracodeOn); err != nil {
+		fmt.Fprintf(stderr, "fak accounts launch: persist pre-spawn Ultracode activation: %v\n", err)
+		return 1
+	}
 	res := runRegisteredAccountsChild(stdout, stderr, launchArgv, launchEnv, "")
 	if res.Code == 2 && res.Stderr != "" {
 		fmt.Fprintln(stderr, "fak accounts launch:", res.Stderr)
@@ -499,7 +503,12 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 				fmt.Fprintf(stderr, "fak accounts launch: spawn broker denied fallback launch: %s\n", fallbackGrant.Reason)
 				return 1
 			}
-			res = runRegisteredAccountsChild(stdout, stderr, fallbackGrant.Argv, envSliceFromMap(fallbackGrant.Env), res.AttemptID)
+			fallbackEnv := envSliceFromMap(fallbackGrant.Env)
+			if err := persistAccountsUltracodeActivation(p.homeDir, fallbackGrant.Metadata.AgentRunID, command, p.ultracodePosture, ultracodeOn); err != nil {
+				fmt.Fprintf(stderr, "fak accounts launch: persist fallback pre-spawn Ultracode activation: %v\n", err)
+				return 1
+			}
+			res = runRegisteredAccountsChild(stdout, stderr, fallbackGrant.Argv, fallbackEnv, res.AttemptID)
 			tried = fallback
 			if res.Code == 0 {
 				break

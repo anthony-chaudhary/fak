@@ -85,8 +85,20 @@ func runUltracodeBench(stdout, stderr io.Writer, args []string) int {
 
 func ultracodeBenchSelfcheckPair() ultracodebench.Pair {
 	id := ultracodebench.Identity{Task: "repair three independent fixture defects", TaskDigest: "sha256:selfcheck-task", Model: "fixture-model", Environment: "offline-selfcheck", WallBudgetMS: 30000, TokenBudget: 10000, SpendBudgetUSD: 1}
+	control, err := ultracodebench.BeforeSpawn(ultracodebench.BeforeSpawnInput{RunID: "selfcheck-control", ChildID: "control", Harness: "codex", Requested: ultracodebench.SettingOff, Resolved: ultracodebench.SettingOff})
+	if err != nil {
+		panic(err)
+	}
+	treatment, err := ultracodebench.BeforeSpawn(ultracodebench.BeforeSpawnInput{RunID: "selfcheck-treatment", ChildID: "treatment", Harness: "codex", Requested: ultracodebench.SettingOn, Resolved: ultracodebench.SettingOn, Injected: true})
+	if err != nil {
+		panic(err)
+	}
+	treatment, err = ultracodebench.Acknowledge(treatment, ultracodebench.ObservableActive, ultracodebench.SourceRuntimeObservation)
+	if err != nil {
+		panic(err)
+	}
 	return ultracodebench.Pair{Schema: ultracodebench.Schema,
-		Single: ultracodebench.Run{Mode: "single", Identity: id, CriticalPathMS: 9000, TotalWorkerMS: 9000, InputTokens: 6000, OutputTokens: 900, BilledTokens: 6900, SpendUSD: .06, ExpectedEffects: 3, AcceptedEffects: 3, AcceptancePassed: true, WitnessDigest: "sha256:selfcheck-single"},
-		Fleet:  ultracodebench.Run{Mode: "fleet", Identity: id, CriticalPathMS: 4000, TotalWorkerMS: 10500, InputTokens: 2600, OutputTokens: 800, CacheReadTokens: 4800, CacheWriteTokens: 100, BilledTokens: 3500, SpendUSD: .035, ExpectedEffects: 3, AcceptedEffects: 3, AcceptancePassed: true, WitnessDigest: "sha256:selfcheck-fleet"},
+		Single: ultracodebench.Run{Mode: "single", Identity: id, CriticalPathMS: 9000, TotalWorkerMS: 9000, InputTokens: 6000, OutputTokens: 900, BilledTokens: 6900, SpendUSD: .06, ExpectedEffects: 3, AcceptedEffects: 3, AcceptancePassed: true, WitnessDigest: "sha256:selfcheck-single", Activation: ultracodebench.ActivationCohort{Receipts: []ultracodebench.ActivationReceipt{control}}},
+		Fleet:  ultracodebench.Run{Mode: "fleet", Identity: id, CriticalPathMS: 4000, TotalWorkerMS: 10500, InputTokens: 2600, OutputTokens: 800, CacheReadTokens: 4800, CacheWriteTokens: 100, BilledTokens: 3500, SpendUSD: .035, ExpectedEffects: 3, AcceptedEffects: 3, AcceptancePassed: true, WitnessDigest: "sha256:selfcheck-fleet", Activation: ultracodebench.ActivationCohort{MinimumActiveRatio: 1, Receipts: []ultracodebench.ActivationReceipt{treatment}}},
 	}
 }

@@ -20,22 +20,28 @@ type Identity struct {
 }
 
 type Run struct {
-	Mode             string   `json:"mode"`
-	Identity         Identity `json:"identity"`
-	CriticalPathMS   int64    `json:"critical_path_ms"`
-	TotalWorkerMS    int64    `json:"total_worker_ms"`
-	InputTokens      int64    `json:"input_tokens"`
-	OutputTokens     int64    `json:"output_tokens"`
-	CacheReadTokens  int64    `json:"cache_read_tokens"`
-	CacheWriteTokens int64    `json:"cache_write_tokens"`
-	BilledTokens     int64    `json:"billed_tokens"`
-	SpendUSD         float64  `json:"spend_usd"`
-	ExpectedEffects  int      `json:"expected_effects"`
-	AcceptedEffects  int      `json:"accepted_effects"`
-	Contradictions   int      `json:"contradictions"`
-	AcceptancePassed bool     `json:"acceptance_passed"`
-	Retries          int      `json:"retries"`
-	WitnessDigest    string   `json:"witness_digest"`
+	Mode             string           `json:"mode"`
+	Identity         Identity         `json:"identity"`
+	CriticalPathMS   int64            `json:"critical_path_ms"`
+	TotalWorkerMS    int64            `json:"total_worker_ms"`
+	InputTokens      int64            `json:"input_tokens"`
+	OutputTokens     int64            `json:"output_tokens"`
+	CacheReadTokens  int64            `json:"cache_read_tokens"`
+	CacheWriteTokens int64            `json:"cache_write_tokens"`
+	BilledTokens     int64            `json:"billed_tokens"`
+	SpendUSD         float64          `json:"spend_usd"`
+	ExpectedEffects  int              `json:"expected_effects"`
+	AcceptedEffects  int              `json:"accepted_effects"`
+	Contradictions   int              `json:"contradictions"`
+	AcceptancePassed bool             `json:"acceptance_passed"`
+	Retries          int              `json:"retries"`
+	WitnessDigest    string           `json:"witness_digest"`
+	Activation       ActivationCohort `json:"activation"`
+}
+
+type ActivationCohort struct {
+	MinimumActiveRatio float64             `json:"minimum_active_ratio"`
+	Receipts           []ActivationReceipt `json:"receipts"`
 }
 
 type Pair struct {
@@ -71,13 +77,29 @@ type Gains struct {
 }
 
 type Report struct {
-	Schema   string      `json:"schema"`
-	Verdict  string      `json:"verdict"`
-	Reasons  []string    `json:"reasons"`
-	Identity Identity    `json:"identity"`
-	Single   ModeMetrics `json:"single"`
-	Fleet    ModeMetrics `json:"fleet"`
-	Gains    Gains       `json:"gains"`
+	Schema      string          `json:"schema"`
+	Verdict     string          `json:"verdict"`
+	Reasons     []string        `json:"reasons"`
+	Attribution string          `json:"attribution"`
+	Identity    Identity        `json:"identity"`
+	Activation  BenchActivation `json:"activation"`
+	Single      ModeMetrics     `json:"single"`
+	Fleet       ModeMetrics     `json:"fleet"`
+	Gains       Gains           `json:"gains"`
+}
+
+type TreatmentActivation struct {
+	Declared           bool    `json:"declared"`
+	MinimumActiveRatio float64 `json:"minimum_active_ratio"`
+	Active             int     `json:"active"`
+	Total              int     `json:"total"`
+	Coverage           float64 `json:"coverage"`
+	Satisfied          bool    `json:"satisfied"`
+}
+
+type BenchActivation struct {
+	Control   ActivationSummary   `json:"control"`
+	Treatment TreatmentActivation `json:"treatment"`
 }
 
 func Evaluate(p Pair) (Report, error) {
@@ -99,7 +121,11 @@ func Evaluate(p Pair) (Report, error) {
 
 	s := metrics(p.Single)
 	f := metrics(p.Fleet)
-	r := Report{Schema: Schema, Identity: p.Single.Identity, Single: s, Fleet: f}
+	activation, err := assessActivation(p.Single.Activation, p.Fleet.Activation)
+	if err != nil {
+		return Report{}, err
+	}
+	r := Report{Schema: Schema, Identity: p.Single.Identity, Activation: activation, Attribution: AttributionVerified, Single: s, Fleet: f}
 	r.Gains = Gains{
 		ConcurrencySpeedup:        ratio(float64(s.CriticalPathMS), float64(f.CriticalPathMS)),
 		BilledTokenReduction:      reduction(float64(s.BilledTokens), float64(f.BilledTokens)),
@@ -110,6 +136,8 @@ func Evaluate(p Pair) (Report, error) {
 	}
 
 	switch {
+	case !activation.Treatment.Satisfied:
+		r.Verdict, r.Attribution, r.Reasons = "ABSTAIN", AttributionUnverified, []string{AttributionUnverified}
 	case !p.Single.AcceptancePassed || !p.Fleet.AcceptancePassed:
 		r.Verdict, r.Reasons = "ABSTAIN", []string{"acceptance outcome is not equal and passing"}
 	case p.Single.Retries > 0 || p.Fleet.Retries > 0:
@@ -124,6 +152,30 @@ func Evaluate(p Pair) (Report, error) {
 		r.Verdict, r.Reasons = "NO_GAIN", []string{"fleet does not improve both accepted outcome efficiency axes"}
 	}
 	return r, nil
+}
+
+func assessActivation(control, treatment ActivationCohort) (BenchActivation, error) {
+	controlSummary, err := SummarizeActivation(control.Receipts)
+	if err != nil {
+		return BenchActivation{}, fmt.Errorf("control activation: %w", err)
+	}
+	treatmentSummary, err := SummarizeActivation(treatment.Receipts)
+	if err != nil {
+		return BenchActivation{}, fmt.Errorf("treatment activation: %w", err)
+	}
+	result := BenchActivation{Control: controlSummary}
+	result.Treatment = TreatmentActivation{
+		Declared: treatment.MinimumActiveRatio > 0, MinimumActiveRatio: treatment.MinimumActiveRatio,
+		Active: treatmentSummary.Active, Total: treatmentSummary.Total,
+	}
+	if treatment.MinimumActiveRatio < 0 || treatment.MinimumActiveRatio > 1 {
+		return BenchActivation{}, fmt.Errorf("treatment activation minimum_active_ratio must be in (0,1]")
+	}
+	if result.Treatment.Total > 0 {
+		result.Treatment.Coverage = round(float64(result.Treatment.Active) / float64(result.Treatment.Total))
+	}
+	result.Treatment.Satisfied = result.Treatment.Declared && result.Treatment.Total > 0 && result.Treatment.Coverage >= result.Treatment.MinimumActiveRatio
+	return result, nil
 }
 
 func validateRun(name string, r Run) error {

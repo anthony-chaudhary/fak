@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -44,5 +46,30 @@ func TestUltracodeBenchRequiresOneInput(t *testing.T) {
 		if !strings.Contains(errOut.String(), "choose exactly one") {
 			t.Fatalf("stderr=%s", errOut.String())
 		}
+	}
+}
+
+func TestUltracodeBenchAbstainsOnUnacknowledgedTreatment(t *testing.T) {
+	pair := ultracodeBenchSelfcheckPair()
+	pair.Fleet.Activation.Receipts[0].Observable = ultracodebench.ObservableUnknown
+	pair.Fleet.Activation.Receipts[0].ObservationSource = ""
+	raw, err := json.Marshal(pair)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "unacknowledged-pair.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := runUltracodeBench(&out, &errOut, []string{"--pair", path, "--json"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	var report ultracodebench.Report
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Verdict != "ABSTAIN" || report.Attribution != ultracodebench.AttributionUnverified || len(report.Reasons) != 1 || report.Reasons[0] != ultracodebench.AttributionUnverified {
+		t.Fatalf("report=%+v", report)
 	}
 }

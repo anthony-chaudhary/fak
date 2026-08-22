@@ -1,0 +1,68 @@
+{
+  "schema": "fak.ultracode_activation_fixture.v1",
+  "receipts": [
+    {
+      "schema": "fak.ultracode_activation.v1",
+      "run_id": "auto-on",
+      "child_id": "claude-primary",
+      "harness": "claude",
+      "requested": "auto",
+      "resolved": "on",
+      "injected": true,
+      "observable": "active",
+      "observation_source": "explicit_harness_ack"
+    },
+    {
+      "schema": "fak.ultracode_activation.v1",
+      "run_id": "explicit-off",
+      "child_id": "claude-control",
+      "harness": "claude",
+      "requested": "off",
+      "resolved": "off",
+      "injected": false,
+      "observable": "unknown"
+    },
+    {
+      "schema": "fak.ultracode_activation.v1",
+      "run_id": "unsupported",
+      "child_id": "codex-unsupported",
+      "harness": "codex",
+      "requested": "on",
+      "resolved": "on",
+      "injected": false,
+      "observable": "unknown",
+      "degradations": ["harness_cannot_inject"]
+    },
+    {
+      "schema": "fak.ultracode_activation.v1",
+      "run_id": "ack-missing",
+      "child_id": "codex-worker",
+      "harness": "codex",
+      "requested": "on",
+      "resolved": "on",
+      "injected": true,
+      "observable": "unknown"
+    },
+    {
+      "schema": "fak.ultracode_activation.v1",
+      "run_id": "paired-treatment",
+      "child_id": "codex-treatment",
+      "harness": "codex",
+      "requested": "on",
+      "resolved": "on",
+      "injected": true,
+      "observable": "active",
+      "observation_source": "runtime_observation"
+    },
+    {
+      "schema": "fak.ultracode_activation.v1",
+      "run_id": "paired-control",
+      "child_id": "codex-control",
+      "harness": "codex",
+      "requested": "off",
+      "resolved": "off",
+      "injected": false,
+      "observable": "unknown"
+    }
+  ]
+}

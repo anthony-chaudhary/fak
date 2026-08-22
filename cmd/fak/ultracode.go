@@ -37,7 +37,7 @@ func runUltracode(stdout, stderr io.Writer, args []string) int {
 		return runUltracodeBench(stdout, stderr, args[1:])
 	}
 	if len(args) > 0 && args[0] == "status" {
-		return runOrchestration(stdout, stderr, args)
+		return runUltracodeStatus(stdout, stderr, args[1:])
 	}
 	for i, arg := range args {
 		if arg == "--profile" || strings.HasPrefix(arg, "--profile=") {

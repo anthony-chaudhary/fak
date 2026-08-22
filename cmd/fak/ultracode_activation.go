@@ -1,0 +1,200 @@
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/ultracodebench"
+)
+
+const ultracodeStatusSchema = "fak.ultracode_status.v1"
+
+type ultracodeWorkerStatus struct {
+	ChildID        string                         `json:"child_id"`
+	State          string                         `json:"state"`
+	TurnsStarted   int                            `json:"turns_started"`
+	TurnsCompleted int                            `json:"turns_completed"`
+	LastEvent      string                         `json:"last_event,omitempty"`
+	Activation     ultracodebench.ActivationState `json:"activation"`
+}
+
+type ultracodeStatus struct {
+	Schema           string                           `json:"schema"`
+	SessionID        string                           `json:"session_id"`
+	RunID            string                           `json:"run_id"`
+	RequestedProfile string                           `json:"requested_profile"`
+	ResolvedProfile  string                           `json:"resolved_profile"`
+	State            string                           `json:"state"`
+	Outcome          orchestrationOutcomeStatus       `json:"outcome"`
+	Activation       ultracodebench.ActivationSummary `json:"activation"`
+	Workers          []ultracodeWorkerStatus          `json:"workers"`
+}
+
+func runUltracodeStatus(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("ultracode status", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	home := fs.String("home", "", "state root (default: current directory)")
+	sessionID := fs.String("session", "", "specific launch session id (default: newest)")
+	asJSON := fs.Bool("json", false, "emit versioned machine-readable status")
+	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
+		return rc
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "usage: fak orchestration status [--session ID] [--home DIR] [--json]")
+		return 2
+	}
+	root := *home
+	if root == "" {
+		var err error
+		root, err = os.Getwd()
+		if err != nil {
+			fmt.Fprintf(stderr, "fak ultracode status: %v\n", err)
+			return 1
+		}
+	}
+	receipt, err := newestOrchestrationReceipt(root, *sessionID)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak ultracode status: %v\n", err)
+		return 1
+	}
+	status, err := projectUltracodeStatus(root, receipt)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak ultracode status: %v\n", err)
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(status); err != nil {
+			fmt.Fprintf(stderr, "fak ultracode status: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintf(stdout, "Ultracode %s - %s\n", status.RunID, status.State)
+	fmt.Fprintf(stdout, "  activation %.1f%% verified | active=%d inactive=%d degraded=%d unknown=%d\n",
+		status.Activation.Ratio*100, status.Activation.Active, status.Activation.Inactive, status.Activation.Degraded, status.Activation.Unknown)
+	for _, worker := range status.Workers {
+		fmt.Fprintf(stdout, "  %-12s %-9s activation=%s turns=%d/%d\n", worker.ChildID, worker.State, worker.Activation, worker.TurnsCompleted, worker.TurnsStarted)
+	}
+	return 0
+}
+
+func projectUltracodeStatus(root string, receipt codexOrchestrationLaunchReceipt) (ultracodeStatus, error) {
+	orchestration := inspectOrchestrationRun(root, receipt)
+	coverage, err := ultracodebench.SummarizeActivation(receipt.Activations)
+	if err != nil {
+		return ultracodeStatus{}, err
+	}
+	states := make(map[string]ultracodebench.ActivationState, len(coverage.Children))
+	for _, child := range coverage.Children {
+		states[child.ChildID] = child.State
+	}
+	for _, worker := range orchestration.Workers {
+		if _, ok := states[worker.RoleID]; ok {
+			continue
+		}
+		states[worker.RoleID] = ultracodebench.ActivationUnknown
+		coverage.Total++
+		coverage.Unknown++
+		coverage.Children = append(coverage.Children, ultracodebench.ChildActivationStatus{
+			RunID: receipt.RunID, ChildID: worker.RoleID, Harness: "codex", State: ultracodebench.ActivationUnknown,
+		})
+	}
+	coverage.Verified = coverage.Active + coverage.Inactive
+	coverage.Ratio = 0
+	if coverage.Total > 0 {
+		coverage.Ratio = float64(coverage.Verified) / float64(coverage.Total)
+	}
+	out := ultracodeStatus{
+		Schema: ultracodeStatusSchema, SessionID: receipt.SessionID, RunID: receipt.RunID,
+		RequestedProfile: receipt.RequestedProfile, ResolvedProfile: receipt.ResolvedProfile,
+		State: orchestration.State, Outcome: orchestration.Outcome, Activation: coverage,
+		Workers: make([]ultracodeWorkerStatus, 0, len(orchestration.Workers)),
+	}
+	for _, worker := range orchestration.Workers {
+		out.Workers = append(out.Workers, ultracodeWorkerStatus{
+			ChildID: worker.RoleID, State: worker.State, TurnsStarted: worker.TurnsStarted,
+			TurnsCompleted: worker.TurnsDone, LastEvent: worker.LastEvent, Activation: states[worker.RoleID],
+		})
+	}
+	return out, nil
+}
+
+func codexOrchestrationActivation(launch codexOrchestrationLaunchReceipt, childID string) (ultracodebench.ActivationReceipt, error) {
+	requested, err := parseActivationSetting(launch.RequestedProfile)
+	if err != nil {
+		return ultracodebench.ActivationReceipt{}, err
+	}
+	resolved, err := parseActivationSetting(launch.ResolvedProfile)
+	if err != nil {
+		return ultracodebench.ActivationReceipt{}, err
+	}
+	degradations := make([]string, 0, len(launch.Degradations))
+	for _, degradation := range launch.Degradations {
+		capability, _, _ := strings.Cut(degradation, ":")
+		capability = strings.ToLower(strings.TrimSpace(capability))
+		capability = strings.NewReplacer("-", "_", " ", "_").Replace(capability)
+		if capability != "" {
+			degradations = append(degradations, "capability_"+capability)
+		}
+	}
+	return ultracodebench.BeforeSpawn(ultracodebench.BeforeSpawnInput{
+		RunID: launch.RunID, ChildID: childID, Harness: "codex", Requested: requested, Resolved: resolved,
+		Injected: resolved == ultracodebench.SettingOn, Degradations: degradations,
+	})
+}
+
+func persistAccountsUltracodeActivation(root, runID, command, requestedWord string, resolvedOn bool) error {
+	requested, err := parseActivationSetting(ultracodePostureWord(requestedWord))
+	if err != nil {
+		return err
+	}
+	resolved := ultracodebench.SettingOff
+	if resolvedOn {
+		resolved = ultracodebench.SettingOn
+	}
+	harness := strings.ToLower(strings.TrimSpace(guardAgentBaseName(command)))
+	if harness == "claude-code" {
+		harness = "claude"
+	}
+	injected := resolvedOn && harness == "claude"
+	var degradations []string
+	if resolvedOn && !injected {
+		degradations = []string{"harness_cannot_inject"}
+	}
+	receipt, err := ultracodebench.BeforeSpawn(ultracodebench.BeforeSpawnInput{
+		RunID: runID, ChildID: "agent", Harness: harness, Requested: requested, Resolved: resolved,
+		Injected: injected, Degradations: degradations,
+	})
+	if err != nil {
+		return err
+	}
+	root = strings.TrimSpace(root)
+	if root == "" {
+		cache, err := os.UserCacheDir()
+		if err != nil {
+			return err
+		}
+		root = filepath.Join(cache, "fak")
+	}
+	return ultracodebench.WriteActivation(root, receipt)
+}
+
+func parseActivationSetting(value string) (ultracodebench.ActivationSetting, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "auto":
+		return ultracodebench.SettingAuto, nil
+	case "on", "true", "ultracode":
+		return ultracodebench.SettingOn, nil
+	case "off", "false", "direct":
+		return ultracodebench.SettingOff, nil
+	default:
+		return "", fmt.Errorf("unknown Ultracode setting %q", value)
+	}
+}
