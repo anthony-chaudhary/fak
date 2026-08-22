@@ -1,0 +1,121 @@
+{
+  "schema": "fak.ultracode.live-paired-campaign/1",
+  "issue": 8168,
+  "captured_at": "2026-08-22T04:28:29.3550109Z",
+  "live": true,
+  "verdict": "ABSTAIN",
+  "value_claim_supported": false,
+  "reasons": [
+    "activation_unverified: effective treatment activation coverage was 0/3 because fak 0.44.0+g88dbd68c9e3c emitted no activation receipts",
+    "outcome_unverified: the orchestration receipt recorded no effect readback, independent witness, or reconciliation",
+    "budget_unverified: both arms declared the same 65536-token envelope, but the launcher did not enforce it and the fleet provider receipt reported 237724 total input/output tokens",
+    "spend_unavailable: the subscription route emitted no per-run dollar charge or invoice-equivalent billed-token total"
+  ],
+  "controls": {
+    "task": {
+      "name": "review three ultracodebench verdict invariants",
+      "fixture": "task.txt",
+      "sha256": "sha256:df4e6199d8ae6809e759153916fc36bb1d3354c134fd41fee52f4bfd62177861"
+    },
+    "model": {
+      "provider": "openai-responses",
+      "id": "gpt-5.6-sol",
+      "reasoning_effort": "xhigh"
+    },
+    "environment": {
+      "os": "Microsoft Windows 10.0.26200",
+      "arch": "x64",
+      "git_head": "764328d54289e5685ac1ca12878c0c39d00e9c76",
+      "git_tree": "b4413077e1a9a5c56c5d66e674dff14590885bc7",
+      "source_sha256": "sha256:ac1b04e9b9f9bb5426477730ce367bcc3b004cbe8864ad100caa83b24a47c815",
+      "fak_build": "0.44.0+g88dbd68c9e3c",
+      "codex_cli": "0.148.0",
+      "snapshot_method": "git archive of the same committed tree into two external scratch directories"
+    },
+    "budgets": {
+      "wall_ms": 180000,
+      "tokens": 65536,
+      "spend_usd": 1,
+      "equal_declared": true,
+      "enforcement": "unverified"
+    }
+  },
+  "activation": {
+    "control_requested": "off",
+    "treatment_requested": "ultracode",
+    "treatment_children_expected": 3,
+    "treatment_children_verified_active": 0,
+    "coverage": 0,
+    "required_coverage": 1,
+    "receipt_support": "unavailable_at_capture",
+    "causal_attribution_allowed": false
+  },
+  "equivalence": {
+    "task_equal": true,
+    "model_equal": true,
+    "environment_equal": true,
+    "budgets_equal_declared": true,
+    "budgets_equal_observed": false,
+    "acceptance_outcome_equal_and_passing": true,
+    "retries": 0,
+    "independent_witness_joined": false,
+    "comparison_valid": false
+  },
+  "axes": {
+    "concurrency": {
+      "single_critical_path_ms": 16277,
+      "fleet_critical_path_ms": 34576,
+      "fleet_total_worker_ms": 62541,
+      "single_over_fleet_speedup": 0.47076,
+      "fleet_wall_time_delta": 1.124224,
+      "verdict": "NO_GAIN"
+    },
+    "cache_and_tokens": {
+      "single_input_tokens": 59067,
+      "fleet_input_tokens": 236386,
+      "single_cache_read_tokens": 38400,
+      "fleet_cache_read_tokens": 173056,
+      "single_output_tokens": 304,
+      "fleet_output_tokens": 1338,
+      "single_cache_share": 0.650109,
+      "fleet_cache_share": 0.732091,
+      "single_total_input_output_tokens": 59371,
+      "fleet_total_input_output_tokens": 237724,
+      "fleet_provider_token_delta": 3.004042,
+      "billed_tokens_available": false,
+      "spend_available": false,
+      "verdict": "ABSTAIN"
+    },
+    "quality": {
+      "single_accepted_effects": 3,
+      "fleet_accepted_effects": 3,
+      "single_pass_rate": 1,
+      "fleet_pass_rate": 1,
+      "single_contradiction_rate": 0,
+      "fleet_contradiction_rate": 0,
+      "verdict": "NO_GAIN"
+    },
+    "overlap": {
+      "single_accepted_per_wall_second": 0.184309,
+      "fleet_accepted_per_wall_second": 0.086765,
+      "accepted_per_wall_gain": -0.52924,
+      "single_accepted_per_provider_ktoken": 0.05053,
+      "fleet_accepted_per_provider_ktoken": 0.01262,
+      "accepted_per_provider_token_gain": -0.750252,
+      "accepted_per_billed_token": "unavailable",
+      "verdict": "ABSTAIN"
+    }
+  },
+  "artifacts": {
+    "single_receipt": "single-receipt.json",
+    "fleet_receipt": "fleet-receipt.json",
+    "pair_projection": "pair.json",
+    "evaluated_report": "paired-report.witness.json"
+  },
+  "reproduction": {
+    "offline_fixture": "fak ultracode bench --selfcheck --json",
+    "captured_pair": "fak ultracode bench --pair docs/_witnesses/issue-8168-ultracode-live/pair.json --json",
+    "artifact_test": "go test ./docs/_witnesses/issue-8168-ultracode-live",
+    "live_rerun": "follow README.md after activation receipt support reports 3/3 treatment coverage"
+  }
+}

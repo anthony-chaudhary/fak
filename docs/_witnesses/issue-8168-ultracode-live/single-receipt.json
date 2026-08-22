@@ -1,0 +1,45 @@
+{
+  "schema": "fak.ultracode.live-arm-receipt/1",
+  "arm": "single",
+  "live": true,
+  "started_at": "2026-08-22T04:27:19.3667996Z",
+  "ended_at": "2026-08-22T04:27:35.6436325Z",
+  "critical_path_ms": 16277,
+  "total_worker_ms": 16277,
+  "provider_usage": {
+    "input_tokens": 59067,
+    "uncached_input_tokens": 20667,
+    "cache_read_tokens": 38400,
+    "cache_write_tokens": 0,
+    "output_tokens": 304,
+    "reasoning_output_tokens": 139,
+    "total_input_output_tokens": 59371,
+    "billed_tokens": {
+      "availability": "unavailable",
+      "reason": "Codex subscription receipt exposed token counts but no invoice-equivalent billed-token total"
+    },
+    "spend_usd": {
+      "availability": "unavailable",
+      "reason": "Codex subscription receipt exposed no per-run dollar charge"
+    }
+  },
+  "quality": {
+    "expected_independent_effects": 3,
+    "accepted_independent_effects": 3,
+    "pass_rate": 1,
+    "contradictions": 0,
+    "contradiction_rate": 0,
+    "answer": {
+      "schema_constant": "fak-ultracode-paired/1",
+      "retry_verdict": "ABSTAIN",
+      "missing_witness_verdict": "ABSTAIN"
+    },
+    "answer_sha256": "sha256:5e835dc5b81b52eaab7c249d2edeaf4de31baba1d76c10d70a22d8560857f4db"
+  },
+  "raw_evidence": {
+    "agent_log_sha256": "sha256:7ea56c615e7ed3fd85fabc91befcf3d6c241b70ff0754de5c5e4676a0c5914cc",
+    "guard_audit_sha256": "sha256:fc017bd5315c9b095a4509d62a187cd8408885af5989f60a5ba7b960fe5f38f2",
+    "committed": false,
+    "reason": "raw agent logs can contain private harness context; only this redacted receipt is committed"
+  }
+}

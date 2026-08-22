@@ -1,0 +1,55 @@
+{
+  "schema": "fak-ultracode-paired/1",
+  "single": {
+    "mode": "single",
+    "identity": {
+      "task": "review three ultracodebench verdict invariants",
+      "task_digest": "sha256:df4e6199d8ae6809e759153916fc36bb1d3354c134fd41fee52f4bfd62177861",
+      "model": "openai/gpt-5.6-sol;reasoning=xhigh",
+      "environment": "windows-10.0.26200-x64;tree=b4413077e1a9;fak=0.44.0+g88dbd68c9e3c;codex=0.148.0",
+      "wall_budget_ms": 180000,
+      "token_budget": 65536,
+      "spend_budget_usd": 1
+    },
+    "critical_path_ms": 16277,
+    "total_worker_ms": 16277,
+    "input_tokens": 20667,
+    "output_tokens": 304,
+    "cache_read_tokens": 38400,
+    "cache_write_tokens": 0,
+    "billed_tokens": 59371,
+    "spend_usd": 0,
+    "expected_effects": 3,
+    "accepted_effects": 3,
+    "contradictions": 0,
+    "acceptance_passed": true,
+    "retries": 0,
+    "witness_digest": "sha256:5e835dc5b81b52eaab7c249d2edeaf4de31baba1d76c10d70a22d8560857f4db"
+  },
+  "fleet": {
+    "mode": "fleet",
+    "identity": {
+      "task": "review three ultracodebench verdict invariants",
+      "task_digest": "sha256:df4e6199d8ae6809e759153916fc36bb1d3354c134fd41fee52f4bfd62177861",
+      "model": "openai/gpt-5.6-sol;reasoning=xhigh",
+      "environment": "windows-10.0.26200-x64;tree=b4413077e1a9;fak=0.44.0+g88dbd68c9e3c;codex=0.148.0",
+      "wall_budget_ms": 180000,
+      "token_budget": 65536,
+      "spend_budget_usd": 1
+    },
+    "critical_path_ms": 34576,
+    "total_worker_ms": 62541,
+    "input_tokens": 63330,
+    "output_tokens": 1338,
+    "cache_read_tokens": 173056,
+    "cache_write_tokens": 0,
+    "billed_tokens": 237724,
+    "spend_usd": 0,
+    "expected_effects": 3,
+    "accepted_effects": 3,
+    "contradictions": 0,
+    "acceptance_passed": true,
+    "retries": 0,
+    "witness_digest": ""
+  }
+}

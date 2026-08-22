@@ -1,0 +1,94 @@
+{
+  "schema": "fak.ultracode.live-arm-receipt/1",
+  "arm": "fleet",
+  "live": true,
+  "launched_at": "2026-08-22T04:27:54.7785873Z",
+  "ended_at": "2026-08-22T04:28:29.3550109Z",
+  "critical_path_ms": 34576,
+  "total_worker_ms": 62541,
+  "provider_usage": {
+    "input_tokens": 236386,
+    "uncached_input_tokens": 63330,
+    "cache_read_tokens": 173056,
+    "cache_write_tokens": 0,
+    "output_tokens": 1338,
+    "reasoning_output_tokens": 624,
+    "total_input_output_tokens": 237724,
+    "billed_tokens": {
+      "availability": "unavailable",
+      "reason": "Codex subscription receipts exposed token counts but no invoice-equivalent billed-token total"
+    },
+    "spend_usd": {
+      "availability": "unavailable",
+      "reason": "Codex subscription receipts exposed no per-run dollar charge"
+    }
+  },
+  "quality": {
+    "expected_independent_effects": 3,
+    "accepted_independent_effects": 3,
+    "pass_rate": 1,
+    "contradictions": 0,
+    "contradiction_rate": 0
+  },
+  "orchestration_outcome": {
+    "verdict": "unverified",
+    "effect_readback": "not_observed",
+    "independent_witness": "not_observed",
+    "reconciliation": "not_observed"
+  },
+  "workers": [
+    {
+      "role": "worker-1",
+      "duration_ms": 17265,
+      "input_tokens": 59253,
+      "cache_read_tokens": 38400,
+      "output_tokens": 377,
+      "reasoning_output_tokens": 211,
+      "accepted_effects": 3,
+      "contradictions": 0,
+      "answer": {
+        "schema_constant": "fak-ultracode-paired/1",
+        "retry_verdict": "ABSTAIN",
+        "missing_witness_verdict": "ABSTAIN"
+      },
+      "agent_log_sha256": "sha256:623f328523f2d26377b5f3b8aea9ef93e494dde5f3cce44a5b41625c4e200429"
+    },
+    {
+      "role": "worker-2",
+      "duration_ms": 16729,
+      "input_tokens": 59179,
+      "cache_read_tokens": 38400,
+      "output_tokens": 300,
+      "reasoning_output_tokens": 133,
+      "accepted_effects": 3,
+      "contradictions": 0,
+      "answer": {
+        "schema_constant": "fak-ultracode-paired/1",
+        "retry_verdict": "ABSTAIN",
+        "missing_witness_verdict": "ABSTAIN"
+      },
+      "agent_log_sha256": "sha256:1de98ed5a20747245e812c663c10cb160ea57e8061f015edcb791fd8c6305f99"
+    },
+    {
+      "role": "worker-3",
+      "duration_ms": 28547,
+      "input_tokens": 117954,
+      "cache_read_tokens": 96256,
+      "output_tokens": 661,
+      "reasoning_output_tokens": 280,
+      "accepted_effects": 3,
+      "contradictions": 0,
+      "answer": {
+        "schema_constant": "fak-ultracode-paired/1",
+        "retry_verdict": "ABSTAIN",
+        "missing_witness_verdict": "ABSTAIN"
+      },
+      "agent_log_sha256": "sha256:0bf514b022dc7887b8f555d202f667a4db27ec7ea1235c60cff486f4e2a99f0c"
+    }
+  ],
+  "raw_evidence": {
+    "launch_receipt_sha256": "sha256:93c08b9b967b7caff35be129decad58b851b8a1ab9b1ffa729ca70eeac410050",
+    "committed": false,
+    "reason": "raw orchestration logs can contain private harness context; only this redacted receipt is committed"
+  }
+}
