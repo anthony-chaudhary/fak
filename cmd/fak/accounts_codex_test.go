@@ -46,9 +46,9 @@ func TestCodexLaunchPosturePinsHomeInArgvAndChildEnv(t *testing.T) {
 }
 
 func TestLaunchCodexEnvDoesNotMutateParentSlice(t *testing.T) {
-	base := []string{"CODEX_HOME=parent", "PATH=/bin"}
+	base := []string{"CODEX_HOME=parent", "CODEX_SESSION_ID=parent-session", "CODEX_THREAD_ID=parent-thread", "FAK_REGISTRATION_ID=parent-registration", "FAK_ATTEMPT_ID=parent-attempt", "FAK_PARENT_REGISTRATION_ID=grandparent", "FAK_PARENT_ATTEMPT_ID=grandparent-attempt", "FAK_ROOT_REGISTRATION_ID=root", "PATH=/bin"}
 	got := launchCodexEnv(base, "child")
-	if base[0] != "CODEX_HOME=parent" || !envHasValue(got, "CODEX_HOME", "child") {
+	if base[0] != "CODEX_HOME=parent" || !envHasValue(got, "CODEX_HOME", "child") || envHasKey(got, "CODEX_SESSION_ID") || envHasKey(got, "CODEX_THREAD_ID") || envHasKey(got, "FAK_REGISTRATION_ID") || envHasKey(got, "FAK_ATTEMPT_ID") || envHasKey(got, "FAK_PARENT_REGISTRATION_ID") || envHasKey(got, "FAK_PARENT_ATTEMPT_ID") || envHasKey(got, "FAK_ROOT_REGISTRATION_ID") {
 		t.Fatalf("base=%#v child=%#v", base, got)
 	}
 }
@@ -82,4 +82,14 @@ func TestDiscoveredCodexHomesEnterUnifiedAccountView(t *testing.T) {
 	if len(homes) != 1 || homes[0].Name != "blue" || homes[0].Dir != ready || !homes[0].CanServe() {
 		t.Fatalf("discovered Codex homes = %+v", homes)
 	}
+}
+
+func envHasKey(env []string, key string) bool {
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		if strings.EqualFold(name, key) {
+			return true
+		}
+	}
+	return false
 }

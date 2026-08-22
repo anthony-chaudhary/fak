@@ -84,7 +84,15 @@ func launchCodexEnv(base []string, home string) []string {
 	out := make([]string, 0, len(base)+1)
 	for _, kv := range base {
 		name, _, _ := strings.Cut(kv, "=")
-		if strings.EqualFold(name, "CODEX_HOME") {
+		switch {
+		case strings.EqualFold(name, "CODEX_HOME"),
+			strings.EqualFold(name, "CODEX_"+"SESSION_ID"),
+			strings.EqualFold(name, "CODEX_THREAD_ID"),
+			strings.EqualFold(name, "FAK_REGISTRATION_ID"),
+			strings.EqualFold(name, "FAK_ATTEMPT_ID"),
+			strings.EqualFold(name, "FAK_PARENT_REGISTRATION_ID"),
+			strings.EqualFold(name, "FAK_PARENT_ATTEMPT_ID"),
+			strings.EqualFold(name, "FAK_ROOT_REGISTRATION_ID"):
 			continue
 		}
 		out = append(out, kv)
