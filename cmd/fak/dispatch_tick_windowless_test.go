@@ -297,11 +297,11 @@ func TestDispatchWorkerLaunchAllocatesNoConsolePane(t *testing.T) {
 	}
 }
 
-// TestDispatchCodexWorkerDescendantsStayOffDesktop is #8252's captured visual
-// witness. The root crosses the real dispatch spawn seam with backend=codex, then
-// starts console-subsystem children named for the three process families observed
-// on the desktop. Each descendant reports its actual console attachment and window
-// handle; one inherited hidden console means console>0, hwnd=0 for every row.
+// TestDispatchCodexWorkerDescendantsStayOffDesktop is #8513's captured visual and
+// lifecycle witness. The root crosses the real dispatch spawn seam with backend=codex,
+// then starts console-subsystem children named for the three process families observed
+// on the desktop. Every process reports its actual console attachment and window handle;
+// the job-backed hidden tree must stay invisible and leave no process or console host.
 func TestDispatchCodexWorkerDescendantsStayOffDesktop(t *testing.T) {
 	switch os.Getenv(dispatchCodexConsoleRoleEnv) {
 	case "root":
@@ -348,11 +348,23 @@ func TestDispatchCodexWorkerDescendantsStayOffDesktop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("spawn Codex console witness: %v", err)
 	}
+	cleaned := false
+	var witnessedTree map[uint32]bool
 	t.Cleanup(func() {
 		_ = os.WriteFile(release, []byte("release"), 0o644)
-		dispatchWindowlessWaitFor(t, "Codex console witness exit", 15*time.Second, func() bool {
-			return !dispatchPIDAlive(spawned.PID)
-		})
+		if !cleaned {
+			for pid := range witnessedTree {
+				if dispatchPIDAlive(int(pid)) {
+					_, _ = procguard.KillPID(int(pid))
+				}
+			}
+		}
+		for pid := range witnessedTree {
+			pid := int(pid)
+			dispatchWindowlessWaitFor(t, fmt.Sprintf("Codex cleanup pid %d exit", pid), 15*time.Second, func() bool {
+				return !dispatchPIDAlive(pid)
+			})
+		}
 	})
 
 	transcript := func() string {
@@ -392,19 +404,50 @@ func TestDispatchCodexWorkerDescendantsStayOffDesktop(t *testing.T) {
 
 	rows := dispatchProcessCensus(t)
 	subtree := dispatchSubtreePIDs(rows, uint32(spawned.PID))
+	witnessedTree = subtree
 	var fresh []string
+	freshPIDs := map[uint32]bool{}
 	for pid, row := range dispatchConsoleHostPIDs(rows) {
 		if _, existed := before[pid]; existed {
 			continue
 		}
 		if subtree[pid] || subtree[row.PPID] {
 			fresh = append(fresh, fmt.Sprintf("%s(pid=%d ppid=%d)", row.Name, row.PID, row.PPID))
+			freshPIDs[pid] = true
 		}
 	}
-	t.Logf("#8252 hidden-console witness: descendants=%v fresh console hosts under Codex pid %d=%v",
+	t.Logf("#8513 live hidden-tree witness: descendants=%v fresh console hosts under Codex pid %d=%v",
 		wantLabels[1:], spawned.PID, fresh)
 	if len(fresh) > 1 {
 		t.Fatalf("Codex descendants allocated %d console hosts, want at most one inherited hidden host: %v", len(fresh), fresh)
+	}
+
+	if err := os.WriteFile(release, []byte("release"), 0o644); err != nil {
+		t.Fatalf("release Codex root: %v", err)
+	}
+	for pid := range subtree {
+		pid := int(pid)
+		dispatchWindowlessWaitFor(t, fmt.Sprintf("Codex tree pid %d exit", pid), 15*time.Second, func() bool {
+			return !dispatchPIDAlive(pid)
+		})
+	}
+	cleaned = true
+	afterHosts := dispatchConsoleHostPIDs(dispatchProcessCensus(t))
+	var survivingHosts []string
+	for pid := range freshPIDs {
+		if row, ok := afterHosts[pid]; ok {
+			survivingHosts = append(survivingHosts, fmt.Sprintf("%s(pid=%d ppid=%d)", row.Name, row.PID, row.PPID))
+		}
+	}
+	t.Logf("#8513 reaped-tree witness: fresh console hosts after reap=%v", survivingHosts)
+	if len(survivingHosts) > 0 {
+		t.Fatalf("Codex cleanup left %d fresh console host process(es): %v", len(survivingHosts), survivingHosts)
+	}
+	for _, label := range wantLabels[1:] {
+		path := filepath.Join(binDir, label+".exe")
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("remove reaped %s witness %q: %v", label, path, err)
+		}
 	}
 }
 
@@ -423,7 +466,6 @@ func runDispatchCodexConsoleRoot(t *testing.T) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	children := make([]*os.Process, 0, 3)
 	for _, label := range []string{"pwsh", "node", "fak-mcp"} {
 		path := filepath.Join(binDir, label+".exe")
 		if err := os.Link(exe, path); err != nil {
@@ -433,6 +475,7 @@ func runDispatchCodexConsoleRoot(t *testing.T) {
 		childEnv := envMap(os.Environ())
 		childEnv[dispatchCodexConsoleRoleEnv] = "child"
 		childEnv[dispatchCodexConsoleLabelEnv] = label
+		delete(childEnv, dispatchWindowlessReleaseEnv)
 		cmd := exec.Command(path, "-test.run=^TestDispatchCodexWorkerDescendantsStayOffDesktop$")
 		cmd.Env = envSliceFromMap(childEnv)
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
@@ -440,12 +483,9 @@ func runDispatchCodexConsoleRoot(t *testing.T) {
 			fmt.Fprintf(os.Stderr, "start %s witness: %v\n", label, err)
 			os.Exit(2)
 		}
-		children = append(children, cmd.Process)
+		_ = cmd.Process.Release()
 	}
 	waitForDispatchCodexConsoleRelease()
-	for _, child := range children {
-		_, _ = child.Wait()
-	}
 }
 
 func waitForDispatchCodexConsoleRelease() {

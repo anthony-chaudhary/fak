@@ -18,6 +18,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
@@ -319,9 +320,25 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 	cmd.Stderr = fh
 	configureDispatchSpawn(cmd)
 	configureDispatchWorkerConsole(cmd, backend)
-	if err := cmd.Start(); err != nil {
+	var job *windowgate.JobObject
+	if runtime.GOOS == "windows" && dispatchWorkerNeedsHiddenConsole(backend) {
+		job, err = windowgate.StartInNewJob(cmd)
+	} else {
+		err = cmd.Start()
+	}
+	if err != nil {
 		_ = fh.Close()
 		return dispatchSpawnResult{}, err
+	}
+	var jobDone <-chan error
+	if job != nil {
+		done := make(chan error, 1)
+		go func() {
+			err := cmd.Wait()
+			_ = job.Close()
+			done <- err
+		}()
+		jobDone = done
 	}
 	_ = fh.Close()
 
@@ -359,7 +376,11 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 	}
 	res := dispatchSpawnResult{PID: cmd.Process.Pid, Log: outLog, Issue: issue, Lane: lane, Backend: backend, LeaseID: leaseID, Tree: tree, Account: acct, Membership: mem}
 	if probeS > 0 {
-		res.EarlyExit = probeDispatchSpawn(cmd, outLog, probeS)
+		if jobDone != nil {
+			res.EarlyExit = probeDispatchWait(jobDone, outLog, probeS)
+		} else {
+			res.EarlyExit = probeDispatchSpawn(cmd, outLog, probeS)
+		}
 	}
 	return res, nil
 }
@@ -435,6 +456,10 @@ func unwrapOpencodeNpmShim(exe string) string {
 func probeDispatchSpawn(cmd *exec.Cmd, logPath string, waitS float64) map[string]any {
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
+	return probeDispatchWait(done, logPath, waitS)
+}
+
+func probeDispatchWait(done <-chan error, logPath string, waitS float64) map[string]any {
 	select {
 	case err := <-done:
 		rec := map[string]any{"checked": true, "alive": false, "wait_s": waitS, "silent": true, "returncode": 0}
