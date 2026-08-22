@@ -1,0 +1,97 @@
+{
+  "schema": "fak-ultracode-access-frontier/1",
+  "evidence_kind": "observed_run",
+  "source_artifact": "docs/_witnesses/issue-8624-ultracode-smallmodel/source-artifact.json",
+  "task_digest": "6d71a6923be0ac5a73627a08ed3841d8041656735563fa61df59a3ff9a86f7c4",
+  "model_class": "qwen2.5:0.5b via Ollama 0.30.10 on fak-realmodel",
+  "baseline_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+  "counterfactual": "observed full-context prompt tokens multiplied by equal agent width",
+  "excluded_baselines": [
+    "raw single-request throughput",
+    "traditional batching",
+    "billed-token or spend comparison"
+  ],
+  "cells": [
+    {
+      "mode": "single",
+      "width": 1,
+      "accepted_outcome": true,
+      "outcome_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+      "full_context_input_tokens": 4095,
+      "scoped_context_input_tokens": 1641,
+      "shared_prefix_read_tokens": 1024
+    },
+    {
+      "mode": "scout_writer",
+      "width": 1,
+      "accepted_outcome": true,
+      "outcome_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+      "full_context_input_tokens": 4095,
+      "scoped_context_input_tokens": 1639,
+      "shared_prefix_read_tokens": 1024
+    },
+    {
+      "mode": "scout_writer",
+      "width": 2,
+      "accepted_outcome": true,
+      "outcome_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+      "full_context_input_tokens": 8190,
+      "scoped_context_input_tokens": 3280,
+      "shared_prefix_read_tokens": 2628
+    },
+    {
+      "mode": "scout_writer",
+      "width": 4,
+      "accepted_outcome": true,
+      "outcome_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+      "full_context_input_tokens": 16380,
+      "scoped_context_input_tokens": 6562,
+      "shared_prefix_read_tokens": 5908
+    },
+    {
+      "mode": "scout_writer",
+      "width": 8,
+      "accepted_outcome": true,
+      "outcome_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+      "full_context_input_tokens": 32760,
+      "scoped_context_input_tokens": 13126,
+      "shared_prefix_read_tokens": 12468
+    },
+    {
+      "mode": "multi_writer",
+      "width": 1,
+      "accepted_outcome": true,
+      "outcome_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+      "full_context_input_tokens": 4095,
+      "scoped_context_input_tokens": 1641,
+      "shared_prefix_read_tokens": 1024
+    },
+    {
+      "mode": "multi_writer",
+      "width": 2,
+      "accepted_outcome": true,
+      "outcome_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+      "full_context_input_tokens": 8190,
+      "scoped_context_input_tokens": 3280,
+      "shared_prefix_read_tokens": 2628
+    },
+    {
+      "mode": "multi_writer",
+      "width": 4,
+      "accepted_outcome": true,
+      "outcome_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+      "full_context_input_tokens": 16380,
+      "scoped_context_input_tokens": 6560,
+      "shared_prefix_read_tokens": 5836
+    },
+    {
+      "mode": "multi_writer",
+      "width": 8,
+      "accepted_outcome": true,
+      "outcome_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+      "full_context_input_tokens": 32760,
+      "scoped_context_input_tokens": 13120,
+      "shared_prefix_read_tokens": 12252
+    }
+  ]
+}

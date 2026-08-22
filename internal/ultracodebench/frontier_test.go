@@ -1,6 +1,11 @@
 package ultracodebench
 
-import "testing"
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestEvaluateAccessFrontierDecomposesSavingsAndStopsHillClimb(t *testing.T) {
 	r, err := EvaluateAccessFrontier(AccessFrontierFixture(), []int{1, 2, 4, 8})
@@ -47,5 +52,37 @@ func TestEvaluateAccessFrontierRequiresObservedSource(t *testing.T) {
 	f.SourceArtifact = ""
 	if _, err := EvaluateAccessFrontier(f, []int{1}); err == nil {
 		t.Fatal("expected observed source error")
+	}
+}
+
+func TestObservedSmallModelAccessFrontierArtifact(t *testing.T) {
+	path := filepath.Join("..", "..", "docs", "_witnesses", "issue-8624-ultracode-smallmodel", "access-frontier.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var input AccessFrontier
+	if err := json.Unmarshal(data, &input); err != nil {
+		t.Fatal(err)
+	}
+	if input.EvidenceKind != "observed_run" || input.SourceArtifact == "" {
+		t.Fatalf("artifact provenance = %q %q", input.EvidenceKind, input.SourceArtifact)
+	}
+	report, err := EvaluateAccessFrontier(input, []int{1, 2, 4, 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.ModelClass != "qwen2.5:0.5b via Ollama 0.30.10 on fak-realmodel" {
+		t.Fatalf("model class = %q", report.ModelClass)
+	}
+	for _, cell := range report.Cells {
+		if cell.Verdict != "GAIN" || cell.ScopeAvoidedTokens <= 0 || cell.CacheAvoidedTokens <= 0 {
+			t.Fatalf("observed cell = %+v", cell)
+		}
+	}
+	for _, climb := range report.HillClimb {
+		if climb.StopWidth != 0 || climb.ChosenWidth == 0 {
+			t.Fatalf("hill climb crossed a non-GAIN cell: %+v", climb)
+		}
 	}
 }

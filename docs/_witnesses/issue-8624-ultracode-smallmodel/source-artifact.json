@@ -1,0 +1,598 @@
+{
+  "schema": "fak-ultracode-smallmodel-campaign/1",
+  "captured_at": "2026-08-22T12:24:07.252269-07:00",
+  "node": "fak-realmodel",
+  "runtime": "ollama 0.30.10 llama-server prompt cache",
+  "model": "qwen2.5:0.5b",
+  "task_digest": "6d71a6923be0ac5a73627a08ed3841d8041656735563fa61df59a3ff9a86f7c4",
+  "accepted_outcome_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+  "method": {
+    "agentic_harness": "bounded sequential microagents with scout, writer, and reviewer roles",
+    "shared_prefix": "identical project contract prefix per child",
+    "cache_authority": "ollama llama-server verbose cached n_tokens lines",
+    "counterfactual": "observed full-context prompt token count multiplied by equal agent width",
+    "excluded_baselines": [
+      "raw single-request throughput",
+      "traditional batching",
+      "billed-token or spend comparison"
+    ]
+  },
+  "runs": [
+    {
+      "mode": "single",
+      "width": 1,
+      "roles": [
+        "writer"
+      ],
+      "baseline": {
+        "started_ns": 1787426290491741571,
+        "response": "ACCEPTED",
+        "prompt_eval_count": 4095,
+        "prompt_eval_duration": 24502478000,
+        "eval_count": 3,
+        "total_duration": 26343186349
+      },
+      "children": [
+        {
+          "started_ns": 1787426317597984149,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 8138567000,
+          "eval_count": 4,
+          "total_duration": 9919858292
+        }
+      ],
+      "accepted_outcome": true,
+      "outcome_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+      "full_context_input_tokens": 4095,
+      "scoped_context_input_tokens": 1641,
+      "shared_prefix_read_tokens": 1024,
+      "cache_task_tokens": [
+        1024
+      ],
+      "ollama_cache_log": [
+        "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+        "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)"
+      ]
+    },
+    {
+      "mode": "scout_writer",
+      "width": 1,
+      "roles": [
+        "scout"
+      ],
+      "baseline": {
+        "started_ns": 1787426328584813341,
+        "response": "ACCEPTED",
+        "prompt_eval_count": 4095,
+        "prompt_eval_duration": 24527487000,
+        "eval_count": 3,
+        "total_duration": 26367047019
+      },
+      "children": [
+        {
+          "started_ns": 1787426355713876192,
+          "response": "ACCEPTED",
+          "prompt_eval_count": 1639,
+          "prompt_eval_duration": 8074370000,
+          "eval_count": 3,
+          "total_duration": 9826353998
+        }
+      ],
+      "accepted_outcome": true,
+      "outcome_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+      "full_context_input_tokens": 4095,
+      "scoped_context_input_tokens": 1639,
+      "shared_prefix_read_tokens": 1024,
+      "cache_task_tokens": [
+        1024
+      ],
+      "ollama_cache_log": [
+        "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+        "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)"
+      ]
+    },
+    {
+      "mode": "scout_writer",
+      "width": 2,
+      "roles": [
+        "scout",
+        "writer"
+      ],
+      "baseline": {
+        "started_ns": 1787426366596914240,
+        "response": "ACCEPTED",
+        "prompt_eval_count": 4095,
+        "prompt_eval_duration": 24600732000,
+        "eval_count": 3,
+        "total_duration": 26438768672
+      },
+      "children": [
+        {
+          "started_ns": 1787426393802258556,
+          "response": "ACCEPTED",
+          "prompt_eval_count": 1639,
+          "prompt_eval_duration": 8180482000,
+          "eval_count": 3,
+          "total_duration": 9928094351
+        },
+        {
+          "started_ns": 1787426403738701612,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 390525000,
+          "eval_count": 4,
+          "total_duration": 809503368
+        }
+      ],
+      "accepted_outcome": true,
+      "outcome_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+      "full_context_input_tokens": 8190,
+      "scoped_context_input_tokens": 3280,
+      "shared_prefix_read_tokens": 2628,
+      "cache_task_tokens": [
+        1024,
+        1604
+      ],
+      "ollama_cache_log": [
+        "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+        "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+        "slot update_slots: id  1 | task 5 | cached n_tokens = 1604, memory_seq_rm [1604, end)"
+      ]
+    },
+    {
+      "mode": "scout_writer",
+      "width": 4,
+      "roles": [
+        "scout",
+        "writer",
+        "writer",
+        "writer"
+      ],
+      "baseline": {
+        "started_ns": 1787426405602454892,
+        "response": "ACCEPTED",
+        "prompt_eval_count": 4095,
+        "prompt_eval_duration": 24580054000,
+        "eval_count": 3,
+        "total_duration": 26440716640
+      },
+      "children": [
+        {
+          "started_ns": 1787426432803998076,
+          "response": "ACCEPTED",
+          "prompt_eval_count": 1639,
+          "prompt_eval_duration": 8144411000,
+          "eval_count": 3,
+          "total_duration": 9894596761
+        },
+        {
+          "started_ns": 1787426442707110895,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 393845000,
+          "eval_count": 4,
+          "total_duration": 799075134
+        },
+        {
+          "started_ns": 1787426443515241734,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 30500000,
+          "eval_count": 4,
+          "total_duration": 445057112
+        },
+        {
+          "started_ns": 1787426443968445064,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 30170000,
+          "eval_count": 4,
+          "total_duration": 450634008
+        }
+      ],
+      "accepted_outcome": true,
+      "outcome_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+      "full_context_input_tokens": 16380,
+      "scoped_context_input_tokens": 6562,
+      "shared_prefix_read_tokens": 5908,
+      "cache_task_tokens": [
+        1024,
+        1604,
+        1640,
+        1640
+      ],
+      "ollama_cache_log": [
+        "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+        "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+        "slot update_slots: id  1 | task 5 | cached n_tokens = 1604, memory_seq_rm [1604, end)",
+        "slot update_slots: id  1 | task 10 | cached n_tokens = 1640, memory_seq_rm [1640, end)",
+        "slot update_slots: id  1 | task 15 | cached n_tokens = 1640, memory_seq_rm [1640, end)"
+      ]
+    },
+    {
+      "mode": "scout_writer",
+      "width": 8,
+      "roles": [
+        "scout",
+        "writer",
+        "writer",
+        "writer",
+        "writer",
+        "writer",
+        "writer",
+        "writer"
+      ],
+      "baseline": {
+        "started_ns": 1787426445480288180,
+        "response": "ACCEPTED",
+        "prompt_eval_count": 4095,
+        "prompt_eval_duration": 24402975000,
+        "eval_count": 3,
+        "total_duration": 26236139189
+      },
+      "children": [
+        {
+          "started_ns": 1787426472478163669,
+          "response": "ACCEPTED",
+          "prompt_eval_count": 1639,
+          "prompt_eval_duration": 8157504000,
+          "eval_count": 3,
+          "total_duration": 9906672700
+        },
+        {
+          "started_ns": 1787426482393107687,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 391340000,
+          "eval_count": 4,
+          "total_duration": 822714283
+        },
+        {
+          "started_ns": 1787426483224021473,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 30454000,
+          "eval_count": 4,
+          "total_duration": 444323702
+        },
+        {
+          "started_ns": 1787426483676465318,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 30724000,
+          "eval_count": 4,
+          "total_duration": 458004843
+        },
+        {
+          "started_ns": 1787426484142297031,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 30373000,
+          "eval_count": 4,
+          "total_duration": 436935584
+        },
+        {
+          "started_ns": 1787426484587021297,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 30797000,
+          "eval_count": 4,
+          "total_duration": 460078317
+        },
+        {
+          "started_ns": 1787426485055391666,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 30848000,
+          "eval_count": 4,
+          "total_duration": 437212119
+        },
+        {
+          "started_ns": 1787426485500362590,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 38781000,
+          "eval_count": 4,
+          "total_duration": 453681555
+        }
+      ],
+      "accepted_outcome": true,
+      "outcome_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+      "full_context_input_tokens": 32760,
+      "scoped_context_input_tokens": 13126,
+      "shared_prefix_read_tokens": 12468,
+      "cache_task_tokens": [
+        1640,
+        1640,
+        1024,
+        1640,
+        1604,
+        1640,
+        1640,
+        1640
+      ],
+      "ollama_cache_log": [
+        "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+        "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+        "slot update_slots: id  1 | task 5 | cached n_tokens = 1604, memory_seq_rm [1604, end)",
+        "slot update_slots: id  1 | task 10 | cached n_tokens = 1640, memory_seq_rm [1640, end)",
+        "slot update_slots: id  1 | task 15 | cached n_tokens = 1640, memory_seq_rm [1640, end)",
+        "slot update_slots: id  1 | task 20 | cached n_tokens = 1640, memory_seq_rm [1640, end)",
+        "slot update_slots: id  1 | task 25 | cached n_tokens = 1640, memory_seq_rm [1640, end)",
+        "slot update_slots: id  1 | task 30 | cached n_tokens = 1640, memory_seq_rm [1640, end)",
+        "slot update_slots: id  1 | task 35 | cached n_tokens = 1640, memory_seq_rm [1640, end)"
+      ]
+    },
+    {
+      "mode": "multi_writer",
+      "width": 1,
+      "roles": [
+        "writer"
+      ],
+      "baseline": {
+        "started_ns": 1787426487007227038,
+        "response": "ACCEPTED",
+        "prompt_eval_count": 4095,
+        "prompt_eval_duration": 24465846000,
+        "eval_count": 3,
+        "total_duration": 26321017568
+      },
+      "children": [
+        {
+          "started_ns": 1787426514100289510,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 8173367000,
+          "eval_count": 4,
+          "total_duration": 9947453512
+        }
+      ],
+      "accepted_outcome": true,
+      "outcome_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+      "full_context_input_tokens": 4095,
+      "scoped_context_input_tokens": 1641,
+      "shared_prefix_read_tokens": 1024,
+      "cache_task_tokens": [
+        1024
+      ],
+      "ollama_cache_log": [
+        "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+        "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)"
+      ]
+    },
+    {
+      "mode": "multi_writer",
+      "width": 2,
+      "roles": [
+        "writer",
+        "reviewer"
+      ],
+      "baseline": {
+        "started_ns": 1787426525119600141,
+        "response": "ACCEPTED",
+        "prompt_eval_count": 4095,
+        "prompt_eval_duration": 24530765000,
+        "eval_count": 3,
+        "total_duration": 26373638833
+      },
+      "children": [
+        {
+          "started_ns": 1787426552262546881,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 8163052000,
+          "eval_count": 4,
+          "total_duration": 9937958333
+        },
+        {
+          "started_ns": 1787426562208877320,
+          "response": "ACCEPTED",
+          "prompt_eval_count": 1639,
+          "prompt_eval_duration": 364505000,
+          "eval_count": 3,
+          "total_duration": 747100167
+        }
+      ],
+      "accepted_outcome": true,
+      "outcome_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+      "full_context_input_tokens": 8190,
+      "scoped_context_input_tokens": 3280,
+      "shared_prefix_read_tokens": 2628,
+      "cache_task_tokens": [
+        1024,
+        1604
+      ],
+      "ollama_cache_log": [
+        "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+        "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+        "slot update_slots: id  1 | task 6 | cached n_tokens = 1604, memory_seq_rm [1604, end)"
+      ]
+    },
+    {
+      "mode": "multi_writer",
+      "width": 4,
+      "roles": [
+        "writer",
+        "reviewer",
+        "writer",
+        "reviewer"
+      ],
+      "baseline": {
+        "started_ns": 1787426564011986806,
+        "response": "ACCEPTED",
+        "prompt_eval_count": 4095,
+        "prompt_eval_duration": 24437614000,
+        "eval_count": 3,
+        "total_duration": 26294930889
+      },
+      "children": [
+        {
+          "started_ns": 1787426591071457479,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 8145216000,
+          "eval_count": 4,
+          "total_duration": 9920897590
+        },
+        {
+          "started_ns": 1787426601000649141,
+          "response": "ACCEPTED",
+          "prompt_eval_count": 1639,
+          "prompt_eval_duration": 365455000,
+          "eval_count": 3,
+          "total_duration": 757081998
+        },
+        {
+          "started_ns": 1787426601765530878,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 388062000,
+          "eval_count": 4,
+          "total_duration": 815728792
+        },
+        {
+          "started_ns": 1787426602589073085,
+          "response": "ACCEPTED",
+          "prompt_eval_count": 1639,
+          "prompt_eval_duration": 365243000,
+          "eval_count": 3,
+          "total_duration": 760116636
+        }
+      ],
+      "accepted_outcome": true,
+      "outcome_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+      "full_context_input_tokens": 16380,
+      "scoped_context_input_tokens": 6560,
+      "shared_prefix_read_tokens": 5836,
+      "cache_task_tokens": [
+        1024,
+        1604,
+        1604,
+        1604
+      ],
+      "ollama_cache_log": [
+        "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+        "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+        "slot update_slots: id  1 | task 6 | cached n_tokens = 1604, memory_seq_rm [1604, end)",
+        "slot update_slots: id  1 | task 10 | cached n_tokens = 1604, memory_seq_rm [1604, end)",
+        "slot update_slots: id  1 | task 15 | cached n_tokens = 1604, memory_seq_rm [1604, end)"
+      ]
+    },
+    {
+      "mode": "multi_writer",
+      "width": 8,
+      "roles": [
+        "writer",
+        "reviewer",
+        "writer",
+        "reviewer",
+        "writer",
+        "reviewer",
+        "writer",
+        "reviewer"
+      ],
+      "baseline": {
+        "started_ns": 1787426604415882363,
+        "response": "ACCEPTED",
+        "prompt_eval_count": 4095,
+        "prompt_eval_duration": 24475983000,
+        "eval_count": 3,
+        "total_duration": 26314571600
+      },
+      "children": [
+        {
+          "started_ns": 1787426631503571791,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 8138538000,
+          "eval_count": 4,
+          "total_duration": 9923051680
+        },
+        {
+          "started_ns": 1787426641434986630,
+          "response": "ACCEPTED",
+          "prompt_eval_count": 1639,
+          "prompt_eval_duration": 366504000,
+          "eval_count": 3,
+          "total_duration": 760273780
+        },
+        {
+          "started_ns": 1787426642203093607,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 389501000,
+          "eval_count": 4,
+          "total_duration": 818773381
+        },
+        {
+          "started_ns": 1787426643029911475,
+          "response": "ACCEPTED",
+          "prompt_eval_count": 1639,
+          "prompt_eval_duration": 364094000,
+          "eval_count": 3,
+          "total_duration": 759847267
+        },
+        {
+          "started_ns": 1787426643797538280,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 388539000,
+          "eval_count": 4,
+          "total_duration": 801189770
+        },
+        {
+          "started_ns": 1787426644606811299,
+          "response": "ACCEPTED",
+          "prompt_eval_count": 1639,
+          "prompt_eval_duration": 364939000,
+          "eval_count": 3,
+          "total_duration": 759263562
+        },
+        {
+          "started_ns": 1787426645373957281,
+          "response": "ACCEPTED.",
+          "prompt_eval_count": 1641,
+          "prompt_eval_duration": 388777000,
+          "eval_count": 4,
+          "total_duration": 791954642
+        },
+        {
+          "started_ns": 1787426646173732911,
+          "response": "ACCEPTED",
+          "prompt_eval_count": 1639,
+          "prompt_eval_duration": 365678000,
+          "eval_count": 3,
+          "total_duration": 756449543
+        }
+      ],
+      "accepted_outcome": true,
+      "outcome_digest": "e2d81d7bcfa4281cbf418c8e75c8ffa283964aeae398818b9fc4a4586797597c",
+      "full_context_input_tokens": 32760,
+      "scoped_context_input_tokens": 13120,
+      "shared_prefix_read_tokens": 12252,
+      "cache_task_tokens": [
+        1604,
+        1604,
+        1604,
+        1024,
+        1604,
+        1604,
+        1604,
+        1604
+      ],
+      "ollama_cache_log": [
+        "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+        "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+        "slot update_slots: id  1 | task 6 | cached n_tokens = 1604, memory_seq_rm [1604, end)",
+        "slot update_slots: id  1 | task 10 | cached n_tokens = 1604, memory_seq_rm [1604, end)",
+        "slot update_slots: id  1 | task 15 | cached n_tokens = 1604, memory_seq_rm [1604, end)",
+        "slot update_slots: id  1 | task 19 | cached n_tokens = 1604, memory_seq_rm [1604, end)",
+        "slot update_slots: id  1 | task 24 | cached n_tokens = 1604, memory_seq_rm [1604, end)",
+        "slot update_slots: id  1 | task 28 | cached n_tokens = 1604, memory_seq_rm [1604, end)",
+        "slot update_slots: id  1 | task 33 | cached n_tokens = 1604, memory_seq_rm [1604, end)"
+      ]
+    }
+  ],
+  "raw_capture_sha256": "3ef6f93a4923ceeb0c984d51bcef7188723e79aeee147e4bb3101553a30f1536"
+}
