@@ -51,6 +51,7 @@ type launchOpts struct {
 	ultracode       bool     // pass --settings '{"ultracode":true}' to Claude (workflow mode)
 	model           string   // pass --model <id> to Claude (default Opus 4.8); empty => the seat's own default
 	guardCacheArgs  []string // managed-cache posture flags spliced into `fak guard` (--api-key-env / --managed-cache); nil only for an explicit `auto` (guard's own billing-gated default) — the unconfigured default now resolves to on
+	codexHome       string   // explicit Codex config home; hard-pinned in guard and child env
 	passthrough     []string // extra args appended to the agent command (everything after `--`)
 }
 
@@ -225,6 +226,9 @@ func buildLaunchArgv(fakBin string, o launchOpts) []string {
 	// keeps the argv byte-identical to a launch that never configured a posture.
 	argv := []string{fakBin, "guard"}
 	argv = append(argv, o.guardCacheArgs...)
+	if guardAgentBaseName(o.command) == "codex" && strings.TrimSpace(o.codexHome) != "" {
+		argv = append(argv, "--codex-home", o.codexHome)
+	}
 	argv = append(argv, "--")
 	return append(argv, agentCmd...)
 }
@@ -300,6 +304,17 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 	}
 	// Serve needs disk-derived identity (a seat that can't serve falls forward), so refresh.
 	reg = reg.Refresh()
+	command := strings.TrimSpace(p.command)
+	if command == "" {
+		command = "claude"
+	}
+	if guardAgentBaseName(command) == "codex" {
+		if strings.TrimSpace(p.name) == "" || p.rotate {
+			fmt.Fprintln(stderr, "fak accounts launch: Codex requires an explicit --name; default/rotate remain Claude-registry semantics so a launch cannot silently cross CODEX_HOME")
+			return 2
+		}
+		reg = appendDiscoveredCodexHomes(reg)
+	}
 	fixes := accountFixSummary(p.registryPath, reg)
 
 	name := strings.TrimSpace(p.name)
@@ -365,10 +380,6 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 	id := accountsReportHome(stderr, home, chain)
 	warnAllCooled(stderr, home, cdEntry)
 
-	command := strings.TrimSpace(p.command)
-	if command == "" {
-		command = "claude"
-	}
 	fakBin, err := os.Executable()
 	if err != nil || strings.TrimSpace(fakBin) == "" {
 		fakBin = "fak" // fall back to PATH resolution if the binary path can't be read
@@ -412,6 +423,7 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		ultracode:       ultracodeOn,
 		model:           p.model,
 		guardCacheArgs:  guardCacheArgs,
+		codexHome:       codexHomeForCommand(command, home),
 		passthrough:     p.passthrough,
 	})
 	if why, conflict := thirdPartyGuardConflict(home, p.useGuard); conflict {
@@ -426,6 +438,9 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		return 2
 	}
 	env, scrubbed := launchSeatEnv(os.Environ(), home)
+	if guardAgentBaseName(command) == "codex" {
+		env = launchCodexEnv(env, home.Dir)
+	}
 	if len(scrubbed) > 0 {
 		// Say it out loud: an operator who exported a key expects it to be used, so silently
 		// dropping it would be its own surprise.
@@ -632,7 +647,11 @@ func printAccountsLaunchPlan(stderr io.Writer, p launchParams, command string, h
 		}
 	}
 	fmt.Fprintf(stderr, "fak accounts launch — seat %q\n", home.Name)
-	fmt.Fprintf(stderr, "  CLAUDE_CONFIG_DIR = <account-dir>\n")
+	if guardAgentBaseName(command) == "codex" {
+		fmt.Fprintln(stderr, "  CODEX_HOME        = <account-dir> (child-local; guard hard-pinned)")
+	} else {
+		fmt.Fprintln(stderr, "  CLAUDE_CONFIG_DIR = <account-dir>")
+	}
 	if id.Email != "" {
 		fmt.Fprintf(stderr, "  identity          = %s\n", id.Email)
 	} else if home.CredentialKind() == accounts.CredKindAPIKey && home.APIKeyEnv != "" {

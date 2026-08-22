@@ -1,0 +1,85 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestCodexLaunchPosturePinsHomeInArgvAndChildEnv(t *testing.T) {
+	homes := []string{t.TempDir(), t.TempDir()}
+	type result struct {
+		argv []string
+		env  []string
+	}
+	results := make(chan result, len(homes))
+	for _, home := range homes {
+		home := home
+		go func() {
+			argv := buildLaunchArgv("fak", launchOpts{command: "codex", useGuard: true, codexHome: home})
+			env := launchCodexEnv([]string{"PATH=/bin", "CODEX_HOME=parent"}, home)
+			results <- result{argv: argv, env: env}
+		}()
+	}
+	seen := map[string]bool{}
+	for range homes {
+		got := <-results
+		joined := strings.Join(got.argv, "\x00")
+		var pinned string
+		for _, home := range homes {
+			if strings.Contains(joined, "--codex-home\x00"+home) {
+				pinned = home
+			}
+		}
+		if pinned == "" {
+			t.Fatalf("guard argv lacks a named --codex-home pin: %#v", got.argv)
+		}
+		if strings.Count(strings.ToUpper(strings.Join(got.env, "\n")), "CODEX_HOME=") != 1 || !envHasValue(got.env, "CODEX_HOME", pinned) {
+			t.Fatalf("child env is not pinned to %q: %#v", pinned, got.env)
+		}
+		seen[pinned] = true
+	}
+	if len(seen) != 2 {
+		t.Fatalf("concurrent launches crossed homes: %#v", seen)
+	}
+}
+
+func TestLaunchCodexEnvDoesNotMutateParentSlice(t *testing.T) {
+	base := []string{"CODEX_HOME=parent", "PATH=/bin"}
+	got := launchCodexEnv(base, "child")
+	if base[0] != "CODEX_HOME=parent" || !envHasValue(got, "CODEX_HOME", "child") {
+		t.Fatalf("base=%#v child=%#v", base, got)
+	}
+}
+
+func envHasValue(env []string, key, value string) bool {
+	for _, kv := range env {
+		if kv == key+"="+value {
+			return true
+		}
+	}
+	return false
+}
+
+func TestDiscoveredCodexHomesEnterUnifiedAccountView(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	ready := filepath.Join(home, ".codex-blue")
+	if err := os.MkdirAll(ready, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const token = "eyJhbGciOiJub25lIn0.eyJzdWIiOiJhY2N0LWJsdWUifQ.sig"
+	auth := `{"auth_mode":"chatgpt","tokens":{"access_token":"` + token + `","account_id":"acct-blue"}}`
+	if err := os.WriteFile(filepath.Join(ready, "auth.json"), []byte(auth), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FLEET_USER_HOME", home)
+	t.Setenv("FLEET_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Setenv("FLEET_REG_DIR", filepath.Join(root, "registry"))
+	t.Setenv("FLEET_POLICY_DIR", filepath.Join(root, "policy"))
+	homes := discoveredCodexHomes()
+	if len(homes) != 1 || homes[0].Name != "blue" || homes[0].Dir != ready || !homes[0].CanServe() {
+		t.Fatalf("discovered Codex homes = %+v", homes)
+	}
+}

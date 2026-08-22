@@ -307,7 +307,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak accounts: %v\n", err)
 			return 1
 		}
-		reg = reg.Refresh()
+		reg = appendDiscoveredCodexHomes(reg.Refresh())
 		if *asJSON {
 			// Emit the per-seat LoginReport roster (schema+summary+seats[]) that the
 			// sibling `status --json` path produces, not the raw registry persistence
