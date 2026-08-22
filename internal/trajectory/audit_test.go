@@ -194,6 +194,160 @@ func TestAuditUnsupportedUsageShapeIsExplicit(t *testing.T) {
 	}
 }
 
+func TestAuditEdgeMatrix(t *testing.T) {
+	fixtureRoot := filepath.Join("testdata", "audit", "issue-8493", "edge", "empty")
+	for _, test := range []struct {
+		name   string
+		source AuditSource
+	}{
+		{"empty Claude file", AuditSource{Name: AuditSourceClaude, Root: filepath.Join(fixtureRoot, "claude", "projects"), RootLabel: "claude/projects"}},
+		{"empty Codex file", AuditSource{Name: AuditSourceCodex, Root: filepath.Join(fixtureRoot, "codex", "sessions"), RootLabel: "codex/sessions"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := RunAudit(AuditOptions{Sources: []AuditSource{test.source}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Denominators) != 1 || !result.Denominators[0].RootPresent || result.Denominators[0].FilesScanned != 1 || result.Denominators[0].Records != 0 {
+				t.Fatalf("empty denominator = %+v", result.Denominators)
+			}
+			if len(result.Transcripts) != 1 || result.Transcripts[0].Tokens != (AuditTokens{}) || len(result.Refusals) != 0 {
+				t.Fatalf("empty result = transcripts:%+v refusals:%+v", result.Transcripts, result.Refusals)
+			}
+		})
+	}
+
+	for _, source := range []string{AuditSourceClaude, AuditSourceCodex} {
+		t.Run("missing "+source+" root", func(t *testing.T) {
+			result, err := RunAudit(AuditOptions{Sources: []AuditSource{{Name: source, Root: filepath.Join(t.TempDir(), "missing"), RootLabel: source + "/missing"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Denominators) != 1 || result.Denominators[0].RootPresent || result.Denominators[0].FilesDiscovered != 0 || len(result.Transcripts) != 0 || len(result.Refusals) != 0 {
+				t.Fatalf("missing-root result = %+v", result)
+			}
+		})
+	}
+}
+
+func TestAuditRefusalMatrix(t *testing.T) {
+	root := filepath.Join("testdata", "audit", "issue-8493", "refusals")
+	tests := []struct {
+		name       string
+		source     AuditSource
+		code       string
+		seen       int
+		exact      int
+		applied    int
+		wantTokens AuditTokens
+		oversized  bool
+	}{
+		{
+			name: "Claude duplicate usage mismatch", source: AuditSource{Name: AuditSourceClaude, Root: filepath.Join(root, "claude-duplicate", "projects"), RootLabel: "claude/projects"},
+			code: "claude_duplicate_usage_mismatch", seen: 2, exact: 1, applied: 1,
+			wantTokens: AuditTokens{InputTokens: 10, OutputTokens: 2, CacheReadTokens: 3, CacheCreateTokens: 4},
+		},
+		{
+			name: "Codex cumulative total decreased", source: AuditSource{Name: AuditSourceCodex, Root: filepath.Join(root, "codex-decreasing", "sessions"), RootLabel: "codex/sessions"},
+			code: "codex_total_usage_decreased", seen: 2, exact: 1, applied: 1,
+			wantTokens: AuditTokens{InputTokens: 6, OutputTokens: 2, CacheReadTokens: 3, CacheCreateTokens: 1},
+		},
+		{
+			name: "malformed JSON", source: AuditSource{Name: AuditSourceClaude, Root: filepath.Join(root, "malformed", "claude", "projects"), RootLabel: "claude/projects"},
+			code: "malformed_json",
+		},
+		{
+			name: "oversized line", source: AuditSource{Name: AuditSourceClaude, Root: filepath.Join(root, "oversized", "claude", "projects"), RootLabel: "claude/projects"},
+			code: "line_too_large", oversized: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var result AuditResult
+			if !test.oversized {
+				var err error
+				result, err = RunAudit(AuditOptions{Sources: []AuditSource{test.source}})
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				matches, err := filepath.Glob(filepath.Join(test.source.Root, "fak", "*.jsonl"))
+				if err != nil || len(matches) != 1 {
+					t.Fatalf("oversized fixture matches=%v err=%v", matches, err)
+				}
+				seed, err := os.ReadFile(matches[0])
+				if err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(t.TempDir(), "oversized.jsonl")
+				file, err := os.Create(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := file.Write(bytes.TrimSpace(seed)); err != nil {
+					file.Close()
+					t.Fatal(err)
+				}
+				chunk := bytes.Repeat([]byte("x"), 1024*1024)
+				for written := len(seed); written <= 32*1024*1024; written += len(chunk) {
+					if _, err := file.Write(chunk); err != nil {
+						file.Close()
+						t.Fatal(err)
+					}
+				}
+				if err := file.Close(); err != nil {
+					t.Fatal(err)
+				}
+				denominator := AuditDenominatorRow{Schema: AuditSchema, Kind: "source_denominator", Source: test.source.Name, Root: test.source.RootLabel, RootPresent: true, FilesDiscovered: 1, RecordTypes: map[string]int{}}
+				row, refusals, hooks, err := parseAuditFile(test.source.Name, path, "fak/oversized.jsonl", &denominator)
+				if err != nil {
+					t.Fatal(err)
+				}
+				denominator.FilesScanned = 1
+				result = AuditResult{Denominators: []AuditDenominatorRow{denominator}, Transcripts: []AuditTranscriptRow{row}, Refusals: refusals}
+				result.Summary = summarizeAudit(result.Denominators, result.Transcripts, hooks)
+			}
+
+			if len(result.Refusals) != 1 || result.Refusals[0].Schema != AuditSchema || result.Refusals[0].Code != test.code {
+				t.Fatalf("refusals = %+v, want one %s row", result.Refusals, test.code)
+			}
+			denominator := result.Denominators[0]
+			if denominator.RefusedRecords != 1 || result.Summary.RefusedRecords != 1 {
+				t.Fatalf("refused denominator=%d summary=%d, want 1/1", denominator.RefusedRecords, result.Summary.RefusedRecords)
+			}
+			if denominator.UsageRecordsSeen != test.seen || denominator.UsageRecordsExact != test.exact || denominator.UsageRecordsApplied != test.applied {
+				t.Fatalf("usage denominator = %+v", denominator)
+			}
+			if len(result.Transcripts) != 1 || result.Transcripts[0].Tokens != test.wantTokens {
+				t.Fatalf("tokens = %+v, want %+v", result.Transcripts, test.wantTokens)
+			}
+		})
+	}
+}
+
+func TestAuditDeterministicByteOrder(t *testing.T) {
+	root := filepath.Join("testdata", "audit", "issue-8493", "deterministic")
+	a := AuditSource{Name: AuditSourceClaude, Root: filepath.Join(root, "claude-a", "projects"), RootLabel: "claude/projects/a"}
+	b := AuditSource{Name: AuditSourceClaude, Root: filepath.Join(root, "claude-b", "projects"), RootLabel: "claude/projects/b"}
+	run := func(sources []AuditSource) []byte {
+		t.Helper()
+		result, err := RunAudit(AuditOptions{Sources: sources})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var output bytes.Buffer
+		if err := WriteAuditJSONL(&output, result); err != nil {
+			t.Fatal(err)
+		}
+		return output.Bytes()
+	}
+	forward := run([]AuditSource{a, b})
+	reverse := run([]AuditSource{b, a})
+	if !bytes.Equal(forward, reverse) {
+		t.Fatalf("JSONL byte order depends on source input order\nforward:\n%s\nreverse:\n%s", forward, reverse)
+	}
+}
+
 func runPinnedAudit(t *testing.T, baseline *AuditSummaryRow) AuditResult {
 	t.Helper()
 	result, err := RunAudit(AuditOptions{

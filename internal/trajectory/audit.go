@@ -204,7 +204,12 @@ func RunAudit(opts AuditOptions) (AuditResult, error) {
 		allHookDurations = append(allHookDurations, hookDurations...)
 	}
 
-	sort.Slice(result.Denominators, func(i, j int) bool { return result.Denominators[i].Source < result.Denominators[j].Source })
+	sort.Slice(result.Denominators, func(i, j int) bool {
+		if result.Denominators[i].Source != result.Denominators[j].Source {
+			return result.Denominators[i].Source < result.Denominators[j].Source
+		}
+		return result.Denominators[i].Root < result.Denominators[j].Root
+	})
 	sort.Slice(result.Transcripts, func(i, j int) bool {
 		if result.Transcripts[i].Source != result.Transcripts[j].Source {
 			return result.Transcripts[i].Source < result.Transcripts[j].Source

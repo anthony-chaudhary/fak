@@ -81,6 +81,81 @@ func TestRunTrajectoryAuditUnsupportedShapeWritesArtifactAndFails(t *testing.T) 
 	}
 }
 
+func TestRunTrajectoryAuditRefusalMatrix(t *testing.T) {
+	fixtureRoot := filepath.Join("..", "..", "internal", "trajectory", "testdata", "audit", "issue-8493", "refusals")
+	missing := filepath.Join(t.TempDir(), "missing")
+	tests := []struct {
+		name       string
+		claudeRoot string
+		codexRoot  string
+		code       string
+	}{
+		{"Claude duplicate mismatch", filepath.Join(fixtureRoot, "claude-duplicate", "projects"), missing, "claude_duplicate_usage_mismatch"},
+		{"Codex cumulative decrease", missing, filepath.Join(fixtureRoot, "codex-decreasing", "sessions"), "codex_total_usage_decreased"},
+		{"malformed JSON", filepath.Join(fixtureRoot, "malformed", "claude", "projects"), missing, "malformed_json"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assertTrajectoryAuditRefusal(t, test.claudeRoot, test.codexRoot, test.code)
+		})
+	}
+
+	t.Run("oversized line", func(t *testing.T) {
+		root := t.TempDir()
+		path := filepath.Join(root, "fak", "oversized.jsonl")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		seed, err := os.ReadFile(filepath.Join(fixtureRoot, "oversized", "claude", "projects", "fak", "oversized.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.Create(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := file.Write(bytes.TrimSpace(seed)); err != nil {
+			file.Close()
+			t.Fatal(err)
+		}
+		chunk := bytes.Repeat([]byte("x"), 1024*1024)
+		for written := len(seed); written <= 32*1024*1024; written += len(chunk) {
+			if _, err := file.Write(chunk); err != nil {
+				file.Close()
+				t.Fatal(err)
+			}
+		}
+		if err := file.Close(); err != nil {
+			t.Fatal(err)
+		}
+		assertTrajectoryAuditRefusal(t, root, missing, "line_too_large")
+	})
+}
+
+func assertTrajectoryAuditRefusal(t *testing.T, claudeRoot, codexRoot, code string) {
+	t.Helper()
+	jsonlPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	var stdout, stderr bytes.Buffer
+	rc := runTrajectory(&stdout, &stderr, []string{
+		"audit", "--since", "0", "--claude-root", claudeRoot, "--codex-root", codexRoot, "--jsonl", jsonlPath,
+	})
+	if rc != 1 {
+		t.Fatalf("rc=%d, want 1; stderr=%s", rc, stderr.String())
+	}
+	artifact, err := os.ReadFile(jsonlPath)
+	if err != nil {
+		t.Fatalf("read refusal artifact: %v; stderr=%s", err, stderr.String())
+	}
+	for _, want := range []string{`"schema":"fak-trajectory-audit/1"`, `"kind":"refusal"`, `"code":"` + code + `"`} {
+		if !bytes.Contains(artifact, []byte(want)) {
+			t.Fatalf("artifact missing %q; stderr=%s artifact=%s", want, stderr.String(), artifact)
+		}
+	}
+	if !strings.Contains(stderr.String(), "TRAJECTORY_SCHEMA_REFUSED") {
+		t.Fatalf("missing refusal status; stderr=%s", stderr.String())
+	}
+}
+
 func TestParseTrajectoryAuditSinceDays(t *testing.T) {
 	duration, err := parseTrajectoryAuditSince("7d")
 	if err != nil {

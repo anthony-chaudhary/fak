@@ -1,0 +1,1 @@
+{"type":"assistant","sessionId":"same-session","message":{"id":"same-message","model":"claude-fixture","usage":{"input_tokens":10,"output_tokens":2},"content":[]}}

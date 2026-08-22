@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -15,6 +16,8 @@ import (
 )
 
 var auditNonzeroExit = regexp.MustCompile(`(?i)(?:process exited with code|exit (?:code|status)[:= ]+)\s*[1-9][0-9]*`)
+
+const auditMaxLineBytes = 32 * 1024 * 1024
 
 type auditToolCall struct {
 	name   string
@@ -65,7 +68,7 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 	}
 	var refusals []AuditRefusalRow
 	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 64*1024), 32*1024*1024)
+	scanner.Buffer(make([]byte, 64*1024), auditMaxLineBytes)
 	lineNumber := 0
 	for scanner.Scan() {
 		lineNumber++
@@ -79,6 +82,7 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 		decoder.UseNumber()
 		if err := decoder.Decode(&record); err != nil {
 			refusals = append(refusals, newAuditRefusal(source, rel, lineNumber, "malformed_json", err.Error()))
+			denominator.RefusedRecords++
 			continue
 		}
 		recordType, _ := record["type"].(string)
@@ -98,7 +102,13 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return AuditTranscriptRow{}, nil, nil, fmt.Errorf("trajectory audit: scan transcript: %w", err)
+		if !errors.Is(err, bufio.ErrTooLong) {
+			return AuditTranscriptRow{}, nil, nil, fmt.Errorf("trajectory audit: scan transcript: %w", err)
+		}
+		lineNumber++
+		denominator.Records++
+		denominator.RefusedRecords++
+		refusals = append(refusals, newAuditRefusal(source, rel, lineNumber, "line_too_large", fmt.Sprintf("line exceeds %d-byte limit", auditMaxLineBytes)))
 	}
 	denominator.UsageRecordsSeen += state.usageSeen
 	denominator.UsageRecordsExact += state.usageExact
@@ -189,6 +199,7 @@ func parseClaudeAuditUsage(value any, message map[string]any, line int, rel stri
 		state.usageDuplicates++
 		if previous != tokens {
 			*refusals = append(*refusals, newAuditRefusal(AuditSourceClaude, rel, line, "claude_duplicate_usage_mismatch", "duplicate message id carries different usage"))
+			return
 		}
 		state.usageExact++
 		return
