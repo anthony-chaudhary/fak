@@ -90,7 +90,7 @@ var tier = map[string]int{
 	"benchscore":             2, // pure benchmark score artifact validator/renderer; stdlib-only, off the hot path.
 	"callavoid":              1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
 	"harnessres":             1, // cross-platform, stdlib-only process resource sampler for the fak guard harness (CPU/mem/IO); imports nothing internal, off the hot path (#2045, epic #2044).
-	"harnessinit":            1, // external product scaffold renderer; stdlib-only and outside kernel hot paths (#6788).
+	"harnessinit":            3, // product scaffold + cross-host conformance; depends on host/resolve/window launch seams (#8227).
 	"harnesshost":            2, // resolves first-party host profiles into product manifests and locks before scaffold rendering.
 	"harnessrelease":         1, // release-asset checksum/extraction and external-product witness runner (#6957).
 	"harnessgallery":         1, // static user-need blueprints and starter pack renderer (#6961).
