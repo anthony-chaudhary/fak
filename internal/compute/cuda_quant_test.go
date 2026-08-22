@@ -305,11 +305,16 @@ func TestCUDAQ4KMatMulApproxMatchesRef(t *testing.T) {
 		t.Fatalf("Q4_K argmax-exact failed: ref=%d cudaHost=%d cudaKernel=%d", argmaxF32(yRef), argmaxF32(yCu), aCu)
 	}
 	c := cosine(nonTarget(yRef, out, target), nonTarget(yCu, out, target))
+	maxAbs := maxAbsDelta(yRef, yCu)
+	const maxAbsLimit = 0.02
+	if maxAbs > maxAbsLimit {
+		t.Fatalf("Q4_K MatMul maxAbs %.6g > %.6g; catches activation-quantization scale/layout drift", maxAbs, maxAbsLimit)
+	}
 	if c < cudaQ4KCosineMin {
 		t.Fatalf("Q4_K MatMul cosine %.6f < recorded Q4_K gate %.6f (cudaQ4KCosineMin)", c, cudaQ4KCosineMin)
 	}
 	t.Logf("#485 Q4_K MatMul: cosine=%.8f maxAbs=%.2e gate=%.4f argmax-exact (device=%s tier=%s class=%s)",
-		c, maxAbsDelta(yRef, yCu), cudaQ4KCosineMin, cb.Name(), cb.Tier(), cb.Class())
+		c, maxAbs, cudaQ4KCosineMin, cb.Name(), cb.Tier(), cb.Class())
 }
 
 // TestCUDAQ4KBatchedMatMulApproxMatchesRef — native Q4_K prefill GEMM, dequant fused into the tile,
