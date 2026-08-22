@@ -9,11 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/leaseref"
 )
 
 type dispatchWavePrice struct {
@@ -51,13 +53,36 @@ type dispatchWavePrice struct {
 	ScopedParallelGain   int                               `json:"scoped_parallelism_gain"`
 	CollisionWavePenalty int                               `json:"collision_wave_penalty"`
 	ExpectedRework       int                               `json:"expected_rework"`
+	RequestedIssues      []int                             `json:"requested_issues,omitempty"`
+	SelectedIssues       []int                             `json:"selected_issues,omitempty"`
+	RefusedIssues        []dispatchWaveIssueRefusal        `json:"refused_issues,omitempty"`
 }
 
 const (
 	dispatchWaveReasonWaveCap     = "wave-cap"
 	dispatchWaveReasonFreshWIPCap = "fresh-wip-cap"
 	dispatchWaveDefaultFreshCap   = 1
+
+	dispatchWaveIssueRefusalRouting     = "routing"
+	dispatchWaveIssueRefusalEligibility = "eligibility"
+	dispatchWaveIssueRefusalCapacity    = "capacity"
+	dispatchWaveIssueRefusalIntent      = "intent"
+
+	dispatchWaveReasonIssueUnroutable = "ISSUE_UNROUTABLE"
+	dispatchWaveReasonCapacity        = "WAVE_CAPACITY"
+	dispatchWaveReasonIssueInFlight   = "ISSUE_IN_FLIGHT"
+	dispatchWaveReasonIssueCooldown   = "ISSUE_COOLDOWN"
+	dispatchWaveReasonIssueIneligible = "ISSUE_INELIGIBLE"
+	dispatchWaveReasonLaneMismatch    = "ISSUE_LANE_MISMATCH"
+	dispatchWaveReasonLaneUnavailable = "ISSUE_LANE_UNAVAILABLE"
 )
+
+type dispatchWaveIssueRefusal struct {
+	Issue  int    `json:"issue"`
+	Class  string `json:"class"`
+	Reason string `json:"reason"`
+	Detail string `json:"detail,omitempty"`
+}
 
 type dispatchWaveCandidate struct {
 	ID           string                    `json:"id"`
@@ -142,6 +167,8 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	goalProfile := fs.String("goal-profile", "", "dispatch picker profile: throughput|high-priority (default follows --goal, else throughput)")
 	lane := fs.String("lane", "", "pin every tick to this repo lane (default: largest step-budget lane pick)")
 	excludeLane := fs.String("exclude-lane", "", "comma-separated lanes to drop from the step-budget pick")
+	var issueFlags repeatedString
+	fs.Var(&issueFlags, "issue", "bind the wave to an issue number; repeatable and comma-separated (never substitutes general backlog work)")
 	settleS := fs.Float64("settle-s", 2.0, "seconds to wait after each live spawn")
 	noLedger := fs.Bool("no-loop-ledger", false, "disable loop-ledger append for spawned ticks")
 	codexLoopGate := fs.String("codex-loop-gate", dispatchCodexLoopGateDefaultThreshold(), "for live Codex workers, audit recent Codex sessions before spawn and refuse at threshold: loop|action|off")
@@ -150,6 +177,11 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	live := fs.Bool("live", false, "actually spawn workers")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 	if !parseFlags(fs, argv) {
+		return 2
+	}
+	requestedIssues, issueErr := parseDispatchWaveIssueNumbers(issueFlags)
+	if issueErr != nil {
+		fmt.Fprintf(stderr, "fak dispatch wave: --issue: %v\n", issueErr)
 		return 2
 	}
 	root := *workspace
@@ -190,6 +222,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	})
 	if preflightErr != nil {
 		rec := newDispatchWaveRecord(root, *live, backendNorm, wk, goalID, profile, *count, 0, nil)
+		dispatchWaveSeedExplicitIssueReceipt(rec, requestedIssues)
 		rec["granted"] = 0
 		rec["shortfall"] = *count
 		dispatchWaveRecordDependencyError(rec, preflightErr)
@@ -198,10 +231,12 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	product, allocationCount, preflightShortfall, preflight := preflightResult.Product, preflightResult.AllocationCount, preflightResult.Shortfall, preflightResult.Payload
 
 	rec := newDispatchWaveRecord(root, *live, backendNorm, wk, goalID, profile, *count, allocationCount, preflight)
+	dispatchWaveSeedExplicitIssueReceipt(rec, requestedIssues)
 	if allocationCount <= 0 {
 		rec["granted"] = 0
 		rec["shortfall"] = *count
 		rec["stop_reason"] = "preflight headroom exhausted before account allocation"
+		dispatchWaveRefuseAllExplicitIssues(rec, requestedIssues, dispatchWaveIssueRefusalCapacity, dispatchWaveReasonCapacity, "preflight capacity admitted no worker seats")
 		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 	}
 
@@ -226,6 +261,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	rec["allocation"] = scrubDispatchSecrets(alloc.Map())
 	if len(lanes) == 0 {
 		rec["stop_reason"] = firstString(alloc.Reason, "no account session slots available")
+		dispatchWaveRefuseAllExplicitIssues(rec, requestedIssues, dispatchWaveIssueRefusalCapacity, dispatchWaveReasonCapacity, rec["stop_reason"].(string))
 		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 	}
 
@@ -235,16 +271,29 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 		dispatchWaveRecordDependencyError(rec, err)
 		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 	}
+	intentHolds, err := dispatchWaveReadIntentHolds(root, requestedIssues)
+	if err != nil {
+		dispatchWaveRecordDependencyError(rec, fmt.Errorf("read live issue intents: %w", err))
+		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
+	}
 	heldIssues := map[int]bool{}
+	var explicitRefusals []dispatchWaveIssueRefusal
 	var executionPlan []dispatchWaveExecutionPlan
 	const maxPrelaunchReprice = 8
 	for attempt := 0; ; attempt++ {
-		price, err := priceDispatchWavePayloadFilteredWithFreshCap(root, router, *count, len(lanes), *lane, excludedLanes, dispatchtick.DefaultCooldownMinutes, heldIssues, *freshStartCap, profile)
+		var price dispatchWavePrice
+		if len(requestedIssues) > 0 {
+			price, err = priceDispatchWaveExplicitIssues(root, router, requestedIssues, *count, len(lanes), *lane, excludedLanes, dispatchtick.DefaultCooldownMinutes, heldIssues, *freshStartCap, intentHolds, profile)
+		} else {
+			price, err = priceDispatchWavePayloadFilteredWithFreshCap(root, router, *count, len(lanes), *lane, excludedLanes, dispatchtick.DefaultCooldownMinutes, heldIssues, *freshStartCap, profile)
+		}
 		if err != nil {
 			rec["stop_reason"] = "price fan-out: " + err.Error()
 			return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 		}
+		price = dispatchWaveMergeIssueRefusals(price, explicitRefusals)
 		rec["price"] = price
+		dispatchWaveAttachExplicitIssueReceipt(rec, price)
 		rec["planned_lanes"] = append([]string(nil), price.RunLanes...)
 		executionPlan = dispatchWaveExecutionPlans(root, backendNorm, wk, goalID, profile, waveID, shortfall, price.RunTargets, lanes, !*noLedger, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit)
 		executionPlanID := dispatchWaveExecutionPlanID(executionPlan)
@@ -265,6 +314,13 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 		rec["prelaunch_gate"] = prelaunchGate
 		readyPlan := dispatchWaveReadyExecutionPlan(executionPlan, executionAudit)
 		rec["ready_execution_plan"] = readyPlan
+		if len(requestedIssues) > 0 {
+			price = dispatchWaveApplyAuditIssueOutcomes(price, executionAudit)
+			explicitRefusals = dispatchWaveMergeRefusalRows(requestedIssues, explicitRefusals, price.RefusedIssues)
+			price = dispatchWaveMergeIssueRefusals(price, explicitRefusals)
+			rec["price"] = price
+			dispatchWaveAttachExplicitIssueReceipt(rec, price)
+		}
 		if prelaunchGate.OK {
 			executionPlan = readyPlan
 		}
@@ -401,8 +457,32 @@ func priceDispatchWavePayloadFiltered(root string, router dispatchtick.RouterPay
 }
 
 func priceDispatchWavePayloadFilteredWithFreshCap(root string, router dispatchtick.RouterPayload, requested, granted int, explicitLane string, excluded []string, cooldownMin int, excludedIssues map[int]bool, freshStartCap int, goalProfile ...string) (dispatchWavePrice, error) {
+	return priceDispatchWavePayloadBound(root, router, requested, granted, explicitLane, excluded, cooldownMin, excludedIssues, freshStartCap, nil, nil, goalProfile...)
+}
+
+// priceDispatchWaveExplicitIssues is the explicit-target planner seam. Supplying a set
+// binds candidate construction to those identities; every member either reaches
+// SelectedIssues or gets one typed refusal, and no general-backlog issue can enter.
+func priceDispatchWaveExplicitIssues(root string, router dispatchtick.RouterPayload, requestedIssues []int, requested, granted int, explicitLane string, excluded []string, cooldownMin int, excludedIssues map[int]bool, freshStartCap int, intentHolds map[int]string, goalProfile ...string) (dispatchWavePrice, error) {
+	return priceDispatchWavePayloadBound(root, router, requested, granted, explicitLane, excluded, cooldownMin, excludedIssues, freshStartCap, requestedIssues, intentHolds, goalProfile...)
+}
+
+func priceDispatchWavePayloadBound(root string, router dispatchtick.RouterPayload, requested, granted int, explicitLane string, excluded []string, cooldownMin int, excludedIssues map[int]bool, freshStartCap int, requestedIssues []int, intentHolds map[int]string, goalProfile ...string) (dispatchWavePrice, error) {
 	runsDir := filepath.Join(root, dispatchtick.RunsDirName)
 	profile := dispatchWaveGoalProfile(goalProfile)
+	requestedSet := map[int]bool{}
+	for _, issue := range requestedIssues {
+		requestedSet[issue] = true
+	}
+	explicitIssues := len(requestedSet) > 0
+	seenRoutes := map[int]bool{}
+	refused := map[int]dispatchWaveIssueRefusal{}
+	refuse := func(issue int, class, reason, detail string) {
+		if issue <= 0 || !explicitIssues || refused[issue].Issue != 0 {
+			return
+		}
+		refused[issue] = dispatchWaveIssueRefusal{Issue: issue, Class: class, Reason: reason, Detail: strings.TrimSpace(detail)}
+	}
 	newlyUnblocked := map[int]bool{}
 	for _, n := range router.NewlyUnblocked {
 		newlyUnblocked[n] = true
@@ -456,17 +536,37 @@ func priceDispatchWavePayloadFilteredWithFreshCap(root string, router dispatchti
 	unscopedByLane := map[string][]int{}
 	scopedByLane := map[string]bool{}
 	for _, route := range router.Issues {
+		if explicitIssues && !requestedSet[route.Number] {
+			continue
+		}
+		seenRoutes[route.Number] = true
 		lane := strings.TrimSpace(route.Lane)
 		if lane == "" {
+			refuse(route.Number, dispatchWaveIssueRefusalRouting, dispatchWaveReasonIssueUnroutable, route.UnroutedReason)
 			continue
 		}
 		if explicitLane != "" && lane != explicitLane {
+			refuse(route.Number, dispatchWaveIssueRefusalRouting, dispatchWaveReasonLaneMismatch, fmt.Sprintf("routed lane %q does not match pinned lane %q", lane, explicitLane))
 			continue
 		}
 		if exclude[lane] {
+			refuse(route.Number, dispatchWaveIssueRefusalEligibility, dispatchWaveReasonLaneUnavailable, fmt.Sprintf("routed lane %q is excluded or already leased", lane))
 			continue
 		}
-		if liveIssues[route.Number] || cooled[route.Number] || skipIssues[route.Number] {
+		if detail := strings.TrimSpace(intentHolds[route.Number]); detail != "" {
+			refuse(route.Number, dispatchWaveIssueRefusalIntent, leaseref.ReasonIntentCollision, detail)
+			continue
+		}
+		if liveIssues[route.Number] {
+			refuse(route.Number, dispatchWaveIssueRefusalEligibility, dispatchWaveReasonIssueInFlight, "a live dispatch worker already owns this issue")
+			continue
+		}
+		if cooled[route.Number] {
+			refuse(route.Number, dispatchWaveIssueRefusalEligibility, dispatchWaveReasonIssueCooldown, "the issue is inside the dispatch retry cooldown")
+			continue
+		}
+		if skipIssues[route.Number] {
+			refuse(route.Number, dispatchWaveIssueRefusalEligibility, dispatchWaveReasonIssueIneligible, "the issue is held by the caller or attempt budget")
 			continue
 		}
 		paths := append([]string(nil), route.Paths...)
@@ -522,7 +622,7 @@ func priceDispatchWavePayloadFilteredWithFreshCap(root string, router dispatchti
 		}
 		grp := router.Lanes[lane]
 		nums := append([]int(nil), unscopedByLane[lane]...)
-		if len(router.Issues) == 0 {
+		if len(router.Issues) == 0 && !explicitIssues {
 			nums = append([]int(nil), grp.Issues...)
 		}
 		nums = dispatchWaveOrderLaneIssues(root, nums, grp.Priority, readyState)
@@ -627,6 +727,43 @@ func priceDispatchWavePayloadFilteredWithFreshCap(root string, router dispatchti
 	price := dispatchWaveBuildPrice(requested, granted, cands, rows, runTargets, runLanes, runLaneNames, held, exclude, res)
 	price.FreshStartCap = freshStartCap
 	price.FreshStarts = freshStarts
+	if explicitIssues {
+		price.RequestedIssues = append([]int(nil), requestedIssues...)
+		for _, target := range price.RunTargets {
+			price.SelectedIssues = append(price.SelectedIssues, target.Issue)
+		}
+		selectedSet := dispatchWaveIntSet(price.SelectedIssues)
+		pricedRowForIssue := map[int]dispatchWaveCandidate{}
+		for _, cand := range price.Candidates {
+			pricedRowForIssue[cand.Issue] = cand
+		}
+		for _, issue := range requestedIssues {
+			if selectedSet[issue] || refused[issue].Issue != 0 {
+				continue
+			}
+			if cand, ok := pricedRowForIssue[issue]; ok {
+				class, reason := dispatchWaveIssueRefusalEligibility, firstString(cand.Reason, dispatchWaveReasonIssueIneligible)
+				if cand.Reason == dispatchWaveReasonWaveCap || cand.Reason == dispatchWaveReasonFreshWIPCap {
+					class, reason = dispatchWaveIssueRefusalCapacity, dispatchWaveReasonCapacity
+				}
+				refuse(issue, class, reason, cand.Reason)
+				continue
+			}
+			if seenRoutes[issue] {
+				refuse(issue, dispatchWaveIssueRefusalCapacity, dispatchWaveReasonCapacity, "the issue could not fit the bounded lane candidate set")
+				continue
+			}
+			detail := "issue is absent from the routed candidate set"
+			for _, row := range router.UnroutableBacklog {
+				if row.Number == issue {
+					detail = firstString(row.Reason, row.NextAction, detail)
+					break
+				}
+			}
+			refuse(issue, dispatchWaveIssueRefusalRouting, dispatchWaveReasonIssueUnroutable, detail)
+		}
+		price.RefusedIssues = dispatchWaveRefusalRows(requestedIssues, refused)
+	}
 	return price, nil
 }
 
@@ -1196,6 +1333,206 @@ func sortedIntSet(set map[int]bool) []int {
 		out = append(out, n)
 	}
 	sort.Ints(out)
+	return out
+}
+
+func parseDispatchWaveIssueNumbers(values []string) ([]int, error) {
+	seen := map[int]bool{}
+	out := []int{}
+	for _, value := range values {
+		for _, token := range strings.Split(value, ",") {
+			raw := strings.TrimSpace(token)
+			if raw == "" {
+				return nil, errors.New("empty issue number")
+			}
+			norm := strings.ToLower(raw)
+			for _, prefix := range []string{"issue", "gh", "bug"} {
+				if strings.HasPrefix(norm, prefix) {
+					norm = strings.TrimLeft(strings.TrimSpace(strings.TrimPrefix(norm, prefix)), "-# ")
+					break
+				}
+			}
+			norm = strings.TrimSpace(strings.TrimPrefix(norm, "#"))
+			n, err := strconv.Atoi(norm)
+			if err != nil || n <= 0 {
+				return nil, fmt.Errorf("%q is not a positive issue number", raw)
+			}
+			if !seen[n] {
+				seen[n] = true
+				out = append(out, n)
+			}
+		}
+	}
+	return out, nil
+}
+
+func dispatchWaveSeedExplicitIssueReceipt(rec map[string]any, requested []int) {
+	if len(requested) == 0 || rec == nil {
+		return
+	}
+	rec["requested_issues"] = append([]int(nil), requested...)
+	rec["selected_issues"] = []int{}
+	rec["refused_issues"] = []dispatchWaveIssueRefusal{}
+}
+
+func dispatchWaveAttachExplicitIssueReceipt(rec map[string]any, price dispatchWavePrice) {
+	if len(price.RequestedIssues) == 0 || rec == nil {
+		return
+	}
+	rec["requested_issues"] = append([]int(nil), price.RequestedIssues...)
+	rec["selected_issues"] = append([]int{}, price.SelectedIssues...)
+	rec["refused_issues"] = append([]dispatchWaveIssueRefusal{}, price.RefusedIssues...)
+}
+
+func dispatchWaveRefuseAllExplicitIssues(rec map[string]any, requested []int, class, reason, detail string) {
+	if len(requested) == 0 {
+		return
+	}
+	rows := make([]dispatchWaveIssueRefusal, 0, len(requested))
+	for _, issue := range requested {
+		rows = append(rows, dispatchWaveIssueRefusal{Issue: issue, Class: class, Reason: reason, Detail: detail})
+	}
+	dispatchWaveAttachExplicitIssueReceipt(rec, dispatchWavePrice{RequestedIssues: append([]int(nil), requested...), RefusedIssues: rows})
+}
+
+func dispatchWaveReadIntentHolds(root string, requested []int) (map[int]string, error) {
+	holds := map[int]string{}
+	if len(requested) == 0 {
+		return holds, nil
+	}
+	wanted := dispatchWaveIntSet(requested)
+	live, _, err := leaseref.NewInDir(root).LiveIntents(context.Background(), time.Now())
+	if err != nil {
+		return nil, err
+	}
+	for _, rec := range live {
+		if !strings.HasPrefix(rec.Key, "issue-") {
+			continue
+		}
+		issue, parseErr := strconv.Atoi(strings.TrimPrefix(rec.Key, "issue-"))
+		if parseErr != nil || !wanted[issue] {
+			continue
+		}
+		detail := fmt.Sprintf("issue #%d is claimed by %s", issue, firstString(strings.TrimSpace(rec.Holder), "an anonymous peer"))
+		if rec.SessionID != "" {
+			detail += " (session " + rec.SessionID + ")"
+		}
+		holds[issue] = detail
+	}
+	return holds, nil
+}
+
+func dispatchWaveApplyAuditIssueOutcomes(price dispatchWavePrice, rows []dispatchWaveExecutionAudit) dispatchWavePrice {
+	if len(price.RequestedIssues) == 0 || len(rows) == 0 {
+		return price
+	}
+	refusals := append([]dispatchWaveIssueRefusal(nil), price.RefusedIssues...)
+	for _, row := range rows {
+		if row.OK || row.Target.Issue <= 0 {
+			continue
+		}
+		class := dispatchWaveIssueRefusalEligibility
+		reason := firstString(strings.TrimSpace(row.Verdict), strings.ToUpper(strings.TrimSpace(row.Action)), dispatchWaveReasonIssueIneligible)
+		switch {
+		case reason == leaseref.ReasonIntentCollision:
+			class, reason = dispatchWaveIssueRefusalIntent, leaseref.ReasonIntentCollision
+		case row.Action == "in_flight_duplicate":
+			class, reason = dispatchWaveIssueRefusalEligibility, dispatchWaveReasonIssueInFlight
+		case strings.Contains(reason, "CAP") || strings.Contains(reason, "NO_SEATS"):
+			class = dispatchWaveIssueRefusalCapacity
+		case strings.Contains(reason, "NO_LANE") || row.Action == "no_lane":
+			class = dispatchWaveIssueRefusalRouting
+		}
+		if row.Error != "" {
+			reason = "WAVE_AUDIT_ERROR"
+		}
+		refusals = append(refusals, dispatchWaveIssueRefusal{
+			Issue: row.Target.Issue, Class: class, Reason: reason,
+			Detail: firstString(row.Reason, row.Error, row.Verdict, row.Action),
+		})
+	}
+	price.RefusedIssues = dispatchWaveMergeRefusalRows(price.RequestedIssues, price.RefusedIssues, refusals)
+	return dispatchWaveMergeIssueRefusals(price, nil)
+}
+
+func dispatchWaveMergeIssueRefusals(price dispatchWavePrice, extras []dispatchWaveIssueRefusal) dispatchWavePrice {
+	if len(price.RequestedIssues) == 0 {
+		return price
+	}
+	price.RefusedIssues = dispatchWaveMergeRefusalRows(price.RequestedIssues, price.RefusedIssues, extras)
+	refused := map[int]dispatchWaveIssueRefusal{}
+	for _, row := range price.RefusedIssues {
+		refused[row.Issue] = row
+	}
+	runTargets := make([]dispatchWaveCandidate, 0, len(price.RunTargets))
+	selected := map[int]bool{}
+	for _, target := range price.RunTargets {
+		if refused[target.Issue].Issue != 0 {
+			continue
+		}
+		runTargets = append(runTargets, target)
+		selected[target.Issue] = true
+	}
+	price.RunTargets = runTargets
+	price.RunLanes = price.RunLanes[:0]
+	price.SelectedIssues = price.SelectedIssues[:0]
+	for _, target := range runTargets {
+		price.RunLanes = append(price.RunLanes, target.Lane)
+		price.SelectedIssues = append(price.SelectedIssues, target.Issue)
+	}
+	for i := range price.Candidates {
+		price.Candidates[i].Selected = selected[price.Candidates[i].Issue]
+		if row, ok := refused[price.Candidates[i].Issue]; ok {
+			price.Candidates[i].Reason = row.Reason
+		}
+	}
+	price.EffectiveCap = len(runTargets)
+	price.LanesUtilized = len(runTargets)
+	return price
+}
+
+func dispatchWaveMergeRefusalRows(requested []int, sets ...[]dispatchWaveIssueRefusal) []dispatchWaveIssueRefusal {
+	byIssue := map[int]dispatchWaveIssueRefusal{}
+	for _, rows := range sets {
+		for _, row := range rows {
+			if row.Issue > 0 && byIssue[row.Issue].Issue == 0 {
+				byIssue[row.Issue] = row
+			}
+		}
+	}
+	return dispatchWaveRefusalRows(requested, byIssue)
+}
+
+func dispatchWaveRefusalRows(requested []int, byIssue map[int]dispatchWaveIssueRefusal) []dispatchWaveIssueRefusal {
+	if len(byIssue) == 0 {
+		return nil
+	}
+	out := make([]dispatchWaveIssueRefusal, 0, len(byIssue))
+	seen := map[int]bool{}
+	for _, issue := range requested {
+		if row := byIssue[issue]; row.Issue != 0 {
+			out = append(out, row)
+			seen[issue] = true
+		}
+	}
+	extra := make([]int, 0, len(byIssue)-len(out))
+	for issue := range byIssue {
+		if !seen[issue] {
+			extra = append(extra, issue)
+		}
+	}
+	sort.Ints(extra)
+	for _, issue := range extra {
+		out = append(out, byIssue[issue])
+	}
+	return out
+}
+
+func dispatchWaveIntSet(issues []int) map[int]bool {
+	out := make(map[int]bool, len(issues))
+	for _, issue := range issues {
+		out[issue] = true
+	}
 	return out
 }
 
