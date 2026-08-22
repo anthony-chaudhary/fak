@@ -1,0 +1,85 @@
+{
+  "schema": "fak-ultracode-paired/1",
+  "cost_comparison": "billed_tokens_and_spend",
+  "single": {
+    "mode": "single",
+    "identity": {
+      "task": "fix three independent defects",
+      "task_digest": "sha256:task",
+      "model": "fixture-model",
+      "environment": "offline-fixture",
+      "wall_budget_ms": 120000,
+      "token_budget": 20000,
+      "spend_budget_usd": 1
+    },
+    "critical_path_ms": 10000,
+    "total_worker_ms": 10000,
+    "input_tokens": 6000,
+    "output_tokens": 1000,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "billed_tokens": 7000,
+    "spend_usd": 0,
+    "accounting": {
+      "schema": "fak.ultracode.accounting.v1",
+      "input_tokens": {"availability": "available", "authority": "provider_usage", "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "coverage": 1, "value": 6000},
+      "output_tokens": {"availability": "available", "authority": "provider_usage", "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "coverage": 1, "value": 1000},
+      "cache_read_tokens": {"availability": "available", "authority": "provider_usage", "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "coverage": 1, "value": 0},
+      "cache_write_tokens": {"availability": "available", "authority": "provider_usage", "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "coverage": 1, "value": 0},
+      "billed_tokens": {"availability": "unavailable", "authority": "provider_usage", "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "coverage": 0, "reason": "subscription receipt does not expose invoice-equivalent billed tokens"},
+      "spend_usd": {"availability": "unavailable", "authority": "provider_usage", "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "coverage": 0, "reason": "subscription receipt does not expose per-run spend"}
+    },
+    "expected_effects": 3,
+    "accepted_effects": 3,
+    "contradictions": 0,
+    "acceptance_passed": true,
+    "retries": 0,
+    "witness_digest": "sha256:single",
+    "activation": {
+      "receipts": [
+        {"schema": "fak.ultracode_activation.v1", "run_id": "control", "child_id": "control", "harness": "codex", "requested": "off", "resolved": "off", "injected": false, "observable": "unknown"}
+      ]
+    }
+  },
+  "fleet": {
+    "mode": "fleet",
+    "identity": {
+      "task": "fix three independent defects",
+      "task_digest": "sha256:task",
+      "model": "fixture-model",
+      "environment": "offline-fixture",
+      "wall_budget_ms": 120000,
+      "token_budget": 20000,
+      "spend_budget_usd": 1
+    },
+    "critical_path_ms": 5000,
+    "total_worker_ms": 13000,
+    "input_tokens": 3000,
+    "output_tokens": 900,
+    "cache_read_tokens": 5000,
+    "cache_write_tokens": 100,
+    "billed_tokens": 4000,
+    "spend_usd": 0,
+    "accounting": {
+      "schema": "fak.ultracode.accounting.v1",
+      "input_tokens": {"availability": "available", "authority": "provider_usage", "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "coverage": 1, "value": 3000},
+      "output_tokens": {"availability": "available", "authority": "provider_usage", "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "coverage": 1, "value": 900},
+      "cache_read_tokens": {"availability": "available", "authority": "provider_usage", "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "coverage": 1, "value": 5000},
+      "cache_write_tokens": {"availability": "available", "authority": "provider_usage", "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "coverage": 1, "value": 100},
+      "billed_tokens": {"availability": "unavailable", "authority": "provider_usage", "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "coverage": 0, "reason": "subscription receipt does not expose invoice-equivalent billed tokens"},
+      "spend_usd": {"availability": "unavailable", "authority": "provider_usage", "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "coverage": 0, "reason": "subscription receipt does not expose per-run spend"}
+    },
+    "expected_effects": 3,
+    "accepted_effects": 3,
+    "contradictions": 0,
+    "acceptance_passed": true,
+    "retries": 0,
+    "witness_digest": "sha256:fleet",
+    "activation": {
+      "minimum_active_ratio": 1,
+      "receipts": [
+        {"schema": "fak.ultracode_activation.v1", "run_id": "treatment", "child_id": "worker-1", "harness": "codex", "requested": "on", "resolved": "on", "injected": true, "observable": "active", "observation_source": "runtime_observation"}
+      ]
+    }
+  }
+}

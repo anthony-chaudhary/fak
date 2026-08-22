@@ -37,6 +37,22 @@ func TestUltracodeBenchJSON(t *testing.T) {
 	}
 }
 
+func TestUltracodeBenchRendersUnavailableAccounting(t *testing.T) {
+	pairPath := filepath.Join("..", "..", "internal", "ultracodebench", "testdata", "accounting_subscription_unavailable.json")
+	var out, errOut bytes.Buffer
+	if code := runUltracodeBench(&out, &errOut, []string{"--pair", pairPath}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	for _, want := range []string{"ULTRACODE PAIRED BENCH: ABSTAIN", "billed tokens: unavailable", "spend: unavailable"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output missing %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "$0.0000") {
+		t.Fatalf("unavailable spend rendered as zero:\n%s", out.String())
+	}
+}
+
 func TestUltracodeBenchRequiresOneInput(t *testing.T) {
 	for _, args := range [][]string{nil, {"--selfcheck", "--pair", "x"}} {
 		var out, errOut bytes.Buffer

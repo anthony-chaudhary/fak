@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -88,17 +89,13 @@ func TestPairReplaysToCapturedAbstain(t *testing.T) {
 	if report.Verdict != "ABSTAIN" {
 		t.Fatalf("verdict=%s reasons=%v", report.Verdict, report.Reasons)
 	}
-	var captured struct {
-		Verdict string               `json:"verdict"`
-		Reasons []string             `json:"reasons"`
-		Gains   ultracodebench.Gains `json:"gains"`
-	}
+	var captured ultracodebench.Report
 	readJSON(t, "paired-report.witness.json", &captured)
-	if captured.Verdict != "ABSTAIN" || len(captured.Reasons) != 1 || captured.Reasons[0] != "both modes require independent witness digests" {
-		t.Fatalf("captured pre-activation report lost its abstention: %+v", captured)
+	if captured.Accounting.Availability != ultracodebench.AccountingUnavailable || captured.Single.AcceptedPerBilledKToken != nil || captured.Gains.OutcomePerUSDGain != nil {
+		t.Fatalf("captured report fabricated unavailable accounting: %+v", captured)
 	}
-	if report.Gains != captured.Gains {
-		t.Fatalf("captured metrics drifted:\n got  %+v\n want %+v", report.Gains, captured.Gains)
+	if !reflect.DeepEqual(report, captured) {
+		t.Fatalf("captured report drifted:\n got  %+v\n want %+v", report, captured)
 	}
 }
 

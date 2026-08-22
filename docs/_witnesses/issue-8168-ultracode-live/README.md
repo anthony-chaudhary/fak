@@ -13,7 +13,7 @@ fak ultracode bench --pair docs/_witnesses/issue-8168-ultracode-live/pair.json -
 go test ./docs/_witnesses/issue-8168-ultracode-live
 ```
 
-The first command must return `ABSTAIN`. `pair.json` is a compatibility projection into `fak-ultracode-paired/1`: its `billed_tokens` values are provider total input-plus-output token counts, not invoice-equivalent bills, and `spend_usd: 0` means no charge was observed. `campaign.json` carries the availability flags that prevent those placeholders from becoming a claim.
+The first command must return `ABSTAIN`. `pair.json` preserves the legacy numeric compatibility projection, where `billed_tokens` contains provider total input-plus-output tokens and `spend_usd: 0` does not prove zero charge. Its joined `fak.ultracode.accounting.v1` receipts are authoritative: raw input/output/cache axes remain provider-usage observations, while billed tokens and spend are typed `unavailable`. The evaluator ignores the compatibility placeholders for cost verdicts and reports no numeric cost gain.
 
 ## Rerun the live campaign after #8488
 

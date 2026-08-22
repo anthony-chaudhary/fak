@@ -1,5 +1,6 @@
 {
   "schema": "fak-ultracode-paired/1",
+  "cost_comparison": "billed_tokens_and_spend",
   "single": {
     "mode": "single",
     "identity": {
@@ -19,6 +20,15 @@
     "cache_write_tokens": 0,
     "billed_tokens": 59371,
     "spend_usd": 0,
+    "accounting": {
+      "schema": "fak.ultracode.accounting.v1",
+      "input_tokens": {"availability": "available", "authority": "provider_usage", "artifact_digest": "sha256:ec9360ee61a63a708d9da77f741008960ad68dc451520fd10fa4c140c82902e8", "coverage": 1, "value": 20667},
+      "output_tokens": {"availability": "available", "authority": "provider_usage", "artifact_digest": "sha256:ec9360ee61a63a708d9da77f741008960ad68dc451520fd10fa4c140c82902e8", "coverage": 1, "value": 304},
+      "cache_read_tokens": {"availability": "available", "authority": "provider_usage", "artifact_digest": "sha256:ec9360ee61a63a708d9da77f741008960ad68dc451520fd10fa4c140c82902e8", "coverage": 1, "value": 38400},
+      "cache_write_tokens": {"availability": "available", "authority": "provider_usage", "artifact_digest": "sha256:ec9360ee61a63a708d9da77f741008960ad68dc451520fd10fa4c140c82902e8", "coverage": 1, "value": 0},
+      "billed_tokens": {"availability": "unavailable", "authority": "provider_usage", "artifact_digest": "sha256:ec9360ee61a63a708d9da77f741008960ad68dc451520fd10fa4c140c82902e8", "coverage": 0, "reason": "Codex subscription receipt exposed token counts but no invoice-equivalent billed-token total"},
+      "spend_usd": {"availability": "unavailable", "authority": "provider_usage", "artifact_digest": "sha256:ec9360ee61a63a708d9da77f741008960ad68dc451520fd10fa4c140c82902e8", "coverage": 0, "reason": "Codex subscription receipt exposed no per-run dollar charge"}
+    },
     "expected_effects": 3,
     "accepted_effects": 3,
     "contradictions": 0,
@@ -45,6 +55,15 @@
     "cache_write_tokens": 0,
     "billed_tokens": 237724,
     "spend_usd": 0,
+    "accounting": {
+      "schema": "fak.ultracode.accounting.v1",
+      "input_tokens": {"availability": "available", "authority": "provider_usage", "artifact_digest": "sha256:9a0deca8c571ef26f8343a7da16bfc5576f7675eac581066832a920e000acc94", "coverage": 1, "value": 63330},
+      "output_tokens": {"availability": "available", "authority": "provider_usage", "artifact_digest": "sha256:9a0deca8c571ef26f8343a7da16bfc5576f7675eac581066832a920e000acc94", "coverage": 1, "value": 1338},
+      "cache_read_tokens": {"availability": "available", "authority": "provider_usage", "artifact_digest": "sha256:9a0deca8c571ef26f8343a7da16bfc5576f7675eac581066832a920e000acc94", "coverage": 1, "value": 173056},
+      "cache_write_tokens": {"availability": "available", "authority": "provider_usage", "artifact_digest": "sha256:9a0deca8c571ef26f8343a7da16bfc5576f7675eac581066832a920e000acc94", "coverage": 1, "value": 0},
+      "billed_tokens": {"availability": "unavailable", "authority": "provider_usage", "artifact_digest": "sha256:9a0deca8c571ef26f8343a7da16bfc5576f7675eac581066832a920e000acc94", "coverage": 0, "reason": "Codex subscription receipts exposed token counts but no invoice-equivalent billed-token total"},
+      "spend_usd": {"availability": "unavailable", "authority": "provider_usage", "artifact_digest": "sha256:9a0deca8c571ef26f8343a7da16bfc5576f7675eac581066832a920e000acc94", "coverage": 0, "reason": "Codex subscription receipts exposed no per-run dollar charge"}
+    },
     "expected_effects": 3,
     "accepted_effects": 3,
     "contradictions": 0,
