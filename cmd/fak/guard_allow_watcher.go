@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -60,12 +61,19 @@ func guardAllowLayersSignature() (string, error) {
 			}
 			return "", err
 		}
-		// Validate before changing the live floor. This is the last-good gate:
-		// malformed edits are retried but never replace the installed runtime.
-		if _, err := loadGuardAllowOverlay(layer.Path); err != nil {
+		// Include the time-filtered form as well as the bytes. A TTL crossing changes
+		// the effective allow set even when the operator has not rewritten the file.
+		effective, err := loadGuardAllowOverlay(layer.Path)
+		if err != nil {
+			return "", err
+		}
+		effectiveRaw, err := json.Marshal(effective)
+		if err != nil {
 			return "", err
 		}
 		b.Write(raw)
+		b.WriteByte(0)
+		b.Write(effectiveRaw)
 		b.WriteByte(0)
 	}
 	return b.String(), nil

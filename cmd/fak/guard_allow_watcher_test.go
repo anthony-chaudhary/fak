@@ -119,3 +119,52 @@ func TestGuardAllowWatcherReloadsSessionScope(t *testing.T) {
 		t.Fatalf("after session add = %v, want ALLOW", got)
 	}
 }
+
+func TestGuardAllowWatcherRevokesAtTTLExpiryWithoutFileChange(t *testing.T) {
+	dir := t.TempDir()
+	allowPath := filepath.Join(dir, "allow.json")
+	t.Setenv(guardAllowOverlayEnv, allowPath)
+	t.Setenv(guardDenyOverlayEnv, filepath.Join(dir, "deny.json"))
+
+	expiresAt := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
+	setClock := guardAllowPinClock(t, expiresAt.Add(-time.Second))
+	const tool = "live_ttl_probe"
+	if err := saveGuardAllowOverlay(allowPath, guardAllowOverlay{
+		Allow:  []string{tool},
+		Expiry: map[string]string{tool: guardAllowExpiryStamp(expiresAt)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(allowPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reload := guardPolicyReloader("")
+	if _, err := reload(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	w := newGuardAllowWatcher(time.Hour, reload, nil)
+	decision := func() (abi.VerdictKind, abi.ReasonCode) {
+		v := adjudicator.Default.Adjudicate(context.Background(), guardToolCall(t, tool, map[string]any{}))
+		return v.Kind, v.Reason
+	}
+	if kind, reason := decision(); kind != abi.VerdictAllow {
+		t.Fatalf("before expiry verdict=(%v, %v), want ALLOW", kind, reason)
+	}
+
+	setClock(expiresAt)
+	if e := w.Reload(context.Background()); !e.Reloaded || e.Rejected {
+		t.Fatalf("expiry reload = %+v, want successful reload", e)
+	}
+	if kind, reason := decision(); kind != abi.VerdictDeny || reason != abi.ReasonDefaultDeny {
+		t.Fatalf("at expiry verdict=(%v, %v), want (DENY, DEFAULT_DENY)", kind, reason)
+	}
+	after, err := os.ReadFile(allowPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("watcher rewrote overlay bytes across expiry:\nbefore: %s\nafter:  %s", before, after)
+	}
+}
