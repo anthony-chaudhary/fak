@@ -1,0 +1,82 @@
+{
+  "schema": "fak.kv-prefix-depth-campaign/v1",
+  "campaign_id": "issue-8424-prefix-depth-fixture-v1",
+  "pins": {
+    "backend": "openai-compatible-fixture",
+    "backend_revision": "prefix-fixture-backend-r1",
+    "runtime_revision": "prefix-fixture-runtime-r1",
+    "model_id": "fixture/reusable-prefix-model",
+    "model_revision": "prefix-fixture-model-r1",
+    "fak_revision": "issue-8424-fixture-r1"
+  },
+  "tokenization": {
+    "tokenizer_id": "fixture/tokenizer",
+    "tokenizer_revision": "prefix-fixture-tokenizer-r1",
+    "prompt_template_sha256": "5c6718c2c315692755fa56dca3e2fdab1074e71cc947219e8a909961d9f14767",
+    "unit": "tokens"
+  },
+  "axes": {
+    "prefix_depth_tokens": [1024, 2048, 4096, 8192, 12288, 16384],
+    "suffix_patterns": [
+      {
+        "id": "stable-tail",
+        "description": "byte-identical suffix across the cold/warm pair",
+        "churn_fraction": 0
+      },
+      {
+        "id": "rotating-tool-tail",
+        "description": "tool-result suffix changes while the token prefix remains identical",
+        "churn_fraction": 1
+      }
+    ],
+    "turn_counts": [4, 8],
+    "concurrency": [1, 4],
+    "pressure_arms": [
+      {
+        "id": "baseline",
+        "phase": "baseline",
+        "competing_tokens": 0,
+        "removed_before_next": false
+      },
+      {
+        "id": "capacity-pressure",
+        "phase": "pressure",
+        "competing_tokens": 32768,
+        "removed_before_next": true
+      },
+      {
+        "id": "post-pressure-recovery",
+        "phase": "recovery",
+        "competing_tokens": 0,
+        "removed_before_next": false
+      }
+    ],
+    "repetitions": 3
+  },
+  "reference_arm": {
+    "turn_count": 4,
+    "concurrency": 1,
+    "pressure_phase": "baseline"
+  },
+  "ordering": {
+    "strategy": "counterbalanced-by-repetition",
+    "seed": 8424,
+    "cold_warm_order": ["cold", "warm"],
+    "request_order": [
+      "odd repetitions: cold then warm",
+      "even repetitions: warm then cold"
+    ]
+  },
+  "reset": {
+    "before_campaign": "restart the backend and clear only its documented prefix-cache surface",
+    "before_cold_arm": "clear the selected backend prefix cache and wait for reset acknowledgement",
+    "before_warm_arm": "preserve the immediately preceding cold request prefix without another reset",
+    "after_pressure": "remove competing traffic, clear only pressure traffic, and preserve the campaign prefix"
+  },
+  "confidence": {
+    "level": 0.95,
+    "reliable_reuse_ratio": 0.8,
+    "minimum_samples": 3
+  },
+  "useful_work_rule": "the request returns the expected terminal marker and no backend error"
+}

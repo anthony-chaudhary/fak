@@ -1,0 +1,420 @@
+{
+  "schema": "fak.kv-prefix-depth-selfcheck/v1",
+  "campaign_id": "issue-8424-prefix-depth-fixture-v1",
+  "assertions": {
+    "known_deepest_reusable_prefix_tokens": 8192,
+    "known_cliff_unreliable_at_tokens": 12288,
+    "recovery_after_pressure": true,
+    "missing_evidence_boundary_unknown": true,
+    "observed_envelope_complete": true
+  },
+  "known_cliff": {
+    "schema": "fak.kv-prefix-depth-report/v1",
+    "campaign_id": "issue-8424-prefix-depth-fixture-v1",
+    "manifest_sha256": "sha256:f8a3b341e362b7f3213a6bf101a6b870495157c1bd66dde1c413fc96035c6b2c",
+    "pins": {
+      "backend": "openai-compatible-fixture",
+      "backend_revision": "prefix-fixture-backend-r1",
+      "runtime_revision": "prefix-fixture-runtime-r1",
+      "model_id": "fixture/reusable-prefix-model",
+      "model_revision": "prefix-fixture-model-r1",
+      "fak_revision": "issue-8424-fixture-r1"
+    },
+    "tokenization": {
+      "tokenizer_id": "fixture/tokenizer",
+      "tokenizer_revision": "prefix-fixture-tokenizer-r1",
+      "prompt_template_sha256": "5c6718c2c315692755fa56dca3e2fdab1074e71cc947219e8a909961d9f14767",
+      "unit": "tokens"
+    },
+    "confidence": {
+      "level": 0.95,
+      "reliable_reuse_ratio": 0.8,
+      "minimum_samples": 3
+    },
+    "observed_envelope": {
+      "prefix_depths": 6,
+      "suffix_patterns": 2,
+      "turn_counts": 2,
+      "concurrency_values": 2,
+      "pressure_phases": 3,
+      "minimum_repetitions_per_arm": 3,
+      "counterbalanced": true,
+      "complete": true
+    },
+    "evidence_dimensions": {
+      "warm_requests": 48,
+      "semantic_prompt_equal": 30,
+      "token_prefix_equal": 48,
+      "backend_status_present": 48,
+      "backend_admitted": 44,
+      "reuse_measurement_present": 48,
+      "observed_reuse_positive": 44,
+      "useful_work_completed": 96,
+      "useful_work_requests": 96
+    },
+    "depth_curve": [
+      {
+        "prefix_depth_tokens": 1024,
+        "pairs": 6,
+        "ttft_saved_ms": {
+          "samples": 6,
+          "mean": 48.64999999999998,
+          "ci95_low": 48.27448141457446,
+          "ci95_high": 49.025518585425495
+        },
+        "prefill_saved_tokens": {
+          "samples": 6,
+          "mean": 973,
+          "ci95_low": 965.4896282914891,
+          "ci95_high": 980.5103717085109
+        },
+        "reuse_ratio": {
+          "samples": 6,
+          "mean": 0.9501953125,
+          "ci95_low": 0.9428609651284073,
+          "ci95_high": 0.9575296598715927
+        },
+        "occupancy_ratio": {
+          "samples": 6,
+          "mean": 0.0625,
+          "ci95_low": 0.0625,
+          "ci95_high": 0.0625
+        },
+        "kv_signal_samples": 6,
+        "evictions": 0,
+        "preemptions": 0
+      },
+      {
+        "prefix_depth_tokens": 2048,
+        "pairs": 6,
+        "ttft_saved_ms": {
+          "samples": 6,
+          "mean": 97.30000000000003,
+          "ci95_low": 96.92448141457446,
+          "ci95_high": 97.67551858542559
+        },
+        "marginal_ttft_saved_ms": 48.65000000000005,
+        "prefill_saved_tokens": {
+          "samples": 6,
+          "mean": 1946,
+          "ci95_low": 1938.4896282914892,
+          "ci95_high": 1953.5103717085108
+        },
+        "marginal_prefill_saved_tokens": 973,
+        "reuse_ratio": {
+          "samples": 6,
+          "mean": 0.9501953125,
+          "ci95_low": 0.9465281388142037,
+          "ci95_high": 0.9538624861857963
+        },
+        "occupancy_ratio": {
+          "samples": 6,
+          "mean": 0.125,
+          "ci95_low": 0.125,
+          "ci95_high": 0.125
+        },
+        "kv_signal_samples": 6,
+        "evictions": 0,
+        "preemptions": 0
+      },
+      {
+        "prefix_depth_tokens": 4096,
+        "pairs": 6,
+        "ttft_saved_ms": {
+          "samples": 6,
+          "mean": 194.55000000000004,
+          "ci95_low": 194.17448141457447,
+          "ci95_high": 194.9255185854256
+        },
+        "marginal_ttft_saved_ms": 97.25000000000001,
+        "prefill_saved_tokens": {
+          "samples": 6,
+          "mean": 3891,
+          "ci95_low": 3883.489628291489,
+          "ci95_high": 3898.510371708511
+        },
+        "marginal_prefill_saved_tokens": 1945,
+        "reuse_ratio": {
+          "samples": 6,
+          "mean": 0.949951171875,
+          "ci95_low": 0.9481175850321019,
+          "ci95_high": 0.9517847587178981
+        },
+        "occupancy_ratio": {
+          "samples": 6,
+          "mean": 0.25,
+          "ci95_low": 0.25,
+          "ci95_high": 0.25
+        },
+        "kv_signal_samples": 6,
+        "evictions": 0,
+        "preemptions": 0
+      },
+      {
+        "prefix_depth_tokens": 8192,
+        "pairs": 6,
+        "ttft_saved_ms": {
+          "samples": 6,
+          "mean": 389.1000000000001,
+          "ci95_low": 388.72448141457454,
+          "ci95_high": 389.4755185854256
+        },
+        "marginal_ttft_saved_ms": 194.55000000000004,
+        "prefill_saved_tokens": {
+          "samples": 6,
+          "mean": 7782,
+          "ci95_low": 7774.489628291489,
+          "ci95_high": 7789.510371708511
+        },
+        "marginal_prefill_saved_tokens": 3891,
+        "reuse_ratio": {
+          "samples": 6,
+          "mean": 0.949951171875,
+          "ci95_low": 0.9490343784535509,
+          "ci95_high": 0.9508679652964491
+        },
+        "occupancy_ratio": {
+          "samples": 6,
+          "mean": 0.5,
+          "ci95_low": 0.5,
+          "ci95_high": 0.5
+        },
+        "kv_signal_samples": 6,
+        "evictions": 0,
+        "preemptions": 0
+      },
+      {
+        "prefix_depth_tokens": 12288,
+        "pairs": 6,
+        "ttft_saved_ms": {
+          "samples": 6,
+          "mean": 25.599999999999984,
+          "ci95_low": 25.224481414574463,
+          "ci95_high": 25.975518585425505
+        },
+        "marginal_ttft_saved_ms": -363.5000000000001,
+        "prefill_saved_tokens": {
+          "samples": 6,
+          "mean": 512,
+          "ci95_low": 504.48962829148917,
+          "ci95_high": 519.5103717085109
+        },
+        "marginal_prefill_saved_tokens": -7270,
+        "reuse_ratio": {
+          "samples": 6,
+          "mean": 0.041666666666666664,
+          "ci95_low": 0.04105547105236728,
+          "ci95_high": 0.04227786228096605
+        },
+        "occupancy_ratio": {
+          "samples": 6,
+          "mean": 0.75,
+          "ci95_low": 0.75,
+          "ci95_high": 0.75
+        },
+        "kv_signal_samples": 6,
+        "evictions": 0,
+        "preemptions": 0
+      },
+      {
+        "prefix_depth_tokens": 16384,
+        "pairs": 6,
+        "ttft_saved_ms": {
+          "samples": 6,
+          "mean": 0.13333333333336364,
+          "ci95_low": -0.08347242304782981,
+          "ci95_high": 0.3501390897145571
+        },
+        "marginal_ttft_saved_ms": -25.46666666666662,
+        "prefill_saved_tokens": {
+          "samples": 6,
+          "mean": 2.6666666666666665,
+          "ci95_low": -1.6694484609562168,
+          "ci95_high": 7.00278179428955
+        },
+        "marginal_prefill_saved_tokens": -509.3333333333333,
+        "reuse_ratio": {
+          "samples": 6,
+          "mean": 0.00016276041666666666,
+          "ci95_low": -0.00010189504766578472,
+          "ci95_high": 0.00042741588099911806
+        },
+        "occupancy_ratio": {
+          "samples": 6,
+          "mean": 1,
+          "ci95_low": 1,
+          "ci95_high": 1
+        },
+        "kv_signal_samples": 6,
+        "evictions": 0,
+        "preemptions": 0
+      }
+    ],
+    "reusable_prefix_boundary": {
+      "status": "known",
+      "deepest_reliable_prefix_tokens": 8192,
+      "cliff": {
+        "reliable_through_tokens": 8192,
+        "unreliable_at_tokens": 12288
+      }
+    },
+    "pressure_recovery": {
+      "status": "recovered",
+      "prefix_depth_tokens": 8192,
+      "pressure_reuse_ratio": {
+        "samples": 3,
+        "mean": 0.03125,
+        "ci95_low": 0.02882388846843461,
+        "ci95_high": 0.03367611153156539
+      },
+      "recovery_reuse_ratio": {
+        "samples": 3,
+        "mean": 0.949951171875,
+        "ci95_low": 0.9475250603434346,
+        "ci95_high": 0.9523772834065654
+      },
+      "evictions": 9,
+      "preemptions": 3
+    }
+  },
+  "missing_backend_evidence": {
+    "schema": "fak.kv-prefix-depth-report/v1",
+    "campaign_id": "issue-8424-prefix-depth-fixture-v1",
+    "manifest_sha256": "sha256:f8a3b341e362b7f3213a6bf101a6b870495157c1bd66dde1c413fc96035c6b2c",
+    "pins": {
+      "backend": "openai-compatible-fixture",
+      "backend_revision": "prefix-fixture-backend-r1",
+      "runtime_revision": "prefix-fixture-runtime-r1",
+      "model_id": "fixture/reusable-prefix-model",
+      "model_revision": "prefix-fixture-model-r1",
+      "fak_revision": "issue-8424-fixture-r1"
+    },
+    "tokenization": {
+      "tokenizer_id": "fixture/tokenizer",
+      "tokenizer_revision": "prefix-fixture-tokenizer-r1",
+      "prompt_template_sha256": "5c6718c2c315692755fa56dca3e2fdab1074e71cc947219e8a909961d9f14767",
+      "unit": "tokens"
+    },
+    "confidence": {
+      "level": 0.95,
+      "reliable_reuse_ratio": 0.8,
+      "minimum_samples": 3
+    },
+    "observed_envelope": {
+      "prefix_depths": 6,
+      "suffix_patterns": 2,
+      "turn_counts": 2,
+      "concurrency_values": 2,
+      "pressure_phases": 3,
+      "minimum_repetitions_per_arm": 3,
+      "counterbalanced": true,
+      "complete": true
+    },
+    "evidence_dimensions": {
+      "warm_requests": 48,
+      "semantic_prompt_equal": 30,
+      "token_prefix_equal": 48,
+      "backend_status_present": 0,
+      "backend_admitted": 0,
+      "reuse_measurement_present": 0,
+      "observed_reuse_positive": 0,
+      "useful_work_completed": 96,
+      "useful_work_requests": 96
+    },
+    "depth_curve": [
+      {
+        "prefix_depth_tokens": 1024,
+        "pairs": 6,
+        "ttft_saved_ms": {
+          "samples": 6,
+          "mean": 48.64999999999998,
+          "ci95_low": 48.27448141457446,
+          "ci95_high": 49.025518585425495
+        },
+        "kv_signal_samples": 0,
+        "evictions": 0,
+        "preemptions": 0
+      },
+      {
+        "prefix_depth_tokens": 2048,
+        "pairs": 6,
+        "ttft_saved_ms": {
+          "samples": 6,
+          "mean": 97.30000000000003,
+          "ci95_low": 96.92448141457446,
+          "ci95_high": 97.67551858542559
+        },
+        "marginal_ttft_saved_ms": 48.65000000000005,
+        "kv_signal_samples": 0,
+        "evictions": 0,
+        "preemptions": 0
+      },
+      {
+        "prefix_depth_tokens": 4096,
+        "pairs": 6,
+        "ttft_saved_ms": {
+          "samples": 6,
+          "mean": 194.55000000000004,
+          "ci95_low": 194.17448141457447,
+          "ci95_high": 194.9255185854256
+        },
+        "marginal_ttft_saved_ms": 97.25000000000001,
+        "kv_signal_samples": 0,
+        "evictions": 0,
+        "preemptions": 0
+      },
+      {
+        "prefix_depth_tokens": 8192,
+        "pairs": 6,
+        "ttft_saved_ms": {
+          "samples": 6,
+          "mean": 389.1000000000001,
+          "ci95_low": 388.72448141457454,
+          "ci95_high": 389.4755185854256
+        },
+        "marginal_ttft_saved_ms": 194.55000000000004,
+        "kv_signal_samples": 0,
+        "evictions": 0,
+        "preemptions": 0
+      },
+      {
+        "prefix_depth_tokens": 12288,
+        "pairs": 6,
+        "ttft_saved_ms": {
+          "samples": 6,
+          "mean": 25.599999999999984,
+          "ci95_low": 25.224481414574463,
+          "ci95_high": 25.975518585425505
+        },
+        "marginal_ttft_saved_ms": -363.5000000000001,
+        "kv_signal_samples": 0,
+        "evictions": 0,
+        "preemptions": 0
+      },
+      {
+        "prefix_depth_tokens": 16384,
+        "pairs": 6,
+        "ttft_saved_ms": {
+          "samples": 6,
+          "mean": 0.13333333333336364,
+          "ci95_low": -0.08347242304782981,
+          "ci95_high": 0.3501390897145571
+        },
+        "marginal_ttft_saved_ms": -25.46666666666662,
+        "kv_signal_samples": 0,
+        "evictions": 0,
+        "preemptions": 0
+      }
+    ],
+    "reusable_prefix_boundary": {
+      "status": "unknown",
+      "reason": "backend cached-input evidence is unavailable"
+    },
+    "pressure_recovery": {
+      "status": "unknown",
+      "evictions": 0,
+      "preemptions": 0,
+      "reason": "reusable prefix boundary is unknown"
+    }
+  }
+}
