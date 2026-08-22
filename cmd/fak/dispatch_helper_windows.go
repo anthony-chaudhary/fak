@@ -9,5 +9,8 @@ import (
 )
 
 func configureDispatchHelperCommand(cmd *exec.Cmd) {
-	windowgate.ConfigureDetachedCommand(cmd)
+	// Helpers such as gh can launch ordinary console descendants (notably git).
+	// Give the short-lived helper tree one hidden console to inherit; a detached
+	// helper leaves those descendants to allocate visible desktop consoles.
+	windowgate.ConfigureBackgroundCommand(cmd)
 }
