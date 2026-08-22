@@ -5,22 +5,28 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/ultracodebench"
 )
 
 const ultracodeBenchUsage = `usage: fak ultracode bench --pair PAIR.json [--json]
        fak ultracode bench --selfcheck [--json]
+  fak ultracode bench --scenario access-frontier [--scenario-input RUN.json] --widths 1,2,4,8 [--json]
 
 Evaluate identical single-agent and ultracode-fleet runs as one paired artifact.
-The pair's cost_comparison requests billed_tokens, spend_usd, or both. The verdict is
+The access-frontier scenario proves same-task micro-context and shared-prefix savings without
+single-request or traditional-batching comparisons. The pair's cost_comparison requests
+billed_tokens, spend_usd, or both. The verdict is
 GAIN only when witnessed, equal-quality outcomes improve wall efficiency and every
 requested provider-billing axis; unavailable, noisy, or unequal pairs ABSTAIN.
 Fleet pairs without a complete provider-authoritative aggregate budget receipt ABSTAIN.`
 
 func runUltracodeBench(stdout, stderr io.Writer, args []string) int {
-	var pairPath string
+	var pairPath, scenario, scenarioInput, widthsText string
 	selfcheck, jsonOutput := false, false
+	widthsText = "1,2,4,8"
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-h", "--help", "help":
@@ -30,6 +36,27 @@ func runUltracodeBench(stdout, stderr io.Writer, args []string) int {
 			selfcheck = true
 		case "--json":
 			jsonOutput = true
+		case "--scenario":
+			if i+1 >= len(args) {
+				fmt.Fprintln(stderr, "fak ultracode bench: --scenario requires a name")
+				return 2
+			}
+			i++
+			scenario = args[i]
+		case "--scenario-input":
+			if i+1 >= len(args) {
+				fmt.Fprintln(stderr, "fak ultracode bench: --scenario-input requires a path")
+				return 2
+			}
+			i++
+			scenarioInput = args[i]
+		case "--widths":
+			if i+1 >= len(args) {
+				fmt.Fprintln(stderr, "fak ultracode bench: --widths requires a list")
+				return 2
+			}
+			i++
+			widthsText = args[i]
 		case "--pair":
 			if i+1 >= len(args) {
 				fmt.Fprintln(stderr, "fak ultracode bench: --pair requires a path")
@@ -42,9 +69,54 @@ func runUltracodeBench(stdout, stderr io.Writer, args []string) int {
 			return 2
 		}
 	}
-	if selfcheck == (pairPath != "") {
-		fmt.Fprintln(stderr, "fak ultracode bench: choose exactly one of --selfcheck or --pair PATH")
+	chosen := 0
+	if selfcheck {
+		chosen++
+	}
+	if pairPath != "" {
+		chosen++
+	}
+	if scenario != "" {
+		chosen++
+	}
+	if chosen != 1 {
+		fmt.Fprintln(stderr, "fak ultracode bench: choose exactly one of --selfcheck, --pair PATH, or --scenario NAME")
 		return 2
+	}
+	if scenario != "" {
+		if scenario != "access-frontier" {
+			fmt.Fprintf(stderr, "fak ultracode bench: unknown scenario %q\n", scenario)
+			return 2
+		}
+		widths, err := parseUltracodeWidths(widthsText)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak ultracode bench: %v\n", err)
+			return 2
+		}
+		frontier := ultracodebench.AccessFrontierFixture()
+		if scenarioInput != "" {
+			b, err := os.ReadFile(scenarioInput)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak ultracode bench: read scenario input: %v\n", err)
+				return 1
+			}
+			if err := json.Unmarshal(b, &frontier); err != nil {
+				fmt.Fprintf(stderr, "fak ultracode bench: decode scenario input: %v\n", err)
+				return 1
+			}
+		}
+		report, err := ultracodebench.EvaluateAccessFrontier(frontier, widths)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak ultracode bench: evaluate access-frontier: %v\n", err)
+			return 1
+		}
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fmt.Fprintf(stderr, "fak ultracode bench: encode access-frontier: %v\n", err)
+			return 1
+		}
+		return 0
 	}
 	var pair ultracodebench.Pair
 	var budgetReceipt ultracodeBenchBudgetReceipt
@@ -146,4 +218,21 @@ func ultracodeBenchKnownAccounting(input, output, cacheRead, cacheWrite, billed 
 		BilledTokens: token(billed, ultracodebench.AuthorityProviderBilling),
 		SpendUSD:     ultracodebench.SpendAccounting{Availability: ultracodebench.AccountingAvailable, Authority: ultracodebench.AuthorityProviderBilling, ArtifactDigest: digest, Coverage: 1, ValueUSD: &spend},
 	}
+}
+
+func parseUltracodeWidths(raw string) ([]int, error) {
+	parts := strings.Split(raw, ",")
+	widths := make([]int, 0, len(parts))
+	seen := map[int]bool{}
+	for _, part := range parts {
+		width, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil || width < 1 {
+			return nil, fmt.Errorf("invalid width %q", part)
+		}
+		if !seen[width] {
+			widths = append(widths, width)
+			seen[width] = true
+		}
+	}
+	return widths, nil
 }

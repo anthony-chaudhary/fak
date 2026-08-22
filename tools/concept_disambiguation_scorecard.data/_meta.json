@@ -1082,12 +1082,18 @@
           "category": "incidental",
           "reason": "Environment knob for the existing token-cache temporary-file grace (#8358), not a distinct cache concept",
           "token": "FAK_TOKEN_CACHE_TEMP_GRACE"
+        },
+        {
+          "category": "incidental",
+          "reason": "Derived benchmark metric, not a cache implementation",
+          "token": "CacheAvoidedTokens"
         }
       ],
       "id": "cache",
       "ignore": [
         "ApplyCachePricing",
         "CACHE_SCOPE",
+        "CacheAvoidedTokens",
         "CacheCachedPromptTokens",
         "CacheControlWrites",
         "CacheCounters",
@@ -8883,6 +8889,16 @@
           "category": "incidental",
           "reason": "Context-aware subprocess helper used only to propagate cancellation",
           "token": "queryCodexHooksContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Access-frontier metric field, not a new context mechanism",
+          "token": "FullContextInputTokens"
+        },
+        {
+          "category": "incidental",
+          "reason": "Access-frontier metric field, not a new context mechanism",
+          "token": "ScopedContextInputTokens"
         }
       ],
       "id": "context-ctx",
@@ -8900,12 +8916,14 @@
         "ContextTokensSaved",
         "ContextualID",
         "FAK_COMPACTION_THRASH_STOP",
+        "FullContextInputTokens",
         "LookupSnapshotTieredContext",
         "MechanismStaleContext",
         "MetricFactRecall",
         "RestoreCalls",
         "RetainedContextBytes",
         "RuntimeContextChanged",
+        "ScopedContextInputTokens",
         "SearchRecall",
         "SensitiveContext",
         "TerminationContextLimit",
