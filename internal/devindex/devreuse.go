@@ -42,6 +42,7 @@ var portableDevPatterns = map[string]string{
 
 var maintainerDevCommands = []string{
 	"accounts",
+	"agents",
 	"ailuminate",
 	"answer-shape",
 	"antipattern-scorecard",
@@ -58,6 +59,7 @@ var maintainerDevCommands = []string{
 	"benchmarks",
 	"bgloop",
 	"blast",
+	"borrow-provenance",
 	"boundary",
 	"breath",
 	"budget",
@@ -81,6 +83,7 @@ var maintainerDevCommands = []string{
 	"codelint",
 	"codex-hook-census",
 	"codex-hook-gate",
+	"codex-hook-profile",
 	"codex-mcp-health",
 	"codex-memory",
 	"codex-plugin-sync",
@@ -133,6 +136,7 @@ var maintainerDevCommands = []string{
 	"gitd",
 	"glm52-prefill-sweep",
 	"go",
+	"goal",
 	"goal-park",
 	"godsplit-plan",
 	"grafana",
@@ -189,6 +193,8 @@ var maintainerDevCommands = []string{
 	"milestone-scorecard",
 	"mlp-score",
 	"mode-debt-dispatch",
+	"model-default",
+	"model-observe",
 	"multisubmit",
 	"native-benchmarks",
 	"negate",
@@ -209,6 +215,7 @@ var maintainerDevCommands = []string{
 	"progress",
 	"propagation-debt-dispatch",
 	"propagation-scorecard",
+	"provider-cost",
 	"public-scrub",
 	"qa-process-debt-dispatch",
 	"quality",
@@ -267,6 +274,7 @@ var maintainerDevCommands = []string{
 	"support-maturity-scorecard",
 	"swebench",
 	"sync",
+	"temp-artifacts",
 	"terminal-relief",
 	"test",
 	"test-quality",
@@ -278,6 +286,7 @@ var maintainerDevCommands = []string{
 	"toolproc",
 	"traj",
 	"trajctl",
+	"trajectory",
 	"trajquery",
 	"tree-doctor",
 	"trunk-build-probe",
@@ -300,6 +309,7 @@ var maintainerDevCommands = []string{
 	"workflow",
 	"workflow-audit",
 	"workpattern",
+	"worktype",
 }
 
 var labDevCommands = map[string]string{
