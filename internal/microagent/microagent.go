@@ -97,6 +97,9 @@ type Config struct {
 	// SpawnBudget is the host-owned admission envelope for recursive children.
 	// Nil refuses child requests while preserving ordinary top-level Spawn.
 	SpawnBudget *SpawnBudget
+	// RootCapabilities is the host-owned authority assigned to top-level agents.
+	// Recursive children receive only the intersection they request from it.
+	RootCapabilities CapabilityEnvelope
 	// Warm wires the two-watermark hibernation warm band (#5072, follow-on
 	// #4035) into the Step loop: an agent that also implements Restorable is
 	// enrolled on spawn (its fresh context frozen to disk, no goroutine held),
@@ -151,6 +154,7 @@ type Host struct {
 	maxRetries  int
 	verifier    Verifier
 	spawnBudget *SpawnBudget
+	rootCaps    CapabilityEnvelope
 	warm        *WarmBand
 
 	queue chan *job
@@ -160,11 +164,12 @@ type Host struct {
 	workers sync.WaitGroup // the K Step drivers
 	pending sync.WaitGroup // one count per accepted, not-yet-retired agent
 
-	mu       sync.Mutex
-	live     map[string]*job
-	results  []Result
-	draining bool
-	closed   bool
+	mu           sync.Mutex
+	live         map[string]*job
+	capabilities map[string]CapabilityEnvelope
+	results      []Result
+	draining     bool
+	closed       bool
 }
 
 // NewHost builds a running Host over the ONE shared gateway and starts its K
@@ -172,6 +177,10 @@ type Host struct {
 func NewHost(gw Gateway, cfg Config) (*Host, error) {
 	if gw == nil {
 		return nil, ErrNilGateway
+	}
+	rootCaps, err := normalizeEnvelope(cfg.RootCapabilities)
+	if err != nil {
+		return nil, err
 	}
 	workers := cfg.Workers
 	if workers <= 0 {
@@ -190,16 +199,18 @@ func NewHost(gw Gateway, cfg Config) (*Host, error) {
 		audit = nopSink{}
 	}
 	h := &Host{
-		gw:          gw,
-		sessions:    sessions,
-		audit:       audit,
-		maxTurns:    max(0, cfg.MaxTurns),
-		maxRetries:  max(0, cfg.MaxRetries),
-		verifier:    cfg.Verifier,
-		spawnBudget: cfg.SpawnBudget,
-		warm:        cfg.Warm,
-		queue:       make(chan *job, queue),
-		live:        map[string]*job{},
+		gw:           gw,
+		sessions:     sessions,
+		audit:        audit,
+		maxTurns:     max(0, cfg.MaxTurns),
+		maxRetries:   max(0, cfg.MaxRetries),
+		verifier:     cfg.Verifier,
+		spawnBudget:  cfg.SpawnBudget,
+		rootCaps:     rootCaps,
+		warm:         cfg.Warm,
+		queue:        make(chan *job, queue),
+		live:         map[string]*job{},
+		capabilities: map[string]CapabilityEnvelope{},
 	}
 	h.ctx, h.cancel = context.WithCancel(context.Background())
 	for i := 0; i < workers; i++ {
@@ -219,6 +230,10 @@ func (h *Host) Sessions() *session.Table { return h.sessions }
 // terminal-state machine). On acceptance the agent's session entry exists and
 // is Running.
 func (h *Host) Spawn(id string, m Microagent) error {
+	return h.spawn(id, m, h.rootCaps)
+}
+
+func (h *Host) spawn(id string, m Microagent, capabilities CapabilityEnvelope) error {
 	if m == nil {
 		return ErrNilAgent
 	}
@@ -241,6 +256,7 @@ func (h *Host) Spawn(id string, m Microagent) error {
 		return ErrDraining
 	}
 	ctx, cancel := context.WithCancel(h.ctx)
+	ctx = withStepEnvelope(ctx, capabilities)
 	j := &job{id: id, m: m, ctx: ctx, cancel: cancel}
 	select {
 	case h.queue <- j:
@@ -253,6 +269,7 @@ func (h *Host) Spawn(id string, m Microagent) error {
 		return ErrQueueFull
 	}
 	h.live[id] = j
+	h.capabilities[id] = capabilities.clone()
 	h.pending.Add(1)
 	h.audit.Record(Event{Agent: id, Kind: EventSpawn})
 	return nil
@@ -264,10 +281,27 @@ func (h *Host) RequestChild(request SpawnRequest, child Microagent) error {
 	if h.spawnBudget == nil {
 		return fmt.Errorf("%w: host has no recursive spawn budget", ErrSpawnBudget)
 	}
+	requested, err := normalizeEnvelope(request.Capabilities)
+	if err != nil {
+		return err
+	}
+	granted := CapabilityEnvelope{}
+	if !requested.empty() {
+		h.mu.Lock()
+		parent, ok := h.capabilities[request.ParentID]
+		h.mu.Unlock()
+		if !ok {
+			return fmt.Errorf("%w: parent %q has no host-owned envelope", ErrChildAuthority, request.ParentID)
+		}
+		granted, err = IntersectCapabilities(parent, requested)
+		if err != nil {
+			return err
+		}
+	}
 	if err := h.spawnBudget.Admit(request); err != nil {
 		return err
 	}
-	if err := h.Spawn(request.ChildID, child); err != nil {
+	if err := h.spawn(request.ChildID, child, granted); err != nil {
 		h.spawnBudget.release(request)
 		return err
 	}
@@ -519,6 +553,7 @@ func (h *Host) retire(j *job, steps int, done bool, err error) {
 	}
 	h.mu.Lock()
 	delete(h.live, j.id)
+	delete(h.capabilities, j.id)
 	h.results = append(h.results, Result{ID: j.id, Steps: steps, Done: done, Err: err})
 	h.sessions.Transition(j.id, session.Stopped, reason)
 	ev := Event{Agent: j.id, Kind: kind, Steps: steps}

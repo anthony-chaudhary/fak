@@ -34,10 +34,11 @@ type LineageBudget struct {
 
 // SpawnRequest carries lineage metadata the host, not the child, adjudicates.
 type SpawnRequest struct {
-	ParentID string
-	ChildID  string
-	Depth    int
-	Budget   LineageBudget
+	ParentID     string
+	ChildID      string
+	Depth        int
+	Budget       LineageBudget
+	Capabilities CapabilityEnvelope
 }
 
 var ErrSpawnBudget = errors.New("microagent: recursive spawn budget refused")
