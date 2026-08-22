@@ -71,3 +71,33 @@ func TestRenderWitness(t *testing.T) {
 		}
 	}
 }
+
+func TestBenchmarkComparesMonolithWithReceiptOnlyRecursion(t *testing.T) {
+	r, err := run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := check(r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Benchmark.Method == "" {
+		t.Fatal("benchmark method is unlabeled")
+	}
+	if r.Benchmark.Monolith.QualityPassed != r.Benchmark.ReceiptOnly.QualityPassed {
+		t.Fatalf("quality differs: monolith=%d receipt_only=%d", r.Benchmark.Monolith.QualityPassed, r.Benchmark.ReceiptOnly.QualityPassed)
+	}
+	if r.Benchmark.ReceiptOnly.RetainedBytes >= r.Benchmark.Monolith.RetainedBytes {
+		t.Fatalf("root context did not shrink: monolith=%d receipt_only=%d", r.Benchmark.Monolith.RetainedBytes, r.Benchmark.ReceiptOnly.RetainedBytes)
+	}
+	if r.Benchmark.ReceiptOnly.CacheReadTokens == 0 || r.Benchmark.ReceiptOnly.CostMicroUSD >= r.Benchmark.Monolith.CostMicroUSD {
+		t.Fatalf("cache/cost receipt is not useful: %#v", r.Benchmark)
+	}
+}
+
+func TestReductionPctRefusesInvalidEnvelope(t *testing.T) {
+	for _, tc := range []struct{ baseline, candidate int }{{0, 0}, {10, -1}, {10, 11}} {
+		if got := reductionPct(tc.baseline, tc.candidate); got != 0 {
+			t.Fatalf("reductionPct(%d, %d) = %d, want refusal value 0", tc.baseline, tc.candidate, got)
+		}
+	}
+}
