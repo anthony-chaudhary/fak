@@ -3090,6 +3090,66 @@
           "category": "incidental",
           "reason": "Private implementation or wire identifier for the positioned provider-session boundary; it is not a distinct operator concept.",
           "token": "guardProviderBoundaryResult"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "classifyGuardCodexSessionStart"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "guardCodexPowerShellCommand"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "guardCodexSessionStartBinding"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "guardCodexSessionStartCommand"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "guardCodexSessionStartConfigCollision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "guardCodexSessionStartDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "guardCodexSessionStartHookKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "guardCodexSessionStartTimeoutSeconds"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "guardCodexSessionStartTrustedHash"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "guardCodexShellQuote"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "installGuardCodexSessionStartHookAt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "writeGuardCodexSessionBinding"
         }
       ],
       "exclude": [
@@ -3187,6 +3247,7 @@
         "buildguardchild",
         "cacheValueGateFactsFromReport",
         "callGateProvider",
+        "classifyGuardCodexSessionStart",
         "cmdCacheValueGateScore",
         "cmdGuardGoalQuestionHook",
         "codeToolGate",
@@ -3475,7 +3536,18 @@
         "unguarded",
         "verifyGateCheckout",
         "withGuardRegistrationEnv",
-        "worker_guard"
+        "worker_guard",
+        "guardCodexPowerShellCommand",
+        "guardCodexSessionStartBinding",
+        "guardCodexSessionStartCommand",
+        "guardCodexSessionStartConfigCollision",
+        "guardCodexSessionStartDecision",
+        "guardCodexSessionStartHookKey",
+        "guardCodexSessionStartTimeoutSeconds",
+        "guardCodexSessionStartTrustedHash",
+        "guardCodexShellQuote",
+        "installGuardCodexSessionStartHookAt",
+        "writeGuardCodexSessionBinding"
       ],
       "known_tokens": [],
       "min_files": 3,
@@ -5273,6 +5345,66 @@
           "category": "incidental",
           "reason": "Field or gateway projection of the positioned ProviderSessionBoundary record; it is not a separate session-runtime concept.",
           "token": "SessionProviderBoundary"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "bindCodexSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "classifyGuardCodexSessionStart"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "guardCodexSessionStartBinding"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "guardCodexSessionStartCommand"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "guardCodexSessionStartConfigCollision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "guardCodexSessionStartDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "guardCodexSessionStartHookKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "guardCodexSessionStartTimeoutSeconds"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "guardCodexSessionStartTrustedHash"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "installGuardCodexSessionStartHookAt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Upstream Codex configuration-layer name; referenced as an adapter detail, not a fak concept.",
+          "token": "SessionFlags"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "writeGuardCodexSessionBinding"
         }
       ],
       "id": "session-runtime",
@@ -5626,7 +5758,19 @@
         "verifyFilterToolSchedulerPath",
         "wipPeerCheckpointSessions",
         "witnessed_sufficiency_slot_released",
-        "writeSessionMoveJSON"
+        "writeSessionMoveJSON",
+        "bindCodexSession",
+        "classifyGuardCodexSessionStart",
+        "guardCodexSessionStartBinding",
+        "guardCodexSessionStartCommand",
+        "guardCodexSessionStartConfigCollision",
+        "guardCodexSessionStartDecision",
+        "guardCodexSessionStartHookKey",
+        "guardCodexSessionStartTimeoutSeconds",
+        "guardCodexSessionStartTrustedHash",
+        "installGuardCodexSessionStartHookAt",
+        "SessionFlags",
+        "writeGuardCodexSessionBinding"
       ],
       "known_tokens": [],
       "min_files": 3,
@@ -10533,6 +10677,11 @@
           "category": "incidental",
           "reason": "Runtime event wire kind; not a decision subsystem primitive.",
           "token": "tool_verdict"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
+          "token": "guardCodexSessionStartDecision"
         }
       ],
       "id": "decision",
@@ -10577,6 +10726,7 @@
         "deterministicSelectorDecision",
         "fixtureSelectStage",
         "gooddecisionratio",
+        "guardCodexSessionStartDecision",
         "guardGoalQuestionDecision",
         "importDecision",
         "kinddecisionsabout",

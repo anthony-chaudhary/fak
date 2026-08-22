@@ -65,7 +65,7 @@ conversation is finished.
 | Provider harness | Detection | Current wiring |
 |---|---|---|
 | Claude Code under `fak guard -- claude` | `SessionStart` input with `source=clear` and `session_id` | Automatic; the existing guard SessionStart hook carries the provider tag and lifecycle socket credentials |
-| OpenAI Codex | `/clear` starts a replacement thread with `SessionStart(source=clear)`; `/new` also starts a thread but currently reports the ordinary startup source | Core-ready for the clear event; automatic hook installation plus stateful `/new` normalization are tracked in [#8218](https://github.com/anthony-chaudhary/fak/issues/8218) |
+| OpenAI Codex under `fak guard -- codex` | `/clear` starts a replacement thread with `SessionStart(source=clear)`; `/new` starts a thread but reports `source=startup` | Automatic; a trusted per-launch hook maps `clear` directly and treats a later `startup` with a new `session_id` as the same boundary |
 | Gemini CLI | Its `clear` command (`new` alias) emits `SessionEnd(clear)`, mints a session id, then emits `SessionStart(clear)` | Core-ready; first-class `fak guard -- gemini` hook installation is tracked in [#8219](https://github.com/anthony-chaudhary/fak/issues/8219) |
 | Other harnesses | Send JSON containing `source:"clear"` and one of `session_id`, `thread_id`, or `conversation_id` to `fak guard-sessionstart --provider NAME` inside a guarded child; adapters own normalization when their reset event uses another source token | Adapter-owned |
 
@@ -74,6 +74,14 @@ provider UI. On failure the provider still clears, fak prints a bounded stderr
 warning, and the old fak trace remains in force; cumulative limits therefore
 fail toward the stricter state rather than being reset.
 
+For Codex, the launch adapter stores only the current provider session id and
+fak trace in its private run directory. The first `startup` binds the launch
+trace, repeated delivery of that id is a no-op, and a later `startup` carrying a
+different id is `/new`. The explicit `clear` source does not need inference.
+The hook is added in Codex's `sessionFlags` layer, so user, project, managed, and
+plugin hook layers stay active. Fak trusts the exact injected handler hash; it
+does not pass Codex's all-hooks trust bypass.
+
 ## Captured witness
 
 The end-to-end test drives the real hook actuator and authenticated lifecycle
@@ -81,8 +89,11 @@ socket, then reads both fak session records and the gateway's new default trace:
 
 ```bash
 go test ./internal/session -run 'TestBeginProviderSession|TestDescriptorRoundTripPreservesProviderBoundary' -count=1
-go test ./cmd/fak -run 'TestGuardSessionStartClearCreatesFakSessionBoundary' -count=1
+go test ./cmd/fak -run 'TestGuardSessionStart(ClearCreatesFakSessionBoundary|CodexClearAndNewCreateOneBoundaryEach)' -count=1
 ```
+
+The captured Codex 0.148 TUI run, exact hook-trust proof, and fail-before result
+are in [`issue-8218-codex-session-boundary.json`](../_witnesses/issue-8218-codex-session-boundary.json).
 
 Live cross-provider dogfood and outcome counts are tracked in [#8220](https://github.com/anthony-chaudhary/fak/issues/8220).
 

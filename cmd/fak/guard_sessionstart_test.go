@@ -619,6 +619,22 @@ func TestInstallGuardSessionStartHookAtWiring(t *testing.T) {
 		}
 	})
 
+	t.Run("codex child gets a per-launch SessionStart hook", func(t *testing.T) {
+		dir := t.TempDir()
+		cmd := []string{"codex"}
+		out, install, err := installGuardSessionStartHookAt(cmd, "on", false, "fak", dir, "", "trace-codex")
+		if err != nil {
+			t.Fatalf("install: %v", err)
+		}
+		if !install.Applied {
+			t.Fatalf("expected Applied=true for a codex child, got %+v", install)
+		}
+		joined := strings.Join(out, " ")
+		if !strings.Contains(joined, "hooks.SessionStart") || !strings.Contains(joined, "guard-sessionstart") {
+			t.Fatalf("codex command missing per-launch SessionStart adapter: %v", out)
+		}
+	})
+
 	t.Run("non-claude child is a no-op", func(t *testing.T) {
 		cmd := []string{"bash", "-c", "echo hi"}
 		out, install, err := installGuardSessionStartHookAt(cmd, "on", true, "fak", t.TempDir(), "", "")

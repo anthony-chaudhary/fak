@@ -1351,7 +1351,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	// ids and can record the A1 uuid<->trace identity join (#4112/#4113).
 	command, _, err = installGuardSessionStartHook(command, os.Getenv(guardSessionStartEnvMode), sessionStartManaged, sessionStartSettings, guardTraceID)
 	if err != nil {
-		abortChildWiring(cancel, "Claude SessionStart hook setup", err, 1)
+		abortChildWiring(cancel, "provider SessionStart hook setup", err, 1)
 	}
 	// First-class `fak guard -- codex`: Codex reads custom upstreams from `-c`
 	// provider overrides, not OPENAI_BASE_URL. Repoint only Codex children, after the

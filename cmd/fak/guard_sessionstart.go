@@ -27,10 +27,11 @@ import (
 // pulls them in, and solves the task as a generic Bash/Edit coder — fak present but inert
 // (the pathology behind session 2586c14b: 339 turns, 0 mcp__fak__* calls).
 //
-// This is a Claude Code SessionStart hook. Its stdout is injected into the FIRST turn's
-// context as additionalContext (a one-time cost, NOT a per-prompt-prefix tax — so it does
-// not fight the --expose token-thrift lever), naming the 2-3 entry verbs the agent should
-// reach for first. It is the always-loaded affordance that survives the deferred-tool wall.
+// This is a provider-native SessionStart hook. Claude Code and Codex inject its stdout into
+// the FIRST turn's context as additionalContext (a one-time cost, NOT a per-prompt-prefix
+// tax — so it does not fight the --expose token-thrift lever), naming the 2-3 entry verbs
+// the agent should reach for first. It is the always-loaded affordance that survives the
+// deferred-tool wall.
 //
 // Opt-out per harness via FAK_GUARD_AFFORDANCE_MODE=off (default on). Fail-open: any bad
 // args or write error is a silent exit 0 — a discoverability hint must never wedge a start.
@@ -80,6 +81,7 @@ func runGuardSessionStartHook(stdout, stderr io.Writer, stdin io.Reader, argv []
 	// long-horizon default. Attended human-driven sessions get the base affordance only.
 	managedFlag := fs.Bool("managed", false, "inject the long-horizon persistence + managed-context rule")
 	providerFlag := fs.String("provider", "claude", "provider emitting the SessionStart event")
+	stateFlag := fs.String("state", "", "launch-scoped provider session binding")
 	// --trace carries the guard trace id threaded in at install (guardSessionStartArgs). Paired
 	// with the child's CLAUDE_CODE_SESSION_ID (the transcript UUID) it is the A1 identity join
 	// (#4112) the resume watchdog reads to resolve a crashed UUID back to its gateway trace.
@@ -99,18 +101,39 @@ func runGuardSessionStartHook(stdout, stderr io.Writer, stdin io.Reader, argv []
 	if sessionID == "" && provider == "claude" {
 		sessionID = strings.TrimSpace(os.Getenv("CLAUDE_CODE_SESSION_ID"))
 	}
-	if hookStart.Source == "clear" && sessionID != "" {
+	boundarySource := hookStart.Source
+	bindCodexSession := false
+	if provider == "codex" && strings.TrimSpace(*stateFlag) != "" {
+		decision, err := classifyGuardCodexSessionStart(*stateFlag, hookStart.Source, sessionID)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak: Codex session binding was not read: %v\n", err)
+		} else {
+			boundarySource = decision.Source
+			bindCodexSession = decision.Bind
+			if decision.Trace != "" {
+				effectiveTrace = decision.Trace
+			}
+		}
+	}
+	boundaryRecorded := false
+	if boundarySource == "clear" && sessionID != "" {
 		result, err := notifyGuardProviderSessionStart(
 			os.Getenv(guardLifecycleSocketEnv), os.Getenv(guardLifecycleTokenEnv),
-			provider, hookStart.Source, sessionID, 500*time.Millisecond,
+			provider, boundarySource, sessionID, 500*time.Millisecond,
 		)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak: provider session boundary was not recorded: %v\n", err)
 		} else {
 			if result.Applied {
-				recordGuardProviderSessionClose(result.PreviousTrace, hookStart.Source)
+				recordGuardProviderSessionClose(result.PreviousTrace, boundarySource)
 			}
 			effectiveTrace = result.NewTrace
+			boundaryRecorded = true
+		}
+	}
+	if provider == "codex" && bindCodexSession && (boundarySource != "clear" || boundaryRecorded) {
+		if err := writeGuardCodexSessionBinding(*stateFlag, sessionID, effectiveTrace); err != nil {
+			fmt.Fprintf(stderr, "fak: Codex session binding was not recorded: %v\n", err)
 		}
 	}
 	// Record the uuid<->trace join first (best-effort, fail-open), so it is written on EVERY
@@ -450,14 +473,15 @@ type guardSessionStartInstall struct {
 	Applied      bool
 	Mode         string
 	Managed      bool
+	Provider     string
 	SettingsPath string
+	StatePath    string
 	Reason       string
 }
 
-// installGuardSessionStartHook installs the Claude Code SessionStart affordance hook,
-// MERGING it into the shared --settings file the other guard hooks already wrote
-// (existingSettingsPath) so a single --settings carries them all. Off mode or a non-claude
-// child is a no-op. Mirrors installGuardStopHook.
+// installGuardSessionStartHook installs a provider-native SessionStart affordance hook.
+// Claude merges it into the shared --settings file; Codex receives a trusted per-launch
+// config layer. Off mode or an unsupported child is a no-op. Mirrors installGuardStopHook.
 func installGuardSessionStartHook(command []string, mode string, managed bool, existingSettingsPath, traceID string) ([]string, guardSessionStartInstall, error) {
 	normalized := normalizeGuardSessionStartMode(mode)
 	install := guardSessionStartInstall{Mode: normalized}
@@ -465,7 +489,7 @@ func installGuardSessionStartHook(command []string, mode string, managed bool, e
 		install.Reason = "disabled"
 		return command, install, nil
 	}
-	if !guardPreCompactIsClaudeCommand(command) {
+	if len(command) == 0 || (!guardPreCompactIsClaudeCommand(command) && !guardIsCodex(command[0])) {
 		install.Reason = "non-claude-child"
 		return command, install, nil
 	}
@@ -489,6 +513,9 @@ func installGuardSessionStartHookAt(command []string, mode string, managed bool,
 	if normalized == guardSessionStartModeOff {
 		install.Reason = "disabled"
 		return command, install, nil
+	}
+	if len(command) > 0 && guardIsCodex(command[0]) {
+		return installGuardCodexSessionStartHookAt(command, managed, fakBin, dir, traceID)
 	}
 	if !guardPreCompactIsClaudeCommand(command) {
 		install.Reason = "non-claude-child"
@@ -515,6 +542,7 @@ func installGuardSessionStartHookAt(command []string, mode string, managed bool,
 	}
 	install.Applied = true
 	install.Managed = managed
+	install.Provider = "claude"
 	install.SettingsPath = settingsPath
 	return command, install, nil
 }

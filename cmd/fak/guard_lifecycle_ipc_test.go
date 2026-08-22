@@ -135,6 +135,129 @@ func TestGuardSessionStartClearCreatesFakSessionBoundary(t *testing.T) {
 	}
 }
 
+func TestGuardSessionStartCodexClearAndNewCreateOneBoundaryEach(t *testing.T) {
+	oldSessions, oldDurability := serveSessions, serveSessionDurability
+	serveSessions, serveSessionDurability = session.NewTable(), nil
+	t.Cleanup(func() {
+		serveSessions, serveSessionDurability = oldSessions, oldDurability
+	})
+	regDir := t.TempDir()
+	t.Setenv("FLEET_REG_DIR", regDir)
+	journalPath := filepath.Join(t.TempDir(), "session-journal.jsonl")
+	t.Setenv(sessionjournal.EnvPath, journalPath)
+	t.Setenv(guardSessionJournalEnvMode, "")
+	stageGuardSessionStartWitness(t, 1, nil)
+
+	const oldTrace = "guard-codex-launch"
+	budget := session.Budget{
+		TurnsLeft: 5, TokensLeft: 800, ContextTokensLeft: 100, ContextTokensCap: 1000,
+		SpendMicroCentsLeft: 40, SpendMicroCentsCap: 100, ToolCallsLeft: 7, ToolCallsCap: 9,
+	}
+	if _, ok := serveSessions.SetBudget(oldTrace, budget); !ok {
+		t.Fatal("stage old session budget")
+	}
+	srv, ipc := newGuardLifecycleTestServer(t)
+	srv.SetDefaultTraceID(oldTrace)
+	t.Setenv(guardLifecycleSocketEnv, ipc.path)
+	t.Setenv(guardLifecycleTokenEnv, ipc.token)
+	statePath := filepath.Join(t.TempDir(), "codex-sessionstart-state")
+
+	emit := func(source, sessionID string) {
+		t.Helper()
+		payload := bytes.NewBufferString(fmt.Sprintf(`{"hook_event_name":"SessionStart","source":%q,"session_id":%q}`, source, sessionID))
+		var stdout, stderr bytes.Buffer
+		args := []string{"--mode", "off", "--provider", "codex", "--trace", oldTrace, "--state", statePath}
+		if code := runGuardSessionStartHook(&stdout, &stderr, payload, args); code != 0 {
+			t.Fatalf("%s hook exit=%d stderr=%s", source, code, stderr.String())
+		}
+		if stdout.Len() != 0 || stderr.Len() != 0 {
+			t.Fatalf("%s hook output stdout=%q stderr=%q", source, stdout.String(), stderr.String())
+		}
+	}
+	assertCumulative := func(trace string) {
+		t.Helper()
+		got := serveSessions.Get(trace).Budget
+		if got.TurnsLeft != budget.TurnsLeft || got.TokensLeft != budget.TokensLeft ||
+			got.SpendMicroCentsLeft != budget.SpendMicroCentsLeft || got.ToolCallsLeft != budget.ToolCallsLeft {
+			t.Fatalf("trace %q reset cumulative envelope: got %+v want cumulative %+v", trace, got, budget)
+		}
+		if got.ContextTokensLeft != budget.ContextTokensCap {
+			t.Fatalf("trace %q context budget=%d, want fresh cap %d", trace, got.ContextTokensLeft, budget.ContextTokensCap)
+		}
+	}
+
+	// First launch startup only establishes the ordered Codex binding.
+	emit("startup", "codex-thread-1")
+	if got := srv.DefaultTraceID(); got != oldTrace {
+		t.Fatalf("initial startup changed gateway trace=%q", got)
+	}
+	if got := serveSessions.Get(oldTrace); got.Run != session.Running {
+		t.Fatalf("initial startup changed launch session=%+v", got)
+	}
+	decision, err := classifyGuardCodexSessionStart(statePath, "startup", "codex-thread-1")
+	if err != nil || decision.Trace != oldTrace || decision.Boundary || decision.Bind {
+		t.Fatalf("initial binding=(%+v, %v)", decision, err)
+	}
+
+	// Codex emits startup again for /new. The changed id is the missing discriminator.
+	emit("startup", "codex-thread-2")
+	newTrace := providerBoundaryTrace("codex", "codex-thread-2")
+	if got := srv.DefaultTraceID(); got != newTrace {
+		t.Fatalf("/new gateway trace=%q, want %q", got, newTrace)
+	}
+	if got := serveSessions.Get(oldTrace); got.Run != session.Stopped || got.Reason != session.ReasonProviderSessionClear {
+		t.Fatalf("/new old session=%+v", got)
+	}
+	if got := serveSessions.Get(newTrace); got.Run != session.Running || got.ProviderBoundary.PreviousTrace != oldTrace || got.ProviderBoundary.Source != "clear" {
+		t.Fatalf("/new child session=%+v", got)
+	}
+	assertCumulative(newTrace)
+
+	// Redelivery of the same startup neither rekeys again nor corrupts its identity join.
+	newRev := serveSessions.Get(newTrace).Rev
+	emit("startup", "codex-thread-2")
+	if got := serveSessions.Get(newTrace).Rev; got != newRev {
+		t.Fatalf("duplicate /new mutated child rev=%d, want %d", got, newRev)
+	}
+	byID, _ := resume.LoadIdentity(regDir)
+	if got := byID["codex-thread-2"]; got != newTrace {
+		t.Fatalf("duplicate /new identity=%q, want %q", got, newTrace)
+	}
+
+	// /clear has an explicit source and advances from the /new child.
+	emit("clear", "codex-thread-3")
+	clearTrace := providerBoundaryTrace("codex", "codex-thread-3")
+	if got := srv.DefaultTraceID(); got != clearTrace {
+		t.Fatalf("/clear gateway trace=%q, want %q", got, clearTrace)
+	}
+	if got := serveSessions.Get(newTrace); got.Run != session.Stopped || got.Reason != session.ReasonProviderSessionClear {
+		t.Fatalf("/clear previous session=%+v", got)
+	}
+	if got := serveSessions.Get(clearTrace); got.Run != session.Running || got.ProviderBoundary.PreviousTrace != newTrace {
+		t.Fatalf("/clear child session=%+v", got)
+	}
+	assertCumulative(clearTrace)
+	clearRev := serveSessions.Get(clearTrace).Rev
+	emit("clear", "codex-thread-3")
+	if got := serveSessions.Get(clearTrace).Rev; got != clearRev {
+		t.Fatalf("duplicate /clear mutated child rev=%d, want %d", got, clearRev)
+	}
+
+	decision, err = classifyGuardCodexSessionStart(statePath, "startup", "codex-thread-3")
+	if err != nil || decision.Trace != clearTrace || decision.Boundary || decision.Bind {
+		t.Fatalf("final binding=(%+v, %v)", decision, err)
+	}
+	journal := sessionjournal.FoldEvents(sessionjournal.LoadFile(journalPath))
+	bySessionID := make(map[string]sessionjournal.Session, len(journal))
+	for _, row := range journal {
+		bySessionID[row.ID] = row
+	}
+	if len(journal) != 3 || !bySessionID["codex-thread-1"].Closed ||
+		!bySessionID["codex-thread-2"].Closed || bySessionID["codex-thread-3"].Closed {
+		t.Fatalf("Codex provider journal boundaries=%+v", journal)
+	}
+}
+
 func TestParseGuardProviderSessionStartAcceptsProviderIDShapes(t *testing.T) {
 	tests := []struct {
 		name    string

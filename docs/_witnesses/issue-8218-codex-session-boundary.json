@@ -1,0 +1,113 @@
+{
+  "schema": "fak.provider-clear-session-witness.v1",
+  "issue": 8218,
+  "captured_at": "2026-08-22T10:08:26Z",
+  "provider": "codex",
+  "adapter": {
+    "launch": "fak guard -- codex",
+    "wire": "codex",
+    "session_start_layer": "sessionFlags",
+    "persistent_settings_mutated": false,
+    "trust_scope": "exact injected SessionStart command hash",
+    "all_hooks_trust_bypass": false
+  },
+  "upstream_contract": {
+    "repository": "openai/codex",
+    "revision": "9bf673718a4605b49e47d00762121d372af95439",
+    "observed": [
+      "/clear emits SessionStart with source=clear and a fresh session_id",
+      "/new emits SessionStart with source=startup and a fresh session_id",
+      "initial startup also uses source=startup, so ordered per-launch session_id state is the discriminator",
+      "SessionStart command input has session_id but no thread_id",
+      "Codex discovers hook arrays per configuration layer, preserving lower-layer and plugin hooks"
+    ]
+  },
+  "fail_before": {
+    "command": "wsl --cd /mnt/c/work/fak -- bash -lc 'go test ./cmd/fak -run \"TestInstallGuardSessionStartHookAtWiring/codex_child\" -count=1'",
+    "result": "FAIL",
+    "observed": "expected Applied=true for a codex child; got Applied=false Reason=non-claude-child"
+  },
+  "offline": {
+    "focused_command": "wsl --cd /mnt/c/work/fak -- bash -lc 'go test ./cmd/fak -run \"Test(GuardCodexSessionStart|GuardCodexPowerShellCommand|InstallGuardCodexSessionStart|ClassifyGuardCodexSessionStart|GuardSessionStartCodexClearAndNew|InstallGuardSessionStartHookAtWiring/codex_child)\" -count=1'",
+    "focused_result": "PASS",
+    "explicit_path_validation": {
+      "command": "fak validate --test-only --wsl-tests --test-run <issue-8218 test selector> --mine <each of the eight issue-owned paths>",
+      "result": "OK: committed tip 39a02f324ea7 + 8 owned path(s) affected-test clean (isolated test-only mode)"
+    },
+    "deterministic_test": "TestGuardSessionStartCodexClearAndNewCreateOneBoundaryEach",
+    "assertions": [
+      "initial startup binds the launch trace without opening a boundary",
+      "a later startup with a new session_id maps /new to exactly one provider boundary",
+      "source=clear maps /clear to exactly one provider boundary",
+      "duplicate /new and /clear deliveries do not mutate the child",
+      "each previous trace stops with PROVIDER_SESSION_CLEAR and its child becomes the gateway default",
+      "context headroom rearms while cumulative turns, tokens, spend, and tool calls carry over unchanged"
+    ],
+    "trust_hash_vector": {
+      "command": "echo hi",
+      "codex_0_148_hash": "sha256:9e87c3ad0f08b294d080bebd23a4971ebf5c8d908f22a10ac0a01510508c7917",
+      "go_result": "same hash"
+    }
+  },
+  "live": {
+    "platform": "windows",
+    "codex_cli_version": "0.148.0",
+    "fak_source_revision": "a61479aa106daf658097642b7071f61c1b2b731c",
+    "launch_trace": "guard-29f75c06adac1cdc-94817535494e98c2",
+    "initial": {
+      "provider_session_id": "01a028eb-a815-7740-88e3-5deda39349f6",
+      "trace": "guard-29f75c06adac1cdc-94817535494e98c2",
+      "run": "running",
+      "turns_left": 9,
+      "tokens_left": 49994,
+      "context_tokens_left": 33643,
+      "spend_micro_cents_left": 100000000
+    },
+    "new": {
+      "command": "/new",
+      "raw_session_start_source": "startup",
+      "normalized_boundary_source": "clear",
+      "provider_session_id": "01a028ef-551d-7a33-a4fc-124cfe48116a",
+      "previous_trace": "guard-29f75c06adac1cdc-94817535494e98c2",
+      "previous_trace_run": "stopped",
+      "previous_trace_reason": "PROVIDER_SESSION_CLEAR",
+      "child_trace": "codex-clear-8ae54786d9200f8e67f85d93",
+      "child_trace_run": "running",
+      "post_prompt_turns_left": 8,
+      "post_prompt_tokens_left": 49988,
+      "post_prompt_context_tokens_left": 37937,
+      "post_prompt_spend_micro_cents_left": 100000000,
+      "model_reply": "new-ok"
+    },
+    "clear": {
+      "command": "/clear",
+      "raw_session_start_source": "clear",
+      "normalized_boundary_source": "clear",
+      "provider_session_id": "01a028f0-21a8-71f0-b68e-aa8ef22f2eae",
+      "previous_trace": "codex-clear-8ae54786d9200f8e67f85d93",
+      "previous_trace_run": "stopped",
+      "previous_trace_reason": "PROVIDER_SESSION_CLEAR",
+      "child_trace": "codex-clear-06466da383f65936af8b7967",
+      "child_trace_run": "running",
+      "post_prompt_turns_left": 7,
+      "post_prompt_tokens_left": 49982,
+      "post_prompt_context_tokens_left": 33643,
+      "post_prompt_spend_micro_cents_left": 100000000,
+      "model_reply": "clear-ok"
+    },
+    "hook_preservation": {
+      "session_start_installed": 2,
+      "session_start_active": 2,
+      "session_start_review": 0,
+      "user_prompt_submit_installed": 2,
+      "user_prompt_submit_active": 2,
+      "injected_hook_result_each_boundary": "completed",
+      "exact_injected_handler_hash": "sha256:db291362a06d9defed6b980decd3c130123556d7e4897e1d63bb424e97b35647"
+    },
+    "notes": [
+      "The replacement model prompt follows SessionStart, so the live child snapshots include that prompt's debit; exact unchanged carry-over is captured synchronously by the deterministic lifecycle test.",
+      "One separately configured SessionStart hook remained installed and active but exited nonzero at runtime; the injected fak boundary hook completed on both replacements.",
+      "The first Windows live attempt exposed shell-dependent direct quoting; the witnessed run uses a shell-neutral encoded PowerShell command."
+    ]
+  }
+}
