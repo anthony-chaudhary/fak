@@ -195,30 +195,30 @@ func AttributeMetrics(in AttributionInput) AttributionReport {
 func buildMetricsDelta(in AttributionInput) MetricsDelta {
 	delta := MetricsDelta{Grade: GradeUnavailable}
 	if in.ScrapeFailure != "" {
-		delta.Reason = "metrics scrape failed: " + in.ScrapeFailure
+		delta.Reason = "metrics scrape failed: " + in.ScrapeFailure + "; capture successful before and after metrics scrapes before retrying attribution"
 		return delta
 	}
 	if in.Before == nil || in.After == nil {
-		delta.Reason = "both metrics scrapes are required"
+		delta.Reason = "both metrics scrapes are required; capture both snapshots around the request window"
 		return delta
 	}
 	delta.ServerInstanceID = in.After.ServerInstanceID
 	delta.ScrapeStartedAt = in.Before.ScrapedAt.UTC()
 	delta.ScrapeEndedAt = in.After.ScrapedAt.UTC()
 	if !in.After.ScrapedAt.After(in.Before.ScrapedAt) {
-		delta.Reason = "scrape bounds are invalid"
+		delta.Reason = "scrape bounds are invalid; capture an after scrape timestamp later than the before scrape"
 		return delta
 	}
 	var duplicateRequestIDs bool
 	delta.OverlappingRequestIDs, duplicateRequestIDs = overlappingRequestIDs(in.Requests, in.Before.ScrapedAt, in.After.ScrapedAt)
 	delta.OverlappingObservedRequests = len(delta.OverlappingRequestIDs)
 	if in.Before.ServerInstanceID == "" || in.After.ServerInstanceID == "" {
-		delta.Reason = "server-instance identity is unavailable"
+		delta.Reason = "server-instance identity is unavailable; record the same non-empty server instance ID in both snapshots"
 		return delta
 	}
 	if in.Before.ServerInstanceID != in.After.ServerInstanceID {
 		delta.ServerInstanceID = in.Before.ServerInstanceID + "->" + in.After.ServerInstanceID
-		delta.Reason = "server instance changed between scrapes"
+		delta.Reason = "server instance changed between scrapes; capture a new before/after pair from one server instance"
 		return delta
 	}
 	delta.Counters, delta.CounterResets, delta.CounterWraps = subtractCounters(in.Before.Counters, in.After.Counters)
@@ -226,12 +226,18 @@ func buildMetricsDelta(in AttributionInput) MetricsDelta {
 
 	if in.MaxScrapeAge > 0 && !in.ObservedAt.IsZero() && in.ObservedAt.Sub(in.After.ScrapedAt) > in.MaxScrapeAge {
 		delta.Grade = GradeStale
-		delta.Reason = fmt.Sprintf("latest scrape is older than %s", in.MaxScrapeAge)
+		delta.Reason = reasonWithRecoveryEvidence(
+			fmt.Sprintf("latest scrape is older than %s; refresh the after scrape within the configured maximum age", in.MaxScrapeAge),
+			delta,
+		)
 		return delta
 	}
 	if duplicateRequestIDs {
 		delta.Grade = GradeCohortOnly
-		delta.Reason = "duplicate request IDs make the shared counter window ambiguous"
+		delta.Reason = reasonWithRecoveryEvidence(
+			"duplicate request IDs make the shared counter window ambiguous; use unique request IDs or trusted request-label or trace correlation",
+			delta,
+		)
 		return delta
 	}
 
@@ -244,25 +250,44 @@ func buildMetricsDelta(in AttributionInput) MetricsDelta {
 		delta.BackgroundUnobserved = &background
 		if background > 0 {
 			delta.Grade = GradeContaminated
-			delta.Reason = fmt.Sprintf("server request counter proves %d unobserved request(s) in the scrape window", background)
+			delta.Reason = reasonWithRecoveryEvidence(
+				fmt.Sprintf("server request counter proves %d unobserved request(s) in the scrape window; isolate observed traffic or use request-label or trace correlation", background),
+				delta,
+			)
 			return delta
 		}
 		if delta.OverlappingObservedRequests == 1 && requestDelta == 1 {
 			delta.Grade = GradeIsolatedWindow
-			delta.Reason = "one observed request accounts for the complete server request delta"
+			delta.Reason = reasonWithRecoveryEvidence("one observed request accounts for the complete server request delta", delta)
 			return delta
 		}
 	}
 
 	delta.Grade = GradeCohortOnly
 	if delta.OverlappingObservedRequests > 1 {
-		delta.Reason = "multiple observed requests overlap the shared counter window"
+		delta.Reason = "multiple observed requests overlap the shared counter window; use request-label or trace correlation for per-request attribution"
 	} else if !requestCountKnown {
-		delta.Reason = "background traffic cannot be excluded without a usable server request counter"
+		delta.Reason = "background traffic cannot be excluded without a usable server request counter; capture a monotonic server request counter in both snapshots or use request-label or trace correlation"
 	} else {
-		delta.Reason = "the server request counter does not prove an isolated request window"
+		delta.Reason = "the server request counter does not prove an isolated request window; capture a window where one observed request matches one server request delta or use request-label or trace correlation"
 	}
+	delta.Reason = reasonWithRecoveryEvidence(delta.Reason, delta)
 	return delta
+}
+
+func reasonWithRecoveryEvidence(reason string, delta MetricsDelta) string {
+	for _, name := range delta.CounterResets {
+		switch name {
+		case CounterPrefixCacheHits, CounterCacheEvictions, CounterQueueEvents, CounterPreemptions:
+			reason += fmt.Sprintf("; %s reset, so no request cause is emitted; capture a fresh monotonic %s counter pair", name, name)
+		}
+	}
+	for _, correlated := range delta.RequestCounters {
+		if correlated.Source != "" && !trustedCorrelation(correlated.Source) {
+			return reason + "; untrusted correlation evidence is ignored; use request-label or trace correlation"
+		}
+	}
+	return reason
 }
 
 func subtractCounters(before, after CounterSet) (map[CounterName]CounterDelta, []CounterName, []CounterName) {
