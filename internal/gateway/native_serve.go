@@ -29,6 +29,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -422,7 +423,7 @@ func ensureGrammarRung() {
 // caller: the registry entry is what a control-plane verb looks the live run up by, so
 // leaving it behind would let a later verb address a finished run.
 func (s *Server) nativeRunOptions(ctx context.Context, reqTrace string) ([]agent.RunOption, func()) {
-	opts := make([]agent.RunOption, 0, 5)
+	opts := make([]agent.RunOption, 0, 6)
 	// #2403 write half: open this run's mid-flight mailbox under the request trace — the
 	// same id the typed progress events carry — so POST /v1/fak/session/{trace}/{interrupt|
 	// drop-pending-call|set-budget} reaches THIS live run and lands at its next clean turn
@@ -432,6 +433,14 @@ func (s *Server) nativeRunOptions(ctx context.Context, reqTrace string) ([]agent
 	// accepts as the historical (mailbox-free) loop.
 	mfOpt, release := s.midflightRunOption(reqTrace)
 	opts = append(opts, mfOpt)
+	opts = append(opts, agent.WithInputClaimLifecycle(agent.InputClaimLifecycle{
+		Claim: func(claim agent.AdmittedInputClaim) (agent.InputClaimBinding, error) {
+			return appendNativeInputClaim(reqTrace, claim)
+		},
+		Release: func(binding agent.InputClaimBinding, reason string) error {
+			return releaseNativeInputClaim(reqTrace, binding, reason)
+		},
+	}))
 	// The receipt observes the exact planned message slice immediately before the
 	// Planner call. Persistence is synchronous and fail-closed: a native request
 	// never reaches the model when its durable reconstruction witness did not land.
@@ -502,14 +511,57 @@ func appendNativeModelRequest(trace string, boundary agent.ModelRequestBoundary)
 	if err != nil {
 		return fmt.Errorf("marshal model request tools: %w", err)
 	}
-	_, err = ledger.AppendModelRequest(trace, sessionledger.ModelRequest{
+	request := sessionledger.ModelRequest{
 		Identity: sessionledger.ModelRequestIdentity{
 			Model: boundary.Model, Turn: boundary.Turn, Stream: boundary.Stream,
 			MaxTokens: boundary.MaxTokens,
 		},
 		Segments: segments,
 		Tools:    tools,
-	})
+	}
+	if boundary.InputClaim != nil {
+		request.InputClaim = &sessionledger.InputClaimBinding{
+			ClaimID: boundary.InputClaim.ID, InputSHA256: boundary.InputClaim.SHA256,
+			InputCount: boundary.InputClaim.Count,
+		}
+	}
+	_, err = ledger.AppendModelRequest(trace, request)
+	return err
+}
+
+func appendNativeInputClaim(trace string, claim agent.AdmittedInputClaim) (agent.InputClaimBinding, error) {
+	ledger, err := openNativeModelRequestLedger()
+	if err != nil {
+		return agent.InputClaimBinding{}, fmt.Errorf("open session ledger: %w", err)
+	}
+	inputs := make([]json.RawMessage, 0, len(claim.Inputs))
+	for i, input := range claim.Inputs {
+		raw, err := json.Marshal(input)
+		if err != nil {
+			return agent.InputClaimBinding{}, fmt.Errorf("marshal admitted input %d: %w", i, err)
+		}
+		inputs = append(inputs, raw)
+	}
+	receipt, err := ledger.AppendInputClaim(trace, sessionledger.InputClaim{Turn: claim.Turn, Inputs: inputs})
+	if err != nil {
+		return agent.InputClaimBinding{}, err
+	}
+	return agent.InputClaimBinding{ID: receipt.ClaimID, SHA256: receipt.InputSHA256, Count: receipt.InputCount}, nil
+}
+
+func releaseNativeInputClaim(trace string, binding agent.InputClaimBinding, reason string) error {
+	ledger, err := openNativeModelRequestLedger()
+	if err != nil {
+		return fmt.Errorf("open session ledger: %w", err)
+	}
+	_, current, err := ledger.ReconstructInputClaim(trace, binding.ID)
+	if err != nil {
+		return err
+	}
+	if current.InputSHA256 != binding.SHA256 || current.InputCount != binding.Count {
+		return errors.New("native input claim binding changed before release")
+	}
+	_, err = ledger.ReleaseInputClaim(trace, binding.ID, reason)
 	return err
 }
 

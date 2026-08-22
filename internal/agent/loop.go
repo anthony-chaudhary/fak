@@ -548,9 +548,26 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 		beforeDirectives := len(messages)
 		messages = spliceTurnDirectives(cfg, messages)
 		injected := append([]Message(nil), messages[beforeDirectives:]...)
+		inputClaim, err := cfg.claimTurnInputs(turn+1, injected)
+		if err != nil {
+			return m, fmt.Errorf("%s arm turn %d claim admitted input: %w", m.Arm, turn+1, err)
+		}
+		releaseClaim := func(reason string, cause error) error {
+			if err := cfg.releaseInputClaim(inputClaim, reason); err != nil {
+				return fmt.Errorf("%w; release input claim: %v", cause, err)
+			}
+			return cause
+		}
 		// Render the model-facing prompt exactly once. SessionPlanner.RenderTurn is
 		// stateful, so a second call for evidence could itself change the request.
-		planned := cfg.promptMessages(ctx, messages)
+		planned, err := cfg.promptMessages(ctx, messages)
+		if err != nil {
+			return m, fmt.Errorf("%s arm turn %d prompt assembly: %w", m.Arm, turn+1, releaseClaim("PROMPT_ASSEMBLY_FAILED", err))
+		}
+		if inputClaim.ID != "" && !claimedInputsSurviveAssembly(injected, planned) {
+			err := fmt.Errorf("prompt assembly dropped claimed input")
+			return m, fmt.Errorf("%s arm turn %d prompt assembly: %w", m.Arm, turn+1, releaseClaim("PROMPT_ASSEMBLY_DROPPED_CLAIMED_INPUT", err))
+		}
 		if cfg.modelRequestObserver != nil {
 			boundary := ModelRequestBoundary{
 				Model: model, Turn: turn + 1, Stream: stream, MaxTokens: perTurnCap,
@@ -558,13 +575,21 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 				Tools:    append([]ToolDef(nil), tools...),
 				Injected: injected,
 			}
-			if err := cfg.modelRequestObserver(boundary); err != nil {
-				return m, fmt.Errorf("%s arm turn %d model request receipt: %w", m.Arm, turn+1, err)
+			if inputClaim.ID != "" {
+				claimCopy := inputClaim
+				boundary.InputClaim = &claimCopy
 			}
+			if err := cfg.modelRequestObserver(boundary); err != nil {
+				return m, fmt.Errorf("%s arm turn %d model request receipt: %w", m.Arm, turn+1, releaseClaim("REQUEST_RECEIPT_FAILED", err))
+			}
+		} else if inputClaim.ID != "" {
+			err := fmt.Errorf("durable input claim requires a model request observer")
+			return m, fmt.Errorf("%s arm turn %d model request receipt: %w", m.Arm, turn+1, releaseClaim("REQUEST_RECEIPT_UNWIRED", err))
 		}
 
 		comp, err := complete(ctx, planned, tools, sampleOptsFor(perTurnCap)...)
 		if err != nil {
+			err = releaseClaim("MODEL_DISPATCH_FAILED", err)
 			// A completion error caused by this session's terminate (#2758) — the watcher
 			// cancelled the in-flight call's context — is the op WORKING, not a failure:
 			// stop typed (StoppedBySession=TERMINATED), no error. Any other error keeps

@@ -21,8 +21,10 @@ const (
 	// KindModelRequestReceipt is the bounded ledger row that points to an exact,
 	// content-addressed model-boundary manifest.
 	KindModelRequestReceipt = "model_request_receipt"
+	KindInputClaimReceipt   = "input_claim_receipt"
 	modelRequestObjectDir   = "model-request-objects"
 	modelRequestSchema      = "fak-model-request/1"
+	inputClaimSchema        = "fak-input-claim/1"
 )
 
 // ModelRequestIdentity identifies one model call without participating in the
@@ -47,9 +49,46 @@ type ModelRequestSegment struct {
 // ModelRequest is the reconstructable logical request at the Planner boundary.
 // Tools is the exact canonical JSON snapshot of the advertised tool catalog.
 type ModelRequest struct {
-	Identity ModelRequestIdentity  `json:"identity"`
-	Segments []ModelRequestSegment `json:"segments"`
-	Tools    json.RawMessage       `json:"tools"`
+	Identity   ModelRequestIdentity  `json:"identity"`
+	Segments   []ModelRequestSegment `json:"segments"`
+	Tools      json.RawMessage       `json:"tools"`
+	InputClaim *InputClaimBinding    `json:"input_claim,omitempty"`
+}
+
+// InputClaimBinding joins one exact admitted-input set to the request built
+// from it without changing the model-visible request digest.
+type InputClaimBinding struct {
+	ClaimID     string `json:"claim_id"`
+	InputSHA256 string `json:"input_sha256"`
+	InputCount  int    `json:"input_count"`
+}
+
+// InputClaim is the exact ordered set removed from the native-loop inbox for
+// one turn. Each item is the canonical message envelope spliced into history.
+type InputClaim struct {
+	Turn   int               `json:"turn"`
+	Inputs []json.RawMessage `json:"inputs"`
+}
+
+// InputClaimState is the closed ownership state recorded in the ledger.
+type InputClaimState string
+
+const (
+	InputClaimClaimed  InputClaimState = "CLAIMED"
+	InputClaimReleased InputClaimState = "RELEASED"
+)
+
+// InputClaimReceipt is a bounded ledger row pointing to exact claim bytes.
+type InputClaimReceipt struct {
+	Schema      string                 `json:"schema"`
+	ClaimID     string                 `json:"claim_id"`
+	Turn        int                    `json:"turn"`
+	State       InputClaimState        `json:"state"`
+	Inputs      ModelRequestContentRef `json:"inputs"`
+	InputSHA256 string                 `json:"input_sha256"`
+	InputCount  int                    `json:"input_count"`
+	Reason      string                 `json:"reason,omitempty"`
+	LedgerEntry Hash                   `json:"-"`
 }
 
 // ModelRequestContentRef is a bounded pointer to immutable CAS bytes.
@@ -71,6 +110,7 @@ type ModelRequestReceipt struct {
 	PromptSHA256  string                 `json:"prompt_sha256"`
 	SegmentCount  int                    `json:"segment_count"`
 	ToolBytes     int                    `json:"tool_bytes"`
+	InputClaim    *InputClaimBinding     `json:"input_claim,omitempty"`
 	LedgerEntry   Hash                   `json:"-"`
 }
 
@@ -87,6 +127,7 @@ type modelRequestManifest struct {
 	Tools         ModelRequestContentRef   `json:"tools"`
 	RequestSHA256 string                   `json:"request_sha256"`
 	PromptSHA256  string                   `json:"prompt_sha256"`
+	InputClaim    *InputClaimBinding       `json:"input_claim,omitempty"`
 }
 
 // ModelRequestMismatchAxis is the closed verifier classification.
@@ -115,6 +156,193 @@ func (e *ModelRequestMismatch) Error() string {
 	return fmt.Sprintf("model request mismatch: %s: %s", e.Axis, e.Detail)
 }
 
+// AppendInputClaim durably owns one exact admitted input set before prompt
+// assembly begins.
+func (l *Ledger) AppendInputClaim(trace string, claim InputClaim) (InputClaimReceipt, error) {
+	if strings.TrimSpace(trace) == "" {
+		return InputClaimReceipt{}, errors.New("sessionledger: input claim trace is required")
+	}
+	if err := validateInputClaim(claim); err != nil {
+		return InputClaimReceipt{}, err
+	}
+	id, err := newReceiptID("ic_")
+	if err != nil {
+		return InputClaimReceipt{}, fmt.Errorf("sessionledger: generate input claim id: %w", err)
+	}
+	digest, err := CanonicalInputClaimDigest(claim.Inputs)
+	if err != nil {
+		return InputClaimReceipt{}, err
+	}
+	inputs, err := json.Marshal(claim.Inputs)
+	if err != nil {
+		return InputClaimReceipt{}, fmt.Errorf("sessionledger: marshal input claim: %w", err)
+	}
+	ref, err := l.putModelRequestObject(inputs)
+	if err != nil {
+		return InputClaimReceipt{}, err
+	}
+	receipt := InputClaimReceipt{
+		Schema: inputClaimSchema, ClaimID: id, Turn: claim.Turn,
+		State: InputClaimClaimed, Inputs: ref, InputSHA256: digest,
+		InputCount: len(claim.Inputs),
+	}
+	return l.appendInputClaimReceipt(trace, receipt)
+}
+
+// ReleaseInputClaim records a deliberate no-retry outcome. A repeated release
+// returns the existing terminal receipt instead of appending a duplicate.
+func (l *Ledger) ReleaseInputClaim(trace, claimID, reason string) (InputClaimReceipt, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" || len(reason) > 256 {
+		return InputClaimReceipt{}, errors.New("sessionledger: input claim release reason is required and bounded")
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	receipt, err := l.inputClaimReceiptLocked(trace, claimID)
+	if err != nil {
+		return InputClaimReceipt{}, err
+	}
+	if receipt.State == InputClaimReleased {
+		return receipt, nil
+	}
+	receipt.State = InputClaimReleased
+	receipt.Reason = reason
+	receipt.LedgerEntry = ""
+	content, err := json.Marshal(receipt)
+	if err != nil {
+		return InputClaimReceipt{}, fmt.Errorf("sessionledger: marshal input claim receipt: %w", err)
+	}
+	parent := l.heads[trace]
+	entry := Entry{Parent: parent, Kind: KindInputClaimReceipt, Content: content}
+	entry.Hash = digest(parent, entry.Kind, content)
+	l.putNode(entry)
+	l.heads[trace] = entry.Hash
+	if err := l.appendRecord(record{
+		Trace: trace, Hash: entry.Hash, Parent: entry.Parent, Kind: entry.Kind, Content: entry.Content,
+	}); err != nil {
+		return InputClaimReceipt{}, err
+	}
+	receipt.LedgerEntry = entry.Hash
+	return receipt, nil
+}
+
+func (l *Ledger) inputClaimReceiptLocked(trace, claimID string) (InputClaimReceipt, error) {
+	head, ok := l.heads[trace]
+	if !ok {
+		return InputClaimReceipt{}, fmt.Errorf("sessionledger: trace %q not found", trace)
+	}
+	entries, err := l.chainFromLocked(head)
+	if err != nil {
+		return InputClaimReceipt{}, err
+	}
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].Kind != KindInputClaimReceipt {
+			continue
+		}
+		var receipt InputClaimReceipt
+		if err := json.Unmarshal(entries[i].Content, &receipt); err != nil {
+			return InputClaimReceipt{}, fmt.Errorf("sessionledger: decode input claim receipt: %w", err)
+		}
+		if receipt.ClaimID == claimID {
+			receipt.LedgerEntry = entries[i].Hash
+			return receipt, nil
+		}
+	}
+	return InputClaimReceipt{}, fmt.Errorf("sessionledger: input claim %q not found on trace %q", claimID, trace)
+}
+
+func (l *Ledger) appendInputClaimReceipt(trace string, receipt InputClaimReceipt) (InputClaimReceipt, error) {
+	content, err := json.Marshal(receipt)
+	if err != nil {
+		return InputClaimReceipt{}, fmt.Errorf("sessionledger: marshal input claim receipt: %w", err)
+	}
+	entry, err := l.Append(trace, KindInputClaimReceipt, content)
+	if err != nil {
+		return InputClaimReceipt{}, err
+	}
+	receipt.LedgerEntry = entry.Hash
+	return receipt, nil
+}
+
+// ReconstructInputClaim materializes and verifies the newest state of a claim
+// after process reopen.
+func (l *Ledger) ReconstructInputClaim(trace, claimID string) (InputClaim, InputClaimReceipt, error) {
+	if strings.TrimSpace(claimID) == "" {
+		return InputClaim{}, InputClaimReceipt{}, errors.New("sessionledger: input claim id is required")
+	}
+	entries, err := l.Chain(trace)
+	if err != nil {
+		return InputClaim{}, InputClaimReceipt{}, err
+	}
+	for i := len(entries) - 1; i >= 0; i-- {
+		entry := entries[i]
+		if entry.Kind != KindInputClaimReceipt {
+			continue
+		}
+		var receipt InputClaimReceipt
+		if err := json.Unmarshal(entry.Content, &receipt); err != nil {
+			return InputClaim{}, InputClaimReceipt{}, fmt.Errorf("sessionledger: decode input claim receipt: %w", err)
+		}
+		if receipt.ClaimID != claimID {
+			continue
+		}
+		receipt.LedgerEntry = entry.Hash
+		claim, err := l.rebuildInputClaim(receipt)
+		return claim, receipt, err
+	}
+	return InputClaim{}, InputClaimReceipt{}, fmt.Errorf("sessionledger: input claim %q not found on trace %q", claimID, trace)
+}
+
+func (l *Ledger) rebuildInputClaim(receipt InputClaimReceipt) (InputClaim, error) {
+	if receipt.Schema != inputClaimSchema || receipt.ClaimID == "" || receipt.Turn <= 0 ||
+		(receipt.State != InputClaimClaimed && receipt.State != InputClaimReleased) {
+		return InputClaim{}, errors.New("sessionledger: invalid input claim receipt")
+	}
+	content, err := l.resolveModelRequestObject(receipt.Inputs)
+	if err != nil {
+		return InputClaim{}, fmt.Errorf("sessionledger: resolve input claim: %w", err)
+	}
+	var inputs []json.RawMessage
+	if err := json.Unmarshal(content, &inputs); err != nil {
+		return InputClaim{}, fmt.Errorf("sessionledger: decode input claim: %w", err)
+	}
+	claim := InputClaim{Turn: receipt.Turn, Inputs: inputs}
+	if err := validateInputClaim(claim); err != nil {
+		return InputClaim{}, err
+	}
+	digest, err := CanonicalInputClaimDigest(inputs)
+	if err != nil {
+		return InputClaim{}, err
+	}
+	if digest != receipt.InputSHA256 || len(inputs) != receipt.InputCount {
+		return InputClaim{}, errors.New("sessionledger: reconstructed input claim digest or count mismatch")
+	}
+	return claim, nil
+}
+
+// CanonicalInputClaimDigest hashes the exact ordered admitted message envelopes.
+func CanonicalInputClaimDigest(inputs []json.RawMessage) (string, error) {
+	if len(inputs) == 0 {
+		return "", errors.New("sessionledger: input claim requires at least one input")
+	}
+	h := sha256.New()
+	for i, input := range inputs {
+		if !json.Valid(input) {
+			return "", fmt.Errorf("sessionledger: input claim item %d is invalid", i)
+		}
+		writeModelRequestFrame(h, "input", input)
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func validateInputClaim(claim InputClaim) error {
+	if claim.Turn <= 0 {
+		return errors.New("sessionledger: input claim turn must be positive")
+	}
+	_, err := CanonicalInputClaimDigest(claim.Inputs)
+	return err
+}
+
 // AppendModelRequest persists every exact payload in the ledger-local CAS before
 // appending one bounded receipt. Failure is returned synchronously so a caller can
 // refuse the model call rather than advance without evidence.
@@ -132,6 +360,19 @@ func (l *Ledger) AppendModelRequest(trace string, req ModelRequest) (ModelReques
 		}
 		req.Identity.RequestID = id
 	}
+	if req.InputClaim != nil {
+		claim, claimReceipt, err := l.ReconstructInputClaim(trace, req.InputClaim.ClaimID)
+		if err != nil {
+			return ModelRequestReceipt{}, fmt.Errorf("sessionledger: bind input claim: %w", err)
+		}
+		if claimReceipt.State != InputClaimClaimed || claimReceipt.InputSHA256 != req.InputClaim.InputSHA256 ||
+			claimReceipt.InputCount != req.InputClaim.InputCount {
+			return ModelRequestReceipt{}, errors.New("sessionledger: model request input claim binding mismatch")
+		}
+		if !inputClaimSurvivesRequest(claim.Inputs, req.Segments) {
+			return ModelRequestReceipt{}, errors.New("sessionledger: model request does not contain the exact claimed inputs")
+		}
+	}
 
 	requestDigest, err := CanonicalModelRequestDigest(req)
 	if err != nil {
@@ -145,6 +386,7 @@ func (l *Ledger) AppendModelRequest(trace string, req ModelRequest) (ModelReques
 		Schema: modelRequestSchema, Identity: req.Identity,
 		Segments:      make([]modelRequestSegmentRef, 0, len(req.Segments)),
 		RequestSHA256: requestDigest, PromptSHA256: promptDigest,
+		InputClaim: cloneInputClaimBinding(req.InputClaim),
 	}
 	for _, segment := range req.Segments {
 		ref, err := l.putModelRequestObject(segment.Content)
@@ -172,6 +414,7 @@ func (l *Ledger) AppendModelRequest(trace string, req ModelRequest) (ModelReques
 		Turn: req.Identity.Turn, Model: req.Identity.Model, Manifest: manifestRef,
 		RequestSHA256: requestDigest, PromptSHA256: promptDigest,
 		SegmentCount: len(req.Segments), ToolBytes: len(req.Tools),
+		InputClaim: cloneInputClaimBinding(req.InputClaim),
 	}
 	receiptBytes, err := json.Marshal(receipt)
 	if err != nil {
@@ -231,8 +474,12 @@ func (l *Ledger) rebuildModelRequest(receipt ModelRequestReceipt) (ModelRequest,
 		return ModelRequest{}, errors.New("sessionledger: receipt/manifest identity mismatch")
 	}
 	request := ModelRequest{
-		Identity: manifest.Identity,
-		Segments: make([]ModelRequestSegment, 0, len(manifest.Segments)),
+		Identity:   manifest.Identity,
+		Segments:   make([]ModelRequestSegment, 0, len(manifest.Segments)),
+		InputClaim: cloneInputClaimBinding(manifest.InputClaim),
+	}
+	if !equalInputClaimBinding(manifest.InputClaim, receipt.InputClaim) {
+		return ModelRequest{}, errors.New("sessionledger: receipt/manifest input claim mismatch")
 	}
 	for _, segment := range manifest.Segments {
 		content, err := l.resolveModelRequestObject(segment.Content)
@@ -331,15 +578,48 @@ func validateModelRequest(req *ModelRequest) error {
 	if !json.Valid(req.Tools) {
 		return errors.New("sessionledger: model request tools must be JSON")
 	}
+	if req.InputClaim != nil && (strings.TrimSpace(req.InputClaim.ClaimID) == "" ||
+		strings.TrimSpace(req.InputClaim.InputSHA256) == "" || req.InputClaim.InputCount <= 0) {
+		return errors.New("sessionledger: invalid model request input claim binding")
+	}
 	return nil
 }
 
 func newModelRequestID() (string, error) {
+	return newReceiptID("mr_")
+}
+
+func newReceiptID(prefix string) (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("sessionledger: generate model request id: %w", err)
+		return "", err
 	}
-	return "mr_" + hex.EncodeToString(b[:]), nil
+	return prefix + hex.EncodeToString(b[:]), nil
+}
+
+func cloneInputClaimBinding(binding *InputClaimBinding) *InputClaimBinding {
+	if binding == nil {
+		return nil
+	}
+	copy := *binding
+	return &copy
+}
+
+func equalInputClaimBinding(a, b *InputClaimBinding) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func inputClaimSurvivesRequest(inputs []json.RawMessage, segments []ModelRequestSegment) bool {
+	matched := 0
+	for _, segment := range segments {
+		if matched < len(inputs) && bytes.Equal(inputs[matched], segment.Content) {
+			matched++
+		}
+	}
+	return matched == len(inputs)
 }
 
 func (l *Ledger) putModelRequestObject(content []byte) (ModelRequestContentRef, error) {

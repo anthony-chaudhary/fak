@@ -11,6 +11,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -34,13 +35,14 @@ type RunOption func(*runConfig)
 // Messages is the single context-planned slice; Injected identifies directives
 // spliced immediately before planning that survived into this boundary.
 type ModelRequestBoundary struct {
-	Model     string
-	Turn      int
-	Stream    bool
-	MaxTokens int
-	Messages  []Message
-	Tools     []ToolDef
-	Injected  []Message
+	Model      string
+	Turn       int
+	Stream     bool
+	MaxTokens  int
+	Messages   []Message
+	Tools      []ToolDef
+	Injected   []Message
+	InputClaim *InputClaimBinding
 }
 
 // ModelRequestObserver persists or audits one model boundary. Returning an error
@@ -51,6 +53,44 @@ type ModelRequestObserver func(ModelRequestBoundary) error
 // observer is a literal no-op and preserves the historical loop.
 func WithModelRequestObserver(observer ModelRequestObserver) RunOption {
 	return func(c *runConfig) { c.modelRequestObserver = observer }
+}
+
+// AdmittedInputClaim is the exact directive set removed from the live inbox for
+// one turn. Claim runs before prompt assembly, so later arrivals cannot leak into
+// the request being built.
+type AdmittedInputClaim struct {
+	Turn   int
+	Inputs []Message
+}
+
+// InputClaimBinding is the durable identity returned by the claim store and
+// carried unchanged into the exact model-request receipt.
+type InputClaimBinding struct {
+	ID     string
+	SHA256 string
+	Count  int
+}
+
+// InputClaimLifecycle persists a claim before assembly and releases it after a
+// failed assembly or dispatch. Release must be idempotent.
+type InputClaimLifecycle struct {
+	Claim   func(AdmittedInputClaim) (InputClaimBinding, error)
+	Release func(InputClaimBinding, string) error
+}
+
+// WithInputClaimLifecycle wires durable native-loop input ownership.
+func WithInputClaimLifecycle(lifecycle InputClaimLifecycle) RunOption {
+	return func(c *runConfig) { c.inputClaims = &lifecycle }
+}
+
+// PromptAssembler is the model-facing context assembly seam. The optional
+// function makes blocking and failure behavior directly witnessable; nil keeps
+// the existing SessionPlanner path.
+type PromptAssembler func(context.Context, []Message) ([]Message, error)
+
+// WithPromptAssembler overrides prompt assembly for an owned loop.
+func WithPromptAssembler(assembler PromptAssembler) RunOption {
+	return func(c *runConfig) { c.promptAssembler = assembler }
 }
 
 // WithFinalGate requires an independently checked post-condition before a model
@@ -107,6 +147,8 @@ type runConfig struct {
 	// modelRequestObserver runs synchronously after directive splicing and the
 	// one context-planning pass, immediately before the Planner call.
 	modelRequestObserver ModelRequestObserver
+	inputClaims          *InputClaimLifecycle
+	promptAssembler      PromptAssembler
 }
 
 // ToolTerminalWakeKind is the typed reason a background-tool terminal
@@ -604,15 +646,64 @@ func bindPendingCheckpoint(p Planner, cfg runConfig) Planner {
 // promptMessages returns the context-planned prompt for this turn when a persistent
 // planner is wired. The authoritative message history stays lossless in RunArm; only
 // the model-facing prompt is shortened.
-func (c runConfig) promptMessages(ctx context.Context, messages []Message) []Message {
+func (c runConfig) promptMessages(ctx context.Context, messages []Message) ([]Message, error) {
+	if c.promptAssembler != nil {
+		planned, err := c.promptAssembler(ctx, append([]Message(nil), messages...))
+		if err != nil {
+			return nil, err
+		}
+		if len(planned) == 0 {
+			return messages, nil
+		}
+		return planned, nil
+	}
 	if c.contextPlanner == nil {
-		return messages
+		return messages, nil
 	}
 	planned := c.contextPlanner.RenderTurn(ctx, messages)
 	if len(planned) == 0 {
-		return messages
+		return messages, nil
 	}
-	return planned
+	return planned, nil
+}
+
+func (c runConfig) claimTurnInputs(turn int, inputs []Message) (InputClaimBinding, error) {
+	if len(inputs) == 0 || c.inputClaims == nil {
+		return InputClaimBinding{}, nil
+	}
+	if c.inputClaims.Claim == nil || c.inputClaims.Release == nil {
+		return InputClaimBinding{}, fmt.Errorf("input claim lifecycle requires claim and release callbacks")
+	}
+	binding, err := c.inputClaims.Claim(AdmittedInputClaim{
+		Turn: turn, Inputs: append([]Message(nil), inputs...),
+	})
+	if err != nil {
+		return InputClaimBinding{}, err
+	}
+	if binding.ID == "" || binding.SHA256 == "" || binding.Count != len(inputs) {
+		return InputClaimBinding{}, fmt.Errorf("input claim store returned an invalid binding")
+	}
+	return binding, nil
+}
+
+func (c runConfig) releaseInputClaim(binding InputClaimBinding, reason string) error {
+	if binding.ID == "" {
+		return nil
+	}
+	if c.inputClaims == nil || c.inputClaims.Release == nil {
+		return fmt.Errorf("input claim %q has no release callback", binding.ID)
+	}
+	return c.inputClaims.Release(binding, reason)
+}
+
+func claimedInputsSurviveAssembly(claimed, planned []Message) bool {
+	matched := 0
+	for _, message := range planned {
+		if matched < len(claimed) && reflect.DeepEqual(claimed[matched], message) {
+			matched++
+		}
+	}
+	return matched == len(claimed)
 }
 
 // terminateSignal returns the channel closed when this run's session enters
