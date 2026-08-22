@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-21T20:12:17-07:00",
+  "updated_at": "2026-08-22T02:12:33-07:00",
   "methodology": "Harness-related repositories absent by exact owner/name from tracked fak docs were ranked by direct seam relevance, current development activity, adoption signal, and license clarity. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -213,6 +213,30 @@
       "stars_at_check": 25448,
       "last_push_at_check": "2026-08-21T19:46:58Z",
       "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.md"
+    },
+    {
+      "repository": "openai/codex",
+      "url": "https://github.com/openai/codex",
+      "status": "studied",
+      "priority": 19,
+      "why": "Codex provider-clear behavior was studied at its typed thread-start seam: /clear and /new both replace the thread, while only /clear reports ThreadStartSource::Clear. The provider session-reset guide records the adapter consequence and exact upstream evidence.",
+      "last_checked": "2026-08-22",
+      "checked_revision": "9bf673718a4605b49e47d00762121d372af95439",
+      "stars_at_check": 111909,
+      "last_push_at_check": "2026-08-22T05:57:03Z",
+      "study_note": "docs/integrations/provider-session-reset.md"
+    },
+    {
+      "repository": "google-gemini/gemini-cli",
+      "url": "https://github.com/google-gemini/gemini-cli",
+      "status": "studied",
+      "priority": 20,
+      "why": "Gemini CLI provider-clear behavior was studied at its typed lifecycle seam: clear, with new as an alias, ends the old session, mints a session id, and emits SessionStart(Clear). The provider session-reset guide records the integration consequence and exact upstream evidence.",
+      "last_checked": "2026-08-22",
+      "checked_revision": "e90c63fa158b8facd1872d32b34b07e516308f2b",
+      "stars_at_check": 106610,
+      "last_push_at_check": "2026-08-22T01:10:05Z",
+      "study_note": "docs/integrations/provider-session-reset.md"
     }
   ]
 }
