@@ -1,0 +1,281 @@
+{
+  "schema": "fak.native_harness_instruction_dogfood.v1",
+  "observed_at_utc": "2026-08-22T12:29:18Z",
+  "issue": {
+    "number": 8046,
+    "title": "dogfood: run Dynamic native-harness instruction composition on this repo's own live work",
+    "state": "OPEN",
+    "url": "https://github.com/anthony-chaudhary/fak/issues/8046"
+  },
+  "repository": {
+    "name": "github.com/anthony-chaudhary/fak",
+    "branch": "main",
+    "head": "56c32a0364e49a78af0436b122957825ff19bddc",
+    "dirty_entries": 68
+  },
+  "owned_paths": [
+    "docs/notes/NATIVE-HARNESS-DYNAMIC-INSTRUCTIONS-DOGFOOD-2026-08-22.md",
+    "docs/_witnesses/native-harness-dynamic-instructions-dogfood-2026-08-22.json"
+  ],
+  "failing_before": {
+    "name": "committed-live-run-readout-exists",
+    "verdict": "FAIL",
+    "observed": "git ls-tree at pre-run HEAD found no #8046 dogfood readout or witness"
+  },
+  "turns": [
+    {
+      "schema_version": "harnesskit-instructions/1",
+      "prompt_value": [
+        {
+          "text": "You operate inside fak, an agent kernel: one process that sits between you and the tools you call and adjudicates every tool call before it runs. fak is the irreducible head of your context — these concepts are always resident and never change per turn.",
+          "type": "text"
+        },
+        {
+          "text": "The gate: every tool call is adjudicated before it executes. fak denies by structure (a default-deny capability floor you cannot talk past), repairs malformed calls, and quarantines poisoned results. A denied call is refused by structure, not by persuasion.",
+          "type": "text"
+        },
+        {
+          "text": "The journal: every decision is appended to a hash-chained, tamper-evident decision journal. A claim counts as true only when a witness in the journal corroborates it; a self-reported success with no witness is not yet done.",
+          "type": "text"
+        },
+        {
+          "text": "A capability is a named, versioned affordance — a skill, an MCP tool, or an A2A agent — that the gate may admit. Capabilities are queried by intent, not menu-dumped; their bodies are paged in on demand and evicted under pressure.",
+          "type": "text"
+        },
+        {
+          "text": "Policy floor: the deployed capability manifest is default-deny. Any tool call outside the granted allow set is refused. The floor is versioned and resident; it is never relaxed mid-session and never paged out.",
+          "type": "text"
+        },
+        {
+          "cache_control": {
+            "type": "ephemeral"
+          },
+          "text": "Safety-critical instructions are always resident — never paged, never compressed, never summarized. Anything load-bearing for the deny floor or fak's identity stays in the spine or policy tier and is excluded from the evictable set by construction.",
+          "type": "text"
+        },
+        {
+          "text": "Resolve issue #8046 (OPEN): dogfood: run Dynamic native-harness instruction composition on this repo's own live work",
+          "type": "text"
+        },
+        {
+          "text": "Work on github.com/anthony-chaudhary/fak branch main at 56c32a0364e49a78af0436b122957825ff19bddc with 68 dirty entries; preserve peer WIP and own only the declared paths.",
+          "type": "text"
+        },
+        {
+          "text": "For this turn, capture the real composition outcome and enumerate any defects.",
+          "type": "text"
+        }
+      ],
+      "snapshot": {
+        "schema_version": "harnesskit-instructions/1",
+        "fragments": [
+          {
+            "id": "issue-contract",
+            "source": "github/issue-8046",
+            "trust": "application",
+            "precedence": 30,
+            "lifetime": "run",
+            "residency": "overlay",
+            "content": "Resolve issue #8046 (OPEN): dogfood: run Dynamic native-harness instruction composition on this repo's own live work",
+            "digest": "sha256:55f8deb951958ee3fc4a11252c13d68333a5d5606c0c8ebf57d461074b759450"
+          },
+          {
+            "id": "repository-state",
+            "source": "git/live-main",
+            "trust": "application",
+            "precedence": 20,
+            "lifetime": "thread",
+            "residency": "overlay",
+            "content": "Work on github.com/anthony-chaudhary/fak branch main at 56c32a0364e49a78af0436b122957825ff19bddc with 68 dirty entries; preserve peer WIP and own only the declared paths.",
+            "digest": "sha256:4eb7469715b2dab48e64266a24f3ccfd46346fe7facc4c9b4d978423f54a2e41"
+          },
+          {
+            "id": "turn-objective",
+            "source": "issue-owner/live-phase",
+            "trust": "application",
+            "precedence": 10,
+            "lifetime": "turn",
+            "residency": "ephemeral-tail",
+            "content": "For this turn, capture the real composition outcome and enumerate any defects.",
+            "digest": "sha256:0522479b6d56290d86c83b502d5368ec7eae534cd484b15804d732b6a98114e2"
+          }
+        ],
+        "digest": "sha256:23fc35b353d0c9c9de4b3914de79e3e5a12a6652cbdb3f48d04288cf3827318b",
+        "estimated_bytes": 364,
+        "estimated_tokens": 91
+      },
+      "decisions": [
+        {
+          "id": "issue-contract",
+          "included": true,
+          "reason": "included by typed instruction snapshot"
+        },
+        {
+          "id": "repository-state",
+          "included": true,
+          "reason": "included by typed instruction snapshot"
+        },
+        {
+          "id": "turn-objective",
+          "included": true,
+          "reason": "included by typed instruction snapshot"
+        }
+      ],
+      "digest": "sha256:a478b5760b64e7d6c59d6b0d2f293b392aee9df3df1044aad20a674eeac3b4ef",
+      "stable_prefix_digest": "blob-sha256:0eab07f1e7352ddc46ea4812761988a4da4bcb71238a3ee434c4c73a219b7169",
+      "prefix_audit_status": "ok",
+      "estimated_bytes": 1791,
+      "estimated_tokens": 448
+    },
+    {
+      "schema_version": "harnesskit-instructions/1",
+      "prompt_value": [
+        {
+          "text": "You operate inside fak, an agent kernel: one process that sits between you and the tools you call and adjudicates every tool call before it runs. fak is the irreducible head of your context — these concepts are always resident and never change per turn.",
+          "type": "text"
+        },
+        {
+          "text": "The gate: every tool call is adjudicated before it executes. fak denies by structure (a default-deny capability floor you cannot talk past), repairs malformed calls, and quarantines poisoned results. A denied call is refused by structure, not by persuasion.",
+          "type": "text"
+        },
+        {
+          "text": "The journal: every decision is appended to a hash-chained, tamper-evident decision journal. A claim counts as true only when a witness in the journal corroborates it; a self-reported success with no witness is not yet done.",
+          "type": "text"
+        },
+        {
+          "text": "A capability is a named, versioned affordance — a skill, an MCP tool, or an A2A agent — that the gate may admit. Capabilities are queried by intent, not menu-dumped; their bodies are paged in on demand and evicted under pressure.",
+          "type": "text"
+        },
+        {
+          "text": "Policy floor: the deployed capability manifest is default-deny. Any tool call outside the granted allow set is refused. The floor is versioned and resident; it is never relaxed mid-session and never paged out.",
+          "type": "text"
+        },
+        {
+          "cache_control": {
+            "type": "ephemeral"
+          },
+          "text": "Safety-critical instructions are always resident — never paged, never compressed, never summarized. Anything load-bearing for the deny floor or fak's identity stays in the spine or policy tier and is excluded from the evictable set by construction.",
+          "type": "text"
+        },
+        {
+          "text": "Resolve issue #8046 (OPEN): dogfood: run Dynamic native-harness instruction composition on this repo's own live work",
+          "type": "text"
+        },
+        {
+          "text": "Work on github.com/anthony-chaudhary/fak branch main at 56c32a0364e49a78af0436b122957825ff19bddc with 68 dirty entries; preserve peer WIP and own only the declared paths.",
+          "type": "text"
+        },
+        {
+          "text": "For this turn, reconcile the readout, filed defects, and independent closure evidence.",
+          "type": "text"
+        }
+      ],
+      "snapshot": {
+        "schema_version": "harnesskit-instructions/1",
+        "fragments": [
+          {
+            "id": "issue-contract",
+            "source": "github/issue-8046",
+            "trust": "application",
+            "precedence": 30,
+            "lifetime": "run",
+            "residency": "overlay",
+            "content": "Resolve issue #8046 (OPEN): dogfood: run Dynamic native-harness instruction composition on this repo's own live work",
+            "digest": "sha256:55f8deb951958ee3fc4a11252c13d68333a5d5606c0c8ebf57d461074b759450"
+          },
+          {
+            "id": "repository-state",
+            "source": "git/live-main",
+            "trust": "application",
+            "precedence": 20,
+            "lifetime": "thread",
+            "residency": "overlay",
+            "content": "Work on github.com/anthony-chaudhary/fak branch main at 56c32a0364e49a78af0436b122957825ff19bddc with 68 dirty entries; preserve peer WIP and own only the declared paths.",
+            "digest": "sha256:4eb7469715b2dab48e64266a24f3ccfd46346fe7facc4c9b4d978423f54a2e41"
+          },
+          {
+            "id": "turn-objective",
+            "source": "issue-owner/live-phase",
+            "trust": "application",
+            "precedence": 10,
+            "lifetime": "turn",
+            "residency": "ephemeral-tail",
+            "content": "For this turn, reconcile the readout, filed defects, and independent closure evidence.",
+            "digest": "sha256:516330a6fe95626c1ded55325f91493f47bbe5728a3894930305833f38e46410"
+          }
+        ],
+        "digest": "sha256:ec7f03c8e398eda1c6e70c29c8023c2082f1591228b468d31ca40c74d539544b",
+        "estimated_bytes": 372,
+        "estimated_tokens": 93
+      },
+      "decisions": [
+        {
+          "id": "issue-contract",
+          "included": true,
+          "reason": "included by typed instruction snapshot"
+        },
+        {
+          "id": "repository-state",
+          "included": true,
+          "reason": "included by typed instruction snapshot"
+        },
+        {
+          "id": "turn-objective",
+          "included": true,
+          "reason": "included by typed instruction snapshot"
+        }
+      ],
+      "digest": "sha256:5a555076b1e106bf02845f59ed2d4159691dca4079c7c04c9dbafbd7eb3380ef",
+      "stable_prefix_digest": "blob-sha256:0eab07f1e7352ddc46ea4812761988a4da4bcb71238a3ee434c4c73a219b7169",
+      "prefix_audit_status": "ok",
+      "estimated_bytes": 1799,
+      "estimated_tokens": 450
+    }
+  ],
+  "checks": [
+    {
+      "name": "live-repository-data-composed",
+      "verdict": "PASS",
+      "observed": "branch=main head=56c32a0364e49a78af0436b122957825ff19bddc dirty_entries=68"
+    },
+    {
+      "name": "stable-prefix-preserved",
+      "verdict": "PASS",
+      "observed": "blob-sha256:0eab07f1e7352ddc46ea4812761988a4da4bcb71238a3ee434c4c73a219b7169"
+    },
+    {
+      "name": "turn-fragment-changed-full-prompt",
+      "verdict": "PASS",
+      "observed": "sha256:a478b5760b64e7d6c59d6b0d2f293b392aee9df3df1044aad20a674eeac3b4ef -\u003e sha256:5a555076b1e106bf02845f59ed2d4159691dca4079c7c04c9dbafbd7eb3380ef"
+    },
+    {
+      "name": "kernel-prefix-audit",
+      "verdict": "PASS",
+      "observed": "ok,ok"
+    },
+    {
+      "name": "typed-fragment-provenance",
+      "verdict": "PASS",
+      "observed": "turn decisions=3,3"
+    }
+  ],
+  "defects": [],
+  "contract": {
+    "schema_version": "harnesskit-instructions/1",
+    "resolution": "the host invokes InstructionProvider.Resolve at declared run, thread, or turn boundaries",
+    "composition": "providers return typed fragments; the host validates, orders, fingerprints, and realizes them without opaque prompt mutation",
+    "ownership": "providers own application fragments; the host owns policy, stable-prefix admission, final serialization, and invocation authority",
+    "security": "only host-trusted fragments may enter the stable prefix; untrusted fragments cannot claim positive precedence",
+    "determinism": "identical typed inputs and provider output produce byte-stable ordering and SHA-256 snapshot fingerprints",
+    "cancellation": "resolution accepts context.Context and returns CodeCanceled with the cancellation cause",
+    "compatibility": "same schema_version is additive; changed ordering, authority, or fingerprint semantics require a new schema_version",
+    "errors": [
+      "invalid",
+      "unsupported",
+      "conflict",
+      "denied",
+      "canceled",
+      "internal"
+    ]
+  }
+}
