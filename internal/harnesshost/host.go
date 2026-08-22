@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/harnesscompose"
@@ -37,25 +39,46 @@ func Build(host, contractVersion string) (Artifacts, error) {
 	if !ok {
 		return Artifacts{}, fmt.Errorf("built-in host profile %q is unavailable", host)
 	}
-	if profile.AdapterVersion == "" {
-		return Artifacts{}, fmt.Errorf("built-in host profile %q has no adapter version", host)
-	}
-	profileDigest, err := harnessprofile.SemanticDigest(profile)
+	binding, err := harnessprofile.Bind(profile)
 	if err != nil {
 		return Artifacts{}, err
 	}
-
-	hostID := "host:" + profile.Name
 	authority := "fak:internal/harnessprofile"
 	source := authority + "/builtin/" + profile.Name + "@" + profile.AdapterVersion
-	requirements := []harnessresolve.Requirement{{Capability: "wire:" + string(profile.Wire), Range: ">=1.0.0"}}
+	return BuildResolved(binding, authority, source, contractVersion)
+}
+
+// BuildResolved projects an explicitly resolved descriptor binding through the same graph
+// and lock path used by the built-in wrapper. The caller supplies provenance; this function
+// does not consult mutable process-global profile state.
+func BuildResolved(binding harnessprofile.Binding, authority, source, contractVersion string) (Artifacts, error) {
+	if binding.Schema != harnessprofile.BindingSchema || strings.TrimSpace(binding.Host) == "" {
+		return Artifacts{}, fmt.Errorf("resolved harness binding is required")
+	}
+	if binding.AdapterVersion == "" {
+		return Artifacts{}, fmt.Errorf("resolved host profile %q has no adapter version", binding.Host)
+	}
+	if strings.TrimSpace(authority) == "" || strings.TrimSpace(source) == "" {
+		return Artifacts{}, fmt.Errorf("resolved host profile %q requires source authority and provenance", binding.Host)
+	}
+	if !binding.Wire.Valid() {
+		return Artifacts{}, fmt.Errorf("resolved host profile %q has unknown wire %q", binding.Host, binding.Wire)
+	}
+	for _, mechanism := range binding.Repoint {
+		if !mechanism.Valid() {
+			return Artifacts{}, fmt.Errorf("resolved host profile %q has unknown repoint mechanism %q", binding.Host, mechanism)
+		}
+	}
+
+	hostID := "host:" + binding.Host
+	requirements := []harnessresolve.Requirement{{Capability: "wire:" + string(binding.Wire), Range: ">=1.0.0"}}
 	components := []harnessresolve.Component{{
-		ID: hostID, Version: profile.AdapterVersion, Digest: profileDigest, Source: source,
-		Provides: []string{"harness:" + profile.Name}, Compatibility: harnessresolve.Compatibility{Contract: contractVersion},
+		ID: hostID, Version: binding.AdapterVersion, Digest: binding.AdapterDigest, Source: source,
+		Provides: []string{"harness:" + binding.Host}, Compatibility: harnessresolve.Compatibility{Contract: contractVersion},
 		Adapters: []string{"harnessprofile"}, Evidence: stackresolve.Evidence{Authority: authority, Source: source, Tier: "shipped"},
 	}}
-	components = append(components, primitiveComponent("wire:"+string(profile.Wire), "gateway:"+string(profile.Wire), authority, contractVersion))
-	for _, mechanism := range profile.Repoint {
+	components = append(components, primitiveComponent("wire:"+string(binding.Wire), "gateway:"+string(binding.Wire), authority, contractVersion))
+	for _, mechanism := range binding.Repoint {
 		capability := "repoint:" + string(mechanism)
 		requirements = append(requirements, harnessresolve.Requirement{Capability: capability, Range: ">=1.0.0"})
 		components = append(components, primitiveComponent(capability, "guard:"+string(mechanism), authority, contractVersion))
@@ -88,7 +111,58 @@ func Build(host, contractVersion string) (Artifacts, error) {
 	if err != nil {
 		return Artifacts{}, err
 	}
-	return Artifacts{Host: host, Manifest: string(manifestRaw) + "\n", Lock: string(lockRaw) + "\n"}, nil
+	return Artifacts{Host: binding.Host, Manifest: string(manifestRaw) + "\n", Lock: string(lockRaw) + "\n"}, nil
+}
+
+// VerifyResolved binds a graph and lock back to the descriptor identity that authored
+// them. Canonical lock self-hashing alone cannot detect a newer descriptor using an old,
+// internally consistent lock.
+func VerifyResolved(binding harnessprofile.Binding, artifacts Artifacts) error {
+	manifest, err := harnessresolve.Parse([]byte(artifacts.Manifest))
+	if err != nil {
+		return fmt.Errorf("stale harness artifacts: manifest: %w", err)
+	}
+	var lock harnessresolve.Lock
+	if err := json.Unmarshal([]byte(artifacts.Lock), &lock); err != nil {
+		return fmt.Errorf("stale harness artifacts: lock: %w", err)
+	}
+	if err := harnessresolve.VerifyLock(lock); err != nil {
+		return fmt.Errorf("stale harness artifacts: lock: %w", err)
+	}
+	if artifacts.Host != binding.Host {
+		return fmt.Errorf("stale harness artifacts: host %q does not match descriptor %q", artifacts.Host, binding.Host)
+	}
+	if err := verifyComponents(binding, manifest.Components); err != nil {
+		return err
+	}
+	locked := make([]harnessresolve.Component, 0, len(lock.Components))
+	for _, component := range lock.Components {
+		locked = append(locked, harnessresolve.Component{ID: component.ID, Version: component.Version, Digest: component.Digest})
+	}
+	return verifyComponents(binding, locked)
+}
+
+func verifyComponents(binding harnessprofile.Binding, components []harnessresolve.Component) error {
+	wantIDs := []string{"host:" + binding.Host, "wire:" + string(binding.Wire)}
+	for _, mechanism := range binding.Repoint {
+		wantIDs = append(wantIDs, "repoint:"+string(mechanism))
+	}
+	sort.Strings(wantIDs)
+	gotIDs := make([]string, 0, len(wantIDs))
+	foundHost := false
+	for _, component := range components {
+		if component.ID == "host:"+binding.Host {
+			foundHost = component.Version == binding.AdapterVersion && component.Digest == binding.AdapterDigest
+		}
+		if strings.HasPrefix(component.ID, "host:") || strings.HasPrefix(component.ID, "wire:") || strings.HasPrefix(component.ID, "repoint:") {
+			gotIDs = append(gotIDs, component.ID)
+		}
+	}
+	sort.Strings(gotIDs)
+	if !foundHost || !slices.Equal(gotIDs, wantIDs) {
+		return fmt.Errorf("stale harness artifacts for %q: components %v do not match descriptor %v", binding.Host, gotIDs, wantIDs)
+	}
+	return nil
 }
 
 func builtinProfile(name string) (harnessprofile.HarnessProfile, bool) {

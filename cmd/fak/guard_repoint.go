@@ -35,6 +35,9 @@ func guardRepointWants(profile harnessprofile.HarnessProfile, ok bool, m harness
 // gate (guardIsCodex, guardPreCompactIsClaudeCommand) agrees on the same normalization
 // (harnessprofile.Lookup ports guardAgentBaseName) and the same closed mechanism set.
 func guardProfileHasRepoint(command string, m harnessprofile.RepointMechanism) bool {
-	profile, ok := harnessprofile.Lookup(command)
-	return guardRepointWants(profile, ok, m)
+	binding, ok, err := harnessprofile.ActiveBinding(command)
+	if err != nil || !ok {
+		return m == harnessprofile.RepointEnv
+	}
+	return binding.HasRepoint(m)
 }

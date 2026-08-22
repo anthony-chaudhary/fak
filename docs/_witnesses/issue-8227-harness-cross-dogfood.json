@@ -1,0 +1,183 @@
+{
+  "schema": "fak.issue-8227-harness-cross-dogfood-witness/1",
+  "issue": 8227,
+  "command": "fak harness cross-dogfood --selfcheck --json",
+  "platform_witnesses": [
+    {
+      "platform": "windows/amd64",
+      "status": "PASS",
+      "hosts": 3,
+      "subsystems_per_host": 5,
+      "drift_refusals": 3,
+      "network": "disabled:GOPROXY=off"
+    },
+    {
+      "platform": "linux/amd64",
+      "status": "PASS",
+      "hosts": 3,
+      "subsystems_per_host": 5,
+      "drift_refusals": 3,
+      "network": "disabled:GOPROXY=off"
+    }
+  ],
+  "matrix": {
+    "schema": "fak.harness-cross-dogfood/v1alpha1",
+    "platform": "linux/amd64",
+    "network": "disabled:GOPROXY=off",
+    "hosts": 3,
+    "subsystems_per_host": 5,
+    "drift_refusals": 3,
+    "rows": [
+      {
+        "host": "codex",
+        "command": "codex",
+        "profile": {
+          "schema": "fak.harness-binding/v1alpha1",
+          "host": "codex",
+          "adapter_version": "1.0.0",
+          "adapter_digest": "sha256:3d51ee171eb08ce467ca9cff9e97084e39c8103d9b0a889fb245e06a23bf2e51",
+          "wire": "openai-responses",
+          "repoint": ["env", "cli-config"]
+        },
+        "launch_binding": {
+          "schema": "fak.harness-binding/v1alpha1",
+          "host": "codex",
+          "adapter_version": "1.0.0",
+          "adapter_digest": "sha256:3d51ee171eb08ce467ca9cff9e97084e39c8103d9b0a889fb245e06a23bf2e51",
+          "wire": "openai-responses",
+          "repoint": ["env", "cli-config"]
+        },
+        "generated_host": "codex",
+        "component_graph": [
+          {"id": "host:codex", "version": "1.0.0", "digest": "sha256:3d51ee171eb08ce467ca9cff9e97084e39c8103d9b0a889fb245e06a23bf2e51"},
+          {"id": "repoint:cli-config", "version": "1.0.0", "digest": "sha256:719896e305250bee9fb4a505006795b3b9a1735fd79b55b100e64112262ff304"},
+          {"id": "repoint:env", "version": "1.0.0", "digest": "sha256:73048f06c24232ad422ada8eee4dcc7183e30b5f74618c6beb1df47c7264e83f"},
+          {"id": "wire:openai-responses", "version": "1.0.0", "digest": "sha256:dd1c9f7b5bfa18c282e4357d142508b9eccf1276ffd249caa701dce377e32171"}
+        ],
+        "lock": {
+          "id": "sha256:3620468a4c497878a36b63e20791ec644a58d26c9e4aaac858ea672625d4988b",
+          "components": [
+            {"id": "host:codex", "version": "1.0.0", "digest": "sha256:3d51ee171eb08ce467ca9cff9e97084e39c8103d9b0a889fb245e06a23bf2e51"},
+            {"id": "repoint:cli-config", "version": "1.0.0", "digest": "sha256:719896e305250bee9fb4a505006795b3b9a1735fd79b55b100e64112262ff304"},
+            {"id": "repoint:env", "version": "1.0.0", "digest": "sha256:73048f06c24232ad422ada8eee4dcc7183e30b5f74618c6beb1df47c7264e83f"},
+            {"id": "wire:openai-responses", "version": "1.0.0", "digest": "sha256:dd1c9f7b5bfa18c282e4357d142508b9eccf1276ffd249caa701dce377e32171"}
+          ]
+        },
+        "receipt": {
+          "schema": "fak.harness-launch-receipt/v1alpha1",
+          "lock_id": "sha256:3620468a4c497878a36b63e20791ec644a58d26c9e4aaac858ea672625d4988b",
+          "product_id": "example-product",
+          "profile": "locked",
+          "layers": [],
+          "assets": [],
+          "components": [
+            "host:codex@1.0.0#sha256:3d51ee171eb08ce467ca9cff9e97084e39c8103d9b0a889fb245e06a23bf2e51",
+            "repoint:cli-config@1.0.0#sha256:719896e305250bee9fb4a505006795b3b9a1735fd79b55b100e64112262ff304",
+            "repoint:env@1.0.0#sha256:73048f06c24232ad422ada8eee4dcc7183e30b5f74618c6beb1df47c7264e83f",
+            "wire:openai-responses@1.0.0#sha256:dd1c9f7b5bfa18c282e4357d142508b9eccf1276ffd249caa701dce377e32171"
+          ]
+        },
+        "drift_refusal": "stale harness artifacts for \"codex\": components [host:codex repoint:cli-config repoint:env wire:openai-responses] do not match descriptor [host:codex repoint:cli-config repoint:env repoint:settings-file wire:openai-responses]"
+      },
+      {
+        "host": "claude",
+        "command": "claude",
+        "profile": {
+          "schema": "fak.harness-binding/v1alpha1",
+          "host": "claude",
+          "adapter_version": "1.0.0",
+          "adapter_digest": "sha256:39d19a2d76f30e7ce7d2b4f2953d90018ec40d6239a9d6715f9d5640b07471fa",
+          "wire": "anthropic",
+          "repoint": ["env", "settings-file"]
+        },
+        "launch_binding": {
+          "schema": "fak.harness-binding/v1alpha1",
+          "host": "claude",
+          "adapter_version": "1.0.0",
+          "adapter_digest": "sha256:39d19a2d76f30e7ce7d2b4f2953d90018ec40d6239a9d6715f9d5640b07471fa",
+          "wire": "anthropic",
+          "repoint": ["env", "settings-file"]
+        },
+        "generated_host": "claude",
+        "component_graph": [
+          {"id": "host:claude", "version": "1.0.0", "digest": "sha256:39d19a2d76f30e7ce7d2b4f2953d90018ec40d6239a9d6715f9d5640b07471fa"},
+          {"id": "repoint:env", "version": "1.0.0", "digest": "sha256:73048f06c24232ad422ada8eee4dcc7183e30b5f74618c6beb1df47c7264e83f"},
+          {"id": "repoint:settings-file", "version": "1.0.0", "digest": "sha256:06a914a602d9fa7563d2cb679b4d0463a2279e7bc3e28d89972bc28d282f2bc8"},
+          {"id": "wire:anthropic", "version": "1.0.0", "digest": "sha256:bd9ce28440124b2e8f1a1db7c7bf80297630eecbb2f30328431b6fbce02b24d9"}
+        ],
+        "lock": {
+          "id": "sha256:1c866ff12579525911a58c7c2f2c7aa336864ae4fb7d4529e4cfc8482371fdc9",
+          "components": [
+            {"id": "host:claude", "version": "1.0.0", "digest": "sha256:39d19a2d76f30e7ce7d2b4f2953d90018ec40d6239a9d6715f9d5640b07471fa"},
+            {"id": "repoint:env", "version": "1.0.0", "digest": "sha256:73048f06c24232ad422ada8eee4dcc7183e30b5f74618c6beb1df47c7264e83f"},
+            {"id": "repoint:settings-file", "version": "1.0.0", "digest": "sha256:06a914a602d9fa7563d2cb679b4d0463a2279e7bc3e28d89972bc28d282f2bc8"},
+            {"id": "wire:anthropic", "version": "1.0.0", "digest": "sha256:bd9ce28440124b2e8f1a1db7c7bf80297630eecbb2f30328431b6fbce02b24d9"}
+          ]
+        },
+        "receipt": {
+          "schema": "fak.harness-launch-receipt/v1alpha1",
+          "lock_id": "sha256:1c866ff12579525911a58c7c2f2c7aa336864ae4fb7d4529e4cfc8482371fdc9",
+          "product_id": "example-product",
+          "profile": "locked",
+          "layers": [],
+          "assets": [],
+          "components": [
+            "host:claude@1.0.0#sha256:39d19a2d76f30e7ce7d2b4f2953d90018ec40d6239a9d6715f9d5640b07471fa",
+            "repoint:env@1.0.0#sha256:73048f06c24232ad422ada8eee4dcc7183e30b5f74618c6beb1df47c7264e83f",
+            "repoint:settings-file@1.0.0#sha256:06a914a602d9fa7563d2cb679b4d0463a2279e7bc3e28d89972bc28d282f2bc8",
+            "wire:anthropic@1.0.0#sha256:bd9ce28440124b2e8f1a1db7c7bf80297630eecbb2f30328431b6fbce02b24d9"
+          ]
+        },
+        "drift_refusal": "stale harness artifacts for \"claude\": components [host:claude repoint:env repoint:settings-file wire:anthropic] do not match descriptor [host:claude repoint:cli-config repoint:env repoint:settings-file wire:anthropic]"
+      },
+      {
+        "host": "acme",
+        "command": "acme-cli",
+        "profile": {
+          "schema": "fak.harness-binding/v1alpha1",
+          "host": "acme",
+          "adapter_version": "2.1.0",
+          "adapter_digest": "sha256:022a6d0ed7baab029c0be053adcd96dd9b8d3e25757013726aef30311ad5dfd6",
+          "wire": "openai",
+          "repoint": ["env"]
+        },
+        "launch_binding": {
+          "schema": "fak.harness-binding/v1alpha1",
+          "host": "acme",
+          "adapter_version": "2.1.0",
+          "adapter_digest": "sha256:022a6d0ed7baab029c0be053adcd96dd9b8d3e25757013726aef30311ad5dfd6",
+          "wire": "openai",
+          "repoint": ["env"]
+        },
+        "generated_host": "acme",
+        "component_graph": [
+          {"id": "host:acme", "version": "2.1.0", "digest": "sha256:022a6d0ed7baab029c0be053adcd96dd9b8d3e25757013726aef30311ad5dfd6"},
+          {"id": "repoint:env", "version": "1.0.0", "digest": "sha256:1c8d497581eb034cbbc0b4f7859737e71b01ab96ac2c787f969b635bd65ab0f6"},
+          {"id": "wire:openai", "version": "1.0.0", "digest": "sha256:68b1cc8660c35627f0f266b838f17a67994d5d99545e3757f8fccf0f52016d73"}
+        ],
+        "lock": {
+          "id": "sha256:3f40dcb66c51d1099fcc7392305dcbc52d1fe9227e28eca36c4f4ba239a4df48",
+          "components": [
+            {"id": "host:acme", "version": "2.1.0", "digest": "sha256:022a6d0ed7baab029c0be053adcd96dd9b8d3e25757013726aef30311ad5dfd6"},
+            {"id": "repoint:env", "version": "1.0.0", "digest": "sha256:1c8d497581eb034cbbc0b4f7859737e71b01ab96ac2c787f969b635bd65ab0f6"},
+            {"id": "wire:openai", "version": "1.0.0", "digest": "sha256:68b1cc8660c35627f0f266b838f17a67994d5d99545e3757f8fccf0f52016d73"}
+          ]
+        },
+        "receipt": {
+          "schema": "fak.harness-launch-receipt/v1alpha1",
+          "lock_id": "sha256:3f40dcb66c51d1099fcc7392305dcbc52d1fe9227e28eca36c4f4ba239a4df48",
+          "product_id": "example-product",
+          "profile": "locked",
+          "layers": [],
+          "assets": [],
+          "components": [
+            "host:acme@2.1.0#sha256:022a6d0ed7baab029c0be053adcd96dd9b8d3e25757013726aef30311ad5dfd6",
+            "repoint:env@1.0.0#sha256:1c8d497581eb034cbbc0b4f7859737e71b01ab96ac2c787f969b635bd65ab0f6",
+            "wire:openai@1.0.0#sha256:68b1cc8660c35627f0f266b838f17a67994d5d99545e3757f8fccf0f52016d73"
+          ]
+        },
+        "drift_refusal": "stale harness artifacts for \"acme\": components [host:acme repoint:env wire:openai] do not match descriptor [host:acme repoint:cli-config repoint:env wire:openai]"
+      }
+    ]
+  }
+}

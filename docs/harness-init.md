@@ -37,6 +37,25 @@ runtime observations: init neither installs nor silently pins them. This split l
 adapter tolerate compatible upstream releases while leaving incompatible drift visible for a
 pre-launch check.
 
+## Cross-dogfood conformance
+
+Run the complete host-artifact matrix from the fak checkout with one offline command:
+
+```text
+fak harness cross-dogfood --selfcheck --json
+```
+
+The selfcheck resolves Codex, Claude, and a config-declared third harness, then derives the
+guard binding, component graph, product lock, and external generated-product receipt from each
+descriptor. Exact host, wire, repoint, adapter-version, and digest identities must agree at every
+seam. Each row also mutates its resolved descriptor and requires the prior graph and lock to fail
+closed as stale. Generated external products use a local module replacement with `GOPROXY=off`,
+so the command needs no key, model, network, or GPU and does not require the three host CLIs.
+
+The same command is supported natively on Windows and through WSL. The checked-in machine
+readout, including both platform witnesses, is
+[`issue-8227-harness-cross-dogfood.json`](_witnesses/issue-8227-harness-cross-dogfood.json).
+
 Ownership is explicit in `harness.lock.json`: `product/config.go` and `README.md` are user-owned and never overwritten. Generated Go/module files carry generator provenance or are listed in the lock. Re-running the command updates only recognized generated files and leaves user-owned files byte-for-byte intact.
 
 The default pin is `github.com/anthony-chaudhary/fak@v0.43.1-0.20260814184635-613a82b762e2`, the Go proxy's immutable pseudo-version for commit `613a82b762e2` where public contract `v1alpha1` shipped. Override it explicitly with `--fak-version` when upgrading. Windows and Linux clean-room transcripts are archived under `docs/_witnesses/harness-init/`.

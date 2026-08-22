@@ -25,7 +25,7 @@ func normalizeHostArtifacts(host, manifest, lock string) (hostArtifacts, error) 
 		}
 		return hostArtifacts{}, nil
 	}
-	if host != "codex" && host != "claude" {
+	if host != "codex" && host != "claude" && (strings.TrimSpace(manifest) == "" || strings.TrimSpace(lock) == "") {
 		return hostArtifacts{}, fmt.Errorf("unsupported --host %q (want codex|claude)", host)
 	}
 	if strings.TrimSpace(manifest) == "" || !json.Valid([]byte(manifest)) {

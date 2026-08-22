@@ -59,11 +59,11 @@ func resolveGuardProvider(flagValue, command string) (provider string, autodetec
 // Lookup ports guardAgentBaseName's normalization, so an absolute path or a wrapped
 // launcher still matches identically.
 func guardDetectProvider(command string) (provider string, recognized bool) {
-	profile, ok := harnessprofile.Lookup(command)
-	if !ok {
+	binding, ok, err := harnessprofile.ActiveBinding(command)
+	if err != nil || !ok {
 		return "", false
 	}
-	return string(profile.Wire), true
+	return string(binding.Wire), true
 }
 
 // guardAgentBaseName normalizes a wrapped-agent command to its lowercased executable base
