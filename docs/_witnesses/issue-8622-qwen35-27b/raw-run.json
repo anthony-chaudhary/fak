@@ -1,0 +1,1969 @@
+{
+  "schema": "fak.qwen38-ladder-raw-run/1",
+  "environment_sha256": "95dbc6e205f0f37048c31392d73ced12bf7e0de295007ea3b0245317ae7139b2",
+  "corpus_sha256": "d1e43a700d5daab37590314c4a102bb9075de52766fe9c4f71100d7ad183d1f5",
+  "rows": [
+    {
+      "trial": 1,
+      "arm": "baseline",
+      "enable_thinking": true,
+      "elapsed_ms": 6691.03705,
+      "passed": true,
+      "decoded_to_stop": "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Question: \"What is 2+2?\"\n    *   Constraint: \"Reply with only the number.\"\n\n2.  **Calculate the Answer:**\n    *   2 + 2 = 4",
+      "events": [
+        {
+          "elapsed_ms": 180.145806,
+          "pieces": [],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 180.2261,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "Thinking"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 288.152048,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Process"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 398.469641,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ":"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 509.272892,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "\n\n"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 620.028921,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "1"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 730.632255,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "."
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 840.885095,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 950.71216,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " **"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1059.686744,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "An"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1168.937168,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "alyze"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1276.535679,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " the"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1384.238208,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Request"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1494.541626,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ":**"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1604.972891,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "\n"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1712.684065,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "   "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1819.567613,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " *"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1926.040617,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "  "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2032.696936,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Question"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2140.292948,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ":"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2249.396386,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " \""
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2357.952443,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "What"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2465.38355,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " is"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2572.559833,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2679.855029,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2787.30371,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "+"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2894.766049,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3002.520608,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "?\""
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3110.207003,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "\n"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3217.600177,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "   "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3324.868076,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " *"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3436.059367,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "  "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3546.680138,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Constraint"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3657.532155,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ":"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3767.866374,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " \""
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3877.860292,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "Reply"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3987.862199,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " with"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4099.075327,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " only"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4208.590437,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " the"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4318.689571,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " number"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4428.435748,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ".\""
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4539.189648,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "\n\n"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4650.318965,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4758.710741,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "."
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4866.218672,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4973.57677,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " **"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5080.63271,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "Calculate"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5187.488846,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " the"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5295.029897,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Answer"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5403.092859,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ":**"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5510.409663,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "\n"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5618.279,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "   "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5725.847224,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " *"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5833.483357,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "  "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5940.872193,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6048.232683,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6155.595461,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " +"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6262.506188,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6369.735732,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6476.836195,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " ="
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6583.843167,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6691.03705,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "4"
+            }
+          ],
+          "finish_reason": null
+        }
+      ]
+    },
+    {
+      "trial": 1,
+      "arm": "candidate",
+      "enable_thinking": false,
+      "elapsed_ms": 376.463048,
+      "passed": true,
+      "decoded_to_stop": "4",
+      "events": [
+        {
+          "elapsed_ms": 376.409396,
+          "pieces": [],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 376.463048,
+          "pieces": [
+            {
+              "field": "content",
+              "text": "4"
+            }
+          ],
+          "finish_reason": null
+        }
+      ]
+    },
+    {
+      "trial": 2,
+      "arm": "baseline",
+      "enable_thinking": true,
+      "elapsed_ms": 6881.530965,
+      "passed": true,
+      "decoded_to_stop": "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Question: \"What is 2+2?\"\n    *   Constraint: \"Reply with only the number.\"\n\n2.  **Calculate the Answer:**\n    *   2 + 2 = 4",
+      "events": [
+        {
+          "elapsed_ms": 382.664018,
+          "pieces": [],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 382.714814,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "Thinking"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 491.562318,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Process"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 602.375022,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ":"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 711.913072,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "\n\n"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 819.510709,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "1"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 927.247707,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "."
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1035.759286,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1142.579757,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " **"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1251.442693,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "An"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1360.367771,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "alyze"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1469.657715,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " the"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1578.666592,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Request"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1687.105992,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ":**"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1793.951204,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "\n"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1903.483744,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "   "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2013.980022,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " *"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2123.755011,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "  "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2233.883412,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Question"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2342.029377,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ":"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2448.706998,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " \""
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2555.700371,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "What"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2662.823091,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " is"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2769.548141,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2876.999019,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2984.926279,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "+"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3092.830315,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3200.961992,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "?\""
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3309.450653,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "\n"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3417.578436,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "   "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3525.759419,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " *"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3633.919582,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "  "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3741.990467,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Constraint"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3849.893114,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ":"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3957.73063,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " \""
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4065.493286,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "Reply"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4173.382349,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " with"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4281.31226,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " only"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4389.210454,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " the"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4497.059648,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " number"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4605.326702,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ".\""
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4714.171591,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "\n\n"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4822.342885,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4930.074424,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "."
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5038.509581,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5146.749819,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " **"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5255.219556,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "Calculate"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5363.32101,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " the"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5471.26144,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Answer"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5579.552791,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ":**"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5687.903131,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "\n"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5796.615051,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "   "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5905.38657,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " *"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6013.674291,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "  "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6121.623951,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6229.742622,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6337.979075,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " +"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6446.464698,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6555.414956,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6664.236137,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " ="
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6772.777767,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6881.530965,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "4"
+            }
+          ],
+          "finish_reason": null
+        }
+      ]
+    },
+    {
+      "trial": 2,
+      "arm": "candidate",
+      "enable_thinking": false,
+      "elapsed_ms": 386.215312,
+      "passed": true,
+      "decoded_to_stop": "4",
+      "events": [
+        {
+          "elapsed_ms": 386.160756,
+          "pieces": [],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 386.215312,
+          "pieces": [
+            {
+              "field": "content",
+              "text": "4"
+            }
+          ],
+          "finish_reason": null
+        }
+      ]
+    },
+    {
+      "trial": 3,
+      "arm": "baseline",
+      "enable_thinking": true,
+      "elapsed_ms": 6880.376436,
+      "passed": true,
+      "decoded_to_stop": "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Question: \"What is 2+2?\"\n    *   Constraint: \"Reply with only the number.\"\n\n2.  **Calculate the Answer:**\n    *   2 + 2 = 4",
+      "events": [
+        {
+          "elapsed_ms": 376.009166,
+          "pieces": [],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 376.065791,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "Thinking"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 484.214049,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Process"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 593.727545,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ":"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 703.557579,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "\n\n"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 813.721253,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "1"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 923.971676,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "."
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1035.330071,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1145.765371,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " **"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1256.315939,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "An"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1367.207489,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "alyze"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1477.763289,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " the"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1586.122638,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Request"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1695.631582,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ":**"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1804.635651,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "\n"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 1913.296871,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "   "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2022.185064,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " *"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2129.53713,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "  "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2236.77393,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Question"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2343.959053,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ":"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2451.359566,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " \""
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2558.628887,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "What"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2665.687107,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " is"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2773.050505,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2880.467991,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 2988.971162,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "+"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3098.766285,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3207.604219,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "?\""
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3316.854682,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "\n"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3425.920098,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "   "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3533.801474,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " *"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3641.434478,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "  "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3749.737654,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Constraint"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3857.371148,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ":"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 3964.995709,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " \""
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4072.406794,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "Reply"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4179.822612,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " with"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4287.051989,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " only"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4394.451273,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " the"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4501.291752,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " number"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4608.194889,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ".\""
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4715.472856,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "\n\n"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4822.534599,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 4930.139153,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "."
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5037.248928,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5144.448066,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " **"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5251.763397,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "Calculate"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5359.177516,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " the"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5466.579825,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " Answer"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5573.678287,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": ":**"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5683.646152,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "\n"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5792.765386,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "   "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 5901.945339,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " *"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6012.330705,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "  "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6120.691199,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6228.032299,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6335.759248,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " +"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6444.587569,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6553.48818,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "2"
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6662.369228,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " ="
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6771.549753,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": " "
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 6880.376436,
+          "pieces": [
+            {
+              "field": "reasoning",
+              "text": "4"
+            }
+          ],
+          "finish_reason": null
+        }
+      ]
+    },
+    {
+      "trial": 3,
+      "arm": "candidate",
+      "enable_thinking": false,
+      "elapsed_ms": 379.235843,
+      "passed": true,
+      "decoded_to_stop": "4",
+      "events": [
+        {
+          "elapsed_ms": 379.179688,
+          "pieces": [],
+          "finish_reason": null
+        },
+        {
+          "elapsed_ms": 379.235843,
+          "pieces": [
+            {
+              "field": "content",
+              "text": "4"
+            }
+          ],
+          "finish_reason": null
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "baseline": {
+      "passed": 3,
+      "trials": 3,
+      "p95_ms": 6881.530965
+    },
+    "candidate": {
+      "passed": 3,
+      "trials": 3,
+      "p95_ms": 386.215312
+    }
+  }
+}

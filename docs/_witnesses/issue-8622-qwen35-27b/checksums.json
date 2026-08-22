@@ -1,0 +1,26 @@
+[
+  {
+    "file": "corpus.json",
+    "sha256": "d1e43a700d5daab37590314c4a102bb9075de52766fe9c4f71100d7ad183d1f5"
+  },
+  {
+    "file": "environment.json",
+    "sha256": "9747ef825bb7687ed0b5a902dcc621ef1e60cc0e7c51877bab16447ae2c80b63"
+  },
+  {
+    "file": "evaluator-output.json",
+    "sha256": "4544640794aa0824ac4fa00b45ae6234d26b72eeed98d892319ebee71b8f6b52"
+  },
+  {
+    "file": "evidence-through-27b.json",
+    "sha256": "43c85f169e709346509aff1602418df7c23f9b2e2966b92304fa5f4f0a4796ac"
+  },
+  {
+    "file": "raw-run.json",
+    "sha256": "3d7a57dd34d9c88655cc90707b21a5ec078edde16e1171ae076b8bb5b1fc288a"
+  },
+  {
+    "file": "README.md",
+    "sha256": "0d1dc71a1aaafb41a9063c7fc2fa9c9cf184fe6605bea12f202f8e26aa266c6d"
+  }
+]

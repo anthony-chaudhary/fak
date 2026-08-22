@@ -1,0 +1,16 @@
+{
+  "verdict": "PROMOTE",
+  "next_stage": {
+    "id": "target",
+    "model": "Qwen/Qwen3.8-27B",
+    "revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+    "parameters_b": 27,
+    "minimum_pass_rate": 0.95,
+    "proves": [
+      "exact target behavior",
+      "exact target performance",
+      "release decision"
+    ]
+  },
+  "reason": "all cheaper stages passed; run the paired experiment at the next stage"
+}
