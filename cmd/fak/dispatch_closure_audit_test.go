@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/closureaudit"
 )
@@ -16,9 +18,9 @@ func withClosureAuditSeams(t *testing.T,
 	audits map[string]closureaudit.Audit,
 ) {
 	t.Helper()
-	oi, oc, oa, ot := closureAuditFetchIssues, closureAuditReadCommits, closureAuditCommitAudit, closureAuditTotalCommits
+	oi, oc, oa, ob, ot := closureAuditFetchIssues, closureAuditReadCommits, closureAuditCommitAudit, closureAuditCommitAudits, closureAuditTotalCommits
 	t.Cleanup(func() {
-		closureAuditFetchIssues, closureAuditReadCommits, closureAuditCommitAudit, closureAuditTotalCommits = oi, oc, oa, ot
+		closureAuditFetchIssues, closureAuditReadCommits, closureAuditCommitAudit, closureAuditCommitAudits, closureAuditTotalCommits = oi, oc, oa, ob, ot
 	})
 	closureAuditFetchIssues = func(_ string, _ int) ([]closureaudit.Issue, error) { return issues, nil }
 	closureAuditReadCommits = func(_ string, _ int) ([]closureaudit.Commit, error) { return commits, nil }
@@ -27,6 +29,75 @@ func withClosureAuditSeams(t *testing.T,
 	// unless a test narrows a cap. Keeps the git rev-list I/O out of unit tests.
 	total := len(commits)
 	closureAuditTotalCommits = func(_ string) *int { return &total }
+}
+
+func TestClosureAuditCommitAuditsBounded(t *testing.T) {
+	original := closureAuditCommitAudit
+	t.Cleanup(func() { closureAuditCommitAudit = original })
+
+	var active atomic.Int32
+	var maxActive atomic.Int32
+	closureAuditCommitAudit = func(_, sha string) closureaudit.Audit {
+		now := active.Add(1)
+		for old := maxActive.Load(); now > old && !maxActive.CompareAndSwap(old, now); old = maxActive.Load() {
+		}
+		time.Sleep(10 * time.Millisecond)
+		active.Add(-1)
+		return closureaudit.Audit{Verdict: "OK", Witness: sha}
+	}
+
+	shas := make([]string, closureAuditWorkers*2)
+	for i := range shas {
+		shas[i] = string(rune('a' + i))
+	}
+	got := closureAuditCommitAuditsBounded(".", shas)
+	if len(got) != len(shas) {
+		t.Fatalf("audited %d SHA(s), want %d", len(got), len(shas))
+	}
+	if maxActive.Load() <= 1 {
+		t.Fatalf("max concurrent audits=%d, want >1", maxActive.Load())
+	}
+	if maxActive.Load() > closureAuditWorkers {
+		t.Fatalf("max concurrent audits=%d, cap=%d", maxActive.Load(), closureAuditWorkers)
+	}
+	for _, sha := range shas {
+		if got[sha].Witness != sha {
+			t.Fatalf("audit[%q]=%+v, want matching witness", sha, got[sha])
+		}
+	}
+}
+
+func TestCollectClosureAuditFreezesCoverageBeforeWitnesses(t *testing.T) {
+	oi, oc, ob, ot := closureAuditFetchIssues, closureAuditReadCommits, closureAuditCommitAudits, closureAuditTotalCommits
+	t.Cleanup(func() {
+		closureAuditFetchIssues, closureAuditReadCommits, closureAuditCommitAudits, closureAuditTotalCommits = oi, oc, ob, ot
+	})
+
+	var order []string
+	closureAuditFetchIssues = func(_ string, _ int) ([]closureaudit.Issue, error) {
+		return []closureaudit.Issue{{Number: 1, State: "CLOSED"}}, nil
+	}
+	closureAuditTotalCommits = func(_ string) *int {
+		order = append(order, "total")
+		total := 1
+		return &total
+	}
+	closureAuditReadCommits = func(_ string, _ int) ([]closureaudit.Commit, error) {
+		order = append(order, "commits")
+		return []closureaudit.Commit{{SHA: "aaaaaaa1", Subject: "fix: resolve #1"}}, nil
+	}
+	closureAuditCommitAudits = func(_ string, _ []string) map[string]closureaudit.Audit {
+		order = append(order, "audits")
+		return map[string]closureaudit.Audit{"aaaaaaa1": {Verdict: "OK", Witness: "diff-witnessed"}}
+	}
+
+	rep := collectDispatchClosureAudit(".", 10, 10)
+	if !rep.Coverage.Complete {
+		t.Fatalf("coverage=%+v, want complete", rep.Coverage)
+	}
+	if got := strings.Join(order, ","); got != "total,commits,audits" {
+		t.Fatalf("I/O order=%q, want total,commits,audits", got)
+	}
 }
 
 func TestRunDispatchClosureAuditJSON(t *testing.T) {

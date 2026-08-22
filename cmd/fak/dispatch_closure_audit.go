@@ -32,6 +32,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/closureaudit"
@@ -43,8 +44,11 @@ var (
 	closureAuditFetchIssues  = closureAuditFetchIssuesGH
 	closureAuditReadCommits  = closureAuditReadCommitsGit
 	closureAuditCommitAudit  = closureAuditCommitAuditDOS
+	closureAuditCommitAudits = closureAuditCommitAuditsBounded
 	closureAuditTotalCommits = closureAuditTotalCommitsGit
 )
+
+const closureAuditWorkers = 8
 
 func runDispatchClosureAudit(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("dispatch closure-audit", flag.ContinueOnError)
@@ -106,6 +110,10 @@ func runDispatchClosureAudit(stdout, stderr io.Writer, argv []string) int {
 // Python collect().
 func collectDispatchClosureAudit(root string, maxCommits, issueLimit int) closureaudit.Report {
 	issues, issuesErr := closureAuditFetchIssues(root, issueLimit)
+	// Freeze the history denominator before the slow DOS witness pass. Shared
+	// trunk can advance while thousands of commits are audited; counting HEAD at
+	// the end would compare two different snapshots and fabricate truncation.
+	totalCommits := closureAuditTotalCommits(root)
 	commits, _ := closureAuditReadCommits(root, maxCommits)
 	refs := closureaudit.RefsFromCommits(commits)
 
@@ -129,10 +137,7 @@ func collectDispatchClosureAudit(root string, maxCommits, issueLimit int) closur
 		shas = append(shas, sha)
 	}
 	sort.Strings(shas)
-	audits := make(map[string]closureaudit.Audit, len(shas))
-	for _, sha := range shas {
-		audits[sha] = closureAuditCommitAudit(root, sha)
-	}
+	audits := closureAuditCommitAudits(root, shas)
 
 	auditError := ""
 	if issuesErr != nil {
@@ -146,7 +151,7 @@ func collectDispatchClosureAudit(root string, maxCommits, issueLimit int) closur
 	// total from `git rev-list --count`) and surfaces AUDIT_WINDOW_TRUNCATED when
 	// the audit saw only a slice of the backlog.
 	cov := closureaudit.ComputeCoverage(len(issues), issueLimit, len(commits), maxCommits,
-		closureAuditTotalCommits(root))
+		totalCommits)
 	rep.Coverage = &cov
 	return rep
 }
@@ -253,6 +258,40 @@ func closureAuditCommitAuditDOS(root, sha string) closureaudit.Audit {
 		return closureaudit.Audit{}
 	}
 	return parseCommitAuditRecord(out)
+}
+
+// closureAuditCommitAuditsBounded keeps complete-window audits practical while
+// preserving the existing one-SHA DOS witness boundary. A full repository scan
+// can contain thousands of resolving commits; serial process startup turned the
+// coverage-honesty path into an hour-scale operation.
+func closureAuditCommitAuditsBounded(root string, shas []string) map[string]closureaudit.Audit {
+	audits := make(map[string]closureaudit.Audit, len(shas))
+	if len(shas) == 0 {
+		return audits
+	}
+
+	workers := min(closureAuditWorkers, len(shas))
+	jobs := make(chan string)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for sha := range jobs {
+				audit := closureAuditCommitAudit(root, sha)
+				mu.Lock()
+				audits[sha] = audit
+				mu.Unlock()
+			}
+		}()
+	}
+	for _, sha := range shas {
+		jobs <- sha
+	}
+	close(jobs)
+	wg.Wait()
+	return audits
 }
 
 func parseCommitAuditRecord(out []byte) closureaudit.Audit {
