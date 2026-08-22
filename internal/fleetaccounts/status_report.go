@@ -63,32 +63,34 @@ type StatusTotals struct {
 // StatusAccount is the per-account row in the report. CapacityCounted=false means the row
 // is visible but its pool was already counted by a better representative.
 type StatusAccount struct {
-	Node            string   `json:"node,omitempty"`
-	Account         string   `json:"account"`
-	Tag             string   `json:"tag"`
-	Product         string   `json:"product"`
-	Provider        string   `json:"provider"`
-	Agent           string   `json:"agent,omitempty"`
-	ModelTier       *int     `json:"model_tier,omitempty"`
-	Model           string   `json:"model,omitempty"`
-	Kind            string   `json:"kind"`
-	State           string   `json:"state"`
-	Pool            string   `json:"pool,omitempty"`
-	CapacityCounted bool     `json:"capacity_counted"`
-	SessionCap      int      `json:"session_cap,omitempty"`
-	LeasedSlots     int      `json:"leased_slots,omitempty"`
-	FreeSlots       int      `json:"free_slots,omitempty"`
-	BlockedSlots    int      `json:"blocked_slots,omitempty"`
-	ActiveSessions  int      `json:"active_sessions"`
-	LiveSessions    int      `json:"live_sessions"`
-	Reason          string   `json:"reason,omitempty"`
-	BlockKind       string   `json:"block_kind,omitempty"`
-	Reset           string   `json:"reset,omitempty"`
-	Weekly          string   `json:"weekly,omitempty"`
-	LoginStatus     *string  `json:"login_status,omitempty"`
-	CanServe        *bool    `json:"can_serve,omitempty"`
-	StatusSource    string   `json:"status_source,omitempty"`
-	RegistryAgeMin  *float64 `json:"registry_age_min,omitempty"`
+	Node            string          `json:"node,omitempty"`
+	Account         string          `json:"account"`
+	Tag             string          `json:"tag"`
+	Product         string          `json:"product"`
+	Provider        string          `json:"provider"`
+	Agent           string          `json:"agent,omitempty"`
+	ModelTier       *int            `json:"model_tier,omitempty"`
+	Model           string          `json:"model,omitempty"`
+	Kind            string          `json:"kind"`
+	State           string          `json:"state"`
+	Pool            string          `json:"pool,omitempty"`
+	CapacityCounted bool            `json:"capacity_counted"`
+	SessionCap      int             `json:"session_cap,omitempty"`
+	LeasedSlots     int             `json:"leased_slots,omitempty"`
+	FreeSlots       int             `json:"free_slots,omitempty"`
+	BlockedSlots    int             `json:"blocked_slots,omitempty"`
+	ActiveSessions  int             `json:"active_sessions"`
+	LiveSessions    int             `json:"live_sessions"`
+	Reason          string          `json:"reason,omitempty"`
+	DiscoverySource DiscoverySource `json:"discovery_source,omitempty"`
+	RootState       RootState       `json:"root_state,omitempty"`
+	BlockKind       string          `json:"block_kind,omitempty"`
+	Reset           string          `json:"reset,omitempty"`
+	Weekly          string          `json:"weekly,omitempty"`
+	LoginStatus     *string         `json:"login_status,omitempty"`
+	CanServe        *bool           `json:"can_serve,omitempty"`
+	StatusSource    string          `json:"status_source,omitempty"`
+	RegistryAgeMin  *float64        `json:"registry_age_min,omitempty"`
 }
 
 // StatusRollup is one grouped status row.
@@ -279,6 +281,8 @@ func statusAccount(row Account, workers []string, countCapacity bool) StatusAcco
 		ActiveSessions:  derefInt(row.ActiveSessions),
 		LiveSessions:    derefInt(row.LiveSessions),
 		Reason:          statusReason(row),
+		DiscoverySource: row.DiscoverySource,
+		RootState:       row.RootState,
 		BlockKind:       derefStr(row.BlockKind),
 		Reset:           derefStr(row.Reset),
 		Weekly:          derefStr(row.Weekly),

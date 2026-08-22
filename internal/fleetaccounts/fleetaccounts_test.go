@@ -559,6 +559,7 @@ func TestJSONShapeMatchesPythonContract(t *testing.T) {
 
 	workerKeys := []string{
 		"dir", "product", "account", "tag", "kind", "reason", "notes",
+		"discovery_source", "root_state",
 		"model_tier", "model", "small_model", "model_effort", "agent", "profile_source", "route_weight",
 		"account_uuid", "login_email", "org_uuid", "org_type", "plan",
 		"tag_login_match", "identity_peers", "identity_role", "login_status", "can_serve",
@@ -567,11 +568,13 @@ func TestJSONShapeMatchesPythonContract(t *testing.T) {
 	}
 	nonAccountKeys := []string{
 		"dir", "product", "account", "tag", "kind", "reason", "notes",
+		"discovery_source", "root_state",
 		"available", "blocked", "block_kind", "block_reason", "reset", "weekly", "throttled",
 		"active_sessions", "live_sessions", "auth_blocked_sessions", "status_source", "registry_age_min",
 	}
 	opencodeWorkerKeys := []string{
 		"dir", "product", "account", "tag", "kind", "reason", "notes",
+		"discovery_source", "root_state",
 		"model_tier", "model", "small_model", "model_effort", "agent", "profile_source", "route_weight",
 		"login_status", "can_serve",
 		"available", "blocked", "block_kind", "block_reason", "reset", "weekly", "throttled",

@@ -664,6 +664,9 @@ func dispatchPreflightAccount(root string, _ io.Writer, workKind, product string
 		return dispatchtick.AccountCheck{Available: false, Error: err.Error()}
 	}
 	route := dispatchtick.RouteAccount(dispatchtick.AccountRouteInput{Rows: rows, Product: product, WorkKind: workKind})
+	if !route.OK && route.Reason == "no worker accounts match product filter" {
+		route.Reason = dispatchNoWorkerCensusReason(rows, product)
+	}
 	blocked := make([]string, 0, len(route.BlockedTargetAccounts))
 	blockedAccounts := make([]dispatchtick.BlockedAccount, 0, len(route.BlockedTargetAccounts))
 	for _, row := range route.BlockedTargetAccounts {

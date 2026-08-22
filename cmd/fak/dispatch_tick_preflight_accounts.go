@@ -319,6 +319,62 @@ func dispatchAccountRowFromFleetAccount(acct fleetaccounts.Account) dispatchtick
 	return row
 }
 
+// dispatchNoWorkerCensusReason turns the canonical roster's typed exclusions into the
+// account-preflight refusal. RouteAccount deliberately ignores excluded/non-account rows;
+// without this projection a fully inventoried host collapses to the misleading
+// "no worker accounts match product filter" even when the census knows exactly why every
+// sanctioned root was rejected.
+func dispatchNoWorkerCensusReason(rows []dispatchtick.AccountRow, product string) string {
+	product = strings.ToLower(strings.TrimSpace(product))
+	total, excluded, nonAccounts, duplicates := 0, 0, 0, 0
+	var soleTag, soleReason string
+	for _, raw := range rows {
+		row := dispatchtick.NormalizeAccountRow(raw)
+		if product != "" && row.Product != product {
+			continue
+		}
+		total++
+		switch strings.ToLower(strings.TrimSpace(row.Kind)) {
+		case string(fleetaccounts.KindExcluded):
+			excluded++
+			soleTag, soleReason = row.Tag, row.BlockReason
+		case string(fleetaccounts.KindNonAccount):
+			nonAccounts++
+			soleTag, soleReason = row.Tag, row.BlockReason
+		default:
+			if strings.EqualFold(strings.TrimSpace(row.IdentityRole), "duplicate") {
+				duplicates++
+				soleTag, soleReason = row.Tag, row.BlockReason
+			}
+		}
+	}
+	label := product
+	if label == "" {
+		label = "requested"
+	}
+	if total == 0 {
+		return fmt.Sprintf("no %s account roots discovered in FLEET_USER_HOME or the fak accounts registry", label)
+	}
+	parts := make([]string, 0, 3)
+	if excluded > 0 {
+		parts = append(parts, fmt.Sprintf("%d excluded", excluded))
+	}
+	if nonAccounts > 0 {
+		parts = append(parts, fmt.Sprintf("%d non-account root(s)", nonAccounts))
+	}
+	if duplicates > 0 {
+		parts = append(parts, fmt.Sprintf("%d duplicate identity row(s)", duplicates))
+	}
+	if len(parts) == 0 {
+		return fmt.Sprintf("no routable %s account: census found %d row(s), but none is an active worker", label, total)
+	}
+	reason := fmt.Sprintf("no routable %s account: census found %s", label, strings.Join(parts, ", "))
+	if total == 1 && strings.TrimSpace(soleReason) != "" {
+		reason += fmt.Sprintf(" (%s: %s)", firstString(strings.TrimSpace(soleTag), "unnamed"), strings.TrimSpace(soleReason))
+	}
+	return reason
+}
+
 func dispatchAccountRegistryPath(root string) string {
 	if dir := strings.TrimSpace(os.Getenv("FLEET_REG_DIR")); dir != "" {
 		return filepath.Join(dir, "sessions.json")

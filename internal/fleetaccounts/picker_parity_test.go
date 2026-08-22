@@ -42,9 +42,11 @@ import (
 // fails the gate — that asymmetry check is what keeps this test from silently absorbing a
 // field the two pickers stop agreeing about.
 var parityKnownAsymmetric = map[string]string{
-	"login_status":    "Go-only by design: the port adds the credential-safe login readiness verdict (package doc)",
-	"can_serve":       "Go-only by design: the served half of the login_status verdict",
-	"throttled_since": "Python-only: extra provenance on an already-agreed throttled row",
+	"login_status":     "Go-only by design: the port adds the credential-safe login readiness verdict (package doc)",
+	"can_serve":        "Go-only by design: the served half of the login_status verdict",
+	"discovery_source": "Go-only: native dispatch publishes the sanctioned root that contributed the census row (#8482)",
+	"root_state":       "Go-only: native dispatch publishes the account root's structural verdict (#8482)",
+	"throttled_since":  "Python-only: extra provenance on an already-agreed throttled row",
 }
 
 // parityValueExempt keys are emitted by BOTH surfaces but legitimately differ in value, so

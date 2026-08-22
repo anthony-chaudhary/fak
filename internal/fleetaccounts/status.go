@@ -843,6 +843,11 @@ func configHomeLoginProduct(product string) bool {
 }
 
 func accountLoginBlockReason(r Account) string {
+	if r.RootState == RootAbsent || r.RootState == RootMalformed {
+		if reason := strings.TrimSpace(r.Reason); reason != "" {
+			return reason
+		}
+	}
 	st := configaccounts.LoginStatus(derefStr(r.LoginStatus))
 	if st != "" && st != configaccounts.LoginReady {
 		reason, _ := configaccounts.LoginReasonAction(st, configaccounts.Home{Name: r.Tag, Dir: r.Dir})

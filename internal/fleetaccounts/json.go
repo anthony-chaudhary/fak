@@ -20,6 +20,10 @@ func (a Account) MarshalJSON() ([]byte, error) {
 	o.set("kind", string(a.Kind))
 	o.set("reason", a.Reason)
 	o.set("notes", a.Notes)
+	if a.DiscoverySource != "" {
+		o.set("discovery_source", string(a.DiscoverySource))
+		o.set("root_state", string(a.RootState))
+	}
 
 	// Credential KIND (#5331), emitted ONLY for an api-key seat: the historical
 	// subscription-OAuth row leaves both fields empty and so keeps the exact legacy key set

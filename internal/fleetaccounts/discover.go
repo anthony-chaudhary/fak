@@ -12,6 +12,27 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 )
 
+// DiscoverySource names the sanctioned inventory surface that contributed a roster row.
+// It is intentionally credential-safe: it identifies a root class, never a credential.
+type DiscoverySource string
+
+const (
+	DiscoveryHomeGlob         DiscoverySource = "home_glob"
+	DiscoveryAccountsRegistry DiscoverySource = "accounts_registry"
+)
+
+// RootState is the structural verdict for a discovered account root. LoginStatus remains
+// the credential/auth verdict; keeping the two separate prevents an installed-but-broken
+// root from disappearing as a generic "no account" refusal.
+type RootState string
+
+const (
+	RootPresent             RootState = "present"
+	RootAbsent              RootState = "absent"
+	RootMalformed           RootState = "malformed"
+	RootCredentialReference RootState = "credential_reference"
+)
+
 // Account is one discovered config dir's roster row. The JSON field names and order
 // mirror the dicts emitted by fleet_accounts.py so the `json` shape is byte-compatible.
 //
@@ -28,6 +49,12 @@ type Account struct {
 	Kind    Kind   `json:"kind"`
 	Reason  string `json:"reason"`
 	Notes   string `json:"notes"`
+
+	// DiscoverySource and RootState make the canonical census auditable without exposing
+	// credential contents. The Go picker is the native dispatch source of truth; these are
+	// additive Go-only fields while the legacy Python picker remains in compatibility mode.
+	DiscoverySource DiscoverySource `json:"discovery_source,omitempty"`
+	RootState       RootState       `json:"root_state,omitempty"`
 
 	// CredKind is the credential KIND this seat's config-home registry entry declares
 	// (#5331). It is EMPTY for the historical subscription-OAuth seat — the zero value the
@@ -382,7 +409,10 @@ func stampProfile(row *Account, pol Policy) {
 func classifyRow(acctDir, product, account string, pol Policy, acctIdx accountsRegistryIndex) Account {
 	tag := AccountTag(account)
 	note := pol.Notes[tag]
-	base := Account{Dir: acctDir, Product: product, Account: account, Tag: tag, Notes: note}
+	base := Account{
+		Dir: acctDir, Product: product, Account: account, Tag: tag, Notes: note,
+		DiscoverySource: DiscoveryHomeGlob, RootState: RootPresent,
+	}
 
 	st, err := os.Stat(acctDir)
 	if err != nil || !st.IsDir() {
@@ -420,11 +450,12 @@ func classifyRow(acctDir, product, account string, pol Policy, acctIdx accountsR
 		// An enrolled api-key dir INHERITS its seat's credential reference (the kind + the
 		// env-var NAME, never the secret) so its readiness is read by KIND below instead of by
 		// the OAuth disk probe, which would mis-report it as credential-less (#5331).
-		if h, ok := acctIdx.activeSeat(acctDir, product, account, tag); ok &&
-			h.CredentialKind() == configaccounts.CredKindAPIKey {
+		if h, ok := acctIdx.activeSeat(acctDir, product, account, tag); ok {
 			seat = h
-			base.CredKind = configaccounts.CredKindAPIKey
-			base.APIKeyEnv = h.APIKeyEnv
+			if h.CredentialKind() == configaccounts.CredKindAPIKey {
+				base.CredKind = configaccounts.CredKindAPIKey
+				base.APIKeyEnv = h.APIKeyEnv
+			}
 		}
 	}
 	if reason := policyExclusion(account, tag, pol, id.LoginEmail); reason != "" {
@@ -497,6 +528,8 @@ func claudeLoginStatus(acctDir, tag string, seat configaccounts.Home) (configacc
 	h := configaccounts.Home{
 		Name:      tag,
 		Dir:       acctDir,
+		Status:    seat.Status,
+		Enabled:   seat.Enabled,
 		CredKind:  seat.CredKind,
 		APIKeyEnv: seat.APIKeyEnv,
 	}
@@ -515,15 +548,12 @@ func claudeLoginStatus(acctDir, tag string, seat configaccounts.Home) (configacc
 	return st, st == configaccounts.LoginReady
 }
 
-// discoverAPIKeySeats surfaces the ACTIVE api-key seats (#5331) that directory discovery
-// structurally cannot reach. Discovery globs config DIRS, but an api-key seat's credential is
-// an env-var reference rather than a directory — accounts.Validate deliberately exempts an
-// active api-key home from the "must have a dir" rule — so a dir-less seat would never appear
-// on the roster and could never be routed to a dispatch worker. This pass folds each such seat
-// in straight from the registry. A seat the glob ALREADY produced a row for is skipped (by
-// cleaned dir first, then by name), so the directory-driven path stays the single owner of
-// every dir it can see and existing rows are untouched.
-func discoverAPIKeySeats(reg configaccounts.Registry, pol Policy, found []Account) []Account {
+// discoverRegistrySeats folds every config-home registry seat that the home glob did not
+// already reach into the canonical census. Registry roots are sanctioned CLAUDE_CONFIG_DIR
+// seats even when they live outside FLEET_USER_HOME, have vanished, or are structurally
+// malformed. Keeping those states visible is what lets status, preflight, and allocation
+// agree on installed capacity instead of collapsing them into an opaque zero-row result.
+func discoverRegistrySeats(reg configaccounts.Registry, pol Policy, found []Account) []Account {
 	seenDirs := map[string]bool{}
 	seenTags := map[string]bool{}
 	for _, r := range found {
@@ -539,17 +569,14 @@ func discoverAPIKeySeats(reg configaccounts.Registry, pol Policy, found []Accoun
 	}
 	var rows []Account
 	for _, h := range reg.Homes {
-		if !h.Active() || h.CredentialKind() != configaccounts.CredKindAPIKey {
-			continue
-		}
 		if k := pathKey(h.Dir); k != "" && seenDirs[k] {
 			continue
 		}
 		name := strings.ToLower(strings.TrimSpace(h.Name))
-		if name != "" && seenTags[name] {
+		if strings.TrimSpace(h.Dir) == "" && name != "" && seenTags[name] {
 			continue
 		}
-		row := apiKeySeatRow(h, pol)
+		row := registrySeatRow(h, pol)
 		if name != "" {
 			seenTags[name] = true
 		}
@@ -582,13 +609,15 @@ func apiKeySeatRow(h configaccounts.Home, pol Policy) Account {
 	}
 	tag := AccountTag(account)
 	base := Account{
-		Dir:       h.Dir,
-		Product:   "claude",
-		Account:   account,
-		Tag:       tag,
-		Notes:     pol.Notes[tag],
-		CredKind:  configaccounts.CredKindAPIKey,
-		APIKeyEnv: h.APIKeyEnv,
+		Dir:             h.Dir,
+		Product:         "claude",
+		Account:         account,
+		Tag:             tag,
+		Notes:           pol.Notes[tag],
+		DiscoverySource: DiscoveryAccountsRegistry,
+		RootState:       RootCredentialReference,
+		CredKind:        configaccounts.CredKindAPIKey,
+		APIKeyEnv:       h.APIKeyEnv,
 	}
 	if reason := intrinsicExclusion(account); reason != "" {
 		base.Kind = KindExcluded
@@ -621,6 +650,111 @@ func apiKeySeatRow(h configaccounts.Home, pol Policy) Account {
 	return row
 }
 
+// registrySeatRow is the registry-driven twin of the home-glob classifier. It preserves
+// lifecycle and login semantics from accounts.Home while making structural root failures
+// explicit. No credential bytes enter the row: identity derivation emits only non-secret
+// metadata/fingerprints, and API-key seats publish only the env-var reference name.
+func registrySeatRow(h configaccounts.Home, pol Policy) Account {
+	if h.CredentialKind() == configaccounts.CredKindAPIKey {
+		row := apiKeySeatRow(h, pol)
+		if strings.TrimSpace(h.Dir) != "" {
+			if st, err := os.Stat(h.Dir); err != nil || !st.IsDir() {
+				row.RootState = RootAbsent
+			} else {
+				row.RootState = RootPresent
+			}
+		}
+		if !h.Active() {
+			row.Kind = KindExcluded
+			row.Reason = accountsRegistryReason(h, "tombstoned in fak accounts registry")
+			row.LoginStatus = strp(string(configaccounts.LoginTombstoned))
+			row.CanServe = boolp(false)
+		}
+		return row
+	}
+
+	account := strings.TrimSpace(h.Name)
+	if strings.TrimSpace(h.Dir) != "" {
+		account = filepath.Base(h.Dir)
+	}
+	tag := AccountTag(account)
+	base := Account{
+		Dir: h.Dir, Product: "claude", Account: account, Tag: tag, Notes: pol.Notes[tag],
+		DiscoverySource: DiscoveryAccountsRegistry,
+	}
+	if !h.Active() {
+		base.Kind = KindExcluded
+		base.Reason = accountsRegistryReason(h, "tombstoned in fak accounts registry")
+		base.RootState = registryRootState(h.Dir)
+		base.LoginStatus = strp(string(configaccounts.LoginTombstoned))
+		base.CanServe = boolp(false)
+		return base
+	}
+
+	st, err := os.Stat(h.Dir)
+	switch {
+	case err != nil || !st.IsDir():
+		base.Kind = KindWorker
+		base.Reason = "registered Claude account root is absent"
+		base.RootState = RootAbsent
+		return stampRegistrySeatReadiness(base, h, pol, false)
+	case !dirExists(filepath.Join(h.Dir, "projects")):
+		base.Kind = KindWorker
+		base.Reason = "registered Claude account root is malformed: no projects/ subdir"
+		base.RootState = RootMalformed
+		return stampRegistrySeatReadiness(base, h, pol, false)
+	default:
+		row := classifyRow(h.Dir, "claude", account, pol, indexAccountsRegistry(configaccounts.Registry{Homes: []configaccounts.Home{h}}))
+		row.DiscoverySource = DiscoveryAccountsRegistry
+		row.RootState = RootPresent
+		return row
+	}
+}
+
+func registryRootState(dir string) RootState {
+	if strings.TrimSpace(dir) == "" {
+		return RootAbsent
+	}
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		return RootAbsent
+	}
+	if !dirExists(filepath.Join(dir, "projects")) {
+		return RootMalformed
+	}
+	return RootPresent
+}
+
+func dirExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.IsDir()
+}
+
+func stampRegistrySeatReadiness(base Account, h configaccounts.Home, pol Policy, structurallyReady bool) Account {
+	if reason := intrinsicExclusion(base.Account); reason != "" {
+		base.Kind = KindExcluded
+		base.Reason = reason
+		return base
+	}
+	if reason := policyExclusion(base.Account, base.Tag, pol, h.Identity.Email); reason != "" {
+		base.Kind = KindExcluded
+		base.Reason = reason
+		return base
+	}
+	base.Kind = KindWorker
+	stampProfile(&base, pol)
+	seat := h
+	seat.Identity = h.DerivedIdentity()
+	st := seat.LoginStatus()
+	base.AccountUUID = strp(seat.Identity.AccountUUID)
+	base.LoginEmail = strp(seat.Identity.Email)
+	base.OrgUUID = strp("")
+	base.OrgType = strp("")
+	base.Plan = strp("")
+	base.LoginStatus = strp(string(st))
+	base.CanServe = boolp(structurallyReady && st == configaccounts.LoginReady)
+	return base
+}
+
 // discoverProduct globs pattern under root and folds each match into an Account
 // row: the common "not a directory" guard first (every product agrees on that),
 // then a product-specific second gate (extraCheck) that returns a non-empty
@@ -637,12 +771,14 @@ func discoverProduct(root, pattern, product string, pol Policy, acctIdx accounts
 		st, err := os.Stat(acctDir)
 		if err != nil || !st.IsDir() {
 			rows = append(rows, Account{Dir: acctDir, Product: product, Account: account,
-				Tag: tag, Kind: KindNonAccount, Reason: "not a directory", Notes: note})
+				Tag: tag, Kind: KindNonAccount, Reason: "not a directory", Notes: note,
+				DiscoverySource: DiscoveryHomeGlob, RootState: RootMalformed})
 			continue
 		}
 		if reason := extraCheck(acctDir); reason != "" {
 			rows = append(rows, Account{Dir: acctDir, Product: product, Account: account,
-				Tag: tag, Kind: KindNonAccount, Reason: reason, Notes: note})
+				Tag: tag, Kind: KindNonAccount, Reason: reason, Notes: note,
+				DiscoverySource: DiscoveryHomeGlob, RootState: RootMalformed})
 			continue
 		}
 		rows = append(rows, classifyRow(acctDir, product, account, pol, acctIdx))
@@ -862,18 +998,15 @@ func derefInt(p *int) int {
 	return *p
 }
 
-// Discover classifies every account config dir across all products, folds in the config-home
-// registry's api-key seats that own no discoverable dir, then reconciles shared Claude/Codex
-// identities. Rows are sorted by (product, kind != worker, tag) to match
-// fleet_accounts.discover_accounts.
+// Discover classifies every account config dir across all products, folds in every config-home
+// registry seat the glob did not reach, then reconciles shared Claude/Codex identities. Rows
+// are sorted by (product, kind != worker, tag) to match fleet_accounts.discover_accounts.
 func Discover(home, configHome string, pol Policy) []Account {
 	reg := loadAccountsRegistry(home)
 	acctIdx := indexAccountsRegistry(reg)
 	rows := append(discoverClaude(home, pol, acctIdx), discoverCodex(home, pol, acctIdx)...)
 	rows = append(rows, discoverOpencode(configHome, pol, acctIdx)...)
-	// Fold in the api-key seats the directory glob structurally cannot reach — a seat whose
-	// credential is an env var need not own a config dir at all (#5331).
-	rows = append(rows, discoverAPIKeySeats(reg, pol, rows)...)
+	rows = append(rows, discoverRegistrySeats(reg, pol, rows)...)
 	reconcileIdentities(rows)
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].Product != rows[j].Product {
