@@ -1,0 +1,121 @@
+{
+  "schema": "fak-issue-8504-dogfood/1",
+  "captured_on": "2026-08-22",
+  "platform": "windows-amd64",
+  "source": {
+    "trunk_commit": "49afd3788614c6fb56424c7dce56b191cbf830e0",
+    "spine_commit": "278ca63914655af02bae654970d861b0384129d0",
+    "build_input": "committed trunk archive"
+  },
+  "failing_before": {
+    "command": "fak temp-artifacts --min-age 24h --json",
+    "exit_code": 0,
+    "receipt": {
+      "schema": "fak-temp-artifacts/1",
+      "mode": "preview",
+      "root": "<OS_TEMP>",
+      "min_age_seconds": 86400,
+      "inspection": "complete",
+      "eligible_items": [
+        {"name": "fak-8293-after-422b3bd1ba6b4c57a6009bd8e8763452.zip", "age_seconds": 101436, "bytes": 120185835, "reason": "eligible"},
+        {"name": "fak-8293-before-735e5a76d86447dcb265b1eb4e8350eb.zip", "age_seconds": 102686, "bytes": 120178503, "reason": "eligible"},
+        {"name": "fak-head-2512ff04abb649a7ad20c35ac417ba60.zip", "age_seconds": 92422, "bytes": 120246336, "reason": "eligible"},
+        {"name": "fak-head-cd8dd71f85ba43e28c0857058d7dc5a9.zip", "age_seconds": 92417, "bytes": 120246336, "reason": "eligible"},
+        {"name": "fak-model-plan-15776.exe", "age_seconds": 96785, "bytes": 84344320, "reason": "eligible"},
+        {"name": "fak-modelobs-67208.exe", "age_seconds": 95474, "bytes": 84391936, "reason": "eligible"},
+        {"name": "fak-push-cdd89a767b444734b3b0203a9e923f21.zip", "age_seconds": 105919, "bytes": 120168573, "reason": "eligible"},
+        {"name": "fak-tip-80692.exe", "age_seconds": 97275, "bytes": 84342784, "reason": "eligible"}
+      ],
+      "summary": {
+        "matching_count": 22,
+        "matching_bytes": 2620527880,
+        "eligible_count": 8,
+        "eligible_bytes": 854104623,
+        "preserved_count": 14,
+        "preserved_bytes": 1766423257,
+        "reaped_count": 0,
+        "reaped_bytes": 0
+      },
+      "warnings": []
+    }
+  },
+  "apply": {
+    "command": "fak temp-artifacts --min-age 24h --apply --json",
+    "exit_code": 0,
+    "receipt": {
+      "schema": "fak-temp-artifacts/1",
+      "mode": "apply",
+      "root": "<OS_TEMP>",
+      "min_age_seconds": 86400,
+      "inspection": "complete",
+      "reaped_items": [
+        {"name": "fak-8293-after-422b3bd1ba6b4c57a6009bd8e8763452.zip", "bytes": 120185835, "reason": "reaped"},
+        {"name": "fak-8293-before-735e5a76d86447dcb265b1eb4e8350eb.zip", "bytes": 120178503, "reason": "reaped"},
+        {"name": "fak-head-2512ff04abb649a7ad20c35ac417ba60.zip", "bytes": 120246336, "reason": "reaped"},
+        {"name": "fak-head-cd8dd71f85ba43e28c0857058d7dc5a9.zip", "bytes": 120246336, "reason": "reaped"},
+        {"name": "fak-model-plan-15776.exe", "bytes": 84344320, "reason": "reaped"},
+        {"name": "fak-modelobs-67208.exe", "bytes": 84391936, "reason": "reaped"},
+        {"name": "fak-push-cdd89a767b444734b3b0203a9e923f21.zip", "bytes": 120168573, "reason": "reaped"},
+        {"name": "fak-tip-80692.exe", "bytes": 84342784, "reason": "reaped"}
+      ],
+      "preserved_items": [
+        {"name": "fak-8452-25986ff76da244509c96dcc8791fe5c4.zip", "bytes": 120303321, "reason": "fresh"},
+        {"name": "fak-8482-48872.exe", "bytes": 84723200, "reason": "fresh"},
+        {"name": "fak-8482-final-41324.exe", "bytes": 84724736, "reason": "fresh"},
+        {"name": "fak-8487.exe", "bytes": 84454400, "reason": "fresh"},
+        {"name": "fak-armbench-a98626864a0b4eae93270b609fd146fc.tar", "bytes": 266752000, "reason": "fresh"},
+        {"name": "fak-armbench-c9a5c924111e46e286835368ad296933.tar", "bytes": 266752000, "reason": "fresh"},
+        {"name": "fak-borrow-proof-27424.exe", "bytes": 84442624, "reason": "fresh"},
+        {"name": "fak-borrow-proof-52292.exe", "bytes": 84442624, "reason": "fresh"},
+        {"name": "fak-dispatch-44496.exe", "bytes": 84396544, "reason": "fresh"},
+        {"name": "fak-dispatch-5db77ca7296b4057aea4ba60284bcef6.tar", "bytes": 266772480, "reason": "fresh"},
+        {"name": "fak-issue-8408-live.exe", "bytes": 85253632, "reason": "fresh"},
+        {"name": "fak-origin-main-262bbf95fa0142998b149295300b5913.exe", "bytes": 84614656, "reason": "fresh"},
+        {"name": "fak-origin-main-814094a970a74b3bb83046ed58b9633f.exe", "bytes": 84396544, "reason": "fresh"},
+        {"name": "fak-verify-34460.exe", "bytes": 84394496, "reason": "fresh"}
+      ],
+      "summary": {
+        "matching_count": 22,
+        "matching_bytes": 2620527880,
+        "eligible_count": 8,
+        "eligible_bytes": 854104623,
+        "preserved_count": 14,
+        "preserved_bytes": 1766423257,
+        "reaped_count": 8,
+        "reaped_bytes": 854104623
+      },
+      "warnings": []
+    }
+  },
+  "post_apply": {
+    "command": "fak temp-artifacts --min-age 24h --json",
+    "exit_code": 0,
+    "receipt": {
+      "schema": "fak-temp-artifacts/1",
+      "mode": "preview",
+      "root": "<OS_TEMP>",
+      "min_age_seconds": 86400,
+      "inspection": "complete",
+      "summary": {
+        "matching_count": 14,
+        "matching_bytes": 1766423257,
+        "eligible_count": 0,
+        "eligible_bytes": 0,
+        "preserved_count": 14,
+        "preserved_bytes": 1766423257,
+        "reaped_count": 0,
+        "reaped_bytes": 0
+      },
+      "warnings": []
+    }
+  },
+  "defect_ledger": {
+    "surfaced_count": 0,
+    "marker_key_prefix": "tempartifact-dogfood-defect:",
+    "filed_issues": []
+  },
+  "scrub": {
+    "paths": "OS temp root replaced by <OS_TEMP>; item paths reduced to basenames",
+    "private_process_fields_included": false
+  }
+}
