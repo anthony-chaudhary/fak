@@ -48,6 +48,15 @@ func TestResolveEmbeddedAlias(t *testing.T) {
 	}
 }
 
+func TestResolveQwen25HalfBForGuard(t *testing.T) {
+	withCacheRoot(t)
+	const want = "hf://Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q8_0.gguf"
+	got, expanded := Resolve("qwen2.5:0.5b")
+	if !expanded || got != want {
+		t.Fatalf("Resolve(qwen2.5:0.5b) = (%q, %v); want (%q, true)", got, expanded, want)
+	}
+}
+
 func TestResolveUnknownReturnedUnchanged(t *testing.T) {
 	withCacheRoot(t)
 	got, expanded := Resolve("definitely-not-a-known-name")
@@ -228,6 +237,7 @@ func TestResolveNormalizesDashesToColons(t *testing.T) {
 		name string
 		want string
 	}{
+		{"qwen2.5-0.5b", "qwen2.5:0.5b"},
 		{"qwen2.5-1.5b", "qwen2.5:1.5b"},
 		{"qwen2.5-7b", "qwen2.5:7b"},
 		{"qwen2.5-coder-1.5b", "qwen2.5-coder:1.5b"},

@@ -64,8 +64,9 @@ var Catalog = map[string]string{
 	// public GGUF re-publisher (the base HuggingFaceTB repo ships no GGUF).
 	"smollm2":      "hf://bartowski/SmolLM2-135M-Instruct-GGUF/SmolLM2-135M-Instruct-Q8_0.gguf",
 	"smollm2:135m": "hf://bartowski/SmolLM2-135M-Instruct-GGUF/SmolLM2-135M-Instruct-Q8_0.gguf",
-	// Qwen2.5 instruct GGUFs: a 1.5B Q8 for a quick CPU run and a 7B Q4_K_M
-	// (single file, ~4.7 GB) for a more capable laptop/GPU run.
+	// Qwen2.5 instruct GGUFs: the official 0.5B and 1.5B Q8 files for quick CPU
+	// runs, and a 7B Q4_K_M (single file, ~4.7 GB) for a more capable laptop/GPU.
+	"qwen2.5:0.5b": "hf://Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q8_0.gguf",
 	"qwen2.5:1.5b": "hf://mradermacher/Qwen2.5-1.5B-GGUF/Qwen2.5-1.5B.Q8_0.gguf",
 	"qwen2.5:7b":   "hf://bartowski/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
 	// Qwen3.6-27B — a dense hybrid REASONING model, the "stronger model" the

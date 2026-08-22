@@ -1,0 +1,51 @@
+{
+  "schema": "fak-guard-gguf-alias-witness/1",
+  "issue": 8064,
+  "captured_at": "2026-08-22T12:45:12Z",
+  "platform": "windows/amd64",
+  "source": {
+    "trunk_commit": "a637d5ec5d3e0e3589aff7aa9fff8bcf3460e857",
+    "overlay_paths": [
+      "internal/modelreg/modelreg.go",
+      "internal/modelreg/modelreg_test.go"
+    ],
+    "go_version": "go1.26.6"
+  },
+  "failing_before": {
+    "command": "fak guard --gguf qwen2.5:0.5b --probe -- cmd /c exit 0",
+    "exit_code": 1,
+    "stderr": "fak: open qwen2.5:0.5b: The system cannot find the file specified."
+  },
+  "model_artifact": {
+    "alias": "qwen2.5:0.5b",
+    "resolved_ref": "hf://Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q8_0.gguf",
+    "filename": "qwen2.5-0.5b-instruct-q8_0.gguf",
+    "bytes": 675710816,
+    "sha256": "ca59ca7f13d0e15a8cfa77bd17e65d24f6844b554a7b6c12e07a5f89ff76844e",
+    "license": "Apache-2.0",
+    "source_url": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF"
+  },
+  "live_generation": {
+    "command": "fak guard --provider anthropic --gguf qwen2.5:0.5b --probe -- powershell.exe -NoProfile -File <one-turn-anthropic-probe>",
+    "cache": "hit",
+    "gateway": {
+      "engine": "inkernel",
+      "planner": "inkernel",
+      "wire": "anthropic"
+    },
+    "runtime": {
+      "backend": "cpu-ref",
+      "forward_path": "cpu/reference",
+      "q4k": false,
+      "q8_decode": "avx512+fused/32w"
+    },
+    "prompt_tokens": 161,
+    "output_tokens": 7,
+    "prefill_tokens_per_second": 127.0,
+    "decode_tokens_per_second": 6.4,
+    "model_text": "FAK_GGUF_ALIAS_OK",
+    "stop_reason": "end_turn",
+    "exit_code": 0
+  },
+  "network_boundary": "The first pull downloaded the public artifact. The witnessed generation used the cache hit and the in-kernel upstream; no API key or request-path network was used."
+}
