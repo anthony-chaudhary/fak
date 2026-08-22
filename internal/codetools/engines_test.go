@@ -57,6 +57,19 @@ func mustWrite(t *testing.T, path, body string) {
 	}
 }
 
+func observedVersion(t *testing.T, ts *Toolset, path string) string {
+	t.Helper()
+	out, bad := ts.read(context.Background(), argsOf(t, ReadArgs{FilePath: path}))
+	if bad {
+		t.Fatalf("Read %s: %s", path, out)
+	}
+	version, _ := decodeResult(t, out)["version"].(string)
+	if version == "" {
+		t.Fatalf("Read %s returned an empty version", path)
+	}
+	return version
+}
+
 // deadCtx is an already-canceled context: the state a queued tool call finds itself in
 // after the loop that proposed it has been terminated.
 func deadCtx() context.Context {
@@ -74,6 +87,41 @@ func TestReadReturnsFileContent(t *testing.T) {
 	}
 	if got := decodeResult(t, out)["content"]; got != "alpha\nbeta\ngamma" {
 		t.Fatalf("content = %q", got)
+	}
+	if got, _ := decodeResult(t, out)["version"].(string); got == "" {
+		t.Fatal("Read returned an empty version")
+	}
+}
+
+func TestReadVersionTracksFullBytesAndFileIdentity(t *testing.T) {
+	dir := t.TempDir()
+	ts, err := New(Config{Root: dir, Limits: Limits{MaxReadBytes: 3}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, "a.txt")
+	mustWrite(t, p, "abc-one")
+	v1 := observedVersion(t, ts, "a.txt")
+	if stable := observedVersion(t, ts, "a.txt"); stable != v1 {
+		t.Fatalf("unchanged file version moved: %q -> %q", v1, stable)
+	}
+
+	mustWrite(t, p, "abc-two")
+	v2 := observedVersion(t, ts, "a.txt")
+	if v2 == v1 {
+		t.Fatal("version did not change when bytes beyond the returned prefix changed")
+	}
+
+	replacement := filepath.Join(dir, "replacement.txt")
+	mustWrite(t, replacement, "abc-two")
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, p); err != nil {
+		t.Fatal(err)
+	}
+	if v3 := observedVersion(t, ts, "a.txt"); v3 == v2 {
+		t.Fatal("version did not change when file identity changed with equal bytes")
 	}
 }
 
@@ -317,8 +365,14 @@ func TestCatalogAndCacheScopeAgreeOnWriteShape(t *testing.T) {
 	for _, d := range Catalog() {
 		meta := CallMeta(d.Name, "")
 		if d.ReadOnly {
-			if meta["readOnlyHint"] != "true" || meta["idempotentHint"] != "true" || meta["destructive"] != "" {
-				t.Fatalf("CallMeta(%q) = %v, want read-only/idempotent", d.Name, meta)
+			if meta["readOnlyHint"] != "true" || meta["destructive"] != "" {
+				t.Fatalf("CallMeta(%q) = %v, want read-only", d.Name, meta)
+			}
+			if d.Name == ToolRead && meta["idempotentHint"] != "" {
+				t.Fatalf("CallMeta(Read) = %v, want cache-ineligible freshness", meta)
+			}
+			if d.Name != ToolRead && meta["idempotentHint"] != "true" {
+				t.Fatalf("CallMeta(%q) = %v, want idempotent", d.Name, meta)
 			}
 		} else if meta["readOnlyHint"] != "false" || meta["idempotentHint"] != "false" || meta["destructive"] != "true" {
 			t.Fatalf("CallMeta(%q) = %v, want non-cacheable destructive", d.Name, meta)

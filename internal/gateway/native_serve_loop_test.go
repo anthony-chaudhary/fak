@@ -419,7 +419,7 @@ type nativeEditTestDiffPlanner struct {
 }
 
 func (p *nativeEditTestDiffPlanner) Model() string { return "native-edit-test-diff" }
-func (p *nativeEditTestDiffPlanner) Complete(_ context.Context, _ []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
+func (p *nativeEditTestDiffPlanner) Complete(_ context.Context, messages []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
 	p.turn++
 	call := func(id, name, args string) (*agent.Completion, error) {
 		return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, ToolCalls: []agent.ToolCall{{ID: id, Type: "function", Function: agent.Func{Name: name, Arguments: args}}}}, FinishReason: "tool_calls"}, nil
@@ -428,7 +428,21 @@ func (p *nativeEditTestDiffPlanner) Complete(_ context.Context, _ []agent.Messag
 	case 1:
 		return call("read", codetools.ToolRead, `{"file_path":"fixture.go"}`)
 	case 2:
-		return call("edit", codetools.ToolEdit, `{"file_path":"fixture.go","old_string":"return 1","new_string":"return 2"}`)
+		version := ""
+		for i := len(messages) - 1; i >= 0; i-- {
+			if messages[i].Role != agent.RoleTool {
+				continue
+			}
+			var receipt struct {
+				Version string `json:"version"`
+			}
+			if json.Unmarshal([]byte(messages[i].Content), &receipt) == nil && receipt.Version != "" {
+				version = receipt.Version
+				break
+			}
+		}
+		args, _ := json.Marshal(map[string]any{"file_path": "fixture.go", "old_string": "return 1", "new_string": "return 2", "expected_version": version})
+		return call("edit", codetools.ToolEdit, string(args))
 	case 3:
 		return call("test", codetools.ToolBash, `{"command":"go test ./... -run TestValue -count=1"}`)
 	case 4:

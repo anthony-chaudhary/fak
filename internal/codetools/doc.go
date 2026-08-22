@@ -34,8 +34,8 @@
 //     default policy; Write/Edit/Bash are not admitted until an operator policy says so,
 //     and a protected path (.git, .dos) is refused for mutation regardless.
 //   - Request/tool identity rides the vDSO cache scope (CallMeta): a mutating tool may
-//     never be tagged readOnlyHint, so the vDSO can neither serve a write from cache nor
-//     fill an entry from one, and a named principal keys its own entries.
+//     never be tagged readOnlyHint, and a version-bearing Read stays cache-ineligible so
+//     a retry can observe peer filesystem writes. A named principal keys cacheable reads.
 //   - Edit semantics are DETERMINISTIC and create/overwrite is EXPLICIT: an edit whose
 //     old_string matches more than once is refused rather than guessed at, and a Write
 //     over an existing file requires overwrite=true.

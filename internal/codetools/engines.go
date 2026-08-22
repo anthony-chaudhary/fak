@@ -2,7 +2,6 @@ package codetools
 
 import (
 	"context"
-	"os"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -57,29 +56,15 @@ func (t *Toolset) read(ctx context.Context, body []byte) ([]byte, bool) {
 	if r != nil {
 		return r.JSON(), true
 	}
-	st, err := os.Stat(res.Abs)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return refuse(CodeNotFound, res.Rel).JSON(), true
+	obs, r := observeFile(ctx, res.Abs, t.limits.MaxReadBytes)
+	if r != nil {
+		if r.Code == CodeNotFound || r.Code == CodeIsDir {
+			r.Detail = res.Rel
 		}
-		return refuse(CodeIO, res.Rel).JSON(), true
+		return r.JSON(), true
 	}
-	if st.IsDir() {
-		return refuse(CodeIsDir, res.Rel).JSON(), true
-	}
-	data, err := os.ReadFile(res.Abs)
-	if err != nil {
-		return refuse(CodeIO, res.Rel).JSON(), true
-	}
-	content := string(data)
-	truncated := false
-	if int64(len(content)) > t.limits.MaxReadBytes {
-		// Truncate rather than refuse: a bounded prefix of a large file is usually the
-		// answer the caller wanted, and `truncated` tells them what they did not get.
-		// Silently returning the prefix is the version of this that lies.
-		content = content[:t.limits.MaxReadBytes]
-		truncated = true
-	}
+	content := string(obs.Content)
+	truncated := obs.Truncated
 	if a.Offset > 0 || a.Limit > 0 {
 		content, truncated = window(content, a.Offset, a.Limit, truncated)
 	}
@@ -88,6 +73,7 @@ func (t *Toolset) read(ctx context.Context, body []byte) ([]byte, bool) {
 		"content":   content,
 		"bytes":     len(content),
 		"truncated": truncated,
+		"version":   obs.Version,
 	}), false
 }
 

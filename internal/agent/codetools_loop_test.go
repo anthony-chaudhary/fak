@@ -42,7 +42,7 @@ type recordingCodePlanner struct {
 func (p *recordingCodePlanner) Complete(_ context.Context, messages []Message, _ []ToolDef, _ ...SampleOpt) (*Completion, error) {
 	p.messages = append([]Message(nil), messages...)
 	lastRecordingMessages = p.messages
-	c := p.turns[p.n]
+	c := bindLatestCodeToolVersion(p.turns[p.n], messages)
 	if p.n < len(p.turns)-1 {
 		p.n++
 	}
@@ -389,6 +389,81 @@ func TestOwnedLoopMutatesScratchRepoThroughKernelEngines(t *testing.T) {
 	if allowed < 2 {
 		t.Fatalf("codetools ALLOW rows=%d, log=%+v", allowed, log)
 	}
+}
+
+func TestOwnedLoopCarriesReadVersionThroughStaleAndFreshEdit(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "value.go")
+	if err := os.WriteFile(path, []byte("package fixture\n\nconst Value = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	firstCatalog, err := ArmCodeTools(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(DisarmCodeTools)
+	var editSchema map[string]any
+	for _, def := range firstCatalog {
+		if def.Function.Name == codetools.ToolEdit {
+			if err := json.Unmarshal(def.Function.Parameters, &editSchema); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	properties, _ := editSchema["properties"].(map[string]any)
+	if _, ok := properties["expected_version"]; !ok {
+		t.Fatal("owned-loop catalog omits Edit.expected_version")
+	}
+	DisarmCodeTools()
+
+	readMetrics, readLog := runCodeToolLoop(t, root, []codeToolScript{{codetools.ToolRead, `{"file_path":"value.go"}`}})
+	if readMetrics.EngineCalls != 1 || len(codeToolRows(readLog)) != 1 {
+		t.Fatalf("owned-loop Read mediation: metrics=%+v log=%+v", readMetrics, readLog)
+	}
+	readReceipt := lastResultFromMessages(lastRecordingMessages)
+	var observed struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal([]byte(readReceipt), &observed); err != nil || observed.Version == "" {
+		t.Fatalf("owned-loop Read receipt = %s, err=%v", readReceipt, err)
+	}
+	if err := os.WriteFile(path, []byte("package fixture\n\nconst Value = 10\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	staleMetrics, staleLog := runCodeToolLoop(t, root, []codeToolScript{{codetools.ToolEdit,
+		mustSelfcheckArgs(map[string]any{"file_path": "value.go", "old_string": "Value = 1", "new_string": "Value = 2", "expected_version": observed.Version})}})
+	if staleMetrics.EngineCalls != 1 || len(codeToolRows(staleLog)) != 1 {
+		t.Fatalf("owned-loop stale Edit mediation: metrics=%+v log=%+v", staleMetrics, staleLog)
+	}
+	staleReceipt := lastResultFromMessages(lastRecordingMessages)
+	if !strings.Contains(staleReceipt, codetools.CodeStaleVersion) {
+		t.Fatalf("owned-loop stale Edit receipt = %s", staleReceipt)
+	}
+	if got, _ := os.ReadFile(path); !strings.Contains(string(got), "Value = 10") {
+		t.Fatalf("stale Edit changed peer bytes to %q", got)
+	}
+
+	freshMetrics, freshLog := runCodeToolLoop(t, root, []codeToolScript{
+		{codetools.ToolRead, `{"file_path":"value.go"}`},
+		{codetools.ToolEdit, `{"file_path":"value.go","old_string":"Value = 10","new_string":"Value = 2"}`},
+	})
+	if freshMetrics.EngineCalls != 2 || len(codeToolRows(freshLog)) != 2 {
+		t.Fatalf("owned-loop fresh flow mediation: metrics=%+v log=%+v", freshMetrics, freshLog)
+	}
+	freshReceipt := lastResultFromMessages(lastRecordingMessages)
+	var applied struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal([]byte(freshReceipt), &applied); err != nil || applied.Version == "" || applied.Version == observed.Version {
+		t.Fatalf("owned-loop fresh Edit receipt = %s, err=%v", freshReceipt, err)
+	}
+	final, _ := os.ReadFile(path)
+	if !strings.Contains(string(final), "Value = 2") {
+		t.Fatalf("fresh Edit final bytes = %q", final)
+	}
+	t.Logf("read=%s stale_edit=%s fresh_edit=%s final=%q", readReceipt, staleReceipt, freshReceipt, final)
 }
 
 func TestOwnedLoopRunsBashThroughKernelEngine(t *testing.T) {

@@ -37,6 +37,7 @@ type mutationResult struct {
 	Path         string `json:"path"`
 	Bytes        int    `json:"bytes"`
 	Replacements int    `json:"replacements,omitempty"`
+	Version      string `json:"version"`
 }
 
 func (t *Toolset) write(ctx context.Context, body []byte) ([]byte, bool) {
@@ -53,10 +54,23 @@ func (t *Toolset) write(ctx context.Context, body []byte) ([]byte, bool) {
 	if int64(len(a.Content)) > t.limits.MaxWriteBytes {
 		return refuse(CodeTooLarge, "Write content exceeds byte bound").JSON(), true
 	}
-	target, r := t.resolve(a.FilePath)
+	initial, r := t.resolveMutation(a.FilePath)
 	if r != nil {
 		return r.JSON(), true
 	}
+	return t.withMutationLock(initial.Key, func() ([]byte, bool) {
+		target, r := t.resolveMutation(a.FilePath)
+		if r != nil {
+			return r.JSON(), true
+		}
+		if target.Key != initial.Key {
+			return staleVersion("Write target identity changed before mutation")
+		}
+		return t.writeLocked(ctx, a, target)
+	})
+}
+
+func (t *Toolset) writeLocked(ctx context.Context, a WriteArgs, target mutationTarget) ([]byte, bool) {
 	info, statErr := os.Lstat(target.Abs)
 	exists := statErr == nil
 	if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
@@ -65,19 +79,73 @@ func (t *Toolset) write(ctx context.Context, body []byte) ([]byte, bool) {
 	if exists && info.IsDir() {
 		return refuse(CodeIsDir, "Write target is a directory").JSON(), true
 	}
+	if exists && info.Mode()&os.ModeSymlink != 0 {
+		return refuse(CodeSymlinkEscape, "Write refuses a symlink target").JSON(), true
+	}
 	if a.Mode == "create" && exists {
 		return refuse(CodeExists, "Write create target already exists").JSON(), true
 	}
 	if a.Mode == "overwrite" && !exists {
-		return refuse(CodeNotFound, "Write overwrite target does not exist").JSON(), true
+		return staleVersion("Write target no longer exists")
+	}
+	if a.Mode == "upsert" && exists && a.ExpectedVersion == "" {
+		return staleVersion("Write upsert must present expected_version for an existing target")
+	}
+	if a.Mode == "upsert" && !exists && a.ExpectedVersion != "" {
+		return staleVersion("Write target no longer exists")
+	}
+
+	var observed fileObservation
+	if exists {
+		var r *Refusal
+		observed, r = observeFile(ctx, target.Abs, 0)
+		if r != nil {
+			return r.JSON(), true
+		}
+		if observed.Version != a.ExpectedVersion {
+			return staleVersion("Write target changed since it was read")
+		}
 	}
 	if r := canceled(ctx); r != nil {
 		return r.JSON(), true
 	}
-	if err := atomicReplace(target.Abs, []byte(a.Content), exists, 0); err != nil {
+	fresh, r := t.resolveMutation(a.FilePath)
+	if r != nil {
+		return r.JSON(), true
+	}
+	if fresh.Key != target.Key {
+		return staleVersion("Write target identity changed before publication")
+	}
+	if exists {
+		current, r := observeFile(ctx, fresh.Abs, 0)
+		if r != nil {
+			return r.JSON(), true
+		}
+		if current.Version != observed.Version {
+			return staleVersion("Write target changed before publication")
+		}
+	} else if _, err := os.Lstat(fresh.Abs); err == nil {
+		if a.Mode == "create" {
+			return refuse(CodeExists, "Write create target already exists").JSON(), true
+		}
+		return staleVersion("Write target appeared before publication")
+	} else if !errors.Is(err, fs.ErrNotExist) {
 		return refuse(CodeIO, err.Error()).JSON(), true
 	}
-	return okJSON(mutationResult{Path: target.Rel, Bytes: len(a.Content)}), false
+	if err := atomicReplace(fresh.Abs, []byte(a.Content), exists, 0); err != nil {
+		if !exists && errors.Is(err, fs.ErrExist) {
+			if a.Mode == "create" {
+				return refuse(CodeExists, "Write create target already exists").JSON(), true
+			}
+			return staleVersion("Write target appeared before publication")
+		}
+		return refuse(CodeIO, err.Error()).JSON(), true
+	}
+	after, r := observeFile(context.WithoutCancel(ctx), fresh.Abs, 0)
+	if r != nil {
+		return r.JSON(), true
+	}
+	return okJSON(mutationResult{Path: fresh.Rel, Bytes: len(a.Content), Version: after.Version}), false
 }
 
 func (t *Toolset) edit(ctx context.Context, body []byte) ([]byte, bool) {
@@ -91,13 +159,26 @@ func (t *Toolset) edit(ctx context.Context, body []byte) ([]byte, bool) {
 	if r := a.Validate(); r != nil {
 		return r.JSON(), true
 	}
-	target, r := t.resolve(a.FilePath)
+	initial, r := t.resolveMutation(a.FilePath)
 	if r != nil {
 		return r.JSON(), true
 	}
+	return t.withMutationLock(initial.Key, func() ([]byte, bool) {
+		target, r := t.resolveMutation(a.FilePath)
+		if r != nil {
+			return r.JSON(), true
+		}
+		if target.Key != initial.Key {
+			return staleVersion("Edit target identity changed before mutation")
+		}
+		return t.editLocked(ctx, a, target)
+	})
+}
+
+func (t *Toolset) editLocked(ctx context.Context, a EditArgs, target mutationTarget) ([]byte, bool) {
 	info, err := os.Lstat(target.Abs)
 	if errors.Is(err, fs.ErrNotExist) {
-		return refuse(CodeNotFound, "Edit target does not exist").JSON(), true
+		return staleVersion("Edit target no longer exists")
 	}
 	if err != nil {
 		return refuse(CodeIO, err.Error()).JSON(), true
@@ -108,13 +189,17 @@ func (t *Toolset) edit(ctx context.Context, body []byte) ([]byte, bool) {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return refuse(CodeSymlinkEscape, "Edit refuses a symlink target").JSON(), true
 	}
-	b, err := os.ReadFile(target.Abs)
-	if err != nil {
-		return refuse(CodeIO, err.Error()).JSON(), true
+	observed, r := observeFile(ctx, target.Abs, t.limits.MaxWriteBytes)
+	if r != nil {
+		return r.JSON(), true
 	}
-	if int64(len(b)) > t.limits.MaxWriteBytes {
+	if observed.Truncated {
 		return refuse(CodeTooLarge, "Edit target exceeds byte bound").JSON(), true
 	}
+	if observed.Version != a.ExpectedVersion {
+		return staleVersion("Edit target changed since it was read")
+	}
+	b := observed.Content
 	n := strings.Count(string(b), a.OldString)
 	if n == 0 {
 		return refuse(CodeEditConflict, "Edit old_string matched 0 occurrences").JSON(), true
@@ -133,15 +218,37 @@ func (t *Toolset) edit(ctx context.Context, body []byte) ([]byte, bool) {
 	if r := canceled(ctx); r != nil {
 		return r.JSON(), true
 	}
-	if err := atomicReplace(target.Abs, []byte(next), true, info.Mode().Perm()); err != nil {
+	fresh, r := t.resolveMutation(a.FilePath)
+	if r != nil {
+		return r.JSON(), true
+	}
+	if fresh.Key != target.Key {
+		return staleVersion("Edit target identity changed before publication")
+	}
+	current, r := observeFile(ctx, fresh.Abs, 0)
+	if r != nil {
+		return r.JSON(), true
+	}
+	if current.Version != observed.Version {
+		return staleVersion("Edit target changed before publication")
+	}
+	if err := atomicReplace(fresh.Abs, []byte(next), true, info.Mode().Perm()); err != nil {
 		return refuse(CodeIO, err.Error()).JSON(), true
 	}
-	return okJSON(mutationResult{Path: target.Rel, Bytes: len(next), Replacements: func() int {
+	after, r := observeFile(context.WithoutCancel(ctx), fresh.Abs, 0)
+	if r != nil {
+		return r.JSON(), true
+	}
+	return okJSON(mutationResult{Path: fresh.Rel, Bytes: len(next), Replacements: func() int {
 		if a.ReplaceAll {
 			return n
 		}
 		return 1
-	}()}), false
+	}(), Version: after.Version}), false
+}
+
+func staleVersion(detail string) ([]byte, bool) {
+	return refuse(CodeStaleVersion, detail).JSON(), true
 }
 
 func atomicReplace(path string, body []byte, existed bool, perm fs.FileMode) error {
@@ -173,8 +280,17 @@ func atomicReplace(path string, body []byte, existed bool, perm fs.FileMode) err
 	if err != nil {
 		return err
 	}
-	if err = os.Rename(tmp, path); err != nil {
-		return err
+	if existed {
+		if err = os.Rename(tmp, path); err != nil {
+			return err
+		}
+	} else {
+		// Linking an already-synced temp file publishes a create atomically without the
+		// overwrite-on-Rename race that would violate create-if-absent semantics.
+		if err = os.Link(tmp, path); err != nil {
+			return err
+		}
+		_ = os.Remove(tmp)
 	}
 	ok = true
 	return nil

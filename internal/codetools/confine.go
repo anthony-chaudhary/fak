@@ -43,6 +43,11 @@ type Resolved struct {
 	Rel string
 }
 
+type mutationTarget struct {
+	Resolved
+	Key string
+}
+
 // resolve canonicalizes a caller-supplied path argument and confines it to the toolset's
 // workspace root, returning a Refusal for anything that escapes. A relative argument is
 // taken against the root (the workspace IS the agent's cwd), an absolute one is accepted
@@ -71,6 +76,41 @@ func (t *Toolset) resolve(arg string) (Resolved, *Refusal) {
 		return Resolved{}, err
 	}
 	return Resolved{Abs: abs, Rel: filepath.ToSlash(rel)}, nil
+}
+
+// resolveMutation returns the canonical path a mutation must actually publish to. A
+// second call inside the target lock detects an alias or ancestor that moved after the
+// caller first resolved it; final symlinks are refused instead of replaced or followed.
+func (t *Toolset) resolveMutation(arg string) (mutationTarget, *Refusal) {
+	res, r := t.resolve(arg)
+	if r != nil {
+		return mutationTarget{}, r
+	}
+	if info, err := os.Lstat(res.Abs); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return mutationTarget{}, refuse(CodeSymlinkEscape, "mutation refuses a symlink target")
+		}
+	} else if !os.IsNotExist(err) {
+		return mutationTarget{}, refuse(CodeIO, err.Error())
+	}
+
+	ancestor := deepestExisting(res.Abs)
+	if ancestor == "" {
+		return mutationTarget{}, refuse(CodeSymlinkEscape, "cannot canonicalize mutation target")
+	}
+	canonical, err := filepath.EvalSymlinks(ancestor)
+	if err != nil || !within(t.evalRoot, canonical) {
+		return mutationTarget{}, refuse(CodeSymlinkEscape, "cannot canonicalize mutation target")
+	}
+	suffix, err := filepath.Rel(ancestor, res.Abs)
+	if err != nil || suffix == ".." || hasDotDotPrefix(suffix) {
+		return mutationTarget{}, refuse(CodePathEscape, "mutation target escapes its canonical ancestor")
+	}
+	abs := filepath.Clean(filepath.Join(canonical, suffix))
+	if !within(t.evalRoot, abs) {
+		return mutationTarget{}, refuse(CodeSymlinkEscape, "canonical mutation target escapes the workspace root")
+	}
+	return mutationTarget{Resolved: Resolved{Abs: abs, Rel: res.Rel}, Key: abs}, nil
 }
 
 // evalWithin denies a path whose REAL location — after resolving every symlink on the

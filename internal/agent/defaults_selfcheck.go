@@ -34,13 +34,62 @@ type defaultsCheckPlanner struct {
 
 func (p *defaultsCheckPlanner) Complete(_ context.Context, messages []Message, _ []ToolDef, _ ...SampleOpt) (*Completion, error) {
 	p.messages = append([]Message(nil), messages...)
-	c := p.turns[p.n]
+	c := bindLatestCodeToolVersion(p.turns[p.n], messages)
 	if p.n < len(p.turns)-1 {
 		p.n++
 	}
 	return c, nil
 }
 func (*defaultsCheckPlanner) Model() string { return "defaults-selfcheck" }
+
+func bindLatestCodeToolVersion(c *Completion, messages []Message) *Completion {
+	if c == nil || len(c.Message.ToolCalls) == 0 {
+		return c
+	}
+	clone := *c
+	clone.Message.ToolCalls = append([]ToolCall(nil), c.Message.ToolCalls...)
+	changed := false
+	for i := range clone.Message.ToolCalls {
+		call := &clone.Message.ToolCalls[i]
+		if call.Function.Name != codetools.ToolEdit && call.Function.Name != codetools.ToolWrite {
+			continue
+		}
+		var args map[string]any
+		if json.Unmarshal([]byte(call.Function.Arguments), &args) != nil {
+			continue
+		}
+		if call.Function.Name == codetools.ToolWrite && args["mode"] == "create" {
+			continue
+		}
+		if expected, _ := args["expected_version"].(string); expected != "" {
+			continue
+		}
+		if version := latestCodeToolVersion(messages); version != "" {
+			args["expected_version"] = version
+			call.Function.Arguments = mustSelfcheckArgs(args)
+			changed = true
+		}
+	}
+	if !changed {
+		return c
+	}
+	return &clone
+}
+
+func latestCodeToolVersion(messages []Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role != "tool" {
+			continue
+		}
+		var receipt struct {
+			Version string `json:"version"`
+		}
+		if json.Unmarshal([]byte(messages[i].Content), &receipt) == nil && receipt.Version != "" {
+			return receipt.Version
+		}
+	}
+	return ""
+}
 
 // RunCodeToolsSelfcheck drives all six default tools and one escaping read through
 // the real owned agent loop and kernel engines. The caller owns workspace cleanup.

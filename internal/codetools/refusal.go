@@ -20,19 +20,20 @@ import (
 // The closed Code set. Anything a caller can hit from a well-formed proposal is here;
 // there is no "other".
 const (
-	CodePathEscape    = "PATH_ESCAPE"    // the canonical path resolves outside the workspace root
-	CodeSymlinkEscape = "SYMLINK_ESCAPE" // an in-tree symlink resolves outside the workspace root
-	CodeMalformed     = "MALFORMED"      // missing/unknown/ill-typed argument
-	CodeDefaultDeny   = "DEFAULT_DENY"   // no policy affirmatively admitted the tool (fail-closed)
-	CodeNotFound      = "NOT_FOUND"      // the target path does not exist
-	CodeIsDir         = "IS_DIR"         // the target is a directory where a file was required
-	CodeCanceled      = "CANCELED"       // the caller's context was canceled
-	CodeCacheScope    = "CACHE_SCOPE"    // the call's cache hints contradict the tool's write shape
-	CodeIO            = "IO_ERROR"       // the filesystem refused the operation
-	CodeExists        = "ALREADY_EXISTS" // create mode addressed an existing file
-	CodeEditConflict  = "EDIT_CONFLICT"  // exact edit match count violated semantics
-	CodeTooLarge      = "TOO_LARGE"      // mutation input exceeded the configured bound
-	CodeCommandDeny   = "COMMAND_DENY"   // Bash command is outside the focused coding allowlist
+	CodePathEscape    = "PATH_ESCAPE"      // the canonical path resolves outside the workspace root
+	CodeSymlinkEscape = "SYMLINK_ESCAPE"   // an in-tree symlink resolves outside the workspace root
+	CodeMalformed     = "MALFORMED"        // missing/unknown/ill-typed argument
+	CodeDefaultDeny   = "DEFAULT_DENY"     // no policy affirmatively admitted the tool (fail-closed)
+	CodeNotFound      = "NOT_FOUND"        // the target path does not exist
+	CodeIsDir         = "IS_DIR"           // the target is a directory where a file was required
+	CodeCanceled      = "CANCELED"         // the caller's context was canceled
+	CodeCacheScope    = "CACHE_SCOPE"      // the call's cache hints contradict the tool's write shape
+	CodeIO            = "IO_ERROR"         // the filesystem refused the operation
+	CodeExists        = "ALREADY_EXISTS"   // create mode addressed an existing file
+	CodeEditConflict  = "EDIT_CONFLICT"    // exact edit match count violated semantics
+	CodeStaleVersion  = "FS_STALE_VERSION" // mutation target or bytes changed since Read
+	CodeTooLarge      = "TOO_LARGE"        // mutation input exceeded the configured bound
+	CodeCommandDeny   = "COMMAND_DENY"     // Bash command is outside the focused coding allowlist
 )
 
 // Refusal is one denied or failed operation: the closed Code, the abi reason the rung

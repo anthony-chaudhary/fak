@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -121,14 +122,21 @@ type Config struct {
 }
 
 // Toolset is a configured, confinement-bound instance of the coding engines plus the
-// adjudicator rung that admits them. It is safe for concurrent use: every field is set
-// once at construction and read-only thereafter.
+// adjudicator rung that admits them. Configuration is immutable after construction; the
+// synchronized mutation-lock registry serializes competing updates to one target.
 type Toolset struct {
 	root            string
 	evalRoot        string // root with symlinks resolved — the base every escape check compares against
 	limits          Limits
 	policy          Policy
 	focusedCommands bool
+	mutationMu      sync.Mutex
+	mutationLocks   map[string]*mutationLock
+}
+
+type mutationLock struct {
+	mu   sync.Mutex
+	refs int
 }
 
 // New builds a Toolset over cfg. It resolves the root ONCE (including symlinks) so every
@@ -161,7 +169,33 @@ func New(cfg Config) (*Toolset, error) {
 	if pol.Allow == nil {
 		pol = DefaultPolicy()
 	}
-	return &Toolset{root: abs, evalRoot: evalRoot, limits: cfg.Limits.normalize(), policy: pol, focusedCommands: cfg.FocusedCommands}, nil
+	return &Toolset{
+		root: abs, evalRoot: evalRoot, limits: cfg.Limits.normalize(), policy: pol,
+		focusedCommands: cfg.FocusedCommands, mutationLocks: map[string]*mutationLock{},
+	}, nil
+}
+
+func (t *Toolset) withMutationLock(key string, fn func() ([]byte, bool)) ([]byte, bool) {
+	t.mutationMu.Lock()
+	l := t.mutationLocks[key]
+	if l == nil {
+		l = &mutationLock{}
+		t.mutationLocks[key] = l
+	}
+	l.refs++
+	t.mutationMu.Unlock()
+
+	l.mu.Lock()
+	defer func() {
+		l.mu.Unlock()
+		t.mutationMu.Lock()
+		l.refs--
+		if l.refs == 0 {
+			delete(t.mutationLocks, key)
+		}
+		t.mutationMu.Unlock()
+	}()
+	return fn()
 }
 
 // Root reports the workspace root every path is confined to.
@@ -236,9 +270,10 @@ func readOnlyTool(tool string) bool {
 //
 // This is the "request/tool identity in the cache scope" contract in code. Two halves:
 //
-//   - A read-shaped tool asserts readOnlyHint+idempotentHint, so the vDSO may serve a
-//     repeat Read from cache; the per-path invalidator (internal/vdso/pathscope.go) binds
-//     that entry to "files:<path>" and a Write/Edit to the same path strands exactly it.
+//   - Grep/Glob assert readOnlyHint+idempotentHint and may use the vDSO. Read remains
+//     read-only but omits idempotentHint: a peer filesystem writer emits no kernel
+//     invalidation event, so caching Read would keep returning an obsolete version after
+//     FS_STALE_VERSION told the model to read again.
 //   - A write-shaped tool asserts destructive and NEITHER hint, so it can never be served
 //     from cache and never fills one. The rung REFUSES a call that contradicts this
 //     (CodeCacheScope), because a mutation mislabeled read-only would let the vDSO answer
@@ -252,7 +287,9 @@ func CallMeta(tool, principal string) map[string]string {
 	m := map[string]string{}
 	if readOnlyTool(tool) {
 		m["readOnlyHint"] = "true"
-		m["idempotentHint"] = "true"
+		if tool != ToolRead {
+			m["idempotentHint"] = "true"
+		}
 	} else {
 		m["readOnlyHint"] = "false"
 		m["idempotentHint"] = "false"

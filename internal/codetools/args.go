@@ -59,9 +59,10 @@ func (a ReadArgs) Validate() *Refusal {
 // "create" refuses an existing file, "overwrite" refuses a missing file, and "upsert"
 // permits either. No omitted/default mode can silently change a caller's intent.
 type WriteArgs struct {
-	FilePath string `json:"file_path"`
-	Content  string `json:"content"`
-	Mode     string `json:"mode"`
+	FilePath        string `json:"file_path"`
+	Content         string `json:"content"`
+	Mode            string `json:"mode"`
+	ExpectedVersion string `json:"expected_version,omitempty"`
 }
 
 func (a WriteArgs) Validate() *Refusal {
@@ -69,7 +70,17 @@ func (a WriteArgs) Validate() *Refusal {
 		return refuse(CodeMalformed, "Write: missing required field: file_path")
 	}
 	switch a.Mode {
-	case "create", "overwrite", "upsert":
+	case "create":
+		if a.ExpectedVersion != "" {
+			return refuse(CodeMalformed, "Write create must not present expected_version")
+		}
+		return nil
+	case "overwrite":
+		if a.ExpectedVersion == "" {
+			return refuse(CodeMalformed, "Write overwrite: missing required field: expected_version")
+		}
+		return nil
+	case "upsert":
 		return nil
 	default:
 		return refuse(CodeMalformed, "Write: mode must be create, overwrite, or upsert")
@@ -79,10 +90,11 @@ func (a WriteArgs) Validate() *Refusal {
 // EditArgs performs an exact textual replacement. The default requires exactly one
 // match; ReplaceAll requires at least one and replaces every match.
 type EditArgs struct {
-	FilePath   string `json:"file_path"`
-	OldString  string `json:"old_string"`
-	NewString  string `json:"new_string"`
-	ReplaceAll bool   `json:"replace_all,omitempty"`
+	FilePath        string `json:"file_path"`
+	OldString       string `json:"old_string"`
+	NewString       string `json:"new_string"`
+	ReplaceAll      bool   `json:"replace_all,omitempty"`
+	ExpectedVersion string `json:"expected_version"`
 }
 
 func (a EditArgs) Validate() *Refusal {
@@ -91,6 +103,9 @@ func (a EditArgs) Validate() *Refusal {
 	}
 	if a.OldString == "" {
 		return refuse(CodeMalformed, "Edit: old_string must not be empty")
+	}
+	if a.ExpectedVersion == "" {
+		return refuse(CodeMalformed, "Edit: missing required field: expected_version")
 	}
 	return nil
 }
@@ -187,7 +202,7 @@ func Catalog() []ToolDef {
 	return []ToolDef{
 		{
 			Name:        ToolRead,
-			Description: "Read a file from the workspace. Returns its content, optionally windowed by line offset and limit.",
+			Description: "Read a file from the workspace. Returns content and an opaque version for guarded mutation, optionally windowed by line offset and limit.",
 			Parameters: json.RawMessage(`{"type":"object","properties":{` +
 				`"file_path":{"type":"string","description":"workspace-relative or absolute path inside the workspace"},` +
 				`"offset":{"type":"integer","description":"1-based first line to return"},` +
@@ -208,14 +223,14 @@ func Catalog() []ToolDef {
 		},
 		{
 			Name:        ToolWrite,
-			Description: "Atomically create or replace a workspace file with explicit create/overwrite/upsert semantics.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"content":{"type":"string"},"mode":{"type":"string","enum":["create","overwrite","upsert"]}},"required":["file_path","content","mode"],"additionalProperties":false}`),
+			Description: "Atomically create or replace a workspace file. overwrite requires the version returned by Read; upsert creates when absent and requires that version when replacing.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"content":{"type":"string"},"mode":{"type":"string","enum":["create","overwrite","upsert"]},"expected_version":{"type":"string","description":"opaque version returned by Read; required for overwrite and for upsert when the target exists"}},"required":["file_path","content","mode"],"additionalProperties":false}`),
 			ReadOnly:    false,
 		},
 		{
 			Name:        ToolEdit,
-			Description: "Atomically replace one exact string in a workspace file, or all matches when replace_all is true.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"}},"required":["file_path","old_string","new_string"],"additionalProperties":false}`),
+			Description: "Atomically replace exact text in the file version returned by Read, or refuse when that observation is stale.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"},"expected_version":{"type":"string","description":"opaque version returned by Read"}},"required":["file_path","old_string","new_string","expected_version"],"additionalProperties":false}`),
 			ReadOnly:    false,
 		},
 		{
