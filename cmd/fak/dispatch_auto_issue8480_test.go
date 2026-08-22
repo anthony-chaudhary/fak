@@ -262,8 +262,17 @@ func stubDispatchAutoIssue8480Probes(
 		}
 	}
 	dispatchAutoPricingProbe = pricing
-	dispatchAutoRenderProbe = func(ctx context.Context, _ map[string]any, _ dispatchauto.Plan, _ bool) error { return ctx.Err() }
+	renderFinished := make(chan struct{})
+	dispatchAutoRenderProbe = func(ctx context.Context, _ map[string]any, _ dispatchauto.Plan, _ bool) error {
+		defer close(renderFinished)
+		return ctx.Err()
+	}
 	t.Cleanup(func() {
+		select {
+		case <-renderFinished:
+		case <-time.After(time.Second):
+			t.Error("dispatch auto render helper did not stop before probe restoration")
+		}
 		dispatchAutoBuildProbe, dispatchAutoBacklogProbe = oldBuild, oldBacklog
 		dispatchAutoRankingProbe, dispatchAutoPricingProbe, dispatchAutoRenderProbe = oldRanking, oldPricing, oldRender
 	})

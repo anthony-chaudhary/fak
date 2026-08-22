@@ -101,13 +101,20 @@ func TestDispatchWaveDependencyRetryRecoversReadOnlyUpstreamFailure(t *testing.T
 
 func TestDispatchWaveDependencyTimeoutIsNotRetriedWhileCallMayStillRun(t *testing.T) {
 	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
+	finished := make(chan struct{})
 	attempts := 0
 	_, err := dispatchWaveDependencyRetry(20*time.Millisecond, "issue-contract discovery", 2, func(error) bool { return true }, func() (int, error) {
+		defer close(finished)
 		attempts++
 		<-release
 		return 0, nil
 	})
+	close(release)
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("timed-out dependency helper did not stop after release")
+	}
 	if err == nil || attempts != 1 {
 		t.Fatalf("error = %v, attempts=%d; want timeout without overlapping retry", err, attempts)
 	}
