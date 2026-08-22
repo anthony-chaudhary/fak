@@ -1,6 +1,9 @@
 package modelperfobs
 
 import (
+	"bytes"
+	"encoding/json"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -157,6 +160,91 @@ func TestAttributionDistinguishesCounterResetFromKnownWrap(t *testing.T) {
 		t.Fatalf("wrap provenance=%+v", report.Delta)
 	}
 	assertRequestAttribution(t, report, "A", GradeIsolatedWindow, []Cause{CausePrefixCacheHit})
+}
+
+func TestAttributionDeterminismUnderConcurrentReads(t *testing.T) {
+	t0 := time.Unix(600, 0).UTC()
+	input := AttributionInput{
+		Before: &MetricsSnapshot{
+			ServerInstanceID: "server-a",
+			ScrapedAt:        t0,
+			Counters: CounterSet{
+				CounterRequests:        {Value: 40},
+				CounterPrefixCacheHits: {Value: 100},
+				CounterCacheEvictions:  {Value: 7},
+				CounterQueueEvents:     {Value: 10},
+				CounterPreemptions:     {Value: 1},
+			},
+			RequestCounters: map[string]CorrelatedCounterSet{
+				"A": {Source: CorrelationTrace, Counters: CounterSet{CounterPrefixCacheHits: {Value: 10}}},
+				"B": {Source: CorrelationRequestLabel, Counters: CounterSet{CounterQueueEvents: {Value: 20}}},
+				"C": {Source: CorrelationSource("adapter-guess"), Counters: CounterSet{CounterCacheEvictions: {Value: 30}}},
+			},
+		},
+		After: &MetricsSnapshot{
+			ServerInstanceID: "server-a",
+			ScrapedAt:        t0.Add(time.Second),
+			Counters: CounterSet{
+				CounterRequests:        {Value: 44},
+				CounterPrefixCacheHits: {Value: 102},
+				CounterCacheEvictions:  {Value: 8},
+				CounterQueueEvents:     {Value: 13},
+				CounterPreemptions:     {Value: 2},
+			},
+			RequestCounters: map[string]CorrelatedCounterSet{
+				"A": {Source: CorrelationTrace, Counters: CounterSet{CounterPrefixCacheHits: {Value: 11}}},
+				"B": {Source: CorrelationRequestLabel, Counters: CounterSet{CounterQueueEvents: {Value: 22}}},
+				"C": {Source: CorrelationSource("adapter-guess"), Counters: CounterSet{CounterCacheEvictions: {Value: 31}}},
+			},
+		},
+		Requests: []RequestWindow{
+			{RequestID: "D", StartedAt: t0.Add(400 * time.Millisecond), EndedAt: t0.Add(900 * time.Millisecond)},
+			{RequestID: "B", StartedAt: t0.Add(200 * time.Millisecond), EndedAt: t0.Add(700 * time.Millisecond)},
+			{RequestID: "A", StartedAt: t0.Add(100 * time.Millisecond), EndedAt: t0.Add(600 * time.Millisecond)},
+			{RequestID: "C", StartedAt: t0.Add(300 * time.Millisecond), EndedAt: t0.Add(800 * time.Millisecond)},
+		},
+	}
+
+	baseline := AttributeMetrics(input)
+	assertRequestAttribution(t, baseline, "A", GradeRequestCorrelated, []Cause{CausePrefixCacheHit})
+	assertRequestAttribution(t, baseline, "B", GradeRequestCorrelated, []Cause{CauseQueue})
+	assertRequestAttribution(t, baseline, "C", GradeCohortOnly, nil)
+	assertRequestAttribution(t, baseline, "D", GradeCohortOnly, nil)
+	baselineJSON, err := json.Marshal(baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type result struct {
+		run    int
+		report AttributionReport
+		json   []byte
+		err    error
+	}
+	const repetitions = 64
+	start := make(chan struct{})
+	results := make(chan result, repetitions)
+	for run := range repetitions {
+		go func() {
+			<-start
+			report := AttributeMetrics(input)
+			encoded, err := json.Marshal(report)
+			results <- result{run: run, report: report, json: encoded, err: err}
+		}()
+	}
+	close(start)
+	for range repetitions {
+		got := <-results
+		if got.err != nil {
+			t.Fatalf("run %d: marshal report: %v", got.run, got.err)
+		}
+		if !reflect.DeepEqual(got.report, baseline) {
+			t.Fatalf("run %d: report differs from baseline\ngot:  %+v\nwant: %+v", got.run, got.report, baseline)
+		}
+		if !bytes.Equal(got.json, baselineJSON) {
+			t.Fatalf("run %d: JSON differs from baseline\ngot:  %s\nwant: %s", got.run, got.json, baselineJSON)
+		}
+	}
 }
 
 func assertRequestAttribution(t *testing.T, report AttributionReport, requestID string, grade AttributionGrade, causes []Cause) {
