@@ -9,9 +9,116 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestDeterminismAcrossFixturesAndRefusals(t *testing.T) {
+	manifest := testManifest(t)
+	for _, fixture := range []string{"known-cliff.jsonl", "missing-cache-evidence.jsonl"} {
+		t.Run("fixture "+fixture, func(t *testing.T) {
+			observations, err := readObservations(filepath.Join("testdata", fixture))
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, err := Analyze(manifest, observations)
+			if err != nil {
+				t.Fatal(err)
+			}
+			observations, err = readObservations(filepath.Join("testdata", fixture))
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := Analyze(manifest, observations)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(first, second) {
+				t.Fatalf("repeated analysis differs:\nfirst:  %+v\nsecond: %+v", first, second)
+			}
+		})
+	}
+
+	t.Run("byte-stable captured witness", func(t *testing.T) {
+		first, err := BuildSelfcheck(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err := BuildSelfcheck(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(first, second) {
+			t.Fatalf("repeated selfcheck differs:\nfirst:  %+v\nsecond: %+v", first, second)
+		}
+		firstBytes, err := json.MarshalIndent(first, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		secondBytes, err := json.MarshalIndent(second, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		firstBytes, secondBytes = append(firstBytes, '\n'), append(secondBytes, '\n')
+		if !bytes.Equal(firstBytes, secondBytes) {
+			t.Fatal("deep-equal selfchecks did not encode to byte-identical JSON")
+		}
+		captured, err := os.ReadFile(filepath.Join("testdata", "known-cliff-witness.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(firstBytes, captured) {
+			t.Fatal("deterministic selfcheck drifted from the checked-in witness")
+		}
+	})
+
+	for _, refusal := range []struct {
+		name   string
+		want   string
+		mutate func([]Observation) []Observation
+	}{
+		{
+			name: "pin drift",
+			want: "pins differ",
+			mutate: func(observations []Observation) []Observation {
+				observations[0].Pins.RuntimeRevision = "different-runtime"
+				return observations
+			},
+		},
+		{
+			name: "incomplete envelope",
+			want: "observed envelope incomplete",
+			mutate: func(observations []Observation) []Observation {
+				filtered := make([]Observation, 0, len(observations))
+				for _, observation := range observations {
+					if observation.PrefixDepthTokens != 16384 {
+						filtered = append(filtered, observation)
+					}
+				}
+				return filtered
+			},
+		},
+	} {
+		t.Run("refusal "+refusal.name, func(t *testing.T) {
+			var failures [2]string
+			for run := range failures {
+				observations, err := SyntheticObservations(manifest, true)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = Analyze(manifest, refusal.mutate(observations))
+				requireRecovery(t, err, refusal.want)
+				failures[run] = err.Error()
+			}
+			if failures[0] != failures[1] {
+				t.Fatalf("repeated refusal differs:\nfirst:  %s\nsecond: %s", failures[0], failures[1])
+			}
+		})
+	}
+
+	t.Log("witnessed 2 fixture variants, 2 guarded refusals, deep-equal reports, and byte-stable captured JSON")
+}
 
 func TestSelfcheckFindsKnownCliffAndRefusesMissingEvidence(t *testing.T) {
 	manifest := testManifest(t)
