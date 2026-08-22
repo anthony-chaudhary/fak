@@ -1223,6 +1223,31 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /v1/fak/observation:
+    get:
+      tags: [fak-native]
+      summary: Read one typed, payload-free gateway observation snapshot
+      description: |
+        Captures session activity, cache attribution, managed-cache posture,
+        and harness resources at one HTTP read boundary. Every source is a
+        `fak-observation/1` envelope whose availability distinguishes an
+        observed zero from an empty, unavailable, stale, or unsupported source.
+        The route contains operational counters and bounded identifiers only:
+        no prompts, tool arguments/results, credentials, raw URLs, or
+        transcript text.
+
+        It uses the same observability auth floor as `/debug/vars` and
+        `/metrics`: loopback reads may be anonymous; off-box reads require the
+        gateway bearer or the read-scoped bearer.
+      responses:
+        '200':
+          description: One versioned snapshot containing the four typed source envelopes.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObservationSnapshot' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
   /v1/fak/loops:
     get:
       tags: [fak-native]
@@ -2313,6 +2338,64 @@ components:
           type: array
           items: { $ref: '#/components/schemas/SessionState' }
         count: { type: integer, description: len(sessions), surfaced so a "0 live sessions" reading is explicit. }
+
+    ObservationEnvelope:
+      type: object
+      required: [schema, source, provenance, availability]
+      description: |
+        One typed source observation. `OBSERVED` carries `data` and no reason;
+        `EMPTY` carries neither; `UNAVAILABLE`, `STALE`, and `NOT_APPLICABLE`
+        carry a closed reason and no data. `observed_at` or `revision` supplies
+        the source clock.
+      properties:
+        schema:
+          type: string
+          enum: [fak-observation/1]
+        source:
+          type: string
+          enum: [sessions, cache_attribution, managed_cache, harness]
+        observed_at:
+          type: string
+          format: date-time
+        revision:
+          type: string
+        provenance:
+          type: string
+          description: The bounded producer identity for this source family.
+        availability:
+          type: string
+          enum: [OBSERVED, EMPTY, UNAVAILABLE, STALE, NOT_APPLICABLE]
+        data:
+          type: object
+          additionalProperties: true
+          description: Payload-free source data, present only when availability is OBSERVED.
+        reason:
+          type: string
+          description: Closed source-state reason, present only for unavailable, stale, or not-applicable states.
+
+    ObservationSnapshot:
+      type: object
+      required: [schema, observed_at, sources]
+      description: |
+        One point-in-time gateway observation boundary. The four required
+        source envelopes are always present, so omission never has to stand in
+        for source health.
+      properties:
+        schema:
+          type: string
+          enum: [fak-observation-snapshot/1]
+        observed_at:
+          type: string
+          format: date-time
+          description: The gateway's shared HTTP snapshot boundary.
+        sources:
+          type: object
+          required: [sessions, cache_attribution, managed_cache, harness]
+          properties:
+            sessions: { $ref: '#/components/schemas/ObservationEnvelope' }
+            cache_attribution: { $ref: '#/components/schemas/ObservationEnvelope' }
+            managed_cache: { $ref: '#/components/schemas/ObservationEnvelope' }
+            harness: { $ref: '#/components/schemas/ObservationEnvelope' }
 
     SessionChangeEvent:
       description: |
