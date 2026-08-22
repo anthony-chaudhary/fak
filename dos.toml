@@ -346,7 +346,7 @@ concurrent = [
   "timeoutphase", "tokencache", "toolcoverage", "toolrollup", "toolsandbox", "toolseq",
   "toolshape", "tooltrend", "toon", "trajctlhook", "trajectory", "trajhook", "trajquery",
   "treedoctor", "trendreport", "trigram", "trunkbuildprobe", "turnkind", "turntaxmeter",
-  "uiquality", "unwiredscore", "unwitnessedclaim", "usagelog", "vcachecal", "vcacheextract",
+  "uiquality", "ultracodebench", "unwiredscore", "unwitnessedclaim", "usagelog", "vcachecal", "vcacheextract",
   "vcacheqa", "vcachescore", "vcachesnapshot", "vcachestar", "verifierexposure", "vllmcompile",
   "watchdoghealth", "whatschanged", "wipattr", "wipfence", "wiprecon", "wipref",
   "workerenvelope", "workerworktree", "workflow", "workflowaudit", "workflowlint", "worklog",
@@ -1078,6 +1078,7 @@ trunkbuildprobe = ["internal/trunkbuildprobe/**"]
 turnkind = ["internal/turnkind/**"]
 turntaxmeter = ["internal/turntaxmeter/**"]
 uiquality = ["internal/uiquality/**"]
+ultracodebench = ["internal/ultracodebench/**"] # #8496: cmd/fak adapters remain on the shared cmd lane.
 unwiredscore = ["internal/unwiredscore/**"]
 unwitnessedclaim = ["internal/unwitnessedclaim/**"]
 usagelog = ["internal/usagelog/**"]
