@@ -270,6 +270,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Concept study: mini-sglang's compact serving control loop](docs/notes/CONCEPT-STUDY-MINI-SGLANG-2026-08-22.md) -- auto-indexed dated note.
 - [FlashInfer study — reusable execution plans, workload tuning, and traceable kernels](docs/research/flashinfer-study-2026-08-22.md) -- pinned deep study; files plan/run #8607, offline tuning #8608, and device-event trace #8609.
 
 - [Flash Linear Attention: recurrent-state kernels are an oracle, not a new runtime](docs/notes/CONCEPT-STUDY-FLASH-LINEAR-ATTENTION-2026-08-22.md) -- auto-indexed dated note.
