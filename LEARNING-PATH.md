@@ -78,6 +78,24 @@ The expected winners are deliberately different:
 | `search_kb` | `ALLOW` | The tool matches the `search_` allow prefix. | `allow_prefix` |
 | `mystery_action` | `DENY / DEFAULT_DENY` | No rule grants the unknown tool. | `posture: fail_closed` |
 
+The same method holds when the input is unfriendly. These are argument-rule cases, not
+global claims that every tool needs arguments or that every call has one fixed size cap:
+
+| Input class | One input change | Expected result | Winning rule |
+|---|---|---|---|
+| Empty required argument | Remove a value required by a positive path constraint. | `DENY / POLICY_BLOCK` | The `allow_glob` rule cannot prove that a missing value is contained. |
+| Oversized string argument | Grow one scalar past its policy-declared byte bound. | `DENY / OVERSIZE` | The matching `max_bytes` argument rule. |
+| Malformed quote-wrapped argument | Open a quote in a constrained value without closing it. | `DENY / MALFORMED` | Canonicalization fails closed and returns a bounded repair hint. |
+| Hostile denied argument | Make one scalar match its policy-declared deny expression. | `DENY / POLICY_BLOCK` | The matching `deny_regex` rule; the witness names the rule, not the input. |
+
+`TestMysteryFreeAdjustmentEdgeAdversarial` drives all four rows through the real
+adjudicator and checks that both learning documents keep the same table. Run the full
+edge/adversarial witness with:
+
+```powershell
+go test ./internal/adjudicator -run 'Edge|Adversarial' -v
+```
+
 Now change exactly one policy fact in a temporary copy and predict the new result:
 
 ```powershell

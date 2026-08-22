@@ -83,6 +83,30 @@ found one affirmative rule. Nothing about the model, routing, cache, or later ex
 changed. If that sentence does not account for the observed trace, keep following the
 winning source; do not add another knob.
 
+## Edge and adversarial inputs
+
+Keep the one-variable discipline when the argument is missing, too large for its declared
+rule, undecodable by the rule, or deliberately hostile. “Empty” below means a value that a
+positive constraint requires; it does not mean every tool must have arguments. “Oversized”
+means beyond that argument's declared `max_bytes` rule, not a global call-size limit.
+
+| Input class | One input change | Expected result | Winning rule |
+|---|---|---|---|
+| Empty required argument | Remove a value required by a positive path constraint. | `DENY / POLICY_BLOCK` | The `allow_glob` rule cannot prove that a missing value is contained. |
+| Oversized string argument | Grow one scalar past its policy-declared byte bound. | `DENY / OVERSIZE` | The matching `max_bytes` argument rule. |
+| Malformed quote-wrapped argument | Open a quote in a constrained value without closing it. | `DENY / MALFORMED` | Canonicalization fails closed and returns a bounded repair hint. |
+| Hostile denied argument | Make one scalar match its policy-declared deny expression. | `DENY / POLICY_BLOCK` | The matching `deny_regex` rule; the witness names the rule, not the input. |
+
+The table is executable rather than illustrative:
+
+```powershell
+go test ./internal/adjudicator -run 'Edge|Adversarial' -v
+```
+
+`TestMysteryFreeAdjustmentEdgeAdversarial` drives the four argument classes through the
+real adjudicator, checks the exact refusal reasons, verifies that bounded witnesses do not
+echo hostile input, and pins this table in both learning documents.
+
 ## Teach-back check
 
 You understand an adjustment when another person can answer all five fields and reproduce
