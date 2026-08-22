@@ -64,18 +64,49 @@ func RestoreTerminalWindow() bool {
 // owned by WindowsTerminal.exe, which is not in that ancestry. In that case the
 // foreground HWND at launch is the only stable attended-window identity available.
 func terminalWindow() uintptr {
-	for _, pid := range ancestorPIDs(uint32(os.Getpid())) {
-		if hwnd := firstVisibleWindowForPID(pid); hwnd != 0 {
+	ancestors := ancestorPIDs(uint32(os.Getpid()))
+	foreground, _, _ := procGetForegroundWindow.Call()
+	var foregroundPID uint32
+	if foreground != 0 {
+		procGetWindowThreadProcessID.Call(foreground, uintptr(unsafe.Pointer(&foregroundPID)))
+	}
+	return terminalWindowByIdentity(
+		ancestors,
+		foreground,
+		foregroundPID,
+		firstVisibleWindowForPID,
+		func() uintptr {
+			hwnd, _, _ := procGetConsoleWindow.Call()
+			if hwnd == 0 {
+				return 0
+			}
+			visible, _, _ := procIsWindowVisible.Call(hwnd)
+			if visible == 0 {
+				return 0
+			}
+			return hwnd
+		},
+	)
+}
+
+// terminalWindowByIdentity keeps attended-window identity ahead of process-level
+// discovery. Windows Terminal owns every window in one shared process, so enumerating the
+// first HWND for its PID can select and restore an unrelated minimized session.
+func terminalWindowByIdentity(ancestors []uint32, foreground uintptr, foregroundPID uint32, firstVisible func(uint32) uintptr, consoleWindow func() uintptr) uintptr {
+	for _, pid := range ancestors {
+		if foreground != 0 && pid == foregroundPID {
+			return foreground
+		}
+	}
+	for _, pid := range ancestors {
+		if hwnd := firstVisible(pid); hwnd != 0 {
 			return hwnd
 		}
 	}
-	if hwnd, _, _ := procGetConsoleWindow.Call(); hwnd != 0 {
-		if visible, _, _ := procIsWindowVisible.Call(hwnd); visible != 0 {
-			return hwnd
-		}
+	if hwnd := consoleWindow(); hwnd != 0 {
+		return hwnd
 	}
-	hwnd, _, _ := procGetForegroundWindow.Call()
-	return hwnd
+	return foreground
 }
 
 func isTerminalWindowIconic(hwnd uintptr) bool {
