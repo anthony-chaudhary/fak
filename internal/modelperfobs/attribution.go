@@ -209,7 +209,8 @@ func buildMetricsDelta(in AttributionInput) MetricsDelta {
 		delta.Reason = "scrape bounds are invalid"
 		return delta
 	}
-	delta.OverlappingRequestIDs = overlappingRequestIDs(in.Requests, in.Before.ScrapedAt, in.After.ScrapedAt)
+	var duplicateRequestIDs bool
+	delta.OverlappingRequestIDs, duplicateRequestIDs = overlappingRequestIDs(in.Requests, in.Before.ScrapedAt, in.After.ScrapedAt)
 	delta.OverlappingObservedRequests = len(delta.OverlappingRequestIDs)
 	if in.Before.ServerInstanceID == "" || in.After.ServerInstanceID == "" {
 		delta.Reason = "server-instance identity is unavailable"
@@ -226,6 +227,11 @@ func buildMetricsDelta(in AttributionInput) MetricsDelta {
 	if in.MaxScrapeAge > 0 && !in.ObservedAt.IsZero() && in.ObservedAt.Sub(in.After.ScrapedAt) > in.MaxScrapeAge {
 		delta.Grade = GradeStale
 		delta.Reason = fmt.Sprintf("latest scrape is older than %s", in.MaxScrapeAge)
+		return delta
+	}
+	if duplicateRequestIDs {
+		delta.Grade = GradeCohortOnly
+		delta.Reason = "duplicate request IDs make the shared counter window ambiguous"
 		return delta
 	}
 
@@ -337,8 +343,9 @@ func trustedCorrelation(source CorrelationSource) bool {
 	return source == CorrelationRequestLabel || source == CorrelationTrace
 }
 
-func overlappingRequestIDs(requests []RequestWindow, started, ended time.Time) []string {
+func overlappingRequestIDs(requests []RequestWindow, started, ended time.Time) ([]string, bool) {
 	seen := make(map[string]struct{}, len(requests))
+	duplicate := false
 	for _, request := range requests {
 		if request.RequestID == "" || request.StartedAt.IsZero() {
 			continue
@@ -348,6 +355,9 @@ func overlappingRequestIDs(requests []RequestWindow, started, ended time.Time) [
 			requestEnd = ended
 		}
 		if request.StartedAt.Before(ended) && requestEnd.After(started) {
+			if _, ok := seen[request.RequestID]; ok {
+				duplicate = true
+			}
 			seen[request.RequestID] = struct{}{}
 		}
 	}
@@ -356,7 +366,7 @@ func overlappingRequestIDs(requests []RequestWindow, started, ended time.Time) [
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	return ids
+	return ids, duplicate
 }
 
 func causesFromCounters(counters map[CounterName]CounterDelta) []Cause {
