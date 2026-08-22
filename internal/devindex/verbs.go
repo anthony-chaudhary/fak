@@ -200,7 +200,7 @@ var verbManifest = []Verb{
 	{Name: "hwgate-lint", Synopsis: "scan agent output for local-hardware stops (no GPU here) and redirect each to a sanctioned compute node", Lane: "cmd"},
 	{Name: "hygiene", Synopsis: "the whole-tree hygiene gates in one process (the --audit-tree twin of fak hooks)", Lane: "cmd"},
 	{Name: "idea-scout", Synopsis: "research-to-issue feeder: score arXiv/GitHub/HN/Reddit hits, dedupe, plan issues; --live FILES them for real", Lane: "cmd", Doc: "docs/idea-scout.md"},
-	{Name: "idempotency", Synopsis: "retry-safe execution for non-idempotent tool ops: key by op+token, dedupe a post-hang retry (run/selfcheck)", Lane: "cmd"},
+	{Name: "idempotency", Synopsis: "durable intent for non-idempotent ops: run/selfcheck; UNKNOWN_APPLIED recovery via status/resolve", Lane: "cmd", Doc: "docs/cli-reference.md"},
 	{Name: "index", Synopsis: "queryable self-index: lane/leaf/docs/claims/verbs/refs (query, don't survey)", Aliases: []string{"devindex"}, Lane: "devindex", Doc: "AGENTS.md"},
 	{Name: "info", Synopsis: "the live fak-info overlay: poll a gateway's /debug/vars and print one plain-words line per tick", Lane: "cmd"},
 	{Name: "init", Synopsis: "scaffold a minimal, valid fak.toml deployment manifest for a new workspace", Lane: "cmd"},

@@ -54,6 +54,25 @@ func TestVerbManifest(t *testing.T) {
 	}
 }
 
+func TestIdempotencyVerbNamesAmbiguousRecovery(t *testing.T) {
+	cat := &Catalog{Root: FindRoot(".")}
+	v, ok := cat.VerbByName("idempotency")
+	if !ok {
+		t.Fatal("VerbByName(idempotency) did not resolve")
+	}
+	for _, want := range []string{"UNKNOWN_APPLIED", "status/resolve"} {
+		if !strings.Contains(v.Synopsis, want) {
+			t.Errorf("idempotency synopsis = %q, want %q", v.Synopsis, want)
+		}
+	}
+	if v.Doc != "docs/cli-reference.md" {
+		t.Errorf("idempotency doc = %q, want docs/cli-reference.md", v.Doc)
+	}
+	if violations := verbStyleViolations(v); len(violations) != 0 {
+		t.Errorf("idempotency style violations = %+v", violations)
+	}
+}
+
 // TestVerbsDeriveCoversUncuratedDispatch proves the catalog is a LIVE VIEW: Verbs()
 // surfaces every verb the dispatch switch routes — including one with NO curated
 // verbManifest entry (which gets a non-empty fallback synopsis) — so `fak index verbs`
