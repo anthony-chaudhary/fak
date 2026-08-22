@@ -128,10 +128,10 @@ type KVSignals struct {
 
 func (m Manifest) Validate() error {
 	if m.Schema != manifestSchema {
-		return fmt.Errorf("schema: got %q, want %q", m.Schema, manifestSchema)
+		return fmt.Errorf("schema: got %q, want %q; recovery: set schema to %q", m.Schema, manifestSchema, manifestSchema)
 	}
 	if strings.TrimSpace(m.CampaignID) == "" {
-		return errors.New("campaign_id is required")
+		return errors.New("campaign_id is required; recovery: set campaign_id to a non-empty stable identifier")
 	}
 	if err := validatePins(m.Pins); err != nil {
 		return err
@@ -140,35 +140,35 @@ func (m Manifest) Validate() error {
 		return err
 	}
 	if len(m.Axes.PrefixDepthTokens) < 6 || !positiveUniqueSorted(m.Axes.PrefixDepthTokens) {
-		return errors.New("prefix_depth_tokens must contain at least six positive, unique, ascending depths")
+		return errors.New("prefix_depth_tokens must contain at least six positive, unique, ascending depths; recovery: declare at least six positive unique depths in ascending order")
 	}
 	if len(m.Axes.SuffixPatterns) < 2 {
-		return errors.New("at least two suffix_patterns are required")
+		return errors.New("at least two suffix_patterns are required; recovery: declare two or more suffix_patterns")
 	}
 	suffixIDs := map[string]bool{}
 	for _, pattern := range m.Axes.SuffixPatterns {
 		if strings.TrimSpace(pattern.ID) == "" || strings.TrimSpace(pattern.Description) == "" || pattern.ChurnFraction < 0 || pattern.ChurnFraction > 1 || suffixIDs[pattern.ID] {
-			return errors.New("suffix_patterns require unique ids, descriptions, and churn_fraction in [0,1]")
+			return errors.New("suffix_patterns require unique ids, descriptions, and churn_fraction in [0,1]; recovery: give each suffix pattern a unique non-empty id, description, and churn_fraction from 0 through 1")
 		}
 		suffixIDs[pattern.ID] = true
 	}
 	if len(m.Axes.TurnCounts) < 2 || !positiveUnique(m.Axes.TurnCounts) {
-		return errors.New("turn_counts must contain at least two positive values")
+		return errors.New("turn_counts must contain at least two positive values; recovery: declare at least two positive unique turn_counts")
 	}
 	if len(m.Axes.Concurrency) < 2 || !positiveUnique(m.Axes.Concurrency) {
-		return errors.New("concurrency must contain at least two positive values")
+		return errors.New("concurrency must contain at least two positive values; recovery: declare at least two positive unique concurrency values")
 	}
 	if m.Axes.Repetitions < 3 {
-		return errors.New("repetitions must be at least three")
+		return errors.New("repetitions must be at least three; recovery: set repetitions to 3 or more")
 	}
 	if !slices.Contains(m.Axes.TurnCounts, m.ReferenceArm.TurnCount) || !slices.Contains(m.Axes.Concurrency, m.ReferenceArm.Concurrency) {
-		return errors.New("reference_arm must select declared turn_count and concurrency values")
+		return errors.New("reference_arm must select declared turn_count and concurrency values; recovery: choose reference_arm turn_count and concurrency values present in the declared axes")
 	}
 	phases := map[string]bool{}
 	pressureSeen := false
 	for _, arm := range m.Axes.PressureArms {
 		if arm.ID == "" || !oneOf(arm.Phase, "baseline", "pressure", "recovery") {
-			return errors.New("pressure_arms require ids and baseline|pressure|recovery phases")
+			return errors.New("pressure_arms require ids and baseline|pressure|recovery phases; recovery: give every pressure arm an id and one of the declared baseline, pressure, or recovery phases")
 		}
 		phases[arm.Phase] = true
 		if arm.Phase == "pressure" && arm.CompetingTokens > 0 && arm.RemovedBeforeNext {
@@ -176,23 +176,23 @@ func (m Manifest) Validate() error {
 		}
 	}
 	if !phases["baseline"] || !phases["pressure"] || !phases["recovery"] || !pressureSeen || !phases[m.ReferenceArm.PressurePhase] {
-		return errors.New("pressure arms must declare baseline, positive pressure, and recovery after removal")
+		return errors.New("pressure arms must declare baseline, positive pressure, and recovery after removal; recovery: declare baseline, pressure with positive competing_tokens and removed_before_next, and recovery arms")
 	}
 	strategy := strings.ToLower(m.Ordering.Strategy)
 	if !strings.Contains(strategy, "counterbalanced") && !strings.Contains(strategy, "randomized") {
-		return errors.New("ordering strategy must be counterbalanced or randomized")
+		return errors.New("ordering strategy must be counterbalanced or randomized; recovery: set ordering.strategy to a counterbalanced or randomized strategy")
 	}
 	if !sameStrings(m.Ordering.ThermalOrder, []string{"cold", "warm"}) || len(m.Ordering.RequestOrder) < 2 {
-		return errors.New("ordering must declare cold/warm and an explicit request order")
+		return errors.New("ordering must declare cold/warm and an explicit request order; recovery: set cold_warm_order to [cold, warm] and provide at least two request_order entries")
 	}
 	if strings.TrimSpace(m.Reset.BeforeCampaign) == "" || strings.TrimSpace(m.Reset.BeforeColdArm) == "" || strings.TrimSpace(m.Reset.BeforeWarmArm) == "" || strings.TrimSpace(m.Reset.AfterPressure) == "" {
-		return errors.New("all reset procedures are required")
+		return errors.New("all reset procedures are required; recovery: fill before_campaign, before_cold_arm, before_warm_arm, and after_pressure")
 	}
 	if m.Confidence.Level != .95 || m.Confidence.ReliableReuseRatio <= 0 || m.Confidence.ReliableReuseRatio > 1 || m.Confidence.MinimumSamples < 3 {
-		return errors.New("confidence requires the supported 0.95 level, reuse ratio in (0,1], and at least three samples")
+		return errors.New("confidence requires the supported 0.95 level, reuse ratio in (0,1], and at least three samples; recovery: set level to 0.95, reliable_reuse_ratio above 0 through 1, and minimum_samples to 3 or more")
 	}
 	if strings.TrimSpace(m.UsefulWorkRule) == "" {
-		return errors.New("useful_work_rule is required")
+		return errors.New("useful_work_rule is required; recovery: describe the rule used to decide whether each request completed useful work")
 	}
 	return nil
 }
@@ -204,7 +204,7 @@ func validatePins(p Pins) error {
 		"model_revision": p.ModelRevision, "fak_revision": p.FakRevision,
 	} {
 		if strings.TrimSpace(value) == "" {
-			return fmt.Errorf("pins.%s is required", name)
+			return fmt.Errorf("pins.%s is required; recovery: set pins.%s to the exact revision used by this campaign", name, name)
 		}
 	}
 	return nil
@@ -212,10 +212,10 @@ func validatePins(p Pins) error {
 
 func validateTokenization(t Tokenization) error {
 	if strings.TrimSpace(t.TokenizerID) == "" || strings.TrimSpace(t.TokenizerRevision) == "" || strings.TrimSpace(t.PromptTemplateSHA256) == "" {
-		return errors.New("tokenization must pin tokenizer id, revision, and prompt template sha256")
+		return errors.New("tokenization must pin tokenizer id, revision, and prompt template sha256; recovery: set tokenizer_id, tokenizer_revision, and prompt_template_sha256 to the campaign inputs")
 	}
 	if t.Unit != "tokens" {
-		return errors.New("tokenization.unit must be tokens")
+		return errors.New("tokenization.unit must be tokens; recovery: set tokenization.unit to tokens")
 	}
 	return nil
 }

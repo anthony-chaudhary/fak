@@ -119,7 +119,7 @@ func Analyze(m Manifest, observations []Observation) (DepthReport, error) {
 
 func pairAndValidate(m Manifest, observations []Observation) ([]pairedObservation, EnvelopeFinding, EvidenceDimensions, error) {
 	if len(observations) == 0 {
-		return nil, EnvelopeFinding{}, EvidenceDimensions{}, errors.New("at least one observation is required")
+		return nil, EnvelopeFinding{}, EvidenceDimensions{}, errors.New("at least one observation is required; recovery: supply request-level cold and warm observations for the declared campaign arms")
 	}
 	depths, patterns, turns, concurrencies, phases := map[int]bool{}, map[string]bool{}, map[int]bool{}, map[int]bool{}, map[string]bool{}
 	byPair := map[string]map[string]Observation{}
@@ -141,7 +141,7 @@ func pairAndValidate(m Manifest, observations []Observation) ([]pairedObservatio
 			byPair[pairKey] = map[string]Observation{}
 		}
 		if _, exists := byPair[pairKey][observation.ThermalState]; exists {
-			return nil, EnvelopeFinding{}, EvidenceDimensions{}, fmt.Errorf("duplicate %s request for pair %s", observation.ThermalState, pairKey)
+			return nil, EnvelopeFinding{}, EvidenceDimensions{}, fmt.Errorf("duplicate %s request for pair %s; recovery: keep exactly one cold and one warm request per arm and repetition", observation.ThermalState, pairKey)
 		}
 		byPair[pairKey][observation.ThermalState] = observation
 		evidence.UsefulWorkRequests++
@@ -168,7 +168,7 @@ func pairAndValidate(m Manifest, observations []Observation) ([]pairedObservatio
 		cold, coldOK := states["cold"]
 		warm, warmOK := states["warm"]
 		if !coldOK || !warmOK {
-			return nil, EnvelopeFinding{}, EvidenceDimensions{}, fmt.Errorf("pair %s requires one cold and one warm request", key)
+			return nil, EnvelopeFinding{}, EvidenceDimensions{}, fmt.Errorf("pair %s requires one cold and one warm request; recovery: add the missing thermal request or remove the incomplete pair", key)
 		}
 		if cold.Repetition%2 == 1 {
 			counterbalanced = counterbalanced && cold.OrderIndex == 1 && warm.OrderIndex == 2
@@ -187,40 +187,40 @@ func pairAndValidate(m Manifest, observations []Observation) ([]pairedObservatio
 		envelope.TurnCounts >= len(m.Axes.TurnCounts) && envelope.ConcurrencyValues >= len(m.Axes.Concurrency) &&
 		envelope.PressurePhases >= 3 && minimumRepetitions >= m.Axes.Repetitions && counterbalanced
 	if !envelope.Complete {
-		return nil, envelope, evidence, fmt.Errorf("observed envelope incomplete: %+v", envelope)
+		return nil, envelope, evidence, fmt.Errorf("observed envelope incomplete: %+v; recovery: cover every declared depth, suffix, turn count, concurrency, pressure phase, repetition, and counterbalanced request order", envelope)
 	}
 	return pairs, envelope, evidence, nil
 }
 
 func validateObservation(m Manifest, observation Observation) error {
 	if observation.Schema != observationSchema || observation.CampaignID != m.CampaignID || observation.RequestID == "" || observation.ArmID == "" {
-		return errors.New("schema, campaign_id, request_id, and arm_id must match the campaign")
+		return errors.New("schema, campaign_id, request_id, and arm_id must match the campaign; recovery: use the observation schema, copy campaign_id from the manifest, and set non-empty request_id and arm_id values")
 	}
 	if observation.Pins != m.Pins || observation.Tokenization != m.Tokenization {
-		return errors.New("model/runtime/fak/tokenization pins differ from the manifest")
+		return errors.New("model/runtime/fak/tokenization pins differ from the manifest; recovery: copy the exact model, runtime, fak, and tokenization pins from the campaign manifest")
 	}
 	if !slicesContains(m.Axes.PrefixDepthTokens, observation.PrefixDepthTokens) || !suffixDeclared(m, observation.SuffixPattern) ||
 		!slicesContains(m.Axes.TurnCounts, observation.TurnCount) || !slicesContains(m.Axes.Concurrency, observation.Concurrency) || !phaseDeclared(m, observation.PressurePhase) {
-		return errors.New("observation coordinates are outside the declared campaign axes")
+		return errors.New("observation coordinates are outside the declared campaign axes; recovery: choose prefix depth, suffix pattern, turn count, concurrency, and pressure phase values declared by the manifest")
 	}
 	if observation.Repetition < 1 || observation.Repetition > m.Axes.Repetitions || !oneOf(observation.ThermalState, "cold", "warm") || observation.OrderIndex < 1 || observation.OrderIndex > 2 {
-		return errors.New("invalid repetition, thermal_state, or order_index")
+		return errors.New("invalid repetition, thermal_state, or order_index; recovery: use a positive repetition, thermal_state cold or warm, and order_index 1 or 2")
 	}
 	if observation.PromptTokens < int64(observation.PrefixDepthTokens) || observation.TTFTMillis <= 0 {
-		return errors.New("prompt_tokens must cover the prefix and ttft_ms must be positive")
+		return errors.New("prompt_tokens must cover the prefix and ttft_ms must be positive; recovery: record prompt_tokens at least as large as prefix_depth_tokens and a positive ttft_ms")
 	}
 	if !oneOf(observation.ResetProcedure, m.Reset.BeforeColdArm, m.Reset.BeforeWarmArm, m.Reset.AfterPressure) {
-		return errors.New("reset_procedure is not declared by the manifest")
+		return errors.New("reset_procedure is not declared by the manifest; recovery: use the manifest's before_cold_arm procedure for cold requests and before_warm_arm procedure for warm requests")
 	}
 	if observation.KV != nil {
 		if invalidNonnegative(observation.KV.CachedInputTokens) || invalidNonnegative(observation.KV.ResidentTokens) || invalidNonnegative(observation.KV.Evictions) || invalidNonnegative(observation.KV.Preemptions) {
-			return errors.New("backend cache token/counter fields must be non-negative when present")
+			return errors.New("backend cache token/counter fields must be non-negative when present; recovery: omit unsupported backend fields or record non-negative token and counter values")
 		}
 		if observation.KV.CachedInputTokens != nil && *observation.KV.CachedInputTokens > observation.PromptTokens {
-			return errors.New("cached_input_tokens cannot exceed prompt_tokens")
+			return errors.New("cached_input_tokens cannot exceed prompt_tokens; recovery: correct the backend reuse count so it does not exceed the request's prompt_tokens")
 		}
 		if observation.KV.OccupancyRatio != nil && (*observation.KV.OccupancyRatio < 0 || *observation.KV.OccupancyRatio > 1) {
-			return errors.New("occupancy_ratio must be in [0,1]")
+			return errors.New("occupancy_ratio must be in [0,1]; recovery: record occupancy_ratio from 0 through 1 or omit it when unavailable")
 		}
 	}
 	return nil

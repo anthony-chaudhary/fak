@@ -48,17 +48,8 @@ func BuildSelfcheck(m Manifest) (SelfcheckResult, error) {
 	if err != nil {
 		return SelfcheckResult{}, fmt.Errorf("missing evidence: %w", err)
 	}
-	if known.Boundary.Status != "known" || known.Boundary.DeepestReliablePrefixTokens == nil || *known.Boundary.DeepestReliablePrefixTokens != 8192 || known.Boundary.Cliff == nil || known.Boundary.Cliff.UnreliableAtTokens != 12288 {
-		return SelfcheckResult{}, fmt.Errorf("known fixture did not recover the 8k/12k cliff: %+v", known.Boundary)
-	}
-	if known.PressureRecovery.Status != "recovered" {
-		return SelfcheckResult{}, fmt.Errorf("known fixture did not recover after pressure: %+v", known.PressureRecovery)
-	}
-	if missing.Boundary.Status != "unknown" || missing.Boundary.DeepestReliablePrefixTokens != nil || missing.PressureRecovery.Status != "unknown" {
-		return SelfcheckResult{}, fmt.Errorf("missing metrics invented a boundary: boundary=%+v recovery=%+v", missing.Boundary, missing.PressureRecovery)
-	}
-	if !known.Envelope.Complete || !missing.Envelope.Complete {
-		return SelfcheckResult{}, fmt.Errorf("synthetic observed envelope incomplete: known=%+v missing=%+v", known.Envelope, missing.Envelope)
+	if err := validateSelfcheckReports(known, missing); err != nil {
+		return SelfcheckResult{}, err
 	}
 	return SelfcheckResult{
 		Schema: selfcheckSchema, CampaignID: m.CampaignID,
@@ -71,6 +62,22 @@ func BuildSelfcheck(m Manifest) (SelfcheckResult, error) {
 	}, nil
 }
 
+func validateSelfcheckReports(known, missing DepthReport) error {
+	if known.Boundary.Status != "known" || known.Boundary.DeepestReliablePrefixTokens == nil || *known.Boundary.DeepestReliablePrefixTokens != 8192 || known.Boundary.Cliff == nil || known.Boundary.Cliff.UnreliableAtTokens != 12288 {
+		return fmt.Errorf("known fixture did not recover the 8k/12k cliff: %+v; recovery: restore the synthetic reuse curve or analyzer threshold so the checked-in fixture yields the declared 8192..12288 boundary", known.Boundary)
+	}
+	if known.PressureRecovery.Status != "recovered" {
+		return fmt.Errorf("known fixture did not recover after pressure: %+v; recovery: restore the pressure and recovery arms so reuse returns above the reliable threshold after pressure is removed", known.PressureRecovery)
+	}
+	if missing.Boundary.Status != "unknown" || missing.Boundary.DeepestReliablePrefixTokens != nil || missing.PressureRecovery.Status != "unknown" {
+		return fmt.Errorf("missing metrics invented a boundary: boundary=%+v recovery=%+v; recovery: keep unsupported backend cache evidence absent and report the boundary and recovery as unknown", missing.Boundary, missing.PressureRecovery)
+	}
+	if !known.Envelope.Complete || !missing.Envelope.Complete {
+		return fmt.Errorf("synthetic observed envelope incomplete: known=%+v missing=%+v; recovery: regenerate both synthetic fixtures across every declared campaign axis and counterbalanced order", known.Envelope, missing.Envelope)
+	}
+	return nil
+}
+
 // SyntheticObservations supplies two deterministic fixtures over the declared
 // campaign envelope. includeKV=false removes the whole backend evidence object.
 func SyntheticObservations(m Manifest, includeKV bool) ([]Observation, error) {
@@ -78,7 +85,7 @@ func SyntheticObservations(m Manifest, includeKV bool) ([]Observation, error) {
 		return nil, err
 	}
 	if !slicesContains(m.Axes.PrefixDepthTokens, 8192) || !slicesContains(m.Axes.PrefixDepthTokens, 12288) {
-		return nil, fmt.Errorf("selfcheck manifest must declare 8192 and 12288 token depths")
+		return nil, fmt.Errorf("selfcheck manifest must declare 8192 and 12288 token depths; recovery: add both depths to axes.prefix_depth_tokens while preserving the six-depth ascending envelope")
 	}
 	reference := m.ReferenceArm
 	arms := make([]fixtureArm, 0, len(m.Axes.PrefixDepthTokens)*len(m.Axes.SuffixPatterns)+4)
