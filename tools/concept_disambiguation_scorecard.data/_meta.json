@@ -11521,6 +11521,11 @@
           "category": "incidental",
           "reason": "Recommendation identifier for bounded audit planning, not a plan-state concept.",
           "token": "bound_planning"
+        },
+        {
+          "category": "incidental",
+          "reason": "validation helper for the existing WorkflowPlan contract, not a distinct plan concept",
+          "token": "NormalizeWorkflowPlanAccess"
         }
       ],
       "exclude": [
@@ -11561,6 +11566,7 @@
         "MergePlan",
         "MotifCatalogPlanFanoutReconcile",
         "NewCandidates",
+        "NormalizeWorkflowPlanAccess",
         "NoteCandidates",
         "OwnershipLaneMismatch",
         "PlanDecodeInterleave",

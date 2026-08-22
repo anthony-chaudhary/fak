@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -77,10 +78,15 @@ const (
 // native launch adapter. Observe carries no write footprint. Effect names the
 // one bounded write region and tool set that the child may exercise.
 type ChildAccess struct {
-	Mode      ChildAccessMode `json:"mode"`
-	Lane      string          `json:"lane,omitempty"`
-	WriteTree string          `json:"write_tree,omitempty"`
-	Tools     []string        `json:"tools,omitempty"`
+	Mode     ChildAccessMode `json:"mode"`
+	ReadSet  []string        `json:"read_set,omitempty"`
+	WriteSet []string        `json:"write_set,omitempty"`
+
+	// Lane, WriteTree, and Tools preserve the shipped runtime adapter contract.
+	// New workflow plans declare portable effects through ReadSet and WriteSet.
+	Lane      string   `json:"lane,omitempty"`
+	WriteTree string   `json:"write_tree,omitempty"`
+	Tools     []string `json:"tools,omitempty"`
 }
 
 type Role struct {
@@ -89,6 +95,60 @@ type Role struct {
 	TaskID  string      `json:"task_id"`
 	Access  ChildAccess `json:"access"`
 }
+
+var (
+	ErrUnknownChildAccessMode = errors.New("unknown child access mode")
+	ErrObserverWriteSet       = errors.New("observe role must not declare a write set")
+	ErrEffectWriteSetRequired = errors.New("effect role requires a bounded write set")
+)
+
+// NormalizeWorkflowPlanAccess validates the closed observe/effect contract and
+// canonicalizes path sets so equivalent plans serialize identically.
+func NormalizeWorkflowPlanAccess(plan *WorkflowPlan) error {
+	if plan == nil {
+		return errors.New("workflow plan is nil")
+	}
+	for i := range plan.Roles {
+		role := &plan.Roles[i]
+		role.Access.ReadSet = normalizeAccessSet(role.Access.ReadSet)
+		role.Access.WriteSet = normalizeAccessSet(role.Access.WriteSet)
+		switch role.Access.Mode {
+		case ChildAccessObserve:
+			if len(role.Access.WriteSet) != 0 {
+				return fmt.Errorf("role %q: %w", role.ID, ErrObserverWriteSet)
+			}
+		case ChildAccessEffect:
+			if len(role.Access.WriteSet) == 0 {
+				return fmt.Errorf("role %q: %w", role.ID, ErrEffectWriteSetRequired)
+			}
+		default:
+			return fmt.Errorf("role %q: %w %q", role.ID, ErrUnknownChildAccessMode, role.Access.Mode)
+		}
+	}
+	return nil
+}
+
+func normalizeAccessSet(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(paths))
+	out := make([]string, 0, len(paths))
+	for _, raw := range paths {
+		path := filepath.ToSlash(filepath.Clean(strings.ReplaceAll(strings.TrimSpace(raw), `\`, `/`)))
+		if path == "" || path == "." {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	sort.Strings(out)
+	return out
+}
+
 type Edge struct {
 	From string `json:"from"`
 	To   string `json:"to"`
