@@ -1,0 +1,20 @@
+{
+  "verdict": "PROMOTE",
+  "next_stage": {
+    "id": "scale-rehearsal",
+    "model": "Qwen/Qwen3.5-27B",
+    "revision": "fc05daec18b0a78c049392ed2e771dde82bdf654",
+    "parameters_b": 27,
+    "minimum_pass_rate": 0.95,
+    "proves": [
+      "exact 27B tensor geometry",
+      "64-layer memory envelope",
+      "24-head/4-kv-head kernels"
+    ],
+    "does_not_prove": [
+      "Qwen3.8 weight quality",
+      "Qwen3.8 exact identity"
+    ]
+  },
+  "reason": "all cheaper stages passed; run the paired experiment at the next stage"
+}

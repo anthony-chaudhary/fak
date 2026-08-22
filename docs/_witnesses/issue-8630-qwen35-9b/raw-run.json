@@ -1,0 +1,79 @@
+{
+  "schema": "fak.qwen38-ladder-raw-run/1",
+  "environment_sha256": "30254e1314b4e0a31e8eb01117eb1bd0f52bcbd877619ea6a7d728cc282a6752",
+  "corpus_sha256": "5c7670fa68ad34e0fa80ff2f14602ad3fb03831eb15afc66fcc2058c2ef2f286",
+  "rows": [
+    {
+      "trial": 1,
+      "arm": "baseline",
+      "enable_thinking": true,
+      "input_tokens": 23,
+      "output_tokens": 59,
+      "elapsed_ms": 45372.2273,
+      "passed": true,
+      "output": "Thinking Process:\n\n1.  **Analyze the Request:** The user is asking for the result of the arithmetic operation \"2+2\". They have specified a constraint: \"Reply with only the number.\"\n\n2.  **Calculate the Result:** 2 + 2 = 4"
+    },
+    {
+      "trial": 1,
+      "arm": "candidate",
+      "enable_thinking": false,
+      "input_tokens": 25,
+      "output_tokens": 1,
+      "elapsed_ms": 897.6285,
+      "passed": true,
+      "output": "4"
+    },
+    {
+      "trial": 2,
+      "arm": "baseline",
+      "enable_thinking": true,
+      "input_tokens": 23,
+      "output_tokens": 59,
+      "elapsed_ms": 37882.6375,
+      "passed": true,
+      "output": "Thinking Process:\n\n1.  **Analyze the Request:** The user is asking for the result of the arithmetic operation \"2+2\". They have specified a constraint: \"Reply with only the number.\"\n\n2.  **Calculate the Result:** 2 + 2 = 4"
+    },
+    {
+      "trial": 2,
+      "arm": "candidate",
+      "enable_thinking": false,
+      "input_tokens": 25,
+      "output_tokens": 1,
+      "elapsed_ms": 948.282,
+      "passed": true,
+      "output": "4"
+    },
+    {
+      "trial": 3,
+      "arm": "baseline",
+      "enable_thinking": true,
+      "input_tokens": 23,
+      "output_tokens": 59,
+      "elapsed_ms": 42562.3259,
+      "passed": true,
+      "output": "Thinking Process:\n\n1.  **Analyze the Request:** The user is asking for the result of the arithmetic operation \"2+2\". They have specified a constraint: \"Reply with only the number.\"\n\n2.  **Calculate the Result:** 2 + 2 = 4"
+    },
+    {
+      "trial": 3,
+      "arm": "candidate",
+      "enable_thinking": false,
+      "input_tokens": 25,
+      "output_tokens": 1,
+      "elapsed_ms": 806.6532,
+      "passed": true,
+      "output": "4"
+    }
+  ],
+  "summary": {
+    "baseline": {
+      "passed": 3,
+      "trials": 3,
+      "p95_ms": 45372.2273
+    },
+    "candidate": {
+      "passed": 3,
+      "trials": 3,
+      "p95_ms": 948.282
+    }
+  }
+}

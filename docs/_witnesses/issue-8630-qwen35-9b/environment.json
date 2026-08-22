@@ -1,0 +1,29 @@
+{
+  "schema": "fak.qwen38-ladder-environment/1",
+  "captured_at": "2026-08-22T20:36:43.677700+00:00",
+  "host_class": "local-control-point-cpu",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "python": "3.13.7",
+  "torch": "2.12.0+cpu",
+  "transformers": "5.10.2",
+  "cuda_available": false,
+  "model": "Qwen/Qwen3.5-9B",
+  "revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+  "dtype": "float32",
+  "seed": 0,
+  "temperature": 0,
+  "max_new_tokens": 256,
+  "scorer": "decoded stream contains standalone expected answer; shared semantic early-stop",
+  "metric": "p95 wall milliseconds to first correct answer; nearest-rank",
+  "arms": {
+    "baseline": {
+      "enable_thinking": true,
+      "runtime_sha": "764328d54289e5685ac1ca12878c0c39d00e9c76"
+    },
+    "candidate": {
+      "enable_thinking": false,
+      "runtime_sha": "b0ce51b599718cb1a08a886ac61af928a5209b78"
+    }
+  },
+  "environment_sha256": "30254e1314b4e0a31e8eb01117eb1bd0f52bcbd877619ea6a7d728cc282a6752"
+}
