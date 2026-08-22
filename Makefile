@@ -1,8 +1,11 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build cross-build-harnessres clean vet architest-gate test test-fast test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
+.PHONY: ci build cross-build-harnessres clean vet architest-gate test test-fast smoke-build test-fast-build-regression test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
 
 VERIFY_LOOP_BUDGET ?= 30s
+SMOKE_BUILD_BUDGET ?= 2m
+SMOKE_BUILD_KILL_AFTER ?= 5s
+GO ?= go
 TEST_DURATION_LEDGER ?= .fak/test-duration-ledger.json
 TEST_PACKAGE_BUDGET ?= 30s
 TEST_TEST_BUDGET ?= 5s
@@ -109,7 +112,18 @@ test: architest-gate
 # the right floor for a pre-commit / pre-push gate. Pair `build vet` with it so a
 # commit that doesn't compile or vet-clean is caught at the same gate. The full
 # `test` target (no -short) still runs the real oracle locally + in CI.
-test-fast: build vet architest-gate
+smoke-build:
+	@status=0; timeout --kill-after=$(SMOKE_BUILD_KILL_AFTER) $(SMOKE_BUILD_BUDGET) $(GO) build -buildvcs=false ./... || status=$$?; \
+	if [ $$status -eq 124 ] || [ $$status -eq 137 ]; then \
+		echo "test-fast build: TIMEOUT after $(SMOKE_BUILD_BUDGET); WSL /mnt/c remedy: retry from the Linux filesystem or raise SMOKE_BUILD_BUDGET." >&2; \
+		exit 124; \
+	fi; \
+	exit $$status
+
+test-fast-build-regression:
+	sh scripts/test-fast-build_test.sh
+
+test-fast: smoke-build test-fast-build-regression vet architest-gate
 	go test -short ./...
 	@echo "test-fast OK (smoke tier; run 'make test' for the weight-backed witnesses)"
 
