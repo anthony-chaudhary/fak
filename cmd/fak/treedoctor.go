@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -42,6 +43,9 @@ func cmdTreeDoctor(argv []string) {
 	abandonAfter := fs.Duration("abandon-after", treedoctor.DefaultAbandonAfter, "an untracked source file older than this and not held by a live owner is surfaced as an abandonment candidate")
 	sweepScratch := fs.Bool("sweep-scratch", false, "reap gitignored scratch under the repo root via `git clean -Xdf` (ignored-only: can never touch a tracked file or a real untracked WIP file)")
 	dryRun := fs.Bool("dry-run", false, "with --sweep-scratch, preview via `git clean -Xdn` — list what would be reaped, delete nothing")
+	goTmp := fs.Bool("go-tmp", false, "inventory and safely bound the configured repository Go compiler scratch (preview by default; --apply quarantines and reclaims only proven stale unreferenced children)")
+	goTmpRoot := fs.String("go-tmp-root", "", "repository Go temp root (default: $GOTMPDIR, then <repo>/_scratch/go-tmp)")
+	goTmpGrace := fs.Duration("go-tmp-grace", treedoctor.DefaultGoTmpMinAge, "minimum quiet age before a Go temp child can be quarantined")
 	_ = fs.Parse(argv)
 
 	repoRoot := strings.TrimSpace(*root)
@@ -78,6 +82,33 @@ func cmdTreeDoctor(argv []string) {
 			}
 		} else {
 			fmt.Fprintln(os.Stdout, dest)
+		}
+		return
+	}
+
+	if *goTmp {
+		configuredRoot := strings.TrimSpace(*goTmpRoot)
+		if configuredRoot == "" {
+			configuredRoot = treedoctor.GoTmpRootFromEnv(os.Getenv)
+		}
+		if configuredRoot == "" {
+			configuredRoot = filepath.Join(repoRoot, "_scratch", "go-tmp")
+		}
+		rep := treedoctor.SweepGoTmp(treedoctor.GoTmpOptions{
+			Root:     configuredRoot,
+			RepoRoot: repoRoot,
+			MinAge:   *goTmpGrace,
+		}, *apply)
+		if *asJSON {
+			if err := writeGoTmpJSON(os.Stdout, rep); err != nil {
+				fmt.Fprintf(os.Stderr, "tree-doctor: encode Go temp JSON: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			writeGoTmpText(os.Stdout, rep)
+		}
+		if rep.Failed() {
+			os.Exit(1)
 		}
 		return
 	}
@@ -178,6 +209,26 @@ func renderScratchSweepJSON(w io.Writer, payload scratchSweepJSON) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
+}
+
+func writeGoTmpJSON(w io.Writer, report treedoctor.GoTmpReport) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(report)
+}
+
+func writeGoTmpText(w io.Writer, report treedoctor.GoTmpReport) {
+	fmt.Fprintln(w, report.Summary())
+	for _, entry := range report.Entries {
+		fmt.Fprintf(w, "  - %s: %s, %d bytes", entry.Name, entry.Reason, entry.Bytes)
+		if len(entry.ReferencedBy) > 0 {
+			fmt.Fprintf(w, ", referenced by PID(s) %v", entry.ReferencedBy)
+		}
+		if entry.RemoveErr != "" {
+			fmt.Fprintf(w, ", error: %s", entry.RemoveErr)
+		}
+		fmt.Fprintln(w)
+	}
 }
 
 // renderScratchSweepText prints the gitignored-scratch reap outcome: the paths reaped (or, in

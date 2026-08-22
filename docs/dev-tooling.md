@@ -81,6 +81,22 @@ fak-dev: build: 284beb4bd8b43330656cfe214d731195e6069973
 process remains mapped, so the final census invokes the deployed path and observes the
 new file instead of reporting the old in-process stamp as a false divergence.
 
+### Age out inherited repository `GOTMPDIR` sessions
+
+Removing a persistent environment value does not rewrite an already-running agent or shell's
+environment. Those inherited sessions may therefore continue creating compiler work below
+`_scratch/go-tmp` until they exit. Audit that exact root with `fak tree-doctor --go-tmp --json`;
+apply the same plan with `fak tree-doctor --go-tmp --apply --json` after reviewing it. The default
+20-minute grace is configurable with `--go-tmp-grace`, and `--go-tmp-root` overrides the inherited
+value while remaining constrained below the repository `_scratch` directory.
+
+The maintenance pass enumerates host processes once, preserves any canonical child referenced by
+the snapshot or touched inside the grace window, and fails closed on ambiguous enumeration. Apply
+uses unique OS-temp quarantine, a second source/destination reference check, and exact bottom-up
+deletion. As old sessions finish, their unreferenced work naturally crosses the grace and becomes
+reclaimable; no peer process is terminated. See [Generated-output defaults](generated-output-defaults.md#repository-go-compiler-scratch)
+for the safety contract and why broad `--sweep-scratch` is not the operational path.
+
 **Next action:** from the repository root, run `fak test --list` to inventory the
 host-aware test and non-test witness tiers without executing them. This is a one-time
 discovery step, not a proof and not a command that every later task must repeat; after it

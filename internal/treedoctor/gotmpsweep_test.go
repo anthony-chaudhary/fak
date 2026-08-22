@@ -10,6 +10,8 @@ package treedoctor
 // was written a moment ago must SURVIVE an applied sweep.
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -348,9 +350,9 @@ func TestGoTmpReportSummary(t *testing.T) {
 	}
 }
 
-// TestScanGoTmpSkipsLooseFiles: only directories are candidates. A loose file in GOTMPDIR
-// belongs to something else and must never enter the plan.
-func TestScanGoTmpSkipsLooseFiles(t *testing.T) {
+// TestScanGoTmpInventoriesLooseFilesButNeverSelectsThem pins the immediate-child inventory:
+// a loose file is visible in JSON with a typed keep reason and can never enter the plan.
+func TestScanGoTmpInventoriesLooseFilesButNeverSelectsThem(t *testing.T) {
 	now := time.Now()
 	root := t.TempDir()
 	writeAged(t, filepath.Join(root, "go-build-not-a-dir"), 8, now, 30*time.Hour)
@@ -359,8 +361,12 @@ func TestScanGoTmpSkipsLooseFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 0 {
-		t.Fatalf("a loose file must not be scanned as an entry, got %+v", entries)
+	if len(entries) != 1 || entries[0].Reason != GoTmpReasonNotDirectory {
+		t.Fatalf("a loose file must be inventoried as not-directory, got %+v", entries)
+	}
+	rep := PlanGoTmp(entries, GoTmpOptions{Root: root, Now: now})
+	if rep.ReapCount() != 0 || rep.Entries[0].Verdict != GoTmpKeepIndeterminate {
+		t.Fatalf("a loose file must never be selected, got %+v", rep)
 	}
 }
 
@@ -385,4 +391,276 @@ func TestScanGoTmpTruncatedWalkIsIndeterminate(t *testing.T) {
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatalf("the unproven dir was removed: %v", err)
 	}
+}
+
+func TestSweepGoTmpLifecycleKeepsUnsafeCandidatesAndReclaimsOnlyStaleUnreferenced(t *testing.T) {
+	now := time.Now()
+	repo := t.TempDir()
+	root := filepath.Join(repo, "_scratch", "go-tmp")
+	quarantine := filepath.Join(t.TempDir(), "quarantine")
+
+	fresh := filepath.Join(root, "go-build-fresh")
+	writeAged(t, filepath.Join(fresh, "b001", "_pkg_.a"), 11, now, time.Minute)
+
+	referenced := filepath.Join(root, "go-build-referenced")
+	writeAged(t, filepath.Join(referenced, "b002", "_pkg_.a"), 13, now, time.Hour)
+
+	nestedRepo := filepath.Join(root, "go-build-nested-repo")
+	writeAged(t, filepath.Join(nestedRepo, ".git", "HEAD"), 17, now, time.Hour)
+
+	reparse := filepath.Join(root, "go-build-reparse")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), reparse); err != nil {
+		t.Skipf("symlink unavailable on this host: %v", err)
+	}
+
+	stale := filepath.Join(root, "go-build-stale")
+	writeAged(t, filepath.Join(stale, "b003", "_pkg_.a"), 19, now, time.Hour)
+
+	snapshotCalls := 0
+	rep := SweepGoTmp(GoTmpOptions{
+		Root:           root,
+		RepoRoot:       repo,
+		Now:            now,
+		MinAge:         20 * time.Minute,
+		QuarantineRoot: quarantine,
+		Processes: func() ([]GoTmpProcess, error) {
+			snapshotCalls++
+			return []GoTmpProcess{{PID: 4242, CommandLine: "compile -o " + filepath.Join(referenced, "b002", "_pkg_.a")}}, nil
+		},
+	}, true)
+
+	if rep.Failed() {
+		t.Fatalf("lifecycle failed: %+v", rep)
+	}
+	if snapshotCalls != 2 || rep.ProcessSnapshots != 2 {
+		t.Fatalf("process snapshots = callback:%d report:%d, want one preflight and one post-move", snapshotCalls, rep.ProcessSnapshots)
+	}
+	for path, reason := range map[string]string{
+		fresh:      GoTmpReasonFresh,
+		referenced: GoTmpReasonReferenced,
+		nestedRepo: GoTmpReasonNestedRepository,
+		reparse:    GoTmpReasonReparsePoint,
+	} {
+		if _, err := os.Lstat(path); err != nil {
+			t.Fatalf("kept path %s (%s) disappeared: %v", path, reason, err)
+		}
+		if got := goTmpReasonForPath(rep, path); got != reason {
+			t.Fatalf("reason for %s = %q, want %q", path, got, reason)
+		}
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("stale unreferenced candidate survived: %v", err)
+	}
+	if got := goTmpReasonForPath(rep, stale); got != GoTmpReasonReclaimed {
+		t.Fatalf("stale reason = %q, want %q", got, GoTmpReasonReclaimed)
+	}
+	if rep.ReapedBytes != 19 || rep.ReapCount() != 1 {
+		t.Fatalf("reclaimed = %d bytes / %d dirs, want 19 / 1", rep.ReapedBytes, rep.ReapCount())
+	}
+	if matches, err := filepath.Glob(filepath.Join(quarantine, "run-*")); err != nil || len(matches) != 0 {
+		t.Fatalf("quarantine residue = %v, err=%v", matches, err)
+	}
+}
+
+func TestSweepGoTmpProcessEnumerationFailureKeepsEligibleCandidate(t *testing.T) {
+	now := time.Now()
+	repo := t.TempDir()
+	root := filepath.Join(repo, "_scratch", "go-tmp")
+	stale := filepath.Join(root, "go-build-stale")
+	writeAged(t, filepath.Join(stale, "b001", "_pkg_.a"), 23, now, time.Hour)
+
+	rep := SweepGoTmp(GoTmpOptions{
+		Root:     root,
+		RepoRoot: repo,
+		Now:      now,
+		Processes: func() ([]GoTmpProcess, error) {
+			return nil, errors.New("ambiguous process snapshot")
+		},
+	}, true)
+	if _, err := os.Stat(stale); err != nil {
+		t.Fatalf("candidate was removed after process enumeration failed: %v", err)
+	}
+	if got := goTmpReasonForPath(rep, stale); got != GoTmpReasonProcessEnumerationFailed {
+		t.Fatalf("reason = %q, want %q", got, GoTmpReasonProcessEnumerationFailed)
+	}
+	if rep.ReapCount() != 0 || !rep.Failed() {
+		t.Fatalf("ambiguous enumeration must fail closed: %+v", rep)
+	}
+}
+
+func TestSweepGoTmpPostMoveReferenceRollsBack(t *testing.T) {
+	now := time.Now()
+	repo := t.TempDir()
+	root := filepath.Join(repo, "_scratch", "go-tmp")
+	quarantine := filepath.Join(t.TempDir(), "quarantine")
+	stale := filepath.Join(root, "go-build-race")
+	writeAged(t, filepath.Join(stale, "b001", "_pkg_.a"), 29, now, time.Hour)
+
+	calls := 0
+	rep := SweepGoTmp(GoTmpOptions{
+		Root:           root,
+		RepoRoot:       repo,
+		Now:            now,
+		QuarantineRoot: quarantine,
+		Processes: func() ([]GoTmpProcess, error) {
+			calls++
+			if calls == 1 {
+				return nil, nil
+			}
+			runs, err := filepath.Glob(filepath.Join(quarantine, "run-*", filepath.Base(stale)))
+			if err != nil || len(runs) != 1 {
+				return nil, errors.New("quarantine destination not observable")
+			}
+			return []GoTmpProcess{{PID: 5252, ExecutablePath: filepath.Join(runs[0], "b001", "tool.exe")}}, nil
+		},
+	}, true)
+	if _, err := os.Stat(stale); err != nil {
+		t.Fatalf("post-move referenced candidate was not rolled back: %v", err)
+	}
+	if got := goTmpReasonForPath(rep, stale); got != GoTmpReasonPostMoveReferenced {
+		t.Fatalf("reason = %q, want %q", got, GoTmpReasonPostMoveReferenced)
+	}
+	if rep.ReapCount() != 0 {
+		t.Fatalf("post-move referenced candidate was reported reclaimed: %+v", rep.Reaped)
+	}
+}
+
+func TestSweepGoTmpRefreshesGraceImmediatelyBeforeMove(t *testing.T) {
+	now := time.Now()
+	repo := t.TempDir()
+	root := filepath.Join(repo, "_scratch", "go-tmp")
+	candidate := filepath.Join(root, "go-build-became-live")
+	file := filepath.Join(candidate, "b001", "_pkg_.a")
+	writeAged(t, file, 31, now, time.Hour)
+
+	rep := SweepGoTmp(GoTmpOptions{
+		Root:     root,
+		RepoRoot: repo,
+		Now:      now,
+		Processes: func() ([]GoTmpProcess, error) {
+			if err := os.Chtimes(file, now, now); err != nil {
+				t.Fatal(err)
+			}
+			return nil, nil
+		},
+	}, true)
+	if _, err := os.Stat(candidate); err != nil {
+		t.Fatalf("candidate refreshed after snapshot was moved: %v", err)
+	}
+	if got := goTmpReasonForPath(rep, candidate); got != GoTmpReasonFresh {
+		t.Fatalf("reason = %q, want %q", got, GoTmpReasonFresh)
+	}
+	if rep.ReapCount() != 0 || rep.ProcessSnapshots != 1 {
+		t.Fatalf("refreshed candidate was reported reclaimed: %+v", rep)
+	}
+}
+
+func TestSweepGoTmpPostMoveFreshnessRollsBack(t *testing.T) {
+	now := time.Now()
+	repo := t.TempDir()
+	root := filepath.Join(repo, "_scratch", "go-tmp")
+	quarantine := filepath.Join(t.TempDir(), "quarantine")
+	candidate := filepath.Join(root, "go-build-post-move-write")
+	file := filepath.Join(candidate, "b001", "_pkg_.a")
+	writeAged(t, file, 37, now, time.Hour)
+
+	calls := 0
+	rep := SweepGoTmp(GoTmpOptions{
+		Root:           root,
+		RepoRoot:       repo,
+		Now:            now,
+		QuarantineRoot: quarantine,
+		Processes: func() ([]GoTmpProcess, error) {
+			calls++
+			if calls == 2 {
+				runs, err := filepath.Glob(filepath.Join(quarantine, "run-*", filepath.Base(candidate), "b001", "_pkg_.a"))
+				if err != nil || len(runs) != 1 {
+					return nil, errors.New("quarantined file not observable")
+				}
+				if err := os.Chtimes(runs[0], now, now); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return nil, nil
+		},
+	}, true)
+	if _, err := os.Stat(candidate); err != nil {
+		t.Fatalf("fresh post-move candidate was not rolled back: %v", err)
+	}
+	if got := goTmpReasonForPath(rep, candidate); got != GoTmpReasonFresh {
+		t.Fatalf("reason = %q, want %q", got, GoTmpReasonFresh)
+	}
+	if rep.ReapCount() != 0 || rep.ProcessSnapshots != 2 {
+		t.Fatalf("fresh post-move candidate was reported reclaimed: %+v", rep)
+	}
+}
+
+func TestGoTmpReportJSONCarriesStableReasonsAndByteCounts(t *testing.T) {
+	rep := GoTmpReport{
+		Schema:      GoTmpSchema,
+		Root:        "/repo/_scratch/go-tmp",
+		DryRun:      true,
+		TotalBytes:  31,
+		ReapedBytes: 29,
+		Entries: []GoTmpEntry{
+			{Name: "go-build-fresh", Bytes: 2, Reason: GoTmpReasonFresh},
+			{Name: "go-build-stale", Bytes: 29, Reason: GoTmpReasonEligible},
+		},
+	}
+	b, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	for _, want := range []string{`"schema":"fak-go-tmp-maintenance/1"`, `"reason":"fresh"`, `"reason":"eligible"`, `"total_bytes":31`, `"reaped_bytes":29`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stable JSON missing %s: %s", want, got)
+		}
+	}
+}
+
+func TestGoTmpReferenceMatchUsesPathBoundaries(t *testing.T) {
+	candidate := filepath.Join(string(filepath.Separator)+"repo", "_scratch", "go-tmp", "go-build12")
+	if !goTmpFieldReferencesPath("compile -o "+filepath.Join(candidate, "b001", "_pkg_.a"), candidate) {
+		t.Fatal("child path in command line should reference the candidate")
+	}
+	if goTmpFieldReferencesPath("compile -o "+candidate+"3", candidate) {
+		t.Fatal("a longer sibling name must not reference the candidate")
+	}
+}
+
+func TestCanonicalGoTmpCandidateRejectsRootAndOutsidePath(t *testing.T) {
+	root := t.TempDir()
+	rootEntry := GoTmpEntry{Path: root}
+	resolveGoTmpChild(root, &rootEntry)
+	if rootEntry.Reason != GoTmpReasonRoot {
+		t.Fatalf("root reason = %q, want %q", rootEntry.Reason, GoTmpReasonRoot)
+	}
+
+	outside := t.TempDir()
+	outsideEntry := GoTmpEntry{Path: outside}
+	resolveGoTmpChild(root, &outsideEntry)
+	if outsideEntry.Reason != GoTmpReasonOutsideRoot {
+		t.Fatalf("outside reason = %q, want %q", outsideEntry.Reason, GoTmpReasonOutsideRoot)
+	}
+}
+
+func TestCanonicalGoTmpRootRejectsOutsideRepositoryScratch(t *testing.T) {
+	repo := t.TempDir()
+	outside := t.TempDir()
+	if _, err := canonicalGoTmpRoot(GoTmpOptions{Root: outside, RepoRoot: repo}); err == nil {
+		t.Fatal("outside repository root was accepted")
+	}
+}
+
+func goTmpReasonForPath(rep GoTmpReport, path string) string {
+	for _, entry := range rep.Entries {
+		if entry.Path == path {
+			return entry.Reason
+		}
+	}
+	return ""
 }

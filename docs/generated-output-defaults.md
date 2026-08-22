@@ -37,6 +37,32 @@ Use `fak tree-doctor --sweep-scratch --dry-run` to preview ignored scratch recla
 `fak tree-doctor --sweep-scratch` to reap it. The `.gitignore` rules remain a compatibility
 backstop for older commands and hand-written redirects; they are not the preferred output path.
 
+## Repository Go compiler scratch
+
+An inherited `GOTMPDIR` under `_scratch/go-tmp` is maintained through its own bounded path:
+
+```powershell
+fak tree-doctor --go-tmp --json
+fak tree-doctor --go-tmp --apply --json
+```
+
+Preview is the default. The doctor inventories immediate children once, caps each recursive
+walk, and takes one process snapshot for the pass. On Windows it matches each canonical
+candidate against both `Win32_Process.CommandLine` and `ExecutablePath`; supported Unix hosts
+use their executable and command-line process references. Fresh, referenced, reparse-point,
+nested-repository, outside-root, unreadable, and process-indeterminate children are kept with a
+typed JSON reason.
+
+Apply moves only stale unreferenced `go-build*` directories into a unique OS-temp quarantine,
+rechecks source and quarantine references, then removes enumerated exact files and directories
+bottom-up. It uses no recursive wildcard and terminates no process. `--go-tmp-root` can name the
+configured root, but the command rejects any root outside the repository `_scratch` subtree.
+
+Do not use `--sweep-scratch` for this job. That generic ignored-tree operation sees the whole
+scratch namespace, including live `.dos`, dispatch, and producer state; it has no Go process
+liveness witness. The Go-temp mode is explicit maintenance (and the daily maintenance fold),
+not a hook installed in every compiler child.
+
 ## Control prompts and test fixtures
 
 Treat `.claude/` as project infrastructure, not an automatic home for every Claude run.

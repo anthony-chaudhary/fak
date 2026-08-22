@@ -1,0 +1,77 @@
+{
+  "schema": "fak-go-tmp-live-witness/1",
+  "issue": 8369,
+  "captured_date": "2026-08-22",
+  "scope": "repository _scratch/go-tmp",
+  "before": {
+    "command": "fak tree-doctor --go-tmp --json",
+    "exit_code": 1,
+    "finding": "flag provided but not defined: -go-tmp"
+  },
+  "compiler_produced_stale_candidate": {
+    "producer": "go build -work -a -o <os-temp>/fak-8369-seed.exe ./cmd/fak",
+    "files": 1816,
+    "bytes": 577623870,
+    "age_seconds_at_apply_minimum": 3600
+  },
+  "concurrent_go_work": {
+    "producer": "go build -a -o <os-temp>/fak-8369-live.exe ./cmd/fak",
+    "go_processes_observed_before_apply": 13,
+    "referencing_processes_observed_at_apply": 3,
+    "referenced_work_bytes_at_apply": 82745487,
+    "running_during_apply": true
+  },
+  "apply": {
+    "command": "fak tree-doctor --go-tmp --apply --json",
+    "exit_code": 0,
+    "schema": "fak-go-tmp-maintenance/1",
+    "process_snapshots": 2,
+    "total_bytes": 660369357,
+    "reclaimed_count": 1,
+    "reclaimed_bytes": 577623870,
+    "kept": [
+      {
+        "reason": "process-referenced",
+        "count": 1,
+        "bytes": 82745487
+      }
+    ],
+    "reclaimed": [
+      {
+        "reason": "reclaimed",
+        "count": 1,
+        "bytes": 577623870
+      }
+    ],
+    "process_error": null,
+    "quarantine_residue_count": 0
+  },
+  "post_check": {
+    "reclaimed_source_absent": true,
+    "concurrent_go_build_completed": true,
+    "concurrent_output_version_smoke_exit": 0,
+    "go_removed_its_fresh_work_dir": true,
+    "quarantine_residue_count": 0
+  },
+  "tests": {
+    "commands": [
+      ".\\test.ps1 -count=1 ./internal/treedoctor",
+      ".\\test.ps1 -run ^TestRenderGoTmp -count=1 ./cmd/fak"
+    ],
+    "platform": "WSL",
+    "exit_code": 0
+  },
+  "owned_path_validation": {
+    "schema": "fak-validate/1",
+    "base_tip": "7825ba897a4dff736fdbdf748908732e4e37e8e5",
+    "mode": "full",
+    "full_mode_build_and_vet_passed": true,
+    "affected_packages": [
+      "cmd/fak",
+      "internal/gitdaily",
+      "internal/treedoctor"
+    ],
+    "wsl_test_selector": "GoTmp",
+    "ok": true
+  }
+}
