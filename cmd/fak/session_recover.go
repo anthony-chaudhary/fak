@@ -1,8 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -12,9 +12,10 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/anthony-chaudhary/fak/internal/devcmd"
+	"github.com/anthony-chaudhary/fak/internal/sessiondiag"
 	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 	"github.com/anthony-chaudhary/fak/internal/sessionrecovery"
+	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 )
 
 type threadFlags map[string]bool
@@ -29,22 +30,29 @@ func (v threadFlags) Set(s string) error {
 	return nil
 }
 
-var recoverySessionDiag = func(stdout, stderr io.Writer, args []string) int {
-	return devcmd.RunSessionDiag(stdout, stderr, args, nil)
-}
+var recoveryInventorySources = sessiondiag.ReadCodexInventorySources
+var recoveryInventoryRegistryPath = sessionregistry.DefaultPath
 
 var recoveryInventory = func(since time.Duration) (sessionrecovery.InventoryReport, error) {
-	var out, er bytes.Buffer
-	args := []string{"--inventory", "--json", "--since", since.String()}
-	if code := recoverySessionDiag(&out, &er, args); code != 0 {
-		reason := strings.TrimSpace(er.String())
-		if reason == "" {
-			reason = fmt.Sprintf("exit %d", code)
-		}
-		return sessionrecovery.InventoryReport{}, fmt.Errorf("sessiondiag inventory: %s", reason)
+	now := recoveryNow()
+	input, err := recoveryInventorySources("", since, now)
+	if err != nil {
+		return sessionrecovery.InventoryReport{}, fmt.Errorf("sessiondiag inventory: %w", err)
+	}
+	rows, registryErr := (sessionregistry.Store{Path: recoveryInventoryRegistryPath()}).ReadAll()
+	if registryErr == nil {
+		input.Registrations = rows
+	} else if !errors.Is(registryErr, os.ErrNotExist) {
+		input.SourceErrors = append(input.SourceErrors, sessiondiag.SourceError{Source: "child_registrations", Code: "READ_FAILED"})
+	}
+	input.Window = since
+	input.StaleAfter = 10 * time.Minute
+	raw, err := json.Marshal(sessiondiag.ReconcileInventory(input, now))
+	if err != nil {
+		return sessionrecovery.InventoryReport{}, fmt.Errorf("encode sessiondiag inventory: %w", err)
 	}
 	var report sessionrecovery.InventoryReport
-	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+	if err := json.Unmarshal(raw, &report); err != nil {
 		return report, fmt.Errorf("decode sessiondiag inventory: %w", err)
 	}
 	return report, nil

@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"io"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/sessiondiag"
 	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 	"github.com/anthony-chaudhary/fak/internal/sessionrecovery"
 )
@@ -23,34 +24,38 @@ func (c *captureLauncher) Launch(r sessionrecovery.Request) error {
 	return nil
 }
 
-func TestRecoveryInventoryRunsSessionDiagInProcess(t *testing.T) {
-	old := recoverySessionDiag
-	defer func() { recoverySessionDiag = old }()
+func TestRecoveryInventoryReconcilesRuntimeSources(t *testing.T) {
+	oldSources, oldRegistryPath, oldNow := recoveryInventorySources, recoveryInventoryRegistryPath, recoveryNow
+	defer func() {
+		recoveryInventorySources, recoveryInventoryRegistryPath, recoveryNow = oldSources, oldRegistryPath, oldNow
+	}()
+	now := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
+	recoveryNow = func() time.Time { return now }
+	recoveryInventoryRegistryPath = func() string { return filepath.Join(t.TempDir(), "missing.jsonl") }
 	called := 0
-	recoverySessionDiag = func(stdout, stderr io.Writer, args []string) int {
+	recoveryInventorySources = func(codexHome string, since time.Duration, observedAt time.Time) (sessiondiag.InventoryInput, error) {
 		called++
-		want := []string{"--inventory", "--json", "--since", "2h0m0s"}
-		if !reflect.DeepEqual(args, want) {
-			t.Fatalf("args=%q want=%q", args, want)
+		if codexHome != "" || since != 2*time.Hour || !observedAt.Equal(now) {
+			t.Fatalf("source args home=%q since=%s now=%s", codexHome, since, observedAt)
 		}
-		_, _ = io.WriteString(stdout, `{"sessions":[{"thread":{"id":"t1"}}]}`)
-		return 0
+		return sessiondiag.InventoryInput{Threads: []sessiondiag.ThreadEvidence{{
+			ThreadID: "91000001-0000-4000-8000-000000000001", Source: "cli", UpdatedAt: now,
+		}}}, nil
 	}
 	report, err := recoveryInventory(2 * time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if called != 1 || len(report.Sessions) != 1 || report.Sessions[0].Thread == nil || report.Sessions[0].Thread.ID != "t1" {
+	if called != 1 || len(report.Sessions) != 1 || report.Sessions[0].Thread == nil || report.Sessions[0].Thread.ID != "91000001-0000-4000-8000-000000000001" {
 		t.Fatalf("called=%d report=%+v", called, report)
 	}
 }
 
-func TestRecoveryInventoryReportsInProcessFailure(t *testing.T) {
-	old := recoverySessionDiag
-	defer func() { recoverySessionDiag = old }()
-	recoverySessionDiag = func(_ io.Writer, stderr io.Writer, _ []string) int {
-		_, _ = io.WriteString(stderr, "inventory unavailable")
-		return 2
+func TestRecoveryInventoryReportsRuntimeSourceFailure(t *testing.T) {
+	old := recoveryInventorySources
+	defer func() { recoveryInventorySources = old }()
+	recoveryInventorySources = func(string, time.Duration, time.Time) (sessiondiag.InventoryInput, error) {
+		return sessiondiag.InventoryInput{}, errors.New("inventory unavailable")
 	}
 	if _, err := recoveryInventory(time.Hour); err == nil || !strings.Contains(err.Error(), "inventory unavailable") {
 		t.Fatalf("err=%v", err)

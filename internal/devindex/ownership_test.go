@@ -87,6 +87,19 @@ func TestRuntimeGraphWitnessReportsCurrentDevLeaks(t *testing.T) {
 	}
 }
 
+func TestRuntimeSafeSessiondiagDoesNotReclassifyDevcmd(t *testing.T) {
+	devOnly := make(map[string]bool, len(DevOnlyPackages))
+	for _, pkg := range DevOnlyPackages {
+		devOnly[pkg.Path] = pkg.Owner == OwnerDev
+	}
+	if !devOnly[moduleInternalPrefix+"devcmd"] {
+		t.Fatal("devcmd must remain development-only")
+	}
+	if devOnly[moduleInternalPrefix+"sessiondiag"] {
+		t.Fatal("sessiondiag data and inventory sources are shared with runtime session recovery")
+	}
+}
+
 func TestDevReuseSeparatesPortablePatternsFromFakInternals(t *testing.T) {
 	cat, err := Load(FindRoot("."))
 	if err != nil {
