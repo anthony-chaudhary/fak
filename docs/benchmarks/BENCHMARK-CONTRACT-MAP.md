@@ -75,6 +75,30 @@ This is witnessed by `TestBuildRejectsIncompleteResultPacket`
 (`internal/agenticbench/rollup_test.go`): a packet missing the official grader, the fak arm,
 or a checked-in artifact fails the gate and cannot graduate.
 
+Latency is a phase receipt, not a boolean. Every `arms[]` row carries a `latency` object
+with `queue_wait`, `agent_execution`, `evaluation`, and `total` measurements. A known
+measurement has `duration`, `unit`, and `source`; it may also carry numeric `start` and
+`end` boundaries in the declared unit. Harnesses that expose only authoritative derived
+durations omit all boundaries instead of inventing timestamps. A missing phase is encoded
+with `unknown_reason` and retained as unknown, never coerced to zero; because the
+decomposition is then incomplete, the result-claim gate refuses it.
+
+When intervals are present, all four measurements must carry them and exactly decompose
+the harness total: queue end is execution start, execution end is evaluation start, and
+evaluation end is total end. Negative, overlapping, partially bounded, unitless,
+source-less, and total-inconsistent receipts fail with stable `LATENCY_*` reasons. Optional
+`gateway_requests` remain nested observations inside `agent_execution` and must declare
+`additive=false`; the JSON and Markdown rollups report them separately and never add them
+to the three harness phases. This prevents provider request time from being double-counted
+as a fourth end-to-end phase.
+
+The offline witnesses are `testdata/latency_good.json` and
+`testdata/latency_overlapping.json`, driven by `latency_phases_test.go`. They prove the
+exact `10s queue + 100s execution + 30s evaluation = 140s total` decomposition, JSON and
+Markdown authority round-trips, duration-only input, unknown preservation, and refusals
+for overlap, negative duration, missing unit, inconsistent total, and additive gateway
+timing.
+
 ## Serving-baseline provenance: the `vllm_compile` block (#1731)
 
 A serving compare is only honest when the vLLM baseline it quotes was actually *tuned* —
