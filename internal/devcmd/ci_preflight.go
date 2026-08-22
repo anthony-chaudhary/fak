@@ -1,6 +1,7 @@
 package devcmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/armbench"
 	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
 	"github.com/anthony-chaudhary/fak/internal/committedtree"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
@@ -107,6 +109,13 @@ func RunCIPreflight(stdout, stderr io.Writer, argv []string) int {
 		res.Failures = append(res.Failures, ciPreflightFailure{Step: "disambiguation-generated", Detail: detail})
 	}
 
+	if checked, detail, werr := armbenchWitnessDrift(dir); werr != nil {
+		res.OK = false
+		res.Failures = append(res.Failures, ciPreflightFailure{Step: "armbench-witness", Detail: werr.Error()})
+	} else if checked && detail != "" {
+		res.OK = false
+		res.Failures = append(res.Failures, ciPreflightFailure{Step: "armbench-witness", Detail: detail})
+	}
 	// build: `go build ./...` — catches the partial-commit `undefined: X` red.
 	if *skipBuild {
 		res.Skipped = append(res.Skipped, "build")
@@ -132,6 +141,28 @@ func RunCIPreflight(stdout, stderr io.Writer, argv []string) int {
 
 // gofmtList returns the unformatted .go files (relative to dir) that `gofmt -l .` reports, matching
 // the CI gofmt-check step exactly.
+func armbenchWitnessDrift(dir string) (bool, string, error) {
+	path := filepath.Join(dir, "docs", "_witnesses", "armbench-selfcheck-2026-08-13.json")
+	want, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, "", nil
+	}
+	if err != nil {
+		return true, "", fmt.Errorf("read committed armbench witness: %w", err)
+	}
+	res, err := armbench.Selfcheck()
+	if err != nil {
+		return true, "", fmt.Errorf("run armbench selfcheck: %w", err)
+	}
+	got, err := armbench.MarshalSelfcheck(res)
+	if err != nil {
+		return true, "", fmt.Errorf("marshal armbench selfcheck: %w", err)
+	}
+	if bytes.Equal(got, want) {
+		return true, "", nil
+	}
+	return true, "committed armbench witness is stale; regenerate with `fak armbench selfcheck --json`", nil
+}
 func gofmtList(dir string) ([]string, error) {
 	cmd := windowgate.Command("gofmt", "-l", ".")
 	cmd.Dir = dir

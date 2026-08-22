@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/armbench"
 	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
 )
 
@@ -214,3 +215,41 @@ func main() {
 	}
 }
 `
+
+func TestArmbenchWitnessDriftRejectsStaleArtifact(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "docs", "_witnesses", "armbench-selfcheck-2026-08-13.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("stale\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	checked, detail, err := armbenchWitnessDrift(dir)
+	if err != nil || !checked || !strings.Contains(detail, "stale") {
+		t.Fatalf("checked=%v detail=%q err=%v", checked, detail, err)
+	}
+}
+
+func TestArmbenchWitnessDriftAcceptsFreshArtifact(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "docs", "_witnesses", "armbench-selfcheck-2026-08-13.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res, err := armbench.Selfcheck()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := armbench.MarshalSelfcheck(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	checked, detail, err := armbenchWitnessDrift(dir)
+	if err != nil || !checked || detail != "" {
+		t.Fatalf("checked=%v detail=%q err=%v", checked, detail, err)
+	}
+}

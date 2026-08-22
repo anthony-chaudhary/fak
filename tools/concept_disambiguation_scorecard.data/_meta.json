@@ -6434,6 +6434,11 @@
           "category": "incidental",
           "reason": "Run-report field carrying the selected response-profile fragment digest; it labels proof data rather than a distinct witness-proof concept.",
           "token": "OutputStyleWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private ci-preflight helper compares one canonical generated witness; it does not introduce a distinct witness-proof concept.",
+          "token": "armbenchWitnessDrift"
         }
       ],
       "id": "witness-proof",
@@ -6494,6 +6499,7 @@
         "accepted_witness_rate",
         "addDebtWitnesses",
         "appendGuardCompactionWitnessTo",
+        "armbenchWitnessDrift",
         "benchFleetWitnessSeconds",
         "cacheWitnessReadback",
         "canonicalDogfoodCacheWitnessPath",
