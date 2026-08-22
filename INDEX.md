@@ -269,6 +269,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Learning observation lineage](docs/learning-observation.md) — content-addressed source/candidate/witness/verdict records and closed-enum edges; separate from witness-gated admission.
 
 ## Notes & research (`docs/notes/`)
+- [Guard launch-grant dogfood — 2026-08-22](docs/notes/GUARD-LAUNCH-GRANT-DOGFOOD-2026-08-22.md) -- auto-indexed dated note.
 - [Native-harness dynamic-instruction dogfood — 2026-08-22](docs/notes/NATIVE-HARNESS-DYNAMIC-INSTRUCTIONS-DOGFOOD-2026-08-22.md) -- auto-indexed dated note.
 - [Dispatch closure honesty: complete-window reconciliation (#8238)](docs/notes/DISPATCH-CLOSURE-HONESTY-8238-2026-08-22.md) -- auto-indexed dated note.
 - [Mystery-free architecture dogfood](docs/notes/MYSTERY-FREE-DOGFOOD-ARCHITECTURE-2026-08-21.md) — applies the five-field learning method to fak's live architecture graph, separates redundant reachability from safe API deletion, and records the source-provenance defect.
