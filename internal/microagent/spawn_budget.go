@@ -1,13 +1,20 @@
 package microagent
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 )
 
 // SpawnBudget bounds one host-mediated recursive task tree.
 type SpawnBudget struct {
+	// RootID and RootGoal anchor the host-derived ancestry. Both are required
+	// for child admission and immutable after the first admitted child.
+	RootID           string
+	RootGoal         string
 	MaxDepth         int
 	MaxChildren      int
 	MaxDescendants   int
@@ -21,6 +28,17 @@ type SpawnBudget struct {
 	reserved     LineageBudget
 	spent        LineageBudget
 	reservations map[string]LineageBudget
+	rootID       string
+	rootGoal     string
+	goals        map[string]goalLineage
+	goalOwners   map[string]string
+}
+
+type goalLineage struct {
+	goalFingerprint string
+	pathFingerprint string
+	ancestors       map[string]struct{}
+	depth           int
 }
 
 // LineageBudget is one host-authored resource envelope. Tokens includes output
@@ -36,12 +54,18 @@ type LineageBudget struct {
 type SpawnRequest struct {
 	ParentID     string
 	ChildID      string
+	Goal         string
 	Depth        int
 	Budget       LineageBudget
 	Capabilities CapabilityEnvelope
 }
 
-var ErrSpawnBudget = errors.New("microagent: recursive spawn budget refused")
+var (
+	ErrSpawnBudget     = errors.New("microagent: recursive spawn budget refused")
+	ErrDuplicateGoal   = errors.New("microagent: duplicate child goal")
+	ErrCyclicGoal      = errors.New("microagent: cyclic child goal")
+	ErrInvalidAncestry = errors.New("microagent: invalid child ancestry")
+)
 
 // Admit reserves one child slot. A refusal never consumes aggregate capacity.
 func (b *SpawnBudget) Admit(request SpawnRequest) error {
@@ -49,7 +73,11 @@ func (b *SpawnBudget) Admit(request SpawnRequest) error {
 		return fmt.Errorf("%w: missing host budget", ErrSpawnBudget)
 	}
 	if request.ParentID == "" || request.ChildID == "" || request.Depth < 1 {
-		return fmt.Errorf("%w: incomplete lineage", ErrSpawnBudget)
+		return fmt.Errorf("%w: %w: parent id, child id, and positive depth are required", ErrSpawnBudget, ErrInvalidAncestry)
+	}
+	goalFingerprint, err := fingerprintGoal(request.Goal)
+	if err != nil {
+		return err
 	}
 	if err := validateLineageBudget("reservation", request.Budget); err != nil {
 		return err
@@ -60,6 +88,25 @@ func (b *SpawnBudget) Admit(request SpawnRequest) error {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if err := b.ensureGoalRoot(); err != nil {
+		return err
+	}
+	parent, ok := b.goals[request.ParentID]
+	if !ok {
+		return fmt.Errorf("%w: %w: parent %q is not in the admitted goal lineage", ErrSpawnBudget, ErrInvalidAncestry, request.ParentID)
+	}
+	if request.Depth != parent.depth+1 {
+		return fmt.Errorf("%w: %w: depth %d does not extend parent %q at depth %d", ErrSpawnBudget, ErrInvalidAncestry, request.Depth, request.ParentID, parent.depth)
+	}
+	if _, exists := b.goals[request.ChildID]; exists {
+		return fmt.Errorf("%w: %w: child %q already names admitted work", ErrSpawnBudget, ErrDuplicateGoal, request.ChildID)
+	}
+	if _, cyclic := parent.ancestors[goalFingerprint]; cyclic || parent.goalFingerprint == goalFingerprint {
+		return fmt.Errorf("%w: %w: goal for child %q repeats an ancestor", ErrSpawnBudget, ErrCyclicGoal, request.ChildID)
+	}
+	if owner, duplicate := b.goalOwners[goalFingerprint]; duplicate {
+		return fmt.Errorf("%w: %w: goal for child %q duplicates %q", ErrSpawnBudget, ErrDuplicateGoal, request.ChildID, owner)
+	}
 	if b.MaxDepth > 0 && request.Depth > b.MaxDepth {
 		return fmt.Errorf("%w: depth %d exceeds %d", ErrSpawnBudget, request.Depth, b.MaxDepth)
 	}
@@ -85,6 +132,15 @@ func (b *SpawnBudget) Admit(request SpawnRequest) error {
 	b.descendants++
 	b.reserved = addLineageBudget(b.reserved, request.Budget)
 	b.reservations[request.ChildID] = request.Budget
+	ancestors := cloneFingerprints(parent.ancestors)
+	ancestors[parent.goalFingerprint] = struct{}{}
+	b.goals[request.ChildID] = goalLineage{
+		goalFingerprint: goalFingerprint,
+		pathFingerprint: fingerprintGoalPath(parent.pathFingerprint, goalFingerprint),
+		ancestors:       ancestors,
+		depth:           request.Depth,
+	}
+	b.goalOwners[goalFingerprint] = request.ChildID
 	return nil
 }
 
@@ -137,6 +193,57 @@ func (b *SpawnBudget) release(request SpawnRequest) {
 		b.reserved = subtractLineageBudget(b.reserved, reservation)
 		delete(b.reservations, request.ChildID)
 	}
+	if goal, ok := b.goals[request.ChildID]; ok {
+		delete(b.goals, request.ChildID)
+		delete(b.goalOwners, goal.goalFingerprint)
+	}
+}
+
+func (b *SpawnBudget) ensureGoalRoot() error {
+	rootID := strings.TrimSpace(b.RootID)
+	rootFingerprint, err := fingerprintGoal(b.RootGoal)
+	if rootID == "" || err != nil {
+		return fmt.Errorf("%w: %w: root id and root goal are required", ErrSpawnBudget, ErrInvalidAncestry)
+	}
+	if b.rootID != "" {
+		if b.rootID != rootID || b.rootGoal != rootFingerprint {
+			return fmt.Errorf("%w: %w: root identity changed after admission", ErrSpawnBudget, ErrInvalidAncestry)
+		}
+		return nil
+	}
+	b.rootID, b.rootGoal = rootID, rootFingerprint
+	b.goals = map[string]goalLineage{
+		rootID: {
+			goalFingerprint: rootFingerprint,
+			pathFingerprint: rootFingerprint,
+			ancestors:       map[string]struct{}{},
+			depth:           0,
+		},
+	}
+	b.goalOwners = map[string]string{rootFingerprint: rootID}
+	return nil
+}
+
+func fingerprintGoal(goal string) (string, error) {
+	normalized := strings.ToLower(strings.Join(strings.Fields(goal), " "))
+	if normalized == "" {
+		return "", fmt.Errorf("%w: goal is required", ErrSpawnBudget)
+	}
+	sum := sha256.Sum256([]byte(normalized))
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func fingerprintGoalPath(parentPath, goalFingerprint string) string {
+	sum := sha256.Sum256([]byte(parentPath + "\x00" + goalFingerprint))
+	return hex.EncodeToString(sum[:])
+}
+
+func cloneFingerprints(src map[string]struct{}) map[string]struct{} {
+	dst := make(map[string]struct{}, len(src)+1)
+	for fingerprint := range src {
+		dst[fingerprint] = struct{}{}
+	}
+	return dst
 }
 
 // ReconcileChild accepts usage only after the child has retired, keeping live

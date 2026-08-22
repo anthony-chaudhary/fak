@@ -45,7 +45,7 @@ func TestRequestChildIntersectsParentCapabilityEnvelope(t *testing.T) {
 	host, err := microagent.NewHost(stubPlanner{}, microagent.Config{
 		Workers:          1,
 		Queue:            2,
-		SpawnBudget:      &microagent.SpawnBudget{MaxDepth: 2, MaxChildren: 1, MaxDescendants: 1},
+		SpawnBudget:      &microagent.SpawnBudget{RootID: "root", RootGoal: "complete the parent task", MaxDepth: 2, MaxChildren: 1, MaxDescendants: 1},
 		RootCapabilities: parent,
 	})
 	if err != nil {
@@ -61,6 +61,7 @@ func TestRequestChildIntersectsParentCapabilityEnvelope(t *testing.T) {
 	err = host.RequestChild(microagent.SpawnRequest{
 		ParentID: "root",
 		ChildID:  "child",
+		Goal:     "read the admitted artifact",
 		Depth:    1,
 		Capabilities: microagent.CapabilityEnvelope{
 			Tools:               []string{"repo.read", "shell.exec"},
@@ -94,7 +95,7 @@ func TestRequestChildRefusesCapabilitiesWithoutParentEnvelope(t *testing.T) {
 	host, err := microagent.NewHost(stubPlanner{}, microagent.Config{
 		Workers:     1,
 		Audit:       sink,
-		SpawnBudget: &microagent.SpawnBudget{MaxDepth: 2, MaxChildren: 1, MaxDescendants: 1},
+		SpawnBudget: &microagent.SpawnBudget{RootID: "root", RootGoal: "complete the parent task", MaxDepth: 2, MaxChildren: 1, MaxDescendants: 1},
 	})
 	if err != nil {
 		t.Fatalf("NewHost: %v", err)
@@ -104,6 +105,7 @@ func TestRequestChildRefusesCapabilitiesWithoutParentEnvelope(t *testing.T) {
 	err = host.RequestChild(microagent.SpawnRequest{
 		ParentID:     "missing-parent",
 		ChildID:      "child",
+		Goal:         "read the admitted artifact",
 		Depth:        1,
 		Capabilities: microagent.CapabilityEnvelope{Tools: []string{"repo.read"}},
 	}, &capabilityCaptureAgent{captured: make(chan microagent.CapabilityEnvelope, 1)})
