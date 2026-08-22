@@ -11967,6 +11967,21 @@
           "category": "incidental",
           "reason": "local error variable, not a project planning concept",
           "token": "plannerErr"
+        },
+        {
+          "category": "incidental",
+          "reason": "Paired benchmark result field, not a planning concept",
+          "token": "CandidatePassed"
+        },
+        {
+          "category": "incidental",
+          "reason": "Immutable benchmark runtime identity, not a planning concept",
+          "token": "CandidateRuntimeSHA"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local benchmark correctness ratio, not a planning concept",
+          "token": "candidateRate"
         }
       ],
       "exclude": [
@@ -11985,6 +12000,8 @@
         "CandidateArm",
         "CandidateDecodeMicroseconds",
         "CandidateOutputNMSE",
+        "CandidatePassed",
+        "CandidateRuntimeSHA",
         "CandidateTaskAccuracy",
         "Candidates",
         "DecodeInterleavePlan",
@@ -12066,6 +12083,7 @@
         "candidateID",
         "candidateNote",
         "candidatePaths",
+        "candidateRate",
         "candidateReport",
         "candidate_evaluations",
         "candidate_requires_auth_relevance",

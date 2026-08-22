@@ -681,6 +681,7 @@ var tier = map[string]int{
 	"cloudroute":                 1, // stdlib-only detector for a request-signed cloud model route (Bedrock SigV4 / Vertex ADC) whose base-URL repoint cannot take effect (#8172); pure over an environ snapshot, imports nothing internal.
 	"modelloadplan":              3, // deterministic Qwen load planner over harnessresolve locks; off the hot path (#8134).
 	"geminicache":                2, // provider CachedContent lifecycle adapter over stdlib HTTP and immutable context identity (#8481).
+	"qwen38ladder":               1, // stdlib-only paired evidence gate from pinned Qwen3.5 proxies to exact Qwen3.8-27B (#8011).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
