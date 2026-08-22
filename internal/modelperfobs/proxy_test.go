@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -78,6 +79,69 @@ func TestFallbackProxyClientBoundsHeadersWithoutCappingStreams(t *testing.T) {
 	}
 	if transport.DialContext == nil || transport.TLSHandshakeTimeout <= 0 || transport.ResponseHeaderTimeout != proxyResponseHeaderTimeout {
 		t.Fatalf("fallback transport lacks bounded connect/header deadlines: %+v", transport)
+	}
+}
+
+func TestProxyRecordsConcurrentObservedRequests(t *testing.T) {
+	arrived := make(chan string, 2)
+	release := make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		arrived <- r.Header.Get("X-Fak-Observation-ID")
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer backend.Close()
+	u, _ := ParseBackend(backend.URL)
+	ledger := t.TempDir() + "/observations.jsonl"
+	proxy := httptest.NewServer(&Proxy{Backend: u, Ledger: ledger})
+	defer proxy.Close()
+
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			resp, err := http.Post(proxy.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{"model":"test"}`))
+			if err == nil {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				err = resp.Body.Close()
+			}
+			errs <- err
+		}()
+	}
+	for range 2 {
+		select {
+		case id := <-arrived:
+			if id == "" {
+				t.Fatal("backend request lacks observation ID")
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("requests did not overlap at backend")
+		}
+	}
+	close(release)
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	f, err := os.Open(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	rows, err := ReadObservations(bufio.NewReader(f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows=%d, want 2", len(rows))
+	}
+	for i, row := range rows {
+		peer := rows[1-i].RequestID
+		if row.CompletedAt.IsZero() || row.OverlappingObservedRequests != 1 || !slices.Contains(row.OverlappingRequestIDs, peer) {
+			t.Fatalf("row %s overlap provenance=%+v, want peer %s", row.RequestID, row, peer)
+		}
 	}
 }
 

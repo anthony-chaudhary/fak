@@ -1032,6 +1032,31 @@
           "category": "incidental",
           "reason": "Provider-owned JSON resource collection name copied from the Gemini API.",
           "token": "cachedContents"
+        },
+        {
+          "category": "incidental",
+          "reason": "backend metric cause only; it reports external cache evidence and defines no fak cache mechanism",
+          "token": "CausePrefixCacheHit"
+        },
+        {
+          "category": "incidental",
+          "reason": "adapter counter name only; it reports external cache evidence and defines no fak cache mechanism",
+          "token": "CounterCacheEvictions"
+        },
+        {
+          "category": "incidental",
+          "reason": "backend metric cause only; it reports external cache evidence and defines no fak cache mechanism",
+          "token": "CauseCacheEviction"
+        },
+        {
+          "category": "incidental",
+          "reason": "adapter counter name only; it reports external cache evidence and defines no fak cache mechanism",
+          "token": "CounterPrefixCacheHits"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON metric key only; it reports external cache evidence and defines no fak cache mechanism",
+          "token": "cache_evictions"
         }
       ],
       "id": "cache",
@@ -1060,8 +1085,12 @@
         "CacheWriteCost",
         "CachedInputShare",
         "CalibrationStatus",
+        "CauseCacheEviction",
+        "CausePrefixCacheHit",
         "CodeCacheScope",
         "CodeKVCache",
+        "CounterCacheEvictions",
+        "CounterPrefixCacheHits",
         "DefaultCacheBytes",
         "DefaultCacheStateAllowlist",
         "FAK_ORG_POLICY_CACHE_PATH",
@@ -1127,6 +1156,7 @@
         "cacheWitnessServer",
         "cache_bytes",
         "cache_creation_span",
+        "cache_evictions",
         "cache_future_dated",
         "cache_hits",
         "cache_misses",
@@ -10067,11 +10097,28 @@
           "category": "incidental",
           "reason": "Implementation operation that releases the already-positioned host L2 snapshot owner while preserving another verified copy; not a distinct eviction-policy concept.",
           "token": "EvictHostSnapshot"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON metric key only; it observes external evictions and performs no eviction operation",
+          "token": "cache_evictions"
+        },
+        {
+          "category": "incidental",
+          "reason": "backend metric cause only; it observes an external eviction and performs no eviction operation",
+          "token": "CauseCacheEviction"
+        },
+        {
+          "category": "incidental",
+          "reason": "adapter counter name only; it observes external evictions and performs no eviction operation",
+          "token": "CounterCacheEvictions"
         }
       ],
       "id": "evict",
       "ignore": [
+        "CauseCacheEviction",
         "CompactReasonPinEvictRefused",
+        "CounterCacheEvictions",
         "EvictDigest",
         "EvictHostSnapshot",
         "EvictHotKVPrefix",
@@ -10082,6 +10129,7 @@
         "L2Evictions",
         "NewWithTierBudgetsAndEvictionPolicy",
         "ReasonPinEvictRefused",
+        "cache_evictions",
         "digestEvictor",
         "evictIDs",
         "evictSupported",

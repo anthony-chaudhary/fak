@@ -67,9 +67,32 @@ GROUP BY model;
 
 The names follow the request-level practice documented by vLLM's metrics design:
 TTFT, inter-token latency, prompt tokens, and generation tokens are the SLO-facing
-metrics, while engine counters explain them. This spine intentionally starts at
-the cross-backend request seam. Backend-specific queue, KV-cache, preemption,
-and GPU counters are follow-on joins, not required to observe an agent today.
+metrics, while engine counters can provide supporting evidence. This spine starts
+at the cross-backend request seam; an optional adapter can join queue, cache,
+eviction, and preemption counters through `modelperfobs.AttributeMetrics` without
+changing the proxy receipt format.
+
+### Causal limits of server counters
+
+A before/after server counter is shared evidence, not a request fact. Its delta
+includes every observed and unobserved request served by that server instance
+between the two scrape timestamps. A cache hit, queue event, eviction, or
+preemption therefore reaches a request report only when either:
+
+- a backend request label or trace names that request; or
+- the server request counter proves the scrape window contains exactly one
+  observed request and no background request.
+
+The attribution report preserves the server-instance ID, scrape bounds,
+overlapping request IDs and count, background-request count when known, and each
+counter's reset or wrap state. Its grades are `request-correlated`,
+`isolated-window`, `cohort-only`, `contaminated`, `stale`, and `unavailable`.
+Unlabeled deltas from overlapping requests remain visible once in the cohort
+report; they are not copied into every request. An unknown background count does
+not prove isolation. Scrape failure, server restart, stale data, a counter reset,
+or an unrecognized correlation source fails closed instead of manufacturing a
+request-level cause. A generic Prometheus adapter may omit request labels and
+still retain honest cohort evidence; distributed tracing is optional.
 
 Source studied 2026-08-21: [vLLM metrics design](https://github.com/vllm-project/vllm/blob/main/docs/design/metrics.md).
 

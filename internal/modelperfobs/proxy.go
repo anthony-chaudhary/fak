@@ -27,12 +27,14 @@ var fallbackProxyClient = func() *http.Client {
 }()
 
 type Proxy struct {
-	Backend *url.URL
-	Ledger  string
-	Client  *http.Client
-	Now     func() time.Time
-	mu      sync.Mutex
-	seq     atomic.Uint64
+	Backend  *url.URL
+	Ledger   string
+	Client   *http.Client
+	Now      func() time.Time
+	mu       sync.Mutex
+	active   map[string]struct{}
+	overlaps map[string]map[string]struct{}
+	seq      atomic.Uint64
 }
 
 type requestEnvelope struct {
@@ -52,6 +54,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	started := p.now()
 	id := fmt.Sprintf("%d-%d", started.UnixNano(), p.seq.Add(1))
 	obs := Observation{Schema: Schema, Timestamp: started.UTC(), RequestID: id, Backend: p.Backend.String()}
+	p.beginRequest(id)
+	completed := false
+	defer func() {
+		if !completed {
+			p.finishRequest(id)
+		}
+	}()
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -77,8 +86,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp, err := client.Do(req)
 	if err != nil {
 		obs.Error = err.Error()
-		obs.DurationMS = millis(p.now().Sub(started))
-		_ = p.append(obs)
+		p.completeObservation(&obs, started)
+		completed = true
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
@@ -103,9 +112,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			obs.Error = readErr.Error()
 		}
 	}
-	obs.DurationMS = millis(p.now().Sub(started))
-	derive(&obs)
-	_ = p.append(obs)
+	p.completeObservation(&obs, started)
+	completed = true
 }
 
 func (p *Proxy) copyStream(w http.ResponseWriter, src io.Reader, started time.Time, obs *Observation) {
@@ -184,6 +192,46 @@ func derive(obs *Observation) {
 	if obs.CompletionTokens > 1 {
 		obs.TPOTMS = decodeMS / float64(obs.CompletionTokens-1)
 	}
+}
+
+func (p *Proxy) beginRequest(id string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.active == nil {
+		p.active = make(map[string]struct{})
+	}
+	if p.overlaps == nil {
+		p.overlaps = make(map[string]map[string]struct{})
+	}
+	p.overlaps[id] = make(map[string]struct{}, len(p.active))
+	for activeID := range p.active {
+		p.overlaps[id][activeID] = struct{}{}
+		p.overlaps[activeID][id] = struct{}{}
+	}
+	p.active[id] = struct{}{}
+}
+
+func (p *Proxy) finishRequest(id string) []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	peers := p.overlaps[id]
+	ids := make([]string, 0, len(peers))
+	for peer := range peers {
+		ids = append(ids, peer)
+	}
+	sort.Strings(ids)
+	delete(p.active, id)
+	delete(p.overlaps, id)
+	return ids
+}
+
+func (p *Proxy) completeObservation(obs *Observation, started time.Time) {
+	obs.CompletedAt = p.now().UTC()
+	obs.DurationMS = millis(obs.CompletedAt.Sub(started))
+	obs.OverlappingRequestIDs = p.finishRequest(obs.RequestID)
+	obs.OverlappingObservedRequests = len(obs.OverlappingRequestIDs)
+	derive(obs)
+	_ = p.append(*obs)
 }
 
 func (p *Proxy) append(obs Observation) error {
