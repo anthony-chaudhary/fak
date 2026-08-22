@@ -788,6 +788,11 @@ func TestClaimPrepushTipCoalescesAcrossProcesses(t *testing.T) {
 	if !strings.Contains(ownerOut.String(), "OWNER") || !strings.Contains(string(waiterOut), "COALESCED") {
 		t.Fatalf("owner=%q waiter=%q", ownerOut.String(), waiterOut)
 	}
+	// A caller arriving after the owner removes its claim must still reuse the success witness.
+	lateOut, lateErr := helper("waiter").CombinedOutput()
+	if lateErr != nil || !strings.Contains(string(lateOut), "COALESCED") {
+		t.Fatalf("late waiter: %v: %s", lateErr, lateOut)
+	}
 }
 
 func TestPrepushSuccessReceiptsSurviveInterleavedTips(t *testing.T) {

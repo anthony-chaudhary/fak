@@ -386,8 +386,16 @@ func claimPrepushTip(root, tip string, now func() time.Time) (owner bool, releas
 		return true, func() {}
 	}
 	for {
+		if prepushSuccessReusable(root, tip, now()) {
+			return false, func() {}
+		}
 		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 		if err == nil {
+			if prepushSuccessReusable(root, tip, now()) {
+				_ = f.Close()
+				_ = os.Remove(path)
+				return false, func() {}
+			}
 			_, _ = fmt.Fprintf(f, "%d\n", os.Getpid())
 			_ = f.Close()
 			return true, func() { _ = os.Remove(path) }
