@@ -22,6 +22,7 @@ const (
 	ReasonInspectionUnavailable      = "process_inspection_unavailable"
 	ReasonReparsePoint               = "reparse_point"
 	ReasonNotRegular                 = "not_regular"
+	ReasonNestedUnknown              = "nested_unknown"
 	ReasonInaccessible               = "inaccessible"
 	ReasonChangedSinceScan           = "changed_since_scan"
 	ReasonMoveFailed                 = "move_failed"
@@ -54,6 +55,7 @@ type Config struct {
 	AfterMove  func(string, string)
 	Rename     func(string, string) error
 	Remove     func(string) error
+	RemoveAll  func(string) error
 }
 
 type Item struct {
@@ -90,6 +92,13 @@ type Report struct {
 type scannedFile struct {
 	itemIndex int
 	info      os.FileInfo
+	directory bool
+	tree      []treeEntry
+}
+
+type treeEntry struct {
+	relative string
+	info     os.FileInfo
 }
 
 func Run(ctx context.Context, cfg Config) (Report, error) {
@@ -129,6 +138,10 @@ func Run(ctx context.Context, cfg Config) (Report, error) {
 	if remove == nil {
 		remove = os.Remove
 	}
+	removeAll := cfg.RemoveAll
+	if removeAll == nil {
+		removeAll = os.RemoveAll
+	}
 
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -138,7 +151,7 @@ func Run(ctx context.Context, cfg Config) (Report, error) {
 	var stale []scannedFile
 	for _, entry := range entries {
 		name := entry.Name()
-		if !allowedName(name) {
+		if !allowedName(name) && !allowedDirectoryName(name) {
 			continue
 		}
 		path := filepath.Clean(filepath.Join(root, name))
@@ -150,33 +163,50 @@ func Run(ctx context.Context, cfg Config) (Report, error) {
 			report.Items = append(report.Items, Item{Path: path, Reason: ReasonInaccessible})
 			continue
 		}
+		if info.IsDir() && !allowedDirectoryName(name) {
+			continue
+		}
 		age := currentTime.Sub(info.ModTime())
 		if age < 0 {
 			age = 0
 		}
 		item := Item{Path: path, AgeSeconds: int64(age / time.Second), Bytes: info.Size()}
 		reparse, reparseErr := isReparsePoint(path, info)
+		var tree []treeEntry
 		switch {
 		case reparseErr != nil:
 			item.Reason = ReasonInaccessible
 		case reparse:
 			item.Reason = ReasonReparsePoint
+		case info.IsDir():
+			var newest time.Time
+			tree, item.Bytes, newest, item.Reason = scanDirectory(path)
+			if newest.After(info.ModTime()) {
+				age = currentTime.Sub(newest)
+				if age < 0 {
+					age = 0
+				}
+				item.AgeSeconds = int64(age / time.Second)
+			}
 		case !info.Mode().IsRegular():
 			item.Reason = ReasonNotRegular
-		case age < cfg.MinAge:
-			item.Reason = ReasonFresh
-		default:
-			item.Reason = ReasonEligible
+		}
+		if item.Reason == "" {
+			if age < cfg.MinAge {
+				item.Reason = ReasonFresh
+			} else {
+				item.Reason = ReasonEligible
+			}
 		}
 		report.Items = append(report.Items, item)
 		if item.Reason == ReasonEligible {
-			stale = append(stale, scannedFile{itemIndex: len(report.Items) - 1, info: info})
+			stale = append(stale, scannedFile{itemIndex: len(report.Items) - 1, info: info, directory: info.IsDir(), tree: tree})
 		}
 	}
 
 	paths := make([]string, 0, len(stale))
 	for _, file := range stale {
-		paths = append(paths, report.Items[file.itemIndex].Path)
+		paths = append(paths, inspectionPaths(report.Items[file.itemIndex].Path, file.tree)...)
 	}
 	initialInspection := inspect(ctx, paths)
 	if !initialInspection.Complete && len(paths) > 0 {
@@ -187,14 +217,14 @@ func Run(ctx context.Context, cfg Config) (Report, error) {
 		switch {
 		case !initialInspection.Complete:
 			item.Reason = ReasonInspectionUnavailable
-		case inspectionReferences(initialInspection, item.Path):
+		case inspectionReferencesAny(initialInspection, inspectionPaths(item.Path, file.tree)):
 			item.Reason = ReasonActiveReference
 		}
 		item.Eligible = item.Reason == ReasonEligible
 	}
 
 	if cfg.Apply {
-		apply(ctx, &report, stale, inspect, rename, remove, cfg.BeforeMove, cfg.AfterMove)
+		apply(ctx, &report, stale, inspect, rename, remove, removeAll, cfg.BeforeMove, cfg.AfterMove)
 	}
 	sort.Slice(report.Items, func(i, j int) bool { return pathKey(report.Items[i].Path) < pathKey(report.Items[j].Path) })
 	report.Summary = summarize(report.Items)
@@ -208,6 +238,7 @@ func apply(
 	inspect InspectFunc,
 	rename func(string, string) error,
 	remove func(string) error,
+	removeAll func(string) error,
 	beforeMove func(string),
 	afterMove func(string, string),
 ) {
@@ -236,16 +267,16 @@ func apply(
 			beforeMove(source)
 		}
 		current, err := os.Lstat(source)
-		if err != nil || !sameIdentity(file.info, current) {
+		if err != nil || !sameIdentity(file.info, current) || !sameTree(source, file.tree) {
 			item.Reason = ReasonChangedSinceScan
 			continue
 		}
-		preMove := inspect(ctx, []string{source})
+		preMove := inspect(ctx, inspectionPaths(source, file.tree))
 		switch {
 		case !preMove.Complete:
 			item.Reason = ReasonInspectionUnavailable
 			continue
-		case inspectionReferences(preMove, source):
+		case inspectionReferencesAny(preMove, inspectionPaths(source, file.tree)):
 			item.Reason = ReasonActiveReference
 			continue
 		}
@@ -260,20 +291,24 @@ func apply(
 			afterMove(source, destination)
 		}
 		moved, err := os.Lstat(destination)
-		if err != nil || !sameIdentity(file.info, moved) || sourceStillExists(source) {
+		if err != nil || !sameIdentity(file.info, moved) || !sameTree(destination, file.tree) || sourceStillExists(source) {
 			item.Reason = ReasonPostMoveRecheckFailed
 			continue
 		}
-		postMove := inspect(ctx, []string{source, destination})
+		postMove := inspect(ctx, append(inspectionPaths(source, file.tree), inspectionPaths(destination, file.tree)...))
 		switch {
 		case !postMove.Complete:
 			item.Reason = ReasonPostMoveInspectUnavailable
 			continue
-		case inspectionReferences(postMove, source) || inspectionReferences(postMove, destination):
+		case inspectionReferencesAny(postMove, append(inspectionPaths(source, file.tree), inspectionPaths(destination, file.tree)...)):
 			item.Reason = ReasonPostMoveReference
 			continue
 		}
-		if err := remove(destination); err != nil {
+		deleteArtifact := remove
+		if file.directory {
+			deleteArtifact = removeAll
+		}
+		if err := deleteArtifact(destination); err != nil {
 			item.Reason = ReasonDeleteFailed
 			continue
 		}
@@ -309,6 +344,10 @@ func resolveRoot(configured string) (string, error) {
 	return filepath.Clean(resolved), nil
 }
 
+func allowedDirectoryName(name string) bool {
+	return strings.HasPrefix(name, "fak-issue-") && name != "fak-issue-"
+}
+
 func allowedName(name string) bool {
 	if !strings.HasPrefix(name, "fak-") {
 		return false
@@ -319,6 +358,70 @@ func allowedName(name string) bool {
 	default:
 		return false
 	}
+}
+
+func scanDirectory(root string) ([]treeEntry, int64, time.Time, string) {
+	entries := []treeEntry{}
+	var bytes int64
+	var newest time.Time
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == root {
+			return nil
+		}
+		reparse, err := isReparsePoint(path, info)
+		if err != nil {
+			return err
+		}
+		if reparse || (!info.IsDir() && !info.Mode().IsRegular()) {
+			return errNestedUnknown
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		entries = append(entries, treeEntry{relative: relative, info: info})
+		if info.ModTime().After(newest) {
+			newest = info.ModTime()
+		}
+		if info.Mode().IsRegular() {
+			bytes += info.Size()
+		}
+		return nil
+	})
+	if errors.Is(err, errNestedUnknown) {
+		return nil, bytes, newest, ReasonNestedUnknown
+	}
+	if err != nil {
+		return nil, bytes, newest, ReasonInaccessible
+	}
+	return entries, bytes, newest, ""
+}
+
+var errNestedUnknown = errors.New("nested unknown entry")
+
+func sameTree(root string, before []treeEntry) bool {
+	after, _, _, reason := scanDirectory(root)
+	if reason != "" || len(before) != len(after) {
+		return false
+	}
+	for index := range before {
+		if before[index].relative != after[index].relative || !sameIdentity(before[index].info, after[index].info) {
+			return false
+		}
+	}
+	return true
+}
+
+func inspectionPaths(root string, tree []treeEntry) []string {
+	paths := make([]string, 0, len(tree)+1)
+	paths = append(paths, root)
+	for _, entry := range tree {
+		paths = append(paths, filepath.Join(root, entry.relative))
+	}
+	return paths
 }
 
 func directChild(root, path string) bool {
@@ -344,6 +447,15 @@ func inspectionReason(inspection Inspection) string {
 
 func inspectionReferences(inspection Inspection, path string) bool {
 	return inspection.References[pathKey(path)] || inspection.References[path]
+}
+
+func inspectionReferencesAny(inspection Inspection, paths []string) bool {
+	for _, path := range paths {
+		if inspectionReferences(inspection, path) {
+			return true
+		}
+	}
+	return false
 }
 
 func pathKey(path string) string {

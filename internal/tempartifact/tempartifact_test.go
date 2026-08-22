@@ -289,6 +289,111 @@ func TestInspectionFailurePreservesCandidate(t *testing.T) {
 	}
 }
 
+func TestPreviewSelectsOnlyStaleSafeIssueDirectories(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().UTC().Truncate(time.Second)
+	old := now.Add(-2 * time.Hour)
+	fresh := now.Add(-5 * time.Minute)
+
+	stale := makeIssueDirectory(t, root, "fak-issue-8514", old, map[string]string{"bin/fak.exe": "binary"})
+	freshChild := makeIssueDirectory(t, root, "fak-issue-fresh", old, map[string]string{"still-building.txt": "active"})
+	if err := os.Chtimes(filepath.Join(freshChild, "still-building.txt"), fresh, fresh); err != nil {
+		t.Fatal(err)
+	}
+	unowned := makeIssueDirectory(t, root, "other-issue-8514", old, nil)
+
+	report, err := Run(context.Background(), Config{Root: root, MinAge: time.Hour, Now: func() time.Time { return now }, Inspect: completeInspection})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item := assertItemReason(t, report, stale, ReasonEligible); !item.Eligible || item.Bytes != int64(len("binary")) {
+		t.Fatalf("stale directory item = %+v", item)
+	}
+	assertItemReason(t, report, freshChild, ReasonFresh)
+	if findItem(report, unowned) != nil {
+		t.Fatalf("unowned directory was inventoried: %+v", report.Items)
+	}
+}
+
+func TestApplyQuarantinesRechecksAndReapsIssueDirectory(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().UTC().Truncate(time.Second)
+	path := makeIssueDirectory(t, root, "fak-issue-8514", now.Add(-2*time.Hour), map[string]string{"nested/output.txt": "done"})
+	var movedSource, movedDestination string
+
+	report, err := Run(context.Background(), Config{
+		Root: root, MinAge: time.Hour, Now: func() time.Time { return now }, Apply: true, Inspect: completeInspection,
+		AfterMove: func(source, destination string) {
+			movedSource, movedDestination = source, destination
+			if _, err := os.Stat(destination); err != nil {
+				t.Fatalf("quarantined directory unavailable during recheck: %v", err)
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertItemReason(t, report, path, ReasonReaped)
+	if movedSource != path || filepath.Dir(movedDestination) == root {
+		t.Fatalf("move = %q -> %q, want source and quarantine child", movedSource, movedDestination)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("source still exists after reap: %v", err)
+	}
+}
+
+func TestIssueDirectoryPreservationContract(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	old := now.Add(-2 * time.Hour)
+
+	t.Run("active nested file", func(t *testing.T) {
+		root := t.TempDir()
+		path := makeIssueDirectory(t, root, "fak-issue-active", old, map[string]string{"bin/fak.exe": "active"})
+		active := filepath.Join(path, "bin", "fak.exe")
+		report, err := Run(context.Background(), Config{Root: root, MinAge: time.Hour, Now: func() time.Time { return now }, Apply: true, Inspect: func(context.Context, []string) Inspection {
+			return Inspection{Complete: true, References: map[string]bool{pathKey(active): true}}
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertItemReason(t, report, path, ReasonActiveReference)
+	})
+
+	t.Run("changed tree", func(t *testing.T) {
+		root := t.TempDir()
+		path := makeIssueDirectory(t, root, "fak-issue-changed", old, map[string]string{"result.txt": "before"})
+		report, err := Run(context.Background(), Config{Root: root, MinAge: time.Hour, Now: func() time.Time { return now }, Apply: true, Inspect: completeInspection, BeforeMove: func(string) {
+			if err := os.WriteFile(filepath.Join(path, "result.txt"), []byte("after"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertItemReason(t, report, path, ReasonChangedSinceScan)
+	})
+
+	t.Run("nested unknown", func(t *testing.T) {
+		root := t.TempDir()
+		path := makeIssueDirectory(t, root, "fak-issue-link", old, nil)
+		target := filepath.Join(root, "outside.txt")
+		if err := os.WriteFile(target, []byte("outside"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(path, "link")); err != nil {
+			t.Skipf("symlink unavailable on this host: %v", err)
+		}
+		report, err := Run(context.Background(), Config{Root: root, MinAge: time.Hour, Now: func() time.Time { return now }, Apply: true, Inspect: completeInspection})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertItemReason(t, report, path, ReasonNestedUnknown)
+		if got, err := os.ReadFile(target); err != nil || string(got) != "outside" {
+			t.Fatalf("external target changed: contents=%q err=%v", got, err)
+		}
+	})
+}
+
 func TestExactProcessPathDoesNotMatchPrefixCollision(t *testing.T) {
 	candidate := `C:\Temp\fak-old.exe`
 	records := []processRecord{
@@ -315,6 +420,32 @@ func makeArtifact(t *testing.T, root, name, contents string, modTime time.Time) 
 		t.Fatal(err)
 	}
 	if err := os.Chtimes(path, modTime, modTime); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Clean(path)
+}
+
+func makeIssueDirectory(t *testing.T, root, name string, modTime time.Time, files map[string]string) string {
+	t.Helper()
+	path := filepath.Join(root, name)
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for relative, contents := range files {
+		child := filepath.Join(path, relative)
+		if err := os.MkdirAll(filepath.Dir(child), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(child, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := filepath.Walk(path, func(child string, _ os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Chtimes(child, modTime, modTime)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	return filepath.Clean(path)
