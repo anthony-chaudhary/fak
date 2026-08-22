@@ -401,6 +401,8 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 		cmdValueChain(args)
 	case "usage":
 		cmdUsage(args)
+	case "borrow-provenance":
+		cmdBorrowProvenance(args)
 	case "provider-cost":
 		cmdProviderCost(args)
 	case "goal":

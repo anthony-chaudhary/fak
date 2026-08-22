@@ -2,6 +2,8 @@ package swebenchsota
 
 import (
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/borrowprovenance"
 )
 
 // fixtureHTML mirrors the embedded leaderboard JSON fixture from the Python test
@@ -30,6 +32,9 @@ func TestBuildSnapshotFromSavedHTML(t *testing.T) {
 		t.Fatalf("BuildSnapshot: %v", err)
 	}
 
+	if doc.SourceSHA256 != borrowprovenance.Digest([]byte(fixtureHTML)) {
+		t.Fatalf("source pin = %q, want shared borrow-provenance digest", doc.SourceSHA256)
+	}
 	if doc.Schema != "fak.swebench-sota-snapshot.v1" {
 		t.Errorf("schema = %q, want fak.swebench-sota-snapshot.v1", doc.Schema)
 	}

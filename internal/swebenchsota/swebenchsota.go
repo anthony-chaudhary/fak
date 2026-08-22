@@ -1,8 +1,6 @@
 package swebenchsota
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -12,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/borrowprovenance"
 )
 
 // Schema is the versioned identity stamped on every emitted snapshot.
@@ -289,13 +289,12 @@ func BuildSnapshot(source, sourceRef, generatedAt string, opt Options) (Snapshot
 		return Snapshot{}, err
 	}
 
-	sum := sha256.Sum256([]byte(source))
 	return Snapshot{
 		Schema:       Schema,
 		GeneratedAt:  generatedAt,
 		SourceURL:    opt.URL,
 		SourceRef:    sourceRef,
-		SourceSHA256: hex.EncodeToString(sum[:]),
+		SourceSHA256: borrowprovenance.Digest([]byte(source)),
 		Benchmark:    "SWE-bench Verified",
 		Metric:       "resolved_pct",
 		Instances:    500,
