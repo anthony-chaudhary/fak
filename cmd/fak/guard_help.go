@@ -84,8 +84,7 @@ var guardFlagGroups = []guardFlagGroup{
 		"vcache-anchor", "defer-cold-tools",
 	}},
 	{"Session lifecycle hooks (Claude Code)", []string{
-		"precompact-hook", "deny-all-continue", "deny-all-max", "deny-all-warn",
-		"deny-all-final", "same-stop", "toolproc-hooks", "task-handoff", "task-handoff-file",
+		"precompact-hook", "deny-all-continue", "toolproc-hooks", "task-handoff", "task-handoff-file",
 		"task-handoff-repo", "task-handoff-live", "operator-directed",
 	}},
 	{"Budgets, resets & session governance", []string{

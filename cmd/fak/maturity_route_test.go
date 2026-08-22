@@ -75,7 +75,7 @@ func TestMaturityRouteDryRunPlansDedupedIssue(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("bad json: %v\n%s", err, out.String())
 	}
-	if got.Schema != "fak-maturity-issues/1" || got.Mode != "dry-run" {
+	if got.Schema != "fak-maturity-issues/3" || got.Mode != "dry-run" {
 		t.Fatalf("header = %q/%q, want maturity dry-run", got.Schema, got.Mode)
 	}
 	if len(got.Planned) != 1 {

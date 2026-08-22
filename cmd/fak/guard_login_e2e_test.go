@@ -118,6 +118,15 @@ func runGuardE2E(t *testing.T, args string, env map[string]string) (exitCode int
 	// rows land under the temp dir instead of the repo. The tests assert only on exit code,
 	// stdout, and the fake-git call log (an absolute temp path), so cwd is otherwise inert.
 	cmd.Dir = t.TempDir()
+	// Guard arbitration is default-on in shadow mode. Give the isolated launch a
+	// real minimal workspace so the test exercises launch and durability rather
+	// than the missing-taxonomy fail-open path.
+	if err := os.Mkdir(filepath.Join(cmd.Dir, ".git"), 0o755); err != nil {
+		t.Fatalf("create guard e2e git dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cmd.Dir, "dos.toml"), []byte("[lanes]\n[lanes.trees]\ncmd = [\"cmd/**\"]\n"), 0o644); err != nil {
+		t.Fatalf("write guard e2e lane taxonomy: %v", err)
+	}
 	cmd.Env = append(os.Environ(), guardE2EHelperEnv+"="+args)
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)
