@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -111,6 +112,114 @@ func TestAdd(t *testing.T) {
 	}
 	if len(res.Tested) == 0 {
 		t.Fatalf("expected affected package test selection")
+	}
+}
+
+func TestValidateWSLIsolatedCheckoutPreservesRequestedGitIdentity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; skipped under -short")
+	}
+	repo, git := seedGitFixtureRepo(t)
+	files := map[string]string{
+		"go.mod":       "module validate.test\n\ngo 1.26\n",
+		"common/id.go": "package common\n\nimport \"errors\"\n\nfunc Check(string) error { return errors.New(\"owned overlay missing\") }\n",
+		"tracked.txt":  "requested-ref\n",
+	}
+	for i := 1; i <= 6; i++ {
+		pkg := fmt.Sprintf("p%d", i)
+		files[pkg+"/identity_test.go"] = fmt.Sprintf(`package %s
+
+import (
+	"testing"
+
+	"validate.test/common"
+)
+
+func TestRequestedGitIdentity(t *testing.T) {
+	if err := common.Check(".."); err != nil {
+		t.Fatal(err)
+	}
+}
+`, pkg)
+	}
+	commitFiles(t, repo, git, "requested ref", files)
+	wantHEAD, err := git("rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitFiles(t, repo, git, "later ref", map[string]string{"later.txt": "must stay outside requested ref\n"})
+
+	overlay := strings.ReplaceAll(`package common
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+)
+
+const expectedHEAD = "__EXPECTED_HEAD__"
+
+func Check(root string) error {
+	head, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git rev-parse HEAD: %w: %s", err, head)
+	}
+	if got := strings.TrimSpace(string(head)); got != expectedHEAD {
+		return fmt.Errorf("HEAD = %s, want requested ref %s", got, expectedHEAD)
+	}
+	tracked, err := exec.Command("git", "-C", root, "ls-files").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git ls-files: %w: %s", err, tracked)
+	}
+	trackedSet := "\n" + strings.TrimSpace(string(tracked)) + "\n"
+	for _, path := range []string{"go.mod", "common/id.go", "tracked.txt"} {
+		if !strings.Contains(trackedSet, "\n"+path+"\n") {
+			return fmt.Errorf("tracked files omit %s: %s", path, tracked)
+		}
+	}
+	for _, path := range []string{"later.txt", "peer-only.txt"} {
+		if strings.Contains(trackedSet, "\n"+path+"\n") {
+			return fmt.Errorf("tracked files include out-of-ref %s: %s", path, tracked)
+		}
+		if _, err := os.Stat(filepath.Join(root, path)); !os.IsNotExist(err) {
+			return fmt.Errorf("isolated checkout leaked %s: %v", path, err)
+		}
+	}
+	body, err := os.ReadFile(filepath.Join(root, "tracked.txt"))
+	if err != nil {
+		return err
+	}
+	if string(body) != "requested-ref\n" {
+		return fmt.Errorf("tracked.txt = %q, want requested ref content", body)
+	}
+	return nil
+}
+`, "__EXPECTED_HEAD__", strings.TrimSpace(wantHEAD))
+	if err := os.WriteFile(filepath.Join(repo, "common", "id.go"), []byte(overlay), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("peer-wip\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "peer-only.txt"), []byte("peer-wip\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, code, stderr := runValidateJSON(t, []string{
+		"--root", repo,
+		"--ref", strings.TrimSpace(wantHEAD),
+		"--mine", "common/id.go",
+		"--test-only",
+		"--wsl-tests",
+		"--json",
+	})
+	if code != 0 || !res.OK {
+		t.Fatalf("code=%d stderr=%q result=%+v", code, stderr, res)
+	}
+	if len(res.Tested) < 6 {
+		t.Fatalf("tested=%v; want at least six Git-aware affected packages", res.Tested)
 	}
 }
 

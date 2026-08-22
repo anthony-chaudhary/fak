@@ -139,7 +139,7 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 				args = append(args, "-run", *testRun)
 			}
 			args = append(args, testTargets...)
-			if detail, ok := runValidateTests(dir, args, *wslTests); !ok {
+			if detail, ok := runValidateTests(r, dir, tip, args, *wslTests); !ok {
 				res.OK = false
 				res.Failures = append(res.Failures, ciPreflightFailure{Step: "test", Detail: detail})
 			}
@@ -346,10 +346,15 @@ func appendUniqueStrings(dst []string, values ...string) []string {
 	return dst
 }
 
-func runValidateTests(dir string, args []string, wsl bool) (string, bool) {
+func runValidateTests(repo, dir, tip string, args []string, wsl bool) (string, bool) {
 	// The archive checkout is isolated from peer WIP. On Windows, --wsl-tests keeps the
 	// same archive question but executes test binaries under Linux, avoiding host
 	// application-control stalls on freshly compiled native test executables.
+	if wsl {
+		if err := prepareValidateGitIdentity(repo, dir, tip); err != nil {
+			return "prepare isolated Git identity: " + err.Error(), false
+		}
+	}
 	var cmd *exec.Cmd
 	if wsl && runtime.GOOS == "windows" {
 		// Stream the isolated archive into WSL-native /tmp. A tar stream is cheaper
@@ -374,6 +379,33 @@ func runValidateTests(dir string, args []string, wsl bool) (string, bool) {
 		return detail, true
 	}
 	return detail, err == nil
+}
+
+// prepareValidateGitIdentity gives repository-aware tests the requested commit and its
+// tracked-file index without attaching the isolated checkout to the peer-dirty worktree.
+// The fetched object database travels with the archive into WSL and is removed with the
+// surrounding temporary checkout on every return path.
+func prepareValidateGitIdentity(repo, dir, tip string) error {
+	commands := [][]string{
+		{"init", "--quiet"},
+		{"fetch", "--quiet", "--no-tags", "--depth=1", repo, tip},
+		{"read-tree", tip},
+		{"update-ref", "--no-deref", "HEAD", tip},
+	}
+	for _, args := range commands {
+		cmd := windowgate.Command("git", args...)
+		cmd.Dir = dir
+		windowgate.ConfigureBackgroundCommand(cmd)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			detail := strings.TrimSpace(string(out))
+			if detail == "" {
+				detail = err.Error()
+			}
+			return fmt.Errorf("git %s: %s", args[0], detail)
+		}
+	}
+	return nil
 }
 
 func posixQuote(s string) string {
