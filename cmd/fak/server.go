@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/serverlifecycle"
 )
 
@@ -77,6 +78,7 @@ func runServerInit(argv []string) (serverlifecycle.Result, error) {
 	if err := fs.Parse(argv); err != nil {
 		return serverlifecycle.Result{}, err
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	if fs.NArg() != 0 || *port > 65535 {
 		return serverlifecycle.Result{}, fmt.Errorf("unexpected arguments or invalid port")
 	}
@@ -107,6 +109,7 @@ func runServerUp(argv []string) (serverlifecycle.Result, error) {
 	if err := fs.Parse(argv); err != nil {
 		return serverlifecycle.Result{}, err
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	if fs.NArg() != 0 {
 		return serverlifecycle.Result{}, fmt.Errorf("unexpected arguments: %v", fs.Args())
 	}
@@ -122,6 +125,7 @@ func runServerStatus(argv []string) (serverlifecycle.Result, error) {
 	if err := fs.Parse(argv); err != nil {
 		return serverlifecycle.Result{}, err
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	if fs.NArg() != 0 {
 		return serverlifecycle.Result{}, fmt.Errorf("unexpected arguments: %v", fs.Args())
 	}
@@ -137,6 +141,7 @@ func runServerDown(argv []string) (serverlifecycle.Result, error) {
 	if err := fs.Parse(argv); err != nil {
 		return serverlifecycle.Result{}, err
 	}
+	*dir = pathutil.ExpandTilde(*dir)
 	if fs.NArg() != 0 {
 		return serverlifecycle.Result{}, fmt.Errorf("unexpected arguments: %v", fs.Args())
 	}
