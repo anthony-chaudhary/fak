@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -239,78 +238,6 @@ var dispatchAutoRenderProbe = func(ctx context.Context, rec map[string]any, plan
 	}
 	_ = renderDispatchAuto(rec, plan)
 	return ctx.Err()
-}
-
-// probeDispatchAutoInput gathers the live ceilings with the SAME folds tick/wave use: the
-// preflight's already-min-folded effective cap and live count, the switcher's free
-// account-slot headroom, and the router's ready-work count. A probe that fails contributes
-// a note and a conservative value (0), never a crash — an unknown ceiling reads as
-// "no wave" for the hard facts and "unset" for the optional ones, matching the fold's
-// zero-value contract.
-func probeDispatchAutoInput(root string, stderr io.Writer, maxWorkers int, workKind, backend, lane string, excluded []string) (dispatchauto.Input, []string, []string) {
-	in := dispatchauto.Input{}
-	notes := []string{}
-	probeErrors := []string{}
-
-	product := dispatchtick.ProductForBackend(backend)
-	var preflightSeatFree *int
-	if pf, err := dispatchPreflight(root, stderr, maxWorkers, workKind, product); err == nil {
-		if terms, ok := pf["cap_terms"].(map[string]any); ok {
-			in.EffectiveCap = dispatchMapInt(terms, "effective_cap")
-		}
-		in.LiveWorkers = dispatchMapInt(pf, "live")
-		if seat, ok := pf["seat"].(map[string]any); ok {
-			preflightSeatFree = intPtrFromAny(seat["free"])
-		}
-		if verdict := dispatchMapString(pf, "verdict"); verdict != "" {
-			notes = append(notes, "preflight: "+verdict)
-		}
-	} else {
-		msg := "preflight probe failed: " + err.Error()
-		notes = append(notes, msg)
-		probeErrors = append(probeErrors, msg)
-	}
-
-	if rows, err := dispatchReadAccountRoster(root); err == nil {
-		leases := dispatchLiveSeatLeases(filepath.Join(root, dispatchtick.RunsDirName))
-		pool := dispatchtick.BuildSeatPool(rows, leases, product)
-		// Price the same work-kind tier that dispatch wave will allocate. BuildSeatPool
-		// counts every product seat, including tiers this wave cannot use.
-		alloc := dispatchtick.AllocateWave(dispatchtick.AccountWaveInput{
-			Rows: rows, Leases: leases, Count: pool.FreeSeats, WorkKind: workKind, Product: product,
-		})
-		freeSlots := alloc.Granted
-		if preflightSeatFree != nil && *preflightSeatFree < freeSlots {
-			freeSlots = *preflightSeatFree
-		}
-		in.DistinctPools = dispatchAutoAccountCapacity(in.LiveWorkers, freeSlots)
-		if pool.TotalSeats > 0 {
-			notes = append(notes, fmt.Sprintf("accounts: %d/%d compatible session slot(s) free for %s", freeSlots, pool.TotalSeats, workKind))
-		}
-		if freeSlots == 0 && strings.TrimSpace(alloc.Reason) != "" {
-			notes = append(notes, "accounts: "+strings.TrimSpace(alloc.Reason))
-		}
-	} else {
-		msg := "account roster probe failed: " + err.Error()
-		notes = append(notes, msg)
-		probeErrors = append(probeErrors, msg)
-	}
-
-	if router, err := dispatchRouteIssues(root, stderr); err == nil {
-		if reason := dispatchAutoRouterProbeError(router); reason != "" {
-			msg := "issue router probe failed: " + reason
-			notes = append(notes, msg)
-			probeErrors = append(probeErrors, msg)
-		} else {
-			in.ReadyWork = dispatchAutoReadyWork(router, lane, excluded)
-		}
-	} else {
-		msg := "issue router probe failed: " + err.Error()
-		notes = append(notes, msg)
-		probeErrors = append(probeErrors, msg)
-	}
-
-	return in, notes, probeErrors
 }
 
 func dispatchAutoAccountCapacity(liveWorkers, freeSlots int) int {
