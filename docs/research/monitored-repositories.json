@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-22T16:30:00Z",
+  "updated_at": "2026-08-22T17:28:53Z",
   "methodology": "Harness-related repositories absent by exact owner/name from tracked fak docs were ranked by direct seam relevance, current development activity, adoption signal, and license clarity. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -261,6 +261,18 @@
       "stars_at_check": 5600,
       "last_push_at_check": "2026-08-22T12:16:00Z",
       "study_note": "docs/notes/CONCEPT-STUDY-FLASH-LINEAR-ATTENTION-2026-08-22.md"
+    },
+    {
+      "repository": "flashinfer-ai/flashinfer",
+      "url": "https://github.com/flashinfer-ai/flashinfer",
+      "status": "studied",
+      "priority": 21,
+      "why": "Production GPU-kernel control-plane analogue: reusable attention plans/workspace, correctness-gated profile tuning, JIT/artifact identity, and trace/replay mechanisms map directly to FAK compute HAL gaps.",
+      "last_checked": "2026-08-22",
+      "checked_revision": "fb28d7242b3506a2348265962041acc1fb56cca4",
+      "stars_at_check": 6209,
+      "last_push_at_check": "2026-08-22T11:34:52Z",
+      "study_note": "docs/research/flashinfer-study-2026-08-22.md"
     }
   ]
 }

@@ -270,6 +270,8 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [FlashInfer study — reusable execution plans, workload tuning, and traceable kernels](docs/research/flashinfer-study-2026-08-22.md) -- pinned deep study; files plan/run #8607, offline tuning #8608, and device-event trace #8609.
+
 - [Flash Linear Attention: recurrent-state kernels are an oracle, not a new runtime](docs/notes/CONCEPT-STUDY-FLASH-LINEAR-ATTENTION-2026-08-22.md) -- auto-indexed dated note.
 - [Concept study: FreeToken edge-native MoE serving](docs/notes/CONCEPT-STUDY-FREETOKEN-2026-08-22.md) -- source-pinned deep study; filed semantic state anchors #8601 and idle cache geometry #8603.
 - [OpenCode Go Ox Alpha coding dogfood — 2026-08-22](docs/notes/OX-ALPHA-DOGFOOD-2026-08-22.md) -- auto-indexed dated note.
