@@ -19,11 +19,11 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 	fmt.Fprintf(&out, "- Repeated failures: %d; mutation churn: %d; hook p95: %s ms.\n", summary.RepeatedFailures, summary.MutationChurn, auditInt(summary.HookP95MS))
 
 	out.WriteString("\n## Source denominator\n\n")
-	out.WriteString("| Source | Root | Present | Files scanned/discovered | Records | Exact usage | Applied usage | Duplicates | Refused |\n")
+	out.WriteString("| Source | Root | Present | Files scanned/non-session/discovered | Records | Exact usage | Applied usage | Duplicates | Refused |\n")
 	out.WriteString("|---|---|---:|---:|---:|---:|---:|---:|---:|\n")
 	for _, denominator := range result.Denominators {
-		fmt.Fprintf(&out, "| %s | `%s` | %t | %d/%d | %d | %d/%d | %d | %d | %d |\n",
-			denominator.Source, denominator.Root, denominator.RootPresent, denominator.FilesScanned, denominator.FilesDiscovered,
+		fmt.Fprintf(&out, "| %s | `%s` | %t | %d/%d/%d | %d | %d/%d | %d | %d | %d |\n",
+			denominator.Source, denominator.Root, denominator.RootPresent, denominator.FilesScanned, denominator.FixtureFilesExcluded, denominator.FilesDiscovered,
 			denominator.Records, denominator.UsageRecordsExact, denominator.UsageRecordsSeen, denominator.UsageRecordsApplied,
 			denominator.DuplicateUsageRecords, denominator.RefusedRecords)
 		fmt.Fprintf(&out, "\n%s token semantics: %s.\n", denominator.Source, denominator.TokenSemantics)

@@ -63,7 +63,8 @@ func (t *AuditTokens) add(other AuditTokens) {
 }
 
 // AuditDenominatorRow is the denominator for one source parser. RecordTypes makes
-// schema drift observable without treating harmless metadata records as usage.
+// schema drift observable without treating harmless metadata records as usage;
+// FixtureFilesExcluded makes narrowly classified fixture exclusions observable.
 type AuditDenominatorRow struct {
 	Schema                string         `json:"schema"`
 	Kind                  string         `json:"kind"`
@@ -72,6 +73,7 @@ type AuditDenominatorRow struct {
 	RootPresent           bool           `json:"root_present"`
 	FilesDiscovered       int            `json:"files_discovered"`
 	FilesScanned          int            `json:"files_scanned"`
+	FixtureFilesExcluded  int            `json:"fixture_files_excluded"`
 	Records               int            `json:"records"`
 	UsageRecordsSeen      int            `json:"usage_records_seen"`
 	UsageRecordsExact     int            `json:"usage_records_exact"`
@@ -115,21 +117,22 @@ type AuditBottleneckRow struct {
 
 // AuditSummaryRow is the machine-wide exact rollup and baseline input.
 type AuditSummaryRow struct {
-	Schema              string      `json:"schema"`
-	Kind                string      `json:"kind"`
-	Sources             int         `json:"sources"`
-	Transcripts         int         `json:"sessions"`
-	FilesDiscovered     int         `json:"files_discovered"`
-	FilesScanned        int         `json:"files_scanned"`
-	Records             int         `json:"records"`
-	UsageRecordsExact   int         `json:"usage_records_exact"`
-	RefusedRecords      int         `json:"refused_records"`
-	Tokens              AuditTokens `json:"tokens"`
-	InputOutputRatio    *float64    `json:"input_output_ratio"`
-	PromptWriteFraction *float64    `json:"prompt_write_fraction"`
-	RepeatedFailures    int         `json:"repeated_failures"`
-	MutationChurn       int         `json:"mutation_churn"`
-	HookP95MS           *int64      `json:"hook_p95_ms"`
+	Schema               string      `json:"schema"`
+	Kind                 string      `json:"kind"`
+	Sources              int         `json:"sources"`
+	Transcripts          int         `json:"sessions"`
+	FilesDiscovered      int         `json:"files_discovered"`
+	FilesScanned         int         `json:"files_scanned"`
+	FixtureFilesExcluded int         `json:"fixture_files_excluded"`
+	Records              int         `json:"records"`
+	UsageRecordsExact    int         `json:"usage_records_exact"`
+	RefusedRecords       int         `json:"refused_records"`
+	Tokens               AuditTokens `json:"tokens"`
+	InputOutputRatio     *float64    `json:"input_output_ratio"`
+	PromptWriteFraction  *float64    `json:"prompt_write_fraction"`
+	RepeatedFailures     int         `json:"repeated_failures"`
+	MutationChurn        int         `json:"mutation_churn"`
+	HookP95MS            *int64      `json:"hook_p95_ms"`
 }
 
 // AuditDeltaRow compares one higher-is-worse metric with a prior summary.
@@ -182,7 +185,7 @@ func DefaultAuditSources() []AuditSource {
 	}
 }
 
-// RunAudit reads each selected file once and returns a deterministic rollup.
+// RunAudit returns a deterministic rollup over the selected transcript roots.
 func RunAudit(opts AuditOptions) (AuditResult, error) {
 	if len(opts.Sources) == 0 {
 		opts.Sources = DefaultAuditSources()
@@ -301,6 +304,10 @@ func auditSource(source AuditSource, opts AuditOptions) (AuditDenominatorRow, []
 			return denominator, nil, nil, nil, fmt.Errorf("trajectory audit: relativize transcript: %w", relErr)
 		}
 		rel = filepath.ToSlash(rel)
+		if source.Name == AuditSourceClaude && auditIsClaudePytestFixture(path, rel) {
+			denominator.FixtureFilesExcluded++
+			continue
+		}
 		row, fileRefusals, fileHooks, parseErr := parseAuditFile(source.Name, path, rel, &denominator)
 		if parseErr != nil {
 			return denominator, nil, nil, nil, parseErr
@@ -318,6 +325,7 @@ func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTrans
 	for _, row := range denominators {
 		summary.FilesDiscovered += row.FilesDiscovered
 		summary.FilesScanned += row.FilesScanned
+		summary.FixtureFilesExcluded += row.FixtureFilesExcluded
 		summary.Records += row.Records
 		summary.UsageRecordsExact += row.UsageRecordsExact
 		summary.RefusedRecords += row.RefusedRecords

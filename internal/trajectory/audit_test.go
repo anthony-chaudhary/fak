@@ -85,6 +85,102 @@ func TestRunAuditPinnedCrossHarnessParity(t *testing.T) {
 	}
 }
 
+func TestAuditExcludesPinnedClaudePytestFixture(t *testing.T) {
+	baseline := runPinnedAudit(t, nil)
+	result, err := RunAudit(AuditOptions{Sources: []AuditSource{
+		{Name: AuditSourceClaude, Root: filepath.Join("testdata", "audit", "claude", "projects"), RootLabel: "claude/projects"},
+		{Name: AuditSourceCodex, Root: filepath.Join("testdata", "audit", "codex", "sessions"), RootLabel: "codex/sessions"},
+		{Name: AuditSourceClaude, Root: filepath.Join("testdata", "audit", "issue-8508", "claude", "projects"), RootLabel: "claude/projects/pytest-fixture"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Refusals) != 0 {
+		t.Fatalf("pytest fixture refusals = %+v, want none", result.Refusals)
+	}
+	if result.Summary.Tokens != baseline.Summary.Tokens {
+		t.Fatalf("tokens with fixture = %+v, want supported totals %+v", result.Summary.Tokens, baseline.Summary.Tokens)
+	}
+	if result.Summary.Transcripts != baseline.Summary.Transcripts {
+		t.Fatalf("sessions with fixture = %d, want supported sessions %d", result.Summary.Transcripts, baseline.Summary.Transcripts)
+	}
+	var fixtureDenominator AuditDenominatorRow
+	for _, row := range result.Denominators {
+		if row.Root == "claude/projects/pytest-fixture" {
+			fixtureDenominator = row
+		}
+	}
+	if fixtureDenominator.FilesDiscovered != 1 || fixtureDenominator.FilesScanned != 0 || fixtureDenominator.FixtureFilesExcluded != 1 {
+		t.Fatalf("pytest fixture denominator = %+v, want discovered=1 scanned=0 non-session=1", fixtureDenominator)
+	}
+}
+
+func TestAuditClaudePytestLookalikeKeepsExactUsage(t *testing.T) {
+	pinned := filepath.Join("testdata", "audit", "issue-8508", "claude", "projects",
+		"C--Users-USER-AppData-Local-Temp-pytest-of-USER-pytest-10095-test_main_json_runs_and_emits_0-ws",
+		"00000000-aaaa-bbbb-cccc-000000000000.jsonl")
+	data, err := os.ReadFile(pinned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = bytes.ReplaceAll(data, []byte(`"usage": {}`), []byte(`"usage": {"input_tokens": 7, "output_tokens": 2}`))
+	root := filepath.Join(t.TempDir(), "projects")
+	destination := filepath.Join(root,
+		"C--Users-USER-AppData-Local-Temp-pytest-of-USER-pytest-10095-test_main_json_runs_and_emits_0-ws",
+		"00000000-aaaa-bbbb-cccc-000000000000.jsonl")
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(destination, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunAudit(AuditOptions{Sources: []AuditSource{{Name: AuditSourceClaude, Root: root, RootLabel: "claude/projects"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := AuditTokens{InputTokens: 28, OutputTokens: 8}
+	if len(result.Refusals) != 0 || result.Summary.Tokens != want || result.Summary.UsageRecordsExact != 4 || result.Summary.Transcripts != 1 {
+		t.Fatalf("supported lookalike = summary:%+v refusals:%+v, want exact tokens %+v", result.Summary, result.Refusals, want)
+	}
+	if result.Summary.FixtureFilesExcluded != 0 {
+		t.Fatalf("supported lookalike classified non-session: %+v", result.Summary)
+	}
+}
+
+func TestAuditClaudePytestFixtureVariants(t *testing.T) {
+	pinned := filepath.Join("testdata", "audit", "issue-8508", "claude", "projects",
+		"C--Users-USER-AppData-Local-Temp-pytest-of-USER-pytest-10095-test_main_json_runs_and_emits_0-ws",
+		"00000000-aaaa-bbbb-cccc-000000000000.jsonl")
+	data, err := os.ReadFile(pinned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "projects")
+	for _, name := range []string{
+		"test_main_json_runs_and_emits_0",
+		"test_route_findings_off_writes0",
+		"test_route_findings_on_appends0",
+	} {
+		variant := bytes.ReplaceAll(data, []byte("test_main_json_runs_and_emits_0"), []byte(name))
+		destination := filepath.Join(root,
+			"C--Users-USER-AppData-Local-Temp-pytest-of-USER-pytest-10095-"+name+"-ws",
+			"00000000-aaaa-bbbb-cccc-000000000000.jsonl")
+		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(destination, variant, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := RunAudit(AuditOptions{Sources: []AuditSource{{Name: AuditSourceClaude, Root: root, RootLabel: "claude/projects"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Refusals) != 0 || result.Summary.Transcripts != 0 || result.Summary.FixtureFilesExcluded != 3 || result.Summary.FilesDiscovered != 3 {
+		t.Fatalf("pytest fixture variants = summary:%+v refusals:%+v", result.Summary, result.Refusals)
+	}
+}
+
 func TestAuditVersionedJSONLMarkdownAndBaseline(t *testing.T) {
 	ioRatio := 10.0
 	cacheBurden := 0.05
