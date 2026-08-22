@@ -8,14 +8,21 @@ import (
 	"os"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/harnessserver"
 	"github.com/anthony-chaudhary/fak/internal/harnessverify"
 )
+
+type harnessVerifyRunCLIResult struct {
+	Harness harnessverify.Report   `json:"harness"`
+	Server  harnessserver.Verified `json:"server"`
+}
 
 func runHarnessVerifyRun(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("harness verify-run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	lockPath := fs.String("lock", "", "verified harness lock promised for the run")
 	observationPath := fs.String("observation", "", "runtime capability and decision observation JSON")
+	serverBindingPath := fs.String("server-binding", "", "immutable harness server binding created by harness init")
 	jsonView := fs.Bool("json", false, "emit machine-readable verification JSON")
 	observationTemplate := fs.Bool("print-observation-template", false, "print a runtime observation bound to --lock")
 	if err := fs.Parse(argv); err != nil {
@@ -31,6 +38,11 @@ func runHarnessVerifyRun(stdout, stderr io.Writer, argv []string) int {
 	if *lockPath == "" || *observationPath == "" {
 		fmt.Fprintln(stderr, "fak harness verify-run: --lock and --observation are required")
 		return 2
+	}
+	server, err := verifyHarnessServerBinding(*serverBindingPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak harness verify-run: server binding: %v\n", err)
+		return 1
 	}
 	lock, err := readHarnessPreviewLock(*lockPath)
 	if err != nil {
@@ -57,11 +69,18 @@ func runHarnessVerifyRun(stdout, stderr io.Writer, argv []string) int {
 	if *jsonView {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
+		var output any = report
+		if server != nil {
+			output = harnessVerifyRunCLIResult{Harness: report, Server: *server}
+		}
+		if err := enc.Encode(output); err != nil {
 			fmt.Fprintf(stderr, "fak harness verify-run: %v\n", err)
 			return 1
 		}
 	} else {
+		if server != nil {
+			fmt.Fprintf(stdout, "SERVER RECEIPT | VERIFIED | model=%s generation=%d protocol=%s/%s\n", server.ModelAlias, server.Generation, server.ProtocolFamily, server.ProtocolRevision)
+		}
 		fmt.Fprint(stdout, harnessverify.Render(report))
 	}
 	if report.Verdict == "deviation" {

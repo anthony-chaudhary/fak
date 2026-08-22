@@ -10,7 +10,13 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/harnessresolve"
+	"github.com/anthony-chaudhary/fak/internal/harnessserver"
 )
+
+type harnessResolveCLIResult struct {
+	harnessresolve.Result
+	Server *harnessserver.Verified `json:"server,omitempty"`
+}
 
 func runHarnessResolve(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("harness resolve", flag.ContinueOnError)
@@ -21,6 +27,7 @@ func runHarnessResolve(stdout, stderr io.Writer, argv []string) int {
 	arch := fs.String("arch", "", "target architecture")
 	contract := fs.String("contract", "", "target harness contract")
 	outputPath := fs.String("output", "", "write the verified product lock for later inspect/preview/verify-run stages")
+	serverBindingPath := fs.String("server-binding", "", "immutable harness server binding created by harness init")
 	example := fs.String("example", "", "print a generic valid manifest or selection template")
 	if err := fs.Parse(argv); err != nil {
 		return 2
@@ -56,6 +63,11 @@ func runHarnessResolve(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak harness resolve: parse selection: %v\n", err)
 		return 1
 	}
+	server, err := verifyHarnessServerBinding(*serverBindingPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak harness resolve: server binding: %v\n", err)
+		return 1
+	}
 	result, err := harnessresolve.Resolve(context.Background(), manifest, selection.Layers, harnessresolve.Environment{OS: *osName, Arch: *arch, Contract: *contract})
 	if err != nil {
 		fmt.Fprintf(stderr, "fak harness resolve: %v\n", err)
@@ -69,7 +81,7 @@ func runHarnessResolve(stdout, stderr io.Writer, argv []string) int {
 	}
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(result); err != nil {
+	if err := enc.Encode(harnessResolveCLIResult{Result: result, Server: server}); err != nil {
 		fmt.Fprintf(stderr, "fak harness resolve: %v\n", err)
 		return 1
 	}
