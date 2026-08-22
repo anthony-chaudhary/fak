@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-22T02:12:33-07:00",
+  "updated_at": "2026-08-22T16:30:00Z",
   "methodology": "Harness-related repositories absent by exact owner/name from tracked fak docs were ranked by direct seam relevance, current development activity, adoption signal, and license clarity. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -237,6 +237,30 @@
       "stars_at_check": 106610,
       "last_push_at_check": "2026-08-22T01:10:05Z",
       "study_note": "docs/integrations/provider-session-reset.md"
+    },
+    {
+      "repository": "sgl-project/mini-sglang",
+      "url": "https://github.com/sgl-project/mini-sglang",
+      "status": "studied",
+      "priority": 21,
+      "why": "Compact modern LLM-serving control loop studied for the integration of radix-prefix reuse, page-aware KV allocation, bounded chunked prefill, continuous decode, stable tensor-parallel request order, CUDA-graph replay, and user-visible latency/throughput measurement. The resulting map reuses fak radixkv and grounds the missing Qwen3.8 serving spine in existing issue #8395.",
+      "last_checked": "2026-08-22",
+      "checked_revision": "9a91cfafe754aa85daee49998176275667eb58f2",
+      "stars_at_check": 4794,
+      "last_push_at_check": "2026-05-17T12:37:42Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-MINI-SGLANG-2026-08-22.md"
+    },
+    {
+      "repository": "fla-org/flash-linear-attention",
+      "url": "https://github.com/fla-org/flash-linear-attention",
+      "status": "studied",
+      "priority": 22,
+      "why": "FLA's MIT naive, chunked-prefill, and fused-recurrent GDN implementations were studied as an independent correctness oracle for fak's resident Qwen sequence work. The Python/PyTorch/Triton runtime and broad architecture catalog are excluded; packed multi-request state and graph capture remain watch items behind existing #8344 and #8391.",
+      "last_checked": "2026-08-22",
+      "checked_revision": "bc3b101dcb713ddc5bd8924b66754eb68b5ccf89",
+      "stars_at_check": 5600,
+      "last_push_at_check": "2026-08-22T12:16:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-FLASH-LINEAR-ATTENTION-2026-08-22.md"
     }
   ]
 }
