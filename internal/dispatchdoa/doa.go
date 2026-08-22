@@ -113,6 +113,10 @@ const (
 	// CauseUsageError: the binary printed its usage block and exited without a more
 	// specific diagnostic (an unknown subcommand, a missing required argument).
 	CauseUsageError      = "usage_error"
+	CauseAuthMissing     = "auth_missing"
+	CauseAuthExpired     = "auth_expired"
+	CauseAuthMismatched  = "auth_mismatched"
+	CauseGatewayRejected = "gateway_rejected"
 	CauseAuthInvalid     = "auth_invalid"
 	CauseProcessStart    = "process_start"
 	CauseImmediateExit   = "immediate_exit"
@@ -127,6 +131,10 @@ var causeNextActions = map[string]string{
 	CauseExecFailure:     "repair the worker runtime/executable path before retrying",
 	CauseWorkingDir:      "repair the declared worker directory before retrying",
 	CauseUsageError:      "inspect the usage diagnostic and repair the launch contract",
+	CauseAuthMissing:     "select a seat with a credential, then rerun account/read with refreshToken=true",
+	CauseAuthExpired:     "refresh or re-login the selected account before retrying",
+	CauseAuthMismatched:  "repair the selected-seat credential provenance before retrying",
+	CauseGatewayRejected: "re-login the selected account and recheck the exact guarded gateway route before retrying",
 	CauseAuthInvalid:     "refresh or re-login the selected account, then rerun account/read with refreshToken=true",
 	CauseProcessStart:    "repair the executable/path/process-start failure before retrying",
 	CauseImmediateExit:   "inspect the first post-launch error and repair the worker route",
@@ -171,10 +179,14 @@ var (
 		`|(?i)getwd: no such file or directory`)
 
 	// usageRE is a bare usage block — the weakest signature, checked last.
-	usageRE         = regexp.MustCompile(`(?mi)^usage: `)
-	authInvalidRE   = regexp.MustCompile(`(?i)(auth_invalid|invalid_refresh_token|invalid refresh token|401 unauthorized|upstream rejected the credential)`)
-	processStartRE  = regexp.MustCompile(`(?i)(executable file not found|failed to start|process start|createprocess)`)
-	immediateExitRE = regexp.MustCompile(`(?i)(exited abnormally|nonzero_exit|immediate exit)`)
+	usageRE             = regexp.MustCompile(`(?mi)^usage: `)
+	authMissingRE       = regexp.MustCompile(`(?i)(\bauth_missing\b|credential_reason"?\s*[:=]\s*"?missing\b|no account home|no credential|not logged in|login required)`)
+	authExpiredRE       = regexp.MustCompile(`(?i)(\bauth_expired\b|credential_reason"?\s*[:=]\s*"?expired\b|credential (?:is )?expired|token expired|expired token)`)
+	authMismatchedRE    = regexp.MustCompile(`(?i)(\bauth_mismatched\b|credential_reason"?\s*[:=]\s*"?mismatched\b|credential (?:is )?mismatched|different account home|credential provenance mismatch)`)
+	authGatewayRejectRE = regexp.MustCompile(`(?i)(\b(?:auth_)?gateway_rejected\b|credential_reason"?\s*[:=]\s*"?gateway_rejected\b|invalid_refresh_token|invalid refresh token|401 unauthorized|gateway rejected the credential|upstream rejected the credential)`)
+	authInvalidRE       = regexp.MustCompile(`(?i)(auth_invalid|authentication failed|unauthorized)`)
+	processStartRE      = regexp.MustCompile(`(?i)(executable file not found|failed to start|process start|createprocess)`)
+	immediateExitRE     = regexp.MustCompile(`(?i)(exited abnormally|nonzero_exit|immediate exit)`)
 )
 
 // Verdict is one run's classification.
@@ -222,9 +234,10 @@ func Classify(head string, size int64) Verdict {
 	// Past every gate: the dispatcher spawned it, it wrote a stub, it never launched.
 	// Precedence runs most-specific first so a flag-parse death (which ALSO prints a
 	// usage block) is never demoted to the generic usage_error class.
+	if cause := CredentialCause(head); cause != "" {
+		return Verdict{DOA: true, Cause: cause}
+	}
 	switch {
-	case authInvalidRE.MatchString(head):
-		return Verdict{DOA: true, Cause: CauseAuthInvalid}
 	case immediateExitRE.MatchString(head):
 		return Verdict{DOA: true, Cause: CauseImmediateExit}
 	case flagParseRE.MatchString(head):
@@ -241,6 +254,27 @@ func Classify(head string, size int64) Verdict {
 		return Verdict{DOA: true, Cause: CauseUsageError}
 	default:
 		return Verdict{DOA: true, Cause: CauseUnrecognized, Signature: unknownSignature(head)}
+	}
+}
+
+// CredentialCause returns the scrubbed selected-seat credential cause carried by
+// a prelaunch refusal or gateway 401. An empty result means the text is not a
+// recognized credential failure. Callers may expose the returned token, never the
+// source text, so diagnostics do not echo credential material.
+func CredentialCause(text string) string {
+	switch {
+	case authMissingRE.MatchString(text):
+		return CauseAuthMissing
+	case authExpiredRE.MatchString(text):
+		return CauseAuthExpired
+	case authMismatchedRE.MatchString(text):
+		return CauseAuthMismatched
+	case authGatewayRejectRE.MatchString(text):
+		return CauseGatewayRejected
+	case authInvalidRE.MatchString(text):
+		return CauseAuthInvalid
+	default:
+		return ""
 	}
 }
 

@@ -184,8 +184,8 @@ func TestClassifyOperationalFailureFamilies(t *testing.T) {
 		want string
 	}{
 		{"auth invalid verdict", "worker preflight refused: AUTH_INVALID", CauseAuthInvalid},
-		{"invalid refresh token", `401 Unauthorized: {"code":"invalid_refresh_token"}`, CauseAuthInvalid},
-		{"guarded upstream credential", "upstream rejected the credential (HTTP 401)", CauseAuthInvalid},
+		{"invalid refresh token", `401 Unauthorized: {"code":"invalid_refresh_token"}`, CauseGatewayRejected},
+		{"guarded upstream credential", "upstream rejected the credential (HTTP 401)", CauseGatewayRejected},
 		{"process start", "CreateProcess failed to start worker", CauseProcessStart},
 		{"immediate exit", "harness crashed (NONZERO_EXIT, exit 1)", CauseImmediateExit},
 	}
@@ -200,8 +200,43 @@ func TestClassifyOperationalFailureFamilies(t *testing.T) {
 	}
 }
 
+func TestClassifySelectedSeatCredentialRefusals(t *testing.T) {
+	tests := []struct {
+		name string
+		log  string
+		want string
+	}{
+		{"missing", "worker preflight refused: AUTH_INVALID credential_reason=missing", "auth_missing"},
+		{"expired", "worker preflight refused: AUTH_INVALID credential_reason=expired", "auth_expired"},
+		{"mismatched", "worker preflight refused: AUTH_INVALID credential_reason=mismatched", "auth_mismatched"},
+		{"gateway rejected", "worker preflight refused: AUTH_INVALID credential_reason=gateway_rejected", "gateway_rejected"},
+		{"gateway 401", `401 Unauthorized: {"code":"invalid_refresh_token"}`, "gateway_rejected"},
+		{"typed missing verdict", "worker preflight refused: AUTH_MISSING", "auth_missing"},
+		{"typed expired verdict", "worker preflight refused: AUTH_EXPIRED", "auth_expired"},
+		{"typed mismatched verdict", "worker preflight refused: AUTH_MISMATCHED", "auth_mismatched"},
+		{"typed gateway verdict", "worker preflight refused: GATEWAY_REJECTED", "gateway_rejected"},
+		{"generic compatibility", "worker preflight refused: AUTH_INVALID", CauseAuthInvalid},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := CredentialCause(tc.log); got != tc.want {
+				t.Fatalf("CredentialCause(%q) = %q, want %q", tc.log, got, tc.want)
+			}
+			log := SpawnHeaderPrefix + "20260821 issue=8420 lane=dispatch backend=codex argv0=fak.exe\n" + tc.log
+			got := Classify(log, int64(len(log)))
+			if !got.DOA || got.Cause != tc.want {
+				t.Fatalf("Classify(%q) = %+v, want DOA cause %q", tc.log, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestFoldProvidesActionForEveryCause(t *testing.T) {
 	runs := []Run{
+		{Log: "missing.log", Verdict: Verdict{DOA: true, Cause: CauseAuthMissing}},
+		{Log: "expired.log", Verdict: Verdict{DOA: true, Cause: CauseAuthExpired}},
+		{Log: "mismatched.log", Verdict: Verdict{DOA: true, Cause: CauseAuthMismatched}},
+		{Log: "rejected.log", Verdict: Verdict{DOA: true, Cause: CauseGatewayRejected}},
 		{Log: "auth.log", Verdict: Verdict{DOA: true, Cause: CauseAuthInvalid}},
 		{Log: "novel.log", Verdict: Verdict{DOA: true, Cause: CauseUnrecognized, Signature: "sha256:0123456789abcdef"}},
 	}

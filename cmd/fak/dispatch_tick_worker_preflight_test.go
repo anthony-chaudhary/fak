@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -315,5 +319,117 @@ func TestDispatchWorkerPreflightReadyLaunchesExactAccountModelAndEvidence(t *tes
 		capturedEnv["FAK_WORKER_PREFLIGHT_MODEL"] != probed.Model ||
 		capturedEnv["FAK_WORKER_PREFLIGHT_SEAT"] != dispatchMapString(preflight, "seat_token") {
 		t.Fatalf("spawn env did not carry exact preflight evidence: env=%#v preflight=%#v", capturedEnv, preflight)
+	}
+}
+
+func TestDispatchCodexGatewayCredentialPreflightFixtures(t *testing.T) {
+	const accountID = "fixture-account"
+	for _, tc := range []struct {
+		name       string
+		status     int
+		credential string
+		want       string
+	}{
+		{name: "missing", status: http.StatusBadRequest, want: dispatchWorkerPreflightAuthMissing},
+		{name: "expired", status: http.StatusBadRequest, credential: dispatchTestJWT(time.Now().Add(-time.Hour)), want: dispatchWorkerPreflightAuthExpired},
+		{name: "mismatched", status: http.StatusForbidden, credential: dispatchTestJWT(time.Now().Add(time.Hour)), want: dispatchWorkerPreflightAuthMismatched},
+		{name: "gateway rejected", status: http.StatusUnauthorized, credential: dispatchTestJWT(time.Now().Add(time.Hour)), want: dispatchWorkerPreflightGatewayRejected},
+		{name: "healthy route", status: http.StatusBadRequest, credential: dispatchTestJWT(time.Now().Add(time.Hour)), want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := 0
+			gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if r.URL.Path != "/v1/responses" {
+					t.Errorf("path = %q, want /v1/responses", r.URL.Path)
+				}
+				if r.Header.Get("Authorization") != "Bearer "+tc.credential || r.Header.Get(guardCodexChatGPTAccountHeader) != accountID {
+					t.Errorf("gateway did not receive matched credential provenance")
+				}
+				w.WriteHeader(tc.status)
+			}))
+			defer gateway.Close()
+			home := t.TempDir()
+			if tc.credential != "" {
+				writeDispatchCodexAuth(t, home, tc.credential, accountID)
+			}
+			req := dispatchWorkerPreflightRequest{
+				Account:       dispatchtick.Account{Dir: home},
+				LaunchCommand: []string{"fak", "guard", "--base-url", gateway.URL + "/v1", "--", "codex"},
+			}
+			got := dispatchCodexGatewayCredentialPreflight(context.Background(), req, time.Now())
+			if got != tc.want {
+				t.Fatalf("verdict = %q, want %q", got, tc.want)
+			}
+			localOnly := tc.want == dispatchWorkerPreflightAuthMissing || tc.want == dispatchWorkerPreflightAuthExpired
+			if localOnly && requests != 0 {
+				t.Fatalf("locally rejected credential reached gateway: requests=%d", requests)
+			}
+			if !localOnly && requests != 1 {
+				t.Fatalf("gateway requests = %d, want 1", requests)
+			}
+		})
+	}
+}
+
+func TestDispatchWorkerGateway401RefusesDryRunAndLiveBeforeSpawn(t *testing.T) {
+	root, _ := dispatchCodexGateFixture(t, false)
+	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", healthyDispatchProvider(t)+"/v1")
+	setDispatchWorkerPreflightProbe(t, func(context.Context, dispatchWorkerPreflightRequest) (dispatchCodexPreflightObservation, error) {
+		return dispatchCodexPreflightObservation{Authenticated: true, GatewayVerdict: dispatchWorkerPreflightGatewayRejected}, nil
+	})
+	oldBroker, oldSpawner := launchSpawnBroker, dispatchIssueWorkerSpawner
+	spawned := false
+	launchSpawnBroker = func(a launchBrokerAttempt) launchBrokerGrant { return allowLaunchBrokerGrant(a, "unit-test-allow") }
+	dispatchIssueWorkerSpawner = func([]string, map[string]string, string, string, int, string, string, string, []string, dispatchtick.Account, *dispatchtick.Membership, string, string, float64) (dispatchSpawnResult, error) {
+		spawned = true
+		return dispatchSpawnResult{}, nil
+	}
+	t.Cleanup(func() { launchSpawnBroker, dispatchIssueWorkerSpawner = oldBroker, oldSpawner })
+
+	for _, live := range []bool{false, true} {
+		name := "dry-run"
+		args := []string{"tick", "--workspace", root, "--backend", "codex", "--lane", "docs", "--no-refresh", "--no-loop-ledger"}
+		if live {
+			name = "live"
+			args = append(args, "--live")
+		}
+		t.Run(name, func(t *testing.T) {
+			out, _, code := runDispatchAt(append(args, "--json")...)
+			if code != 1 || spawned {
+				t.Fatalf("exit=%d spawned=%v output=%s", code, spawned, out)
+			}
+			var got map[string]any
+			if err := json.Unmarshal([]byte(out), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got["action"] != "worker_preflight_refused" || got["verdict"] != dispatchWorkerPreflightGatewayRejected || got["admitted_workers"] != float64(0) {
+				t.Fatalf("receipt = %#v", got)
+			}
+		})
+	}
+}
+
+func dispatchTestJWT(exp time.Time) string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"exp":%d}`, exp.Unix())))
+	return header + "." + payload + ".fixture"
+}
+
+func writeDispatchCodexAuth(t *testing.T, home, credential, accountID string) {
+	t.Helper()
+	doc := map[string]any{
+		"auth_mode": "chatgpt",
+		"tokens": map[string]string{
+			"access_token": credential,
+			"account_id":   accountID,
+		},
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, codexAuthFileName), raw, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

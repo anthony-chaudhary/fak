@@ -5,11 +5,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +27,10 @@ import (
 const (
 	dispatchWorkerPreflightReady              = "READY"
 	dispatchWorkerPreflightAuthInvalid        = "AUTH_INVALID"
+	dispatchWorkerPreflightAuthMissing        = "AUTH_MISSING"
+	dispatchWorkerPreflightAuthExpired        = "AUTH_EXPIRED"
+	dispatchWorkerPreflightAuthMismatched     = "AUTH_MISMATCHED"
+	dispatchWorkerPreflightGatewayRejected    = "GATEWAY_REJECTED"
 	dispatchWorkerPreflightModelUnsupported   = "MODEL_UNSUPPORTED"
 	dispatchWorkerPreflightQuotaExhausted     = "QUOTA_EXHAUSTED"
 	dispatchWorkerPreflightTransientUpstream  = "TRANSIENT_UPSTREAM"
@@ -56,6 +63,7 @@ type dispatchCodexPreflightObservation struct {
 	RouteError     string
 	QuotaExhausted bool
 	RetryAt        time.Time
+	GatewayVerdict string
 }
 
 type dispatchWorkerPreflightResult struct {
@@ -165,7 +173,7 @@ func dispatchWorkerPreflight(ctx context.Context, req dispatchWorkerPreflightReq
 		return result.finishEvidence(nil)
 	}
 	if result.accountDir == "" {
-		result.Verdict = dispatchWorkerPreflightAuthInvalid
+		result.Verdict = dispatchWorkerPreflightAuthMissing
 		result.Reason = "Codex launch has no account home to refresh"
 		return result.finishEvidence(nil)
 	}
@@ -185,15 +193,24 @@ func dispatchWorkerPreflight(ctx context.Context, req dispatchWorkerPreflightReq
 	case err != nil:
 		result.Verdict = dispatchWorkerPreflightErrorVerdict(err.Error())
 	case strings.TrimSpace(obs.RouteError) != "":
-		result.Verdict = dispatchWorkerPreflightRouteMisconfigured
+		result.Verdict = dispatchWorkerPreflightErrorVerdict(obs.RouteError)
+		if result.Verdict == dispatchWorkerPreflightTransientUpstream {
+			result.Verdict = dispatchWorkerPreflightRouteMisconfigured
+		}
 	case strings.TrimSpace(obs.AuthError) != "":
 		result.Verdict = dispatchWorkerPreflightErrorVerdict(obs.AuthError)
 		if result.Verdict != dispatchWorkerPreflightRouteMisconfigured &&
-			result.Verdict != dispatchWorkerPreflightTransientUpstream {
+			result.Verdict != dispatchWorkerPreflightTransientUpstream &&
+			result.Verdict != dispatchWorkerPreflightAuthMissing &&
+			result.Verdict != dispatchWorkerPreflightAuthExpired &&
+			result.Verdict != dispatchWorkerPreflightAuthMismatched &&
+			result.Verdict != dispatchWorkerPreflightGatewayRejected {
 			result.Verdict = dispatchWorkerPreflightAuthInvalid
 		}
 	case !obs.Authenticated:
-		result.Verdict = dispatchWorkerPreflightAuthInvalid
+		result.Verdict = dispatchWorkerPreflightAuthMissing
+	case strings.TrimSpace(obs.GatewayVerdict) != "":
+		result.Verdict = obs.GatewayVerdict
 	case strings.TrimSpace(obs.ModelError) != "":
 		result.Verdict = dispatchWorkerPreflightErrorVerdict(obs.ModelError)
 	case !dispatchPreflightModelAvailable(result.Model, obs.Models):
@@ -212,6 +229,14 @@ func dispatchWorkerPreflight(ctx context.Context, req dispatchWorkerPreflightReq
 		result.Reason = fmt.Sprintf("Codex seat is ready for model %q", result.Model)
 	case dispatchWorkerPreflightAuthInvalid:
 		result.Reason = "Codex credential refresh failed for the selected seat"
+	case dispatchWorkerPreflightAuthMissing:
+		result.Reason = "Codex credential is missing for the selected seat"
+	case dispatchWorkerPreflightAuthExpired:
+		result.Reason = "Codex credential is expired for the selected seat"
+	case dispatchWorkerPreflightAuthMismatched:
+		result.Reason = "Codex credential does not match the selected seat"
+	case dispatchWorkerPreflightGatewayRejected:
+		result.Reason = "Codex gateway rejected the selected seat credential"
 	case dispatchWorkerPreflightModelUnsupported:
 		result.Reason = fmt.Sprintf("model %q is unavailable to credential class %q", result.Model, firstString(result.AccountType, "unknown"))
 	case dispatchWorkerPreflightQuotaExhausted:
@@ -258,6 +283,26 @@ func (r dispatchWorkerPreflightResult) finishEvidence(obs *dispatchCodexPrefligh
 func dispatchWorkerPreflightErrorVerdict(text string) string {
 	lower := strings.ToLower(strings.TrimSpace(text))
 	switch {
+	case strings.Contains(lower, "credential missing"),
+		strings.Contains(lower, "no codex login"),
+		strings.Contains(lower, "not logged in"),
+		strings.Contains(lower, "login required"):
+		return dispatchWorkerPreflightAuthMissing
+	case strings.Contains(lower, "credential expired"),
+		strings.Contains(lower, "expired token"),
+		strings.Contains(lower, "token expired"):
+		return dispatchWorkerPreflightAuthExpired
+	case strings.Contains(lower, "credential mismatched"),
+		strings.Contains(lower, "different account home"),
+		strings.Contains(lower, "credential provenance mismatch"):
+		return dispatchWorkerPreflightAuthMismatched
+	case strings.Contains(lower, "gateway rejected"),
+		strings.Contains(lower, "invalid_refresh_token"),
+		strings.Contains(lower, "invalid refresh token"),
+		strings.Contains(lower, "invalid token"),
+		strings.Contains(lower, "401 unauthorized"),
+		strings.Contains(lower, "unauthorized"):
+		return dispatchWorkerPreflightGatewayRejected
 	case strings.Contains(lower, "model_provider"),
 		strings.Contains(lower, "env_key"),
 		strings.Contains(lower, "provider configuration"),
@@ -290,12 +335,7 @@ func dispatchWorkerPreflightErrorVerdict(text string) string {
 		strings.Contains(lower, "spend control reached"):
 		return dispatchWorkerPreflightQuotaExhausted
 	case strings.Contains(lower, "refresh token"),
-		strings.Contains(lower, "invalid token"),
-		strings.Contains(lower, "expired token"),
-		strings.Contains(lower, "authentication failed"),
-		strings.Contains(lower, "unauthorized"),
-		strings.Contains(lower, "not logged in"),
-		strings.Contains(lower, "login required"):
+		strings.Contains(lower, "authentication failed"):
 		return dispatchWorkerPreflightAuthInvalid
 	default:
 		return dispatchWorkerPreflightTransientUpstream
@@ -426,7 +466,79 @@ func runDispatchCodexAppServerPreflight(ctx context.Context, req dispatchWorkerP
 		}
 		return dispatchCodexPreflightObservation{}, fmt.Errorf("Codex app-server preflight exited: %w", err)
 	}
-	return dispatchCodexObservationFromRPC(messages), nil
+	obs := dispatchCodexObservationFromRPC(messages)
+	if obs.Authenticated && obs.AuthError == "" {
+		obs.GatewayVerdict = dispatchCodexGatewayCredentialPreflight(ctx, req, time.Now().UTC())
+	}
+	return obs, nil
+}
+
+var dispatchCodexGatewayHTTPClient = &http.Client{Timeout: dispatchProviderProbeTimeout}
+
+// dispatchCodexGatewayCredentialPreflight checks the same responses route and matched
+// credential pair guard will proxy for the child. A syntactically invalid request is
+// deliberate: any non-auth HTTP response proves the credential crossed the route without
+// spending model quota.
+func dispatchCodexGatewayCredentialPreflight(ctx context.Context, req dispatchWorkerPreflightRequest, now time.Time) string {
+	cred, err := readCodexSubscriptionCredential(filepath.Join(req.Account.Dir, codexAuthFileName))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) || strings.Contains(strings.ToLower(err.Error()), "no codex login") || strings.Contains(strings.ToLower(err.Error()), "no codex chatgpt-subscription token") {
+			return dispatchWorkerPreflightAuthMissing
+		}
+		return dispatchWorkerPreflightAuthInvalid
+	}
+	if exp, ok := dispatchJWTExpiry(cred.AccessToken); ok && !exp.After(now) {
+		return dispatchWorkerPreflightAuthExpired
+	}
+	endpoint := dispatchProviderURL(req.LaunchCommand)
+	if endpoint == "" {
+		endpoint = guardCodexChatGPTBackendBaseURL
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return dispatchWorkerPreflightRouteMisconfigured
+	}
+	u.Path = strings.TrimSuffix(u.Path, "/") + "/responses"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), strings.NewReader(`{}`))
+	if err != nil {
+		return dispatchWorkerPreflightRouteMisconfigured
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+cred.AccessToken)
+	for key, value := range guardCodexSubscriptionHeaders(cred) {
+		httpReq.Header.Set(key, value)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := dispatchCodexGatewayHTTPClient.Do(httpReq)
+	if err != nil {
+		return dispatchWorkerPreflightTransientUpstream
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+		return dispatchWorkerPreflightGatewayRejected
+	case http.StatusForbidden:
+		return dispatchWorkerPreflightAuthMismatched
+	default:
+		return ""
+	}
+}
+
+func dispatchJWTExpiry(raw string) (time.Time, bool) {
+	parts := strings.Split(raw, ".")
+	if len(parts) != 3 {
+		return time.Time{}, false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return time.Time{}, false
+	}
+	var claims struct {
+		Exp int64 `json:"exp"`
+	}
+	if json.Unmarshal(payload, &claims) != nil || claims.Exp <= 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(claims.Exp, 0).UTC(), true
 }
 
 func dispatchReadCodexRPCMessage(ctx context.Context, scanner *bufio.Scanner, wantID string) (dispatchCodexRPCMessage, error) {
