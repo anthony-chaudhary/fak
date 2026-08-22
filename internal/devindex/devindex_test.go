@@ -191,6 +191,76 @@ func TestSearchDocsRanking(t *testing.T) {
 	}
 }
 
+func TestSearchDocsRanksMultiTermCoverageBeforeFieldWeight(t *testing.T) {
+	c := &Catalog{Docs: []Doc{
+		{Title: "Dogfood archive", Path: "docs/notes/dogfood.md"},
+		{Title: "Developer tooling", Path: "docs/dev-tooling.md", Blurb: "documentation dogfood lookup"},
+	}}
+
+	hits := c.SearchDocs("documentation dogfood")
+	if len(hits) != 2 {
+		t.Fatalf("SearchDocs(documentation dogfood) = %+v, want two hits", hits)
+	}
+	if hits[0].Path != "docs/dev-tooling.md" {
+		t.Fatalf("top multi-term hit = %q, want the two-token owner before the higher-weight one-token note", hits[0].Path)
+	}
+
+	// Multi-term ranking must not change the established single-term field weights.
+	single := c.SearchDocs("dogfood")
+	if len(single) != 2 || single[0].Path != "docs/notes/dogfood.md" {
+		t.Fatalf("SearchDocs(dogfood) = %+v, want title/path-weighted note first", single)
+	}
+}
+
+func TestSearchDocsRepositoryMultiTermCanaries(t *testing.T) {
+	c, err := Load(filepath.Clean(filepath.Join("..", "..")))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		query     string
+		limit     int
+		unrelated string
+	}{
+		{
+			query:     "documentation self-index dogfood",
+			limit:     10,
+			unrelated: "docs/notes/DOS-FRESH-INSTALL-VALUE-DOGFOOD-LAPTOP-2026-06-25.md",
+		},
+		{
+			query:     "shared-tree commit",
+			limit:     5,
+			unrelated: "docs/notes/SHARED-CLONE-INTEGRATION-PASS-2026-06-29.md",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.query, func(t *testing.T) {
+			hits := c.SearchDocs(tc.query)
+			ownerRank := docPathRank(hits, "docs/dev-tooling.md")
+			if ownerRank < 0 || ownerRank >= tc.limit {
+				t.Fatalf("docs/dev-tooling.md rank = %d for %q, want within top %d; top hits = %+v", ownerRank+1, tc.query, tc.limit, hits[:min(tc.limit, len(hits))])
+			}
+			unrelatedRank := docPathRank(hits, tc.unrelated)
+			if unrelatedRank < 0 {
+				t.Fatalf("unrelated canary %q missing for %q", tc.unrelated, tc.query)
+			}
+			if ownerRank >= unrelatedRank {
+				t.Fatalf("docs/dev-tooling.md rank %d for %q, want ahead of unrelated note rank %d", ownerRank+1, tc.query, unrelatedRank+1)
+			}
+		})
+	}
+}
+
+func docPathRank(docs []Doc, path string) int {
+	for i, d := range docs {
+		if d.Path == path {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestGenerationIndexSearch(t *testing.T) {
 	c, _ := Load(writeSyntheticRepo(t))
 	if len(c.Generations) != 4 {

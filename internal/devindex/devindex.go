@@ -790,44 +790,71 @@ func (c *Catalog) fuzzyLeaves(toks []string) []Leaf {
 
 // SearchDocs returns the doc-map entries matching the query, lexically scored
 // (a title hit weighs most, then the path, then the blurb) and ranked best-first.
-// A doc must match at least one query token. An empty query returns nothing — a
-// doc search with no terms is a usage error the caller surfaces. When exact scoring
-// yields NO hit, it falls back to a trigram fuzzy pass over the same fields (#3925),
-// returning the best near-misses flagged Approx rather than an empty result.
+// Multi-term searches rank token coverage first and prefer reference docs over
+// historical notes at equal coverage. A doc must match at least one query token.
+// An empty query returns nothing — a doc search with no terms is a usage error the
+// caller surfaces. When exact scoring yields NO hit, it falls back to a trigram
+// fuzzy pass over the same fields (#3925), returning the best near-misses flagged
+// Approx rather than an empty result.
 func (c *Catalog) SearchDocs(query string) []Doc {
 	toks := tokens(query)
 	if len(toks) == 0 {
 		return nil
 	}
 	type scored struct {
-		d Doc
-		s int
+		d        Doc
+		s        int
+		coverage int
 	}
 	var hits []scored
 	for _, d := range c.Docs {
 		title, path, blurb := strings.ToLower(d.Title), strings.ToLower(d.Path), strings.ToLower(d.Blurb)
 		score := 0
+		coverage := 0
 		for _, tk := range toks {
+			matched := false
 			if strings.Contains(title, tk) {
 				score += 3
+				matched = true
 			}
 			if strings.Contains(path, tk) {
 				score += 2
+				matched = true
 			}
 			if strings.Contains(blurb, tk) {
 				score++
+				matched = true
+			}
+			if matched {
+				coverage++
 			}
 		}
 		if score > 0 {
-			hits = append(hits, scored{d, score})
+			hits = append(hits, scored{d: d, s: score, coverage: coverage})
 		}
 	}
 	if len(hits) == 0 {
 		return c.fuzzyDocs(toks)
 	}
 	sort.SliceStable(hits, func(i, j int) bool {
+		if len(toks) > 1 {
+			if hits[i].coverage != hits[j].coverage {
+				return hits[i].coverage > hits[j].coverage
+			}
+			iNote := strings.HasPrefix(strings.ToLower(normPath(hits[i].d.Path)), "docs/notes/")
+			jNote := strings.HasPrefix(strings.ToLower(normPath(hits[j].d.Path)), "docs/notes/")
+			if iNote != jNote {
+				return !iNote
+			}
+		}
 		if hits[i].s != hits[j].s {
 			return hits[i].s > hits[j].s
+		}
+		if len(toks) > 1 {
+			iTitle, jTitle := strings.ToLower(hits[i].d.Title), strings.ToLower(hits[j].d.Title)
+			if iTitle != jTitle {
+				return iTitle < jTitle
+			}
 		}
 		return hits[i].d.Title < hits[j].d.Title
 	})
