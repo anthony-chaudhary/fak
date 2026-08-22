@@ -12,11 +12,12 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 )
 
-const modelUsage = "usage: fak model <plan|load|pull|ls|canary-gate|acceptance-gate|acceptance-run|acceptance-refold|readiness-inventory> ...\n" +
+const modelUsage = "usage: fak model <plan|load|pull|ls|provider-contracts|canary-gate|acceptance-gate|acceptance-run|acceptance-refold|readiness-inventory> ...\n" +
 	"  fak model plan         choose a Qwen3.8-27B load from goals and declared capacity without downloading\n" +
 	"  fak model load <ref>   resolve a model ref (alias | hf://… | path) to a cached file path\n" +
 	"  fak model pull <ref>   download a model ref into the local cache (alias-aware)\n" +
 	"  fak model ls           list known model aliases and which are cached locally\n" +
+	"  fak model provider-contracts inspect canonical provider behavior and provenance (--json for complete records)\n" +
 	"  " + modelCanaryGateSynopsis + "  fold exact-model observations into PROMOTE/ROLLBACK/HOLD\n" +
 	"  fak model acceptance-gate evaluate a versioned exact-model capability report\n" +
 	"  fak model acceptance-run execute a latest-generation exact-model campaign (older generations require a named exception)\n" +
@@ -43,6 +44,8 @@ func cmdModel(args []string) {
 		cmdModelPull(args[1:])
 	case "ls", "list":
 		cmdModelLs(args[1:])
+	case "provider-contracts":
+		os.Exit(runModelProviderContracts(os.Stdout, os.Stderr, args[1:]))
 	case "canary-gate":
 		os.Exit(runModelCanaryGate(os.Stdout, os.Stderr, args[1:]))
 	case "acceptance-gate":

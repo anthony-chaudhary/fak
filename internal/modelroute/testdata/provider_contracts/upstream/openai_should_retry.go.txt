@@ -1,0 +1,32 @@
+func shouldRetry(req *http.Request, res *http.Response, err error) bool {
+	// If there is no way to recover the Body, then we shouldn't retry.
+	if req.Body != nil && req.GetBody == nil {
+		return false
+	}
+
+	var deterministic interface{ noRetry() }
+	if errors.As(err, &deterministic) {
+		return false
+	}
+
+	// If there is no response, that indicates that there is a connection error
+	// so we retry the request.
+	if res == nil {
+		return true
+	}
+
+	// If the header explicitly wants a retry behavior, respect that over the
+	// http status code.
+	if res.Header.Get("x-should-retry") == "true" {
+		return true
+	}
+	if res.Header.Get("x-should-retry") == "false" {
+		return false
+	}
+
+	return res.StatusCode == http.StatusRequestTimeout ||
+		res.StatusCode == http.StatusConflict ||
+		res.StatusCode == http.StatusTooManyRequests ||
+		res.StatusCode >= http.StatusInternalServerError
+}
+

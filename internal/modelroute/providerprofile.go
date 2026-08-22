@@ -193,38 +193,19 @@ func (r *ProviderRegistry) JSON() []byte {
 // uniform (see the file header): a placeholder default stamped on every provider
 // would silently mis-credit cache savings, which the issue flags as a risk.
 func DefaultProviderProfiles() []ProviderProfile {
-	return []ProviderProfile{
-		{
-			Provider:              "anthropic",
-			AuthEnv:               "ANTHROPIC_API_KEY",
-			Endpoint:              "https://api.anthropic.com",
-			SupportsPromptCaching: true,
-			CacheTTLSeconds:       300, // 5-minute ephemeral cache (1h also offered)
-			MaxCacheBreakpoints:   4,   // up to 4 explicit cache_control breakpoints
-		},
-		{
-			Provider:              "openai",
-			AuthEnv:               "OPENAI_API_KEY",
-			Endpoint:              "https://api.openai.com/v1",
-			SupportsPromptCaching: true, // automatic prompt caching, provider-managed
-			CacheTTLSeconds:       0,    // no operator TTL knob
-			MaxCacheBreakpoints:   0,    // automatic, no explicit breakpoints
-		},
-		{
-			Provider:              "gemini",
-			AuthEnv:               "GEMINI_API_KEY",
-			Endpoint:              "https://generativelanguage.googleapis.com",
-			SupportsPromptCaching: true,
-			CacheTTLSeconds:       3600, // operator-set context-cache TTL, default 1h
-			MaxCacheBreakpoints:   0,
-		},
-		{
-			Provider:              "xai",
-			AuthEnv:               "XAI_API_KEY",
-			Endpoint:              "https://api.x.ai/v1",
-			SupportsPromptCaching: true, // cached prompt tokens, provider-managed
-			CacheTTLSeconds:       0,
-			MaxCacheBreakpoints:   0,
-		},
+	contracts := DefaultProviderContracts()
+	profiles := make([]ProviderProfile, 0, len(contracts)+2)
+	for _, contract := range contracts {
+		profile, err := providerProfileFromContract(contract)
+		if err != nil {
+			panic(err)
+		}
+		profiles = append(profiles, profile)
 	}
+	// Gemini and xAI remain legacy projections until their canonical contracts land.
+	profiles = append(profiles,
+		ProviderProfile{Provider: "gemini", AuthEnv: "GEMINI_API_KEY", Endpoint: "https://generativelanguage.googleapis.com", SupportsPromptCaching: true, CacheTTLSeconds: 3600},
+		ProviderProfile{Provider: "xai", AuthEnv: "XAI_API_KEY", Endpoint: "https://api.x.ai/v1", SupportsPromptCaching: true},
+	)
+	return profiles
 }
