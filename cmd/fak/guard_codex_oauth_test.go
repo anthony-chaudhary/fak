@@ -336,3 +336,37 @@ func TestCodexAccountFailoverResendsWithMatchedSibling(t *testing.T) {
 		t.Fatalf("no-target failover moved current dir to %q, want it held at %q", got, b)
 	}
 }
+
+func writeCodexPinnedAuth(t *testing.T, dir, token, account string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	payload := fmt.Sprintf(`{"auth_mode":"chatgpt","tokens":{"access_token":%q,"account_id":%q}}`, token, account)
+	if err := os.WriteFile(filepath.Join(dir, "auth.json"), []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+func TestExplicitCodexHomeDisablesCrossAccountFailover(t *testing.T) {
+	root := t.TempDir()
+	pinned := filepath.Join(root, ".codex-pinned")
+	other := filepath.Join(root, ".codex-other")
+	writeCodexPinnedAuth(t, pinned, "tok-pinned", "acct-pinned")
+	writeCodexPinnedAuth(t, other, "tok-other", "acct-other")
+
+	cred, err := resolveCodexSubscriptionCredential(pinned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	posture := guardUpstreamPosture{apiKey: cred.AccessToken, extraHeaders: guardCodexSubscriptionHeaders(cred)}
+	installCodexAccountRefresh(&posture, pinned, root, cred)
+	if posture.accountFailoverFunc != nil || posture.activeAccountDir != nil || posture.walledAccounts != nil {
+		t.Fatal("explicit Codex home installed cross-account failover")
+	}
+	if got := posture.apiKeyFunc(); got != "tok-pinned" {
+		t.Fatalf("pinned credential refresh = %q, want tok-pinned", got)
+	}
+	if got := posture.extraHeadersFunc()[guardCodexChatGPTAccountHeader]; got != "acct-pinned" {
+		t.Fatalf("pinned account header = %q, want acct-pinned", got)
+	}
+}

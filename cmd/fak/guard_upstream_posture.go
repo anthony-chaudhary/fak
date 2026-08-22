@@ -248,19 +248,30 @@ func resolveGuardUpstreamPosture(in guardUpstreamPostureInputs) guardUpstreamPos
 			// the planner rotates once and resends the still-owned request in place. Keep the
 			// access token and ChatGPT-Account-Id on one moving credential source so a switch
 			// can never pair one account's bearer with another account's routing header.
-			pinnedDir := filepath.Dir(cred.Source)
-			if homeRoot, hErr := os.UserHomeDir(); hErr == nil && strings.TrimSpace(homeRoot) != "" {
-				af := newCodexAccountFailover(homeRoot, pinnedDir)
-				p.accountFailoverFunc = af.failover
-				p.activeAccountDir = af.currentConfigDir
-				p.walledAccounts = af.walledKeys
-				p.apiKeyFunc, p.extraHeadersFunc = newCodexFailoverRefreshers(af, cred)
-			} else {
-				p.apiKeyFunc, p.extraHeadersFunc = newCodexSubscriptionRefreshers(in.codexHome, cred)
-			}
+			homeRoot, _ := os.UserHomeDir()
+			installCodexAccountRefresh(&p, in.codexHome, homeRoot, cred)
 		} else if strings.TrimSpace(os.Getenv(guardCodexEnvKey(in.apiKeyEnv))) == "" && !in.quiet {
 			fmt.Fprintf(os.Stderr, "fak guard: Codex ChatGPT subscription unavailable: %v\n", err)
 		}
 	}
 	return p
+}
+
+func installCodexAccountRefresh(p *guardUpstreamPosture, explicitHome, homeRoot string, cred codexSubscriptionCredential) {
+	// An explicit Codex home is a process-level account pin. Do not install
+	// cross-home failover: two concurrent launches must never migrate onto
+	// each other's seat after one account returns an auth or capacity wall.
+	if strings.TrimSpace(explicitHome) != "" {
+		p.apiKeyFunc, p.extraHeadersFunc = newCodexSubscriptionRefreshers(explicitHome, cred)
+		return
+	}
+	if strings.TrimSpace(homeRoot) != "" {
+		af := newCodexAccountFailover(homeRoot, filepath.Dir(cred.Source))
+		p.accountFailoverFunc = af.failover
+		p.activeAccountDir = af.currentConfigDir
+		p.walledAccounts = af.walledKeys
+		p.apiKeyFunc, p.extraHeadersFunc = newCodexFailoverRefreshers(af, cred)
+		return
+	}
+	p.apiKeyFunc, p.extraHeadersFunc = newCodexSubscriptionRefreshers(explicitHome, cred)
 }
