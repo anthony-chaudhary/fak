@@ -76,6 +76,132 @@ exit 0
 	}
 }
 
+func TestTestShFastMirrorExcludesTokenCacheDuringChurn(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash unavailable")
+	}
+	root := repoRootForWrapperTest(t)
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source")
+	scratch := filepath.Join(dir, "scratch")
+	bin := filepath.Join(dir, "bin")
+	cacheDir := filepath.Join(source, ".git", "fak", "token-cache")
+	for _, path := range []string{bin, cacheDir} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script, err := os.ReadFile(filepath.Join(root, "test.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "test.sh"), script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "tracked.go"), []byte("package fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, ".git", "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	attemptsFile := filepath.Join(dir, "rsync-attempts")
+	mutationsFile := filepath.Join(dir, "cache-mutations")
+	goArgsFile := filepath.Join(dir, "go-args")
+	writeExecutable(t, filepath.Join(bin, "rsync"), `#!/usr/bin/env bash
+set -euo pipefail
+attempts=0
+if [ -f "$FAK_FAKE_RSYNC_ATTEMPTS" ]; then attempts=$(cat "$FAK_FAKE_RSYNC_ATTEMPTS"); fi
+attempts=$((attempts + 1))
+printf '%s' "$attempts" > "$FAK_FAKE_RSYNC_ATTEMPTS"
+source_dir="${@: -2:1}"
+dest="${@: -1}"
+cache_excluded=0
+for arg in "$@"; do
+  case "$arg" in
+    --exclude=/.git/fak/token-cache) cache_excluded=1 ;;
+    --exclude=/.git|--exclude=/.git/|--exclude=/.git/fak|--exclude=/.git/fak/)
+      echo "broad Git metadata exclusion: $arg" >&2
+      exit 64
+      ;;
+  esac
+done
+cache_dir="${source_dir%/}/.git/fak/token-cache"
+mkdir -p "$cache_dir"
+for i in $(seq 1 100); do
+  entry="$cache_dir/churn-$i.json"
+  printf '{"generation":%s}\n' "$i" > "$entry"
+  rm -f "$entry"
+done
+printf '100' > "$FAK_FAKE_CACHE_MUTATIONS"
+if [ "$cache_excluded" -ne 1 ]; then
+  echo "file has vanished: .git/fak/token-cache/churn-100.json" >&2
+  exit 23
+fi
+mkdir -p "$dest/.git"
+cp "${source_dir%/}/tracked.go" "$dest/tracked.go"
+cp "${source_dir%/}/.git/HEAD" "$dest/.git/HEAD"
+`)
+	writeExecutable(t, filepath.Join(bin, "go"), `#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = "version" ]; then
+  echo "go version go1.26.0 linux/amd64"
+  exit 0
+fi
+printf '%s\n' "$@" > "$FAK_FAKE_GO_ARGS"
+`)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bash, filepath.Join(source, "test.sh"), "-run", "TestRequested", "./internal/gateway")
+	cmd.Env = append(os.Environ(),
+		"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"FAK_FAST=1",
+		"FAK_FAST_DIR="+scratch,
+		"FAK_FAKE_RSYNC_ATTEMPTS="+attemptsFile,
+		"FAK_FAKE_CACHE_MUTATIONS="+mutationsFile,
+		"FAK_FAKE_GO_ARGS="+goArgsFile,
+	)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("test.sh mirror did not complete within 10s: %v\n%s", ctx.Err(), out)
+	}
+	if err != nil {
+		t.Fatalf("test.sh failed before the requested go test returned: %v\n%s", err, out)
+	}
+	if strings.Contains(string(out), "file has vanished") {
+		t.Fatalf("volatile token-cache churn leaked into rsync traversal:\n%s", out)
+	}
+	if strings.Contains(string(out), "retrying mirror") {
+		t.Fatalf("excluded token-cache churn consumed the source-race retry budget:\n%s", out)
+	}
+	assertWrapperFileContent(t, attemptsFile, "1")
+	assertWrapperFileContent(t, mutationsFile, "100")
+	assertWrapperFileContent(t, filepath.Join(scratch, "tracked.go"), "package fixture")
+	assertWrapperFileContent(t, filepath.Join(scratch, ".git", "HEAD"), "ref: refs/heads/main")
+	rawArgs, err := os.ReadFile(goArgsFile)
+	if err != nil {
+		t.Fatalf("requested go test never started: %v\n%s", err, out)
+	}
+	got := strings.Fields(string(rawArgs))
+	want := []string{"test", "-run", "TestRequested", "./internal/gateway"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("go args = %v, want %v; output:\n%s", got, want, out)
+	}
+}
+
+func assertWrapperFileContent(t *testing.T, path, want string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(raw)); got != want {
+		t.Fatalf("%s = %q, want %q", path, got, want)
+	}
+}
+
 func TestTestPs1ForwardsDashVToRest(t *testing.T) {
 	powershell, ok := lookPathAny("powershell.exe", "powershell", "pwsh")
 	if !ok {

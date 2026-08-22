@@ -121,6 +121,7 @@ if [ "${FAK_FAST:-}" = "1" ]; then
   else
     SCRATCH="${FAK_FAST_DIR:-$HOME/.cache/fak-src}"
     CACHE_REL="internal/model/.cache"   # generated weights — symlink, never copy
+    TOKEN_CACHE_REL=".git/fak/token-cache" # volatile runtime state — never mirror
     mkdir -p "$SCRATCH"
     if command -v rsync >/dev/null 2>&1; then
       # plain --delete (NOT --delete-excluded) so excluded runtime state and the
@@ -129,6 +130,7 @@ if [ "${FAK_FAST:-}" = "1" ]; then
       rsync_args=(
         -a --delete
         --exclude="/$CACHE_REL"
+        --exclude="/$TOKEN_CACHE_REL"
         --exclude="/.git/*.lock"
         --exclude="/.git/**/*.lock"
         --exclude="/.codex-tmp"
@@ -159,8 +161,10 @@ if [ "${FAK_FAST:-}" = "1" ]; then
         find "$SCRATCH/.git" -type f -name '*.lock' -delete
       fi
     else
-      # tar fallback (no pruning of stale files, but correct): copy all but the cache.
-      ( cd "$SCRIPT_DIR" && find . -path "./$CACHE_REL" -prune -o -type f -print ) \
+      # tar fallback (no pruning of stale files, but correct): copy source, not caches.
+      ( cd "$SCRIPT_DIR" && find . \
+          \( -path "./$CACHE_REL" -o -path "./$TOKEN_CACHE_REL" \) -prune \
+          -o -type f -print ) \
         | tar -C "$SCRIPT_DIR" -cf - -T - | tar -C "$SCRATCH" -xf -
     fi
     if [ -e "$SCRIPT_DIR/$CACHE_REL" ] && [ ! -e "$SCRATCH/$CACHE_REL" ]; then
