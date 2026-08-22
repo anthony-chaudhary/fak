@@ -36,9 +36,9 @@ go test ./internal/skillfootprint   # the enforcing test; -v logs the same figur
 ## Baseline (measured)
 
 ```
-skill footprint [interactive]: 64 skill(s); resident floor = 48109 bytes (~12027 tokens);
-  description floor = 48109 B; name-only floor = 866 B; at-rest card floor = 15426 bytes
-  at-rest intent slice (#5560): 11439 B (~2860 tokens) across 64 skill(s)
+skill footprint [interactive]: 64 skill(s); resident floor = 47234 bytes (~11808 tokens);
+  description floor = 47234 B; name-only floor = 866 B; at-rest card floor = 15312 bytes
+  at-rest intent slice (#5560): 11325 B (~2831 tokens) across 64 skill(s)
 ```
 
 Heaviest resident descriptions — the trim targets:
@@ -57,14 +57,14 @@ Heaviest resident descriptions — the trim targets:
 The full 64-skill breakdown is what `fak skill footprint --top 0` prints; only the
 head is pinned here so a drift is legible in review.
 
-`name-only floor = 797 B` is the size of the headroom: **47.2 kB of the 48.1 kB
+`name-only floor = 866 B` is the size of the headroom: **46.4 kB of the 47.2 kB
 resident floor is description prose**, and every skill stays invocable by name
 without a single byte of it.
 
-**Last re-pin: 47821 → 48109 B (+288, 59 → 64 skills)** — five new
-resident skill cards landed while their descriptions stayed compact enough that total
-growth was only 288 bytes. The gate records that measured floor rather than masking the
-new catalog surface; future growth retains the same narrow ratchet band.
+**Last re-pin: 48109 → 47234 B (-875, 64 skills)** — #8404 replaced the
+1155-byte `trajectory-audit` description with a 265-byte description (-890 B), while
+other catalog changes netted +15 B. The gate banks that explained corpus reduction; future
+growth retains the same narrow ratchet band.
 
 ## Provenance (Law A2 — every value carries its provenance)
 
@@ -94,7 +94,7 @@ in the twenty days that followed, the measured floor grew from 36,237 B to 47,23
 and taste lost 30% in three weeks.
 
 `internal/skillfootprint.CheckDescriptions` gates the measured floor against a
-committed ceiling, `SkillDescriptionBudgetBytes` (currently **48109**), as a one-way
+committed ceiling, `SkillDescriptionBudgetBytes` (currently **47234**), as a one-way
 ratchet:
 
 | Direction | Reason | What it means |
