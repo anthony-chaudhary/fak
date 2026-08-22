@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
 func TestSelfcheckCapturesStablePrefixAndDynamicTurn(t *testing.T) {
@@ -18,6 +20,9 @@ func TestSelfcheckCapturesStablePrefixAndDynamicTurn(t *testing.T) {
 	}
 	if got.Verdict != "PASS" || !got.StablePrefixUnchanged || !got.FullDigestChanged || len(got.Turns) != 2 {
 		t.Fatalf("bad witness: %#v", got)
+	}
+	if got.Outcomes.Invocations != 3 || got.Outcomes.Succeeded != 2 || got.Outcomes.Failed != 1 || got.Outcomes.ByCode[harnesskit.CodeDenied] != 1 || got.Outcomes.Unclassified != 0 {
+		t.Fatalf("bad outcome counts: %#v", got.Outcomes)
 	}
 	if got.Turns[0].Snapshot.Fragments[0].Content == got.Turns[1].Snapshot.Fragments[0].Content {
 		t.Fatal("turn-scoped content did not change")

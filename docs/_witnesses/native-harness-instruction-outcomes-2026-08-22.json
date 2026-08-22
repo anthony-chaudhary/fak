@@ -1,0 +1,16 @@
+{
+  "schema_version": "fak-harness-instruction-outcome-witness/1",
+  "captured_at": "2026-08-22",
+  "command": "go run ./cmd/instructiondemo -selfcheck",
+  "projection": "verdict,outcome_counts",
+  "verdict": "PASS",
+  "outcome_counts": {
+    "invocations": 3,
+    "succeeded": 2,
+    "failed": 1,
+    "by_code": {
+      "denied": 1
+    },
+    "unclassified": 0
+  }
+}

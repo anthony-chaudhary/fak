@@ -34,6 +34,8 @@ realized, err := harnessinstructions.Resolve(ctx, provider, harnesskit.Instructi
 
 `Realization.PromptValue` is the exact system value. Its audit record includes the complete digest, stable-prefix digest, estimated bytes/tokens, fragment provenance, and inclusion reasons.
 
+For content-free operational observability, resolve through a zero-value `harnessinstructions.OutcomeRecorder` and query `Counts()`. The snapshot reports invocations, successes, failures, typed failures by `harnesskit.Code`, and unclassified provider failures. Each invocation contributes exactly once, so `succeeded + failed = invocations`; snapshots are caller-owned and safe to export while resolutions continue.
+
 ## Authority boundary
 
 - Providers may author application, user, and untrusted fragments.
@@ -54,5 +56,7 @@ go run ./cmd/instructiondemo -selfcheck
 ```
 
 The demo resolves two turns with different operator focus. It passes only when the complete prompt digest changes while the audited kernel-prefix digest remains byte-identical. Captured output: [`docs/_witnesses/native-harness-dynamic-instructions-2026-08-18.json`](../_witnesses/native-harness-dynamic-instructions-2026-08-18.json).
+
+The same selfcheck also drives one real stable-prefix refusal and exposes the resulting outcome tally. Captured counter readout: [`docs/_witnesses/native-harness-instruction-outcomes-2026-08-22.json`](../_witnesses/native-harness-instruction-outcomes-2026-08-22.json).
 
 The witness proves deterministic composition and cache-prefix preservation. It does not claim that one prompt improves model quality or reduces net tokens; those require a workload experiment.
