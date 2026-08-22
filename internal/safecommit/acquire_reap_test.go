@@ -2,6 +2,9 @@ package safecommit
 
 import (
 	"errors"
+	"os"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -94,5 +97,54 @@ func TestAcquireWithReapPropagatesNonBusyError(t *testing.T) {
 	}
 	if acqCalls != 1 {
 		t.Fatalf("acqCalls = %d, want 1 (propagate immediately)", acqCalls)
+	}
+}
+
+func TestRealLockLiveHolderTimeoutReportsWaitAndHolder(t *testing.T) {
+	path := t.TempDir() + "/fak-commit.lock"
+	release, err := realLock(LockOptions{Path: path, Timeout: 20 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("first realLock: %v", err)
+	}
+	defer release()
+
+	started := time.Now()
+	_, err = realLock(LockOptions{Path: path, Timeout: 20 * time.Millisecond})
+	if !errors.Is(err, ErrLockBusy) {
+		t.Fatalf("second realLock err = %v, want ErrLockBusy", err)
+	}
+	var busy *LockBusyError
+	if !errors.As(err, &busy) {
+		t.Fatalf("second realLock err type = %T, want *LockBusyError", err)
+	}
+	if busy.Receipt.DeadlineNS != int64(20*time.Millisecond) || busy.Receipt.HolderPID != os.Getpid() || !busy.Receipt.HolderAlive {
+		t.Fatalf("live-holder receipt = %+v", busy.Receipt)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("live-holder wait = %s, want a bounded refusal", elapsed)
+	}
+	detail := err.Error()
+	for _, want := range []string{"elapsed wait", "deadline", "holder pid " + strconv.Itoa(os.Getpid())} {
+		if !strings.Contains(detail, want) {
+			t.Fatalf("live-holder refusal = %q, want %q", detail, want)
+		}
+	}
+}
+
+func TestRealLockReclaimsDeadPIDResidue(t *testing.T) {
+	path := t.TempDir() + "/fak-commit.lock"
+	dead := deadPID(t)
+	if err := os.WriteFile(path, []byte(strconv.Itoa(dead)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	release, err := realLock(LockOptions{Path: path, Timeout: 100 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("realLock with dead PID residue: %v", err)
+	}
+	defer release()
+	probe := ProbeLock(path)
+	if probe.HolderPID != os.Getpid() || !probe.Alive || probe.Stale {
+		t.Fatalf("post-reclaim lock probe = %+v, want current live holder", probe)
 	}
 }

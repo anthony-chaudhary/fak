@@ -27,6 +27,9 @@ var commitFn = safecommit.Commit
 // remains inside safecommit.Commit; this seam only prevents queued contenders from starting
 // expensive build checks while a live writer already owns the lane.
 var commitLaneBusyFn = commitLaneBusy
+var commitLaneWaitFn = waitForCommitLane
+var commitLaneNow = time.Now
+var commitLaneSleep = time.Sleep
 var commitRecordTreeReceipt = recordCommittedTreeReceipt
 
 // runCommitCommand routes `fak commit [<sub>]` to its subcommand handler and returns the
@@ -104,6 +107,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	dir := fs.String("dir", "", "repo directory (default: discover from cwd)")
 	trunk := fs.String("trunk", "", "expected development branch override (default: configured development branch)")
 	push := fs.Bool("push", false, "push after a VERIFIED commit through the safe sync path (never --force)")
+	lockTimeout := fs.Duration("lock-timeout", safecommit.DefaultLockTimeout, "finite deadline for waiting on the advisory commit lock (default 10s); LOCK_BUSY reports elapsed wait and holder evidence")
 	noSignoff := fs.Bool("no-signoff", false, "do not add the DCO sign-off (-s is the default)")
 	preview := fs.Bool("preview", false, "LINT-ONLY: check the message+paths and exit WITHOUT touching git (is the subject witness-gradeable, does it carry a bindable `(fak <leaf>)` stamp, does the leaf match the paths' lane?). Exit 0 clean, 1 issues, 2 usage")
 	requireIssue := fs.Bool("require-issue", false, "treat a missing bindable issue link (#N in subject / `Closes #N` in body) as BLOCKING, not advisory — the dispatch-worker contract so a close binds in `issue_closure_audit` (#312)")
@@ -123,6 +127,10 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	}
 	if *reviewMinModels < 0 {
 		fmt.Fprintln(stderr, "fak commit: --review-min-models must be non-negative")
+		return 2
+	}
+	if *lockTimeout <= 0 {
+		fmt.Fprintln(stderr, "fak commit: --lock-timeout must be greater than zero")
 		return 2
 	}
 	*dir = pathutil.ExpandTilde(*dir)
@@ -184,12 +192,23 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
-	if busy, holderPID := commitLaneBusyFn(root); busy {
-		fmt.Fprintln(stderr, "LOCK_BUSY: commit lane is already held; skipped build-check to avoid slowing the active writer")
-		if holderPID > 0 {
-			fmt.Fprintf(stderr, "  holder pid: %d\n", holderPID)
+	if ready, receipt := commitLaneWaitFn(root, *lockTimeout); !ready {
+		res := safecommit.ScoreResult(safecommit.Result{
+			Paths:    append([]string(nil), paths...),
+			Reason:   safecommit.ReasonLockBusy,
+			Detail:   receipt.Detail(),
+			LockWait: &receipt,
+		})
+		if *asJSON {
+			if err := writeIndentedJSON(stdout, res); err != nil {
+				fmt.Fprintf(stderr, "fak commit: %v\n", err)
+				return 1
+			}
+			return safecommit.ExitLockBusy
 		}
-		fmt.Fprintln(stderr, "  next: wait for `fak commit status` to report ready, then retry")
+		fmt.Fprintln(stderr, "LOCK_BUSY: commit lane remained held through its finite deadline; skipped build-check to avoid slowing the active writer")
+		fmt.Fprintf(stderr, "  %s\n", receipt.Detail())
+		fmt.Fprintln(stderr, "  next: inspect `fak commit status`; retry after it reports ready")
 		return safecommit.ExitLockBusy
 	}
 
@@ -218,6 +237,7 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		Trunk:                      *trunk,
 		SignOff:                    !*noSignoff,
 		Push:                       *push,
+		Lock:                       safecommit.LockOptions{Timeout: *lockTimeout},
 		Review:                     review,
 		CoreLockMaintenanceWitness: *coreLockWitness,
 	})
@@ -632,6 +652,39 @@ func commitLaneBusy(dir string) (bool, int) {
 	lockPath := wipCommitLockPath(context.Background(), dir)
 	probe := safecommit.ProbeLock(lockPath)
 	return probe.Exists && probe.Alive && !probe.Foreign, probe.HolderPID
+}
+
+const commitLaneWaitPoll = 250 * time.Millisecond
+
+// waitForCommitLane keeps expensive prospective-tree validation out of an occupied commit
+// lane while giving the holder a documented, finite window to finish. Dead and reused-PID
+// residues are not treated as live here; they flow to safecommit's guarded reaper.
+func waitForCommitLane(dir string, timeout time.Duration) (bool, safecommit.LockWaitReceipt) {
+	started := commitLaneNow()
+	deadline := started.Add(timeout)
+	for {
+		busy, holderPID := commitLaneBusyFn(dir)
+		now := commitLaneNow()
+		receipt := safecommit.LockWaitReceipt{
+			ElapsedNS:   now.Sub(started).Nanoseconds(),
+			DeadlineNS:  timeout.Nanoseconds(),
+			HolderPID:   holderPID,
+			HolderAlive: busy,
+		}
+		if !busy {
+			return true, receipt
+		}
+		if !now.Before(deadline) {
+			return false, receipt
+		}
+		wait := commitLaneWaitPoll
+		if remaining := deadline.Sub(now); remaining < wait {
+			wait = remaining
+		}
+		if wait > 0 {
+			commitLaneSleep(wait)
+		}
+	}
 }
 
 // stdin is overridable in tests; defaults to os.Stdin.

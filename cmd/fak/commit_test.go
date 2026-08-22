@@ -20,22 +20,35 @@ import (
 // withCommitFn swaps the commitFn seam for the duration of a test.
 func withCommitFn(t *testing.T, fn func(context.Context, safecommit.Options) (safecommit.Result, error)) {
 	t.Helper()
-	prevCommit, prevBusy := commitFn, commitLaneBusyFn
+	prevCommit, prevBusy, prevWait := commitFn, commitLaneBusyFn, commitLaneWaitFn
 	commitFn = fn
 	commitLaneBusyFn = func(string) (bool, int) { return false, 0 }
+	commitLaneWaitFn = func(string, time.Duration) (bool, safecommit.LockWaitReceipt) {
+		return true, safecommit.LockWaitReceipt{}
+	}
 	t.Cleanup(func() {
 		commitFn = prevCommit
 		commitLaneBusyFn = prevBusy
+		commitLaneWaitFn = prevWait
 	})
 }
 
 func TestRunCommitBusyLaneSkipsBuildCheckAndCommit(t *testing.T) {
-	oldBusy, oldBuild, oldCommit := commitLaneBusyFn, commitBuildCheckGate, commitFn
+	oldBusy, oldWait, oldBuild, oldCommit := commitLaneBusyFn, commitLaneWaitFn, commitBuildCheckGate, commitFn
 	t.Cleanup(func() {
-		commitLaneBusyFn, commitBuildCheckGate, commitFn = oldBusy, oldBuild, oldCommit
+		commitLaneBusyFn, commitLaneWaitFn, commitBuildCheckGate, commitFn = oldBusy, oldWait, oldBuild, oldCommit
 	})
 
 	commitLaneBusyFn = func(string) (bool, int) { return true, 4242 }
+	commitLaneWaitFn = func(string, time.Duration) (bool, safecommit.LockWaitReceipt) {
+		return false, safecommit.LockWaitReceipt{
+			ElapsedNS:      int64(10 * time.Second),
+			DeadlineNS:     int64(10 * time.Second),
+			HolderPID:      4242,
+			HolderAlive:    true,
+			LockAgeSeconds: 17,
+		}
+	}
 	buildCalled := false
 	commitBuildCheckGate = func(io.Writer, string, []string) (safecommit.BuildCheckOutcome, string) {
 		buildCalled = true
@@ -55,8 +68,52 @@ func TestRunCommitBusyLaneSkipsBuildCheckAndCommit(t *testing.T) {
 	if buildCalled || commitCalled {
 		t.Fatalf("busy lane called build=%v commit=%v, want neither", buildCalled, commitCalled)
 	}
-	if got := errOut.String(); !strings.Contains(got, "skipped build-check") || !strings.Contains(got, "holder pid: 4242") {
-		t.Fatalf("stderr = %q, want fast-refusal evidence", got)
+	if got := errOut.String(); !strings.Contains(got, "skipped build-check") ||
+		!strings.Contains(got, "holder pid 4242") ||
+		!strings.Contains(got, "elapsed wait:") ||
+		!strings.Contains(got, "deadline:") {
+		t.Fatalf("stderr = %q, want bounded live-holder refusal evidence", got)
+	}
+
+	out.Reset()
+	errOut.Reset()
+	code = runCommit(&out, &errOut, []string{"--json", "--path", "cmd/fak/main.go", "-m", "fix(cmd): reduce commit stampedes (fak cmd)"})
+	if code != safecommit.ExitLockBusy {
+		t.Fatalf("JSON code = %d, want %d; stderr=%s", code, safecommit.ExitLockBusy, errOut.String())
+	}
+	var res safecommit.Result
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil {
+		t.Fatalf("JSON LOCK_BUSY receipt: %v\n%s", err, out.String())
+	}
+	if res.Reason != safecommit.ReasonLockBusy || res.LockWait == nil || res.LockWait.HolderPID != 4242 || res.LockWait.ElapsedNS != int64(10*time.Second) {
+		t.Fatalf("JSON LOCK_BUSY receipt = %+v", res)
+	}
+}
+
+func TestWaitForCommitLaneBoundsLiveHolderAndLetsDeadHolderThrough(t *testing.T) {
+	oldBusy, oldNow, oldSleep := commitLaneBusyFn, commitLaneNow, commitLaneSleep
+	t.Cleanup(func() {
+		commitLaneBusyFn, commitLaneNow, commitLaneSleep = oldBusy, oldNow, oldSleep
+	})
+
+	clock := time.Unix(1_800_000_000, 0)
+	commitLaneNow = func() time.Time { return clock }
+	commitLaneSleep = func(d time.Duration) { clock = clock.Add(d) }
+	commitLaneBusyFn = func(string) (bool, int) { return true, 4242 }
+	ready, receipt := waitForCommitLane(".", time.Second)
+	if ready {
+		t.Fatal("live holder reported ready")
+	}
+	if time.Duration(receipt.ElapsedNS) != time.Second || receipt.HolderPID != 4242 || !receipt.HolderAlive {
+		t.Fatalf("live-holder receipt = %+v, want 1s bounded wait and PID 4242 alive", receipt)
+	}
+
+	sleeps := 0
+	commitLaneSleep = func(time.Duration) { sleeps++ }
+	commitLaneBusyFn = func(string) (bool, int) { return false, 9191 }
+	ready, receipt = waitForCommitLane(".", time.Second)
+	if !ready || sleeps != 0 || receipt.HolderAlive || receipt.HolderPID != 9191 {
+		t.Fatalf("dead-holder precheck ready=%t sleeps=%d receipt=%+v; want immediate guarded-reaper handoff", ready, sleeps, receipt)
 	}
 }
 
@@ -93,6 +150,27 @@ func TestRunCommit_noPathsIsUsageError(t *testing.T) {
 	code := runCommit(&out, &errb, []string{"-m", "msg"})
 	if code != 2 {
 		t.Fatalf("want exit 2 for no paths, got %d (stderr=%q)", code, errb.String())
+	}
+}
+
+func TestRunCommitHelpDocumentsFiniteLockDeadline(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{"--help"})
+	if code != 2 {
+		t.Fatalf("help exit = %d, want usage exit 2", code)
+	}
+	for _, want := range []string{"lock-timeout", "finite deadline", "default 10s"} {
+		if !strings.Contains(errb.String(), want) {
+			t.Fatalf("commit help = %q, want %q", errb.String(), want)
+		}
+	}
+}
+
+func TestRunCommitRejectsNonPositiveLockDeadline(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{"--lock-timeout=0", "--path", "a.go", "-m", "msg"})
+	if code != 2 || !strings.Contains(errb.String(), "must be greater than zero") {
+		t.Fatalf("code=%d stderr=%q, want finite-deadline usage refusal", code, errb.String())
 	}
 }
 

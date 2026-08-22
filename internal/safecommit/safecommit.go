@@ -67,6 +67,43 @@ type LockFunc func(LockOptions) (unlock func(), err error)
 // fak writer. CommitWith maps it to Result{Reason: ReasonLockBusy}, never a hard error.
 var ErrLockBusy = errors.New("safecommit: commit lock busy")
 
+// LockWaitReceipt is the bounded wait evidence attached to a LOCK_BUSY refusal. It keeps
+// the deadline and the last observed holder machine-readable while Detail() provides the
+// same facts to the human CLI.
+type LockWaitReceipt struct {
+	ElapsedNS      int64 `json:"elapsed_ns"`
+	DeadlineNS     int64 `json:"deadline_ns"`
+	HolderPID      int   `json:"holder_pid,omitempty"`
+	HolderAlive    bool  `json:"holder_alive"`
+	HolderStale    bool  `json:"holder_stale"`
+	HolderForeign  bool  `json:"holder_foreign"`
+	LockAgeSeconds int64 `json:"lock_age_seconds,omitempty"`
+}
+
+// Detail renders the actionable, bounded refusal receipt without exposing the absolute
+// lock path. A missing PID stays explicit instead of being mistaken for holder PID zero.
+func (r LockWaitReceipt) Detail() string {
+	detail := fmt.Sprintf("elapsed wait: %s; deadline: %s", time.Duration(r.ElapsedNS), time.Duration(r.DeadlineNS))
+	if r.HolderPID <= 0 {
+		return detail + "; holder pid unavailable"
+	}
+	holder := fmt.Sprintf("holder pid %d (alive=%t stale=%t foreign=%t)",
+		r.HolderPID, r.HolderAlive, r.HolderStale, r.HolderForeign)
+	if r.LockAgeSeconds > 0 {
+		holder += fmt.Sprintf("; lock age=%s", time.Duration(r.LockAgeSeconds)*time.Second)
+	}
+	return detail + "; " + holder
+}
+
+// LockBusyError preserves errors.Is(err, ErrLockBusy) while carrying the wait receipt
+// from the real advisory-lock acquisition.
+type LockBusyError struct {
+	Receipt LockWaitReceipt
+}
+
+func (e *LockBusyError) Error() string { return ErrLockBusy.Error() + ": " + e.Receipt.Detail() }
+func (e *LockBusyError) Unwrap() error { return ErrLockBusy }
+
 // LockOptions configures the advisory commit lock.
 type LockOptions struct {
 	Path    string        // "" => <Dir>/.git/fak-commit.lock
@@ -164,25 +201,26 @@ const (
 // has Committed && Verified && Reason == "". RacedExtra lists the committed files that NO
 // requested path covers — the evidence of a raced commit.
 type Result struct {
-	Committed        bool     `json:"committed"`
-	SHA              string   `json:"committed_sha,omitempty"`
-	Paths            []string `json:"paths"`
-	Verified         bool     `json:"verified"`
-	Pushed           bool     `json:"pushed"`
-	Value            float64  `json:"value"`
-	ValueUnit        string   `json:"value_unit,omitempty"`
-	Score            int      `json:"score"`
-	LegacyScore      int      `json:"legacy_score,omitempty"`
-	LegacyScoreScale int      `json:"legacy_score_scale,omitempty"`
-	Grade            string   `json:"grade"`
-	ScoreNotes       []string `json:"score_notes,omitempty"`
-	Reason           string   `json:"reason,omitempty"`
-	Detail           string   `json:"detail,omitempty"`
-	RacedExtra       []string `json:"raced_extra_paths,omitempty"`
-	HeadBefore       string   `json:"head_before,omitempty"`
-	LockHoldNS       int64    `json:"lock_hold_ns,omitempty"`
-	CoreLockPaths    []string `json:"core_lock_paths,omitempty"`
-	CoreLockWitness  string   `json:"core_lock_witness,omitempty"`
+	Committed        bool             `json:"committed"`
+	SHA              string           `json:"committed_sha,omitempty"`
+	Paths            []string         `json:"paths"`
+	Verified         bool             `json:"verified"`
+	Pushed           bool             `json:"pushed"`
+	Value            float64          `json:"value"`
+	ValueUnit        string           `json:"value_unit,omitempty"`
+	Score            int              `json:"score"`
+	LegacyScore      int              `json:"legacy_score,omitempty"`
+	LegacyScoreScale int              `json:"legacy_score_scale,omitempty"`
+	Grade            string           `json:"grade"`
+	ScoreNotes       []string         `json:"score_notes,omitempty"`
+	Reason           string           `json:"reason,omitempty"`
+	Detail           string           `json:"detail,omitempty"`
+	RacedExtra       []string         `json:"raced_extra_paths,omitempty"`
+	HeadBefore       string           `json:"head_before,omitempty"`
+	LockHoldNS       int64            `json:"lock_hold_ns,omitempty"`
+	LockWait         *LockWaitReceipt `json:"lock_wait,omitempty"`
+	CoreLockPaths    []string         `json:"core_lock_paths,omitempty"`
+	CoreLockWitness  string           `json:"core_lock_witness,omitempty"`
 	// CoreLockWitnessCorrelation is whether CoreLockWitness actually named a path
 	// this commit changed ("correlated" / "uncorrelated" / "indeterminate", plus
 	// why). A CONFIRMED witness is not automatically a RELEVANT one; this is the
@@ -523,6 +561,14 @@ func acquireCommitLock(lock LockFunc, opts Options, res *Result) (releaseLock fu
 	unlock, err := lock(opts.Lock)
 	if err != nil {
 		if errors.Is(err, ErrLockBusy) {
+			var busy *LockBusyError
+			if errors.As(err, &busy) {
+				receipt := busy.Receipt
+				res.LockWait = &receipt
+				res.Detail = receipt.Detail()
+			} else {
+				res.Detail = "elapsed wait unavailable; deadline unavailable; holder evidence unavailable"
+			}
 			return nil, time.Time{}, ReasonLockBusy, nil
 		}
 		return nil, time.Time{}, "", fmt.Errorf("safecommit: lock: %w", err)

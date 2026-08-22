@@ -124,8 +124,25 @@ func realLock(opts LockOptions) (func(), error) {
 			reapStaleLock(path)
 		}
 	}
+	started := time.Now()
 	release, err := acquireWithReap(acq, reap, opts.NoWait, timeout, lockReapPoll, time.Now, time.Sleep)
 	if err != nil {
+		if errors.Is(err, ErrLockBusy) {
+			probe := ProbeLock(path)
+			deadline := timeout
+			if opts.NoWait {
+				deadline = 0
+			}
+			return nil, &LockBusyError{Receipt: LockWaitReceipt{
+				ElapsedNS:      time.Since(started).Nanoseconds(),
+				DeadlineNS:     deadline.Nanoseconds(),
+				HolderPID:      probe.HolderPID,
+				HolderAlive:    probe.Alive,
+				HolderStale:    probe.Stale,
+				HolderForeign:  probe.Foreign,
+				LockAgeSeconds: probe.AgeSeconds,
+			}}
+		}
 		return nil, err
 	}
 	// Cross-machine VISIBILITY tier (#825): when opted in (FAK_LEASEREF=1), publish the
