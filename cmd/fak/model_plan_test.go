@@ -19,7 +19,7 @@ func TestRunModelPlanJSONCapturesHarnessGoalAndSelection(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &p); err != nil {
 		t.Fatal(err)
 	}
-	if p.Schema != modelloadplan.Schema || p.Request.Setup != "shared" || p.Selected == nil || p.Selected.Quantization != "Q6_K" {
+	if p.Schema != modelloadplan.Schema || p.Request.Setup != "shared" || p.Selected == nil || p.Selected.Quantization != "Q5_K_M" {
 		t.Fatalf("plan = %#v", p)
 	}
 }

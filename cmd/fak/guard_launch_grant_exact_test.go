@@ -7,6 +7,7 @@ import (
 )
 
 func TestGuardDenialRowGrantStaysExactOnly(t *testing.T) {
+	useGuardLaunchToolGrant(t)
 	rejected := []string{"*", "deploy*", "deploy?", "[deploy]", "deploy|shell", "../deploy", "deploy..preview", "deploy preview", "ｄｅｐｌｏｙ＊"}
 	for _, name := range rejected {
 		t.Run("reject/"+name, func(t *testing.T) {

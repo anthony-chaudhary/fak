@@ -11,8 +11,9 @@ func TestGuardProfileEdgeAndAdversarialInputs(t *testing.T) {
 		name, profile string
 		wantOK        bool
 	}{
-		{"empty", "", false}, {"blank", "   ", false}, {"unknown", "hostile; rm -rf", false},
-		{"caveman exact", "caveman", true}, {"ponytail exact", "ponytail", true},
+		{"empty", "", true}, {"blank", "   ", true}, {"unknown", "hostile; rm -rf", false},
+		{"caveman exact", "caveman", false}, {"ponytail exact", "ponytail", false},
+		{"caveman qualified", "caveman:medium", true}, {"ponytail qualified", "ponytail:native:medium", true},
 		{"no prefix widening", "ponytail-extra", false}, {"no case confusion", "PONYTAIL", false},
 	}
 	for _, tc := range cases {

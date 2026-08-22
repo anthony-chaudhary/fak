@@ -101,7 +101,7 @@ func runMaturityRoute(stdout, stderr io.Writer, argv []string) int {
 	limit := fs.Int("limit", 0, "number of ranked maturity backlog items to route (0 = all)")
 	existingJSON := fs.String("existing-json", "", "fixture/list of existing gh issues for dry-run tests")
 	fetchExisting := fs.Bool("fetch-existing", false, "dry-run but query gh to classify create vs update")
-	live := fs.Bool("live", true, "create/update/reopen GitHub issues with gh")
+	live := fs.Bool("live", false, "create/update/reopen GitHub issues with gh")
 	dryRun := fs.Bool("dry-run", false, "render the continuity plan without changing GitHub")
 	asJSON := fs.Bool("json", false, "emit machine-readable plan/result")
 	var labels stringList

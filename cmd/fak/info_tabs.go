@@ -477,7 +477,7 @@ func buildInfoTabBar(active infoView, glossaryOpen bool) infoBar {
 	var regions []infoTabRegion
 	start, end := bb.segment("[w web gateway]")
 	regions = append(regions, infoTabRegion{view: viewNone, term: "web-gateway", start: start, end: end})
-	bb.sep("   ")
+	bb.sep("   c copy   ")
 	for i := 0; i < infoViewCount(); i++ {
 		v := infoView(i)
 		if i > 0 {
@@ -500,7 +500,6 @@ func buildInfoTabBar(active infoView, glossaryOpen bool) infoBar {
 	regions = append(regions, infoTabRegion{view: viewNone, start: start, end: end})
 	// Keyboard-only hint for copy/freeze mode. No click region: entering copy mode disables mouse
 	// reporting (a loop side effect the pure click-fold cannot do), so 'c' is the only way in.
-	bb.sep("   c copy")
 	return infoBar{text: bb.b.String(), regions: regions}
 }
 

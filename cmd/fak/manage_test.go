@@ -25,7 +25,7 @@ func TestManageAndGuardUsageExposeSameSurface(t *testing.T) {
 		"usage: fak manage [flags] [--] <agent command...>",
 		"e.g. fak manage claude",
 		"fak manage --provider openai -- codex",
-		"fak manage allow <tool> | policy explain|diff",
+		"fak manage allow <tool> | disable [--reason TEXT] | policy explain|diff",
 	} {
 		if !strings.Contains(manageText, want) {
 			t.Errorf("manage help missing %q\n%s", want, manageText)

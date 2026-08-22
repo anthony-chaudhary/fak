@@ -201,6 +201,7 @@ func TestOverviewVerbsAdoptVerbFlagUsage(t *testing.T) {
 	exempt := map[string]bool{
 		"version": true, "help": true, "ps": true,
 		"audit": true, "egress": true, "model": true, "signal": true, "codex": true, "manage": true,
+		"progress": true, "ultracode": true,
 	}
 	for _, g := range overviewGroups {
 		for _, e := range g.entries {
@@ -212,6 +213,24 @@ func TestOverviewVerbsAdoptVerbFlagUsage(t *testing.T) {
 				t.Errorf("overview verb %q: no %s call found in cmd/fak — its --help would regress to the bare flag.FlagSet dump", e.name, want)
 			}
 		}
+	}
+}
+
+func TestOverviewBespokeHelpExemptionsRenderUsage(t *testing.T) {
+	var progressOut bytes.Buffer
+	if code := runProgress(io.Discard, &progressOut, []string{"--help"}); code != 2 {
+		t.Fatalf("progress --help code=%d, want 2 from flag.ErrHelp", code)
+	}
+	if got := progressOut.String(); !strings.Contains(got, "Usage: fak progress") {
+		t.Fatalf("progress --help lost bespoke usage: %q", got)
+	}
+
+	var ultracodeOut bytes.Buffer
+	if code := runUltracode(&ultracodeOut, io.Discard, []string{"--help"}); code != 0 {
+		t.Fatalf("ultracode --help code=%d, want 0", code)
+	}
+	if got := ultracodeOut.String(); !strings.Contains(got, "usage: fak ultracode") {
+		t.Fatalf("ultracode --help lost bespoke usage: %q", got)
 	}
 }
 

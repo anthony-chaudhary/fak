@@ -239,7 +239,7 @@ func TestGuardDefaultLaunchDoesNotSpawnGit(t *testing.T) {
 	binDir, logPath := writeGuardE2EFakeGit(t)
 	child := writeGuardE2ENoopChild(t, false)
 	registryPath := filepath.Join(t.TempDir(), "session-registry.json")
-	if err := os.WriteFile(registryPath, []byte("\n"), 0o600); err != nil {
+	if err := os.WriteFile(registryPath, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(sessionRegistryEnv, registryPath)
@@ -270,7 +270,7 @@ func TestGuardDurableLaunchStillPublishes(t *testing.T) {
 	binDir, logPath := writeGuardE2EFakeGit(t)
 	child := writeGuardE2ENoopChild(t, true)
 	registryPath := filepath.Join(t.TempDir(), "session-registry.json")
-	if err := os.WriteFile(registryPath, []byte("\n"), 0o600); err != nil {
+	if err := os.WriteFile(registryPath, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(sessionRegistryEnv, registryPath)

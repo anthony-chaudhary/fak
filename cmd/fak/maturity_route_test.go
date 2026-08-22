@@ -101,6 +101,7 @@ alpha = ["internal/alpha/**"]
 `)
 	writeRouteFile(t, root, "internal/alpha/alpha.go", "package alpha\n\nfunc A() {}\n")
 	writeRouteFile(t, root, "docs/cli-reference.md", "# verbs\n")
+	writeRouteFile(t, root, "internal/maturity/runtime-proofs.json", `{"schema":"fak-maturity-runtime-proofs/2","witnesses":[]}`)
 
 	var out, errb bytes.Buffer
 	code := runMaturity(&out, &errb, []string{
@@ -145,6 +146,7 @@ alpha = ["internal/alpha/**"]
 `)
 	writeRouteFile(t, root, "internal/alpha/alpha.go", "package alpha\n\nfunc A() {}\n")
 	writeRouteFile(t, root, "docs/cli-reference.md", "# verbs\n")
+	writeRouteFile(t, root, "internal/maturity/runtime-proofs.json", `{"schema":"fak-maturity-runtime-proofs/2","witnesses":[]}`)
 	return root
 }
 

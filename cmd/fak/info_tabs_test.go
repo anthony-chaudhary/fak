@@ -336,7 +336,7 @@ func TestApplyInfoClickGlossaryChip(t *testing.T) {
 // vs brackets) and that its regions cover contiguous, non-overlapping cell spans.
 func TestBuildInfoTabBarActiveMarker(t *testing.T) {
 	bar := buildInfoTabBar(viewCache, false)
-	if !strings.Contains(bar.text, "«4 cache»") {
+	if !strings.Contains(bar.text, "«5 cache»") {
 		t.Fatalf("active cache tab must be guillemet-marked: %q", bar.text)
 	}
 	if !strings.Contains(bar.text, "[1 overview]") {
@@ -382,7 +382,7 @@ func TestRenderInteractiveBlockViews(t *testing.T) {
 		ByReason: map[string]uint64{"dangerous_command": 3, "out_of_tree_write": 1, "secret_in_arg": 1, "unknown_tool": 1, "path_escape": 1},
 	}
 	safety := renderGuardInfoInteractiveBlock(infoViewState{active: viewSafety}, v2, tr, 120, 0)
-	for _, want := range []string{"«5 safety»", "blocked: dangerous_command", "blocked: path_escape", "held for witness: 1"} {
+	for _, want := range []string{"«6 safety»", "blocked: dangerous_command", "blocked: path_escape", "held for witness: 1"} {
 		if !strings.Contains(safety, want) {
 			t.Fatalf("safety view missing %q:\n%s", want, safety)
 		}
