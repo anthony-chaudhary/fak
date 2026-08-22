@@ -334,8 +334,8 @@ func TestDispatchOrderTableRendersPriorityColumn(t *testing.T) {
 
 // TestDispatchUsageErrors covers the exit-2 / exit-1 paths.
 func TestDispatchUsageErrors(t *testing.T) {
-	if _, _, code := runDispatchAt(); code != 2 {
-		t.Errorf("no subcommand: exit = %d, want 2", code)
+	if _, _, code := runDispatchAt(); code != 0 {
+		t.Errorf("default sessions view: exit = %d, want 0", code)
 	}
 	if _, _, code := runDispatchAt("frobnicate"); code != 2 {
 		t.Errorf("unknown subcommand: exit = %d, want 2", code)
