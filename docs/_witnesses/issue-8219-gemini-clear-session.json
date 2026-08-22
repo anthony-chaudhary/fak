@@ -1,0 +1,113 @@
+{
+  "schema": "fak.provider-clear-session-witness.v1",
+  "issue": 8219,
+  "captured_at": "2026-08-22T10:05:47Z",
+  "provider": "gemini",
+  "adapter": {
+    "launch": "fak manage -- gemini",
+    "wire": "gemini",
+    "repoint_env": "GOOGLE_GEMINI_BASE_URL",
+    "settings_overlay_env": "GEMINI_CLI_SYSTEM_SETTINGS_PATH",
+    "session_start_matcher": "clear",
+    "persistent_settings_mutated": false
+  },
+  "upstream_contract": {
+    "repository": "google-gemini/gemini-cli",
+    "revision": "e90c63fa158b8facd1872d32b34b07e516308f2b",
+    "commit_time": "2026-08-19T21:20:10Z",
+    "license": "Apache-2.0",
+    "observed": [
+      "/new is an alias of /clear",
+      "both commands emit SessionStart with source=clear and a fresh session_id",
+      "GEMINI_CLI_SYSTEM_SETTINGS_PATH selects the machine-level settings source"
+    ]
+  },
+  "fail_before": {
+    "command": "wsl.exe bash -lc \"cd /mnt/c/work/fak && go test ./cmd/fak -run '^TestGuardGeminiProfileUsesNativeRepoint$' -count=1\"",
+    "result": "FAIL",
+    "observed": {
+      "detected_provider": "",
+      "recognized": false,
+      "base_url_env": "OPENAI_BASE_URL",
+      "base_url_value": "http://127.0.0.1:43123/v1"
+    },
+    "required": {
+      "detected_provider": "gemini",
+      "recognized": true,
+      "base_url_env": "GOOGLE_GEMINI_BASE_URL",
+      "base_url_value": "http://127.0.0.1:43123"
+    }
+  },
+  "offline": {
+    "command": "fak validate --wsl-tests --mine <each issue-owned path>",
+    "committed_base": "cd5cfdc08f233bd6682a80350bfbe1e2aa61dc57",
+    "owned_paths": 16,
+    "result": "PASS: isolated WSL affected tests; independent base-plus-owned-path archive built, vetted, and passed focused tests under WSL",
+    "archive_packages": [
+      "./cmd/fak",
+      "./internal/dropin",
+      "./internal/harnessprofile",
+      "./internal/policy"
+    ],
+    "deterministic_test": "TestGuardGeminiClearAndNewCreateOneBoundedChildEach",
+    "assertions": [
+      "the child receives the authenticated FAK_GUARD_LIFECYCLE_SOCKET and FAK_GUARD_LIFECYCLE_TOKEN",
+      "/clear and /new each add exactly one child trace",
+      "the previous trace stops with PROVIDER_SESSION_CLEAR",
+      "the child becomes the gateway default trace",
+      "context headroom resets while cumulative turns, tokens, and spend carry over",
+      "the launch overlay preserves existing system auth and hooks byte-for-byte in the persistent source"
+    ]
+  },
+  "live": {
+    "platform": "windows",
+    "gemini_cli_version": "0.56.0",
+    "fak_source_revision": "a61479aa106daf658097642b7071f61c1b2b731c",
+    "launch_trace": "issue-8219-live2",
+    "context_budget_tokens": 1000,
+    "system_settings_source_sha256_after": "6115c57d35b997ae7d346232fde4398c706006e7b4200801f1cfc9f209c0698f",
+    "clear": {
+      "command": "/clear",
+      "provider_session_id": "cc99e420-938c-4d9d-a2bb-c26347929fb1",
+      "previous_trace": "issue-8219-live2",
+      "previous_trace_run": "stopped",
+      "previous_trace_reason": "PROVIDER_SESSION_CLEAR",
+      "child_trace": "gemini-clear-9828e7075a453682ced78aac",
+      "child_trace_run": "running",
+      "child_context_tokens_left": 1000,
+      "default_trace_probe_header": "gemini-clear-9828e7075a453682ced78aac"
+    },
+    "new": {
+      "command": "/new",
+      "provider_session_id": "d799346d-8a06-48bd-a581-d9b6ede12712",
+      "previous_trace": "gemini-clear-9828e7075a453682ced78aac",
+      "previous_trace_run": "stopped",
+      "previous_trace_reason": "PROVIDER_SESSION_CLEAR",
+      "child_trace": "gemini-clear-7b833725a99b807ded807bef",
+      "child_trace_run": "running",
+      "child_context_tokens_left": 1000,
+      "default_trace_probe_header": "gemini-clear-7b833725a99b807ded807bef"
+    },
+    "bounded_child_evidence": {
+      "resume_identity_rows": 2,
+      "provider_session_open_rows": 2,
+      "provider_session_close_rows_before_process_exit": 1,
+      "children_per_alias": 1,
+      "session_end_hook": "executed successfully"
+    },
+    "default_route_smoke": {
+      "fak_source_revision": "39a02f324ea79ced5a533d6c6f7546b06096612c",
+      "command": "fak manage --session-id issue-8219-default-live --context-budget-tokens 1000 -- gemini --skip-trust",
+      "extensionless_npm_shim": true,
+      "provider_detected": "gemini",
+      "cli_reached_prompt": true,
+      "cli_auth_posture": "gemini-api-key",
+      "session_end_hook": "executed successfully"
+    },
+    "notes": [
+      "The default-trace probes omitted X-Trace-Id; the gateway returned the current child in the X-Trace-Id response header.",
+      "The probes reached the real Gemini upstream and received HTTP 403 from a deliberately non-secret placeholder key; provider authentication was not needed to witness local routing and lifecycle state.",
+      "The launch-scoped settings overlay preserved a commented system auth setting, and the source file remained at the recorded SHA-256 after exit."
+    ]
+  }
+}

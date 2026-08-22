@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 )
 
 type hookCapability struct {
@@ -72,7 +74,7 @@ func launchFixtures() []launchFixture {
 	return []launchFixture{
 		{Name: "claude-windows-separator", Invocation: "manage", Harness: "claude", Platform: "windows", Provider: "anthropic", Separator: true, Argv: []string{`C:\Program Files\Claude\claude.exe`, "-p", "review this repo"}},
 		{Name: "codex-posix-no-separator", Invocation: "m", Harness: "codex", Platform: "posix", Provider: "openai", Argv: []string{"/usr/local/bin/codex", "exec", "review this repo"}},
-		{Name: "gemini-posix-separator", Invocation: "manage", Harness: "gemini", Platform: "posix", Provider: "openai", Separator: true, Argv: []string{"/opt/bin/gemini", "-p", "review this repo"}},
+		{Name: "gemini-posix-separator", Invocation: "manage", Harness: "gemini", Platform: "posix", Provider: "gemini", Separator: true, Argv: []string{"/opt/bin/gemini", "-p", "review this repo"}},
 	}
 }
 
@@ -143,7 +145,7 @@ func installManagedNativeHooks(command []string) ([]string, func(), error) {
 		config := fmt.Sprintf(`hooks={Stop=[{hooks=[{type="command",command="%s manage hook --harness codex --event Stop"}]}],PreCompact=[{hooks=[{type="command",command="%s manage hook --harness codex --event PreCompact"}]}],PreToolUse=[{hooks=[{type="command",command="%s manage hook --harness codex --event PreToolUse"}]}],PostToolUse=[{hooks=[{type="command",command="%s manage hook --harness codex --event PostToolUse"}]}]}`, q, q, q, q)
 		return append([]string{command[0], "--config", config}, command[1:]...), func() {}, nil
 	}
-	if harness != "gemini" {
+	if !guardProfileHasRepoint(command[0], harnessprofile.RepointSystemSettingsEnv) {
 		return command, func() {}, nil
 	}
 	dir, err := os.MkdirTemp("", "fak-manage-gemini-hooks-")
@@ -151,27 +153,27 @@ func installManagedNativeHooks(command []string) ([]string, func(), error) {
 		return nil, nil, err
 	}
 	path := filepath.Join(dir, "settings.json")
-	hooks := map[string]any{"hooks": map[string]any{}}
-	events := hooks["hooks"].(map[string]any)
+	additions := map[string][]geminiHookGroup{}
 	for _, event := range []string{"BeforeTool", "AfterTool", "AfterAgent", "SessionEnd"} {
-		cmd := fmt.Sprintf(`"%s" manage hook --harness gemini --event %s`, exe, event)
-		events[event] = []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": cmd}}}}
+		cmd := geminiCommandLine([]string{exe, "manage", "hook", "--harness", "gemini", "--event", event}, runtime.GOOS)
+		additions[event] = []geminiHookGroup{{Hooks: []geminiHookCommand{{Type: "command", Command: cmd}}}}
 	}
-	data, _ := json.Marshal(hooks)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	additions["SessionStart"] = []geminiHookGroup{geminiClearHookGroup(exe, guardSessionStartManaged(command))}
+	sourcePath := geminiSettingsSource(os.Getenv, runtime.GOOS)
+	if err := writeGeminiSettingsOverlay(path, sourcePath, additions); err != nil {
 		os.RemoveAll(dir)
 		return nil, nil, err
 	}
-	old, had := os.LookupEnv("GEMINI_CLI_SYSTEM_SETTINGS_PATH")
-	if err := os.Setenv("GEMINI_CLI_SYSTEM_SETTINGS_PATH", path); err != nil {
+	old, had := os.LookupEnv(geminiSystemSettingsEnv)
+	if err := os.Setenv(geminiSystemSettingsEnv, path); err != nil {
 		os.RemoveAll(dir)
 		return nil, nil, err
 	}
 	return command, func() {
 		if had {
-			_ = os.Setenv("GEMINI_CLI_SYSTEM_SETTINGS_PATH", old)
+			_ = os.Setenv(geminiSystemSettingsEnv, old)
 		} else {
-			_ = os.Unsetenv("GEMINI_CLI_SYSTEM_SETTINGS_PATH")
+			_ = os.Unsetenv(geminiSystemSettingsEnv)
 		}
 		_ = os.RemoveAll(dir)
 	}, nil

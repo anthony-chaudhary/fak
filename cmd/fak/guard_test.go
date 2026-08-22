@@ -453,6 +453,7 @@ func TestResolveGuardProvider(t *testing.T) {
 		{"openai", "claude", "openai", false},          // explicit flag wins over the name
 		{"  Anthropic ", "codex", "anthropic", false},  // explicit flag is normalized, still wins
 		{"", "codex", "openai-responses", true},        // empty flag -> inferred
+		{"", "gemini", "gemini", true},                 // native Gemini wire -> inferred
 		{"", "claude", "anthropic", true},              // empty flag -> inferred (the common case)
 		{"", "some-unknown-agent", "anthropic", false}, // unrecognized -> anthropic fallback, NOT flagged as detected
 	}
@@ -481,11 +482,14 @@ func TestGuardInjectedEnv(t *testing.T) {
 	// Claude Code both reach the same local guard when the upstream is OpenAI-compatible
 	// (`--local`, `--remote-serve`, or an explicit OpenAI backend).
 	want := [][2]string{{"OPENAI_BASE_URL", gw + "/v1"}, {"OPENAI_API_BASE", gw + "/v1"}, {"ANTHROPIC_BASE_URL", gw}}
-	for _, p := range []string{"openai", "gemini", "xai", "other"} {
+	for _, p := range []string{"openai", "xai", "other"} {
 		got := guardInjectedEnv(p, "", gw)
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s injected = %v, want %v", p, got, want)
 		}
+	}
+	if got := guardInjectedEnv("gemini", "", gw); !reflect.DeepEqual(got, [][2]string{{"GOOGLE_GEMINI_BASE_URL", gw}}) {
+		t.Errorf("gemini injected = %v, want native GOOGLE_GEMINI_BASE_URL", got)
 	}
 
 	// An explicit --env override yields exactly that one var (no OPENAI_API_BASE alias,
@@ -1315,7 +1319,7 @@ func TestGuardEnvVar(t *testing.T) {
 	}{
 		{"anthropic", "", "ANTHROPIC_BASE_URL"},
 		{"openai", "", "OPENAI_BASE_URL"},
-		{"gemini", "", "OPENAI_BASE_URL"},
+		{"gemini", "", "GOOGLE_GEMINI_BASE_URL"},
 		{"xai", "", "OPENAI_BASE_URL"},
 		{"anthropic", "MY_BASE", "MY_BASE"},        // override always wins
 		{"openai", "  CUSTOM_URL  ", "CUSTOM_URL"}, // trimmed
@@ -1414,10 +1418,13 @@ func TestGuardEnvValue(t *testing.T) {
 	// OpenAI-compatible clients (OpenCode, Codex, the OpenAI/AI SDKs) treat the value as
 	// ending in /v1 and append "/chat/completions" — so it MUST carry /v1 or the gateway
 	// 404s. This is the bug that made `--provider openai` unusable before.
-	for _, p := range []string{"openai", "gemini", "xai", "other"} {
+	for _, p := range []string{"openai", "xai", "other"} {
 		if got := guardEnvValue(p, gw); got != gw+"/v1" {
 			t.Errorf("%s value = %q, want %s/v1", p, got, gw)
 		}
+	}
+	if got := guardEnvValue("gemini", gw); got != gw {
+		t.Errorf("gemini value = %q, want bare host %q", got, gw)
 	}
 	// A trailing slash on the host does not double up.
 	if got := guardEnvValue("openai", gw+"/"); got != gw+"/v1" {
@@ -1431,6 +1438,9 @@ func TestGuardDefaultBaseURL(t *testing.T) {
 	}
 	if got := guardDefaultBaseURL("openai"); got != "https://api.openai.com/v1" {
 		t.Errorf("openai default = %q", got)
+	}
+	if got := guardDefaultBaseURL("gemini"); got != "https://generativelanguage.googleapis.com/v1beta" {
+		t.Errorf("gemini default = %q", got)
 	}
 	if got := guardDefaultBaseURL("groq"); got != "" {
 		t.Errorf("unknown provider should have no default, got %q", got)

@@ -773,10 +773,19 @@ func newResolvedExecCommand(command []string) *exec.Cmd {
 }
 
 // resolveWindowsBatchCommand preserves Windows PATH semantics for npm-installed agent
-// shims. Keep this at the exec boundary: replacing codex with node earlier erases the
-// harness identity that provider wiring, native hooks, and session reporting consume.
+// shims. Keep this at the exec boundary: replacing the harness with node earlier erases
+// the identity that provider wiring, native hooks, and session reporting consume.
 func resolveWindowsBatchCommand(command []string) []string {
 	if runtime.GOOS != "windows" || len(command) == 0 || strings.ContainsAny(command[0], `/\`) || filepath.Ext(command[0]) != "" {
+		return command
+	}
+	entrypointRel := ""
+	switch strings.ToLower(strings.TrimSpace(command[0])) {
+	case "codex":
+		entrypointRel = filepath.Join("node_modules", "@openai", "codex", "bin", "codex.js")
+	case "gemini":
+		entrypointRel = filepath.Join("node_modules", "@google", "gemini-cli", "bundle", "gemini.js")
+	default:
 		return command
 	}
 	resolved, err := exec.LookPath(command[0] + ".cmd")
@@ -788,8 +797,8 @@ func resolveWindowsBatchCommand(command []string) []string {
 	}
 	// CreateProcess cannot execute a batch file directly. npm's shim sits beside
 	// the package entrypoint, so invoke that JavaScript file with node instead of
-	// relying on cmd.exe quoting rules for a long generated Codex argv.
-	entrypoint := filepath.Join(filepath.Dir(resolved), "node_modules", "@openai", "codex", "bin", "codex.js")
+	// relying on cmd.exe quoting rules for the generated agent argv.
+	entrypoint := filepath.Join(filepath.Dir(resolved), entrypointRel)
 	node, nodeErr := exec.LookPath("node.exe")
 	if nodeErr == nil {
 		if _, statErr := os.Stat(entrypoint); statErr == nil {

@@ -25,6 +25,7 @@ func TestStripInheritedSecretsFloor(t *testing.T) {
 		"FLEET_RESOLVE_ISSUE=2358",
 		"CLAUDE_CONFIG_DIR=/home/agent/.claude",
 		"ANTHROPIC_API_KEY=sk-ant-live-should-survive-api-billing",
+		"GEMINI_API_KEY=gemini-api-key-should-survive-api-billing",
 		"OPENAI_API_KEY=sk-proj-should-survive-api-billing",
 		"GITHUB_TOKEN=ghp_should_be_stripped_by_name",
 		"CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-should-be-stripped",
@@ -43,7 +44,7 @@ func TestStripInheritedSecretsFloor(t *testing.T) {
 			keptSet[kv[:i]] = kv[i+1:]
 		}
 	}
-	mustKeep := []string{"PATH", "DISPATCH_LANE", "FLEET_RESOLVE_ISSUE", "CLAUDE_CONFIG_DIR", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"}
+	mustKeep := []string{"PATH", "DISPATCH_LANE", "FLEET_RESOLVE_ISSUE", "CLAUDE_CONFIG_DIR", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"}
 	for _, name := range mustKeep {
 		if _, ok := keptSet[name]; !ok {
 			t.Fatalf("StripInheritedSecrets dropped a var it must keep: %s\nkept=%v", name, kept)

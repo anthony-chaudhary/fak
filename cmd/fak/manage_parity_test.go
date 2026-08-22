@@ -81,19 +81,31 @@ func TestInstallManagedNativeHooksUsesSupportedSeams(t *testing.T) {
 			t.Errorf("Codex adapter missing %s: %s", event, joined)
 		}
 	}
-	old, had := os.LookupEnv("GEMINI_CLI_SYSTEM_SETTINGS_PATH")
+	old, had := os.LookupEnv(geminiSystemSettingsEnv)
 	defer func() {
 		if had {
-			_ = os.Setenv("GEMINI_CLI_SYSTEM_SETTINGS_PATH", old)
+			_ = os.Setenv(geminiSystemSettingsEnv, old)
 		} else {
-			_ = os.Unsetenv("GEMINI_CLI_SYSTEM_SETTINGS_PATH")
+			_ = os.Unsetenv(geminiSystemSettingsEnv)
 		}
 	}()
+	source := filepath.Join(t.TempDir(), "system-settings.json")
+	sourceData := []byte(`{
+  // Existing system policy remains effective in the launch overlay.
+  "security": {"auth": {"selectedType": "gemini-api-key"}},
+  "hooks": {"SessionStart": [{"matcher": "startup", "hooks": [{"type": "command", "command": "existing-hook"}]}]}
+}`)
+	if err := os.WriteFile(source, sourceData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Setenv(geminiSystemSettingsEnv, source); err != nil {
+		t.Fatal(err)
+	}
 	_, restore, err = installManagedNativeHooks([]string{"gemini", "-p", "ok"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := os.Getenv("GEMINI_CLI_SYSTEM_SETTINGS_PATH")
+	path := os.Getenv(geminiSystemSettingsEnv)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +113,34 @@ func TestInstallManagedNativeHooksUsesSupportedSeams(t *testing.T) {
 	if filepath.Base(path) != "settings.json" || !bytes.Contains(data, []byte(`"BeforeTool"`)) || !bytes.Contains(data, []byte(`"AfterAgent"`)) {
 		t.Fatalf("Gemini settings = %s", data)
 	}
+	var settings struct {
+		Security struct {
+			Auth struct {
+				SelectedType string `json:"selectedType"`
+			} `json:"auth"`
+		} `json:"security"`
+		Hooks map[string][]geminiHookGroup `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("parse Gemini settings: %v", err)
+	}
+	if settings.Security.Auth.SelectedType != "gemini-api-key" {
+		t.Fatalf("Gemini overlay dropped existing auth policy: %+v", settings.Security)
+	}
+	start := settings.Hooks["SessionStart"]
+	if len(start) != 2 || start[0].Matcher != "startup" || start[1].Matcher != "clear" || len(start[1].Hooks) != 1 {
+		t.Fatalf("Gemini SessionStart hook = %+v", start)
+	}
+	if command := start[1].Hooks[0].Command; !strings.Contains(command, "guard-sessionstart") || !strings.Contains(command, "--provider") || !strings.Contains(command, "gemini") {
+		t.Fatalf("Gemini SessionStart command = %q", command)
+	}
 	restore()
+	if got := os.Getenv(geminiSystemSettingsEnv); got != source {
+		t.Fatalf("Gemini settings env restored to %q, want %q", got, source)
+	}
+	if after, err := os.ReadFile(source); err != nil || !bytes.Equal(after, sourceData) {
+		t.Fatalf("persistent Gemini settings changed: err=%v after=%s", err, after)
+	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("temporary Gemini settings survived restore: %v", err)
 	}

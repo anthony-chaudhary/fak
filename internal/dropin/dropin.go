@@ -26,8 +26,9 @@ func Ready() bool { return true }
 // operator passes no --provider, so naming a known agent (`fak guard -- codex`) Just
 // Works without also having to say `--provider openai`. The table lists agents that
 // read a base-URL variable guard injects: ANTHROPIC_BASE_URL for the Anthropic wire,
-// and OPENAI_BASE_URL plus OPENAI_API_BASE for the OpenAI wire (guard sets both, so
-// Aider, which reads OPENAI_API_BASE rather than OPENAI_BASE_URL, connects too). An
+// OPENAI_BASE_URL plus OPENAI_API_BASE for the OpenAI wire (guard sets both, so
+// Aider, which reads OPENAI_API_BASE rather than OPENAI_BASE_URL, connects too), and
+// GOOGLE_GEMINI_BASE_URL for Gemini's native wire. An
 // agent that reads neither is left to an explicit --provider/--env on purpose, rather
 // than autodetected into a base URL it ignores. Matching is on the executable's base
 // name, lowercased, with any directory and a Windows .exe/.cmd/.bat/.ps1/.com launcher
@@ -51,6 +52,8 @@ func DetectProvider(command string) (provider string, recognized bool) {
 		return "anthropic", true
 	case "codex", "opencode", "aider":
 		return "openai", true
+	case "gemini":
+		return "gemini", true
 	default:
 		return "", false
 	}
@@ -83,6 +86,8 @@ func DefaultBaseURL(provider string) string {
 		return "https://api.anthropic.com"
 	case "openai":
 		return "https://api.openai.com/v1"
+	case "gemini":
+		return "https://generativelanguage.googleapis.com/v1beta"
 	default:
 		return ""
 	}
@@ -91,8 +96,8 @@ func DefaultBaseURL(provider string) string {
 // EnvVar picks the env var that points the child agent at the gateway. An explicit
 // override always wins; otherwise it is the provider's conventional base-URL variable:
 // Anthropic clients (Claude Code, the Anthropic SDKs) read ANTHROPIC_BASE_URL;
-// OpenAI-compatible clients read OPENAI_BASE_URL (gemini/xai are proxied on the
-// OpenAI-compatible surface here).
+// OpenAI-compatible clients read OPENAI_BASE_URL; Gemini CLI reads
+// GOOGLE_GEMINI_BASE_URL on its native generateContent wire.
 func EnvVar(provider, override string) string {
 	if v := strings.TrimSpace(override); v != "" {
 		return v
@@ -100,6 +105,8 @@ func EnvVar(provider, override string) string {
 	switch provider {
 	case "anthropic":
 		return "ANTHROPIC_BASE_URL"
+	case "gemini":
+		return "GOOGLE_GEMINI_BASE_URL"
 	default:
 		return "OPENAI_BASE_URL"
 	}
@@ -107,14 +114,15 @@ func EnvVar(provider, override string) string {
 
 // EnvValue is the base-URL VALUE injected into the child — and the two wires disagree
 // on the /v1 suffix, which is the difference between a working session and a 404.
-// Anthropic clients (Claude Code) append "/v1/messages" to ANTHROPIC_BASE_URL, so it
-// must be the bare host. OpenAI-compatible clients (OpenCode, Codex, the OpenAI SDK,
+// Anthropic clients append "/v1/messages" and Gemini clients append their native
+// versioned model route, so both receive the bare host. OpenAI-compatible clients
+// (OpenCode, Codex, the OpenAI SDK,
 // the Vercel AI SDK) treat OPENAI_BASE_URL as ending in "/v1" and append
 // "/chat/completions" — so the value MUST carry the /v1 the gateway serves its OpenAI
 // routes under. Without it the client calls "<host>/chat/completions" and the gateway
 // (which exposes "/v1/chat/completions") 404s.
 func EnvValue(provider, gwURL string) string {
-	if provider == "anthropic" {
+	if provider == "anthropic" || provider == "gemini" {
 		return gwURL
 	}
 	return strings.TrimRight(gwURL, "/") + "/v1"
@@ -126,7 +134,7 @@ func EnvValue(provider, gwURL string) string {
 // OpenAI-compatible wire gets OPENAI_BASE_URL and OPENAI_API_BASE with /v1, plus
 // ANTHROPIC_BASE_URL with the bare guard URL so Claude Code can still talk to the local
 // Anthropic Messages surface while fak proxies inference over an OpenAI-compatible
-// upstream.
+// upstream. Gemini's native wire gets GOOGLE_GEMINI_BASE_URL with the bare URL.
 func InjectedEnv(provider, override, gwURL string) [][2]string {
 	val := EnvValue(provider, gwURL)
 	primary := EnvVar(provider, override)
@@ -205,6 +213,12 @@ func KnownAgents() []Agent {
 			Display: "OpenAI Codex",
 			Note:    "OpenAI's coding CLI on the OpenAI-compatible wire. Bring OPENAI_API_KEY, or point --base-url at a local model.",
 			Home:    "https://github.com/openai/codex",
+		},
+		{
+			Command: "gemini",
+			Display: "Gemini CLI",
+			Note:    "Google's coding CLI on the native Gemini wire; existing CLI authentication is inherited.",
+			Home:    "https://github.com/google-gemini/gemini-cli",
 		},
 		{
 			Command: "opencode",

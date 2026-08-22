@@ -20,6 +20,8 @@ func TestDetectProvider(t *testing.T) {
 		{"opencode", "openai", true},
 		{"opencode.cmd", "openai", true}, // the Windows .cmd worker
 		{"aider", "openai", true},        // reads OPENAI_API_BASE, which guard injects alongside OPENAI_BASE_URL
+		{"gemini", "gemini", true},
+		{"gemini.ps1", "gemini", true},
 		{"vim", "", false},
 		{"", "", false},
 	}
@@ -59,6 +61,9 @@ func TestDefaultBaseURL(t *testing.T) {
 	if got := DefaultBaseURL("openai"); got != "https://api.openai.com/v1" {
 		t.Errorf("openai default = %q", got)
 	}
+	if got := DefaultBaseURL("gemini"); got != "https://generativelanguage.googleapis.com/v1beta" {
+		t.Errorf("gemini default = %q", got)
+	}
 	if got := DefaultBaseURL("groq"); got != "" {
 		t.Errorf("unknown provider should have no default, got %q", got)
 	}
@@ -72,7 +77,7 @@ func TestEnvVar(t *testing.T) {
 	}{
 		{"anthropic", "", "ANTHROPIC_BASE_URL"},
 		{"openai", "", "OPENAI_BASE_URL"},
-		{"gemini", "", "OPENAI_BASE_URL"},
+		{"gemini", "", "GOOGLE_GEMINI_BASE_URL"},
 		{"xai", "", "OPENAI_BASE_URL"},
 		{"anthropic", "MY_BASE", "MY_BASE"},        // override always wins
 		{"openai", "  CUSTOM_URL  ", "CUSTOM_URL"}, // trimmed
@@ -92,10 +97,13 @@ func TestEnvValue(t *testing.T) {
 	}
 	// OpenAI-compatible clients treat the value as ending in /v1 and append
 	// "/chat/completions" — so it MUST carry /v1 or the gateway 404s.
-	for _, p := range []string{"openai", "gemini", "xai", "other"} {
+	for _, p := range []string{"openai", "xai", "other"} {
 		if got := EnvValue(p, gw); got != gw+"/v1" {
 			t.Errorf("%s value = %q, want %s/v1", p, got, gw)
 		}
+	}
+	if got := EnvValue("gemini", gw); got != gw {
+		t.Errorf("gemini value = %q, want bare host %q", got, gw)
 	}
 	// A trailing slash on the host does not double up.
 	if got := EnvValue("openai", gw+"/"); got != gw+"/v1" {
@@ -114,11 +122,14 @@ func TestInjectedEnv(t *testing.T) {
 	// OpenAI wire with no override: the OpenAI conventional vars carry /v1, while
 	// ANTHROPIC_BASE_URL carries the bare guard URL for Claude Code.
 	want := [][2]string{{"OPENAI_BASE_URL", gw + "/v1"}, {"OPENAI_API_BASE", gw + "/v1"}, {"ANTHROPIC_BASE_URL", gw}}
-	for _, p := range []string{"openai", "gemini", "xai", "other"} {
+	for _, p := range []string{"openai", "xai", "other"} {
 		got := InjectedEnv(p, "", gw)
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s injected = %v, want %v", p, got, want)
 		}
+	}
+	if got := InjectedEnv("gemini", "", gw); !reflect.DeepEqual(got, [][2]string{{"GOOGLE_GEMINI_BASE_URL", gw}}) {
+		t.Errorf("gemini injected = %v, want native GOOGLE_GEMINI_BASE_URL", got)
 	}
 
 	// An explicit override yields exactly that one var (no OPENAI_API_BASE alias),
@@ -147,6 +158,14 @@ func TestPlanFor(t *testing.T) {
 	codex := PlanFor("codex", "", "", gw)
 	if codex.Provider != "openai" || !codex.Autodetected || !codex.Recognized {
 		t.Errorf("codex plan provider/autodetect/recognized = %q/%v/%v", codex.Provider, codex.Autodetected, codex.Recognized)
+	}
+
+	gemini := PlanFor("gemini", "", "", gw)
+	if gemini.Provider != "gemini" || !gemini.Autodetected || !gemini.Recognized {
+		t.Errorf("gemini plan provider/autodetect/recognized = %q/%v/%v", gemini.Provider, gemini.Autodetected, gemini.Recognized)
+	}
+	if gemini.BaseURL != "https://generativelanguage.googleapis.com/v1beta" || !reflect.DeepEqual(gemini.EnvVars, [][2]string{{"GOOGLE_GEMINI_BASE_URL", gw}}) {
+		t.Errorf("gemini plan base/env = %q/%v", gemini.BaseURL, gemini.EnvVars)
 	}
 	if len(codex.EnvVars) != 3 || codex.EnvVars[0] != [2]string{"OPENAI_BASE_URL", gw + "/v1"} || codex.EnvVars[2] != [2]string{"ANTHROPIC_BASE_URL", gw} {
 		t.Errorf("codex env = %v, want OPENAI_BASE_URL + OPENAI_API_BASE carrying /v1 plus ANTHROPIC_BASE_URL bare", codex.EnvVars)

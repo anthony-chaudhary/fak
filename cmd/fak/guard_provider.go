@@ -225,8 +225,8 @@ func guardPreflightRemoteServe(baseURL string) error {
 // guardEnvVar picks the env var that points the child agent at the gateway. An
 // explicit --env override always wins; otherwise it is the provider's conventional
 // base-URL variable: Anthropic clients (Claude Code, the Anthropic SDKs) read
-// ANTHROPIC_BASE_URL; OpenAI-compatible clients read OPENAI_BASE_URL (gemini/xai are
-// proxied on the OpenAI-compatible surface here).
+// ANTHROPIC_BASE_URL; OpenAI-compatible clients read OPENAI_BASE_URL; Gemini CLI reads
+// GOOGLE_GEMINI_BASE_URL on its native generateContent wire.
 // It is dropin.EnvVar: the drop-in leaf owns the provider→base-URL-variable mapping, and the
 // guard must inject the SAME variable the drop-in surface documents or a guarded child and an
 // unguarded one point at different places. This used to be a byte-identical private copy.
@@ -258,14 +258,15 @@ func guardEnsureTimeoutFloor(name string, floorS int) {
 
 // guardEnvValue is the base-URL VALUE injected into the child — and the two wires
 // disagree on the /v1 suffix, which is the difference between a working session and a
-// 404. Anthropic clients (Claude Code) append "/v1/messages" to ANTHROPIC_BASE_URL, so
-// it must be the bare host. OpenAI-compatible clients (OpenCode, Codex, the OpenAI SDK,
-// the Vercel AI SDK) treat OPENAI_BASE_URL as ending in "/v1" and append
+// 404. Anthropic clients append "/v1/messages" and Gemini clients append their native
+// versioned model route, so both receive the bare host. OpenAI-compatible clients
+// (OpenCode, Codex, the OpenAI SDK, the Vercel AI SDK) treat OPENAI_BASE_URL as ending
+// in "/v1" and append
 // "/chat/completions" — so the value MUST carry the /v1 the gateway serves its OpenAI
 // routes under. Without it the client calls "<host>/chat/completions" and the gateway
 // (which exposes "/v1/chat/completions") 404s.
 func guardEnvValue(provider, gwURL string) string {
-	if provider == "anthropic" {
+	if provider == "anthropic" || provider == "gemini" {
 		return gwURL
 	}
 	return strings.TrimRight(gwURL, "/") + "/v1"
@@ -277,7 +278,8 @@ func guardEnvValue(provider, gwURL string) string {
 // wire gets the OpenAI base variables a client might read (OPENAI_BASE_URL and
 // OPENAI_API_BASE), plus ANTHROPIC_BASE_URL pointed at the same guard. That last var is
 // load-bearing for `fak guard --local -- claude`: the upstream proxy hop is OpenAI
-// compatible, but Claude Code still speaks Anthropic Messages to the local guard.
+// compatible, but Claude Code still speaks Anthropic Messages to the local guard. The
+// Gemini wire gets GOOGLE_GEMINI_BASE_URL with the bare guard URL.
 //
 // The Anthropic wire additionally carries ENABLE_TOOL_SEARCH=true (#5049, Headroom
 // GH#746): Claude Code stops DEFERRING its MCP/system tool schemas — materializing all

@@ -339,6 +339,7 @@ func secretShapedName(name string) bool {
 // high-security deployment that authenticates the child some other way.
 var providerAPIKeyNames = map[string]bool{
 	"ANTHROPIC_API_KEY": true,
+	"GEMINI_API_KEY":    true,
 	"OPENAI_API_KEY":    true,
 }
 

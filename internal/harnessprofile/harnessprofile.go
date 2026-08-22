@@ -37,10 +37,12 @@ const (
 	// WireOpenAIResponses is the OpenAI Responses wire the current Codex CLI prefers
 	// (Chat Completions is deprecated for future removal, so Codex autodetects here).
 	WireOpenAIResponses Wire = "openai-responses"
+	// WireGemini is Google's native Gemini generateContent wire.
+	WireGemini Wire = "gemini"
 )
 
 // RepointMechanism names HOW guard points a wrapped child at the in-process gateway.
-// It is a CLOSED set of the four mechanisms that exist in guard today; a profile
+// It is a CLOSED set of the mechanisms that exist in guard today; a profile
 // SELECTS from it by data instead of guard choosing by `if guardIsCodex` /
 // `case "claude"`. The implementations are untouched — the profile only picks them.
 type RepointMechanism string
@@ -64,6 +66,9 @@ const (
 	// takes baseURL from provider config (packages/ai/src/api/anthropic-messages.ts) — so an
 	// injected env var is not a reliable repoint; the registered-provider override is.
 	RepointExtension RepointMechanism = "extension"
+	// RepointSystemSettingsEnv writes a launch-scoped Gemini system settings overlay and
+	// points the child at it through GEMINI_CLI_SYSTEM_SETTINGS_PATH.
+	RepointSystemSettingsEnv RepointMechanism = "system-settings-env"
 )
 
 // Valid reports whether m is one of the closed RepointMechanism values. C6 (config
@@ -71,7 +76,7 @@ const (
 // dropping it.
 func (m RepointMechanism) Valid() bool {
 	switch m {
-	case RepointEnv, RepointCLIConfig, RepointSettingsFile, RepointExtension:
+	case RepointEnv, RepointCLIConfig, RepointSettingsFile, RepointExtension, RepointSystemSettingsEnv:
 		return true
 	default:
 		return false
@@ -83,7 +88,7 @@ func (m RepointMechanism) Valid() bool {
 // declare a brand-new upstream protocol in config.
 func (w Wire) Valid() bool {
 	switch w {
-	case WireAnthropic, WireOpenAI, WireOpenAIResponses:
+	case WireAnthropic, WireOpenAI, WireOpenAIResponses, WireGemini:
 		return true
 	default:
 		return false
@@ -217,6 +222,17 @@ var builtins = []HarnessProfile{
 		Identity:       IdentityCodex,
 	},
 	{
+		Name:           "gemini",
+		AdapterVersion: "1.0.0",
+		Names:          []string{"gemini"},
+		Wire:           WireGemini,
+		DefaultBaseURL: "https://generativelanguage.googleapis.com/v1beta",
+		Repoint:        []RepointMechanism{RepointEnv, RepointSystemSettingsEnv},
+		Credential:     CredentialSource{Kind: CredentialEnvKey, EnvKey: "GEMINI_API_KEY"},
+		ConfigHomeGlob: ".gemini*",
+		Identity:       IdentityNone,
+	},
+	{
 		Name:           "openai-generic",
 		Names:          []string{"opencode", "aider", "hermes"},
 		Wire:           WireOpenAI,
@@ -293,6 +309,8 @@ func BaseURLForWire(w Wire) string {
 		return "https://api.anthropic.com"
 	case WireOpenAI, WireOpenAIResponses:
 		return "https://api.openai.com/v1"
+	case WireGemini:
+		return "https://generativelanguage.googleapis.com/v1beta"
 	default:
 		return ""
 	}

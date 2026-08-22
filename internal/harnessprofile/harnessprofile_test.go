@@ -24,6 +24,8 @@ func TestLookupReproducesGuardDetectTable(t *testing.T) {
 		{"codex", WireOpenAIResponses, true},
 		{"codex.cmd", WireOpenAIResponses, true},         // Windows .cmd worker
 		{"/opt/openai/codex", WireOpenAIResponses, true}, // absolute path still matches
+		{"gemini", WireGemini, true},
+		{"gemini.ps1", WireGemini, true},
 		{"opencode", WireOpenAI, true},
 		{"opencode.cmd", WireOpenAI, true},
 		{"aider", WireOpenAI, true},
@@ -62,6 +64,7 @@ func TestDefaultBaseURLMatchesGuardTable(t *testing.T) {
 		{WireAnthropic, "https://api.anthropic.com"},
 		{WireOpenAI, "https://api.openai.com/v1"},
 		{WireOpenAIResponses, "https://api.openai.com/v1"},
+		{WireGemini, "https://generativelanguage.googleapis.com/v1beta"},
 		{Wire("groq"), ""}, // unknown wire -> no default
 	}
 	for _, tc := range cases {
@@ -86,6 +89,7 @@ func TestRepointEncodesTodaysWiring(t *testing.T) {
 	want := map[string][]RepointMechanism{
 		"claude":         {RepointEnv, RepointSettingsFile},
 		"codex":          {RepointEnv, RepointCLIConfig},
+		"gemini":         {RepointEnv, RepointSystemSettingsEnv},
 		"openai-generic": {RepointEnv},
 		"pi":             {RepointEnv, RepointExtension},
 	}
@@ -111,7 +115,7 @@ func TestRepointEncodesTodaysWiring(t *testing.T) {
 // TestClosedVocabulariesValidate guards the C6 validation contract: the built-in wires
 // and mechanisms are Valid, and a made-up value is not (so config load rejects it).
 func TestClosedVocabulariesValidate(t *testing.T) {
-	for _, w := range []Wire{WireAnthropic, WireOpenAI, WireOpenAIResponses} {
+	for _, w := range []Wire{WireAnthropic, WireOpenAI, WireOpenAIResponses, WireGemini} {
 		if !w.Valid() {
 			t.Errorf("built-in wire %q should be Valid", w)
 		}
@@ -119,7 +123,7 @@ func TestClosedVocabulariesValidate(t *testing.T) {
 	if Wire("groq").Valid() {
 		t.Errorf("unknown wire should not be Valid")
 	}
-	for _, m := range []RepointMechanism{RepointEnv, RepointCLIConfig, RepointSettingsFile, RepointExtension} {
+	for _, m := range []RepointMechanism{RepointEnv, RepointCLIConfig, RepointSettingsFile, RepointExtension, RepointSystemSettingsEnv} {
 		if !m.Valid() {
 			t.Errorf("built-in mechanism %q should be Valid", m)
 		}
