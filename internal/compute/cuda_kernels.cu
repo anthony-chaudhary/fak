@@ -375,8 +375,29 @@ __global__ void k_qwen35_gdn_fused_in_proj(
   }
   float sum = 0.0f;
   size_t base = (size_t)row * hidden;
-  for (int i = threadIdx.x; i < hidden; i += blockDim.x)
-    sum += qwen35_gdn_weight(w, scale, q8, base + i, hidden) * x[i];
+  if (q8) {
+    const signed char *codes = (const signed char *)w + base;
+    int nblk = hidden / 32;
+    const float *rowScale = scale + (size_t)row * nblk;
+    for (int blk = threadIdx.x; blk < nblk; blk += blockDim.x) {
+      const signed char *qb = codes + blk * 32;
+      const float *xb = x + blk * 32;
+      float blockSum = 0.0f;
+#pragma unroll
+      for (int i = 0; i < 32; i += 4) {
+        char4 q = *(const char4 *)(qb + i);
+        float4 xv = *(const float4 *)(xb + i);
+        blockSum = fmaf((float)q.x, xv.x, blockSum);
+        blockSum = fmaf((float)q.y, xv.y, blockSum);
+        blockSum = fmaf((float)q.z, xv.z, blockSum);
+        blockSum = fmaf((float)q.w, xv.w, blockSum);
+      }
+      sum = fmaf(blockSum, rowScale[blk], sum);
+    }
+  } else {
+    for (int i = threadIdx.x; i < hidden; i += blockDim.x)
+      sum += ((const float *)w)[base + i] * x[i];
+  }
   __shared__ float warpSums[8];
   int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
 #pragma unroll
@@ -505,8 +526,29 @@ __global__ void k_qwen35_gdn_out_proj(
   int row = blockIdx.x;
   float sum = 0.0f;
   size_t base = (size_t)row * valueDim;
-  for (int i = threadIdx.x; i < valueDim; i += blockDim.x)
-    sum += qwen35_gdn_weight(w, scale, q8, base + i, valueDim) * x[i];
+  if (q8) {
+    const signed char *codes = (const signed char *)w + base;
+    int nblk = valueDim / 32;
+    const float *rowScale = scale + (size_t)row * nblk;
+    for (int blk = threadIdx.x; blk < nblk; blk += blockDim.x) {
+      const signed char *qb = codes + blk * 32;
+      const float *xb = x + blk * 32;
+      float blockSum = 0.0f;
+#pragma unroll
+      for (int i = 0; i < 32; i += 4) {
+        char4 q = *(const char4 *)(qb + i);
+        float4 xv = *(const float4 *)(xb + i);
+        blockSum = fmaf((float)q.x, xv.x, blockSum);
+        blockSum = fmaf((float)q.y, xv.y, blockSum);
+        blockSum = fmaf((float)q.z, xv.z, blockSum);
+        blockSum = fmaf((float)q.w, xv.w, blockSum);
+      }
+      sum = fmaf(blockSum, rowScale[blk], sum);
+    }
+  } else {
+    for (int i = threadIdx.x; i < valueDim; i += blockDim.x)
+      sum += ((const float *)w)[base + i] * x[i];
+  }
   __shared__ float warpSums[8];
   int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
 #pragma unroll
