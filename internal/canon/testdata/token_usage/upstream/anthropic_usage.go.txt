@@ -1,0 +1,47 @@
+type Usage struct {
+	// Breakdown of cached tokens by TTL
+	CacheCreation CacheCreation `json:"cache_creation" api:"required"`
+	// The number of input tokens used to create the cache entry.
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens" api:"required"`
+	// The number of input tokens read from the cache.
+	CacheReadInputTokens int64 `json:"cache_read_input_tokens" api:"required"`
+	// The geographic region where inference was performed for this request.
+	InferenceGeo string `json:"inference_geo" api:"required"`
+	// The number of input tokens which were used.
+	InputTokens int64 `json:"input_tokens" api:"required"`
+	// The number of output tokens which were used.
+	OutputTokens int64 `json:"output_tokens" api:"required"`
+	// Breakdown of output tokens by category.
+	//
+	// `output_tokens` remains the inclusive, authoritative total used for billing.
+	// This object provides a read-only decomposition for observability — for example,
+	// how many of the billed output tokens were spent on internal reasoning that may
+	// have been summarized before being returned to you.
+	OutputTokensDetails OutputTokensDetails `json:"output_tokens_details" api:"required"`
+	// The number of server tool requests.
+	ServerToolUse ServerToolUsage `json:"server_tool_use" api:"required"`
+	// If the request used the priority, standard, or batch tier.
+	//
+	// Any of "standard", "priority", "batch".
+	ServiceTier UsageServiceTier `json:"service_tier" api:"required"`
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
+	JSON struct {
+		CacheCreation            respjson.Field
+		CacheCreationInputTokens respjson.Field
+		CacheReadInputTokens     respjson.Field
+		InferenceGeo             respjson.Field
+		InputTokens              respjson.Field
+		OutputTokens             respjson.Field
+		OutputTokensDetails      respjson.Field
+		ServerToolUse            respjson.Field
+		ServiceTier              respjson.Field
+		ExtraFields              map[string]respjson.Field
+		raw                      string
+	} `json:"-"`
+}
+
+// Returns the unmodified JSON received from the API
+func (r Usage) RawJSON() string { return r.JSON.raw }
+func (r *Usage) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
+}

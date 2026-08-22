@@ -1,0 +1,70 @@
+type ResponseUsage struct {
+	// The number of input tokens.
+	InputTokens int64 `json:"input_tokens" api:"required"`
+	// A detailed breakdown of the input tokens.
+	InputTokensDetails ResponseUsageInputTokensDetails `json:"input_tokens_details" api:"required"`
+	// The number of output tokens.
+	OutputTokens int64 `json:"output_tokens" api:"required"`
+	// A detailed breakdown of the output tokens.
+	OutputTokensDetails ResponseUsageOutputTokensDetails `json:"output_tokens_details" api:"required"`
+	// The total number of tokens used.
+	TotalTokens int64 `json:"total_tokens" api:"required"`
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
+	JSON struct {
+		InputTokens         respjson.Field
+		InputTokensDetails  respjson.Field
+		OutputTokens        respjson.Field
+		OutputTokensDetails respjson.Field
+		TotalTokens         respjson.Field
+		ExtraFields         map[string]respjson.Field
+		raw                 string
+	} `json:"-"`
+}
+
+// Returns the unmodified JSON received from the API
+func (r ResponseUsage) RawJSON() string { return r.JSON.raw }
+func (r *ResponseUsage) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
+}
+
+// A detailed breakdown of the input tokens.
+type ResponseUsageInputTokensDetails struct {
+	// The number of input tokens that were written to the cache.
+	CacheWriteTokens int64 `json:"cache_write_tokens" api:"required"`
+	// The number of tokens that were retrieved from the cache.
+	// [More on prompt caching](https://platform.openai.com/docs/guides/prompt-caching).
+	CachedTokens int64 `json:"cached_tokens" api:"required"`
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
+	JSON struct {
+		CacheWriteTokens respjson.Field
+		CachedTokens     respjson.Field
+		ExtraFields      map[string]respjson.Field
+		raw              string
+	} `json:"-"`
+}
+
+// Returns the unmodified JSON received from the API
+func (r ResponseUsageInputTokensDetails) RawJSON() string { return r.JSON.raw }
+func (r *ResponseUsageInputTokensDetails) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
+}
+
+// A detailed breakdown of the output tokens.
+type ResponseUsageOutputTokensDetails struct {
+	// The number of reasoning tokens.
+	ReasoningTokens int64 `json:"reasoning_tokens" api:"required"`
+	// JSON contains metadata for fields, check presence with [respjson.Field.Valid].
+	JSON struct {
+		ReasoningTokens respjson.Field
+		ExtraFields     map[string]respjson.Field
+		raw             string
+	} `json:"-"`
+}
+
+// Returns the unmodified JSON received from the API
+func (r ResponseUsageOutputTokensDetails) RawJSON() string { return r.JSON.raw }
+func (r *ResponseUsageOutputTokensDetails) UnmarshalJSON(data []byte) error {
+	return apijson.UnmarshalRoot(data, r)
+}
+
+// Emitted when a web search call is completed.

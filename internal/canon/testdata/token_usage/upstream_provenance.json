@@ -7,9 +7,18 @@
       "repository": "https://github.com/openai/openai-go",
       "revision": "6dfcd9b01bc201830df3aff3820a1664ea05e21b",
       "source_path": "responses/response.go",
-      "symbols": ["ResponseUsage", "ResponseUsageInputTokensDetails", "ResponseUsageOutputTokensDetails"],
+      "symbols": [
+        "ResponseUsage",
+        "ResponseUsageInputTokensDetails",
+        "ResponseUsageOutputTokensDetails"
+      ],
       "license": "Apache-2.0",
-      "reuse": "The JSON field names and inclusive-total semantics are copied from the generated SDK contract. fak maps them into provider-independent context/cache token classes and retains the native receipt."
+      "reuse": "The JSON field names and inclusive-total semantics are copied from the generated SDK contract. fak maps them into provider-independent context/cache token classes and retains the native receipt.",
+      "excerpt_path": "upstream/openai_response_usage.go.txt",
+      "excerpt_sha256": "6fcbc205758e4a2d32e1db954e5357ebb962889a11f76d7d1d88715af08a01a0",
+      "license_path": "upstream/openai.LICENSE",
+      "source_start_line": 23205,
+      "source_end_line": 23274
     },
     {
       "provider": "anthropic",
@@ -17,9 +26,16 @@
       "revision": "da00f432230f3cdc1dff4e0c1e201d8e95558449",
       "version": "v1.66.0",
       "source_path": "message.go",
-      "symbols": ["Usage"],
+      "symbols": [
+        "Usage"
+      ],
       "license": "MIT",
-      "reuse": "The cache creation/read JSON field names and usage semantics are copied from the generated SDK contract. fak maps them into provider-independent context/cache token classes and retains the native receipt."
+      "reuse": "The cache creation/read JSON field names and usage semantics are copied from the generated SDK contract. fak maps them into provider-independent context/cache token classes and retains the native receipt.",
+      "excerpt_path": "upstream/anthropic_usage.go.txt",
+      "excerpt_sha256": "e551e5f77ba4491a7819452a67417f4abecef0469e3b009417f50709ea3de9f9",
+      "license_path": "upstream/anthropic.LICENSE",
+      "source_start_line": 12152,
+      "source_end_line": 12198
     },
     {
       "provider": "gemini",
@@ -27,9 +43,17 @@
       "revision": "fbdae87185987c7fc1abbe9e0b023c614bc8dc3b",
       "version": "v1.69.0",
       "source_path": "types.go",
-      "symbols": ["GenerateContentResponseUsageMetadata", "ModalityTokenCount"],
+      "symbols": [
+        "GenerateContentResponseUsageMetadata",
+        "ModalityTokenCount"
+      ],
       "license": "Apache-2.0",
-      "reuse": "The generated SDK field names and inclusive effective-prompt semantics are copied directly. fak subtracts cached content from the inclusive prompt, adds tool-result input, separates visible candidates from thoughts, reconciles the explicit total, and retains the native receipt."
+      "reuse": "The generated SDK field names and inclusive effective-prompt semantics are copied directly. fak subtracts cached content from the inclusive prompt, adds tool-result input, separates visible candidates from thoughts, reconciles the explicit total, and retains the native receipt.",
+      "excerpt_path": "upstream/gemini_usage.go.txt",
+      "excerpt_sha256": "05b6869dc417c3ee775c7870cb85fa48e7618557c7aeceb184d581d4a0ebf0c5",
+      "license_path": "upstream/gemini.LICENSE",
+      "source_start_line": 3597,
+      "source_end_line": 3651
     }
   ]
 }
