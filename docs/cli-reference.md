@@ -1230,3 +1230,17 @@ fak git-daily [--root DIR] [--dry-run] [--force] [--prune-worktrees] [--emit tas
 ```
 
 `--dry-run` is the safe preview. `--status N` and `--score` are read-only ledger views; they do not run a maintenance tick. `--emit` prints an OS scheduler unit, while `--install` explicitly installs it. Use `--root` in scheduled jobs so repository discovery never depends on the scheduler's working directory.
+
+## `fak temp-artifacts`
+
+Inventory direct fak build/archive artifacts in the resolved OS temporary directory, with preview as the default:
+
+```text
+fak temp-artifacts --min-age DURATION [--apply] [--json]
+```
+
+`--min-age` is required and must be positive. The command examines only direct, ordinary, non-reparse `fak-*` files with a case-insensitive `.exe`, `.tar`, or `.zip` extension. Preview reports each matching file's exact canonical path, age, bytes, eligibility, and typed reason plus aggregate matching, eligible, preserved, and reaped totals. It never recurses into temporary directories.
+
+On Windows, selection checks each exact candidate path against both `Win32_Process.ExecutablePath` and parsed command-line arguments. Prefix collisions do not count as references, and command-line contents never enter the receipt. If inspection is unavailable, candidates are preserved. `--apply` rechecks identity and references before each move, moves an eligible file into a unique quarantine under the same temporary root, rechecks source and quarantine paths, and deletes only that exact quarantined regular file. A changed, newly referenced, inaccessible, ambiguous, or failed file remains at its source or reported quarantine path; the command never terminates a process and never uses recursive or wildcard deletion.
+
+Producer audit for this fallback: committed `os.MkdirTemp("", "fak-…")` build/cleanroom producers such as `cmd/fak/commit_buildcheck.go`, `cmd/fak/prepush_build.go`, `internal/committedtree`, `internal/devcmd/buildcheck`, `internal/nightrun/prebuild`, and `internal/workerworktree` own directories and use local cleanup where deterministic. Committed direct `os.CreateTemp` producers use non-allowlisted control extensions such as `.md`, `.json`, `.txt`, `.patch`, and `.index`. The incident's direct `.exe`, `.tar`, and `.zip` names have no committed deterministic producer to repair, so this bounded fallback owns interrupted and manual verification artifacts without widening those producer contracts.

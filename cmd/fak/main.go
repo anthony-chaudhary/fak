@@ -8,6 +8,7 @@
 //	fak bench      -  A/B ablate the vDSO over a frozen trace, emit report.json
 //	fak policy     -  dump / validate the deployable capability-floor manifest
 //	fak scratch-janitor - scan and optionally remove stale session scratchpads
+//	fak temp-artifacts  - preview or safely reap stale direct fak OS-temp files
 //	fak hook       -  spawned-hook mode: decide one call from stdin (the baseline)
 //
 // The single blank import of internal/registrations is what wires every leaf
@@ -111,6 +112,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		cmdSessionAudit(args)
 	case "scratch-janitor":
 		os.Exit(runScratchJanitor(os.Stdout, os.Stderr, args))
+	case "temp-artifacts":
+		os.Exit(runTempArtifacts(os.Stdout, os.Stderr, args))
 	case "codex-resume":
 		cmdCodexResume(args)
 	case "sessionjournal":

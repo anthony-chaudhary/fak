@@ -1,0 +1,67 @@
+{
+  "schema": "fak-issue-8365-witness/1",
+  "captured_on": "2026-08-21",
+  "failing_before": {
+    "command": "fak temp-artifacts --min-age 6h --json",
+    "exit_code": 2,
+    "stderr_contains": "unknown verb \"temp-artifacts\"",
+    "committed_dispatch_case": false
+  },
+  "windows_apply": {
+    "platform": "windows-amd64",
+    "command": "fak temp-artifacts --min-age 6h --apply --json",
+    "exit_code": 0,
+    "receipt": {
+      "schema": "fak-temp-artifacts/1",
+      "mode": "apply",
+      "root": "%TEMP%\\issue-8365-dogfood-<run>",
+      "min_age_seconds": 21600,
+      "inspection": "complete",
+      "items": [
+        {
+          "path": "%TEMP%\\issue-8365-dogfood-<run>\\fak-dogfood-active.exe",
+          "age_seconds": 25210,
+          "bytes": 45056,
+          "eligible": false,
+          "reason": "active_reference"
+        },
+        {
+          "path": "%TEMP%\\issue-8365-dogfood-<run>\\fak-dogfood-fresh.tar",
+          "age_seconds": 10,
+          "bytes": 5,
+          "eligible": false,
+          "reason": "fresh"
+        },
+        {
+          "path": "%TEMP%\\issue-8365-dogfood-<run>\\fak-dogfood-old.zip",
+          "age_seconds": 25210,
+          "bytes": 20,
+          "eligible": true,
+          "reason": "reaped"
+        }
+      ],
+      "summary": {
+        "matching_count": 3,
+        "matching_bytes": 45081,
+        "eligible_count": 1,
+        "eligible_bytes": 20,
+        "preserved_count": 2,
+        "preserved_bytes": 45061,
+        "reaped_count": 1,
+        "reaped_bytes": 20
+      }
+    },
+    "postconditions": {
+      "reaped_source_exists": false,
+      "active_source_exists": true,
+      "fresh_source_exists": true,
+      "rejected_extension_exists": true,
+      "unrelated_sibling_exists": true,
+      "controlled_root_cleaned_after_helper_exit": true
+    }
+  },
+  "scrub": {
+    "paths": "OS temp root replaced by %TEMP% and run token replaced by <run>",
+    "private_command_line_contents_included": false
+  }
+}
