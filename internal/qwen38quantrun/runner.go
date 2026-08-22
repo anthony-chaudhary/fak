@@ -220,7 +220,7 @@ func cachePhase(f qwen38quant.Fixture, repetition int) string {
 
 func runOne(ctx context.Context, client *http.Client, cfg Config, f qwen38quant.Fixture) (chatResponse, error) {
 	prompt := materialize(f)
-	body := map[string]any{"model": cfg.Model, "messages": []map[string]string{{"role": "user", "content": prompt}}, "temperature": 0, "max_tokens": f.MaxOutputTokens}
+	body := map[string]any{"model": cfg.Model, "messages": []map[string]string{{"role": "user", "content": prompt}}, "temperature": 0, "max_tokens": f.MaxOutputTokens, "chat_template_kwargs": map[string]bool{"enable_thinking": false}}
 	if f.Workload == "json_schema" {
 		body["response_format"] = map[string]any{
 			"type": "json_schema",

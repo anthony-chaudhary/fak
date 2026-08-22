@@ -12,6 +12,35 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/qwen38quant"
 )
 
+func TestRunnerPinsNoThinkingProfile(t *testing.T) {
+	var captured map[string]any
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{{"id": "exact"}}})
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model": "exact", "choices": []any{map[string]any{"message": map[string]any{"content": "FAK-OK"}}},
+			"usage": map[string]int{"completion_tokens": 1},
+		})
+	}))
+	defer s.Close()
+
+	c := qwen38quant.DefaultCorpus()
+	c.Fixtures = c.Fixtures[:1]
+	c.Workloads = c.Workloads[:1]
+	c.MinimumRepetitions = 1
+	if _, err := (Runner{}).Run(context.Background(), Config{Endpoint: s.URL, Model: "exact", Repetitions: 1}, c); err != nil {
+		t.Fatal(err)
+	}
+	kwargs, ok := captured["chat_template_kwargs"].(map[string]any)
+	if !ok || kwargs["enable_thinking"] != false {
+		t.Fatalf("chat_template_kwargs = %#v, want enable_thinking=false", captured["chat_template_kwargs"])
+	}
+}
 func TestRunAllFixturesAndRepetitions(t *testing.T) {
 	c := qwen38quant.DefaultCorpus()
 	calls := 0
