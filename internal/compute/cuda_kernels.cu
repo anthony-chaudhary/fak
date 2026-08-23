@@ -1753,57 +1753,25 @@ __global__ void k_qwen35_causal_attention_panel(
     const float *Q, const float *K, const float *V, float *Out,
     int tokens, int prefix, int nH, int nKV, int hd, float scale) {
   int flat = blockIdx.x;
-  int h = flat % nH;
-  int token = flat / nH;
-  if (h >= nH || token >= tokens) return;
-  int grp = nH / nKV;
-  int kvh = h / grp;
-  int width = nKV * hd;
+  int h = flat % nH, token = flat / nH;
+  if (h >= nH || token >= tokens || hd > 32) return;
+  int lane = threadIdx.x, kvh = h / (nH / nKV), width = nKV * hd;
   int nPos = prefix + token + 1;
-  const float *qh = Q + (size_t)token * nH * hd + (size_t)h * hd;
-  extern __shared__ float smem[];
-  float *qs = smem;
-  float *red = smem + hd;
-  int tid = threadIdx.x;
-  for (int d = tid; d < hd; d += FLASH_THREADS) qs[d] = qh[d];
-  __syncthreads();
-  float m = -1e30f, l = 0.f;
-  float acc[FLASH_ACC_MAX];
-#pragma unroll
-  for (int k = 0; k < FLASH_ACC_MAX; k++) acc[k] = 0.f;
+  float q = lane < hd ? Q[(size_t)token * nH * hd + (size_t)h * hd + lane] : 0.f;
+  float m = -1e30f, l = 0.f, acc = 0.f;
   for (int j = 0; j < nPos; j++) {
     const float *kj = K + (size_t)j * width + (size_t)kvh * hd;
-    float partial = 0.f;
-    for (int d = tid; d < hd; d += FLASH_THREADS) partial += qs[d] * kj[d];
+    float dot = lane < hd ? q * kj[lane] : 0.f;
 #pragma unroll
-    for (int off = 16; off > 0; off >>= 1)
-      partial += __shfl_down_sync(0xffffffff, partial, off);
-    int lane = tid & 31, warp = tid >> 5;
-    if (lane == 0) red[warp] = partial;
-    __syncthreads();
-    if (warp == 0) {
-      partial = lane < (FLASH_THREADS / 32) ? red[lane] : 0.f;
-#pragma unroll
-      for (int off = 16; off > 0; off >>= 1)
-        partial += __shfl_down_sync(0xffffffff, partial, off);
-      if (lane == 0) red[0] = partial;
-    }
-    __syncthreads();
-    float score = red[0] * scale;
-    float nextM = fmaxf(m, score);
-    float correction = expf(m - nextM);
-    float probability = expf(score - nextM);
+    for (int off = 16; off > 0; off >>= 1) dot += __shfl_down_sync(0xffffffff, dot, off);
+    dot = __shfl_sync(0xffffffff, dot, 0);
+    float nextM = fmaxf(m, dot * scale);
+    float correction = expf(m - nextM), probability = expf(dot * scale - nextM);
     l = l * correction + probability;
-    const float *vj = V + (size_t)j * width + (size_t)kvh * hd;
-    int k = 0;
-    for (int d = tid; d < hd; d += FLASH_THREADS, k++)
-      acc[k] = acc[k] * correction + probability * vj[d];
+    if (lane < hd) acc = acc * correction + probability * V[(size_t)j * width + (size_t)kvh * hd + lane];
     m = nextM;
   }
-  float inv = l > 0.f ? 1.f / l : 0.f;
-  float *out = Out + (size_t)token * nH * hd + (size_t)h * hd;
-  int k = 0;
-  for (int d = tid; d < hd; d += FLASH_THREADS, k++) out[d] = acc[k] * inv;
+  if (lane < hd) Out[(size_t)token * nH * hd + (size_t)h * hd + lane] = acc / l;
 }
 
 extern "C" int fak_qwen35_causal_attention_panel_f32(
@@ -1812,8 +1780,7 @@ extern "C" int fak_qwen35_causal_attention_panel_f32(
   if (!dQ || !dK || !dV || !dOut || tokens <= 0 || prefix < 0 ||
       nH <= 0 || nKV <= 0 || nH % nKV != 0 || hd <= 0 || hd > 1024) return -1;
   cudaGetLastError();
-  size_t shmem = ((size_t)hd + FLASH_THREADS) * sizeof(float);
-  k_qwen35_causal_attention_panel<<<tokens * nH, FLASH_THREADS, shmem, g_stream>>>(
+  k_qwen35_causal_attention_panel<<<tokens * nH, 32, 0, g_stream>>>(
       dQ, dK, dV, dOut, tokens, prefix, nH, nKV, hd, scale);
   cudaError_t launch = cudaGetLastError();
   return launch == cudaSuccess ? 0 : 50000 + (int)launch;
