@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 )
 
 const landRulePreimageSuffix = ".land-rule.preimage"
+
+var landRuleHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 type landRuleCandidate struct {
 	Version    string           `json:"version,omitempty"`
@@ -140,8 +143,11 @@ func reloadLandedPolicy(url string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	resp, err := landRuleHTTPClient.Do(req)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("reload policy timeout: %w", err)
+		}
 		return fmt.Errorf("reload policy: %w", err)
 	}
 	defer resp.Body.Close()

@@ -2,12 +2,16 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPolicyLandRuleDryRunAndRefusals(t *testing.T) {
@@ -65,5 +69,54 @@ func TestPolicyLandRuleRollbackRoundTrip(t *testing.T) {
 	}
 	if reloads != 2 {
 		t.Fatalf("reloads=%d want 2", reloads)
+	}
+}
+
+func TestPolicyLandRuleReloadTimeoutRestoresExactPreimage(t *testing.T) {
+	accepted := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(accepted)
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	previousClient := landRuleHTTPClient
+	landRuleHTTPClient = &http.Client{Timeout: 50 * time.Millisecond}
+	t.Cleanup(func() { landRuleHTTPClient = previousClient })
+
+	dir := t.TempDir()
+	policyPath := filepath.Join(dir, "policy.json")
+	candidatePath := filepath.Join(dir, "candidate.json")
+	preimage := []byte("{\n  \"version\": \"fak-policy/v1\",\n  \"allow\": [\"Bash\"]\n}\n")
+	if err := os.WriteFile(policyPath, preimage, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(candidatePath, []byte(`{"arg_rules":[{"tool":"Bash","arg":"command","deny_regex":"sponge","reason":"POLICY_BLOCK"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	started := time.Now()
+	err := runPolicyLandRule(policyPath, candidatePath, srv.URL, true, false, io.Discard)
+	if elapsed := time.Since(started); elapsed >= time.Second {
+		t.Fatalf("land returned after %s, want a sub-second timeout", elapsed)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("land error = %v, want context deadline exceeded", err)
+	}
+	lowerErr := strings.ToLower(err.Error())
+	if !strings.Contains(lowerErr, "reload policy") || !strings.Contains(lowerErr, "timeout") {
+		t.Fatalf("land error = %q, want reload operation and timeout", err)
+	}
+	select {
+	case <-accepted:
+	default:
+		t.Fatal("reload server never accepted the request")
+	}
+	restored, readErr := os.ReadFile(policyPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(restored, preimage) {
+		t.Fatalf("rollback mismatch:\n got %q\nwant %q", restored, preimage)
 	}
 }
