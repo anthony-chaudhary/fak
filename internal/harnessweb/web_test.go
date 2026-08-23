@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -45,6 +46,57 @@ func TestCapturedPageRendersOperatingStatesAndSecondSkin(t *testing.T) {
 	}
 	if got := response.Header().Get("Content-Security-Policy"); !strings.Contains(got, "default-src 'self'") {
 		t.Fatalf("CSP=%q", got)
+	}
+}
+
+func TestStatusAndPageDistinguishOfflineProofRunsFromLiveWork(t *testing.T) {
+	store := newStore()
+	for _, id := range []string{"local-1", "local-2", "local-3", "local-4", "live-5", "imported-run"} {
+		if err := store.replace(id, []harnesskit.Envelope{event(id, 1, harnesskit.EventRunCompleted, harnesskit.RunPayload{Status: "completed"})}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ui := httptest.NewServer(handler(store))
+	defer ui.Close()
+	response, err := ui.Client().Get(ui.URL + "/api/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var status struct {
+		Agents agentOverview `json:"agents"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status.Agents.TotalRuns != 6 || status.Agents.LiveRuns != 1 || status.Agents.OfflineDemoRuns != 4 {
+		t.Fatalf("run provenance counts = total %d, live %d, offline-demo %d", status.Agents.TotalRuns, status.Agents.LiveRuns, status.Agents.OfflineDemoRuns)
+	}
+	wantSources := map[string]string{"local-1": "offline-demo", "live-5": "live", "imported-run": "legacy-unknown"}
+	for _, run := range status.Agents.RecentRuns {
+		if want, ok := wantSources[run.RunID]; ok && run.Source != want {
+			t.Errorf("source for %s = %q, want %q", run.RunID, run.Source, want)
+		}
+	}
+
+	pageResponse, err := ui.Client().Get(ui.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pageResponse.Body.Close()
+	body, err := io.ReadAll(pageResponse.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	render := string(body)
+	for _, want := range []string{"Live stored runs", "Offline proof runs", "not live activity", "legacy-unknown"} {
+		if !strings.Contains(render, want) {
+			t.Errorf("render missing %q", want)
+		}
+	}
+	if strings.Contains(render, `"Stored runs"`) {
+		t.Error("render still labels the combined total as Stored runs")
 	}
 }
 

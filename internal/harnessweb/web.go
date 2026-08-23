@@ -44,7 +44,7 @@ function render(e){const p=e.payload||{},d=document.createElement("article");d.c
 function empty(message){const p=document.createElement("p");p.className="empty";p.textContent=message;return p}
 function row(title,meta,tag){const d=document.createElement("div");d.className="row";const copy=document.createElement("div"),strong=document.createElement("strong"),small=document.createElement("span"),badge=document.createElement("span");strong.textContent=title;small.className="meta";small.textContent=meta;badge.className="tag";badge.textContent=tag;copy.append(strong,small);d.append(copy,badge);return d}
 function stat(value,label,detail){const d=document.createElement("div");d.className="stat";d.innerHTML='<span class="value">'+esc(value)+'</span><span class="label">'+esc(label)+'</span><span class="detail">'+esc(detail)+'</span>';return d}
-function renderOverview(data){const agents=data.agents||{},goals=data.goals||{},gateway=data.gateway||{},workspace=data.workspace||{};status.textContent=data.mode==="live"?"live - gateway connected":"offline - gateway unavailable";document.querySelector("#overview-note").textContent=gateway.reachable?"live gateway and local registries":"local registries · gateway unavailable; start fak serve and this page reconnects automatically";const stats=document.querySelector("#stats");stats.replaceChildren(stat((agents.live_sessions||[]).length,"Live agents",gateway.reachable?"running through the gateway":"gateway not connected"),stat(agents.total_runs||0,"Stored runs",(agents.completed||0)+" completed · "+(agents.failed||0)+" failed"),stat(goals.active||0,"Active goals",(goals.blocked||0)+" blocked · "+(goals.paused||0)+" paused"),stat(gateway.fleet_sessions||0,"Fleet sessions",(gateway.fleet_machines||0)+" machines visible"));const agentRows=document.querySelector("#agent-rows");agentRows.replaceChildren();for(const a of agents.live_sessions||[])agentRows.append(row(a.trace_id||"unnamed agent",(a.last_tool?"last tool "+a.last_tool+" · ":"")+(a.turns_left||0)+" turns left",a.run||"live"));for(const a of agents.recent_runs||[])agentRows.append(row(a.run_id,a.events+" events · last "+(a.last_event||"unknown"),a.status));if(!agentRows.children.length)agentRows.append(empty("No agent sessions or stored runs yet."));const goalRows=document.querySelector("#goal-rows");goalRows.replaceChildren();if(!goals.readable)goalRows.append(empty("Goal registry unavailable."));else for(const g of goals.items||[])goalRows.append(row(g.title,g.goal_id,g.lifecycle));if(!goalRows.children.length)goalRows.append(empty("No registered goals. Create one with fak goal create."));const gatewayLink=document.querySelector("#gateway-link");if(gateway.url){gatewayLink.href=gateway.url;gatewayLink.target="_blank";gatewayLink.rel="noreferrer";gatewayLink.removeAttribute("aria-disabled")}else{gatewayLink.removeAttribute("href");gatewayLink.removeAttribute("target");gatewayLink.setAttribute("aria-disabled","true")}document.querySelector("#dashboard-note").textContent=gateway.reachable?"live from "+gateway.url:"Start fak serve; dashboards connect automatically to "+(gateway.target||"the configured gateway")+".";const links=document.querySelector("#dashboard-links");links.replaceChildren();for(const item of data.dashboards||[]){const d=document.createElement(item.url?"a":"div");d.className="dashboard"+(item.url?"":" disabled");if(item.url){d.href=item.url;d.target="_blank";d.rel="noreferrer"}const strong=document.createElement("strong"),desc=document.createElement("span"),path=document.createElement("span");strong.textContent=item.label;desc.textContent=item.description;path.className="path";path.textContent=item.path;d.append(strong,desc,path);links.append(d)}if(workspace.armed)document.querySelector("#overview-note").textContent+=" · workspace "+workspace.identity}
+function renderOverview(data){const agents=data.agents||{},goals=data.goals||{},gateway=data.gateway||{},workspace=data.workspace||{};status.textContent=data.mode==="live"?"live - gateway connected":"offline - gateway unavailable";document.querySelector("#overview-note").textContent=gateway.reachable?"live gateway and local registries":"local registries · gateway unavailable; start fak serve and this page reconnects automatically";const stats=document.querySelector("#stats");stats.replaceChildren(stat((agents.live_sessions||[]).length,"Live agents",gateway.reachable?"running through the gateway":"gateway not connected"),stat(agents.live_runs||0,"Live stored runs","gateway-backed operational runs"),stat(agents.offline_demo_runs||0,"Offline proof runs","deterministic demo evidence; not live activity"),stat(goals.active||0,"Active goals",(goals.blocked||0)+" blocked · "+(goals.paused||0)+" paused"),stat(gateway.fleet_sessions||0,"Fleet sessions",(gateway.fleet_machines||0)+" machines visible"));const agentRows=document.querySelector("#agent-rows");agentRows.replaceChildren();for(const a of agents.live_sessions||[])agentRows.append(row(a.trace_id||"unnamed agent",(a.last_tool?"last tool "+a.last_tool+" · ":"")+(a.turns_left||0)+" turns left",a.run||"live"));for(const a of agents.recent_runs||[])agentRows.append(row(a.run_id,(a.source||"legacy-unknown")+" | "+a.events+" events | last "+(a.last_event||"unknown"),a.status));if(!agentRows.children.length)agentRows.append(empty("No agent sessions or stored runs yet."));const goalRows=document.querySelector("#goal-rows");goalRows.replaceChildren();if(!goals.readable)goalRows.append(empty("Goal registry unavailable."));else for(const g of goals.items||[])goalRows.append(row(g.title,g.goal_id,g.lifecycle));if(!goalRows.children.length)goalRows.append(empty("No registered goals. Create one with fak goal create."));const gatewayLink=document.querySelector("#gateway-link");if(gateway.url){gatewayLink.href=gateway.url;gatewayLink.target="_blank";gatewayLink.rel="noreferrer";gatewayLink.removeAttribute("aria-disabled")}else{gatewayLink.removeAttribute("href");gatewayLink.removeAttribute("target");gatewayLink.setAttribute("aria-disabled","true")}document.querySelector("#dashboard-note").textContent=gateway.reachable?"live from "+gateway.url:"Start fak serve; dashboards connect automatically to "+(gateway.target||"the configured gateway")+".";const links=document.querySelector("#dashboard-links");links.replaceChildren();for(const item of data.dashboards||[]){const d=document.createElement(item.url?"a":"div");d.className="dashboard"+(item.url?"":" disabled");if(item.url){d.href=item.url;d.target="_blank";d.rel="noreferrer"}const strong=document.createElement("strong"),desc=document.createElement("span"),path=document.createElement("span");strong.textContent=item.label;desc.textContent=item.description;path.className="path";path.textContent=item.path;d.append(strong,desc,path);links.append(d)}if(workspace.armed)document.querySelector("#overview-note").textContent+=" · workspace "+workspace.identity}
 async function refreshOverview(){try{const r=await fetch("/api/status",{cache:"no-store"});if(!r.ok)throw new Error(r.status);renderOverview(await r.json())}catch(e){status.textContent="status unavailable"}}
 async function pull(){const r=await fetch('/api/events?run_id='+encodeURIComponent(run)+'&after='+after);for(const e of await r.json())render(e);status.textContent='connected · cursor '+after}
 async function start(message){list.replaceChildren();after=0;const r=await fetch("/api/runs",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({message})});run=(await r.json()).run_id;history.replaceState(null,"","?run="+encodeURIComponent(run));await pull();await refreshOverview()}
@@ -191,6 +191,7 @@ func (s *store) replace(runID string, events []harnesskit.Envelope) error {
 
 type runSummary struct {
 	RunID     string `json:"run_id"`
+	Source    string `json:"source"`
 	Status    string `json:"status"`
 	Events    int    `json:"events"`
 	LastEvent string `json:"last_event,omitempty"`
@@ -205,6 +206,8 @@ type liveSessionSummary struct {
 
 type agentOverview struct {
 	TotalRuns        int                  `json:"total_runs"`
+	LiveRuns         int                  `json:"live_runs"`
+	OfflineDemoRuns  int                  `json:"offline_demo_runs"`
 	Running          int                  `json:"running"`
 	Completed        int                  `json:"completed"`
 	Failed           int                  `json:"failed"`
@@ -219,6 +222,12 @@ func (s *store) overview(live []liveSessionSummary) agentOverview {
 	out := agentOverview{TotalRuns: len(s.runs), LiveSessions: live, RecentRuns: make([]runSummary, 0, len(s.runs))}
 	for id, state := range s.runs {
 		summary := summarizeRun(id, state.events)
+		switch summary.Source {
+		case "live":
+			out.LiveRuns++
+		case "offline-demo":
+			out.OfflineDemoRuns++
+		}
 		switch summary.Status {
 		case "completed":
 			out.Completed++
@@ -244,8 +253,19 @@ func (s *store) overview(live []liveSessionSummary) agentOverview {
 	return out
 }
 
+func runSource(id string) string {
+	switch {
+	case strings.HasPrefix(id, "live-"):
+		return "live"
+	case strings.HasPrefix(id, "local-"):
+		return "offline-demo"
+	default:
+		return "legacy-unknown"
+	}
+}
+
 func summarizeRun(id string, events []harnesskit.Envelope) runSummary {
-	summary := runSummary{RunID: id, Status: "running", Events: len(events)}
+	summary := runSummary{RunID: id, Source: runSource(id), Status: "running", Events: len(events)}
 	var requested, resolved uint64
 	for _, e := range events {
 		summary.LastEvent = string(e.Type)
