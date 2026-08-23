@@ -205,7 +205,7 @@ func (c Client) do(ctx context.Context, method, path string, body any, out any) 
 	}
 	hc := c.HTTPClient
 	if hc == nil {
-		hc = http.DefaultClient
+		hc = &http.Client{Timeout: 30 * time.Second}
 	}
 	resp, err := hc.Do(req)
 	if err != nil {
