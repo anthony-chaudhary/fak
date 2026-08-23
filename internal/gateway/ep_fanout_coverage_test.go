@@ -192,6 +192,7 @@ var epFanoutExemptRoutes = map[string]string{
 	// The fak-native surface: syscall adjudication, admission, revocation, ledger reads,
 	// policy/route reloads, trace and session control, lease planes. All gateway state.
 	"/v1/fak/syscall":               epExemptNoDecode,
+	"/v1/fak/cache/posture":         epExemptNoDecode,
 	"/v1/fak/adjudicate":            epExemptNoDecode,
 	"/v1/fak/admit":                 epExemptNoDecode,
 	"/v1/fak/changes":               epExemptNoDecode,

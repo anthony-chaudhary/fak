@@ -1043,6 +1043,52 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /v1/fak/cache/posture:
+    get:
+      summary: Read the managed provider-cache posture
+      responses:
+        '200':
+          description: Active cache posture
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mode]
+                properties:
+                  mode:
+                    type: string
+                    enum: [on, off]
+    post:
+      summary: Set the managed provider-cache posture
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              additionalProperties: false
+              properties:
+                mode:
+                  type: string
+                  enum: [on, off]
+      responses:
+        '200':
+          description: Updated cache posture
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mode]
+                properties:
+                  mode:
+                    type: string
+                    enum: [on, off]
+        '400':
+          description: Invalid posture request
+        '405':
+          description: Method not allowed
+
   /v1/fak/policy:
     get:
       tags: [fak-native]
