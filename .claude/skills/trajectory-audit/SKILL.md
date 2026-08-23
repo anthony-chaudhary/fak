@@ -83,14 +83,13 @@ Do not infer that a missing root means zero activity; the coverage row records
 `root_present: false`. Do not sum a vendor price across harnesses: this spine is
 token-exact and deliberately does not fabricate a blended dollar rate.
 
-## Python parity boundary
+## Retired Python boundary
 
-`tools/session_audit.py` remains only the Claude fixture parity oracle while the
-Go parser is established. Use it during parser development to verify selected
-exact fixture totals; do not use it as the operational audit path and do not
-publish its markdown-first output as the cross-harness contract. The pinned
-oracle values live beside the Go fixtures under
-`internal/trajectory/testdata/audit/`.
+The former Python auditor and import API are retired. `fak trajectory audit` is
+the only operational audit path. Extend its Go fixtures when a supported
+transcript shape changes; never estimate an unsupported shape or revive a
+second parser. The checked retirement inventory and intentional omissions live
+in `internal/trajectory/PYTHON_PARITY.md`.
 
 ## Output
 

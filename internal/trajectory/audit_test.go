@@ -44,24 +44,9 @@ func TestRunAuditPinnedCrossHarnessParity(t *testing.T) {
 	}
 
 	claude := auditSession(t, result, AuditSourceClaude)
-	oracleBytes, err := os.ReadFile(filepath.Join("testdata", "audit", "claude-parity-oracle.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var oracle struct {
-		Input       int64 `json:"input_tokens"`
-		Output      int64 `json:"output_tokens"`
-		CacheRead   int64 `json:"cache_read_tokens"`
-		CacheCreate int64 `json:"cache_create_tokens"`
-		ToolCalls   int   `json:"tool_calls"`
-		ToolErrors  int   `json:"tool_errors"`
-	}
-	if err := json.Unmarshal(oracleBytes, &oracle); err != nil {
-		t.Fatal(err)
-	}
-	wantClaude := AuditTokens{InputTokens: oracle.Input, OutputTokens: oracle.Output, CacheReadTokens: oracle.CacheRead, CacheCreateTokens: oracle.CacheCreate}
-	if claude.Tokens != wantClaude || claude.ToolCalls != oracle.ToolCalls || claude.ToolErrors != oracle.ToolErrors {
-		t.Fatalf("Claude parity = tokens:%+v calls:%d errors:%d, oracle tokens:%+v calls:%d errors:%d", claude.Tokens, claude.ToolCalls, claude.ToolErrors, wantClaude, oracle.ToolCalls, oracle.ToolErrors)
+	wantClaude := AuditTokens{InputTokens: 130, OutputTokens: 17, CacheReadTokens: 250, CacheCreateTokens: 65}
+	if claude.Tokens != wantClaude || claude.ToolCalls != 4 || claude.ToolErrors != 2 {
+		t.Fatalf("Claude exact fixture = tokens:%+v calls:%d errors:%d, want tokens:%+v calls:4 errors:2", claude.Tokens, claude.ToolCalls, claude.ToolErrors, wantClaude)
 	}
 
 	codex := auditSession(t, result, AuditSourceCodex)

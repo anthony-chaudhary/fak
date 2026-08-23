@@ -13,7 +13,7 @@ growing record of *how agents actually do the work* in this repo, and it is the
 most direct RSI signal we own: not a synthetic benchmark, but our own behavior,
 graded by reality every time a commit lands or a session stops.
 
-We already mine part of it. `tools/session_audit.py` folds those transcripts into
+We already mine part of it. `fak trajectory audit` folds those transcripts into
 exact **cost** observability: tokens, tool mix, cache reuse, dollars, per-model and
 per-namespace rollups. That answers *what did a session spend*. It is genuinely
 useful and it is not the thing this note is about.
@@ -85,7 +85,7 @@ folding the scorecard into the control-pane ratchet (the one SOFT rung still ope
 ```bash
 fak sessions score                  # link each transcript to its witnessed outcome
 fak sessions learn                  # run the value-vs-waste contrast over the corpus
-python tools/session_audit.py audit # the cost side: tokens, tool mix, cache reuse
+fak trajectory audit --since 7d # the cost side: tokens, tool mix, cache reuse
 ```
 
 ## The scorecard
