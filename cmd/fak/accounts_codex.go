@@ -56,16 +56,6 @@ func appendDiscoveredCodexHomes(reg accounts.Registry) accounts.Registry {
 	return reg
 }
 
-func resolveNamedCodexHome(name string) (accounts.Home, bool) {
-	name = strings.TrimSpace(name)
-	for _, h := range discoveredCodexHomes() {
-		if h.Name == name {
-			return h, true
-		}
-	}
-	return accounts.Home{}, false
-}
-
 func codexDerefString(v *string) string {
 	if v == nil {
 		return ""

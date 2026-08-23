@@ -483,14 +483,6 @@ type guardSessionStartInstall struct {
 // installGuardSessionStartHook installs a provider-native SessionStart affordance hook.
 // Claude merges it into the shared --settings file; Codex receives a trusted per-launch
 // config layer. Off mode or an unsupported child is a no-op. Mirrors installGuardStopHook.
-func installGuardSessionStartHook(command []string, mode string, managed bool, existingSettingsPath, traceID string) ([]string, guardSessionStartInstall, error) {
-	var profile harnessprofile.HarnessProfile
-	if len(command) > 0 {
-		profile, _ = harnessprofile.Lookup(command[0])
-	}
-	return installGuardSessionStartHookForProfile(command, profile, mode, managed, existingSettingsPath, traceID)
-}
-
 func installGuardSessionStartHookForProfile(command []string, profile harnessprofile.HarnessProfile, mode string, managed bool, existingSettingsPath, traceID string) ([]string, guardSessionStartInstall, error) {
 	normalized := normalizeGuardSessionStartMode(mode)
 	install := guardSessionStartInstall{Mode: normalized}

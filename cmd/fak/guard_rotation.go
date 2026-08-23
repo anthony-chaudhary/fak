@@ -43,14 +43,6 @@ type guardRotationRuntime struct {
 	Headroom    accounts.RotationHeadroom
 }
 
-func guardRotationRuntimeFor(command []string, mode string) guardRotationRuntime {
-	var profile harnessprofile.HarnessProfile
-	if len(command) > 0 {
-		profile, _ = harnessprofile.Lookup(command[0])
-	}
-	return guardRotationRuntimeForProfile(profile, mode)
-}
-
 func guardRotationRuntimeForProfile(profile harnessprofile.HarnessProfile, mode string) guardRotationRuntime {
 	r := guardRotationRuntime{Mode: mode}
 	if mode == guardRotateOff || !profile.Recognized() || strings.TrimSpace(profile.ConfigHomeGlob) == "" {
