@@ -31,6 +31,7 @@ const (
 	PlaneInstructions ExtensionPlane = "instructions"
 	PlaneTransports   ExtensionPlane = "transports"
 	PlaneEvents       ExtensionPlane = "events"
+	PlaneHardware     ExtensionPlane = "hardware"
 )
 
 // LifecycleState is the host-observable state of an extension instance.

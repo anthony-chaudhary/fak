@@ -18,11 +18,12 @@ type Contract struct {
 	Ownership     map[string]Ownership           `json:"resource_ownership"`
 	RunProtocol   ProtocolContract               `json:"run_protocol"`
 	Instructions  InstructionCompositionContract `json:"instruction_composition"`
+	Hardware      HardwareContract               `json:"hardware"`
 }
 
 // SupportedPlanes returns a fresh copy of all public extension planes.
 func SupportedPlanes() []ExtensionPlane {
-	return []ExtensionPlane{PlaneTools, PlaneModels, PlaneContext, PlaneInstructions, PlaneTransports, PlaneEvents}
+	return []ExtensionPlane{PlaneTools, PlaneModels, PlaneContext, PlaneInstructions, PlaneTransports, PlaneEvents, PlaneHardware}
 }
 
 // PublicContract returns the normative machine-readable contract.
@@ -42,6 +43,7 @@ func PublicContract() Contract {
 		Ownership:     map[string]Ownership{"factory_runtime": OwnershipHost, "builder_inputs": OwnershipCaller, "service_inputs": OwnershipCaller},
 		RunProtocol:   PublicProtocolContract(),
 		Instructions:  PublicInstructionContract(),
+		Hardware:      PublicHardwareContract(),
 	}
 }
 

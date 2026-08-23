@@ -43,3 +43,13 @@ This is **Core** work: it freezes the external/kernel boundary before public SDK
 - **#3265** owns executable custom-tool/MCP registration and the proof that calls cannot widen session/tenant authority. Harness-kit defines only the vocabulary and `Services.Invoke` security contract.
 - **#6101** shipped pinned tool-plugin profiles and layered preferences in `fak.toml`; `Profile`/`Provenance` describe portable builder selection and do not reimplement configuration precedence.
 - **#6672** owns canonical-instruction projection into host-specific envelopes; the `instructions` plane identifies the extension point without defining those adapters.
+
+## Hardware kernel and scheduler adapters
+
+`PlaneHardware` keeps device and scheduling experiments behind the same public import as the other harness planes. `HardwareAdapter` declares discovery, architecture, precision, memory, concurrency, determinism, fallback, allocation, validation, and execution. `Scheduler` owns admission and queueing; `DirectScheduler` is the minimal reference implementation and always calls the side-effect-free `Validate` method before `Execute`, so unsupported kernels fail before device work begins.
+
+Buffers name their owner and require idempotent `Release`. Execution never transfers ownership. All blocking methods accept `context.Context`. `ExecutionTelemetry` separates queue time, adapter overhead, execution time, peak memory, and fallback identity so a performance claim can compare a tuned baseline without hiding adapter cost.
+
+`internal/compute.NewHarnessAdapter` is the in-tree non-default bridge: a CUDA build can pass the result of `compute.Lookup("cuda")` without exposing the private compute API. The reference and accelerated paths use the same public scheduler and correctness fixture.
+
+This is a `gen/next` gated contract. Promotion requires reference parity plus sanctioned-device correctness, cancellation, memory-pressure, fallback, and tuned net-true performance captures. Demote or retire an adapter when parity, cancellation, ownership, or net-true performance regresses. The invalidating assumption is that device discovery and negotiated capabilities remain truthful for the lifetime of a scheduled request.

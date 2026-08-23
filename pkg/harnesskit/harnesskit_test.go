@@ -60,11 +60,14 @@ func TestPublicContractIsCompleteAndMachineReadable(t *testing.T) {
 	if !reflect.DeepEqual(roundTrip, got) {
 		t.Fatalf("round trip changed contract\n got %#v\nwant %#v", roundTrip, got)
 	}
-	if len(got.Planes) != 6 || len(got.Lifecycle) != 6 || len(got.Errors) < 7 || got.Security == "" || got.Compatibility == "" {
+	if len(got.Planes) != 7 || len(got.Lifecycle) != 6 || len(got.Errors) < 7 || got.Security == "" || got.Compatibility == "" {
 		t.Fatalf("incomplete contract: %#v", got)
 	}
 	if got.Ownership["factory_runtime"] != OwnershipHost {
 		t.Fatalf("runtime ownership missing: %#v", got.Ownership)
+	}
+	if got.Hardware.PromotionEvidence == "" || got.Hardware.InvalidatingAssumption == "" {
+		t.Fatalf("hardware contract missing: %#v", got.Hardware)
 	}
 	if got.Instructions.SchemaVersion != InstructionContractVersion || got.Instructions.Ownership == "" || got.Instructions.Security == "" || got.Instructions.Cancellation == "" {
 		t.Fatalf("instruction composition contract missing: %#v", got.Instructions)
