@@ -298,6 +298,8 @@ func dispatchCoreVerbB(name string, args []string) bool {
 		cmdNegate(args)
 	case "claim-check":
 		cmdClaimCheck(args)
+	case "native-first-lint":
+		os.Exit(cmdNativeFirstLint(args))
 	case "headless-lint":
 		cmdHeadlessLint(args)
 	case "hwgate-lint":
