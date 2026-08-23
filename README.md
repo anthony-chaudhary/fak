@@ -4,6 +4,11 @@
 
 # fak — configure your agents for the task at hand
 
+> **Native inference goal:** [fak-native is the product and performance path, intended to beat
+> llama.cpp in matched, quality-constrained envelopes](docs/native-inference-goal.md).
+> llama.cpp is an explicit benchmark, diagnosis, interoperability, or borrowing reference,
+> never a silent fallback.
+
 AI agents can do more work than one fixed pile of prompts, tools, permissions, and model
 settings can handle well. fak lets you run your agents with a small configuration chosen for
 this task, while one boundary manages their context, models, tools, and record of what happened.
@@ -70,10 +75,11 @@ scratch. Start with the [harness guide](docs/harness-init.md) when you are ready
 | Inspect or change console settings | [Settings quickstart](docs/cli-reference.md#console-settings) |
 | Connect another agent or model | [Codex](docs/integrations/openai-codex.md) · [Claude Code](docs/integrations/claude.md) · [all integrations](docs/integrations/) |
 | Understand what fak manages | [Architecture](docs/architecture.md) · [capability map](docs/CAPABILITIES.md) |
+| Improve or compare local inference | [Fak-native inference doctrine](docs/native-inference-goal.md) · [performance routes](docs/performance.md) |
 | Check the proof and limits | [Claims](CLAIMS.md) · [benchmark authority](BENCHMARK-AUTHORITY.md) · [security](SECURITY.md) |
 | Build on fak | [Go API](pkg/) · [harness contract](docs/harness-kit-contract.md) · [contributing](CONTRIBUTING.md) |
 | Explore everything else | [Documentation index](docs/index.md) · [interactive showcase](docs/showcase.html) · [front-page archive](docs/README-legacy.md) |
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-08-20 vs VERSION 0.44.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
+<!-- readme-verified: 2026-08-20 vs VERSION 0.45.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->

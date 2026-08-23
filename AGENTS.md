@@ -25,6 +25,18 @@ Only inspect or modify another repository when the operator explicitly names
 that repository or the FAK task itself has a concrete, evidenced cross-repo
 dependency. If scope is ambiguous, stay in FAK.
 
+## Native inference performance invariant
+
+For any native-inference or performance task, keep model execution **fak-native all the
+way**. The product path is intended to beat llama.cpp in matched, quality-constrained
+envelopes while fak retains ownership of kernels, memory, scheduling, cache, adaptation,
+and operations. llama.cpp is allowed only when explicitly selected for benchmarks,
+parity/reference diagnosis, migration/interoperability, or ego-free borrowing. Never add
+an `auto`, recovery, or convenience path that silently changes native/performance work to
+llama.cpp. Before accepting evidence, ask whether the model executed inside fak and whether
+the receipt names that engine. Canonical definitions, matched-envelope rules, and the
+deterministic docs guard: [`docs/native-inference-goal.md`](docs/native-inference-goal.md).
+
 ## What this project is
 
 **fak** is an *agent kernel*: one Go binary that sits between an AI agent and the tools
