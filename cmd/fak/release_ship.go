@@ -1349,16 +1349,34 @@ func releaseShipSourceCI(result *releaseShipResult, root string, opts releaseShi
 		return map[string]any{"ok": false, "status": "missing", "source_sha": sha}
 	}
 	row := rows[0]
-	conclusion := stringFromAny(row["conclusion"])
-	status := stringFromAny(row["status"])
-	if conclusion == "" {
-		conclusion = status
-	}
+	conclusion := strings.ToLower(stringFromAny(row["conclusion"]))
+	workflowStatus := strings.ToLower(stringFromAny(row["status"]))
+	state := releaseShipCIState(workflowStatus, conclusion)
 	return map[string]any{
-		"ok":         conclusion == "success",
-		"status":     conclusion,
-		"source_sha": sha,
-		"run":        row,
+		"ok":              state == "green",
+		"status":          state,
+		"workflow_status": workflowStatus,
+		"conclusion":      conclusion,
+		"source_sha":      sha,
+		"run":             row,
+	}
+}
+
+func releaseShipCIState(status, conclusion string) string {
+	if status == "queued" || status == "in_progress" || status == "requested" || status == "waiting" || status == "pending" {
+		return "pending"
+	}
+	switch conclusion {
+	case "success":
+		return "green"
+	case "cancelled", "stale", "skipped":
+		return "cancelled_or_starved"
+	case "failure", "timed_out", "action_required", "startup_failure":
+		return "failed"
+	case "":
+		return "missing"
+	default:
+		return "failed"
 	}
 }
 
