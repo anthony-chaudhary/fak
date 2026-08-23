@@ -87,3 +87,29 @@ func TestAccountingDeterminism(t *testing.T) {
 		}
 	}
 }
+
+func TestAccountingEdgeAdversarialDecode(t *testing.T) {
+	valid, err := json.Marshal(knownAccounting(1, 1, 0, 0, 2, 0.01, "sha256:"+strings.Repeat("c", 64)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		data []byte
+		want string
+	}{
+		{name: "empty", data: nil, want: "decode accounting receipt"},
+		{name: "malformed", data: []byte(`{"schema":`), want: "decode accounting receipt"},
+		{name: "trailing-value", data: append(append([]byte{}, valid...), []byte(` {}`)...), want: "trailing JSON value"},
+		{name: "hostile-unknown-field", data: []byte(`{"schema":"fak.ultracode.accounting.v1","raw_prompt":"secret"}`), want: "unknown field"},
+		{name: "oversized-number", data: []byte(`{"schema":"fak.ultracode.accounting.v1","input_tokens":{"availability":"available","authority":"provider_usage","coverage":1,"value":999999999999999999999999999999}}`), want: "cannot unmarshal number"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := DecodeAccounting(tc.data)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want refusal %q", err, tc.want)
+			}
+		})
+	}
+}
