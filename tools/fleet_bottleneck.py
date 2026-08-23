@@ -29,12 +29,11 @@ the DGX-caching observability stack (C:\work\metrics-service):
        Grafana dashboard + alert rules over them.
 
 Telemetry sources (all already produced by the existing fleet tooling — we do not
-re-parse worker logs or transcripts):
+re-parse the JSONL classifier, we consume its output):
 
-  - fak dispatch sessions --json       <- native current dispatch-session fold
-                                          (liveness, outcome, last activity)
-  - tools/_registry/sessions.json      <- legacy fallback only (account/throttle detail)
-  - session_audit.py (imported)        <- EXACT token accounting (cost, cache-hit,
+  - tools/_registry/sessions.json      <- fleet_sessions.py  (disposition, category,
+                                          throttle, account, age, autonomy)
+  - fak trajectory audit (separate Go report)        <- EXACT token accounting (cost, cache-hit,
                                           I:O, top spenders) from the transcripts
   - tools/_registry/resume_ledger.jsonl, transitions.log, _watchdog/  <- recovery freshness
 
@@ -44,12 +43,12 @@ Usage:
   python fleet_bottleneck.py json [--out FILE]      # full machine payload
   python fleet_bottleneck.py prometheus [--out FILE]# Prometheus text exposition (machine/agent)
   python fleet_bottleneck.py serve [--port 9095]    # live web dashboard + JSON API + /metrics
-      [--no-audit]            skip the (slow) token-spend pass; session signals only
+      [--no-audit]            skip the (slow) token-spend pass; registry signals only
       [--audit-days 1.5]      how far back the token audit looks
       [--audit-max 80]        cap transcripts analyzed per refresh
       [--interval 45]         background snapshot refresh seconds (serve mode)
 
-The native session signals are cheap and always computed; the token-spend pass reads
+The registry signals are cheap and always computed; the token-spend pass reads
 full transcripts, so it is bounded and (in serve mode) refreshed on an interval —
 the HTTP handlers always serve the latest cached snapshot (the memory-sink pattern).
 """
@@ -63,28 +62,20 @@ import time
 import html
 import math
 import tempfile
-import shutil
-import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FLEET_DIR = os.path.dirname(HERE)
 REG_DIR = os.path.join(HERE, "_registry")
 WATCH_DIR = os.path.join(HERE, "_watchdog")
 
-# session_audit lives next to us; import it for EXACT token accounting (no re-parse).
 sys.path.insert(0, HERE)
 try:
     import appversion
-except Exception:  # keep serving even if the version helper is unavailable (mirrors session_audit)
+except Exception:  # keep serving even if the version helper is unavailable
     class appversion:  # type: ignore  # minimal fallback matching app_version()'s real contract
         @staticmethod
         def app_version(*a, **k):
             return os.environ.get("FAK_APP_VERSION", "").strip() or "dev"
-try:
-    import session_audit  # type: ignore
-except Exception:  # pragma: no cover - audit is optional, registry signals still work
-    session_audit = None
-
 def NOW():
     return dt.datetime.now(dt.timezone.utc)
 
@@ -123,227 +114,14 @@ def severity_of(score):
 # --------------------------------------------------------------------------- #
 # 1. COLLECT — normalize the fragmented fleet signals into one FleetSnapshot.
 # --------------------------------------------------------------------------- #
-NATIVE_SESSIONS_SCHEMA = "fleet-dispatch-sessions/1"
-# age_seconds is last-log activity, so the existing telemetry warning floor is
-# also the first point where a live native row becomes HANGING.
-NATIVE_SESSION_HANG_SECONDS = int(CFG["stale_warn_min"] * 60)
-
-
-class SessionSourceError(RuntimeError):
-    """Typed failure from one session-source rung."""
-
-    def __init__(self, code, message):
-        super().__init__(message)
-        self.code = code
-        self.message = message
-
-    def as_dict(self):
-        return {"code": self.code, "message": self.message}
-
-
-def _validate_native_sessions(payload):
-    if not isinstance(payload, dict):
-        raise SessionSourceError(
-            "NATIVE_SESSION_PAYLOAD_INVALID",
-            "fak dispatch sessions returned a non-object JSON payload",
-        )
-    if payload.get("schema") != NATIVE_SESSIONS_SCHEMA:
-        raise SessionSourceError(
-            "NATIVE_SESSION_SCHEMA_INVALID",
-            f"fak dispatch sessions schema is {payload.get('schema')!r}, "
-            f"want {NATIVE_SESSIONS_SCHEMA!r}",
-        )
-    generated = payload.get("generated_utc")
-    if not isinstance(generated, str) or not generated.strip():
-        raise SessionSourceError(
-            "NATIVE_SESSION_PAYLOAD_INVALID",
-            "fak dispatch sessions payload has no generated_utc stamp",
-        )
-    try:
-        dt.datetime.fromisoformat(generated.replace("Z", "+00:00"))
-    except Exception as e:
-        raise SessionSourceError(
-            "NATIVE_SESSION_PAYLOAD_INVALID",
-            "fak dispatch sessions generated_utc is not an ISO-8601 timestamp",
-        ) from e
-    sessions = payload.get("sessions")
-    if not isinstance(sessions, list):
-        raise SessionSourceError(
-            "NATIVE_SESSION_PAYLOAD_INVALID",
-            "fak dispatch sessions payload has no sessions array",
-        )
-    session_count = payload.get("session_count")
-    if not isinstance(session_count, int) or isinstance(session_count, bool) or session_count != len(sessions):
-        raise SessionSourceError(
-            "NATIVE_SESSION_PAYLOAD_INVALID",
-            "fak dispatch sessions session_count does not match its sessions array",
-        )
-    for i, row in enumerate(sessions):
-        if not isinstance(row, dict) or not isinstance(row.get("live"), bool):
-            raise SessionSourceError(
-                "NATIVE_SESSION_PAYLOAD_INVALID",
-                f"fak dispatch sessions row {i} has no typed live field",
-            )
-        age = row.get("age_seconds", 0)
-        if not isinstance(age, (int, float)) or isinstance(age, bool) or age < 0:
-            raise SessionSourceError(
-                "NATIVE_SESSION_PAYLOAD_INVALID",
-                f"fak dispatch sessions row {i} has invalid age_seconds",
-            )
-    live_count = sum(1 for row in sessions if row["live"])
-    declared_live = payload.get("live_count")
-    if not isinstance(declared_live, int) or isinstance(declared_live, bool) or declared_live != live_count:
-        raise SessionSourceError(
-            "NATIVE_SESSION_PAYLOAD_INVALID",
-            "fak dispatch sessions live_count does not match its sessions array",
-        )
-
-
-def _load_native_sessions():
-    """Read the current native fleet-dispatch-sessions/1 snapshot."""
-    fak = os.environ.get("FAK_BIN", "").strip()
-    if not fak:
-        fak = shutil.which("fak") or shutil.which("fak-dev")
-    if not fak:
-        raise SessionSourceError(
-            "NATIVE_SESSION_COMMAND_NOT_FOUND",
-            "neither fak nor fak-dev is available on PATH",
-        )
-    try:
-        proc = subprocess.run(
-            [fak, "dispatch", "sessions", "--json"],
-            cwd=FLEET_DIR,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=15,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as e:
-        raise SessionSourceError(
-            "NATIVE_SESSION_COMMAND_FAILED",
-            f"fak dispatch sessions could not run: {e}",
-        ) from e
-    if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "no diagnostic").strip()
-        raise SessionSourceError(
-            "NATIVE_SESSION_COMMAND_FAILED",
-            f"fak dispatch sessions exited {proc.returncode}: {detail[:240]}",
-        )
-    try:
-        payload = json.loads(proc.stdout)
-    except Exception as e:
-        raise SessionSourceError(
-            "NATIVE_SESSION_PAYLOAD_INVALID",
-            f"fak dispatch sessions emitted invalid JSON: {e}",
-        ) from e
-    _validate_native_sessions(payload)
-    return payload
-
-
-def _legacy_row_from_native(row):
-    """Adapt one native dispatch row to the legacy fields the v1 ranker consumes."""
-    live = row["live"]
-    age_seconds = float(row.get("age_seconds") or 0)
-    wedged = live and age_seconds >= NATIVE_SESSION_HANG_SECONDS
-    outcome = str(row.get("outcome") or "UNKNOWN").upper()
-    reason = str(row.get("reason") or "")
-
-    disp = "LIVE" if live else "DONE"
-    action = "RUNNING" if live else "SKIP_DONE"
-    if live and outcome in ("RETRY_STORM", "ERRORED"):
-        disp = "STOPPED_APIERR"
-        action = "SURFACE"
-    elif live and (outcome == "QUOTA_WALLED" or "capped backend" in reason.lower()):
-        disp = "STOPPED_LIMIT"
-        action = "DEFER_THROTTLED"
-    if wedged:
-        action = "INSPECT_STALLED"
-
-    issue = str(row.get("issue") or "")
-    lane = str(row.get("lane") or "")
-    backend = str(row.get("backend") or "")
-    project = lane or (f"issue-{issue}" if issue else backend)
-    return {
-        "account": None,
-        "project": project,
-        "session": str(row.get("worker") or ""),
-        "git": None,
-        "category": "HANGING" if wedged else ("AGENT" if live else "DONE"),
-        "disp": disp,
-        "cause": reason,
-        "action": action,
-        "age_min": age_seconds / 60.0,
-        "autonomous": True,
-        "supervised": False,
-        "throttle_reset": None,
-    }
-
-
-def _registry_from_native(payload):
-    """Project fleet-dispatch-sessions/1 into the existing normalized collector input."""
-    _validate_native_sessions(payload)
-    return {
-        "schema": "fleet-bottleneck-native-session-adapter/1",
-        "generated_utc": payload["generated_utc"],
-        "window_h": None,
-        "sessions": [_legacy_row_from_native(row) for row in payload["sessions"]],
-        "throttle": {},
-    }
-
-
-def _load_legacy_registry():
+def _load_registry():
     p = os.path.join(REG_DIR, "sessions.json")
     if not os.path.exists(p):
-        raise SessionSourceError(
-            "LEGACY_SESSION_REGISTRY_NOT_FOUND",
-            f"legacy registry not found at {p}",
-        )
+        return None
     try:
-        with open(p, encoding="utf-8") as f:
-            payload = json.load(f)
-    except Exception as e:
-        raise SessionSourceError(
-            "LEGACY_SESSION_REGISTRY_INVALID",
-            f"legacy registry could not be decoded: {e}",
-        ) from e
-    if not isinstance(payload, dict) or not isinstance(payload.get("sessions"), list):
-        raise SessionSourceError(
-            "LEGACY_SESSION_REGISTRY_INVALID",
-            "legacy registry is not an object with a sessions array",
-        )
-    return payload
-
-
-def _load_session_registry():
-    """Prefer the native current snapshot, then fall back to the legacy registry."""
-    try:
-        native = _load_native_sessions()
-    except SessionSourceError as native_error:
-        try:
-            legacy = _load_legacy_registry()
-        except SessionSourceError as legacy_error:
-            error = {
-                "code": "SESSION_SOURCE_UNAVAILABLE",
-                "message": "native dispatch sessions and legacy sessions registry are unavailable",
-                "causes": [native_error.as_dict(), legacy_error.as_dict()],
-            }
-            source = {"status": "unavailable", "error": error}
-            return None, source, [f"{error['code']}: {error['message']}"]
-        source = {
-            "status": "available",
-            "kind": "legacy_sessions_registry",
-            "schema": str(legacy.get("schema") or "legacy-sessions-json"),
-            "fallback_from": native_error.as_dict(),
-        }
-        return legacy, source, []
-    source = {
-        "status": "available",
-        "kind": "native_dispatch_sessions",
-        "schema": native["schema"],
-    }
-    return _registry_from_native(native), source, []
+        return json.load(open(p, encoding="utf-8"))
+    except Exception:
+        return None
 
 
 def _storm_block(reg, sessions):
@@ -470,67 +248,18 @@ def _resumed_set():
     return out
 
 
-def _token_audit(days, cap):
-    """Bounded EXACT token-spend pass. Returns the session_audit aggregate + a few
-    derived fleet figures, or None if the auditor isn't importable."""
-    if session_audit is None:
-        return None
-    try:
-        files = session_audit.discover(session_audit.DEFAULT_ROOTS, since_days=days, ns_prefix="")
-        files = files[:cap]
-        sess = [session_audit.analyze(f["path"]) for f in files]
-        sess = [s for s in sess if "error" not in s]
-        if not sess:
-            return None
-        agg = session_audit.aggregate(sess)
-        # window cost-rate: total cost over the wall span of the analyzed sessions
-        spans = [s["wall_s"] for s in sess if s.get("wall_s")]
-        cost_per_hr = None
-        if agg["total_cost_usd"] and spans:
-            # approximate active hours = sum of session wall spans (parallel workers overlap,
-            # so this is an upper bound on machine-hours; reported as "per active session-hour")
-            active_h = sum(spans) / 3600.0
-            cost_per_hr = agg["total_cost_usd"] / active_h if active_h else None
-        # top spenders + worst cache-hit, for the dashboard
-        top = sorted(sess, key=lambda s: -s["tokens"]["output"])[:6]
-        worst_cache = sorted(
-            [s for s in sess if s.get("cache_hit_frac") is not None and s["n_tool_use"] >= 5],
-            key=lambda s: s["cache_hit_frac"])[:6]
-
-        def _row(s):
-            ns = os.path.basename(os.path.dirname(s["path"]))
-            return {"session": s["session"][:8], "ns": ns,
-                    "turns": s["assistant_turns"], "tool_calls": s["n_tool_use"],
-                    "output": s["tokens"]["output"], "io": s.get("io_ratio"),
-                    "cache_hit": s.get("cache_hit_frac"), "cost": round(s["cost_usd"], 2)}
-        return {
-            "n_analyzed": len(sess),
-            "days": days,
-            "totals": agg["totals"], "total_cost_usd": round(agg["total_cost_usd"], 2),
-            "cost_per_active_session_hr": round(cost_per_hr, 2) if cost_per_hr else None,
-            "dist": agg["dist"],
-            "tool_mix": dict(list(agg["tool_mix"].items())[:12]),
-            "top_spenders": [_row(s) for s in top],
-            "worst_cache": [_row(s) for s in worst_cache],
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
-
 def collect(audit=True, audit_days=1.5, audit_max=80):
     """Build the unified FleetSnapshot from every available source."""
     snap = {
         "app_version": appversion.app_version(),
         "generated_utc": NOW().isoformat(timespec="seconds"),
         "fleet_dir": FLEET_DIR,
-        "session_source": None,
         "registry": None, "audit": None,
         "errors": [],
     }
-    reg, source, source_errors = _load_session_registry()
-    snap["session_source"] = source
-    snap["errors"].extend(source_errors)
+    reg = _load_registry()
     if reg is None:
+        snap["errors"].append("registry sessions.json not found — run: python tools/fleet_sessions.py registry")
         return snap
 
     sessions = reg.get("sessions", [])
@@ -645,8 +374,6 @@ def collect(audit=True, audit_days=1.5, audit_max=80):
         "transitions_log_present": os.path.exists(os.path.join(REG_DIR, "transitions.log")),
     }
 
-    if audit:
-        snap["audit"] = _token_audit(audit_days, audit_max)
     return snap
 
 
@@ -843,8 +570,8 @@ def _bottlenecks(snap):
         out.append(_b(
             "stale_telemetry", "Stale fleet telemetry", "Observability",
             score,
-            f"Session snapshot is {reg_age:.0f} min old — fleet state may have changed since.",
-            "Re-run `fak dispatch sessions --json` and the bottleneck map so the "
+            f"Session registry is {reg_age:.0f} min old — fleet state may have changed since.",
+            "Re-run `python tools/fleet_sessions.py registry` (or schedule it) so the "
             "classification reflects the live fleet. Stale signals hide real bottlenecks.",
             {"registry_age_min": round(reg_age, 1)}))
 
@@ -881,23 +608,19 @@ def report_text(snap, ranked):
     now = NOW().strftime("%Y-%m-%d %H:%M")
     L.append(f"==================== FLEET BOTTLENECK + VISIBILITY @ {now}Z ====================")
     r = snap.get("registry")
-    source = snap.get("session_source") or {}
     if not r:
-        error = source.get("error") or {}
-        code = error.get("code") or "SESSION_SOURCE_UNAVAILABLE"
-        L.append(f"session source: UNAVAILABLE ({code}) — fleet health cannot be inferred.")
+        L.append("registry: NOT FOUND — run `python tools/fleet_sessions.py registry` first.")
         for e in snap.get("errors", []):
             L.append("  ! " + e)
         L.append("=" * 78)
         return "\n".join(L)
 
-    L.append(f"source: {source.get('kind', 'unknown')}  schema={source.get('schema', 'unknown')}")
     c = r["counts"]
     age_s = f"{r['age_min']:.0f}m old" if r.get("age_min") is not None else "age unknown"
     win_s = f"{r['window_h']}h window" if r.get("window_h") is not None else "window unknown"
     L.append(f"health: {ranked['health'].upper()}   "
              f"sessions={r['n_sessions']}  accounts={r['n_accounts']}  "
-             f"(source {age_s}, {win_s})")
+             f"(registry {age_s}, {win_s})")
     L.append("category: " + "  ".join(f"{k}={v}" for k, v in
              sorted(r["category"].items(), key=lambda kv: -kv[1])))
     L.append(f"slots: live={c['live']}  supervised={c['supervised']}  active={c['active']}  "
@@ -1302,8 +1025,8 @@ td.r,th.r{{text-align:right;font-variant-numeric:tabular-nums}}
     elif a and "error" in a:
         P(f'<div class="sec muted">token audit unavailable: {_esc(a["error"])}</div>')
 
-    P('<p class="muted" style="font-size:12px">Sources: fak dispatch sessions --json '
-      '(legacy sessions.json fallback) + session_audit.py · scoring tunable in fleet_bottleneck.py CFG.</p>')
+    P('<p class="muted" style="font-size:12px">Sources: tools/_registry/sessions.json '
+      '(fleet_sessions.py) + session_audit.py · scoring tunable in fleet_bottleneck.py CFG.</p>')
     P(f'<script>setTimeout(function(){{location.reload()}},{interval*1000});</script>')
     P('</main></body></html>')
     return "".join(parts)
