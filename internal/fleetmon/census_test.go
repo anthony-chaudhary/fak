@@ -150,7 +150,8 @@ func TestCensusNoAgentsNeverSilent(t *testing.T) {
 
 	rows := Census(home, censusFixtureNow)
 
-	for _, agent := range []string{"claude", "codex", "gemini", "openai-generic", "pi"} {
+	agents := []string{"claude", "codex", "gemini", "openai-generic", "pi"}
+	for _, agent := range agents {
 		r, ok := findRow(rows, agent, KindNoNamespace)
 		if !ok {
 			t.Fatalf("agent %q missing its NO_NAMESPACE row; got %+v", agent, rows)
@@ -159,8 +160,8 @@ func TestCensusNoAgentsNeverSilent(t *testing.T) {
 			t.Errorf("agent %q NO_NAMESPACE liveness = %q, want UNKNOWN", agent, r.Liveness)
 		}
 	}
-	if len(rows) != 5 {
-		t.Errorf("bare home census = %d rows, want 5 (one NO_NAMESPACE per agent)", len(rows))
+	if len(rows) != len(agents) {
+		t.Errorf("bare home census = %d rows, want one NO_NAMESPACE row per %d agents", len(rows), len(agents))
 	}
 }
 
