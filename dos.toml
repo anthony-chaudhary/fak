@@ -326,7 +326,7 @@ concurrent = [
   "looporphan", "looprecover", "loopscore", "loopunblock", "macbench", "maputil", "mathx",
   "mcpfootprint", "memgate", "memorycotravel", "memoryread", "memorystability", "memvaluescore",
   "memview", "mergepreview", "milestoneburndown", "milestonedoc", "milestonepost",
-  "milestonereport", "modedebt", "modelladder", "modelscore", "modver", "mutationbudget",
+  "milestonereport", "modedebt", "modelladder", "modelperfobs", "modelscore", "modver", "mutationbudget",
   "mutationefficacy", "negframe", "newmodel", "nodecompare", "nodeusagepost", "numfmt",
   "operatortouches", "orphanscan", "patchcommit", "planaudit", "popularizationtickets",
   "privatepath", "procguard", "projectcompletion", "projectreport", "promalert", "promptaudit",
@@ -960,6 +960,7 @@ milestonepost = ["internal/milestonepost/**"]
 milestonereport = ["internal/milestonereport/**"]
 modedebt = ["internal/modedebt/**"]
 modelladder = ["internal/modelladder/**"]
+modelperfobs = ["internal/modelperfobs/**"] # #8518: cmd/fak adapters remain on the shared cmd lane.
 modelscore = ["internal/modelscore/**"]
 modver = ["internal/modver/**"]
 mutationbudget = ["internal/mutationbudget/**"]
