@@ -87,10 +87,17 @@ type Gains struct {
 	OutcomePerUSDGain         *float64 `json:"outcome_per_usd_gain,omitempty"`
 }
 
+type AccountingOutcomeCounts struct {
+	Success int `json:"success"`
+	Refusal int `json:"refusal"`
+	Error   int `json:"error"`
+}
+
 type AccountingAssessment struct {
-	Comparison   CostComparison         `json:"comparison"`
-	Availability AccountingAvailability `json:"availability"`
-	Reasons      []string               `json:"reasons,omitempty"`
+	Comparison   CostComparison          `json:"comparison"`
+	Availability AccountingAvailability  `json:"availability"`
+	Outcomes     AccountingOutcomeCounts `json:"outcomes"`
+	Reasons      []string                `json:"reasons,omitempty"`
 }
 
 type Report struct {
@@ -303,8 +310,34 @@ func validateAccountingJoin(name string, run Run, accounting AccountingReceipt) 
 	return nil
 }
 
+func accountingOutcomeCounts(receipts ...AccountingReceipt) AccountingOutcomeCounts {
+	var counts AccountingOutcomeCounts
+	for _, receipt := range receipts {
+		hasRefusal, hasError := false, false
+		for _, availability := range []AccountingAvailability{
+			receipt.InputTokens.Availability,
+			receipt.OutputTokens.Availability,
+			receipt.CacheReadTokens.Availability,
+			receipt.CacheWriteTokens.Availability,
+			receipt.BilledTokens.Availability,
+			receipt.SpendUSD.Availability,
+		} {
+			hasRefusal = hasRefusal || availability == AccountingUnavailable
+			hasError = hasError || availability == AccountingPartial
+		}
+		switch {
+		case hasError:
+			counts.Error++
+		case hasRefusal:
+			counts.Refusal++
+		default:
+			counts.Success++
+		}
+	}
+	return counts
+}
 func assessAccounting(comparison CostComparison, single, fleet AccountingReceipt) AccountingAssessment {
-	assessment := AccountingAssessment{Comparison: comparison, Availability: AccountingAvailable}
+	assessment := AccountingAssessment{Comparison: comparison, Availability: AccountingAvailable, Outcomes: accountingOutcomeCounts(single, fleet)}
 	if comparison == CompareBilledTokens || comparison == CompareBilledTokensAndSpend {
 		assessment.Reasons = append(assessment.Reasons, tokenAxisReasons("billed_tokens", single.BilledTokens, fleet.BilledTokens)...)
 	}

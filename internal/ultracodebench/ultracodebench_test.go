@@ -88,6 +88,40 @@ func TestEvaluateAccountingCoverageAndAuthorityFailClosed(t *testing.T) {
 	}
 }
 
+func TestAccountingOutcomeCountsAreQueryableFromReport(t *testing.T) {
+	pair := fixture()
+	pair.Single.Accounting.CacheWriteTokens = TokenAccounting{
+		Availability: AccountingUnavailable,
+		Authority:    AuthorityUnreported,
+		Reason:       "provider did not expose cache writes",
+	}
+	partialValue := int64(50)
+	pair.Fleet.Accounting.CacheWriteTokens = TokenAccounting{
+		Availability:   AccountingPartial,
+		Authority:      AuthorityProviderUsage,
+		ArtifactDigest: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+		Coverage:       0.5,
+		Value:          &partialValue,
+		Reason:         "provider returned incomplete cache-write usage",
+	}
+
+	report, err := Evaluate(pair)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := AccountingOutcomeCounts{Refusal: 1, Error: 1}
+	if report.Accounting.Outcomes != want {
+		t.Fatalf("accounting outcomes = %+v, want %+v", report.Accounting.Outcomes, want)
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	field := `"outcomes":{"success":0,"refusal":1,"error":1}`
+	if !strings.Contains(string(raw), field) {
+		t.Fatalf("report missing queryable outcome counts %s: %s", field, raw)
+	}
+}
 func TestEvaluateRequestsOnlyNamedCostAxis(t *testing.T) {
 	pair := fixture()
 	pair.CostComparison = CompareBilledTokens
