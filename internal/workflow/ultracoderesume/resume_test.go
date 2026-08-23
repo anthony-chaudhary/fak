@@ -212,8 +212,36 @@ func TestCrashResumeSelectivelyRerunsAndThenIsIdempotent(t *testing.T) {
 	}
 
 	attempts, err := run.store.ReadAttempts()
-	if err != nil || len(attempts) != 9 {
-		t.Fatalf("attempt rows=%d err=%v, want 9 write-ahead/terminal rows", len(attempts), err)
+	if err != nil {
+		t.Fatalf("read attempts: %v", err)
+	}
+	type attemptKey struct {
+		node    string
+		attempt int
+		status  AttemptStatus
+	}
+	wantAttempts := map[attemptKey]bool{
+		{"observe-config", 1, AttemptStarted}:   false,
+		{"observe-config", 1, AttemptCompleted}: false,
+		{"effect-land", 1, AttemptStarted}:      false,
+		{"effect-land", 1, AttemptCompleted}:    false,
+		{"effect-partial", 1, AttemptStarted}:   false,
+		{"effect-partial", 2, AttemptStarted}:   false,
+		{"effect-partial", 2, AttemptCompleted}: false,
+		{"reconcile", 1, AttemptStarted}:        false,
+		{"reconcile", 1, AttemptCompleted}:      false,
+	}
+	for _, attempt := range attempts {
+		key := attemptKey{attempt.NodeID, attempt.Attempt, attempt.Status}
+		if _, ok := wantAttempts[key]; !ok {
+			t.Fatalf("unexpected attempt row: %+v", attempt)
+		}
+		wantAttempts[key] = true
+	}
+	for key, seen := range wantAttempts {
+		if !seen {
+			t.Errorf("missing attempt row: %+v", key)
+		}
 	}
 	journal, err := run.store.ReadWorkflowJournal()
 	if err != nil || len(journal) != 3 {
