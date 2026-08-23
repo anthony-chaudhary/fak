@@ -109,9 +109,16 @@ func TestCensusCrossAgentGolden(t *testing.T) {
 		t.Errorf("NO_NAMESPACE row should explain why the namespace is absent")
 	}
 
-	// The pi harness (Claude-subscription-backed, config home ~/.pi*) has no config
-	// home in this fixture, so like the env-key harness it yields a typed NO_NAMESPACE
-	// row, never silence.
+	// The Gemini and pi harnesses have no config homes in this fixture, so like
+	// the env-key harness they yield typed NO_NAMESPACE rows, never silence.
+	gemini, ok := findRow(rows, "gemini", KindNoNamespace)
+	if !ok {
+		t.Fatalf("no NO_NAMESPACE row for the gemini harness; got %+v", rows)
+	}
+	if gemini.Liveness != LivenessUnknown || gemini.Note == "" {
+		t.Errorf("gemini NO_NAMESPACE row = %+v, want UNKNOWN with explanation", gemini)
+	}
+
 	pi, ok := findRow(rows, "pi", KindNoNamespace)
 	if !ok {
 		t.Fatalf("no NO_NAMESPACE row for the pi harness; got %+v", rows)
@@ -125,8 +132,8 @@ func TestCensusCrossAgentGolden(t *testing.T) {
 
 	// No agent is silently dropped: every built-in profile contributes at least one
 	// row, and each SESSION row's agent is exactly its profile Name.
-	if got := len(rows); got != 4 {
-		t.Fatalf("census row count = %d, want 4 (claude + codex + openai-generic + pi); rows=%+v", got, rows)
+	if got := len(rows); got != 5 {
+		t.Fatalf("census row count = %d, want 5 (claude + codex + gemini + openai-generic + pi); rows=%+v", got, rows)
 	}
 	for _, r := range rows {
 		if r.Agent == "" {
@@ -143,7 +150,7 @@ func TestCensusNoAgentsNeverSilent(t *testing.T) {
 
 	rows := Census(home, censusFixtureNow)
 
-	for _, agent := range []string{"claude", "codex", "openai-generic", "pi"} {
+	for _, agent := range []string{"claude", "codex", "gemini", "openai-generic", "pi"} {
 		r, ok := findRow(rows, agent, KindNoNamespace)
 		if !ok {
 			t.Fatalf("agent %q missing its NO_NAMESPACE row; got %+v", agent, rows)
@@ -152,8 +159,8 @@ func TestCensusNoAgentsNeverSilent(t *testing.T) {
 			t.Errorf("agent %q NO_NAMESPACE liveness = %q, want UNKNOWN", agent, r.Liveness)
 		}
 	}
-	if len(rows) != 4 {
-		t.Errorf("bare home census = %d rows, want 4 (one NO_NAMESPACE per agent)", len(rows))
+	if len(rows) != 5 {
+		t.Errorf("bare home census = %d rows, want 5 (one NO_NAMESPACE per agent)", len(rows))
 	}
 }
 
