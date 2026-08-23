@@ -34,7 +34,7 @@ restart, cleanup, archive hashing, and rollback cover operations (P4).
 | Runtime | SGLang 0.5.13.post1; Torch 2.11.0+cu130; Transformers 5.8.1 |
 | Image | `sha256:111ae1c2ea80cd2bd94b05a904bda6cf49f8e84e4a29f5dea14fc301a0e7d249` |
 | Driver / CUDA | 580.173.02 / 13.0 |
-| Hardware | 1× NVIDIA A100-SXM4-80GB, `sm_80` |
+| Hardware | `1× NVIDIA A100-SXM4-80GB, sm_80` |
 | Context / cache | 65,536 tokens / SGLang radix cache |
 | Stale after | 2026-09-20 |
 
