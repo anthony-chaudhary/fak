@@ -12114,6 +12114,31 @@
           "category": "incidental",
           "reason": "Fleet-search join candidate is a local identifier record, not a planning concept.",
           "token": "idCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal helper resizes an existing execution plan for bounded retry; it does not define a new plan concept.",
+          "token": "dispatchWaveExecutionPlanWithSize"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal bounded-retry implementation detail; it does not define a new operator-facing plan concept.",
+          "token": "HeldCandidates"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal bounded-retry implementation detail; it does not define a new operator-facing plan concept.",
+          "token": "requestedExecutionPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal bounded-retry implementation detail; it does not define a new operator-facing plan concept.",
+          "token": "auditedPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal bounded-retry implementation detail; it does not define a new operator-facing plan concept.",
+          "token": "auditDispatchWaveExecutionPlanWithFallback"
         }
       ],
       "exclude": [
@@ -12148,6 +12173,7 @@
         "GroupLaneState",
         "GroupLaneStatePlan",
         "GroupedPlan",
+        "HeldCandidates",
         "KVPrefixPressureCandidate",
         "KVPrefixPressuredCandidates",
         "KindCandidate",
@@ -12207,6 +12233,8 @@
         "WatchdogPlanRows",
         "WriteMergePlan",
         "auditDispatchWaveExecutionPlanBounded",
+        "auditDispatchWaveExecutionPlanWithFallback",
+        "auditedPlan",
         "bound_planning",
         "buildMainPlan",
         "buildreconciledissueplan",
@@ -12224,10 +12252,12 @@
         "clonePlan",
         "dedupCandidate",
         "defaultsCheckPlanner",
+        "dispatchWaveExecutionPlanWithSize",
         "fitandplanserveggufexpertparallelpathondevice",
         "fixturePlanner",
         "foldCandidate",
         "hostPlan",
+        "idCandidate",
         "inKernelPlannerEPCoordinated",
         "indexPlanSteps",
         "indexedPlanStep",
@@ -12261,6 +12291,7 @@
         "register_bench_plan_doc",
         "relationCandidates",
         "reportFromSessions",
+        "requestedExecutionPlan",
         "rollbackCodexMarketplaceCandidate",
         "runAblatePlan",
         "runContinuitySyncPlan",
@@ -12276,8 +12307,7 @@
         "watchdogExclusionReason",
         "wipLandOptions",
         "wipLandWith",
-        "writeCandidate",
-        "idCandidate"
+        "writeCandidate"
       ],
       "known_tokens": [],
       "min_files": 2,

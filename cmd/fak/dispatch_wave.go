@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -142,6 +143,14 @@ type dispatchWavePrelaunchGate struct {
 	ErrorCount      int                            `json:"error_count,omitempty"`
 	Reason          string                         `json:"reason,omitempty"`
 	Refused         []dispatchWavePrelaunchRefusal `json:"refused,omitempty"`
+}
+
+type dispatchWaveTrancheReceipt struct {
+	RequestedCount        int      `json:"requested_count"`
+	AttemptedTrancheSizes []int    `json:"attempted_tranche_sizes"`
+	HeldCandidates        []string `json:"held_candidates,omitempty"`
+	TimeoutSource         string   `json:"timeout_source,omitempty"`
+	FinalAuditedCount     int      `json:"final_audited_count"`
 }
 
 type dispatchWavePrelaunchRefusal struct {
@@ -302,9 +311,23 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 			rec["stop_reason"] = "priced fan-out found no launchable lane"
 			return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 		}
-		executionAudit, auditErr := auditDispatchWaveExecutionPlanBounded(root, *maxWorkers, excludedLanes, executionPlan, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit, dispatchWaveDependencyTimeout)
+		requestedExecutionPlan := executionPlan
+		executionAudit, auditedPlan, trancheReceipt, auditErr := auditDispatchWaveExecutionPlanWithFallback(executionPlan, func(plan []dispatchWaveExecutionPlan) ([]dispatchWaveExecutionAudit, error) {
+			return auditDispatchWaveExecutionPlanBounded(root, *maxWorkers, excludedLanes, plan, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit, dispatchWaveDependencyTimeout)
+		})
+		if len(trancheReceipt.AttemptedTrancheSizes) > 1 {
+			rec["requested_execution_plan"] = requestedExecutionPlan
+			rec["tranche_fallback"] = trancheReceipt
+			executionPlan = auditedPlan
+			executionPlanID = dispatchWaveExecutionPlanID(executionPlan)
+			rec["execution_plan_id"] = executionPlanID
+			rec["execution_plan"] = executionPlan
+		}
 		if auditErr != nil {
 			rec["execution_plan_audit"] = executionAudit
+			if len(trancheReceipt.AttemptedTrancheSizes) > 0 {
+				rec["tranche_fallback"] = trancheReceipt
+			}
 			dispatchWaveRecordDependencyError(rec, auditErr)
 			return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 		}
@@ -1082,6 +1105,67 @@ func dispatchWaveRecordDependencyError(rec map[string]any, err error) {
 	}
 }
 
+func dispatchWaveExecutionPlanWithSize(plan []dispatchWaveExecutionPlan, size int) []dispatchWaveExecutionPlan {
+	if size >= len(plan) {
+		return append([]dispatchWaveExecutionPlan(nil), plan...)
+	}
+	if size < 0 {
+		size = 0
+	}
+	out := append([]dispatchWaveExecutionPlan(nil), plan[:size]...)
+	for i := range out {
+		out[i].Rank = i
+		out[i].WaveSize = len(out)
+		out[i].DispatchTickArgs = dispatchWaveSetIntArg(out[i].DispatchTickArgs, "--wave-rank", i)
+		out[i].DispatchTickArgs = dispatchWaveSetIntArg(out[i].DispatchTickArgs, "--wave-size", len(out))
+		out[i].DispatchTickCommand = append([]string{"fak", "dispatch", "tick"}, out[i].DispatchTickArgs...)
+	}
+	return out
+}
+
+func dispatchWaveSetIntArg(args []string, name string, value int) []string {
+	out := append([]string(nil), args...)
+	for i := 0; i+1 < len(out); i++ {
+		if out[i] == name {
+			out[i+1] = strconv.Itoa(value)
+			return out
+		}
+	}
+	return append(out, name, strconv.Itoa(value))
+}
+func dispatchWaveFallbackSize(size int) int {
+	switch {
+	case size > 8:
+		return 8
+	case size > 4:
+		return 4
+	default:
+		return 0
+	}
+}
+
+func auditDispatchWaveExecutionPlanWithFallback(plan []dispatchWaveExecutionPlan, audit func([]dispatchWaveExecutionPlan) ([]dispatchWaveExecutionAudit, error)) ([]dispatchWaveExecutionAudit, []dispatchWaveExecutionPlan, dispatchWaveTrancheReceipt, error) {
+	receipt := dispatchWaveTrancheReceipt{RequestedCount: len(plan)}
+	current := append([]dispatchWaveExecutionPlan(nil), plan...)
+	for {
+		receipt.AttemptedTrancheSizes = append(receipt.AttemptedTrancheSizes, len(current))
+		rows, err := audit(current)
+		if err == nil {
+			receipt.FinalAuditedCount = len(rows)
+			return rows, current, receipt, nil
+		}
+		var dep *dispatchWaveDependencyError
+		next := dispatchWaveFallbackSize(len(current))
+		if len(receipt.AttemptedTrancheSizes) > 1 || !errors.As(err, &dep) || dep.Kind != "timeout" || dep.Dependency != "prelaunch contract audit" || next == 0 {
+			return rows, current, receipt, err
+		}
+		receipt.TimeoutSource = dep.Dependency
+		for _, row := range current[next:] {
+			receipt.HeldCandidates = append(receipt.HeldCandidates, row.Target.ID)
+		}
+		current = dispatchWaveExecutionPlanWithSize(current, next)
+	}
+}
 func auditDispatchWaveExecutionPlanBounded(root string, maxWorkers int, exclude []string, plan []dispatchWaveExecutionPlan, codexLoopGate string, codexLoopGateSinceHours float64, codexLoopGateLimit int, timeout time.Duration) ([]dispatchWaveExecutionAudit, error) {
 	return dispatchWaveDependency(timeout, "prelaunch contract audit", func() ([]dispatchWaveExecutionAudit, error) {
 		return auditDispatchWaveExecutionPlan(root, maxWorkers, exclude, plan, codexLoopGate, codexLoopGateSinceHours, codexLoopGateLimit), nil

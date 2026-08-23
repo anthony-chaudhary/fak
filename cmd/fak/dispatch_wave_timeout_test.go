@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -169,5 +171,68 @@ func TestDispatchWaveDependencyRetryPropagatesFinalUpstreamCause(t *testing.T) {
 	dispatchWaveRecordDependencyError(rec, err)
 	if rec["cause"] != final.Error() || rec["attempts"] != 2 || rec["failure_class"] != "upstream" {
 		t.Fatalf("record = %#v, want propagated final cause", rec)
+	}
+}
+
+func TestDispatchWaveContractTimeoutFallsBackToBoundedTranche(t *testing.T) {
+	plan := make([]dispatchWaveExecutionPlan, 40)
+	for i := range plan {
+		plan[i] = dispatchWaveExecutionPlan{
+			Rank:     i,
+			WaveSize: len(plan),
+			Target: dispatchLaunchTarget{
+				ID:    fmt.Sprintf("issue-%d", i+1),
+				Issue: i + 1,
+				Lane:  fmt.Sprintf("lane-%d", i+1),
+			},
+		}
+	}
+	calls := 0
+	rows, audited, receipt, err := auditDispatchWaveExecutionPlanWithFallback(plan, func(got []dispatchWaveExecutionPlan) ([]dispatchWaveExecutionAudit, error) {
+		calls++
+		if calls == 1 {
+			return nil, &dispatchWaveDependencyError{Dependency: "prelaunch contract audit", Kind: "timeout", Retryable: true, Timeout: time.Second, Err: context.DeadlineExceeded}
+		}
+		out := make([]dispatchWaveExecutionAudit, len(got))
+		for i, row := range got {
+			out[i] = dispatchWaveExecutionAudit{Rank: row.Rank, Target: row.Target, OK: true}
+		}
+		return out, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := receipt.AttemptedTrancheSizes, []int{40, 8}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("attempted tranche sizes = %v, want %v", got, want)
+	}
+	if len(audited) != 8 || len(rows) != 8 || receipt.FinalAuditedCount != 8 {
+		t.Fatalf("audited=%d rows=%d final=%d, want 8", len(audited), len(rows), receipt.FinalAuditedCount)
+	}
+	if len(receipt.HeldCandidates) != 32 || receipt.TimeoutSource != "prelaunch contract audit" {
+		t.Fatalf("receipt = %+v", receipt)
+	}
+}
+
+func TestDispatchWaveContractTimeoutFallsBackOnceAtEight(t *testing.T) {
+	plan := make([]dispatchWaveExecutionPlan, 8)
+	for i := range plan {
+		plan[i] = dispatchWaveExecutionPlan{Rank: i, WaveSize: 8, Target: dispatchLaunchTarget{ID: fmt.Sprintf("issue-%d", i+1)}}
+	}
+	calls := 0
+	_, audited, receipt, err := auditDispatchWaveExecutionPlanWithFallback(plan, func(got []dispatchWaveExecutionPlan) ([]dispatchWaveExecutionAudit, error) {
+		calls++
+		if calls <= 2 {
+			return nil, &dispatchWaveDependencyError{Dependency: "prelaunch contract audit", Kind: "timeout", Retryable: true, Timeout: time.Second, Err: context.DeadlineExceeded}
+		}
+		return nil, nil
+	})
+	if err == nil {
+		t.Fatal("expected the bounded 8->4 retry to refuse after its timeout")
+	}
+	if got, want := receipt.AttemptedTrancheSizes, []int{8, 4}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("attempted tranche sizes = %v, want %v", got, want)
+	}
+	if len(audited) != 4 || calls != 2 {
+		t.Fatalf("audited=%d calls=%d, want 4 and 2", len(audited), calls)
 	}
 }
