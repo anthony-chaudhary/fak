@@ -66,6 +66,15 @@ class Witness:
 
 
 WITNESSES: tuple[Witness, ...] = (
+    Witness("archreportdemo-selfcheck", ("go", "run", "./cmd/archreportdemo", "-selfcheck"), ("selfcheck: PASS",)),
+    Witness("disambiguationdemo-selfcheck", ("go", "run", "./cmd/disambiguationdemo", "-selfcheck"), ("SELFCHECK PASS",)),
+    Witness("fabricmapdemo-selfcheck", ("go", "run", "./cmd/fabricmapdemo", "-selfcheck"), ("PASS:",)),
+    Witness("kvdepth-selfcheck", ("go", "run", "./cmd/kvdepth", "-manifest", "cmd/kvdepth/testdata/campaign.json", "-selfcheck"), ('"campaign_id"',)),
+    Witness("microcachedemo-json", ("go", "run", "./cmd/microcachedemo", "-json"), ("{",)),
+    Witness("microcachedemo-selfcheck", ("go", "run", "./cmd/microcachedemo", "-selfcheck"), ("PASS",)),
+    Witness("microfleetdemo-json", ("go", "run", "./cmd/microfleetdemo", "-json"), ("{",)),
+    Witness("microfleetdemo-selfcheck", ("go", "run", "./cmd/microfleetdemo", "-selfcheck"), ("PASS",)),
+    Witness("quantdemo-selfcheck", ("go", "run", "./cmd/quantdemo", "-selfcheck"), ("PASS",)),
     Witness("guarddemo-selfcheck", ("go", "run", "./cmd/guarddemo", "-selfcheck"), ("reproduced the documented safety-floor",)),
     Witness("turntaxdemo-selfcheck", ("go", "run", "./cmd/turntaxdemo", "-selfcheck"), ("reproduced the documented turn-tax",)),
     Witness("tokendemo-selfcheck", ("go", "run", "./cmd/tokendemo", "-selfcheck"), ("reproduced the documented ledger",)),
@@ -165,7 +174,7 @@ WITNESSES: tuple[Witness, ...] = (
     Witness(
         "fanoutdemo-json",
         ("go", "run", "./cmd/fanoutdemo", "-json"),
-        ('"spine_first_refusal"', '"schema": "fak.issue-fanout-plan.v1"', '"fanout-issuefanout-qa-edge-sweep"'),
+        ('"spine_first_refusal"', '"schema": "fak.issue-fanout-plan.v1"', '"fanout-issuefanout-spine-'),
     ),
     Witness(
         "trychatdemo-print",
