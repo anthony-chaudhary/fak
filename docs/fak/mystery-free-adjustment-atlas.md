@@ -58,6 +58,10 @@ or a captured trace rather than production state.
 **Predict.** An unknown tool is denied because a fail-closed policy has no affirmative
 rule for it.
 
+### Explicit policy refusal recovery
+
+`POLICY_BLOCK` means an explicit manifest rule won; it is not repaired by weakening fail-closed posture. For the canonical `refund_payment` refusal, inspect `deny.refund_payment`, then remove or narrow only that entry if the operation is intentionally authorized. Rerun the identical `fak preflight --explain` call and keep the rule if authorization is uncertain.
+
 **Run.** From the repository root:
 
 ```powershell
