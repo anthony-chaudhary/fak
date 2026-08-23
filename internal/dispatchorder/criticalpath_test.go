@@ -18,8 +18,9 @@ func TestCriticalPathPickThirtySeatsPrioritizesUnlocksAndRefills(t *testing.T) {
 		t.Fatalf("first=%q want dependency-unlocking spine", first.Admitted[0])
 	}
 	second := CriticalPathPick(cands, []string{"spine"}, 30)
-	if !second.Refill || len(second.Admitted) != 29 {
-		t.Fatalf("refill=%v admitted=%d want true,29", second.Refill, len(second.Admitted))
+	wantAdmitted := len(cands) - 1 // completed spine is the only candidate omitted
+	if !second.Refill || len(second.Admitted) != wantAdmitted {
+		t.Fatalf("refill=%v admitted=%d want true,%d", second.Refill, len(second.Admitted), wantAdmitted)
 	}
 	seen := map[string]bool{}
 	for _, id := range second.Admitted {
