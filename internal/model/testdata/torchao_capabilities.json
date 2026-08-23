@@ -1,0 +1,11 @@
+{
+  "source": "https://github.com/pytorch/ao/blob/v0.18.0/torchao/quantization/quant_api.py",
+  "cases": [
+    {"name":"weight-only","request":{"version":"0.9.0","recipe":"int8-weight-only","artifact":"hf://example/model"},"decision":"delegate","reason":"runtime_delegation_required"},
+    {"name":"dynamic-activation","request":{"version":"0.18.0","recipe":"int8-dynamic-activation-int8-weight"},"decision":"delegate","reason":"runtime_delegation_required"},
+    {"name":"float8","request":{"version":"0.18.0","recipe":"float8-dynamic-activation-float8-weight"},"decision":"delegate","reason":"runtime_delegation_required"},
+    {"name":"pre-config-api","request":{"version":"0.8.0","recipe":"int8-weight-only"},"decision":"abstain","reason":"unsupported_version"},
+    {"name":"unknown-future","request":{"version":"99.0.0","recipe":"int8-weight-only"},"decision":"abstain","reason":"unknown_version"},
+    {"name":"unsupported-combination","request":{"version":"0.18.0","recipe":"int4-dynamic-activation-float8-weight"},"decision":"refuse","reason":"unsupported_recipe"}
+  ]
+}

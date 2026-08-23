@@ -3161,6 +3161,11 @@
           "category": "incidental",
           "reason": "Private callback extracted only to keep command orchestration below the god-file ceiling; it adds no operator-facing guard or gate concept.",
           "token": "guardUpstreamObserver"
+        },
+        {
+          "category": "incidental",
+          "reason": "Provider-specific runtime handoff; not a general guard or gate",
+          "token": "TorchAODelegate"
         }
       ],
       "exclude": [
@@ -3241,6 +3246,7 @@
         "SafetyGate",
         "SessionAffinityGateway",
         "TestGuardSelfTightenOverlayPathIsAgentWritable",
+        "TorchAODelegate",
         "VocabularyGateClass",
         "WithAffinity",
         "WritePonytailGateReport",
@@ -10137,6 +10143,16 @@
           "category": "incidental",
           "reason": "Fleet-search store-read status is query evidence coverage, not feature support maturity.",
           "token": "CoveragePartial"
+        },
+        {
+          "category": "incidental",
+          "reason": "Provider-version abstention code; not a general support maturity level",
+          "token": "TorchAOUnsupportedVersion"
+        },
+        {
+          "category": "incidental",
+          "reason": "Serialized provider-version abstention code; not a general support maturity level",
+          "token": "unsupported_version"
         }
       ],
       "id": "support-maturity",
@@ -10153,6 +10169,7 @@
         "ConfigDescriptionCoverage",
         "CorrectnessGate",
         "CorrectnessMargin",
+        "CoveragePartial",
         "CoverageSkipped",
         "CoverageUnavailable",
         "DecodeInterleaveUnsupported",
@@ -10241,6 +10258,7 @@
         "TestMaturityBaselinePromotionIsWitnessGatedAndImmediatelyEnforced",
         "TierStatusSupported",
         "TierStatusUnsupported",
+        "TorchAOUnsupportedVersion",
         "TransitionUnsupported",
         "UNKNOWN_FORMAT",
         "UNKNOWN_RUNTIME",
@@ -10249,6 +10267,7 @@
         "UNSUPPORTED_MEDIA_TYPE",
         "UNSUPPORTED_SESSION_KIND",
         "VerdictParityOK",
+        "VerdictPartialCoverage",
         "VerdictSetupParityClean",
         "VerdictSetupParityFlagged",
         "WatchdogExcludeKind",
@@ -10288,12 +10307,14 @@
         "guardKeychainSupported",
         "immaturity",
         "joinCoverageScores",
+        "lifecycleCoverage",
         "manageParityPosture",
         "marshalWorkCoverageForTest",
         "maturityBaselineRunWitness",
         "maturityBaselineUsage",
         "nativeReasonMessageRoleUnsupported",
         "normalizeAchievedMaturity",
+        "normalizeCoverage",
         "numareplicapolicyunsupported",
         "parityPanelHeader",
         "paritybench",
@@ -10302,6 +10323,7 @@
         "partial_provider_coverage",
         "provenance_correctness",
         "recurrentevictunsupportederror",
+        "registrationCoverage",
         "resolveParityPublication",
         "robustnessTasks",
         "runInfoWorkCoverage",
@@ -10336,14 +10358,10 @@
         "unsupported_recipe",
         "unsupported_runtime_fusion",
         "unsupported_scale",
+        "unsupported_version",
         "workCoverage",
         "workCoverageUnavailableSources",
-        "workCoverageUnavailableText",
-        "VerdictPartialCoverage",
-        "normalizeCoverage",
-        "lifecycleCoverage",
-        "registrationCoverage",
-        "CoveragePartial"
+        "workCoverageUnavailableText"
       ],
       "known_tokens": [],
       "min_files": 3,
@@ -10827,6 +10845,11 @@
           "category": "incidental",
           "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
           "token": "guardCodexSessionStartDecision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Provider-specific typed result; not a general decision primitive",
+          "token": "TorchAODecision"
         }
       ],
       "id": "decision",
@@ -10857,6 +10880,7 @@
         "ReuseDecision",
         "RuntimeVerdict",
         "SessionClientDecisionRequest",
+        "TorchAODecision",
         "TotalDecisionOverhead",
         "ValidDecisions",
         "VocabularyDecision",
