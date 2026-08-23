@@ -2,10 +2,10 @@
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1017<br>
-rows: 1081<br>
-unverified rows: 0 / 1081<br>
-source-only rows absent from help: 846
+parsed files: 1020<br>
+rows: 1084<br>
+unverified rows: 0 / 1084<br>
+source-only rows absent from help: 849
 
 | VERB | PURPOSE | IMPLEMENTS | DOC | PRECONDITION | REFUSES | HELP |
 |---|---|---|---|---|---|---|
@@ -508,6 +508,7 @@ source-only rows absent from help: 846
 | `fak leaseref renew` |  | runLeaserefRenew / internal/leaseref, internal/pathutil | `case` arm of the dispatch switch in runLeaseref() | NONE | — | **SOURCE ONLY** |
 | `fak leaseref session-publish` |  | runLeaserefSessionPublish / internal/leaseref, internal/pathutil | `case` arm of the dispatch switch in runLeaseref() | NONE | — | **SOURCE ONLY** |
 | `fak leaseref sync` | convergence verb: move the refs/fak/locks/* namespace between this clone and a remote so every node's arbiter sees every node's leases | runLeaserefSync / internal/leaseref, internal/pathutil | `case` arm of the dispatch switch in runLeaseref() | NONE | — | **SOURCE ONLY** |
+| `fak lifecycle` |  | cmdLifecycle / internal/lifecycle | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak lint` | the static tool linter: the definition-time dual of the kernel's call-time re-checks | cmdLint / internal/agent, internal/toollint | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | yes |
 | `fak llmd-smoke` | smoke-test an llm-d OpenAI-compatible engine: /v1/models, one chat completion, engine-tagged metrics | cmdLLMDSmoke / internal/engine | `case` arm of the dispatch switch in dispatchExtendedVerbA() | RUNTIME | — | yes |
 | `fak llms-full` | generate or check llms-full.txt from committed tip plus explicit owned paths | cmdLLMSFull / internal/committedtree, internal/windowgate | `case` arm of the dispatch switch in dispatchPrimaryVerb() | RUNTIME | — | **SOURCE ONLY** |
@@ -574,6 +575,7 @@ source-only rows absent from help: 846
 | `fak micro host` |  |  | `if` arm of the dispatch in cmdMicro() | N/A | — | **SOURCE ONLY** |
 | `fak micro paired` |  | cmdMicroPaired / internal/accountprobe, internal/accounts, internal/agent, internal/metrics, internal/microagent, internal/secretload, internal/session | `case` arm of the dispatch switch in cmdMicro() | STRUCTURAL | `NOT_YET` | **SOURCE ONLY** |
 | `fak micro trace` | `fak micro trace <id>` (#2031): the per-agent trace readout | cmdMicroTrace / internal/agent, internal/metrics, internal/microagent, internal/secretload, internal/session | `if` arm of the dispatch in cmdMicro() | NONE | — | **SOURCE ONLY** |
+| `fak micro tree` |  | cmdMicroTree / internal/policy | `case` arm of the dispatch switch in cmdMicro() | NONE | — | **SOURCE ONLY** |
 | `fak microbench` | per-agent RSS/CPU density for the in-process microagent runtime: in-process cells vs a guarded-CLI baseline | cmdMicroBench / internal/agent, internal/harnessres, internal/microagent, internal/session, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbB() | RUNTIME | — | **SOURCE ONLY** |
 | `fak milestone` | the roadmap/milestone report (discrete-deliverable epics, completion %) | cmdMilestone | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak milestone-scorecard` | native milestone-roadmap scorecard control-pane payload | cmdMilestoneScorecard / internal/milestonereport | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
@@ -749,6 +751,7 @@ source-only rows absent from help: 846
 | `fak scorecard control-pane` |  | runScorecardControlPane / internal/scdiff, internal/scoreboard, internal/scorecardpane, internal/slackoutbox | `case` arm of the dispatch switch in cmdScorecardPane() | NONE | — | **SOURCE ONLY** |
 | `fak scorecard qa-dogfood` | `fak scorecard qa-dogfood` | runScorecardQADogfood / internal/scorecardpane, internal/windowgate | `case` arm of the dispatch switch in cmdScorecardPane() | RUNTIME | — | **SOURCE ONLY** |
 | `fak scratch-janitor` | plan or remove abandoned session scratch directories with age and resume guards | runScratchJanitor / internal/scratchjanitor | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
+| `fak search` | search the repository text corpus with bounded results and JSON output | cmdSearch / internal/fleetsearch, internal/sessionjournal, internal/sessionregistry | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak self-update` | converge a built-from-source fak binary on origin/main | cmdSelfUpdate / internal/binstamp, internal/safecommit, internal/selfinstall, internal/versionskew, internal/windowgate | `case` arm of the dispatch switch in dispatchPrimaryVerb() | RUNTIME | — | **SOURCE ONLY** |
 | `fak serve` | run the OpenAI-compatible gateway in front of a local or remote model | cmdServe / internal/abi, internal/adjudicator, internal/agent, internal/branchrole, internal/compute, internal/deploymanifest, internal/gateway, internal/ggufload, internal/guardvars, internal/ifc, internal/journal, internal/pathutil, internal/policy, internal/toolplugin | `case` arm of the dispatch switch in dispatchCoreVerbB() | STRUCTURAL | `POLICY_BLOCK` | yes |
 | `fak serve help` |  |  | `if` arm of the dispatch in serveHelpTopic() | N/A | — | **SOURCE ONLY** |

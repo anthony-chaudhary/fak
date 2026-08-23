@@ -316,6 +316,7 @@ var verbManifest = []Verb{
 	{Name: "score", Synopsis: "parent verb over the meta-scorecards / RSI loops: `fak score <name>` routes to each legacy scorecard handler", Lane: "cmd"},
 	{Name: "scoreboard", Synopsis: "the scoreboard Slack surface for #scoreboard", Lane: "cmd"},
 	{Name: "scorecard", Synopsis: "the scorecard control pane: every metric's debt + grade + trend", Lane: "cmd"},
+	{Name: "search", Synopsis: "search the repository text corpus with bounded results and JSON output", Lane: "cmd"},
 	{Name: "scratch-janitor", Synopsis: "plan or remove abandoned session scratch directories with age and resume guards", Lane: "cmd"},
 	{Name: "self-update", Synopsis: "converge a built-from-source fak binary on origin/main", Lane: "cmd"},
 	{Name: "serve", Synopsis: "run the OpenAI-compatible gateway in front of a local or remote model", Lane: "gateway"},

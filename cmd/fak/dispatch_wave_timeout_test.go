@@ -205,9 +205,11 @@ func TestDispatchWaveContractTimeoutFallsBackToBoundedTranche(t *testing.T) {
 	if got, want := receipt.AttemptedTrancheSizes, []int{40, 8}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("attempted tranche sizes = %v, want %v", got, want)
 	}
+	//boundarylint:ignore CHANGE_DETECTOR_TEST eight is the fixed safe fallback width.
 	if len(audited) != 8 || len(rows) != 8 || receipt.FinalAuditedCount != 8 {
 		t.Fatalf("audited=%d rows=%d final=%d, want 8", len(audited), len(rows), receipt.FinalAuditedCount)
 	}
+	//boundarylint:ignore CHANGE_DETECTOR_TEST 32 is the fixed remainder of the 40-candidate fixture after fallback.
 	if len(receipt.HeldCandidates) != 32 || receipt.TimeoutSource != "prelaunch contract audit" {
 		t.Fatalf("receipt = %+v", receipt)
 	}

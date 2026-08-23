@@ -201,7 +201,7 @@ func TestReleaseShipDryRunReportsSourceAndTargetBranches(t *testing.T) {
 				"FAK_RELEASE_TARGET_BRANCH": "main",
 				"FAK_RELEASE_TARGET_SHA":    "main-target-sha",
 				"FAK_RELEASE_SOURCE_RANGE":  "main-target-sha..dev-source-sha",
-				"FAK_RELEASE_SOURCE_CI":     "success",
+				"FAK_RELEASE_SOURCE_CI":     "green",
 			} {
 				if got := envValue(env, key); got != want {
 					t.Fatalf("%s = %q, want %q in release_cut env %v", key, got, want, env)
