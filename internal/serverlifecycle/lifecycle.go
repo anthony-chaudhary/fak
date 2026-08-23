@@ -451,7 +451,7 @@ func Status(ctx context.Context, dir string, opts Options) (Result, error) {
 		result.Evidence.ReceiptValid = true
 		opts = normalizeOptions(opts)
 		probeCtx, cancel := context.WithTimeout(ctx, minDuration(opts.ReadinessTimeout, defaultProbeTimeout))
-		_, err = serveradapter.ProbeLlamaServer(probeCtx, http.DefaultClient, serveradapter.ProbeTarget{BaseURL: receipt.Endpoint.BaseURL, ModelAlias: receipt.ModelAlias})
+		_, err = serveradapter.ProbeLlamaServer(probeCtx, &http.Client{Timeout: defaultProbeTimeout}, serveradapter.ProbeTarget{BaseURL: receipt.Endpoint.BaseURL, ModelAlias: receipt.ModelAlias})
 		cancel()
 		if err != nil {
 			result.State, result.Detail = StateStale, "protocol readiness lost: "+err.Error()
@@ -606,7 +606,7 @@ func waitUntilReady(ctx context.Context, invocation serveradapter.Invocation, de
 			return serveradapter.ProbeResult{}, time.Time{}, fmt.Errorf("readiness deadline exceeded: %w", lastErr)
 		}
 		attemptScope, cancel := context.WithTimeout(ctx, minDuration(remaining, defaultProbeTimeout))
-		probe, err := serveradapter.ProbeLlamaServer(attemptScope, http.DefaultClient, serveradapter.ProbeTarget{BaseURL: invocation.BaseURL, ModelAlias: invocation.ModelAlias})
+		probe, err := serveradapter.ProbeLlamaServer(attemptScope, &http.Client{Timeout: defaultProbeTimeout}, serveradapter.ProbeTarget{BaseURL: invocation.BaseURL, ModelAlias: invocation.ModelAlias})
 		cancel()
 		if err == nil {
 			return probe, time.Now().UTC(), nil
