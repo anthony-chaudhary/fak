@@ -874,8 +874,12 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
       dRecurrentState, dCore, tokens, convDim, nK, nV, kHd, vHd, rmsEps);
   status = qwen35_gdn_launch_status(5);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
-  k_qwen35_gdn_out_proj<<<dim3(hidden, tokens), 256, 0, g_stream>>>(
-      dOutW, dOutWScale, outWQ8, dCore, dOut, hidden, nV * vHd);
+  if (tokens >= 128 && outWQ8) {
+    q8_dequant_sgemm(dOutW, dOutWScale, dCore, dOut, hidden, nV * vHd, tokens, 32);
+  } else {
+    k_qwen35_gdn_out_proj<<<dim3(hidden, tokens), 256, 0, g_stream>>>(
+        dOutW, dOutWScale, outWQ8, dCore, dOut, hidden, nV * vHd);
+  }
   status = qwen35_gdn_launch_status(6);
   if (status != 0) return qwen35_gdn_drain_after_error(status);  cudaError_t sync = cudaStreamSynchronize(g_stream);
   if (sync != cudaSuccess) return 70000 + (int) sync;
