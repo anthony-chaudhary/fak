@@ -255,7 +255,7 @@ change must update the allowlist in the same reviewed change.
   before it was ported to the `fak score seo` verb; the script is gone, so an older
   instruction naming it will fail.)
 - **Tests run through WSL, not native Windows** — from the repository root, `.\test.ps1`
-  (whole suite) or `.\test.ps1 ./internal/<pkg>/`. `go build` / `go vet` work natively; only test
+  (whole suite) or `.\test.ps1 ./internal/<pkg>/`. The selected WSL distro needs Go 1.26+; the Windows-host Go install is not visible inside WSL, and `GOTOOLCHAIN=auto` cannot bootstrap without a base `go` command. Follow the [`One-time Windows developer setup`](#one-time-windows-developer-setup). `go build` / `go vet` work natively; only test
   *execution* is blocked on the Windows host. See the Windows note in
   [`GETTING-STARTED.md`](GETTING-STARTED.md) for why. **Never commit a red tree.**
 - **Add a feature as a leaf, not a core edit** — `fak new-leaf <name> --tier
@@ -350,7 +350,9 @@ Participation in this project — issues, pull requests, and reviews — is gove
 [Code of Conduct](.github/CODE_OF_CONDUCT.md). It also names the route for reporting a
 problem with someone's conduct.
 
-### One-time Windows developer setup
+## One-time Windows developer setup
+
+For WSL-routed tests, install Go 1.26+ inside the selected distro and confirm `go version` there before running `./test.ps1`. Installing Go on the Windows host does not install it in WSL, and `GOTOOLCHAIN=auto` still needs a base `go` command; follow the [official Linux installation steps](https://go.dev/doc/install).
 
 Windows contributors can enable native `go test`, fak's generated test binaries, and the
 Fleet-spine discovery path with one elevated setup:

@@ -159,7 +159,7 @@ performs a different, task-specific discovery: changed packages and their import
 | Platform | Build and vet | Test execution | Required full gate |
 |---|---|---|---|
 | Linux or macOS | Native Go toolchain and `fak-dev buildcheck` | Native `fak test` / `make test*` | `make ci` |
-| This native Windows control host | Native Go build, vet, run, and `fak-dev buildcheck` | Prefer host-aware `fak test <tier-or-package>`; it routes to WSL. Use `./test.ps1 [package]` as the direct WSL suite entry. Do not run native `go test`. | Run `./test.ps1` for the full test suite plus the native non-test gates named by the change; CI is the complete `make ci` witness. Then run `fak-dev ci-preflight` for committed `HEAD`. |
+| This native Windows control host | Native Go build, vet, run, and `fak-dev buildcheck` | The selected WSL distro needs Go 1.26+; the Windows-host Go install is not visible inside WSL, and `GOTOOLCHAIN=auto` cannot bootstrap without a base `go` command. Prefer host-aware `fak test <tier-or-package>`; it routes to WSL. Use `./test.ps1 [package]` as the direct WSL suite entry. Do not run native `go test`. | Run `./test.ps1` for the full test suite plus the native non-test gates named by the change; CI is the complete `make ci` witness. Then run `fak-dev ci-preflight` for committed `HEAD`. |
 | CI or a sanctioned compute node | Use the runner's declared toolchain | Use the checked-in gate or workload command | The workflow or node witness named by the task; do not substitute local hardware absence for that witness |
 
 ## Route context
@@ -263,8 +263,10 @@ elapsed time instead of hand-ordered package lists.
 For a single package, `go test ./internal/<pkg>/... -count=1` is the direct form
 (`-count=1` defeats the test cache when you want a clean re-run).
 
-> **Windows host caveat.** Native `go build` / `go vet` / `go run` work, but native
-> `go test` is blocked by an OS Application-Control policy on the freshly-compiled
+> **Windows host caveat.** The selected WSL distro needs Go 1.26+; the Windows-host
+> Go install is not visible inside WSL, and `GOTOOLCHAIN=auto` cannot bootstrap without a
+> base `go` command. Native `go build` / `go vet` / `go run` work,
+> but native `go test` is blocked by an OS Application-Control policy on the freshly-compiled
 > test binaries. Run the suite under WSL with `./test.ps1` from the repo root (it
 > shells the same `go test` inside WSL and defaults to the ext4 mirror fast path,
 > `FAK_FAST=1`, so test source enumeration does not run from slow `/mnt/c` drvfs).

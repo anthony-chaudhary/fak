@@ -69,6 +69,10 @@ cd "$SCRIPT_DIR"
 if ! command -v go >/dev/null 2>&1; then
   export PATH="/usr/local/go/bin:${HOME}/go/bin:${PATH}"
 fi
+if ! command -v go >/dev/null 2>&1; then
+  echo "WSL_GO_MISSING: no Go toolchain in WSL distro; install Go 1.26+ inside WSL, then rerun ./test.ps1 (see CONTRIBUTING.md#one-time-windows-developer-setup)" >&2
+  exit 1
+fi
 
 # fak/go.mod requires `go 1.26`; the distro Go may be older. GOTOOLCHAIN=auto
 # lets the toolchain fetch the required version into user space (no sudo). The
