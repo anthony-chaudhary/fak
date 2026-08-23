@@ -227,6 +227,19 @@ var admittedPostFreeze = []string{
 	"FAK_DEV_EXE",
 	"FLEET_CODEX_EXE",
 
+	// FAK_CA_BUNDLE is resolved through secretload as the declared trust-source config;
+	// the default loader may source that key from the process environment.
+	// Relocates to: typed host trust configuration passed to httptrust.ResolveWith.
+	"FAK_CA_BUNDLE",
+
+	// FAK_CHILD_REGISTRY carries the private guard-to-child registry path across a process
+	// boundary until child launch accepts the path as an explicit argument.
+	"FAK_CHILD_REGISTRY",
+
+	// FAK_STREAM_Q4K selects the experimental bounded Q4_K loader on CUDA hosts.
+	// Relocates to: a typed fak serve setting passed into the GGUF load helpers.
+	"FAK_STREAM_Q4K",
+
 	// internal/goalregistry/goalregistry.go — selects the durable goal-registry JSON file.
 	// The CLI already exposes --registry; the native harness still consumes DefaultPath(),
 	// so removing the ambient override now would split the two operator views.
