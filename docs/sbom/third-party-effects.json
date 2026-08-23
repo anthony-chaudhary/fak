@@ -607,7 +607,8 @@
       "class": "subprocess_tool",
       "reference": "powershell.exe",
       "consumer_domains": [
-        "cmd"
+        "cmd",
+        "internal"
       ],
       "status": "used",
       "pin": "host_provided",
@@ -631,8 +632,7 @@
       "class": "subprocess_tool",
       "reference": "python",
       "consumer_domains": [
-        "cmd",
-        "internal"
+        "cmd"
       ],
       "status": "used",
       "pin": "host_provided",
