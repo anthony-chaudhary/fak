@@ -440,7 +440,7 @@ func cooldownServeFixture() Registry {
 	}
 }
 
-// TestServeAtWalksPastCooledDownSeat is the #4673 repro: a tombstone whose rehome chain
+// TestServeAtWalksPastCooledDownSeat is the #4674 repro: a tombstone whose rehome chain
 // points at a throttled seat. Cooldown-blind Serve stops ON the throttled sink (the bug
 // shape — documented here so the baseline is explicit); ServeAt with the store walks
 // PAST it to the serving anchor.
