@@ -17,6 +17,33 @@ import (
 // every state in the closed vocabulary is emitted (0 when absent), the counts match
 // the snapshot, and an unknown Run token is surfaced as a drift row instead of being
 // silently dropped.
+// TestMetricsSessionRefusalReasons exposes structured envelope refusals on /metrics.
+func TestMetricsSessionRefusalReasons(t *testing.T) {
+	srv := newTestServer(t)
+	srv.listSessions = func(context.Context) []SessionState {
+		return []SessionState{
+			{TraceID: "wall", Run: "stopped", Reason: "TIME_BUDGET_EXHAUSTED"},
+			{TraceID: "spend", Run: "stopped", Reason: "BUDGET_SPEND_EXHAUSTED"},
+			{TraceID: "throughput", Run: "stopped", Reason: "THROUGHPUT_BELOW_FLOOR"},
+			{TraceID: "operator", Run: "paused", Reason: "maintenance window"},
+		}
+	}
+
+	text := srv.renderMetrics()
+	for _, want := range []string{
+		"# TYPE fak_session_refusals gauge",
+		`fak_session_refusals{reason="TIME_BUDGET_EXHAUSTED"} 1`,
+		`fak_session_refusals{reason="BUDGET_SPEND_EXHAUSTED"} 1`,
+		`fak_session_refusals{reason="THROUGHPUT_BELOW_FLOOR"} 1`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("metrics missing %q\n--- metrics ---\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "maintenance window") {
+		t.Fatalf("free-form operator reason leaked into metric label:\n%s", text)
+	}
+}
 func TestMetricsSessionGauge(t *testing.T) {
 	srv := newTestServer(t)
 	srv.listSessions = func(context.Context) []SessionState {

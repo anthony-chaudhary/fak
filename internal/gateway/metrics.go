@@ -649,6 +649,18 @@ const (
 // /debug/vars. Editing this set is a metrics-series change.
 var sessionRunStates = []string{"running", "throttled", "paused", "draining", "stopped"}
 
+var sessionEnvelopeRefusalReasonOrder = []string{
+	"TIME_BUDGET_EXHAUSTED",
+	"BUDGET_SPEND_EXHAUSTED",
+	"THROUGHPUT_BELOW_FLOOR",
+}
+
+var sessionEnvelopeRefusalReasons = map[string]bool{
+	"TIME_BUDGET_EXHAUSTED":  true,
+	"BUDGET_SPEND_EXHAUSTED": true,
+	"THROUGHPUT_BELOW_FLOOR": true,
+}
+
 // AdjudicationSummary is a verdict roll-up over every kernel decision a gateway has
 // made — the tally `fak guard` prints when the wrapped agent exits, so an operator
 // sees what the kernel allowed vs blocked without scraping /metrics. It folds the

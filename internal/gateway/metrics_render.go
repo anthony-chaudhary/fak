@@ -79,12 +79,16 @@ func (s *Server) writeSessionMetrics(b *strings.Builder) {
 	}
 	sessions := s.listSessions(context.Background())
 	counts := make(map[string]int, len(sessionRunStates)+1)
+	refusals := make(map[string]int, len(sessionEnvelopeRefusalReasonOrder))
 	for _, st := range sessions {
 		state := strings.ToLower(strings.TrimSpace(st.Run))
 		if state == "" {
 			state = "unknown"
 		}
 		counts[state]++
+		if sessionEnvelopeRefusalReasons[st.Reason] {
+			refusals[st.Reason]++
+		}
 	}
 	writeHelpType(b, "fak_sessions", "Live served sessions by DRIVE run-state token (read-time fold of the session registry; a GC'd session decrements its bucket next scrape).", "gauge")
 	known := make(map[string]bool, len(sessionRunStates))
@@ -97,6 +101,10 @@ func (s *Server) writeSessionMetrics(b *strings.Builder) {
 			continue
 		}
 		fmt.Fprintf(b, "fak_sessions{state=\"%s\"} %d\n", promQuote(state), n)
+	}
+	writeHelpType(b, "fak_session_refusals", "Live sessions refused by structured envelope ceiling reason.", "gauge")
+	for _, reason := range sessionEnvelopeRefusalReasonOrder {
+		fmt.Fprintf(b, "fak_session_refusals{reason=\"%s\"} %d\n", reason, refusals[reason])
 	}
 }
 
