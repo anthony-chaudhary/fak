@@ -45,6 +45,6 @@ witness: .github/workflows/ci.yml
 reason: The landed subject says fix(ci), but the diff changes only the GitHub Actions workflow contract and no test or program source. It replaces deleted Python tool-coverage invocations with their Go command equivalents; the evidence supports a CI configuration claim, not the test claim inferred from the original subject.
 
 commit: 2379fab5c2efbfb4c00a15a96049a75ce69fc294
-type: chore
+type: fix
 witness: internal/managedocs/managedocs.go
 reason: The landed subject says test(managedocs), but the diff only refreshes two generated guard-table rows and changes no test source. The evidence supports generated-data maintenance, not a test-code claim.
