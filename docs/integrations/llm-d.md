@@ -16,6 +16,24 @@ plane. fak's support is deliberately a ride-mode integration:
 - The registered engine id is `llm-d`, with `FAK_LLMD_*` env vars. `FAK_LLM_D_*` aliases
   are accepted for operators who prefer the upstream spelling.
 
+## Supported contract: llm-d v0.9+
+
+This integration targets llm-d v0.9 and later compatible v0.x releases. Compatibility means the documented OpenAI transport shape, not proof of every scheduler or cluster. Refresh this contract when Endpoint Picker, queueing, P/D, or KV-event APIs change. Live-cluster proof is tracked in [#8017](https://github.com/anthony-chaudhary/fak/issues/8017); see the [pinned study](../research/llm-d-study-2026-08-18.md).
+
+| Decision | Authoritative owner |
+|---|---|
+| tool policy/capability floor | fak |
+| managed conversation context | fak |
+| OpenAI wire transport | fak adapter to llm-d endpoint |
+| worker selection | llm-d Endpoint Picker |
+| request admission/serving queue | llm-d |
+| prefill/decode topology | llm-d |
+| KV indexing/cache events | llm-d |
+| replica autoscaling | llm-d/Kubernetes |
+
+Use one cache-aware worker router and one visible serving queue per request. When llm-d owns Endpoint Picker routing, fak targets the service rather than selecting replicas; do not add an opaque fak queue in front of llm-d admission.
+
+`llm-d-smoke` is deterministic protocol/unit smoke. It is not live-cluster compatibility, cache-hit, global, or performance evidence.
 ## 1. Find the llm-d OpenAI route
 
 Use the route your llm-d deployment exposes for Chat Completions. In a local smoke test,
