@@ -131,8 +131,8 @@ func TestQ5KMCampaignWitness(t *testing.T) {
 		}
 		var archive q5KMArchive
 		decodeWitnessJSON(t, filepath.Join(witnessDir, arm.Archive), &archive)
-		if archive.Schema != "fak.qwen38-quant-raw/1" || len(archive.Results) != 18 {
-			t.Fatalf("arm %s archive metadata invalid: schema=%q results=%d", armName, archive.Schema, len(archive.Results))
+		if archive.Schema != "fak.qwen38-quant-raw/1" || len(archive.Results) != len(corpus.Fixtures)*corpus.MinimumRepetitions {
+			t.Fatalf("arm %s archive metadata invalid: schema=%q results=%d, want one result per fixture repetition", armName, archive.Schema, len(archive.Results))
 		}
 	}
 	text := string(readWitnessFile(t, filepath.Join(witnessDir, "README.md")))
