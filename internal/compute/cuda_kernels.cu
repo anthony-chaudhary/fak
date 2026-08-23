@@ -1120,9 +1120,58 @@ __global__ void k_q4k_gemm(const unsigned char *Q4K, const float *X, float *Y, i
   }
 }
 
+// k_q4k_gemm_panel reuses each dequantized Q4_K lane across a short token panel. Prefill
+// otherwise rereads the same weight row once per token; keeping four token accumulators in each
+// lane trades registers for a 4x reduction in weight traffic while preserving f32 dequantization.
+template <int token_tile>
+__global__ void k_q4k_gemm_panel(const unsigned char *Q4K, const float *X, float *Y,
+                                 int out, int in, int P) {
+  int lane = threadIdx.x;
+  int o = blockIdx.x;
+  int token0 = blockIdx.y * token_tile;
+  int nsb = in / 256;
+  const unsigned char *wrow = Q4K + (size_t)o * nsb * 144;
+  float sums[token_tile] = {};
+  for (int sb = 0; sb < nsb; ++sb) {
+    const unsigned char *blk = wrow + (size_t)sb * 144;
+    float d = __half2float(*(const __half *)(blk));
+    float dmin = __half2float(*(const __half *)(blk + 2));
+    const unsigned char *scales = blk + 4;
+    const unsigned char *q = blk + 16;
+#pragma unroll
+    for (int group = 0; group < 8; ++group) {
+      unsigned char sc, mn;
+      getScaleMinK4_dev(group, scales, &sc, &mn);
+      int qi = (group >> 1) * 32 + lane;
+      unsigned char packed = q[qi];
+      int code = (group & 1) ? (packed >> 4) : (packed & 0x0f);
+      float w = d * (float)sc * (float)code - dmin * (float)mn;
+      int k = sb * 256 + group * 32 + lane;
+#pragma unroll
+      for (int j = 0; j < token_tile; ++j) {
+        int token = token0 + j;
+        if (token < P) sums[j] = fmaf(w, X[(size_t)token * in + k], sums[j]);
+      }
+    }
+  }
+#pragma unroll
+  for (int j = 0; j < token_tile; ++j) {
+#pragma unroll
+    for (int delta = 16; delta > 0; delta >>= 1)
+      sums[j] += __shfl_down_sync(0xffffffff, sums[j], delta);
+    if (lane == 0 && token0 + j < P) Y[(size_t)(token0 + j) * out + o] = sums[j];
+  }
+}
+
 extern "C" void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY,
                                      int out, int in, int P) {
-  k_q4k_gemm<<<dim3((out + 1) / 2, P), 256, 0, g_stream>>>(
+  if (P < 4) {
+    k_q4k_gemm<<<dim3((out + 1) / 2, P), 256, 0, g_stream>>>(
+        (const unsigned char *)dQ4K, dX, dY, out, in, P);
+    return;
+  }
+  constexpr int token_tile = 4;
+  k_q4k_gemm_panel<token_tile><<<dim3(out, (P + token_tile - 1) / token_tile), 32, 0, g_stream>>>(
       (const unsigned char *)dQ4K, dX, dY, out, in, P);
 }
 
