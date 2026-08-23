@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,9 +11,117 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
+
+func TestValidateTimeoutReturnsStructuredPartialResultAndProgress(t *testing.T) {
+	oldHook := validatePhaseHook
+	validatePhaseHook = func(ctx context.Context, phase string) {
+		if phase == "resolve_ref" {
+			<-ctx.Done()
+		}
+	}
+	t.Cleanup(func() { validatePhaseHook = oldHook })
+
+	res, code, stderr := runValidateJSON(t, []string{
+		"--root", t.TempDir(),
+		"--mine", "p/p.go",
+		"--timeout", "5ms",
+		"--progress",
+		"--json",
+	})
+	if code == 0 || res.OK || !res.Partial || !res.TimedOut || res.Reason != "TIMEOUT" {
+		t.Fatalf("code=%d stderr=%q result=%+v", code, stderr, res)
+	}
+	if res.TimeoutMS != (5*time.Millisecond).Milliseconds() || res.ElapsedMS < 0 {
+		t.Fatalf("timeout_ms=%d elapsed_ms=%d", res.TimeoutMS, res.ElapsedMS)
+	}
+	if len(res.Overlays.Checked) != 0 || len(res.Overlays.Skipped) != 1 || res.Overlays.Skipped[0] != "p/p.go" {
+		t.Fatalf("overlays=%+v; want p/p.go reported skipped", res.Overlays)
+	}
+	if len(res.Phases) < 2 || res.Phases[len(res.Phases)-1].Name != "resolve_ref" || res.Phases[len(res.Phases)-1].Status != "timeout" {
+		t.Fatalf("phases=%+v; want timed-out resolve_ref phase", res.Phases)
+	}
+	if len(res.SkippedPhases) == 0 || !validateContains(res.SkippedPhases, "overlay") || !validateContains(res.SkippedPhases, "test") {
+		t.Fatalf("skipped_phases=%v; want unrun overlay and test phases", res.SkippedPhases)
+	}
+	for _, want := range []string{"phase=resolve_root status=start", "phase=resolve_ref status=start", "phase=resolve_ref status=timeout"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("progress stderr=%q; want %q", stderr, want)
+		}
+	}
+}
+
+func TestNormalizeMinePathsPrunesScratchDirsUnlessExplicit(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel string) {
+		t.Helper()
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(rel), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, rel := range []string{
+		"owned/visible.go",
+		"owned/nested/visible_test.go",
+		"owned/.dispatch-runs/run.log",
+		"owned/.hidden/peer.go",
+		"owned/_scratch/generated.go",
+		"owned/nested/_generated/peer.go",
+	} {
+		write(rel)
+	}
+
+	got, err := normalizeMinePaths(root, []string{"owned"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"owned/nested/visible_test.go", "owned/visible.go"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("broad directory expansion=%v, want %v", got, want)
+	}
+	explicit, err := normalizeMinePaths(root, []string{"owned/.hidden"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(explicit) != 1 || explicit[0] != "owned/.hidden/peer.go" {
+		t.Fatalf("explicit hidden directory=%v; want its owned file", explicit)
+	}
+}
+
+func TestOwnedTestRunExpressionSelectsOnlyOwnedTests(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "p", "owned_test.go")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `package p
+
+import "testing"
+
+func helper() {}
+func TestZulu(t *testing.T) {}
+func BenchmarkOwned(b *testing.B) {}
+func FuzzOwned(f *testing.F) {}
+func TestAlpha(t *testing.T) {}
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ownedTestRunExpression(root, []string{"p/owned_test.go", "p/production.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "^(FuzzOwned|TestAlpha|TestZulu)$"
+	if got != want {
+		t.Fatalf("test run expression=%q, want %q", got, want)
+	}
+}
 
 func runValidateJSON(t *testing.T, argv []string) (validateResult, int, string) {
 	t.Helper()
