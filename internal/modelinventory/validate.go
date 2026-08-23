@@ -62,8 +62,8 @@ func (in Inventory) ValidateAt(asOf time.Time) Diagnostics {
 
 func validateEntry(candidate Candidate, asOf time.Time, add func(Code, string, string, string, string, string)) {
 	id := candidate.ID
-	if !tokenPattern.MatchString(id) {
-		add(CodeMissingIdentity, id, "id", "", "candidate ID is missing or is not a stable lowercase token", "set id to a non-empty [a-z0-9._-] token")
+	if !tokenPattern.MatchString(id) || len(id) > 255 {
+		add(CodeMissingIdentity, id, "id", "", "candidate ID is missing, oversized, or is not a stable lowercase token", "set id to a 1-255 byte [a-z0-9._-] token")
 	}
 	if credentialLike(id) {
 		add(CodeCredentialMaterial, id, "id", "", "candidate ID contains credential-shaped material", "replace it with a stable non-secret identifier")

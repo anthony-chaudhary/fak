@@ -226,3 +226,18 @@ func hasCode(diagnostics modelinventory.Diagnostics, code modelinventory.Code) b
 	}
 	return false
 }
+
+func TestNormalizeRejectsOversizedCandidateID(t *testing.T) {
+	observations := fixture()
+	observations.Providers[0].ID = "m" + strings.Repeat("x", 255)
+	_, diagnostics := modelinventory.Normalize(observations, asOf)
+	found := false
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Field == "id" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("diagnostics=%v, want oversized id refusal", diagnostics)
+	}
+}
