@@ -15,7 +15,7 @@
       "license": "Apache-2.0",
       "reuse": "The JSON field names and inclusive-total semantics are copied from the generated SDK contract. fak maps them into provider-independent context/cache token classes and retains the native receipt.",
       "excerpt_path": "upstream/openai_response_usage.go.txt",
-      "excerpt_sha256": "6fcbc205758e4a2d32e1db954e5357ebb962889a11f76d7d1d88715af08a01a0",
+      "excerpt_sha256": "b0e404546f3f440fc26fb2a872967fbc6d96ad612c4dd4018accf9e53ece724a",
       "license_path": "upstream/openai.LICENSE",
       "source_start_line": 23205,
       "source_end_line": 23274
@@ -32,7 +32,7 @@
       "license": "MIT",
       "reuse": "The cache creation/read JSON field names and usage semantics are copied from the generated SDK contract. fak maps them into provider-independent context/cache token classes and retains the native receipt.",
       "excerpt_path": "upstream/anthropic_usage.go.txt",
-      "excerpt_sha256": "e551e5f77ba4491a7819452a67417f4abecef0469e3b009417f50709ea3de9f9",
+      "excerpt_sha256": "722594c8201d743b50830ec061fcabf2f9659a969e7028d08b5ff4194dac7098",
       "license_path": "upstream/anthropic.LICENSE",
       "source_start_line": 12152,
       "source_end_line": 12198
@@ -50,7 +50,7 @@
       "license": "Apache-2.0",
       "reuse": "The generated SDK field names and inclusive effective-prompt semantics are copied directly. fak subtracts cached content from the inclusive prompt, adds tool-result input, separates visible candidates from thoughts, reconciles the explicit total, and retains the native receipt.",
       "excerpt_path": "upstream/gemini_usage.go.txt",
-      "excerpt_sha256": "05b6869dc417c3ee775c7870cb85fa48e7618557c7aeceb184d581d4a0ebf0c5",
+      "excerpt_sha256": "365c39d02a8c39076da86391d677055bb30bb0a6d68861d8064f2913df473e4d",
       "license_path": "upstream/gemini.LICENSE",
       "source_start_line": 3597,
       "source_end_line": 3651

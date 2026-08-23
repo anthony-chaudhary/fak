@@ -162,7 +162,7 @@ func notApplicable[T any](source FactSource) ContractFact[T] {
 
 func openAIProviderContract() ProviderContract {
 	sdk := FactSource{URL: "https://github.com/openai/openai-go", Ref: "6dfcd9b01bc201830df3aff3820a1664ea05e21b", Path: "responses/response.go", ObservedAt: "2026-08-21"}
-	retry := FactSource{URL: sdk.URL, Ref: sdk.Ref, Path: "internal/requestconfig/requestconfig.go", Symbol: "shouldRetry", ObservedAt: sdk.ObservedAt, CopiedPath: "testdata/provider_contracts/upstream/openai_should_retry.go.txt", CopiedSHA256: "2f9831ecd231465f8748cbf6026940abcd60ad14fc7ce17dfdc9008aaa876714", License: "Apache-2.0"}
+	retry := FactSource{URL: sdk.URL, Ref: sdk.Ref, Path: "internal/requestconfig/requestconfig.go", Symbol: "shouldRetry", ObservedAt: sdk.ObservedAt, CopiedPath: "testdata/provider_contracts/upstream/openai_should_retry.go.txt", CopiedSHA256: "19d8259d9f2e08ada9df5708305af0f8e747904c0eb6f00f617a84c8005311b7", License: "Apache-2.0"}
 	audit := FactSource{URL: sdk.URL, Ref: sdk.Ref, Path: "README.md", Symbol: "model-specific limits not encoded by SDK", ObservedAt: sdk.ObservedAt}
 	return ProviderContract{
 		Provider: "openai", Family: "openai", ModelScope: "*",
@@ -179,7 +179,7 @@ func openAIProviderContract() ProviderContract {
 
 func anthropicProviderContract() ProviderContract {
 	sdk := FactSource{URL: "https://github.com/anthropics/anthropic-sdk-go", Ref: "da00f432230f3cdc1dff4e0c1e201d8e95558449", Path: "message.go", ObservedAt: "2026-08-21"}
-	retry := FactSource{URL: sdk.URL, Ref: sdk.Ref, Path: "internal/requestconfig/requestconfig.go", Symbol: "shouldRetry", ObservedAt: sdk.ObservedAt, CopiedPath: "testdata/provider_contracts/upstream/anthropic_should_retry.go.txt", CopiedSHA256: "7e94ab87ffe54c47660d94d4f51cdd4f1fbcdc0d718f4bad4a447a95e179c9fa", License: "MIT"}
+	retry := FactSource{URL: sdk.URL, Ref: sdk.Ref, Path: "internal/requestconfig/requestconfig.go", Symbol: "shouldRetry", ObservedAt: sdk.ObservedAt, CopiedPath: "testdata/provider_contracts/upstream/anthropic_should_retry.go.txt", CopiedSHA256: "c2628df609bbcf284028519341ea4aa1b9725ba1f034402383a1b0ac64a4dedf", License: "MIT"}
 	docs := FactSource{URL: "https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching", Ref: "observed-2026-08-21", Path: "cache duration and breakpoints", ObservedAt: "2026-08-21"}
 	audit := FactSource{URL: sdk.URL, Ref: sdk.Ref, Path: "README.md", Symbol: "model-specific limits not encoded by SDK", ObservedAt: sdk.ObservedAt}
 	return ProviderContract{

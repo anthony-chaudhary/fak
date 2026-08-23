@@ -22,3 +22,8 @@ docs/benchmarks/harness-control-study/task-card.md text eol=lf
 docs/benchmarks/harness-control-study/materials/*/task-card.md text eol=lf
 docs/benchmarks/harness-control-study/materials/default-control/kernel-component.txt text eol=lf
 docs/benchmarks/harness-control-study/README.md text eol=lf
+
+# Copied upstream excerpts are SHA-256 addressed by borrow-provenance tests.
+# Pin repository LF bytes so one digest names the artifact on every OS.
+internal/canon/testdata/token_usage/upstream/*.txt text eol=lf
+internal/modelroute/testdata/provider_contracts/upstream/*.txt text eol=lf
