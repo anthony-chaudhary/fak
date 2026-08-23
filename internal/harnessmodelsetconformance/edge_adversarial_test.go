@@ -35,12 +35,12 @@ func TestTwoRoleModelSetConformanceEdgeAndAdversarialInputs(t *testing.T) {
 	inventoryCases := []struct {
 		name         string
 		observations modelinventory.Observations
-		wantPath     string
+		wantField    string
 	}{
-		{name: "empty", observations: modelinventory.Observations{}, wantPath: "$.candidates"},
-		{name: "hostile provider id", observations: modelinventory.Observations{Providers: []modelinventory.ProviderObservation{{ID: "../../escape"}}}, wantPath: "$.candidates[0].id"},
-		{name: "malformed digest", observations: modelinventory.Observations{Locals: []modelinventory.LocalObservation{{ID: "local-safe", Artifact: "models/safe.gguf", Digest: "not-a-sha256", Format: "gguf"}}}, wantPath: "$.candidates[0].digest"},
-		{name: "oversized id", observations: modelinventory.Observations{Locals: []modelinventory.LocalObservation{{ID: "m" + strings.Repeat("x", 4096), Artifact: "models/safe.gguf", Digest: "sha256:" + strings.Repeat("a", 64), Format: "gguf"}}}, wantPath: "$.candidates[0].id"},
+		{name: "empty", observations: modelinventory.Observations{}, wantField: "candidates"},
+		{name: "hostile provider id", observations: modelinventory.Observations{Providers: []modelinventory.ProviderObservation{{ID: "../../escape"}}}, wantField: "id"},
+		{name: "malformed digest", observations: modelinventory.Observations{Locals: []modelinventory.LocalObservation{{ID: "local-safe", Artifact: "models/safe.gguf", Digest: "not-a-sha256", Format: "gguf"}}}, wantField: "identity.digest"},
+		{name: "oversized id", observations: modelinventory.Observations{Locals: []modelinventory.LocalObservation{{ID: "m" + strings.Repeat("x", 4096), Artifact: "models/safe.gguf", Digest: "sha256:" + strings.Repeat("a", 64), Format: "gguf"}}}, wantField: "id"},
 	}
 	for _, tc := range inventoryCases {
 		t.Run("inventory/"+tc.name, func(t *testing.T) {
@@ -48,8 +48,15 @@ func TestTwoRoleModelSetConformanceEdgeAndAdversarialInputs(t *testing.T) {
 			if len(diagnostics) == 0 {
 				t.Fatalf("Normalize accepted hostile observations: %+v", inventory)
 			}
-			if !strings.Contains(diagnostics.Error(), tc.wantPath) {
-				t.Fatalf("Normalize diagnostics = %q, want path %q", diagnostics, tc.wantPath)
+			found := false
+			for _, diagnostic := range diagnostics {
+				if diagnostic.Field == tc.wantField {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("Normalize diagnostics = %q, want field %q", diagnostics, tc.wantField)
 			}
 		})
 	}
