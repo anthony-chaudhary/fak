@@ -92,6 +92,9 @@ type WorkerSample struct {
 	Blocker          string         `json:"blocker,omitempty"`
 	ChildSummary     string         `json:"child_summary,omitempty"`
 	Reasons          []string       `json:"reasons"`
+	ProgressState    ProgressState  `json:"progress_state"`
+	LastProgressUTC  string         `json:"last_progress_utc,omitempty"`
+	ProgressSource   string         `json:"progress_provenance,omitempty"`
 }
 
 // Classify folds one worker's evidence into a classified sample. The order of
@@ -136,6 +139,15 @@ func Classify(ev WorkerEvidence, now time.Time, th Thresholds) WorkerSample {
 		d := ev.Transcript.Lines - *ev.PrevLines
 		s.LineDelta = &d
 	}
+
+	progressEvidence := ProgressEvidence{}
+	if ev.Transcript.HasTimestamp {
+		progressEvidence = ProgressEvidence{At: ev.Transcript.LastTimestamp, Provenance: "transcript-jsonl"}
+		s.LastProgressUTC = ev.Transcript.LastTimestamp.UTC().Format(time.RFC3339)
+		s.ProgressSource = progressEvidence.Provenance
+	}
+	progressMoved := s.LineDelta != nil && *s.LineDelta > 0
+	s.ProgressState = EvaluateProgress(ev.HasPID && ev.PIDAlive, ev.PIDLivenessKnown, progressMoved, progressEvidence, now, th.StaleTranscript)
 
 	stale := ageSec != nil && *ageSec > th.StaleTranscript.Seconds()
 	// activelyGrowing is forward progress we can SEE this sample: the line count
