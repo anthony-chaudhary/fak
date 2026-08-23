@@ -347,6 +347,32 @@ __device__ __forceinline__ float qwen35_gdn_weight(
   return (float)((const signed char *)weight)[index] * scale[(size_t)row * nblk + col / 32];
 }
 
+__global__ void k_tf32_split(const float *src, float *hi, float *lo, size_t n) {
+  size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= n) return;
+  unsigned bits = __float_as_uint(src[i]);
+  hi[i] = __uint_as_float((bits + 0x1000u) & 0xffffe000u);
+  lo[i] = src[i] - hi[i];
+}
+
+static void tf32_compensated_matmul(const float *W, const float *X, float *Y,
+                                    int out, int in, int tokens) {
+  size_t wn = (size_t)out * in, xn = (size_t)tokens * in;
+  float *wHi = (float *)fcuda_malloc(wn * sizeof(float));
+  float *wLo = (float *)fcuda_malloc(wn * sizeof(float));
+  float *xHi = (float *)fcuda_malloc(xn * sizeof(float));
+  float *xLo = (float *)fcuda_malloc(xn * sizeof(float));
+  k_tf32_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(W, wHi, wLo, wn);
+  k_tf32_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(X, xHi, xLo, xn);
+  cublasSetMathMode(g_blas, CUBLAS_TF32_TENSOR_OP_MATH);
+  const float one = 1.0f, zero = 0.0f;
+  cublasSgemm(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one, wHi, in, xHi, in, &zero, Y, out);
+  cublasSgemm(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one, wLo, in, xHi, in, &one, Y, out);
+  cublasSgemm(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one, wHi, in, xLo, in, &one, Y, out);
+  cublasSetMathMode(g_blas, CUBLAS_DEFAULT_MATH);
+  fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
+}
+
 __global__ void k_q8_dequant_transient(const signed char *codes, const float *scales,
                                          float *W, int rows, int cols, int block) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -361,7 +387,7 @@ static void q8_dequant_sgemm(const void *codes, const float *scales,
   float *wide = (float *)fcuda_malloc((size_t)rows * cols * sizeof(float));
   k_q8_dequant_transient<<<((size_t)rows * cols + 255) / 256, 256, 0, g_stream>>>(
       (const signed char *)codes, scales, wide, rows, cols, block);
-  fcuda_matmul_f32(wide, X, Y, rows, cols, tokens);
+  tf32_compensated_matmul(wide, X, Y, rows, cols, tokens);
   fcuda_free(wide);
 }
 
@@ -1216,7 +1242,7 @@ extern "C" void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float
     float *wide = (float *)fcuda_malloc((size_t)out * in * sizeof(float));
     k_q4k_dequant_transient<<<((size_t)out * in + 255) / 256, 256, 0, g_stream>>>(
         (const unsigned char *)dQ4K, wide, out, in);
-    fcuda_matmul_f32(wide, dX, dY, out, in, P);
+    tf32_compensated_matmul(wide, dX, dY, out, in, P);
     fcuda_free(wide);
     return;
   }
