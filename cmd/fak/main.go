@@ -138,6 +138,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		cmdConPTY(args)
 	case "agents":
 		cmdAgents(args)
+	case "lifecycle":
+		cmdLifecycle(args)
 	case "ps":
 		cmdPS(args)
 	case "top":
