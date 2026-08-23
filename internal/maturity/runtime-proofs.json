@@ -5,6 +5,11 @@
       "lane": "policy",
       "command": "fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args {}",
       "output_contains": "policy.json"
+    },
+    {
+      "lane": "ablate",
+      "command": "fak ablate --sweep vdso --baseline all-off",
+      "output_contains": "fak ablate"
     }
   ]
 }

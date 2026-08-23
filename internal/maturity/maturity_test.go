@@ -451,7 +451,7 @@ func TestRealRuntimeWitnessRegistryPasses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve fixture HEAD: %v: %s", err, headOutput)
 	}
-	artifact := buildRuntimeFakFixture(t, strings.TrimSpace(string(headOutput)), "fak: loaded capability floor from examples/customer-support-readonly-policy.json")
+	artifact := buildRuntimeFakFixture(t, strings.TrimSpace(string(headOutput)), "fak: loaded capability floor from examples/customer-support-readonly-policy.json\nfak ablate")
 	oldResolver := resolveRuntimeFak
 	resolveRuntimeFak = func() (string, error) { return artifact, nil }
 	t.Cleanup(func() { resolveRuntimeFak = oldResolver })
