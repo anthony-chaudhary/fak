@@ -75,7 +75,7 @@ func TestAuditExcludesPinnedClaudePytestFixture(t *testing.T) {
 	result, err := RunAudit(AuditOptions{Sources: []AuditSource{
 		{Name: AuditSourceClaude, Root: filepath.Join("testdata", "audit", "claude", "projects"), RootLabel: "claude/projects"},
 		{Name: AuditSourceCodex, Root: filepath.Join("testdata", "audit", "codex", "sessions"), RootLabel: "codex/sessions"},
-		{Name: AuditSourceClaude, Root: filepath.Join("testdata", "audit", "issue-8508", "claude", "projects"), RootLabel: "claude/projects/pytest-fixture"},
+		{Name: AuditSourceClaude, Root: filepath.Join("testdata", "a", "i8508", "c", "p"), RootLabel: "claude/projects/pytest-fixture"},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -101,8 +101,8 @@ func TestAuditExcludesPinnedClaudePytestFixture(t *testing.T) {
 }
 
 func TestAuditClaudePytestLookalikeKeepsExactUsage(t *testing.T) {
-	pinned := filepath.Join("testdata", "audit", "issue-8508", "claude", "projects",
-		"C--Users-USER-AppData-Local-Temp-pytest-of-USER-pytest-10095-test_main_json_runs_and_emits_0-ws",
+	pinned := filepath.Join("testdata", "a", "i8508", "c", "p",
+		"C--Users-U-AppData-Local-Temp-pytest-of-U-pytest-1-test_main_json_runs_and_emits_0-ws",
 		"00000000-aaaa-bbbb-cccc-000000000000.jsonl")
 	data, err := os.ReadFile(pinned)
 	if err != nil {
@@ -111,7 +111,7 @@ func TestAuditClaudePytestLookalikeKeepsExactUsage(t *testing.T) {
 	data = bytes.ReplaceAll(data, []byte(`"usage": {}`), []byte(`"usage": {"input_tokens": 7, "output_tokens": 2}`))
 	root := filepath.Join(t.TempDir(), "projects")
 	destination := filepath.Join(root,
-		"C--Users-USER-AppData-Local-Temp-pytest-of-USER-pytest-10095-test_main_json_runs_and_emits_0-ws",
+		"C--Users-U-AppData-Local-Temp-pytest-of-U-pytest-1-test_main_json_runs_and_emits_0-ws",
 		"00000000-aaaa-bbbb-cccc-000000000000.jsonl")
 	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 		t.Fatal(err)
@@ -133,8 +133,8 @@ func TestAuditClaudePytestLookalikeKeepsExactUsage(t *testing.T) {
 }
 
 func TestAuditClaudePytestFixtureVariants(t *testing.T) {
-	pinned := filepath.Join("testdata", "audit", "issue-8508", "claude", "projects",
-		"C--Users-USER-AppData-Local-Temp-pytest-of-USER-pytest-10095-test_main_json_runs_and_emits_0-ws",
+	pinned := filepath.Join("testdata", "a", "i8508", "c", "p",
+		"C--Users-U-AppData-Local-Temp-pytest-of-U-pytest-1-test_main_json_runs_and_emits_0-ws",
 		"00000000-aaaa-bbbb-cccc-000000000000.jsonl")
 	data, err := os.ReadFile(pinned)
 	if err != nil {
@@ -148,7 +148,7 @@ func TestAuditClaudePytestFixtureVariants(t *testing.T) {
 	} {
 		variant := bytes.ReplaceAll(data, []byte("test_main_json_runs_and_emits_0"), []byte(name))
 		destination := filepath.Join(root,
-			"C--Users-USER-AppData-Local-Temp-pytest-of-USER-pytest-10095-"+name+"-ws",
+			"C--Users-U-AppData-Local-Temp-pytest-of-U-pytest-1-"+name+"-ws",
 			"00000000-aaaa-bbbb-cccc-000000000000.jsonl")
 		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 			t.Fatal(err)
