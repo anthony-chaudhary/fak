@@ -538,3 +538,27 @@ func testManifest(t *testing.T) Manifest {
 	}
 	return manifest
 }
+
+func TestEdgeAdversarialManifests(t *testing.T) {
+	cases := []struct {
+		name string
+		edit func(*Manifest)
+		want string
+	}{
+		{name: "empty-id", edit: func(m *Manifest) { m.CampaignID = "" }, want: "campaign_id is required"},
+		{name: "hostile-schema", edit: func(m *Manifest) { m.Schema = "hostile/99" }, want: "set schema to"},
+		{name: "duplicate-depth", edit: func(m *Manifest) { m.Axes.PrefixDepthTokens[1] = m.Axes.PrefixDepthTokens[0] }, want: "positive, unique, ascending depths"},
+		{name: "oversized-churn", edit: func(m *Manifest) { m.Axes.SuffixPatterns[0].ChurnFraction = 2 }, want: "churn_fraction in [0,1]"},
+		{name: "missing-reset", edit: func(m *Manifest) { m.Reset.BeforeCampaign = "" }, want: "all reset procedures are required"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := testManifest(t)
+			tc.edit(&manifest)
+			err := manifest.Validate()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want recovery cue %q", err, tc.want)
+			}
+		})
+	}
+}
