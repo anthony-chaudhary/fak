@@ -378,7 +378,7 @@ concurrent = [
   "sessionintent",
   "serverproduct",
   "serveradapter",
-  "harnessmodelset",
+  "harnessmodelset", "harnessserver",
   "modelinventory",
   "modelsetresolve",
   "modelsetlock",
@@ -1135,6 +1135,7 @@ sessionintent = ["internal/sessionintent/**"]
 serverproduct = ["internal/serverproduct/**"]
 serveradapter = ["internal/serveradapter/**"]
 harnessmodelset = ["internal/harnessmodelset/**"]
+harnessserver = ["internal/harnessserver/**"]
 modelinventory = ["internal/modelinventory/**"]
 modelsetresolve = ["internal/modelsetresolve/**"]
 modelsetlock = ["internal/modelsetlock/**"]
