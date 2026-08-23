@@ -6,7 +6,8 @@ import (
 )
 
 func TestResolvedBindingUsesConfigDescriptorAndRefusesStaleSnapshot(t *testing.T) {
-	profiles, err := Resolve([]byte(`{"harnesses":[{"name":"acme","adapter_version":"2.1.0","names":["acme-cli"],"wire":"openai","repoint":["env"],"credential":{"kind":"env-key","env_key":"ACME_API_KEY"},"identity":"env-key"}]}`))
+	const adapterVersion = "2.1.0"
+	profiles, err := Resolve([]byte(`{"harnesses":[{"name":"acme","adapter_version":"` + adapterVersion + `","names":["acme-cli"],"wire":"openai","repoint":["env"],"credential":{"kind":"env-key","env_key":"ACME_API_KEY"},"identity":"env-key"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -17,7 +18,7 @@ func TestResolvedBindingUsesConfigDescriptorAndRefusesStaleSnapshot(t *testing.T
 	if !ok {
 		t.Fatal("config-declared harness did not resolve")
 	}
-	if binding.Host != "acme" || binding.AdapterVersion != "2.1.0" || binding.Wire != WireOpenAI {
+	if binding.Host != "acme" || binding.AdapterVersion != adapterVersion || binding.Wire != WireOpenAI {
 		t.Fatalf("binding=%+v", binding)
 	}
 	if len(binding.Repoint) != 1 || binding.Repoint[0] != RepointEnv {
