@@ -59,3 +59,31 @@ func TestAccountingRefusalsNameRecovery(t *testing.T) {
 }
 
 func int64Ptr(value int64) *int64 { return &value }
+
+func TestAccountingDeterminism(t *testing.T) {
+	receipt := knownAccounting(101, 23, 89, 7, 131, 0.42, "sha256:"+strings.Repeat("b", 64))
+	first, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 100; i++ {
+		next, err := json.Marshal(receipt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(next) != string(first) {
+			t.Fatalf("marshal %d differs:\nfirst=%s\nnext=%s", i, first, next)
+		}
+		decoded, err := DecodeAccounting(next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		roundTrip, err := json.Marshal(decoded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(roundTrip) != string(first) {
+			t.Fatalf("round trip %d differs:\nfirst=%s\nnext=%s", i, first, roundTrip)
+		}
+	}
+}
