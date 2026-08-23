@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -20,7 +21,11 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/quantmeta"
 )
 
-const Schema = "fak.llamacppinterop/1"
+const (
+	Schema = "fak.llamacppinterop/1"
+	// WitnessedQwen38MTPCommit is the llama.cpp runtime measured on the A100 default path.
+	WitnessedQwen38MTPCommit = "8144f31"
+)
 
 type Outcome string
 
@@ -36,6 +41,7 @@ type Capability struct {
 	Commit   string `json:"commit,omitempty"`
 	Server   bool   `json:"server"`
 	DraftMTP bool   `json:"draft_mtp,omitempty"`
+	CUDA     bool   `json:"cuda,omitempty"`
 }
 type Result struct {
 	Schema     string     `json:"schema"`
@@ -78,9 +84,19 @@ func Discover(ctx context.Context, r Runner, binary string) Result {
 		if help, helpErr := r.Output(ctx, binary, "--help"); helpErr == nil {
 			cap.DraftMTP = strings.Contains(string(help), "draft-mtp")
 		}
+		if devices, deviceErr := r.Output(ctx, binary, "--list-devices"); deviceErr == nil {
+			cap.CUDA = strings.Contains(strings.ToLower(string(devices)), "cuda")
+		}
 	}
 	return Result{Schema: Schema, Outcome: OutcomeDelegate, Reason: "llama.cpp capability discovered", Capability: cap}
 }
+
+// WitnessedQwen38MTP reports whether capability provenance matches the measured runtime.
+func WitnessedQwen38MTP(cap Capability) bool {
+	commit := strings.ToLower(strings.TrimSpace(cap.Commit))
+	return commit != "" && (strings.HasPrefix(commit, WitnessedQwen38MTPCommit) || strings.HasPrefix(WitnessedQwen38MTPCommit, commit)) && cap.Server && cap.DraftMTP && cap.CUDA
+}
+
 func Plan(cap Capability, model string, d quantmeta.Descriptor) Result {
 	if cap.Binary == "" || cap.Version == "" {
 		return Result{Schema: Schema, Outcome: OutcomeRefuse, Reason: "unproven llama.cpp capability"}
@@ -105,8 +121,8 @@ func PlanQwen38MTP(cap Capability, model string, d quantmeta.Descriptor, port, c
 	if base.Outcome != OutcomeDelegate {
 		return base
 	}
-	if !cap.Server || !cap.DraftMTP {
-		base.Outcome, base.Reason, base.Argv = OutcomeAbstain, "llama-server does not advertise draft-mtp", nil
+	if !cap.Server || !cap.DraftMTP || !cap.CUDA {
+		base.Outcome, base.Reason, base.Argv = OutcomeAbstain, "llama-server does not advertise draft-mtp on a CUDA device", nil
 		return base
 	}
 	arch := ""
@@ -122,7 +138,7 @@ func PlanQwen38MTP(cap Capability, model string, d quantmeta.Descriptor, port, c
 		return base
 	}
 	base.Reason = "delegate Qwen3.8 to versioned llama-server draft-mtp runtime"
-	base.Argv = []string{cap.Binary, "-m", model, "--host", "127.0.0.1", "--port", strconv.Itoa(port), "-ngl", "99", "-c", strconv.Itoa(contextTokens), "--spec-type", "draft-mtp", "--spec-draft-n-max", "3", "--spec-draft-p-min", "0.0"}
+	base.Argv = []string{cap.Binary, "-m", model, "--host", "127.0.0.1", "--port", strconv.Itoa(port), "-ngl", "99", "-c", strconv.Itoa(contextTokens), "-b", "4096", "-ub", "1024", "--spec-type", "draft-mtp", "--spec-draft-n-max", "3", "--spec-draft-p-min", "0.0"}
 	return base
 }
 
@@ -207,12 +223,15 @@ func Start(ctx context.Context, argv []string, startupTimeout time.Duration) (*P
 		}
 		select {
 		case err := <-p.done:
+			<-scanDone
 			return nil, fmt.Errorf("llama-server exited before ready: %v: %s", err, strings.TrimSpace(lines.String()))
 		case <-ctx.Done():
 			_ = p.Stop()
+			<-scanDone
 			return nil, ctx.Err()
 		case <-deadline.C:
 			_ = p.Stop()
+			<-scanDone
 			return nil, fmt.Errorf("llama-server readiness timed out after %s: %s", startupTimeout, strings.TrimSpace(lines.String()))
 		case <-tick.C:
 		}
@@ -232,14 +251,23 @@ func (p *Process) Stop() error {
 	}
 	var stopErr error
 	p.stopOnce.Do(func() {
+		select {
+		case <-p.done:
+			return
+		default:
+		}
 		if p.cmd != nil && p.cmd.Process != nil {
-			stopErr = p.cmd.Process.Signal(os.Interrupt)
+			if err := p.cmd.Process.Signal(os.Interrupt); err != nil && !errors.Is(err, os.ErrProcessDone) {
+				stopErr = err
+			}
 		}
 		select {
 		case <-p.done:
 		case <-time.After(5 * time.Second):
 			if p.cmd != nil && p.cmd.Process != nil {
-				stopErr = p.cmd.Process.Kill()
+				if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+					stopErr = err
+				}
 			}
 		}
 	})

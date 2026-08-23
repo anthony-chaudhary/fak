@@ -311,6 +311,10 @@ func cmdServe(argv []string) {
 		}
 		return
 	}
+	if _, err := normalizeQwen38Runtime(*sf.qwen38Runtime); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
 	if manifestPresent {
 		if err := validateServeManifestOpinions(manifest); err != nil {
 			fmt.Fprintf(os.Stderr, "fak serve: config %s: %v\n", configPath, err)
@@ -322,12 +326,6 @@ func cmdServe(argv []string) {
 		{Name: "flag-parse", Dur: parseDur},
 	}}
 	rt.resolveServeModelSources(sf)
-	if err := rt.maybeStartQwen38Delegation(sf); err != nil {
-		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
-		os.Exit(2)
-	}
-	defer rt.stopQwen38Delegation()
-
 	// --policy-check: validate the manifest and exit, binding no listener.
 	if *sf.policyCheck {
 		runServePolicyCheck(*sf.policyPath)
@@ -387,6 +385,14 @@ func cmdServe(argv []string) {
 	applyPolicy(*sf.policyPath)
 	rt.startupPhases = append(rt.startupPhases, gateway.StartupPhase{Name: "policy-load", Dur: time.Since(tPolicy)})
 	configureServeToolEngines()
+
+	// Start the measured child only after every validation step that can terminate
+	// startup, and immediately before compute selection consumes the model source.
+	if err := rt.maybeStartQwen38Delegation(sf); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
+	defer rt.stopQwen38Delegation()
 
 	// Boot stages (serve_stages.go). The order is load-bearing: compute before the
 	// weight load, the session plane before the gateway, the observer seams resolved

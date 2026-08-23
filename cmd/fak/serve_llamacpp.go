@@ -12,6 +12,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ggufinterop"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/llamacppinterop"
+	"github.com/anthony-chaudhary/fak/internal/quantmeta"
 )
 
 const (
@@ -51,6 +52,20 @@ func (rt *serveRuntime) maybeStartQwen38Delegation(sf *serveFlags) error {
 	if raw := mapped.Descriptor.Extra["gguf_architecture"]; len(raw) > 0 {
 		_ = json.Unmarshal(raw, &arch)
 	}
+	if arch == "" {
+		if entry, ok := gg.Metadata["general.architecture"]; ok {
+			arch, _ = entry.Value.(string)
+		}
+	}
+	if arch == "qwen35" && mapped.Descriptor.Artifact == nil {
+		mapped.Descriptor.Artifact = &quantmeta.ArtifactSpec{ContainerID: "gguf"}
+	}
+	if mapped.Descriptor.Extra == nil {
+		mapped.Descriptor.Extra = map[string]json.RawMessage{}
+	}
+	if arch == "qwen35" {
+		mapped.Descriptor.Extra["gguf_architecture"] = json.RawMessage("\"qwen35\"")
+	}
 	if arch != "qwen35" {
 		if mode == qwen38RuntimeAuto {
 			return nil
@@ -64,11 +79,14 @@ func (rt *serveRuntime) maybeStartQwen38Delegation(sf *serveFlags) error {
 	probeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	discovered := llamacppinterop.Discover(probeCtx, llamacppinterop.ExecRunner{}, binary)
-	if discovered.Outcome != llamacppinterop.OutcomeDelegate || !discovered.Capability.DraftMTP {
+	if discovered.Outcome != llamacppinterop.OutcomeDelegate || !discovered.Capability.DraftMTP || !discovered.Capability.CUDA {
 		if mode == qwen38RuntimeAuto {
 			return nil
 		}
-		return fmt.Errorf("Qwen3.8 llama-mtp capability unavailable: %s", discovered.Reason)
+		return fmt.Errorf("Qwen3.8 llama-mtp CUDA capability unavailable: %s", discovered.Reason)
+	}
+	if mode == qwen38RuntimeAuto && !llamacppinterop.WitnessedQwen38MTP(discovered.Capability) {
+		return nil
 	}
 	port, err := freeLoopbackPort()
 	if err != nil {
@@ -89,6 +107,7 @@ func (rt *serveRuntime) maybeStartQwen38Delegation(sf *serveFlags) error {
 	rt.llamaProcess = proc
 	*sf.baseURL = proc.BaseURL()
 	*sf.provider = "openai"
+	*sf.backendName = ""
 	if strings.TrimSpace(*sf.model) == "" || *sf.model == "mock" {
 		*sf.model = *sf.ggufPath
 	}

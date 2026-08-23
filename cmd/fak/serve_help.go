@@ -19,7 +19,7 @@ type serveHelpCategory struct {
 // where an operator will look before the help-contract test permits it to land.
 var serveHelpCategories = []serveHelpCategory{
 	{name: "start", summary: "Listener, deployment manifest, and provider connection.", flags: strings.Fields("addr stdio config print-effective-config provider base-url model api-key-env require-key-env stream-progress-timeout expose key-principal unsafe-allow-unauthenticated-bind")},
-	{name: "model", summary: "Local engines, weights, parallelism, and hardware.", flags: strings.Fields("engine backend gguf tokenizer cuda-graph cpu-offload-experts n-cpu-moe metal expert-parallel tensor-parallel replica-base-url")},
+	{name: "model", summary: "Local engines, weights, parallelism, and hardware.", flags: strings.Fields("engine backend gguf tokenizer qwen38-runtime llama-server llama-startup-timeout cuda-graph cpu-offload-experts n-cpu-moe metal expert-parallel tensor-parallel replica-base-url")},
 	{name: "cache", summary: "Shared engine-cache attachment and cache correctness.", flags: strings.Fields("engine-cache-engine engine-cache-base-url engine-cache-admin-key-env engine-cache-idle-timeout engine-cache-require-exact-span")},
 	{name: "context", summary: "Context budgets, compaction, elision, and reuse.", flags: strings.Fields("ctx-view-budget compact-history-budget positive-residual-substitution compact-anchor-head assume-session-turns elide-result-bytes elide-stale-reads vcache-anchor defer-cold-tools context-budget-tokens reset-on-budget")},
 	{name: "policy", summary: "Policy, routing, plans, and invalidation.", flags: strings.Fields("policy policy-canary-turns policy-check plan-json vdso invalidation route-manifest route-accounts")},

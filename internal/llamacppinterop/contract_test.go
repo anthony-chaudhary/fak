@@ -18,10 +18,11 @@ import (
 )
 
 type fakeRunner struct {
-	out  string
-	help string
-	err  error
-	got  [][]string
+	out     string
+	help    string
+	devices string
+	err     error
+	got     [][]string
 }
 
 func (f *fakeRunner) Output(_ context.Context, n string, a ...string) ([]byte, error) {
@@ -32,21 +33,35 @@ func (f *fakeRunner) Output(_ context.Context, n string, a ...string) ([]byte, e
 	if len(a) > 0 && a[0] == "--help" {
 		return []byte(f.help), nil
 	}
+	if len(a) > 0 && a[0] == "--list-devices" {
+		return []byte(f.devices), nil
+	}
 	return []byte(f.out), nil
 }
 
 func TestDiscoverAndPlan(t *testing.T) {
-	f := &fakeRunner{out: "llama-server version: 0.0.6123 (commit 8144f31)", help: "--spec-type none,draft-mtp"}
+	f := &fakeRunner{out: "llama-server version: 0.0.6123 (commit 8144f31)", help: "--spec-type none,draft-mtp", devices: "CUDA0: NVIDIA A100"}
 	r := Discover(context.Background(), f, "llama-server")
-	if r.Outcome != OutcomeDelegate || r.Capability.Version != "0.0.6123" || r.Capability.Commit != "8144f31" || !r.Capability.DraftMTP {
+	if r.Outcome != OutcomeDelegate || r.Capability.Version != "0.0.6123" || r.Capability.Commit != "8144f31" || !r.Capability.DraftMTP || !r.Capability.CUDA {
 		t.Fatalf("%+v got=%v", r, f.got)
 	}
 	d := quantmeta.Descriptor{Artifact: &quantmeta.ArtifactSpec{ContainerID: "gguf"}, Extra: map[string]json.RawMessage{"gguf_architecture": json.RawMessage(`"qwen35"`)}}
 	p := PlanQwen38MTP(r.Capability, "tiny.gguf", d, 18080, 4096)
-	if p.Outcome != OutcomeDelegate || !containsPair(p.Argv, "--spec-type", "draft-mtp") || !containsPair(p.Argv, "--host", "127.0.0.1") {
+	if p.Outcome != OutcomeDelegate || !containsPair(p.Argv, "--spec-type", "draft-mtp") || !containsPair(p.Argv, "--host", "127.0.0.1") || !containsPair(p.Argv, "-b", "4096") || !containsPair(p.Argv, "-ub", "1024") {
 		t.Fatalf("%+v", p)
 	}
 }
+func TestWitnessedQwen38MTP(t *testing.T) {
+	cap := Capability{Commit: "8144f3192e5a3131cd043f284525e6ceebf82d0f", Server: true, DraftMTP: true, CUDA: true}
+	if !WitnessedQwen38MTP(cap) {
+		t.Fatal("measured runtime was not admitted")
+	}
+	cap.Commit = "deadbeef"
+	if WitnessedQwen38MTP(cap) {
+		t.Fatal("unmeasured runtime was admitted")
+	}
+}
+
 func TestDiscoverFailsClosed(t *testing.T) {
 	if r := Discover(context.Background(), &fakeRunner{err: errors.New("missing")}, "llama-cli"); r.Outcome != OutcomeRefuse {
 		t.Fatalf("%+v", r)
@@ -56,7 +71,7 @@ func TestDiscoverFailsClosed(t *testing.T) {
 	}
 }
 func TestPlanRejectsNonGGUFAndUnsupportedMTP(t *testing.T) {
-	cap := Capability{Binary: "llama-server", Version: "1", Server: true, DraftMTP: true}
+	cap := Capability{Binary: "llama-server", Version: "1", Server: true, DraftMTP: true, CUDA: true}
 	if r := Plan(cap, "m.bin", quantmeta.Descriptor{}); r.Outcome != OutcomeAbstain {
 		t.Fatalf("%+v", r)
 	}
@@ -65,6 +80,11 @@ func TestPlanRejectsNonGGUFAndUnsupportedMTP(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	d.Extra["gguf_architecture"] = json.RawMessage(`"qwen35"`)
+	cap.CUDA = false
+	if r := PlanQwen38MTP(cap, "m.gguf", d, 1, 1); r.Outcome != OutcomeAbstain {
+		t.Fatalf("%+v", r)
+	}
+	cap.CUDA = true
 	cap.DraftMTP = false
 	if r := PlanQwen38MTP(cap, "m.gguf", d, 1, 1); r.Outcome != OutcomeAbstain {
 		t.Fatalf("%+v", r)
