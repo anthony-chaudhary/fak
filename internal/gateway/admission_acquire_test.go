@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -73,6 +74,29 @@ func TestAcquireLeaseBoundaryShedsAndDenies(t *testing.T) {
 // wired it admits an underloaded request and returns a releasable lease; with no controller
 // attached it is inert (nil lease, nil error) and the historical request path is byte-for-byte
 // unchanged. This is the seam the gateway request path acquires through before the planner runs.
+func TestBeginServedAdmissionRejectsRequestLargerThanTokenBudget(t *testing.T) {
+	policy := DefaultAdmissionPolicy()
+	policy.TokenBudget = 32
+	server := newTestServer(t)
+	server.SetAdmissionController(NewAdmissionController(policy))
+
+	// Claude CLI commonly asks for a much larger output envelope than a tiny direct
+	// probe. A request that can never fit must be refused instead of queued forever.
+	lease, err := server.beginServedAdmission(context.Background(), servedSessionTurn{traceID: "claude-envelope"}, nil, nil, 64)
+	if lease != nil {
+		t.Fatal("beginServedAdmission lease != nil, want refusal for an impossible request")
+	}
+	var admissionErr *AdmissionError
+	if !errors.As(err, &admissionErr) {
+		t.Fatalf("beginServedAdmission err = %v, want typed AdmissionError", err)
+	}
+	if admissionErr.Verdict != VerdictShed || admissionErr.Reason != "request tokens 64 exceed scheduler token budget 32" {
+		t.Fatalf("admission error = %+v, want exact impossible-envelope reason", admissionErr)
+	}
+	if stats := server.admissionCtl.Stats(); stats.Waiting != 0 || stats.Shed != 1 {
+		t.Fatalf("admission stats = %+v, want waiting=0 shed=1", stats)
+	}
+}
 func TestBeginServedAdmissionSeam(t *testing.T) {
 	ctx := context.Background()
 	turn := servedSessionTurn{traceID: "seam", state: SessionState{Priority: 0}, maxTokens: 1}

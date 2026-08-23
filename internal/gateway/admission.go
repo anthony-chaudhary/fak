@@ -276,6 +276,10 @@ func (c *AdmissionController) Offer(req SeqRequest) AdmissionVerdict {
 		c.stats.Denied++
 		return VerdictDenied
 	}
+	if c.impossibleReason(req) != "" {
+		c.stats.Shed++
+		return VerdictShed
+	}
 	// Fast path: nobody is waiting and there is headroom now — admit immediately so an
 	// idle/underloaded node does not pay a Schedule round to serve its first requests.
 	if len(c.waiting) == 0 && c.hasHeadroomLocked(req.Tokens) {
@@ -312,6 +316,11 @@ func (c *AdmissionController) Acquire(ctx context.Context, req SeqRequest) (*Adm
 		c.stats.Denied++
 		c.mu.Unlock()
 		return nil, &AdmissionError{Verdict: VerdictDenied, Reason: req.Trust.Reason}
+	}
+	if reason := c.impossibleReason(req); reason != "" {
+		c.stats.Shed++
+		c.mu.Unlock()
+		return nil, &AdmissionError{Verdict: VerdictShed, Reason: reason}
 	}
 	if len(c.waiting) == 0 && c.hasHeadroomLocked(req.Tokens) {
 		c.admitLocked(req)
@@ -441,6 +450,15 @@ func (c *AdmissionController) cancelAdmission(traceID string) {
 	if c.completeLocked(traceID) {
 		c.scheduleLocked()
 	}
+}
+
+// impossibleReason reports capacity constraints that cannot become satisfiable by waiting.
+// Caller holds c.mu.
+func (c *AdmissionController) impossibleReason(req SeqRequest) string {
+	if c.policy.TokenBudget > 0 && req.Tokens > c.policy.TokenBudget {
+		return fmt.Sprintf("request tokens %d exceed scheduler token budget %d", req.Tokens, c.policy.TokenBudget)
+	}
+	return ""
 }
 
 // hasHeadroomLocked reports whether a request of the given token footprint fits the
