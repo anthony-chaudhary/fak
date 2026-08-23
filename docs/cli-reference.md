@@ -1278,3 +1278,16 @@ fak temp-artifacts --min-age DURATION [--apply] [--json]
 On Windows, selection checks each exact candidate path against both `Win32_Process.ExecutablePath` and parsed command-line arguments. Prefix collisions do not count as references, and command-line contents never enter the receipt. If inspection is unavailable, candidates are preserved. `--apply` rechecks identity and references before each move, moves an eligible file into a unique quarantine under the same temporary root, rechecks source and quarantine paths, and deletes only that exact quarantined regular file. A changed, newly referenced, inaccessible, ambiguous, or failed file remains at its source or reported quarantine path; the command never terminates a process and never uses recursive or wildcard deletion.
 
 Producer audit for this fallback: committed `os.MkdirTemp("", "fak-…")` build/cleanroom producers such as `cmd/fak/commit_buildcheck.go`, `cmd/fak/prepush_build.go`, `internal/committedtree`, `internal/devcmd/buildcheck`, `internal/nightrun/prebuild`, and `internal/workerworktree` own directories and use local cleanup where deterministic. Committed direct `os.CreateTemp` producers use non-allowlisted control extensions such as `.md`, `.json`, `.txt`, `.patch`, and `.index`. The incident's direct `.exe`, `.tar`, and `.zip` names have no committed deterministic producer to repair, so this bounded fallback owns interrupted and manual verification artifacts without widening those producer contracts.
+
+## `fak server`: own a loopback inference server
+
+`fak server` manages one local-process server instance through a receipt-backed lifecycle:
+
+```text
+fak server init --dir DIR --name NAME --model MODEL.gguf --sha256 HEX --executable /path/to/llama-server --json
+fak server up --dir DIR --json
+fak server status --dir DIR --json
+fak server down --dir DIR --json
+```
+
+`init` records immutable model and executable identity. `up` starts only the declared executable and waits within its readiness deadline; `status` reports the typed lifecycle state; `down` signals only the process proven by the instance receipt. Each subcommand emits JSON. Run `fak server` with no subcommand for the live usage text.

@@ -44,6 +44,7 @@ const usageCoreText = `usage:
   fak harness model-set resolve --intent PATH --inventory PATH --out PATH [--json]
   fak harness model-set inspect --lock PATH [--receipt PATH] [--json]
   fak harness model-set selfcheck --lock PATH --inventory PATH --receipt PATH [--as-of RFC3339] [--json]
+  fak server <init|up|status|down> [flags]
                 (MODEL-SET LIFECYCLE: resolve role requirements against witnessed
                  inventory into an atomic canonical lock; inspect lock/receipt
                  state without mutation; selfcheck re-evaluates locally and writes
