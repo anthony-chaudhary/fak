@@ -203,10 +203,7 @@ A successful replay ends with a `summary:` of submit, local-hit, engine-call, an
 # verdict=ALLOW ...                                <- on the allow-list
 ```
 
-> **cmd.exe note.** The single-quoted `--args '{...}'` works in git-bash and PowerShell but
-> **not** cmd.exe, which passes the quotes through literally. On cmd.exe, drop the single quotes
-> and escape the inner double quotes (`--args "{""_positional"":[""alice""]}"`). Or just run
-> these examples from git-bash / PowerShell, where the shown syntax works unchanged.
+> **Windows shell note.** The single-quoted `--args '{...}'` works unchanged in git-bash and`n> PowerShell 7. Windows PowerShell 5.1 strips the inner JSON quotes at the native-process boundary;`n> use `--args '{\"_positional\":[\"alice\"]}'` there. On cmd.exe, use`n> `--args "{""_positional"":[""alice""]}"`.
 
 **Inspect / author the deployable capability floor:**
 
