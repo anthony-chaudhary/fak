@@ -1775,14 +1775,21 @@ __global__ void k_qwen35_causal_attention_panel(
     const float *kj = K + (size_t)j * width + (size_t)kvh * hd;
     float partial = 0.f;
     for (int d = tid; d < hd; d += FLASH_THREADS) partial += qs[d] * kj[d];
-    red[tid] = partial;
+#pragma unroll
+    for (int off = 16; off > 0; off >>= 1)
+      partial += __shfl_down_sync(0xffffffff, partial, off);
+    int lane = tid & 31, warp = tid >> 5;
+    if (lane == 0) red[warp] = partial;
     __syncthreads();
-    for (int s = FLASH_THREADS / 2; s > 0; s >>= 1) {
-      if (tid < s) red[tid] += red[tid + s];
-      __syncthreads();
+    if (warp == 0) {
+      partial = lane < (FLASH_THREADS / 32) ? red[lane] : 0.f;
+#pragma unroll
+      for (int off = 16; off > 0; off >>= 1)
+        partial += __shfl_down_sync(0xffffffff, partial, off);
+      if (lane == 0) red[0] = partial;
     }
-    float score = red[0] * scale;
     __syncthreads();
+    float score = red[0] * scale;
     float nextM = fmaxf(m, score);
     float correction = expf(m - nextM);
     float probability = expf(score - nextM);
