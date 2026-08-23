@@ -29,6 +29,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -38,6 +39,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ghexec"
 	"github.com/anthony-chaudhary/fak/internal/issuecohort"
 	"github.com/anthony-chaudhary/fak/internal/steerpr"
+	"github.com/anthony-chaudhary/fak/internal/trajctl"
 )
 
 const steerPRsSchema = steerpr.Schema // "fak.steerpr.v1"
@@ -50,6 +52,12 @@ var steerPRsVerdicts = dosCommitAuditRange
 // ledger under. Overridable in tests so a test run never touches the real
 // overlay ledger.
 var steerRoot = repoRoot
+
+// steerPRsTrajState folds the live objective ledger once per view. Tests replace
+// this seam so the captured render never reads the repository ledger.
+var steerPRsTrajState = func(root string) trajctl.State {
+	return trajctl.Fold(trajctl.ReadLedgerFile(filepath.Join(root, trajctl.DefaultLedgerRel)))
+}
 
 func cmdSteer(argv []string) { os.Exit(runSteer(os.Stdout, os.Stderr, argv)) }
 
@@ -469,6 +477,7 @@ func buildSteerPRsViewWaves(root, base, head string, waves []steerpr.WaveBinding
 	// grouping stays the fallback for everything else — the common case — and each
 	// unit states which basis it used.
 	units, unstamped := steerpr.FoldUnitsByWave(commits, steerpr.WaveIndex(waves))
+	attachSteerPRCurves(units, steerPRsTrajState(root))
 	steerpr.SortWorstFirst(units)
 
 	// The partial state rides beside the band as a third orthogonal axis (#5027):
@@ -559,6 +568,43 @@ func buildSteerPRsViewWaves(root, base, head string, waves []steerpr.WaveBinding
 		"acks":            acked,
 		"pauses":          paused,
 	}, nil
+}
+
+// attachSteerPRCurves joins an overlay unit to the objective convention used by
+// dispatch: a closure-grade #N binds issue-N first, then the unit leaf. The
+// first live objective wins; units without one stay curve-free.
+func attachSteerPRCurves(units []steerpr.Unit, state trajctl.State) {
+	steerpr.AttachCurves(units, func(unit steerpr.Unit) (steerpr.Curve, bool) {
+		ids := make([]string, 0, len(unit.Resolves)+1)
+		for _, issue := range unit.Resolves {
+			ids = append(ids, "issue-"+strings.TrimPrefix(issue, "#"))
+		}
+		ids = append(ids, unit.Leaf)
+		for _, id := range ids {
+			objective, ok := state.Objectives[id]
+			if !ok || (objective.Status != trajctl.StatusActive && objective.Status != trajctl.StatusPaused) {
+				continue
+			}
+			curve, ok := state.CurveFor(id)
+			if !ok {
+				continue
+			}
+			scores := state.ScoresFor(id)
+			var rung steerpr.CurveRung
+			if len(scores) > 0 {
+				rung = steerpr.CurveRung(scores[len(scores)-1].Witness)
+			}
+			return steerpr.Curve{
+				ObjectiveID: curve.ObjectiveID,
+				Signal:      steerpr.CurveSignal(curve.Signal),
+				Rung:        rung,
+				Latest:      curve.Latest,
+				Delta:       curve.Delta,
+				Detail:      curve.Detail,
+			}, true
+		}
+		return steerpr.Curve{}, false
+	})
 }
 
 // steerPRsIntentGather is the bounded issue-graph scan the partial state derives
@@ -715,6 +761,13 @@ func writeSteerPRs(view map[string]any, maxFiles int) string {
 		// silence reads as completeness to an operator scanning the overlay.
 		if line := unit.Partial.Annotate(); line != "" {
 			fmt.Fprintf(&b, "%s\n", line)
+		}
+		if line := unit.Curve.Annotate(); line != "" {
+			if unit.Band == steerpr.BandCleared && steerpr.DriftHiddenByBand([]steerpr.Unit{unit}) != nil {
+				fmt.Fprintf(&b, "**DRIFT HIDDEN BY CLEARED BAND** - %s\n", line)
+			} else {
+				fmt.Fprintf(&b, "%s\n", line)
+			}
 		}
 		fmt.Fprintf(&b, "**Title:** `%s`\n", unit.Title)
 		if len(unit.Resolves) > 0 {

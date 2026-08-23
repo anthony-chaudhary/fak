@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/steerpr"
+	"github.com/anthony-chaudhary/fak/internal/trajctl"
 )
 
 // The two stamped SHAs in prPlanFakeLog (defined in release_prplan_test.go): the
@@ -193,5 +194,55 @@ func TestRunSteerDispatch(t *testing.T) {
 	stderr.Reset()
 	if code := runSteer(&stdout, &stderr, []string{"--help"}); code != 0 {
 		t.Fatalf("--help exit = %d, want 0", code)
+	}
+}
+
+// This captured operator render is #5114's spine witness: a live issue-bound
+// trajctl objective is joined onto a CLEARED overlay unit, and its declining W3
+// curve remains emphatic rather than disappearing behind the cleared band.
+func TestSteerPRsRendersDriftCurveOnClearedUnit(t *testing.T) {
+	withSteerFakes(t, prPlanFakeLog, steerpr.VerdictWitnessed)
+	orig := steerPRsTrajState
+	steerPRsTrajState = func(string) trajctl.State {
+		return trajctl.Fold([]trajctl.Row{
+			trajctl.ObjectiveRecord(trajctl.Objective{ID: "issue-1146", Statement: "ship gateway", Status: trajctl.StatusActive}),
+			trajctl.ScoreRecord(trajctl.ScoreRow{ObjectiveID: "issue-1146", Method: trajctl.CommitScorerMethod, Version: "1", Witness: trajctl.W3, Value: .8, UnixMillis: 1}),
+			trajctl.ScoreRecord(trajctl.ScoreRow{ObjectiveID: "issue-1146", Method: trajctl.CommitScorerMethod, Version: "1", Witness: trajctl.W3, Value: .5, UnixMillis: 2}),
+		})
+	}
+	t.Cleanup(func() { steerPRsTrajState = orig })
+
+	var stdout, stderr bytes.Buffer
+	if code := runSteerPRs(&stdout, &stderr, []string{"--base", "baseref", "--head", "headref"}); code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
+	}
+	got := stdout.String()
+	for _, want := range []string{
+		"## [CLEARED] gateway",
+		"**DRIFT HIDDEN BY CLEARED BAND**",
+		"curve: DRIFT [W3]",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("captured render missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestSteerPRsUnitWithoutObjectiveHasNoCurve(t *testing.T) {
+	withSteerFakes(t, prPlanFakeLog, steerpr.VerdictWitnessed)
+	orig := steerPRsTrajState
+	steerPRsTrajState = func(string) trajctl.State { return trajctl.State{} }
+	t.Cleanup(func() { steerPRsTrajState = orig })
+
+	view, err := buildSteerPRsView(t.TempDir(), "baseref", "headref")
+	if err != nil {
+		t.Fatalf("buildSteerPRsView: %v", err)
+	}
+	units := view["units"].([]steerpr.Unit)
+	if len(units) != 1 || units[0].Curve != nil {
+		t.Fatalf("units = %#v, want one unit with no curve", units)
+	}
+	if got := writeSteerPRs(view, 20); strings.Contains(got, "curve:") || strings.Contains(got, "DRIFT HIDDEN") {
+		t.Fatalf("curve-free unit rendered a curve warning:\n%s", got)
 	}
 }
