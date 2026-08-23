@@ -4104,6 +4104,11 @@ def _path_text_variants(path: str) -> list[str]:
 
 def text_mentions_repo_path(text: str, path: str) -> bool:
     hay = (text or "").replace("\\", "/")
+    # Git accepts punctuation-only filenames, but treating tokens such as `;` as
+    # paths makes virtually any prose collide. They carry no useful ownership
+    # signal; same-issue WIP detection still protects them by exact log evidence.
+    if not any(ch.isalnum() for ch in normalize_repo_path(path)):
+        return False
     for variant in _path_text_variants(path):
         if re.search(r"(?<![\w./-])" + re.escape(variant) + r"(?![\w./-])", hay):
             return True

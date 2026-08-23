@@ -6206,6 +6206,12 @@ class DirtyPathCollisionTest(unittest.TestCase):
         self.assertEqual(scan["dirty_paths"],
                          ["cmd/fak/knownbad.go", "internal/foo/bar.go"])
 
+    def test_punctuation_only_dirty_name_does_not_collide_with_prose(self) -> None:
+        mod = load()
+        scan = mod.dirty_path_collision(
+            "Acceptance: preserve policy; then dispatch.", [";"])
+        self.assertFalse(scan["collides"])
+
     def test_bare_filename_does_not_collide(self) -> None:
         mod = load()
         scan = mod.dirty_path_collision(
