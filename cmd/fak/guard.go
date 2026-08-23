@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -25,7 +24,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/goalpark"
 	"github.com/anthony-chaudhary/fak/internal/guard"
 	"github.com/anthony-chaudhary/fak/internal/guardsessions"
-	"github.com/anthony-chaudhary/fak/internal/harnessprofile"
 	"github.com/anthony-chaudhary/fak/internal/harnessres"
 	"github.com/anthony-chaudhary/fak/internal/headroom"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
@@ -43,82 +41,6 @@ import (
 // launch adapters are free to rewrite. Its fields stay private and every slice accessor
 // clones, so a broker, trampoline, or exec-boundary transform cannot mutate the semantic
 // command or the resolved profile in place.
-type guardLaunchPlan struct {
-	semantic          []string
-	executable        []string
-	baseName          string
-	profile           harnessprofile.HarnessProfile
-	recognizedProfile bool
-	initialized       bool
-}
-
-func newGuardLaunchPlan(command []string) guardLaunchPlan {
-	plan := guardLaunchPlan{
-		semantic:    append([]string(nil), command...),
-		executable:  append([]string(nil), command...),
-		initialized: true,
-	}
-	if len(command) == 0 {
-		return plan
-	}
-	plan.baseName = guardAgentBaseName(command[0])
-	profile, ok := harnessprofile.Lookup(command[0])
-	if !ok {
-		return plan
-	}
-	plan.profile = cloneGuardHarnessProfile(profile)
-	plan.recognizedProfile = true
-	return plan
-}
-
-func cloneGuardHarnessProfile(profile harnessprofile.HarnessProfile) harnessprofile.HarnessProfile {
-	profile.Names = append([]string(nil), profile.Names...)
-	profile.Repoint = append([]harnessprofile.RepointMechanism(nil), profile.Repoint...)
-	return profile
-}
-
-func (p guardLaunchPlan) semanticCommand() []string {
-	return append([]string(nil), p.semantic...)
-}
-
-func (p guardLaunchPlan) executableCommand() []string {
-	return append([]string(nil), p.executable...)
-}
-
-func (p guardLaunchPlan) harnessProfile() harnessprofile.HarnessProfile {
-	return cloneGuardHarnessProfile(p.profile)
-}
-
-func (p guardLaunchPlan) recognized() bool { return p.recognizedProfile }
-
-func (p guardLaunchPlan) withExecutableCommand(command []string) guardLaunchPlan {
-	p.executable = append([]string(nil), command...)
-	return p
-}
-
-func (p guardLaunchPlan) resolveProvider(explicit string) (string, bool) {
-	if provider := strings.ToLower(strings.TrimSpace(explicit)); provider != "" {
-		return provider, false
-	}
-	if p.recognizedProfile {
-		return string(p.profile.Wire), true
-	}
-	return "anthropic", false
-}
-
-func (p guardLaunchPlan) agentName() string {
-	if len(p.semantic) == 0 {
-		return ""
-	}
-	return p.semantic[0]
-}
-
-func (p guardLaunchPlan) agentBaseName() string { return p.baseName }
-
-func (p guardLaunchPlan) interactive() bool {
-	return guardChildInteractive(p.semanticCommand())
-}
-
 func cmdGuard(argv []string) {
 	cmdManageCommand("guard", argv)
 }
@@ -990,25 +912,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		Pool: os.Getenv("DISPATCH_POOL"), Lease: os.Getenv("DISPATCH_LEASE"),
 		Witness: os.Getenv("DISPATCH_WITNESS_REQUIREMENT"), Command: append([]string(nil), command...),
 	}
-	longRetryParked := false
-	observeUpstreamResponse := func(status int, header http.Header) {
-		// Passive, zero-request harvest; persistence failures never fail the response path.
-		_ = quotaHarvester.Observe(status, header)
-		if parkGoal == "" || longRetryParked {
-			return
-		}
-		parked, parkErr := parkStore.RecordLongRetry(status, header, time.Now(), parkTemplate)
-		if parkErr != nil {
-			fmt.Fprintf(os.Stderr, "fak guard: long Retry-After park failed open: %v\n", parkErr)
-			return
-		}
-		if parked {
-			longRetryParked = true
-			if rec, loadErr := parkStore.Load(parkGoal); loadErr == nil {
-				fmt.Fprintf(os.Stderr, "fak guard: PARKED goal=%q parked_until=%d reason=%s account=%q pool=%q next=%q\n", rec.Goal, rec.ParkedUntil, rec.Reason, rec.Account, rec.Pool, rec.NextAction)
-			}
-		}
-	}
+	observeUpstreamResponse := guardUpstreamObserver(quotaHarvester, parkStore, parkGoal, parkTemplate, os.Stderr)
 
 	// Pin the compaction anchor mode this launch runs under for the durable per-session
 	// compaction-health witness (#3152). Stamped here, next to the CompactAnchorHead the
