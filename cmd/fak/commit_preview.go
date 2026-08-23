@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/hooks"
@@ -17,6 +18,7 @@ import (
 // surface produces a path-scoped warning naming the witness command that would clear it. The
 // warnings are WARNING MODE — they never change the exit code; only the lint verdict decides it.
 func runCommitPreview(stdout, stderr io.Writer, message string, paths []string, root, expectedBranch string, asJSON, requireIssue bool) int {
+	paths = commitPreviewEffectPaths(root, paths)
 	rep := hooks.LintCommitMessageWithOptions(message, paths, root, requireIssue)
 	coreLockWarns := auditCoreLockPaths(paths)
 	// The modver cross-check (#2495): name the modules whose rev a commit of exactly these
@@ -31,12 +33,14 @@ func runCommitPreview(stdout, stderr io.Writer, message string, paths []string, 
 			CoreLockWarnings []coreLockWarning `json:"core_lock_warnings"`
 			CoreLockWarnMode string            `json:"core_lock_warn_mode"`
 			BumpedModules    []string          `json:"bumped_modules"`
+			RequiredPaths    []string          `json:"required_paths"`
 		}{
 			CommitLintReport: rep,
 			ExpectedBranch:   expectedBranch,
 			CoreLockWarnings: coreLockWarns,
 			CoreLockWarnMode: coreLockModeWarning,
 			BumpedModules:    bumpedModules,
+			RequiredPaths:    paths,
 		}
 		if err := writeIndentedJSON(stdout, payload); err != nil {
 			fmt.Fprintf(stderr, "fak commit: %v\n", err)
@@ -45,6 +49,9 @@ func runCommitPreview(stdout, stderr io.Writer, message string, paths []string, 
 	} else {
 		renderPreview(stdout, rep, expectedBranch)
 		renderModuleAdvisory(stdout, bumpedModules)
+		if len(paths) > 0 {
+			fmt.Fprintf(stdout, "  required paths: %s\n", strings.Join(paths, ", "))
+		}
 		renderCoreLockWarnings(stdout, coreLockWarns)
 	}
 	if rep.OK {
@@ -53,6 +60,33 @@ func runCommitPreview(stdout, stderr io.Writer, message string, paths []string, 
 	return 1
 }
 
+func commitPreviewEffectPaths(root string, paths []string) []string {
+	out := append([]string(nil), paths...)
+	for _, path := range paths {
+		rel := filepath.ToSlash(path)
+		if filepath.IsAbs(path) {
+			if r, err := filepath.Rel(root, path); err == nil {
+				rel = filepath.ToSlash(r)
+			}
+		}
+		if strings.HasPrefix(rel, "docs/notes/") && strings.HasSuffix(strings.ToLower(rel), ".md") {
+			base := filepath.Base(rel)
+			if len(base) >= 14 && base[len(base)-14] == '-' && !commitPreviewContainsPath(out, "INDEX.md") {
+				out = append(out, "INDEX.md")
+			}
+		}
+	}
+	return out
+}
+
+func commitPreviewContainsPath(values []string, want string) bool {
+	for _, value := range values {
+		if filepath.ToSlash(value) == want {
+			return true
+		}
+	}
+	return false
+}
 func renderPreview(w io.Writer, r hooks.CommitLintReport, expectedBranch string) {
 	if r.OK {
 		fmt.Fprintln(w, "commit-preview OK — subject is witness-gradeable and bindable")
