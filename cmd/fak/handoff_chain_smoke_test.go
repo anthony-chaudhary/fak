@@ -434,6 +434,12 @@ func requireDosCommitAuditOK(t *testing.T, dosPath, repo, sha, wantPath string) 
 func requireWouldCloseWitness(t *testing.T, pythonPath, repo, fixturePath string) {
 	t.Helper()
 	scriptPath := issueResolveWitnessedScript(t)
+	ghDir := t.TempDir()
+	ghPath := filepath.Join(ghDir, "gh")
+	ghScript := "#!/bin/sh\nexit 0\n"
+	if err := os.WriteFile(ghPath, []byte(ghScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	cmd := exec.Command(pythonPath, scriptPath,
 		"--workspace", repo,
 		"--audit-json", fixturePath,
@@ -441,6 +447,7 @@ func requireWouldCloseWitness(t *testing.T, pythonPath, repo, fixturePath string
 		"--json",
 	)
 	var stdout, stderr bytes.Buffer
+	cmd.Env = append(os.Environ(), "PATH="+ghDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
