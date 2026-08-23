@@ -361,7 +361,7 @@ func renderMonitorTable(w io.Writer, p fleetmon.MonitorPayload) {
 		parts = append(parts, fmt.Sprintf("%s=%d", c, p.ByClass[c]))
 	}
 	fmt.Fprintf(w, "  %s\n\n", strings.Join(parts, "  "))
-	fmt.Fprintf(w, "%-6s %-20s %-20s %-6s %-10s %s\n", "ISSUE", "SESSION", "CLASS", "PID", "TX-AGE", "WHY")
+	fmt.Fprintf(w, "%-6s %-20s %-20s %-20s %-6s %-10s %s\n", "ISSUE", "SESSION", "CLASS", "PROGRESS", "PID", "TX-AGE", "WHY")
 	for _, s := range p.Workers {
 		issue := ""
 		if s.Issue != 0 {
@@ -382,7 +382,7 @@ func renderMonitorTable(w io.Writer, p fleetmon.MonitorPayload) {
 		if len(s.Reasons) > 0 {
 			why = s.Reasons[0]
 		}
-		fmt.Fprintf(w, "%-6s %-20s %-20s %-6s %-10s %s\n", issue, truncateTableField(s.Session, 20), s.Class, pid, age, why)
+		fmt.Fprintf(w, "%-6s %-20s %-20s %-20s %-6s %-10s %s\n", issue, truncateTableField(s.Session, 20), s.Class, s.ProgressState, pid, age, why)
 	}
 }
 

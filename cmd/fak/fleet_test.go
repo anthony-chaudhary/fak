@@ -84,6 +84,18 @@ func TestFleetMonitorJSON(t *testing.T) {
 	if payload.Workers[0].Class != fleetmon.ClassCompletedFinal {
 		t.Fatalf("alive PID + final report + idle => completed-final, got %s", payload.Workers[0].Class)
 	}
+	if got := payload.Workers[0].ProgressState; got != fleetmon.QuietWithinWindow {
+		t.Fatalf("progress state = %s, want %s", got, fleetmon.QuietWithinWindow)
+	}
+	if payload.Workers[0].LastProgressUTC == "" || payload.Workers[0].ProgressSource != "transcript-jsonl" {
+		t.Fatalf("missing durable progress provenance: %+v", payload.Workers[0])
+	}
+
+	var table bytes.Buffer
+	renderMonitorTable(&table, payload)
+	if got := table.String(); !strings.Contains(got, "PROGRESS") || !strings.Contains(got, string(fleetmon.QuietWithinWindow)) {
+		t.Fatalf("monitor table omits productive liveness:\n%s", got)
+	}
 }
 
 func proc4242() procguard.Proc {
