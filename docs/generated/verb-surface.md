@@ -508,7 +508,7 @@ source-only rows absent from help: 849
 | `fak leaseref renew` |  | runLeaserefRenew / internal/leaseref, internal/pathutil | `case` arm of the dispatch switch in runLeaseref() | NONE | — | **SOURCE ONLY** |
 | `fak leaseref session-publish` |  | runLeaserefSessionPublish / internal/leaseref, internal/pathutil | `case` arm of the dispatch switch in runLeaseref() | NONE | — | **SOURCE ONLY** |
 | `fak leaseref sync` | convergence verb: move the refs/fak/locks/* namespace between this clone and a remote so every node's arbiter sees every node's leases | runLeaserefSync / internal/leaseref, internal/pathutil | `case` arm of the dispatch switch in runLeaseref() | NONE | — | **SOURCE ONLY** |
-| `fak lifecycle` |  | cmdLifecycle / internal/lifecycle | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
+| `fak lifecycle` | inspect and control phase-aware capability lifecycle state | cmdLifecycle / internal/lifecycle | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak lint` | the static tool linter: the definition-time dual of the kernel's call-time re-checks | cmdLint / internal/agent, internal/toollint | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | yes |
 | `fak llmd-smoke` | smoke-test an llm-d OpenAI-compatible engine: /v1/models, one chat completion, engine-tagged metrics | cmdLLMDSmoke / internal/engine | `case` arm of the dispatch switch in dispatchExtendedVerbA() | RUNTIME | — | yes |
 | `fak llms-full` | generate or check llms-full.txt from committed tip plus explicit owned paths | cmdLLMSFull / internal/committedtree, internal/windowgate | `case` arm of the dispatch switch in dispatchPrimaryVerb() | RUNTIME | — | **SOURCE ONLY** |

@@ -226,6 +226,7 @@ var verbManifest = []Verb{
 	{Name: "launch", Synopsis: "the reversible provider launch shim: route claude/codex through fak (install/uninstall/default/enable/status)", Lane: "cmd"},
 	{Name: "leaseref", Synopsis: "cross-machine lease visibility: read the refs/fak/locks/* lease ref namespace", Lane: "cmd"},
 	{Name: "learning-debt-dispatch", Synopsis: "learning-scorecard -> backlog: file capped triage issues for HARD learning-debt defects", Lane: "cmd"},
+	{Name: "lifecycle", Synopsis: "inspect and control phase-aware capability lifecycle state", Lane: "cmd"},
 	{Name: "learning-observation", Synopsis: "store and trace observation -> candidate -> witness -> verdict learning records", Lane: "cmd"},
 	{Name: "lint", Synopsis: "the static tool linter: the definition-time dual of the kernel's call-time re-checks", Lane: "cmd"},
 	{Name: "llmd-smoke", Synopsis: "smoke-test an llm-d OpenAI-compatible engine: /v1/models, one chat completion, engine-tagged metrics", Aliases: []string{"llm-d-smoke"}, Lane: "cmd"},

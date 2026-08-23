@@ -245,7 +245,7 @@ func TestReleaseShipDryRunReportsSourceAndTargetBranches(t *testing.T) {
 	if result.TargetSHA != "main-target-sha" || result.TargetAncestry == nil || result.TargetAncestry["ok"] != true || result.TargetAncestry["status"] != "ancestor" {
 		t.Fatalf("target ancestry witness wrong: sha=%q ancestry=%#v", result.TargetSHA, result.TargetAncestry)
 	}
-	if result.SourceCI == nil || result.SourceCI["ok"] != true || result.SourceCI["status"] != "success" {
+	if result.SourceCI == nil || result.SourceCI["ok"] != true || result.SourceCI["status"] != "green" {
 		t.Fatalf("source CI witness missing or not green: %#v", result.SourceCI)
 	}
 	if result.CommitSHA != "release-sha" || result.Tag != "v0.36.0" {
