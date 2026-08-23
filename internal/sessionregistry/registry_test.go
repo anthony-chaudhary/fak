@@ -1,13 +1,60 @@
 package sessionregistry
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+type schemaCollisionMarker interface {
+	error
+	schemaCollision()
+}
+
+func TestReadAllNamesDescriptorStoreSchemaCollision(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session-registry.json")
+	before := []byte("{\n  \"version\": \"fak.session-descriptors.v1\",\n  \"descriptors\": []\n}\n")
+	if err := os.WriteFile(path, before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := (Store{Path: path}).ReadAll()
+	if err == nil {
+		t.Fatal("ReadAll() adopted a descriptor store; want schema-collision refusal")
+	}
+	var collision schemaCollisionMarker
+	if !errors.As(err, &collision) {
+		t.Fatalf("ReadAll() error %T %v, want typed schema collision", err, err)
+	}
+	for _, want := range []string{"session registry schema collision", "fak.session-descriptors.v1", "fak-child-registration/1", "<UserConfigDir>/fak/session-registry.json", "<UserConfigDir>/fak/child-registrations.jsonl"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal message %q missing %q", err, want)
+		}
+	}
+	record, newErr := New(NewInput{RegistrationID: "guard-child", AttemptID: "guard-attempt", LaunchKind: "headless_worker", Runtime: "codex"})
+	if newErr != nil {
+		t.Fatal(newErr)
+	}
+	registerErr := (Store{Path: path}).Register(record)
+	if !errors.As(registerErr, &collision) {
+		t.Fatalf("guard registration error %T %v, want typed schema collision", registerErr, registerErr)
+	}
+	if strings.Contains(registerErr.Error(), "unexpected end of JSON input") {
+		t.Fatalf("guard registration misreported schema collision as truncation: %v", registerErr)
+	}
+	after, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("schema-collision read changed descriptor store\nbefore: %q\n after: %q", before, after)
+	}
+}
 
 func TestIsTerminalCoversEveryState(t *testing.T) {
 	cases := map[State]bool{

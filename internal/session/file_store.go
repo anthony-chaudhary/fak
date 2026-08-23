@@ -27,6 +27,12 @@ const descriptorFileMagic = "fak.session-descriptors."
 
 const descriptorFileVersion = descriptorFileMagic + "v1"
 
+const (
+	childRegistrationSchema       = "fak-child-registration/1"
+	descriptorStoreDefault        = "<UserConfigDir>/fak/session-registry.json"
+	childRegistrationStoreDefault = "<UserConfigDir>/fak/child-registrations.jsonl"
+)
+
 // ledgerSchemaIncompatibleReason is the stable, greppable named reason surfaced
 // when the durable session ledger's schema is incompatible with this build. It
 // is the "refuses with a named reason rather than partially migrating" contract
@@ -57,6 +63,29 @@ func (e *IncompatibleSchemaError) Error() string {
 // quarantine (which would drop live sessions), it must halt the upgrade loudly.
 func IsIncompatibleSchema(err error) bool {
 	var target *IncompatibleSchemaError
+	return errors.As(err, &target)
+}
+
+// SchemaCollisionError reports that the descriptor store was pointed at a
+// child-lineage ledger. It is not corruption: callers must leave the file in
+// place and refuse startup.
+type SchemaCollisionError struct {
+	FoundSchema              string
+	ExpectedSchema           string
+	DescriptorDefault        string
+	ChildRegistrationDefault string
+}
+
+func (e *SchemaCollisionError) Error() string {
+	return fmt.Sprintf("session registry schema collision: the session registry path (FAK_SESSION_REGISTRY/--session-registry) names schema %q, but the descriptor store requires schema %q; defaults are descriptor %s and child-registration %s; refusing without changing the lineage ledger",
+		e.FoundSchema, e.ExpectedSchema, e.DescriptorDefault, e.ChildRegistrationDefault)
+}
+
+func (*SchemaCollisionError) schemaCollision() {}
+
+// IsSchemaCollision reports whether err is a cross-store schema collision.
+func IsSchemaCollision(err error) bool {
+	var target *SchemaCollisionError
 	return errors.As(err, &target)
 }
 
@@ -201,6 +230,12 @@ func (s *FileStore) loadLocked() (map[string]Descriptor, error) {
 	if len(bytes.TrimSpace(b)) == 0 {
 		return map[string]Descriptor{}, nil
 	}
+	if schema := lineageSchema(b); schema != "" {
+		return nil, &SchemaCollisionError{
+			FoundSchema: schema, ExpectedSchema: descriptorFileVersion,
+			DescriptorDefault: descriptorStoreDefault, ChildRegistrationDefault: childRegistrationStoreDefault,
+		}
+	}
 	var doc descriptorFile
 	if err := json.Unmarshal(b, &doc); err != nil {
 		return nil, corruptDescriptorFileError(RecoveryCauseDecode, fmt.Errorf("decode session descriptor file: %w", err))
@@ -223,6 +258,26 @@ func (s *FileStore) loadLocked() (map[string]Descriptor, error) {
 		byID[d.ID] = d
 	}
 	return byID, nil
+}
+
+func lineageSchema(data []byte) string {
+	for _, line := range bytes.Split(data, []byte{'\n'}) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var header struct {
+			Schema string `json:"schema"`
+		}
+		if json.Unmarshal(line, &header) != nil {
+			return ""
+		}
+		if header.Schema == childRegistrationSchema || strings.HasPrefix(header.Schema, "fak-child-registration/") || strings.HasPrefix(header.Schema, "fak.sessionjournal.") {
+			return header.Schema
+		}
+		return ""
+	}
+	return ""
 }
 
 func (s *FileStore) saveLocked(byID map[string]Descriptor) error {

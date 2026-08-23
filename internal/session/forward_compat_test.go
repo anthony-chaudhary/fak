@@ -1,11 +1,67 @@
 package session
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+type schemaCollisionMarker interface {
+	error
+	schemaCollision()
+}
+
+func TestFileStoreRefusesChildRegistrationSchemaWithoutChangingLedger(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "child-registrations.jsonl")
+	before := []byte(`{"schema":"fak-child-registration/1","at":"2026-08-13T12:00:00Z","record":{"schema":"fak-child-registration/1"}}` + "\n")
+	if err := os.WriteFile(path, before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := NewFileStore(path).Put(Descriptor{ID: "serve-must-not-overwrite"})
+	if err == nil {
+		t.Fatal("Put() adopted a child-registration ledger; want schema-collision refusal")
+	}
+	var collision schemaCollisionMarker
+	if !errors.As(err, &collision) {
+		t.Fatalf("Put() error %T %v, want typed schema collision", err, err)
+	}
+	if IsCorruptDescriptorFile(err) {
+		t.Fatalf("schema collision reported as corruption %v; serve would quarantine the lineage ledger", err)
+	}
+	for _, want := range []string{"session registry schema collision", "fak-child-registration/1", "fak.session-descriptors.v1", "<UserConfigDir>/fak/session-registry.json", "<UserConfigDir>/fak/child-registrations.jsonl"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal message %q missing %q", err, want)
+		}
+	}
+	after, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("schema-collision refusal changed lineage ledger\nbefore: %q\n after: %q", before, after)
+	}
+}
+
+func TestFileStoreRefusesUnifiedSessionJournalSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session-journal.jsonl")
+	before := []byte(`{"schema":"fak.sessionjournal.v1","kind":"open","id":"guard-child"}` + "\n")
+	if err := os.WriteFile(path, before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := NewFileStore(path).List()
+	var collision schemaCollisionMarker
+	if !errors.As(err, &collision) || !strings.Contains(err.Error(), "fak.sessionjournal.v1") {
+		t.Fatalf("List() error = %T %v, want unified-lineage SchemaCollisionError", err, err)
+	}
+	if IsCorruptDescriptorFile(err) {
+		t.Fatalf("unified lineage journal reported as corrupt: %v", err)
+	}
+}
 
 // TestForwardCompatIncompatibleSchemaRefusesNotQuarantine is the #3424 contract:
 // the durable session ledger carries a self-describing schema magic+version

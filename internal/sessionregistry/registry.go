@@ -21,6 +21,36 @@ import (
 
 const Schema = "fak-child-registration/1"
 
+const (
+	descriptorStoreSchemaMagic    = "fak.session-descriptors."
+	descriptorStoreSchema         = descriptorStoreSchemaMagic + "v1"
+	descriptorStoreDefault        = "<UserConfigDir>/fak/session-registry.json"
+	childRegistrationStoreDefault = "<UserConfigDir>/fak/child-registrations.jsonl"
+)
+
+// SchemaCollisionError reports that the child-lineage reader was pointed at a
+// descriptor store. The file is valid for the other subsystem and must not be
+// repaired, truncated, or overwritten.
+type SchemaCollisionError struct {
+	FoundSchema              string
+	ExpectedSchema           string
+	DescriptorDefault        string
+	ChildRegistrationDefault string
+}
+
+func (e *SchemaCollisionError) Error() string {
+	return fmt.Sprintf("session registry schema collision: the session registry path (FAK_SESSION_REGISTRY/--session-registry) names schema %q, but the child-registration lineage store requires schema %q; defaults are descriptor %s and child-registration %s; refusing without changing the descriptor store",
+		e.FoundSchema, e.ExpectedSchema, e.DescriptorDefault, e.ChildRegistrationDefault)
+}
+
+func (*SchemaCollisionError) schemaCollision() {}
+
+// IsSchemaCollision reports whether err is a cross-store schema collision.
+func IsSchemaCollision(err error) bool {
+	var target *SchemaCollisionError
+	return errors.As(err, &target)
+}
+
 type State string
 
 const (
@@ -528,6 +558,12 @@ func (s Store) readAllUnlocked() ([]Record, error) {
 	if err != nil {
 		return nil, err
 	}
+	if schema := descriptorSchema(data); schema != "" {
+		return nil, &SchemaCollisionError{
+			FoundSchema: schema, ExpectedSchema: Schema,
+			DescriptorDefault: descriptorStoreDefault, ChildRegistrationDefault: childRegistrationStoreDefault,
+		}
+	}
 	latest := map[string]Record{}
 	lines := bytes.Split(data, []byte{'\n'})
 	terminated := len(data) == 0 || data[len(data)-1] == '\n'
@@ -560,6 +596,16 @@ func (s Store) readAllUnlocked() ([]Record, error) {
 		return out[i].CreatedAt.Before(out[j].CreatedAt)
 	})
 	return out, nil
+}
+
+func descriptorSchema(data []byte) string {
+	var header struct {
+		Version string `json:"version"`
+	}
+	if json.Unmarshal(data, &header) != nil || !strings.HasPrefix(header.Version, descriptorStoreSchemaMagic) {
+		return ""
+	}
+	return header.Version
 }
 
 func (s Store) withLock(fn func() error) error {
