@@ -96,7 +96,7 @@ func assertCodeSearchArm(tb testing.TB, name string, search func(string) string)
 func TestCodeSearchExternalCommandArms(t *testing.T) {
 	dir := materializeCodeSearchFixture(t)
 	if _, err := exec.LookPath("rg"); err != nil {
-		t.Fatal("ripgrep unavailable")
+		t.Skip("ripgrep unavailable")
 	}
 	assertCodeSearchArm(t, "ripgrep", func(query string) string {
 		out := runCodeSearchCommand(t, dir, "rg", "--fixed-strings", "--line-number", "--with-filename", "--sort", "path", query, ".")

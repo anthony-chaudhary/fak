@@ -70,6 +70,7 @@ type wiringRow struct {
 // regression. A "" Field marks a seam wired through a session.Table observer, not Config;
 // the serve.go-sets check is skipped for those (tracked by Flag presence instead).
 var servewiringData = []wiringRow{
+	{"reloadcanary", "--policy-canary-turns", "PolicyCanaryTurns", verdictOffByDefault, "internal/gateway/policy_canary.go:7", "after a reload, rolls back on the configured consecutive deny-all streak; zero disables the canary"},
 	{"otlp", "--otlp-traces-endpoint", "OTLPEndpoint", verdictOffByDefault, "internal/gateway/gateway.go:2081", "enables bounded asynchronous OTLP/HTTP JSON trace export; empty disables it"},
 	{"orgaudit", "(organization audit config)", "OrgAudit", verdictOffByDefault, "internal/gateway/gateway.go:2085", "enables enrolled privacy-screened adjudication receipts; zero config disables it"},
 	{"trajctlmetrics", "(trajectory metrics observer)", "TrajctlMetrics", verdictOffByDefault, "internal/gateway/metrics.go", "projects bounded objective health onto /metrics when configured"},

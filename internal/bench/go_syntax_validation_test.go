@@ -8,7 +8,7 @@ import (
 
 func TestGoSyntaxValidationComparisonWitness(t *testing.T) {
 	result := codelint.CompareGoSyntaxLocal()
-	if len(result.Arms) != 8 {
+	if len(result.Arms) != 8 { //boundarylint:ignore CHANGE_DETECTOR_TEST eight is the fixed comparison-arm contract documented by this witness.
 		t.Fatalf("arms=%d, want 8", len(result.Arms))
 	}
 	for i, arm := range result.Arms {
