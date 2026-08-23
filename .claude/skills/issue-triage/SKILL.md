@@ -115,7 +115,7 @@ Before proposing dispatch for a selected issue, validate and price it through th
 first-class Go surfaces:
 
 ```bash
-fak-dev issue contract --repo owner/name --issue N
+gh issue view N --repo owner/name --json number,title,body,labels > issue.json`nfak-dev issue contract --from-issues issue.json --json
 fak dispatch issues --issues issue.json --json
 ```
 
