@@ -1192,7 +1192,7 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	if signal == adjudicationOutcomeDenyAll {
 		denyFP = denyAllFingerprint(adjs)
 	}
-	s.metrics.recordAdjudicationOutcome(signal, denyFP)
+	s.recordAdjudicationOutcome(signal, denyFP)
 
 	blocks := agent.AnthropicResponseBlocks(asst)
 	stop := agent.AnthropicStopReason(comp.FinishReason, len(kept) > 0)

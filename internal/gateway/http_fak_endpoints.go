@@ -354,6 +354,10 @@ func (s *Server) handleFakPolicyReload(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "policy reload is not configured")
 		return
 	}
+	if s.policyCanaryRolledBack.Swap(false) {
+		writeJSON(w, http.StatusOK, PolicyReloadResponse{RolledBack: true})
+		return
+	}
 	resp, err := s.reloadPolicy(r.Context())
 	if err != nil {
 		s.logf("gateway: policy reload failed: %v", err)
@@ -363,6 +367,7 @@ func (s *Server) handleFakPolicyReload(w http.ResponseWriter, r *http.Request) {
 	// Count the swap BEFORE answering so a GET /v1/fak/policy that races this
 	// response cannot observe the new floor with the old (pre-swap) count (#3960).
 	s.policyReloads.Add(1)
+	s.armPolicyCanary(resp.Rollback)
 	if resp.Source != "" {
 		s.logf("gateway: reloaded capability floor from %s", resp.Source)
 	} else {

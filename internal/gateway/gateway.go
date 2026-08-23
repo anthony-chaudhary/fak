@@ -490,6 +490,9 @@ type Config struct {
 	// ReloadPolicy reloads the process policy floor in-place. Nil disables the
 	// /v1/fak/policy/reload route.
 	ReloadPolicy PolicyReloadFunc
+	// PolicyCanaryTurns arms a default-off post-reload window. A deny-all streak
+	// spanning the configured number of served turns rolls the floor back.
+	PolicyCanaryTurns int
 	// ObservePolicy reports which capability floor governs this process RIGHT NOW —
 	// source + effective (post-overlay) digest — WITHOUT reloading anything (#3960).
 	// It is the read-only complement of ReloadPolicy, mirroring ObserveTrace/ResetTrace:
@@ -873,6 +876,8 @@ type PolicyReloadResponse struct {
 	Source          string `json:"source,omitempty"`
 	Summary         string `json:"summary,omitempty"`
 	EffectiveDigest string `json:"effective_digest,omitempty"`
+	RolledBack      bool   `json:"rolled_back,omitempty"`
+	Rollback        func() `json:"-"`
 }
 
 // PolicyObserveFunc is injected by the host CLI so the gateway can ATTEST the
@@ -1304,25 +1309,31 @@ type Server struct {
 	// it; identical schemas dedupe across turns/sessions by content hash. Its
 	// ResidentBytes/DedupHits back the tool_schema_resident_bytes and
 	// tool_page_dedup_hits_total /metrics rows. Built in New; nil-safe for a bare Server.
-	toolPages      *ctxmmu.ToolPageTable
-	servedFailure  servedFailure // recent served-turn panic behind /healthz honesty (#2336); see served_failure.go
-	traceSeq       uint64        // mints a non-empty TraceID when the wire omits one (atomic)
-	reloadPolicy   PolicyReloadFunc
-	observePolicy  PolicyObserveFunc
-	resetTrace     TraceResetFunc
-	observeTrace   TraceObserveFunc
-	observeSession SessionObserveFunc
-	controlSession SessionControlFunc
-	steerSession   SteerSessionFunc
-	listSessions   SessionListFunc
-	trajctlMetrics TrajctlMetricsFunc
-	decideSession  SessionDecideFunc
-	stopGate       StopGateFunc
-	debitSession   SessionDebitFunc
-	resetOnBudget  ResetOnBudgetFunc
-	budgetDrained  BudgetExhaustedFunc
-	defaultTraceMu sync.RWMutex
-	defaultTraceID string
+	toolPages               *ctxmmu.ToolPageTable
+	servedFailure           servedFailure // recent served-turn panic behind /healthz honesty (#2336); see served_failure.go
+	traceSeq                uint64        // mints a non-empty TraceID when the wire omits one (atomic)
+	reloadPolicy            PolicyReloadFunc
+	policyCanaryTurns       int
+	policyCanaryMu          sync.Mutex
+	policyCanaryRemaining   int
+	policyCanaryConsecutive int
+	policyCanaryRollback    func()
+	policyCanaryRolledBack  atomic.Bool
+	observePolicy           PolicyObserveFunc
+	resetTrace              TraceResetFunc
+	observeTrace            TraceObserveFunc
+	observeSession          SessionObserveFunc
+	controlSession          SessionControlFunc
+	steerSession            SteerSessionFunc
+	listSessions            SessionListFunc
+	trajctlMetrics          TrajctlMetricsFunc
+	decideSession           SessionDecideFunc
+	stopGate                StopGateFunc
+	debitSession            SessionDebitFunc
+	resetOnBudget           ResetOnBudgetFunc
+	budgetDrained           BudgetExhaustedFunc
+	defaultTraceMu          sync.RWMutex
+	defaultTraceID          string
 
 	// warmup is the #3051 boot warmup-inference readiness gate behind /healthz:
 	// when the host arms it, /healthz reports ok:false (warmup_pending) until a
@@ -2105,6 +2116,7 @@ func New(cfg Config) (*Server, error) {
 		logf:                         logf,
 		debugStatsf:                  cfg.DebugStatsf,
 		reloadPolicy:                 cfg.ReloadPolicy,
+		policyCanaryTurns:            cfg.PolicyCanaryTurns,
 		observePolicy:                cfg.ObservePolicy,
 		resetTrace:                   cfg.ResetTrace,
 		observeTrace:                 cfg.ObserveTrace,

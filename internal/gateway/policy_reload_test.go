@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -35,6 +36,88 @@ func TestPolicyReloadRouteInvokesConfiguredReloader(t *testing.T) {
 	if calls != 1 || !resp.Reloaded || resp.Source != "floor.json" || resp.EffectiveDigest != "sha256:effective" {
 		t.Fatalf("calls=%d response=%+v, want one reload with source", calls, resp)
 	}
+}
+
+func TestPolicyReloadCanaryRollsBackDenyAllWindow(t *testing.T) {
+	var logs strings.Builder
+	rolledBack := 0
+	srv := newTestServer(t)
+	srv.policyCanaryTurns = 2
+	srv.logf = func(format string, args ...any) { fmt.Fprintf(&logs, format, args...) }
+	srv.reloadPolicy = func(context.Context) (PolicyReloadResponse, error) {
+		return PolicyReloadResponse{Reloaded: true, Rollback: func() { rolledBack++ }}, nil
+	}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	postPolicyReload(t, ts.URL)
+	srv.recordAdjudicationOutcome(adjudicationOutcomeDenyAll, "a")
+	srv.recordAdjudicationOutcome(adjudicationOutcomeDenyAll, "b")
+	if rolledBack != 1 || srv.metrics.policyCanaryRollbacks.Load() != 1 {
+		t.Fatalf("rollback=%d metric=%d, want one", rolledBack, srv.metrics.policyCanaryRollbacks.Load())
+	}
+	if !strings.Contains(logs.String(), "POLICY CANARY ROLLBACK") {
+		t.Fatalf("log %q does not report rollback", logs.String())
+	}
+
+	resp := postPolicyReload(t, ts.URL)
+	if !resp.RolledBack || resp.Reloaded {
+		t.Fatalf("notification response=%+v, want rolled_back only", resp)
+	}
+}
+
+func TestPolicyReloadCanaryExpiresWithoutRollback(t *testing.T) {
+	rolledBack := 0
+	srv := newTestServer(t)
+	srv.policyCanaryTurns = 2
+	srv.reloadPolicy = func(context.Context) (PolicyReloadResponse, error) {
+		return PolicyReloadResponse{Reloaded: true, Rollback: func() { rolledBack++ }}, nil
+	}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	postPolicyReload(t, ts.URL)
+	srv.recordAdjudicationOutcome(adjudicationOutcomeDenyAll, "a")
+	srv.recordAdjudicationOutcome(adjudicationOutcomeReset, "")
+	srv.recordAdjudicationOutcome(adjudicationOutcomeDenyAll, "b")
+	if rolledBack != 0 || srv.metrics.policyCanaryRollbacks.Load() != 0 {
+		t.Fatalf("rollback=%d metric=%d, want zero after expiry", rolledBack, srv.metrics.policyCanaryRollbacks.Load())
+	}
+}
+
+func TestPolicyReloadCanaryDefaultsOff(t *testing.T) {
+	rolledBack := 0
+	srv := newTestServer(t)
+	srv.reloadPolicy = func(context.Context) (PolicyReloadResponse, error) {
+		return PolicyReloadResponse{Reloaded: true, Rollback: func() { rolledBack++ }}, nil
+	}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	postPolicyReload(t, ts.URL)
+	for range 3 {
+		srv.recordAdjudicationOutcome(adjudicationOutcomeDenyAll, "a")
+	}
+	if rolledBack != 0 {
+		t.Fatalf("default-off canary rolled back %d times", rolledBack)
+	}
+}
+
+func postPolicyReload(t *testing.T, baseURL string) PolicyReloadResponse {
+	t.Helper()
+	r, err := http.Post(baseURL+"/v1/fak/policy/reload", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("reload status = %d, want 200", r.StatusCode)
+	}
+	var resp PolicyReloadResponse
+	if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return resp
 }
 
 func TestPolicyReloadRouteDisabledWithoutCallback(t *testing.T) {

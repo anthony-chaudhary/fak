@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -424,6 +425,7 @@ type gatewayMetrics struct {
 	// locks above — a one-fold-per-served-turn path with no coupling to the cache families.
 	denyAllMu               sync.Mutex
 	denyAllStops            uint64 // cumulative deny-all turns this session
+	policyCanaryRollbacks   atomic.Uint64
 	denyAllConsecutive      uint64 // consecutive deny-all turns ending the most recent served turn (reset by any non-deny-all turn)
 	denyAllSameConsecutive  uint64 // consecutive deny-all turns proposing the IDENTICAL refused action (same tool+reason); re-seeded to 1 whenever the fingerprint changes, reset to 0 by any non-deny-all turn. The same-issue signal the guard Stop hook keys its give-up on — a varied session pins this at 1 and is never stopped.
 	denyAllFingerprint      string // the fingerprint (denyAllFingerprint) of the most recent deny-all turn; the equality test that advances vs re-seeds denyAllSameConsecutive

@@ -125,6 +125,7 @@ type serveFlags struct {
 	backendName                  *string
 	cudaGraph                    *bool
 	policyPath                   *string
+	policyCanaryTurns            *int
 	policyCheck                  *bool
 	sizingJSON                   *bool
 	expose                       repeatedStringFlag
@@ -572,6 +573,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 		Invalidation:                 *sf.invalidation,
 		Version:                      appversion.Current(),
 		ReloadPolicy:                 policyReloader(*sf.policyPath),
+		PolicyCanaryTurns:            *sf.policyCanaryTurns,
 		ResetTrace:                   resetTrace,
 		ObserveTrace:                 observeTrace,
 		ObserveSession:               observeSession,

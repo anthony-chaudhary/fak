@@ -29,6 +29,9 @@ func (m *gatewayMetrics) writeDenyAllMetrics(b *strings.Builder) {
 	writeCounter(b, "fak_guard_deny_all_stops_total",
 		"Served turns whose EVERY proposed tool call the capability floor refused, forcing the wire to report end_turn (a stop the agent did not choose; the v0.15.0 contract that keeps the client from hanging on a dropped tool_use block). The guard --deny-all-continue Stop-hook reads the consecutive gauge below to auto-continue the agent past these.",
 		int64(stops))
+	writeCounter(b, "fak_gateway_policy_canary_rollbacks_total",
+		"Capability-floor reloads automatically rolled back after a deny-all anomaly.",
+		int64(m.policyCanaryRollbacks.Load()))
 	writeHelpType(b, "fak_guard_deny_all_consecutive",
 		"Consecutive deny-all turns ending the most recent served turn (reset to 0 by any turn with a surviving or no tool call). Blind to WHICH call was refused — kept for observability; the guard Stop hook now keys its give-up on the same-issue gauge below instead.",
 		"gauge")

@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/bench"
 	"github.com/anthony-chaudhary/fak/internal/benchcli"
@@ -1282,6 +1283,14 @@ func reloadPolicy(path string) (policy.Runtime, string, error) {
 	return loadAndApplyPolicyLocked(path, true)
 }
 
+func reloadPolicyWithPrior(path string) (policy.Runtime, adjudicator.Policy, string, error) {
+	policyReloadMu.Lock()
+	defer policyReloadMu.Unlock()
+	prior := adjudicator.Default.PolicySnapshot()
+	rt, warning, err := loadAndApplyPolicyLocked(path, true)
+	return rt, prior, warning, err
+}
+
 func loadAndApplyPolicyLocked(path string, enforceWideningGate bool) (policy.Runtime, string, error) {
 	if path == "" {
 		return policy.Runtime{}, "", errors.New("policy reload requires --policy FILE")
@@ -1342,7 +1351,7 @@ func policyReloader(path string) gateway.PolicyReloadFunc {
 		return nil
 	}
 	return func(context.Context) (gateway.PolicyReloadResponse, error) {
-		rt, overlayWarning, err := reloadPolicy(path)
+		rt, prior, overlayWarning, err := reloadPolicyWithPrior(path)
 		if err != nil {
 			return gateway.PolicyReloadResponse{}, err
 		}
@@ -1355,7 +1364,12 @@ func policyReloader(path string) gateway.PolicyReloadFunc {
 		if readErr != nil {
 			return gateway.PolicyReloadResponse{}, readErr
 		}
-		return gateway.PolicyReloadResponse{Reloaded: true, Source: path, Summary: summary, EffectiveDigest: effectiveDigestWithLaunchGrant(policyBytes)}, nil
+		rollback := func() {
+			policyReloadMu.Lock()
+			defer policyReloadMu.Unlock()
+			adjudicator.Default.SetPolicy(prior)
+		}
+		return gateway.PolicyReloadResponse{Reloaded: true, Source: path, Summary: summary, EffectiveDigest: effectiveDigestWithLaunchGrant(policyBytes), Rollback: rollback}, nil
 	}
 }
 

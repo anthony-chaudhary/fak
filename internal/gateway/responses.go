@@ -387,7 +387,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	if signal == adjudicationOutcomeDenyAll {
 		denyFP = denyAllFingerprint(turnAdjs)
 	}
-	s.metrics.recordAdjudicationOutcome(signal, denyFP)
+	s.recordAdjudicationOutcome(signal, denyFP)
 
 	asst.ToolCalls = kept
 	// #3567 output-side shadow: classify the MODEL's own outbound prose (sampled,

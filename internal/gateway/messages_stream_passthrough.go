@@ -362,7 +362,7 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 		if signal == adjudicationOutcomeDenyAll {
 			denyFP = denyAllFingerprint(p.adjs)
 		}
-		p.s.metrics.recordAdjudicationOutcome(signal, denyFP)
+		p.s.recordAdjudicationOutcome(signal, denyFP)
 		p.complTok, p.finishReason = relayMessageDelta(p.send, ev.Data, p.complTok, len(p.toolOrder) > 0, p.keptTools)
 
 	case "message_stop":
