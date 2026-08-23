@@ -378,6 +378,7 @@ concurrent = [
   "sessionintent",
   "serverproduct",
   "serveradapter",
+  "serverlifecycle",
   "harnessmodelset", "harnessserver",
   "modelinventory",
   "modelsetresolve",
@@ -1134,6 +1135,7 @@ projectassets = ["internal/projectassets/**"]
 sessionintent = ["internal/sessionintent/**"]
 serverproduct = ["internal/serverproduct/**"]
 serveradapter = ["internal/serveradapter/**"]
+serverlifecycle = ["internal/serverlifecycle/**"] # cmd/fak adapter remains on the shared cmd lane.
 harnessmodelset = ["internal/harnessmodelset/**"]
 harnessserver = ["internal/harnessserver/**"]
 modelinventory = ["internal/modelinventory/**"]
