@@ -341,7 +341,7 @@ func validateCampaignBinding(report qwen38quant.Report, raw []byte, corpus qwen3
 	}
 	trials := make([]qwen38quant.Trial, 0, len(archive.Results))
 	for _, result := range archive.Results {
-		trials = append(trials, qwen38quant.Trial{Workload: result.Workload, Repetition: result.Repeat, Quality: result.Quality, LatencyMS: result.LatencyMS, Failure: result.Failure})
+		trials = append(trials, qwen38quant.Trial{Workload: result.Workload, Repetition: result.Repeat, Quality: result.Quality, LatencyMS: result.LatencyMS, Failure: result.Failure, CompletionTokens: result.Usage["completion_tokens"]})
 	}
 	if !reflect.DeepEqual(trials, report.Trials) {
 		return errors.New("campaign results do not bind report trials")

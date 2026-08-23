@@ -1,6 +1,7 @@
 package qwen38quantrun
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -100,7 +101,7 @@ func TestRunOracleRefusesRevisionDrift(t *testing.T) {
 }
 
 func TestOracleHelperProcess(t *testing.T) {
-	if len(os.Args) < 3 || os.Args[len(os.Args)-3] != "--oracle-helper" {
+	if len(os.Args) < 3 || os.Args[len(os.Args)-3] != "--" {
 		return
 	}
 	mode, path := os.Args[len(os.Args)-2], os.Args[len(os.Args)-1]
@@ -142,9 +143,9 @@ func writeOracleRuntimeFixture(t *testing.T, dir, name string, corpus qwen38quan
 	var trials []qwen38quant.Trial
 	for _, fixture := range corpus.Fixtures {
 		for repetition := 1; repetition <= corpus.MinimumRepetitions; repetition++ {
-			result := Result{FixtureID: fixture.ID, Workload: fixture.Workload, Repeat: repetition, LatencyMS: float64(repetition), Quality: "PASS", Output: fixture.ExpectedExact}
+			result := Result{FixtureID: fixture.ID, Workload: fixture.Workload, Repeat: repetition, LatencyMS: float64(repetition), Quality: "PASS", Output: fixture.ExpectedExact, Usage: map[string]int{"completion_tokens": 1}}
 			results = append(results, result)
-			trials = append(trials, qwen38quant.Trial{Workload: fixture.Workload, Repetition: repetition, Quality: "PASS", LatencyMS: float64(repetition)})
+			trials = append(trials, qwen38quant.Trial{Workload: fixture.Workload, Repetition: repetition, Quality: "PASS", LatencyMS: float64(repetition), CompletionTokens: 1})
 		}
 	}
 	archive := Archive{Schema: "fak.qwen38-quant-raw/1", CorpusID: corpus.ID, Arm: "q4_k_m", Before: observation, After: observation, Results: results, RestartReady: true, CleanupOK: true}
@@ -152,7 +153,7 @@ func writeOracleRuntimeFixture(t *testing.T, dir, name string, corpus qwen38quan
 	if err != nil {
 		t.Fatal(err)
 	}
-	archiveSum := sha256.Sum256(archiveRaw)
+	archiveSum := sha256.Sum256(bytes.TrimSpace(archiveRaw))
 	report := qwen38quant.Report{
 		Schema: qwen38quant.Schema, CorpusID: corpus.ID, CorpusSHA256: qwen38quant.CorpusDigest(corpus), Arm: "q4_k_m", Identity: identity,
 		Environment: qwen38quant.Environment{Command: command, Hardware: observation.Hardware, Software: observation.Software, ContextTokens: observation.ContextTokens, CacheMode: observation.CacheMode, RequireDevice: "CUDA", DenyFallback: true},
@@ -197,7 +198,7 @@ func validOracleConfig(ref, candidate oracleFixturePaths) OracleConfig {
 }
 
 func oracleHelperCommand(mode, path string) []string {
-	return []string{os.Args[0], "-test.run=^TestOracleHelperProcess$", "--oracle-helper", mode, path}
+	return []string{os.Args[0], "-test.run=^TestOracleHelperProcess$", "--", mode, path}
 }
 
 func readJSONTest(t *testing.T, path string, dst any) {

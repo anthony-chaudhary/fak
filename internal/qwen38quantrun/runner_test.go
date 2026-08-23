@@ -30,10 +30,7 @@ func TestRunnerPinsNoThinkingProfile(t *testing.T) {
 	defer s.Close()
 
 	c := qwen38quant.DefaultCorpus()
-	c.Fixtures = c.Fixtures[:1]
-	c.Workloads = c.Workloads[:1]
-	c.MinimumRepetitions = 1
-	if _, err := (Runner{}).Run(context.Background(), Config{Endpoint: s.URL, Model: "exact", Repetitions: 1}, c); err != nil {
+	if _, err := (Runner{}).Run(context.Background(), Config{Endpoint: s.URL, APIKey: "test", Model: "exact"}, c); err != nil {
 		t.Fatal(err)
 	}
 	kwargs, ok := captured["chat_template_kwargs"].(map[string]any)
