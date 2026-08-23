@@ -76,8 +76,42 @@ Read the markdown first, then query the JSONL only for drill-down:
    deterministic without inventing cross-vendor prices.
 4. Check tool errors, repeated failures, mutation churn, and hook p95 on the
    session rows.
-5. If `--baseline` was supplied, surface only the delta rows that are comparable
+5. Audit the signal-bearing sessions against the source transcript. Rank by the
+   signal being explained, then inspect at least the top three sessions (or all
+   sessions when fewer than three carry it). Keep transcript content private:
+   record the session ID, aggregate signal counts, tool names, normalized error
+   class, and mutated target only. Do not copy prompts, arguments, outputs, or
+   machine-private absolute paths into reports or issues.
+6. Classify each witnessed pattern before recommending work:
+   - **skill-solvable**: the relevant skill omits a repeatable action that would
+     have prevented the failure or churn. Update that canonical skill and add a
+     checkable example or assertion in the same change.
+   - **tool-solvable**: correct skill use still encounters an avoidable tool or
+     telemetry limitation. File or reconcile one deduplicated issue with the
+     aggregate witness and done condition.
+   - **task-inherent / efficient reuse**: retries, edits, or cache reads are
+     justified by the task and next-best alternative. Record no action; a high
+     count alone is not debt.
+   - **insufficient evidence**: the aggregate points at a session but transcript
+     evidence cannot establish cause. File only a bounded instrumentation issue,
+     never a speculative guidance change.
+7. If `--baseline` was supplied, surface only the delta rows that are comparable
    regressions.
+
+For repeated failures, group normalized error classes across the sampled
+sessions. A one-off malformed command is not skill debt. Repeated timeout polls,
+invalid invocation shapes, or the same failed recovery sequence become skill
+candidates only when the owning skill can name a concrete replacement action.
+For mutation churn, distinguish intentional iterative refinement from avoidable
+re-touching: check whether the same target was changed repeatedly because the
+skill skipped read-before-write, a witness-first repro, or a single coherent
+edit. Never infer cause from `mutation_churn` alone.
+
+When the request includes remediation, this audit is the evidence-gathering
+phase rather than the stopping point. Apply proven skill-solvable fixes; dedupe
+remaining work against open and closed GitHub issues; create issues only for
+unresolved, witnessed defects. Put operational artifacts under allocated
+scratch or the repository's declared witness path, not loose in the repo root.
 
 Do not infer that a missing root means zero activity; the coverage row records
 `root_present: false`. Do not sum a vendor price across harnesses: this spine is
@@ -99,5 +133,6 @@ in `internal/trajectory/PYTHON_PARITY.md`.
 - A short operator summary naming the exact totals, rank-1 bottleneck, any
   comparable regression, and the artifact paths.
 
-This skill audits existing transcripts and writes only the requested report
-artifacts. It does not edit code, plans, or memory.
+For a report-only request, write only the requested artifacts. For an explicit
+remediation request, the output also includes canonical skill edits and
+reconciled issue URLs, each tied to privacy-safe aggregate evidence.
