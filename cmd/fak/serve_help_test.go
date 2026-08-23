@@ -83,3 +83,21 @@ func TestServeHelpTopicForms(t *testing.T) {
 		}
 	}
 }
+
+func TestServePolicyCanaryFlagDefaultsOffAndParses(t *testing.T) {
+	fs, sf := newServeFlagSet()
+	if sf.policyCanaryTurns == nil || *sf.policyCanaryTurns != 0 {
+		t.Fatalf("policy canary default = %v, want initialized zero", sf.policyCanaryTurns)
+	}
+	if err := fs.Parse([]string{"--policy-canary-turns", "3"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := *sf.policyCanaryTurns; got != 3 {
+		t.Fatalf("policy canary turns = %d, want 3", got)
+	}
+	var out bytes.Buffer
+	printServeHelp(&out, fs, "policy")
+	if !strings.Contains(out.String(), "--policy-canary-turns") {
+		t.Fatalf("policy help omits canary flag:\n%s", out.String())
+	}
+}
