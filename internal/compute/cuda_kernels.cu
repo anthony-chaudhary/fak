@@ -645,6 +645,9 @@ __global__ void k_qwen35_gdn_out_proj(
     const void *w, const float *scale, int q8,
     const float *x, float *out, int hidden, int valueDim) {
   int row = blockIdx.x;
+  int token = blockIdx.y;
+  x += (size_t)token * valueDim;
+  out += (size_t)token * hidden;
   float sum = 0.0f;
   size_t base = (size_t)row * valueDim;
   if (q8) {
@@ -846,12 +849,8 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
       dRecurrentState, dCore, tokens, convDim, nK, nV, kHd, vHd, rmsEps);
   status = qwen35_gdn_launch_status(5);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
-  for (int token = 0; token < tokens; ++token) {
-    k_qwen35_gdn_out_proj<<<hidden, 256, 0, g_stream>>>(
-        dOutW, dOutWScale, outWQ8,
-        dCore + (size_t)token * nV * vHd,
-        dOut + (size_t)token * hidden, hidden, nV * vHd);
-  }
+  k_qwen35_gdn_out_proj<<<dim3(hidden, tokens), 256, 0, g_stream>>>(
+      dOutW, dOutWScale, outWQ8, dCore, dOut, hidden, nV * vHd);
   status = qwen35_gdn_launch_status(6);
   if (status != 0) return qwen35_gdn_drain_after_error(status);  cudaError_t sync = cudaStreamSynchronize(g_stream);
   if (sync != cudaSuccess) return 70000 + (int) sync;
