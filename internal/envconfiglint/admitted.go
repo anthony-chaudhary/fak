@@ -219,8 +219,6 @@ var admittedPostFreeze = []string{
 	"FAK_TOOLCALL_CONTROL_MODE",
 	// FAK_CLAUDE_SPEED selects the declared dispatch speed profile.
 	"FAK_CLAUDE_SPEED",
-	// GEMINI_CLI_SYSTEM_SETTINGS_PATH is a host-tool settings discovery path.
-	"GEMINI_CLI_SYSTEM_SETTINGS_PATH",
 	// FAK_WORK_EFFECT_CALIBRATION_JSON and FAK_EP_COORDINATED_DECODE are explicit
 	// experimental runtime overrides pending typed gateway/serve config in #2862.
 	"FAK_WORK_EFFECT_CALIBRATION_JSON",
