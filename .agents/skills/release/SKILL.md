@@ -1,6 +1,6 @@
 ---
 name: release
-description: Perform a full versioned release — bump version, draft release notes, commit, tag, push, and create the GitHub release page. Reads `.claude/project.yaml` for the project's release-context and version-bump helpers; the skill text is universal, the helpers are project-supplied. Use when the user says "cut a release", "ship vX.Y.Z", "release", or after a shippable phase.
+description: Perform a full versioned release — bump version, draft release notes, commit, tag, push, and create the GitHub release page. Reads `.claude/project.yaml` for the project's release-context and version-bump helpers;...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/release/SKILL.md

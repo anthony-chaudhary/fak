@@ -1,6 +1,6 @@
 ---
 name: clean-skill
-description: Audit a Claude Code skill's per-invocation context use, then propose a context-bundling helper + SKILL.md edits to cut waste. Reads a representative session JSONL, ranks the largest tool results, traces them back to SKILL.md instructions, and proposes a fix. Stops after the proposal — the operator approves before code is written. Use when a skill feels slow, expensive, or "burns context" — typical signal is a SKILL.md over ~300 lines that reads multiple files >5 KB on every run.
+description: Audit a Claude Code skill's per-invocation context use, then propose a context-bundling helper + SKILL.md edits to cut waste. Reads a representative session JSONL, ranks the largest tool results, traces them back to...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/clean-skill/SKILL.md

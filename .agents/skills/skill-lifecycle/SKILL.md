@@ -1,6 +1,6 @@
 ---
 name: skill-lifecycle
-description: Witnessed lifecycle for the project skill pack — usage-telemetry sidecar, value/idle-driven auto-archive (never delete, restorable), pin-exemption, journaled reversible transitions. Use to record skill usage, review archive verdicts, archive or restore a skill, or pin one exempt. Max action is archive; nothing is ever deleted.
+description: Witnessed lifecycle for the project skill pack — usage-telemetry sidecar, value/idle-driven auto-archive (never delete, restorable), pin-exemption, journaled reversible transitions. Use to record skill usage, review...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/skill-lifecycle/SKILL.md

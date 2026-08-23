@@ -249,3 +249,26 @@ func TestAdapterDescriptionHonorsAgentSkillsLimit(t *testing.T) {
 		t.Fatalf("short description = %q, want %q", got, short)
 	}
 }
+
+func TestCodexAdapterDescriptionsCutResidentFloorByThree(t *testing.T) {
+	const baselineChars = 43861
+	root := filepath.Clean(filepath.Join("..", ".."))
+	files, err := skillFiles(root, filepath.ToSlash(filepath.Join(".agents", "skills")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var total int
+	for _, path := range files {
+		description, err := skillDescription(root, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if description == "" {
+			t.Fatalf("%s has an empty description", path)
+		}
+		total += len([]rune(description))
+	}
+	if total*3 > baselineChars {
+		t.Fatalf("adapter descriptions total %d characters, want at most one third of baseline %d", total, baselineChars)
+	}
+}

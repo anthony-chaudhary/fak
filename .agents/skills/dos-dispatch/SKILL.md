@@ -1,6 +1,6 @@
 ---
 name: dos-dispatch
-description: "Plan and ship the next batch on one lane: run `dos-next-up`, acquire a lease with `dos arbitrate`, gate empty work, dispatch the packet, and archive the run. Use when a single lane should move end to end with collision safety."
+description: "Plan and ship the next batch on one lane: run `dos-next-up`, acquire a lease with `dos arbitrate`, gate empty work, dispatch the packet, and archive the run. Use when a single lane should move end to end with...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/dos-dispatch/SKILL.md

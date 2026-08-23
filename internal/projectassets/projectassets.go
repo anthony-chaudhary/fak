@@ -12,7 +12,7 @@ import (
 
 const (
 	ManifestPath             = ".claude/project-assets.json"
-	maxSkillDescriptionChars = 1024
+	maxSkillDescriptionChars = 220
 )
 
 type Exclusion struct {
@@ -172,8 +172,8 @@ func adapterDescription(description string) string {
 		return string(runes)
 	}
 
-	// Agent Skills caps discovery descriptions at 1024 characters. Keep the
-	// canonical trigger intact while generating a host-compatible projection.
+	// Keep the discovery synopsis resident and page the canonical workflow on selection.
+	// Preserve its leading trigger instead of inventing a second summary.
 	const suffix = "..."
 	limit := maxSkillDescriptionChars - len([]rune(suffix))
 	cut := strings.TrimSpace(string(runes[:limit]))
