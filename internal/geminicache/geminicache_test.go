@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -101,8 +102,15 @@ func TestCachedContentLifecycleCopiesPinnedProviderContract(t *testing.T) {
 	if _, err := Reference(RouteGenerateContent, id, deleted, prefix, now); err == nil {
 		t.Fatal("deleted object remained reusable")
 	}
-	if len(calls) != 5 {
-		t.Fatalf("provider calls=%v", calls)
+	wantCalls := []string{
+		http.MethodPost + " /v1beta/cachedContents",
+		http.MethodGet + " /v1beta/cachedContents/cache-a",
+		http.MethodPatch + " /v1beta/cachedContents/cache-a",
+		http.MethodGet + " /v1beta/cachedContents?pageSize=10&pageToken=next-a",
+		http.MethodDelete + " /v1beta/cachedContents/cache-a",
+	}
+	if !slices.Equal(calls, wantCalls) {
+		t.Fatalf("provider calls=%v want=%v", calls, wantCalls)
 	}
 }
 
