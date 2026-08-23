@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -37,6 +38,61 @@ func TestGuardRestartAuditSurfacesCrashGiveUpReason(t *testing.T) {
 		t.Fatalf("restart audit output %q does not surface typed give-up reason", out.String())
 	}
 }
+
+func TestGuardRestartAuditRotatedSegmentsMatchUnrotated(t *testing.T) {
+	writeJournal := func(t *testing.T, rotate bool) string {
+		t.Helper()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "audit.jsonl")
+		j, err := journal.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		j.AppendRestartHop("claude", "guard-before", journal.RestartHop{
+			Hop: 1, FromTrace: "trace-1", ToTrace: "trace-2", Child: "trace-2",
+			Handback: guardRestartHandbackContinue, Status: journal.RestartHopOK,
+		})
+		guardRecordCrashRestartGiveUp(j, "claude", "guard-before")
+		if rotate {
+			if _, err := j.Cut(); err != nil {
+				_ = j.Close()
+				t.Fatalf("cut restart-audit fixture: %v", err)
+			}
+		}
+		j.AppendRestartHop("claude", "guard-after", journal.RestartHop{
+			Hop: 2, FromTrace: "trace-2", ToTrace: "trace-3", Child: "trace-3",
+			Handback: guardRestartHandbackContinue, Status: journal.RestartHopOK,
+		})
+		guardRecordCrashRestartGiveUp(j, "claude", "guard-after")
+		if err := j.Close(); err != nil {
+			t.Fatalf("close restart-audit fixture: %v", err)
+		}
+		return dir
+	}
+
+	type totals struct {
+		journals int
+		hops     int
+		giveUps  int
+		counts   map[string]int
+	}
+	scanTotals := func(dir string) totals {
+		rep := guardRestartAuditScan(dir, nil, "")
+		return totals{journals: rep.Journals, hops: len(rep.Hops), giveUps: len(rep.GiveUps), counts: rep.Counts}
+	}
+
+	unrotated := scanTotals(writeJournal(t, false))
+	rotated := scanTotals(writeJournal(t, true))
+	want := totals{journals: 1, hops: 2, giveUps: 2, counts: map[string]int{journal.RestartHopOK: 2}}
+	if !reflect.DeepEqual(unrotated, want) {
+		t.Fatalf("unrotated totals = %+v, want %+v", unrotated, want)
+	}
+	if !reflect.DeepEqual(rotated, unrotated) {
+		t.Fatalf("rotated totals = %+v, want unrotated totals %+v", rotated, unrotated)
+	}
+}
+
 func TestRestartChainHopFromEvent(t *testing.T) {
 	full := guardBudgetRestartEvent{
 		Schema:      "fak.guard.budget_restart.v1",
