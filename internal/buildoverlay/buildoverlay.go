@@ -78,6 +78,13 @@ func Write(path string, overlay Overlay) error {
 
 // UntrackedGoFiles returns untracked, non-ignored Go source files.
 func UntrackedGoFiles(root string) ([]string, error) {
+	managed, err := hasGitMetadata(root)
+	if err != nil {
+		return nil, err
+	}
+	if !managed {
+		return nil, nil
+	}
 	cmd := windowgate.Command("git", "-C", root, "ls-files", "--others", "--exclude-standard", "--", "*.go")
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
@@ -93,6 +100,27 @@ func UntrackedGoFiles(root string) ([]string, error) {
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+func hasGitMetadata(root string) (bool, error) {
+	dir, err := filepath.Abs(root)
+	if err != nil {
+		return false, err
+	}
+	for {
+		_, err := os.Stat(filepath.Join(dir, ".git"))
+		switch {
+		case err == nil:
+			return true, nil
+		case !os.IsNotExist(err):
+			return false, err
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false, nil
+		}
+		dir = parent
+	}
 }
 
 // ModifiedDirs returns package directories containing tracked worktree edits.

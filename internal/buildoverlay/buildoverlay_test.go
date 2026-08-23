@@ -37,3 +37,17 @@ func TestModulePath(t *testing.T) {
 		t.Fatalf("got=%q err=%v", got, err)
 	}
 }
+
+func TestUntrackedGoFilesAllowsStandaloneModule(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "peer.go"), []byte("package peer\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := UntrackedGoFiles(root)
+	if err != nil {
+		t.Fatalf("UntrackedGoFiles() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("UntrackedGoFiles() = %v, want no Git-managed files", got)
+	}
+}
