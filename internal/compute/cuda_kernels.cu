@@ -348,19 +348,19 @@ __device__ __forceinline__ float qwen35_gdn_weight(
 }
 
 __global__ void k_q8_dequant_transient(const signed char *codes, const float *scales,
-                                          float *W, int rows, int cols) {
+                                         float *W, int rows, int cols, int block) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   int total = rows * cols;
   if (i >= total) return;
   int row = i / cols, col = i % cols;
-  W[i] = (float)codes[i] * scales[(size_t)row * (cols / 32) + col / 32];
+  W[i] = (float)codes[i] * scales[(size_t)row * (cols / block) + col / block];
 }
 
 static void q8_dequant_sgemm(const void *codes, const float *scales,
-                            const float *X, float *Y, int rows, int cols, int tokens) {
+                            const float *X, float *Y, int rows, int cols, int tokens, int block) {
   float *wide = (float *)fcuda_malloc((size_t)rows * cols * sizeof(float));
   k_q8_dequant_transient<<<((size_t)rows * cols + 255) / 256, 256, 0, g_stream>>>(
-      (const signed char *)codes, scales, wide, rows, cols);
+      (const signed char *)codes, scales, wide, rows, cols, block);
   fcuda_matmul_f32(wide, X, Y, rows, cols, tokens);
   fcuda_free(wide);
 }
@@ -846,10 +846,10 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
       !dConvOut || !dQNorm || !dKNorm || !dCore) return -1;
   cudaGetLastError();
   if (tokens >= 128 && inQKVQ8 && inZQ8 && inBQ8 && inAQ8) {
-    q8_dequant_sgemm(dInQKV, dInQKVScale, dX, dMixed, convDim, hidden, tokens);
-    q8_dequant_sgemm(dInZ, dInZScale, dX, dZ, nV * vHd, hidden, tokens);
-    q8_dequant_sgemm(dInB, dInBScale, dX, dB, nV, hidden, tokens);
-    q8_dequant_sgemm(dInA, dInAScale, dX, dA, nV, hidden, tokens);
+    q8_dequant_sgemm(dInQKV, dInQKVScale, dX, dMixed, convDim, hidden, tokens, 32);
+    q8_dequant_sgemm(dInZ, dInZScale, dX, dZ, nV * vHd, hidden, tokens, 32);
+    q8_dequant_sgemm(dInB, dInBScale, dX, dB, nV, hidden, tokens, 32);
+    q8_dequant_sgemm(dInA, dInAScale, dX, dA, nV, hidden, tokens, 32);
   } else {
     k_qwen35_gdn_fused_in_proj<<<dim3(fusedRows, tokens), 256, 0, g_stream>>>(
       dX, dInQKV, dInQKVScale, inQKVQ8, dInZ, dInZScale, inZQ8,
@@ -1065,6 +1065,10 @@ static float *g_q8_xScale = nullptr;
 static int g_q8_xScale_cap = 0; // floats
 extern "C" void fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float *dX,
                                     float *dY, int out, int in, int P, int block) {
+  if (P >= 128) {
+    q8_dequant_sgemm(dCodes, dScales, dX, dY, out, in, P, block);
+    return;
+  }
   int nblk = in / block;
   int needQX = P * in;          // int8 activation codes
   int needScale = P * nblk;     // per-block act scales (floats)
