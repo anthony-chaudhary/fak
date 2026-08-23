@@ -31,6 +31,41 @@ Files:
 
 The single-agent width-1 control also gained, but it is not a throughput baseline. It establishes that the same harness semantics benefit from scoping and prefix reuse before concurrency is increased.
 
+
+## Win record: what belongs to fak, and what does not
+
+This is a **combined-system win**, not a claim that fak invented prefix caching.
+
+Across the eight multi-agent cells (`scout_writer` and `multi_writer`, widths 1/2/4/8), the evaluator credited **117,410 avoided input-token accesses**:
+
+| Source | Avoided token accesses | Share of credited total | Attribution |
+|---|---:|---:|---|
+| Role-scoped micro-contexts | 73,642 | 62.7% | fak's agentic decomposition and context-selection policy |
+| Runtime shared-prefix reads | 43,768 | 37.3% | Ollama/llama.cpp's ordinary prompt/KV prefix cache |
+
+The runtime rows (`cached n_tokens`, including “prompt is already in the cache”) prove that prefix reuse happened. They do **not** prove that fak supplied a new radix-tree implementation. The portable fak contribution demonstrated here is that bounded scout/writer/reviewer contexts omit irrelevant broad history while preserving one stable project-contract prefix that an existing runtime cache can reuse.
+
+The current artifact supports three claims:
+
+1. **Scoping works independently in the accounting:** `full_context_input_tokens - scoped_context_input_tokens` is positive in every accepted multi-agent cell.
+2. **Ordinary prefix reuse adds independently in the accounting:** runtime-authored `cached n_tokens` is positive in every accepted multi-agent cell.
+3. **The composition scales in this envelope:** accepted outcomes remain equal through width 8 while both terms grow.
+
+It does **not yet identify a causal fusion bonus** beyond `scope_avoided + prefix_read`: there is no 2×2 campaign with scoping on/off and prefix caching on/off. Nor does it test fak's Random Access Cache, addressed non-prefix reuse, cross-request planning, repaired spans, or a fak-owned radix index. Those are separate innovations and require separate witnesses rather than inheriting this result.
+
+### Required next decomposition
+
+Use the same frozen task and outcome digest in a factorial campaign:
+
+| Cell | Context policy | Runtime prefix cache | What it identifies |
+|---|---|---|---|
+| A | full context | off/cold | no-reuse control |
+| B | full context | on/warm | generic radix/prefix contribution |
+| C | scoped micro-context | off/cold | fak scoping contribution |
+| D | scoped micro-context | on/warm | combined result |
+
+Report `B-A`, `C-A`, and `D-A`; call any fusion term only as `D - B - C + A`, with confidence intervals and equal-outcome gating. Add RAC/addressed-reuse cells only after this ordinary-prefix baseline is green.
+
 ## Measurement boundary
 
 - `full_context_input_tokens` is an observed full-context prompt count multiplied by equal agent width; it is a context-access counterfactual, not a second latency run.
