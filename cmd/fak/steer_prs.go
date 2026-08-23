@@ -589,10 +589,11 @@ func attachSteerPRCurves(units []steerpr.Unit, state trajctl.State) {
 			if !ok {
 				continue
 			}
-			scores := state.ScoresFor(id)
 			var rung steerpr.CurveRung
-			if len(scores) > 0 {
-				rung = steerpr.CurveRung(scores[len(scores)-1].Witness)
+			for _, score := range state.ScoresFor(id) {
+				if score.Method == trajctl.CommitScorerMethod {
+					rung = steerpr.CurveRung(score.Witness)
+				}
 			}
 			return steerpr.Curve{
 				ObjectiveID: curve.ObjectiveID,
@@ -763,7 +764,7 @@ func writeSteerPRs(view map[string]any, maxFiles int) string {
 			fmt.Fprintf(&b, "%s\n", line)
 		}
 		if line := unit.Curve.Annotate(); line != "" {
-			if unit.Band == steerpr.BandCleared && steerpr.DriftHiddenByBand([]steerpr.Unit{unit}) != nil {
+			if unit.Band == steerpr.BandCleared && len(steerpr.DriftHiddenByBand([]steerpr.Unit{unit})) > 0 {
 				fmt.Fprintf(&b, "**DRIFT HIDDEN BY CLEARED BAND** - %s\n", line)
 			} else {
 				fmt.Fprintf(&b, "%s\n", line)
