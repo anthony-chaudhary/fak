@@ -502,6 +502,8 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 		cmdNightrun(args)
 	case "sessions":
 		cmdSessions(args)
+	case "search":
+		cmdSearch(args)
 	case "loop-index-scorecard":
 		cmdLoopIndexScorecard(args)
 	case "loop-map":
