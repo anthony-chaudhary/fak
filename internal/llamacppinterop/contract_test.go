@@ -2,32 +2,48 @@ package llamacppinterop
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"github.com/anthony-chaudhary/fak/internal/quantmeta"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/quantmeta"
 )
 
 type fakeRunner struct {
-	out string
-	err error
-	got []string
+	out  string
+	help string
+	err  error
+	got  [][]string
 }
 
 func (f *fakeRunner) Output(_ context.Context, n string, a ...string) ([]byte, error) {
-	f.got = append([]string{n}, a...)
-	return []byte(f.out), f.err
+	f.got = append(f.got, append([]string{n}, a...))
+	if f.err != nil {
+		return nil, f.err
+	}
+	if len(a) > 0 && a[0] == "--help" {
+		return []byte(f.help), nil
+	}
+	return []byte(f.out), nil
 }
+
 func TestDiscoverAndPlan(t *testing.T) {
-	f := &fakeRunner{out: "llama-server version: 0.0.6123"}
+	f := &fakeRunner{out: "llama-server version: 0.0.6123 (commit 8144f31)", help: "--spec-type none,draft-mtp"}
 	r := Discover(context.Background(), f, "llama-server")
-	if r.Outcome != OutcomeDelegate || r.Capability.Version != "0.0.6123" || !reflect.DeepEqual(f.got, []string{"llama-server", "--version"}) {
+	if r.Outcome != OutcomeDelegate || r.Capability.Version != "0.0.6123" || r.Capability.Commit != "8144f31" || !r.Capability.DraftMTP {
 		t.Fatalf("%+v got=%v", r, f.got)
 	}
-	p := Plan(r.Capability, "tiny.gguf", quantmeta.Descriptor{Artifact: &quantmeta.ArtifactSpec{ContainerID: "gguf"}})
-	if p.Outcome != OutcomeDelegate || len(p.Argv) < 3 {
+	d := quantmeta.Descriptor{Artifact: &quantmeta.ArtifactSpec{ContainerID: "gguf"}, Extra: map[string]json.RawMessage{"gguf_architecture": json.RawMessage(`"qwen35"`)}}
+	p := PlanQwen38MTP(r.Capability, "tiny.gguf", d, 18080, 4096)
+	if p.Outcome != OutcomeDelegate || !containsPair(p.Argv, "--spec-type", "draft-mtp") || !containsPair(p.Argv, "--host", "127.0.0.1") {
 		t.Fatalf("%+v", p)
 	}
 }
@@ -39,9 +55,18 @@ func TestDiscoverFailsClosed(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
-func TestPlanRejectsNonGGUF(t *testing.T) {
-	r := Plan(Capability{Binary: "llama-cli", Version: "1"}, "m.bin", quantmeta.Descriptor{})
-	if r.Outcome != OutcomeAbstain {
+func TestPlanRejectsNonGGUFAndUnsupportedMTP(t *testing.T) {
+	cap := Capability{Binary: "llama-server", Version: "1", Server: true, DraftMTP: true}
+	if r := Plan(cap, "m.bin", quantmeta.Descriptor{}); r.Outcome != OutcomeAbstain {
+		t.Fatalf("%+v", r)
+	}
+	d := quantmeta.Descriptor{Artifact: &quantmeta.ArtifactSpec{ContainerID: "gguf"}, Extra: map[string]json.RawMessage{"gguf_architecture": json.RawMessage(`"llama"`)}}
+	if r := PlanQwen38MTP(cap, "m.gguf", d, 1, 1); r.Outcome != OutcomeAbstain {
+		t.Fatalf("%+v", r)
+	}
+	d.Extra["gguf_architecture"] = json.RawMessage(`"qwen35"`)
+	cap.DraftMTP = false
+	if r := PlanQwen38MTP(cap, "m.gguf", d, 1, 1); r.Outcome != OutcomeAbstain {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -61,3 +86,52 @@ func TestHealth(t *testing.T) {
 		})
 	}
 }
+func TestProcessStartAndStop(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fake-server")
+	body := `#!/bin/sh
+port=""
+while [ "$#" -gt 0 ]; do if [ "$1" = "--port" ]; then port="$2"; shift; fi; shift; done
+python3 - "$port" <<'PY'
+import http.server,json,sys
+class H(http.server.BaseHTTPRequestHandler):
+ def do_GET(self): self.send_response(200);self.send_header("Content-Type","application/json");self.end_headers();self.wfile.write(b'{"status":"ok"}')
+ def log_message(self,*a): pass
+http.server.HTTPServer(("127.0.0.1",int(sys.argv[1])),H).serve_forever()
+PY
+`
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	port := freePort(t)
+	p, err := Start(context.Background(), []string{script, "--port", port}, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid := p.PID()
+	if pid == 0 || p.BaseURL() != "http://127.0.0.1:"+port+"/v1" {
+		t.Fatalf("pid=%d url=%s", pid, p.BaseURL())
+	}
+	if err := p.Stop(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		t.Fatal(err)
+	}
+}
+func containsPair(v []string, a, b string) bool {
+	for i := 0; i+1 < len(v); i++ {
+		if v[i] == a && v[i+1] == b {
+			return true
+		}
+	}
+	return false
+}
+func freePort(t *testing.T) string {
+	t.Helper()
+	s := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer s.Close()
+	return strings.TrimPrefix(s.URL, "http://127.0.0.1:")
+}
+
+var _ = reflect.DeepEqual

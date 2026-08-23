@@ -2,15 +2,22 @@
 package llamacppinterop
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/anthony-chaudhary/fak/internal/quantmeta"
+	"io"
+	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/quantmeta"
 )
 
 const Schema = "fak.llamacppinterop/1"
@@ -24,9 +31,11 @@ const (
 )
 
 type Capability struct {
-	Binary  string `json:"binary"`
-	Version string `json:"version"`
-	Server  bool   `json:"server"`
+	Binary   string `json:"binary"`
+	Version  string `json:"version"`
+	Commit   string `json:"commit,omitempty"`
+	Server   bool   `json:"server"`
+	DraftMTP bool   `json:"draft_mtp,omitempty"`
 }
 type Result struct {
 	Schema     string     `json:"schema"`
@@ -44,7 +53,10 @@ func (ExecRunner) Output(ctx context.Context, name string, args ...string) ([]by
 	return exec.CommandContext(ctx, name, args...).CombinedOutput()
 }
 
-var versionRE = regexp.MustCompile(`(?i)(?:version|build)\s*[: ]\s*([0-9]+(?:\.[0-9]+){0,2}|[a-f0-9]{7,40})`)
+var (
+	versionRE = regexp.MustCompile(`(?i)(?:version|build)\s*[: ]\s*([0-9]+(?:\.[0-9]+){0,2}|[a-f0-9]{7,40})`)
+	commitRE  = regexp.MustCompile(`(?i)commit\s+([a-f0-9]{7,40})`)
+)
 
 func Discover(ctx context.Context, r Runner, binary string) Result {
 	if strings.TrimSpace(binary) == "" {
@@ -58,7 +70,16 @@ func Discover(ctx context.Context, r Runner, binary string) Result {
 	if len(m) < 2 {
 		return Result{Schema: Schema, Outcome: OutcomeAbstain, Reason: "llama.cpp version is not parseable"}
 	}
-	return Result{Schema: Schema, Outcome: OutcomeDelegate, Reason: "llama.cpp capability discovered", Capability: Capability{Binary: binary, Version: m[1], Server: strings.Contains(strings.ToLower(binary), "server")}}
+	cap := Capability{Binary: binary, Version: m[1], Server: strings.Contains(strings.ToLower(binary), "server")}
+	if cm := commitRE.FindStringSubmatch(string(b)); len(cm) == 2 {
+		cap.Commit = cm[1]
+	}
+	if cap.Server {
+		if help, helpErr := r.Output(ctx, binary, "--help"); helpErr == nil {
+			cap.DraftMTP = strings.Contains(string(help), "draft-mtp")
+		}
+	}
+	return Result{Schema: Schema, Outcome: OutcomeDelegate, Reason: "llama.cpp capability discovered", Capability: cap}
 }
 func Plan(cap Capability, model string, d quantmeta.Descriptor) Result {
 	if cap.Binary == "" || cap.Version == "" {
@@ -75,6 +96,34 @@ func Plan(cap Capability, model string, d quantmeta.Descriptor) Result {
 		argv = append(argv, "--host", "127.0.0.1", "--port", "0")
 	}
 	return Result{Schema: Schema, Outcome: OutcomeDelegate, Reason: "delegate to versioned llama.cpp runtime", Capability: cap, Argv: argv}
+}
+
+// PlanQwen38MTP plans the measured Qwen3.8 CUDA path. The caller supplies a
+// loopback port so fak remains the public control plane and llama-server never binds externally.
+func PlanQwen38MTP(cap Capability, model string, d quantmeta.Descriptor, port, contextTokens int) Result {
+	base := Plan(cap, model, d)
+	if base.Outcome != OutcomeDelegate {
+		return base
+	}
+	if !cap.Server || !cap.DraftMTP {
+		base.Outcome, base.Reason, base.Argv = OutcomeAbstain, "llama-server does not advertise draft-mtp", nil
+		return base
+	}
+	arch := ""
+	if raw := d.Extra["gguf_architecture"]; len(raw) > 0 {
+		_ = json.Unmarshal(raw, &arch)
+	}
+	if arch != "qwen35" {
+		base.Outcome, base.Reason, base.Argv = OutcomeAbstain, "Qwen3.8 MTP delegation requires qwen35 GGUF metadata", nil
+		return base
+	}
+	if port < 1 || contextTokens < 1 {
+		base.Outcome, base.Reason, base.Argv = OutcomeRefuse, "invalid llama-server loopback port or context", nil
+		return base
+	}
+	base.Reason = "delegate Qwen3.8 to versioned llama-server draft-mtp runtime"
+	base.Argv = []string{cap.Binary, "-m", model, "--host", "127.0.0.1", "--port", strconv.Itoa(port), "-ngl", "99", "-c", strconv.Itoa(contextTokens), "--spec-type", "draft-mtp", "--spec-draft-n-max", "3", "--spec-draft-p-min", "0.0"}
+	return base
 }
 
 type Health struct {
@@ -102,4 +151,109 @@ func CheckHealth(ctx context.Context, c *http.Client, url string) Result {
 		return Result{Schema: Schema, Outcome: OutcomeAbstain, Reason: "health response is not ready"}
 	}
 	return Result{Schema: Schema, Outcome: OutcomeDelegate, Reason: "llama.cpp server is healthy"}
+}
+
+// Process owns one loopback llama-server child and its bounded startup/shutdown lifecycle.
+type Process struct {
+	cmd      *exec.Cmd
+	url      string
+	log      io.ReadCloser
+	done     chan error
+	stopOnce sync.Once
+}
+
+func Start(ctx context.Context, argv []string, startupTimeout time.Duration) (*Process, error) {
+	if len(argv) == 0 {
+		return nil, fmt.Errorf("llama.cpp argv is empty")
+	}
+	if startupTimeout <= 0 {
+		startupTimeout = 90 * time.Second
+	}
+	cmd := exec.Command(argv[0], argv[1:]...)
+	logR, logW := io.Pipe()
+	cmd.Stdout = logW
+	cmd.Stderr = logW
+	if err := cmd.Start(); err != nil {
+		_ = logR.Close()
+		return nil, err
+	}
+	p := &Process{cmd: cmd, url: loopbackURL(argv), log: logR, done: make(chan error, 1)}
+	go func() {
+		err := cmd.Wait()
+		_ = logW.Close()
+		p.done <- err
+		close(p.done)
+	}()
+	deadline := time.NewTimer(startupTimeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	var lines strings.Builder
+	scanDone := make(chan struct{})
+	go func() {
+		s := bufio.NewScanner(logR)
+		for s.Scan() {
+			if lines.Len() < 32<<10 {
+				lines.WriteString(s.Text())
+				lines.WriteByte('\n')
+			}
+		}
+		close(scanDone)
+	}()
+	for {
+		if CheckHealth(ctx, client, p.url).Outcome == OutcomeDelegate {
+			return p, nil
+		}
+		select {
+		case err := <-p.done:
+			return nil, fmt.Errorf("llama-server exited before ready: %v: %s", err, strings.TrimSpace(lines.String()))
+		case <-ctx.Done():
+			_ = p.Stop()
+			return nil, ctx.Err()
+		case <-deadline.C:
+			_ = p.Stop()
+			return nil, fmt.Errorf("llama-server readiness timed out after %s: %s", startupTimeout, strings.TrimSpace(lines.String()))
+		case <-tick.C:
+		}
+	}
+}
+
+func (p *Process) BaseURL() string { return p.url + "/v1" }
+func (p *Process) PID() int {
+	if p == nil || p.cmd == nil || p.cmd.Process == nil {
+		return 0
+	}
+	return p.cmd.Process.Pid
+}
+func (p *Process) Stop() error {
+	if p == nil {
+		return nil
+	}
+	var stopErr error
+	p.stopOnce.Do(func() {
+		if p.cmd != nil && p.cmd.Process != nil {
+			stopErr = p.cmd.Process.Signal(os.Interrupt)
+		}
+		select {
+		case <-p.done:
+		case <-time.After(5 * time.Second):
+			if p.cmd != nil && p.cmd.Process != nil {
+				stopErr = p.cmd.Process.Kill()
+			}
+		}
+	})
+	return stopErr
+}
+func loopbackURL(argv []string) string {
+	port := ""
+	for i := 0; i+1 < len(argv); i++ {
+		if argv[i] == "--port" {
+			port = argv[i+1]
+		}
+	}
+	if port == "" {
+		return ""
+	}
+	return "http://" + net.JoinHostPort("127.0.0.1", port)
 }

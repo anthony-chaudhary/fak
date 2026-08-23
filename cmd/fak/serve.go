@@ -123,6 +123,9 @@ type serveFlags struct {
 	engineCacheRequireExactSpan  *bool
 	engineID                     *string
 	backendName                  *string
+	qwen38Runtime                *string
+	llamaServer                  *string
+	llamaStartupTimeout          *time.Duration
 	cudaGraph                    *bool
 	policyPath                   *string
 	policyCanaryTurns            *int
@@ -204,6 +207,9 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.engineCacheRequireExactSpan = fs.Bool("engine-cache-require-exact-span", false, "require exact remote K/V/index span eviction; fail closed if the selected engine only supports whole-cache reset")
 	sf.engineID = fs.String("engine", "inkernel", "registered engine id that fak_syscall dispatches an allowed call to: inkernel, mock, vllm, sglang, llm-d, dynamo, or another registered driver (default: the fused in-kernel model)")
 	sf.backendName = fs.String("backend", "", "compute backend for the in-kernel chat decode (with --gguf, no --base-url): empty = the CPU reference path; a registered device name like 'cuda' runs prefill+decode through the GPU HAL. Requires a `-tags cuda` build AND a reachable GPU at runtime; fails loud if named but unavailable so a typo never silently runs on CPU.")
+	sf.qwen38Runtime = fs.String("qwen38-runtime", "auto", "Qwen3.8 GGUF execution: auto delegates to a capability-proven llama-server draft-mtp runtime when available, native keeps fak in-kernel execution, llama-mtp requires delegation")
+	sf.llamaServer = fs.String("llama-server", "llama-server", "versioned llama-server binary used by --qwen38-runtime auto|llama-mtp")
+	sf.llamaStartupTimeout = fs.Duration("llama-startup-timeout", 2*time.Minute, "bounded readiness timeout for a fak-owned llama-server child")
 	sf.cudaGraph = fs.Bool("cuda-graph", false, "with --backend cuda: capture each decode token's whole op stream into a CUDA graph and replay it as ONE launch instead of N kernel launches (#483), the per-token launch-overhead lever for large single-stream decode (e.g. Qwen3.6-27B on an A100). OFF by default (a measured no-win on a tiny 0.5B/L4 where launch overhead is already small); witness tok/s before/after on YOUR node before relying on it. Equivalent to FAK_CUDA_GRAPH=1; inert on a non-cuda build or CPU backend.")
 	sf.policyPath = fs.String("policy", "", "capability-floor manifest to load (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
 	sf.policyCanaryTurns = fs.Int("policy-canary-turns", 0, "after a policy reload, roll back when this many consecutive requests are denied; 0 disables the canary")
@@ -316,6 +322,11 @@ func cmdServe(argv []string) {
 		{Name: "flag-parse", Dur: parseDur},
 	}}
 	rt.resolveServeModelSources(sf)
+	if err := rt.maybeStartQwen38Delegation(sf); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
+	defer rt.stopQwen38Delegation()
 
 	// --policy-check: validate the manifest and exit, binding no listener.
 	if *sf.policyCheck {
