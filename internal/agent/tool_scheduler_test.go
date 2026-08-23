@@ -20,7 +20,8 @@ func TestParallelToolCancellationDrainsStartedAndSkipsQueuedInModelOrder(t *test
 
 	blockingCall := func(id, content string, release <-chan struct{}) scheduledToolCall {
 		return scheduledToolCall{
-			call: ToolCall{ID: id, Function: Func{Name: "read"}},
+			call:   ToolCall{ID: id, Function: Func{Name: "read"}},
+			effect: toolEffectSafe,
 			run: func(context.Context) (string, error) {
 				started <- id
 				<-release
