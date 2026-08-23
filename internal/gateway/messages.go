@@ -825,7 +825,7 @@ func (s *Server) compactAnthropicRawWithReason(req *agent.AnthropicMessagesReque
 		// fires horizon-free. This is what lets a plain, un-budgeted `fak guard -- claude` long
 		// session finally shed its sprawled middle (the #1407 cold case), without ever guessing:
 		// a warm trace still refuses without a repaying horizon.
-		opts.ColdCache = s.metrics.coldMessageSpanCache(trace, time.Now(), s.cacheTTL1H)
+		opts.ColdCache = s.metrics.coldMessageSpanCache(trace, time.Now(), s.cacheTTL1H.Load())
 		// Context-solvency override (the occupancy axis): hand the gate the trace's OBSERVED peak
 		// resident window alongside the armed floor, so a trace that has climbed into the danger
 		// band sheds even when the burst does not repay. PEAK (the same heldResidentPeak the
@@ -912,7 +912,7 @@ func (s *Server) maybeUpgradeAnthropicCacheTTL1H(req *agent.AnthropicMessagesReq
 }
 
 func (s *Server) maybeUpgradeAnthropicCacheTTL1HScoped(req *agent.AnthropicMessagesRequest) (bool, bool) {
-	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) || !s.cacheTTL1H || !s.vcacheCalibration.wantsExplicitOneHourTTL(req.Model) {
+	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthroughFor(req.Model) || !s.cacheTTL1H.Load() || !s.vcacheCalibration.wantsExplicitOneHourTTL(req.Model) {
 		return false, false
 	}
 	upgrade := agent.UpgradeAnthropicStableCacheTTL1hWithMessagePrefixes

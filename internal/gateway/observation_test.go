@@ -39,7 +39,7 @@ func TestObservationSnapshotEndpointStateAndLegacyParity(t *testing.T) {
 
 		srv := newObservationTestServer(t)
 		srv.listSessions = func(context.Context) []SessionState { return []SessionState{} }
-		srv.cacheTTL1H = true
+		srv.cacheTTL1H.Store(true)
 		srv.SetSessionHarnessProvider(func() SessionHarness { return SessionHarness{} })
 
 		snapshot, raw := getObservationSnapshot(t, srv)
@@ -93,7 +93,7 @@ func TestObservationSnapshotEndpointStateAndLegacyParity(t *testing.T) {
 				Time:     SessionTime{ElapsedSeconds: 12},
 			}}
 		}
-		srv.cacheTTL1H = true
+		srv.cacheTTL1H.Store(true)
 		srv.metrics.observeInference(1000, 50, 600, 200, "end_turn", time.Second)
 		srv.metrics.observeCacheTTLUpgrade("")
 		srv.SetSessionHarnessProvider(func() SessionHarness {

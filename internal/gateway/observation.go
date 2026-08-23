@@ -112,7 +112,7 @@ func (s *Server) buildObservationSnapshot(
 		cacheData = *cache
 	}
 
-	managed := managedCacheVars(s.cacheTTL1H, s.provider, sum)
+	managed := managedCacheVars(s.cacheTTL1H.Load(), s.provider, sum)
 	managedAvailability := guardvars.AvailabilityObserved
 	managedReason := ""
 	var managedData any

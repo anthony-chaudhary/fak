@@ -158,11 +158,11 @@ func TestServeRequestChainKeepsOpenAIStablePrefix(t *testing.T) {
 		compactAnchorHead:    true,
 		assumeSessionTurns:   DefaultAssumedSessionTurns,
 		elideResultBytes:     512,
-		cacheTTL1H:           true,
-		toolFloorDenies:      func(string) bool { return true }, // "deny every tool" — would prune the whole tools[] on the Anthropic wire
-		systemBlockDrop:      func(string, string) bool { return true },
-		logf:                 func(string, ...any) {},
-		metrics:              newGatewayMetrics(time.Now()),
+
+		toolFloorDenies: func(string) bool { return true }, // "deny every tool" — would prune the whole tools[] on the Anthropic wire
+		systemBlockDrop: func(string, string) bool { return true },
+		logf:            func(string, ...any) {},
+		metrics:         newGatewayMetrics(time.Now()),
 	}
 	if s.anthropicPassthrough() {
 		t.Fatal("mock planner must NOT be an anthropic passthrough — the OpenAI-compatible wire under test")

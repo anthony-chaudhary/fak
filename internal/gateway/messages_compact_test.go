@@ -86,7 +86,7 @@ func TestMaybeUpgradeCacheTTL1HGate(t *testing.T) {
 		t.Fatalf("decode on: %v", err)
 	}
 	s := anthropicPassthroughServer(1200)
-	s.cacheTTL1H = true
+	s.cacheTTL1H.Store(true)
 	if !s.maybeUpgradeAnthropicCacheTTL1H(reqOn) {
 		t.Fatal("TTL upgrade gate should fire on a stable system breakpoint")
 	}
@@ -134,7 +134,7 @@ func TestPrepareServedRequestUnionsExtendedCacheTTLBeta(t *testing.T) {
 	// in AND the inbound betas must survive (union, not replace).
 	t.Run("upgrade_fires_unions_beta", func(t *testing.T) {
 		s := anthropicPassthroughServer(1200)
-		s.cacheTTL1H = true
+		s.cacheTTL1H.Store(true)
 		s.metrics = newGatewayMetrics(time.Now())
 
 		req := newReq(t)
@@ -185,7 +185,7 @@ func TestMaybeUpgradeCacheTTL1HPlacesThenUpgrades(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	s := anthropicPassthroughServer(0) // compaction OFF: placement must not depend on it
-	s.cacheTTL1H = true
+	s.cacheTTL1H.Store(true)
 	s.metrics = newGatewayMetrics(time.Now())
 
 	if !s.maybeUpgradeAnthropicCacheTTL1H(req) {
@@ -226,7 +226,7 @@ func TestMaybeUpgradeCacheTTL1HVolatileHeadStaysByteSafe(t *testing.T) {
 	}
 	orig := append([]byte(nil), req.Raw...)
 	s := anthropicPassthroughServer(0) // compaction OFF: the composed path must stand on its own
-	s.cacheTTL1H = true                // --managed-cache ACTIVE
+	s.cacheTTL1H.Store(true)           // --managed-cache ACTIVE
 	s.metrics = newGatewayMetrics(time.Now())
 
 	if s.maybeUpgradeAnthropicCacheTTL1H(req) {
@@ -1007,7 +1007,7 @@ func TestServedTurnCountIncrementsPerFold(t *testing.T) {
 
 func TestManagedCacheMessagePrefixUpgradeAndCreationAttribution(t *testing.T) {
 	s := anthropicPassthroughServer(0)
-	s.cacheTTL1H = true
+	s.cacheTTL1H.Store(true)
 	s.metrics = newGatewayMetrics(time.Now())
 	req, err := agent.DecodeAnthropicMessagesRequest([]byte(`{"model":"claude-test","system":[{"type":"text","text":"head","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":[{"type":"text","text":"stable history","cache_control":{"type":"ephemeral"}}]}],"max_tokens":64}`))
 	if err != nil {
@@ -1052,7 +1052,7 @@ func TestCacheCreationSpanLabel(t *testing.T) {
 func TestManagedCacheHeadOnlyEnvironmentAblation(t *testing.T) {
 	t.Setenv("FAK_ABLATE_TTL_1H_HEAD_ONLY", "1")
 	s := anthropicPassthroughServer(0)
-	s.cacheTTL1H = true
+	s.cacheTTL1H.Store(true)
 	req, err := agent.DecodeAnthropicMessagesRequest([]byte(`{"model":"claude-test","system":[{"type":"text","text":"head","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":[{"type":"text","text":"history","cache_control":{"type":"ephemeral"}}]}],"max_tokens":64}`))
 	if err != nil {
 		t.Fatal(err)

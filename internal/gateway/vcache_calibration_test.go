@@ -84,14 +84,14 @@ func TestFreshMeasuredTTLSteersAnthropicTierDecision(t *testing.T) {
 	}
 
 	fallback := anthropicPassthroughServer(0)
-	fallback.cacheTTL1H = true
+	fallback.cacheTTL1H.Store(true)
 	fallbackReq := decode(t)
 	if !fallback.maybeUpgradeAnthropicCacheTTL1H(fallbackReq) || !bytes.Contains(fallbackReq.Raw, []byte(`"ttl":"1h"`)) {
 		t.Fatalf("missing calibration must preserve the explicit 1h tier:\n%s", fallbackReq.Raw)
 	}
 
 	calibrated := anthropicPassthroughServer(0)
-	calibrated.cacheTTL1H = true
+	calibrated.cacheTTL1H.Store(true)
 	calibrated.vcacheCalibration = &VCacheRuntimeCalibration{
 		Provider: "anthropic", Model: "claude-sonnet", Source: "probe:test",
 		TTLMillis: int64((2 * time.Hour) / time.Millisecond), TTLMeasured: true,

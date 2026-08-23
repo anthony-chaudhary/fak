@@ -1772,7 +1772,7 @@ type Server struct {
 
 	// cacheTTL1H mirrors Config.CacheTTL1H or FAK_ABLATE_TTL_1H. When true, the Anthropic
 	// passthrough upgrades stable-head cache_control breakpoints to ttl:"1h" before forwarding.
-	cacheTTL1H bool
+	cacheTTL1H atomic.Bool
 
 	// provider mirrors Config.Provider — the resolved upstream wire ("anthropic",
 	// "openai-responses", ...). The managed-cache posture surfaces read it to stay wire-aware:
@@ -2150,7 +2150,6 @@ func New(cfg Config) (*Server, error) {
 		exposeProfile:                cfg.ExposeProfile,
 		elideResultBytes:             ablateUncachedTrimBytes(cfg.ElideResultBytes),
 		elideStaleReads:              cfg.ElideStaleReads,
-		cacheTTL1H:                   cfg.CacheTTL1H || envEnabled("FAK_ABLATE_TTL_1H"),
 		provider:                     strings.TrimSpace(cfg.Provider),
 		prefixGuard:                  cfg.PrefixGuard || envEnabled("FAK_ABLATE_PREFIX_GUARD"),
 		vcacheAnchor:                 cfg.VCacheAnchor || envEnabled("FAK_ABLATE_BP_PLAN"),
@@ -2188,6 +2187,7 @@ func New(cfg Config) (*Server, error) {
 	if cfg.ReloadRoute != nil {
 		s.routeWatcher.Store(cfg.ReloadRoute)
 	}
+	s.cacheTTL1H.Store(cfg.CacheTTL1H || envEnabled("FAK_ABLATE_TTL_1H"))
 
 	// Wire retry observability onto the proxy planner (#793 follow-on): Complete's 429/5xx
 	// backoff is otherwise invisible — up to ~8s of silent waiting. The hook bumps a retry

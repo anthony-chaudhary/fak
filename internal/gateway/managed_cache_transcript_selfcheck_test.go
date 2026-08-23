@@ -88,7 +88,7 @@ func TestManagedCacheSelfCheckRealisticTranscript_UpgradesLastSystemBlock(t *tes
 	}
 
 	s := anthropicPassthroughServer(0) // compaction OFF: isolate the managed-cache transform
-	s.cacheTTL1H = true                // --managed-cache ACTIVE
+	s.cacheTTL1H.Store(true)           // --managed-cache ACTIVE
 	s.metrics = newGatewayMetrics(time.Now())
 
 	prep := s.prepareServedAnthropicRequest(context.Background(), inboundTranscriptRequest(), req, "", servedSessionTurn{})
@@ -186,7 +186,7 @@ func TestManagedCacheSelfCheckRawClient_PlacesThenUpgrades(t *testing.T) {
 	}
 
 	s := anthropicPassthroughServer(0) // compaction OFF and vcacheAnchor OFF: the composed
-	s.cacheTTL1H = true                // place-then-upgrade path must stand on its own.
+	s.cacheTTL1H.Store(true)           // place-then-upgrade path must stand on its own.
 	s.metrics = newGatewayMetrics(time.Now())
 
 	prep := s.prepareServedAnthropicRequest(context.Background(), inboundTranscriptRequest(), req, "", servedSessionTurn{})
