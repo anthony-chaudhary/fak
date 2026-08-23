@@ -5433,6 +5433,21 @@
           "category": "incidental",
           "reason": "Fleet-search identifier selection helper does not create or manage runtime sessions.",
           "token": "chooseSessionID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Prometheus metric name for bounded counts of existing session refusal reasons; not a separate session-runtime concept.",
+          "token": "fak_session_refusals"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private deterministic metric label ordering helper, not a user-facing session concept.",
+          "token": "sessionEnvelopeRefusalReasonOrder"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private metrics snapshot helper, not a distinct session-runtime concept.",
+          "token": "sessionEnvelopeRefusalReasons"
         }
       ],
       "id": "session-runtime",
@@ -5568,6 +5583,7 @@
         "boolInt",
         "bumpSessionHandoffBlocks",
         "capability_digest",
+        "chooseSessionID",
         "classifyGuardCodexSessionStart",
         "cmdSessionRecover",
         "codexlooparchivemanifest",
@@ -5593,6 +5609,7 @@
         "fak_fleet_canonical_goal_sessions",
         "fak_fleet_goal_sessions",
         "fak_gateway_compaction_thrash_sessions_total",
+        "fak_session_refusals",
         "filterToolSchedulerFold",
         "filterToolSchedulerOutput",
         "filterToolSchedulerReport",
@@ -5639,6 +5656,7 @@
         "live_count",
         "live_sessions",
         "loadSchedulerRecords",
+        "logicalSession",
         "loopStateForSession",
         "matchedSessions",
         "materializeSessionMoveCheckpoint",
@@ -5741,6 +5759,8 @@
         "sessionClientSession",
         "sessionCorpusCapabilities",
         "sessionDiscoverySchema",
+        "sessionEnvelopeRefusalReasonOrder",
+        "sessionEnvelopeRefusalReasons",
         "sessionLocked",
         "sessionMemoryPattern",
         "sessionMoveDestination",
@@ -5798,9 +5818,7 @@
         "wipPeerCheckpointSessions",
         "witnessed_sufficiency_slot_released",
         "writeGuardCodexSessionBinding",
-        "writeSessionMoveJSON",
-        "logicalSession",
-        "chooseSessionID"
+        "writeSessionMoveJSON"
       ],
       "incidental_tokens": [],
       "known_tokens": [],
