@@ -865,6 +865,33 @@ def _fak_command_prefix(root: Path) -> list[str]:
     return [max(candidates, key=dispatch_worker.fak_binary_build_time)]
 
 
+def _fak_dev_command_prefix(root: Path) -> list[str]:
+    """Argv prefix for invoking the development-only ``fak-dev`` binary.
+
+    ``FAK_DEV_BIN`` is the dedicated override. Keep accepting ``FAK_BIN`` when
+    callers explicitly point it at fak-dev so existing repair jobs remain
+    reproducible, but never route a moved development command through fak.
+    """
+    explicit = (os.environ.get("FAK_DEV_BIN") or "").strip()
+    compatible = (os.environ.get("FAK_BIN") or "").strip()
+    if not explicit and compatible and Path(compatible).stem.lower() == "fak-dev":
+        explicit = compatible
+    if explicit:
+        return [explicit]
+    candidates: list[str] = []
+    onpath = dispatch_worker._which_on_exact_path("fak-dev", os.environ.get("PATH"))
+    if onpath:
+        candidates.append(onpath)
+    for name in ("fak-dev.exe", "fak-dev"):
+        cand = root / name
+        if cand.is_file():
+            candidates.append(str(cand))
+            break
+    if not candidates:
+        return ["go", "run", "./cmd/fak-dev"]
+    return [max(candidates, key=dispatch_worker.fak_binary_build_time)]
+
+
 def contract_overlay_path(runs_dir: Path, number: int) -> Path:
     return runs_dir / CONTRACT_OVERLAY_DIRNAME / f"issue-{int(number)}.md"
 
@@ -996,7 +1023,7 @@ def issue_contract_review(root: Path, issue: dict[str, Any] | None,
             json.dump([record], f, ensure_ascii=False)
             f.write("\n")
         cmd = [
-            *_fak_command_prefix(root),
+            *_fak_dev_command_prefix(root),
             "issue", "contract",
             "--from-issues", str(tmp),
             "--live", "--dedupe-checked", "--dedupe-cap", "300",

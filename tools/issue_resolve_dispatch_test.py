@@ -89,6 +89,27 @@ class ContractOverlayTest(unittest.TestCase):
             mod._issue_record_for_contract({"number": 7, "body": "base body"}, 7)["body"],
             "base body")
 
+    def test_contract_review_invokes_fak_dev_after_command_split(self) -> None:
+        mod = load()
+        seen = []
+
+        def runner(command, **_kwargs):
+            seen.append(command)
+            return subprocess.CompletedProcess(
+                args=command, returncode=0, stdout=json.dumps({
+                    "ok": True,
+                    "reviews": [{"ok": True, "score": {"total": 100},
+                                 "spine_priority": {"total": 100}}],
+                }), stderr="")
+
+        with tempfile.TemporaryDirectory() as td, mock.patch.object(
+                mod, "_fak_dev_command_prefix", return_value=["fak-dev"]):
+            review = mod.issue_contract_review(
+                Path(td), {"number": 7, "title": "t", "body": "body"}, 7,
+                runner=runner)
+        self.assertTrue(review["ok"])
+        self.assertEqual(seen[0][:3], ["fak-dev", "issue", "contract"])
+
     def test_read_and_times_roundtrip(self) -> None:
         import tempfile
         mod = load()
