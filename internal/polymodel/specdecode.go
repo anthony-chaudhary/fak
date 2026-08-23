@@ -104,6 +104,8 @@ type SpecDecodeRun struct {
 	// AcceptedDrafts is the total drafted tokens that matched the target's argmax and were
 	// committed (excludes the per-round correction token).
 	AcceptedDrafts int
+	// AcceptanceProfile retains accepted/proposed counts by zero-based draft position.
+	AcceptanceProfile []AcceptancePosition
 	// EvictKV is the total rejected speculative KV positions rolled back.
 	EvictKV int
 	// MeanAcceptanceLength is the mean REAL tokens committed per verify pass
@@ -152,6 +154,7 @@ func commitToken(out, committed *[]int, tok int, stopEnabled bool, stopToken int
 
 func SpecDecode(prompt []int, draft Drafter, verify Verifier, cfg SpecDecodeConfig) (SpecDecodeRun, error) {
 	var run SpecDecodeRun
+	var profile acceptanceProfile
 	if verify == nil {
 		return run, ErrNoVerifier
 	}
@@ -180,6 +183,7 @@ func SpecDecode(prompt []int, draft Drafter, verify Verifier, cfg SpecDecodeConf
 		run.Rounds++
 		run.DraftedTokens += len(d)
 		run.AcceptedDrafts += res.Accepted
+		profile.record(len(d), res.Accepted)
 		if res.EvictKV > 0 {
 			run.EvictKV += res.EvictKV
 			if cfg.Rollback != nil {
@@ -213,6 +217,7 @@ func SpecDecode(prompt []int, draft Drafter, verify Verifier, cfg SpecDecodeConf
 	}
 
 	run.Output = out
+	run.AcceptanceProfile = profile.snapshot()
 	if run.Rounds > 0 {
 		run.MeanAcceptanceLength = float64(len(out)) / float64(run.Rounds)
 	}

@@ -118,6 +118,8 @@ type SpecDecodeTreeRun struct {
 	// AcceptedNodes is the total speculative nodes that lay on an accepted path and were
 	// committed (excludes the per-round correction token).
 	AcceptedNodes int
+	// AcceptanceProfile retains accepted/proposed counts by zero-based draft position.
+	AcceptanceProfile []AcceptancePosition
 	// EvictKV is the total rejected-branch KV positions rolled back. Over a whole run
 	// AcceptedNodes + EvictKV == DraftedNodes: every verified node is either kept or
 	// rolled back, the same conservation AcceptTree asserts per round.
@@ -158,6 +160,7 @@ var (
 // reports MeanAcceptanceLength = emitted/Rounds, the honest throughput the tree bought.
 func SpecDecodeTree(prompt []int, draft TreeDrafter, verify TreeVerifier, cfg SpecDecodeTreeConfig) (SpecDecodeTreeRun, error) {
 	var run SpecDecodeTreeRun
+	var profile acceptanceProfile
 	if verify == nil {
 		return run, ErrNoTreeVerifier
 	}
@@ -192,6 +195,7 @@ func SpecDecodeTree(prompt []int, draft TreeDrafter, verify TreeVerifier, cfg Sp
 		run.Rounds++
 		run.DraftedNodes += len(tree.Nodes) - 1
 		run.AcceptedNodes += len(res.Path)
+		profile.recordCounts(treeProposalPositions(tree), len(res.Path))
 		if res.EvictKV > 0 {
 			run.EvictKV += res.EvictKV
 			if cfg.Rollback != nil {
@@ -226,6 +230,7 @@ func SpecDecodeTree(prompt []int, draft TreeDrafter, verify TreeVerifier, cfg Sp
 	}
 
 	run.Output = out
+	run.AcceptanceProfile = profile.snapshot()
 	if run.Rounds > 0 {
 		run.MeanAcceptanceLength = float64(len(out)) / float64(run.Rounds)
 	}
