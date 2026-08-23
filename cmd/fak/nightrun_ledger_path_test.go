@@ -33,7 +33,8 @@ func TestNightrunLedgerPathInsideWorktreeUsesPrimaryCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("worktree ledger helper: %v\n%s", err, out)
 	}
-	got := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(string(out)), "PASS"))
+	firstLine := strings.SplitN(string(out), "\n", 2)[0]
+	got := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(firstLine), "PASS"))
 	want := filepath.Join(root, rel)
 	if !sameLedgerPath(got, want) {
 		t.Fatalf("ledger forked from primary checkout: got %q want %q", got, want)
