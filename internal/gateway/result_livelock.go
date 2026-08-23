@@ -75,10 +75,11 @@ func resultAdmissionIsLowInfoReceipt(a ResultAdmission) bool {
 	if a.Verdict.Kind != "ALLOW" {
 		return false
 	}
-	if !isUpdatePlanTool(a.Tool) {
-		return false
+	tool := strings.ToLower(strings.TrimSpace(a.Tool))
+	if isUpdatePlanTool(tool) {
+		return a.ResultDigest == guardrsi.ArgsDigest("Plan updated")
 	}
-	return a.ResultDigest == guardrsi.ArgsDigest("Plan updated")
+	return tool == "exec_command" || tool == "functions.exec_command" || tool == "write_stdin" || tool == "functions.write_stdin"
 }
 
 func isUpdatePlanTool(tool string) bool {
