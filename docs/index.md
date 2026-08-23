@@ -242,3 +242,5 @@ LLM agent fleet, agentic AI, Go.</sub>
 }
 </script>
 <!-- BREADCRUMB-JSONLD:END -->
+
+- [KV capacity normalization](kv-capacity-normalization.md) — compare block-oriented and direct KV metrics in tokens, bytes, and occupancy without inventing unavailable values.

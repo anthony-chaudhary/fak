@@ -95,3 +95,5 @@ Runtime behavior is authoritative in code and tests. Documentation describes the
 For an unlisted task, start at [`INDEX.md`](INDEX.md) and select the current audience route.
 
 - docs/generated/verb-surface.md — generated source-derived fak verb tree, REFUSES column, and unverified coverage count
+
+- [KV capacity normalization](docs/kv-capacity-normalization.md): normalize block and direct runtime KV metrics across tokens, bytes, and occupancy with typed honesty diagnostics.
