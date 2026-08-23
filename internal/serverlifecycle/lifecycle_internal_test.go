@@ -136,3 +136,35 @@ func mustJSON(t *testing.T, value any) []byte {
 	}
 	return data
 }
+
+func TestRefusalErrorsNameRecovery(t *testing.T) {
+	root := t.TempDir()
+	cases := []struct {
+		name string
+		run  func() error
+		want []string
+	}{
+		{name: "status-uninitialized", run: func() error {
+			_, err := Status(context.Background(), filepath.Join(root, "not-initialized"), Options{})
+			return err
+		}, want: []string{"read server spec", SpecFilename}},
+		{name: "down-uninitialized", run: func() error {
+			_, err := Down(context.Background(), filepath.Join(root, "not-initialized-down"), Options{})
+			return err
+		}, want: []string{"read server spec", SpecFilename}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run()
+			if err == nil {
+				t.Fatal("expected refusal")
+			}
+			message := strings.ToLower(err.Error())
+			for _, cue := range tc.want {
+				if !strings.Contains(message, strings.ToLower(cue)) {
+					t.Fatalf("error %q does not name recovery cue %q", err, cue)
+				}
+			}
+		})
+	}
+}
