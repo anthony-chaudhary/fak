@@ -1070,6 +1070,20 @@ __device__ void getScaleMinK4_dev(int j, const unsigned char *q, unsigned char *
   }
 }
 
+__global__ void k_q4k_dequant_transient(const unsigned char *Q4K, float *W, int out, int in) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int total = out * in;
+  if (i >= total) return;
+  int o = i / in, k = i % in;
+  int sb = k / 256, group = (k % 256) / 32, lane = k & 31;
+  const unsigned char *blk = Q4K + ((size_t)o * (in / 256) + sb) * 144;
+  float d = __half2float(*(const __half *)blk), dm = __half2float(*(const __half *)(blk + 2));
+  unsigned char sc, mn; getScaleMinK4_dev(group, blk + 4, &sc, &mn);
+  unsigned char packed = blk[16 + (group >> 1) * 32 + lane];
+  int q = (group & 1) ? packed >> 4 : packed & 15;
+  W[i] = d * (float)sc * (float)q - dm * (float)mn;
+}
+
 // k_q4k_gemm: four warps cooperate on each output row. Each warp owns a disjoint stride of
 // 256-value super-blocks, preserving the exact f32-dequantized dot while exposing the short Qwen
 // hidden-width K loop to the GPU. Two rows per block retain 256-thread occupancy; only the four
@@ -1165,6 +1179,14 @@ __global__ void k_q4k_gemm_panel(const unsigned char *Q4K, const float *X, float
 
 extern "C" void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY,
                                      int out, int in, int P) {
+  if (P >= 128) {
+    float *wide = (float *)fcuda_malloc((size_t)out * in * sizeof(float));
+    k_q4k_dequant_transient<<<((size_t)out * in + 255) / 256, 256, 0, g_stream>>>(
+        (const unsigned char *)dQ4K, wide, out, in);
+    fcuda_matmul_f32(wide, dX, dY, out, in, P);
+    fcuda_free(wide);
+    return;
+  }
   if (P < 4) {
     k_q4k_gemm<<<dim3((out + 1) / 2, P), 256, 0, g_stream>>>(
         (const unsigned char *)dQ4K, dX, dY, out, in, P);
