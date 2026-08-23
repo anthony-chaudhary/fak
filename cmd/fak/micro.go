@@ -108,6 +108,9 @@ func cmdMicro(args []string) {
 		case "corpus":
 			cmdMicroCorpus(args[1:])
 			return
+		case "tree":
+			cmdMicroTree(args[1:])
+			return
 		}
 	}
 	if len(args) > 0 && args[0] == "collapse" {
