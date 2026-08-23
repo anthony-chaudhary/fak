@@ -261,6 +261,9 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		// so we don't double-stamp the timestamp s.logf already adds.
 		ErrorLog: log.New(logfWriter{logf: s.logf}, "", 0),
 	}
+	if s.richDashboards != nil {
+		defer s.richDashboards.close()
+	}
 	// Disable Nagle on accepted TCP connections. Without TCP_NODELAY the kernel
 	// coalesces small writes (Nagle), adding 40-200ms of buffering on a high-RTT
 	// link — felt on streamed chat-completion deltas and the small fak-native verdict

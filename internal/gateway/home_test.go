@@ -43,6 +43,8 @@ func TestGatewayHomepageRendersDiscoverySurface(t *testing.T) {
 		"docs/fak/openapi.yaml",
 		"GET /metrics",
 		"GET /debug/vars",
+		"Rich dashboards",
+		"on-demand · 9 dashboards",
 		"Live gateway",
 		`id="live-ready"`,
 		`id="live-requests"`,
@@ -123,9 +125,9 @@ func TestGatewayHomepageCapturedHTML(t *testing.T) {
 		t.Fatal(err)
 	}
 	// This captured response is the visual witness: it asserts the actual browser
-	// surface has live state, a title, identity, and all six navigable modules.
-	if strings.Count(string(raw), `class="card"`) != 6 {
-		t.Fatalf("captured homepage card count = %d, want 6", strings.Count(string(raw), `class="card"`))
+	// surface has live state, a title, identity, and all seven navigable modules.
+	if strings.Count(string(raw), `class="card"`) != 7 {
+		t.Fatalf("captured homepage card count = %d, want 7", strings.Count(string(raw), `class="card"`))
 	}
 	if !strings.Contains(string(raw), "demo-model") || !strings.Contains(string(raw), "local agent kernel") ||
 		!strings.Contains(string(raw), `id="live-state"`) || !strings.Contains(string(raw), "refreshes every 5 seconds") {

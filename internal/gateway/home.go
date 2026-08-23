@@ -24,6 +24,7 @@ var homePageTemplate = template.Must(template.New("gateway-home").Parse(`<!docty
 <a class="card" href="/v1/models"><h2>Models</h2><p>OpenAI-compatible model discovery for this gateway.</p><span class="path">GET /v1/models - auth may apply</span></a>
 <a class="card" href="/a2a/v1/agent-card"><h2>Agent</h2><p>Discover the A2A agent, its skills, and its task endpoint.</p><span class="path">GET /a2a/v1/agent-card - local discovery</span></a>
 <a class="card" href="https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/openapi.yaml"><h2>API map</h2><p>Open the gateway's machine-readable OpenAPI reference.</p><span class="path">docs/fak/openapi.yaml</span></a>
+<a class="card" href="/?dashboard=rich&amp;uid=fak-gateway-observability"><h2>Rich dashboards</h2><p>Launch Grafana only when clicked, then continue to live charts automatically.</p><span class="path">on-demand · 9 dashboards</span></a>
 <a class="card" href="/metrics"><h2>Metrics</h2><p>Prometheus counters for requests, cache behavior, and latency.</p><span class="path">GET /metrics - auth may apply</span></a>
 <a class="card" href="/debug/vars"><h2>Diagnostics</h2><p>Runtime counters and bounded operational state.</p><span class="path">GET /debug/vars - auth may apply</span></a>
 </section><footer>API clients can continue using <code>/v1/responses</code>, <code>/v1/chat/completions</code>, or <code>/mcp</code>. The homepage contains no credentials or upstream URL.</footer>
@@ -41,6 +42,9 @@ type homePageData struct {
 }
 
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
+	if s.richDashboards != nil && s.handleRichDashboard(w, r) {
+		return
+	}
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return

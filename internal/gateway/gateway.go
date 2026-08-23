@@ -1271,6 +1271,7 @@ type Server struct {
 	toolPreferences toolplugin.PreferenceLayers
 	engineID        string
 	model           string
+	richDashboards  *richDashboardManager
 	requireKey      string
 	// readBearer is the read-scoped observability bearer (Config.ReadBearer): accepted
 	// ONLY on the diagnostic reads (/debug/vars, /metrics, /v1/fak/observation),
@@ -2104,6 +2105,7 @@ func New(cfg Config) (*Server, error) {
 		toolPreferences:              cfg.ToolPreferences,
 		engineID:                     engineID,
 		model:                        model,
+		richDashboards:               newRichDashboardManager(),
 		servedSide:                   servedSide,
 		upstream:                     upstreamSide,
 		requireKey:                   cfg.RequireKey,
