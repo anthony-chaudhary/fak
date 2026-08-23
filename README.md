@@ -55,8 +55,8 @@ instructions, and tools you own:
 ```bash
 fak harness init --dir ./my-agent --module example.com/my-agent
 cd ./my-agent
-go run ./cmd/product --selfcheck
-go run ./cmd/product
+go run ./cmd/microharnessdemo --selfcheck
+go run ./cmd/microharnessdemo
 ```
 
 The generated product uses fak's managed boundary without making you assemble an agent loop from

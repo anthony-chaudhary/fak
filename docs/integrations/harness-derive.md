@@ -11,7 +11,7 @@ fak harness derive \
 
 fak harness preview --current support.lock.json --candidate my-support.lock.json
 fak harness inspect --lock my-support.lock.json
-go run ./cmd/product --selfcheck --product-lock my-support.lock.json
+go run ./cmd/microharnessdemo --selfcheck --product-lock my-support.lock.json
 ```
 
 The base manifest and layer-selection files are not required. The base lock is the imported product; the `--set` expression is the local source code of the variant.

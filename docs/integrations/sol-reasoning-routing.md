@@ -27,8 +27,8 @@ The managed Codex developer configuration selects `gpt-5.6-sol` with `model_reas
 FAK orchestration now makes the decision explicit in `resolved.sol_route` and launch receipts:
 
 ```powershell
-fak orchestration plan --profile auto --task-text "audit an uncertain security invariant" --json
-fak orchestration plan --profile auto --task-text "run a fleet wave over independent issues" --json
+go run ./cmd/fak -- orchestration plan --profile auto --task-text "audit an uncertain security invariant" --json
+go run ./cmd/fak -- orchestration plan --profile auto --task-text "run a fleet wave over independent issues" --json
 ```
 
 The first resolves to `max/xhigh`; the second resolves to `ultra/high` and the ultracode profile. If a task is both independent and rigor-sensitive, it resolves to `ultra/xhigh`: workflow topology never downgrades reasoning depth. An explicit `consult pro` request resolves to `pro`, but `--launch` returns `SOL_ROUTE_PRO_CONSULT_ONLY` instead of silently launching ordinary reasoning.

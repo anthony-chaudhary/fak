@@ -12,7 +12,7 @@ fak harness mix \
   --output support-research.lock.json
 
 fak harness inspect --lock support-research.lock.json
-go run ./cmd/product --selfcheck --product-lock support-research.lock.json
+go run ./cmd/microharnessdemo --selfcheck --product-lock support-research.lock.json
 ```
 
 This is intentionally stricter than loading two plugins:

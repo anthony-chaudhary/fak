@@ -6,7 +6,7 @@ Generated `fak harness init` products accept the immutable product lock emitted 
 fak harness select ... > selection.json
 fak harness resolve ... > resolution.json
 # extract resolution.lock as product.lock.json
-go run ./cmd/product --selfcheck --product-lock product.lock.json
+go run ./cmd/microharnessdemo --selfcheck --product-lock product.lock.json
 ```
 
 Before constructing the public `pkg/harnesskit` product, the generated runtime validates the lock schema, required component and asset provenance, opaque secret references, and canonical SHA-256 lock identity. Tampered or malformed locks fail before the offline turn starts.
