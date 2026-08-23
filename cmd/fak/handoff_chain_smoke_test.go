@@ -436,7 +436,7 @@ func requireWouldCloseWitness(t *testing.T, pythonPath, repo, fixturePath string
 	scriptPath := issueResolveWitnessedScript(t)
 	ghDir := t.TempDir()
 	ghPath := filepath.Join(ghDir, "gh")
-	ghScript := "#!/bin/sh\nif [ \"$1 $2\" = \"issue view\" ]; then printf '{\\\"body\\\":\\\"\\\",\\\"labels\\\":[]}\\n'; fi\nexit 0\n"
+	ghScript := "#!/bin/sh\nif [ \"$1 $2\" = \"issue view\" ]; then echo '{\"body\":\"\",\"labels\":[]}'; fi\nexit 0\n"
 	if err := os.WriteFile(ghPath, []byte(ghScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
