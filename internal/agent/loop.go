@@ -386,6 +386,47 @@ func RunArmStream(ctx context.Context, p Planner, task string, fak bool, maxTurn
 
 type armCompleteFunc func(ctx context.Context, messages []Message, tools []ToolDef, sink StreamSink, opts ...SampleOpt) (*Completion, error)
 
+func stopTerminatedArm(ctx context.Context, cfg runConfig, terminated func() bool, fak bool, k *kernel.Kernel, metrics *ArmMetrics) bool {
+	if !terminated() {
+		return false
+	}
+	_, proceed, reason := cfg.gateTurn(ctx)
+	if proceed || reason == "" {
+		return false
+	}
+	metrics.StoppedBySession = reason
+	if fak {
+		finalizeFak(k, metrics)
+	}
+	return true
+}
+func watchArmTermination(ctx context.Context, termCh <-chan struct{}) (context.Context, func() bool, func()) {
+	if termCh == nil {
+		return ctx, func() bool { return false }, func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	watchDone := make(chan struct{})
+	go func() {
+		select {
+		case <-termCh:
+			cancel()
+		case <-watchDone:
+		}
+	}()
+	terminated := func() bool {
+		select {
+		case <-termCh:
+			return true
+		default:
+			return false
+		}
+	}
+	cleanup := func() {
+		close(watchDone)
+		cancel()
+	}
+	return ctx, terminated, cleanup
+}
 func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]traceEvent, model string, stream bool, sink StreamSink, complete armCompleteFunc, opts ...RunOption) (ArmMetrics, error) {
 	cfg := resolveRunConfig(opts)
 	// Mid-flight mailbox (#5158): seal the verb mailbox on EVERY return path once the arm
@@ -417,58 +458,10 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 	messages := cfg.seedMessages(task)
 	tools := cfg.seedTools()
 
-	// Terminate seam (#2758): when a session table/gate wires a terminate signal, the
-	// arm's context is cancelled the moment the session enters Terminating, so the
-	// in-flight model call aborts at once instead of running to its natural end (the
-	// drain behavior). The watcher goroutine is reaped via watchDone on every return
-	// path; terminated() is the non-blocking mid-turn probe the tool loop consults
-	// before dispatching new work.
-	termCh := cfg.terminateSignal()
-	if termCh != nil {
-		var cancelArm context.CancelFunc
-		ctx, cancelArm = context.WithCancel(ctx)
-		defer cancelArm()
-		watchDone := make(chan struct{})
-		defer close(watchDone)
-		go func() {
-			select {
-			case <-termCh:
-				cancelArm()
-			case <-watchDone:
-			}
-		}()
-	}
-	terminated := func() bool {
-		if termCh == nil {
-			return false
-		}
-		select {
-		case <-termCh:
-			return true
-		default:
-			return false
-		}
-	}
-	// stopTerminated finalizes a terminate taken INSIDE the turn: it re-runs the
-	// boundary gate (which finalizes Terminating->Stopped and yields the closed
-	// TERMINATED reason for both the table- and function-shaped sources), stamps the
-	// arm metrics, and reports whether the arm should return. A proceed=true answer
-	// means the cancellation was NOT this session's terminate (e.g. the parent ctx
-	// died) — the caller falls through to its historical path.
-	stopTerminated := func() bool {
-		if !terminated() {
-			return false
-		}
-		_, proceed, stopReason := cfg.gateTurn(ctx)
-		if proceed || stopReason == "" {
-			return false
-		}
-		m.StoppedBySession = stopReason
-		if fak {
-			finalizeFak(k, &m)
-		}
-		return true
-	}
+	var terminated func() bool
+	ctx, terminated, cleanupTerminate := watchArmTermination(ctx, cfg.terminateSignal())
+	defer cleanupTerminate()
+	stopTerminated := func() bool { return stopTerminatedArm(ctx, cfg, terminated, fak, k, &m) }
 
 	// Resume re-entry (#1363/#4124): when this run is keyed on a session whose drive state
 	// carries a non-zero write-ahead turn checkpoint — a prior attempt was interrupted
