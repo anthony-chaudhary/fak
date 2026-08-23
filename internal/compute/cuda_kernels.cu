@@ -347,6 +347,24 @@ __device__ __forceinline__ float qwen35_gdn_weight(
   return (float)((const signed char *)weight)[index] * scale[(size_t)row * nblk + col / 32];
 }
 
+__global__ void k_q8_dequant_transient(const signed char *codes, const float *scales,
+                                          float *W, int rows, int cols) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int total = rows * cols;
+  if (i >= total) return;
+  int row = i / cols, col = i % cols;
+  W[i] = (float)codes[i] * scales[(size_t)row * (cols / 32) + col / 32];
+}
+
+static void q8_dequant_sgemm(const void *codes, const float *scales,
+                            const float *X, float *Y, int rows, int cols, int tokens) {
+  float *wide = (float *)fcuda_malloc((size_t)rows * cols * sizeof(float));
+  k_q8_dequant_transient<<<((size_t)rows * cols + 255) / 256, 256, 0, g_stream>>>(
+      (const signed char *)codes, scales, wide, rows, cols);
+  fcuda_matmul_f32(wide, X, Y, rows, cols, tokens);
+  fcuda_free(wide);
+}
+
 __global__ void k_qwen35_gdn_fused_in_proj(
     const float *x,
     const void *wQKV, const float *sQKV, int qQKV,
@@ -827,10 +845,17 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
       !dOutW || !dConvState || !dRecurrentState || !dMixed || !dZ || !dB || !dA ||
       !dConvOut || !dQNorm || !dKNorm || !dCore) return -1;
   cudaGetLastError();
-  k_qwen35_gdn_fused_in_proj<<<dim3(fusedRows, tokens), 256, 0, g_stream>>>(
+  if (tokens >= 128 && inQKVQ8 && inZQ8 && inBQ8 && inAQ8) {
+    q8_dequant_sgemm(dInQKV, dInQKVScale, dX, dMixed, convDim, hidden, tokens);
+    q8_dequant_sgemm(dInZ, dInZScale, dX, dZ, nV * vHd, hidden, tokens);
+    q8_dequant_sgemm(dInB, dInBScale, dX, dB, nV, hidden, tokens);
+    q8_dequant_sgemm(dInA, dInAScale, dX, dA, nV, hidden, tokens);
+  } else {
+    k_qwen35_gdn_fused_in_proj<<<dim3(fusedRows, tokens), 256, 0, g_stream>>>(
       dX, dInQKV, dInQKVScale, inQKVQ8, dInZ, dInZScale, inZQ8,
       dInB, dInBScale, inBQ8, dInA, dInAScale, inAQ8,
       dMixed, dZ, dB, dA, hidden, convDim, nV * vHd, nV);
+  }
   int status = qwen35_gdn_launch_status(2);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
   int convBlocks = (convDim + 255) / 256;
