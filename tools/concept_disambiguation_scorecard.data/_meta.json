@@ -5417,6 +5417,16 @@
           "category": "incidental",
           "reason": "Implementation-local Codex SessionStart adapter symbol; not a distinct project concept.",
           "token": "writeGuardCodexSessionBinding"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fleet-search aggregation record is an internal join representation, not a runtime session lifecycle concept.",
+          "token": "logicalSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fleet-search identifier selection helper does not create or manage runtime sessions.",
+          "token": "chooseSessionID"
         }
       ],
       "id": "session-runtime",
@@ -5782,7 +5792,9 @@
         "wipPeerCheckpointSessions",
         "witnessed_sufficiency_slot_released",
         "writeGuardCodexSessionBinding",
-        "writeSessionMoveJSON"
+        "writeSessionMoveJSON",
+        "logicalSession",
+        "chooseSessionID"
       ],
       "incidental_tokens": [],
       "known_tokens": [],
@@ -10095,6 +10107,36 @@
           "category": "incidental",
           "reason": "Fleet-search implementation symbol is local API vocabulary, not a new support-maturity concept.",
           "token": "CoverageUnavailable"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fleet-search verdict string describes query evidence coverage, not feature support maturity.",
+          "token": "PARTIAL_COVERAGE"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fleet-search typed verdict describes query evidence coverage, not feature support maturity.",
+          "token": "VerdictPartialCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fleet-search normalization helper handles store-read coverage, not feature support maturity.",
+          "token": "normalizeCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fleet-search local store-read status is query coverage, not feature support maturity.",
+          "token": "lifecycleCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fleet-search local store-read status is query coverage, not feature support maturity.",
+          "token": "registrationCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fleet-search store-read status is query evidence coverage, not feature support maturity.",
+          "token": "CoveragePartial"
         }
       ],
       "id": "support-maturity",
@@ -10136,6 +10178,7 @@
         "NATIVE_MESSAGE_ROLE_UNSUPPORTED",
         "NonCacheParity",
         "OutcomeSupported",
+        "PARTIAL_COVERAGE",
         "PROFILE_UNSUPPORTED_HARNESS",
         "ParityAhead",
         "ParityAtParity",
@@ -10295,7 +10338,12 @@
         "unsupported_scale",
         "workCoverage",
         "workCoverageUnavailableSources",
-        "workCoverageUnavailableText"
+        "workCoverageUnavailableText",
+        "VerdictPartialCoverage",
+        "normalizeCoverage",
+        "lifecycleCoverage",
+        "registrationCoverage",
+        "CoveragePartial"
       ],
       "known_tokens": [],
       "min_files": 3,
@@ -11266,6 +11314,11 @@
           "category": "incidental",
           "reason": "Human-readable formatter for the evidence-cited failure-analysis card; it applies the card's advisory contract and introduces no independent render/materialization concept.",
           "token": "RenderFailureAnalysisMarkdown"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fleet-search command renderer is a local output helper, not a separate render-materialization concept.",
+          "token": "renderSearchHuman"
         }
       ],
       "id": "render-materialize",
@@ -11335,6 +11388,7 @@
         "renderResumeDedup",
         "renderRunaway",
         "renderSchedLauncherTable",
+        "renderSearchHuman",
         "renderSeatCells",
         "renderSessionOpen",
         "renderShellChoice",
@@ -12055,6 +12109,11 @@
           "category": "incidental",
           "reason": "Local benchmark correctness ratio, not a planning concept",
           "token": "candidateRate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fleet-search join candidate is a local identifier record, not a planning concept.",
+          "token": "idCandidate"
         }
       ],
       "exclude": [
@@ -12217,7 +12276,8 @@
         "watchdogExclusionReason",
         "wipLandOptions",
         "wipLandWith",
-        "writeCandidate"
+        "writeCandidate",
+        "idCandidate"
       ],
       "known_tokens": [],
       "min_files": 2,

@@ -69,7 +69,7 @@ func TestSearchCapturedHumanAndJSONRenders(t *testing.T) {
 	if err := json.Unmarshal(machine.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.Verdict != fleetsearch.VerdictIncompleteEvidence || report.TotalMatches != 1 {
+	if report.Verdict != fleetsearch.VerdictPartialCoverage || report.TotalMatches != 1 {
 		t.Fatalf("partial JSON render = %+v", report)
 	}
 }

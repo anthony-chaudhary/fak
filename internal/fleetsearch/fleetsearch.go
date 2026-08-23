@@ -26,11 +26,11 @@ const (
 type Verdict string
 
 const (
-	VerdictSoleMatch          Verdict = "SOLE_MATCH"
-	VerdictMatches            Verdict = "MATCHES"
-	VerdictNoMatch            Verdict = "NO_MATCH"
-	VerdictNoContentTerms     Verdict = "NO_CONTENT_TERMS"
-	VerdictIncompleteEvidence Verdict = "INCOMPLETE_EVIDENCE"
+	VerdictSoleMatch       Verdict = "SOLE_MATCH"
+	VerdictMatches         Verdict = "MATCHES"
+	VerdictNoMatch         Verdict = "NO_MATCH"
+	VerdictNoContentTerms  Verdict = "NO_CONTENT_TERMS"
+	VerdictPartialCoverage Verdict = "PARTIAL_COVERAGE"
 )
 
 type Store string
@@ -332,7 +332,7 @@ func Search(in Input) (Report, error) {
 	report.Returned = len(report.Hits)
 	switch {
 	case incompleteEvidence(coverage):
-		report.Verdict = VerdictIncompleteEvidence
+		report.Verdict = VerdictPartialCoverage
 	case report.TotalMatches == 0:
 		report.Verdict = VerdictNoMatch
 	case report.TotalMatches == 1:

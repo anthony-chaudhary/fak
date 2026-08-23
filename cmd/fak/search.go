@@ -84,7 +84,7 @@ func searchUsage(w io.Writer, fs *flag.FlagSet) {
 	fmt.Fprintln(w, "Search lifecycle, child-registration, and tool-process stores by logical session ID.")
 	fmt.Fprintln(w, "Plain terms rank safe durable evidence; facets include is:active|stale|crashed|completed,")
 	fmt.Fprintln(w, "store:lifecycle|registration|tool-process, and limit:N. A missing or skipped store")
-	fmt.Fprintln(w, "returns INCOMPLETE_EVIDENCE instead of claiming sole-match or no-match certainty.")
+	fmt.Fprintln(w, "returns PARTIAL_COVERAGE instead of claiming sole-match or no-match certainty.")
 	fmt.Fprintf(w, "JSON schema: %s\n\n", fleetsearch.Schema)
 	prior := fs.Output()
 	fs.SetOutput(w)

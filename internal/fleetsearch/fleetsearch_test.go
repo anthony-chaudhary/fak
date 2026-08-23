@@ -161,12 +161,12 @@ func TestVerdictsNoTermsNoMatchAndPartialCoverage(t *testing.T) {
 		Lifecycle: []sessionjournal.Event{{Schema: sessionjournal.Schema, Kind: sessionjournal.KindOpen, ID: "only", TS: fixtureNow.Format(time.RFC3339), CWD: "confluence"}},
 		Coverage:  partial,
 	})
-	if err != nil || partialReport.Verdict != VerdictIncompleteEvidence || partialReport.TotalMatches != 1 {
+	if err != nil || partialReport.Verdict != VerdictPartialCoverage || partialReport.TotalMatches != 1 {
 		t.Fatalf("partial sole-match guard = %+v err=%v", partialReport, err)
 	}
 
 	partialNoMatch, err := Search(Input{Query: mustQuery(t, "absent", 10), Now: fixtureNow, Coverage: partial})
-	if err != nil || partialNoMatch.Verdict != VerdictIncompleteEvidence || partialNoMatch.TotalMatches != 0 {
+	if err != nil || partialNoMatch.Verdict != VerdictPartialCoverage || partialNoMatch.TotalMatches != 0 {
 		t.Fatalf("partial no-match guard = %+v err=%v", partialNoMatch, err)
 	}
 }
@@ -194,7 +194,7 @@ func TestRunFixtureStoreFailurePreventsFalseUniqueness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run partial: %v", err)
 	}
-	if partial.Verdict != VerdictIncompleteEvidence || partial.TotalMatches != 1 {
+	if partial.Verdict != VerdictPartialCoverage || partial.TotalMatches != 1 {
 		t.Fatalf("partial report = %+v", partial)
 	}
 	if got := coverageFor(partial.Coverage, StoreRegistration); got.Status != CoverageUnavailable || got.Detail == "" {
@@ -205,7 +205,7 @@ func TestRunFixtureStoreFailurePreventsFalseUniqueness(t *testing.T) {
 		LifecyclePath: paths.lifecycle, RegistrationPath: paths.registration, ToolProcessPath: paths.tool,
 		SkipToolProcess: true, Now: fixtureNow, StaleAfter: 30 * time.Minute, Limit: 10,
 	})
-	if err != nil || skipped.Verdict != VerdictIncompleteEvidence {
+	if err != nil || skipped.Verdict != VerdictPartialCoverage {
 		t.Fatalf("skipped store report = %+v err=%v", skipped, err)
 	}
 	if got := coverageFor(skipped.Coverage, StoreToolProcess); got.Status != CoverageSkipped {
