@@ -650,6 +650,15 @@ __global__ void k_qwen35_gdn_recurrent_panel(
   int kh = h / repeat;
   int keyDim = nK * kHd;
   extern __shared__ float ss[];
+  constexpr int maxKHd = 128;
+  float localState[maxKHd];
+  if (d < vHd) {
+#pragma unroll
+    for (int i = 0; i < maxKHd; ++i) {
+      if (i < kHd) localState[i] = state[((size_t)h * kHd + i) * vHd + d];
+    }
+  }
+
   for (int token = 0; token < tokens; ++token) {
     const float *qRow = qNorm + ((size_t)token * nK + kh) * kHd;
     const float *kRow = kNorm + ((size_t)token * nK + kh) * kHd;
@@ -664,19 +673,23 @@ __global__ void k_qwen35_gdn_recurrent_panel(
     float readout = 0.0f;
     if (d < vHd) {
       float kvmem = 0.0f;
-      for (int i = 0; i < kHd; ++i) {
-        size_t si = ((size_t)h * kHd + i) * vHd + d;
-        float sd = state[si] * decay;
-        state[si] = sd;
-        kvmem += sd * kRow[i];
+#pragma unroll
+      for (int i = 0; i < maxKHd; ++i) {
+        if (i < kHd) {
+          float sd = localState[i] * decay;
+          localState[i] = sd;
+          kvmem += sd * kRow[i];
+        }
       }
       float v = convRow[2 * keyDim + h * vHd + d];
       float delta = (v - kvmem) * beta;
-      for (int i = 0; i < kHd; ++i) {
-        size_t si = ((size_t)h * kHd + i) * vHd + d;
-        float sd = state[si] + kRow[i] * delta;
-        state[si] = sd;
-        readout += sd * qRow[i];
+#pragma unroll
+      for (int i = 0; i < maxKHd; ++i) {
+        if (i < kHd) {
+          float sd = localState[i] + kRow[i] * delta;
+          localState[i] = sd;
+          readout += sd * qRow[i];
+        }
       }
     }
     ss[d] = d < vHd ? readout * readout : 0.0f;
@@ -691,6 +704,12 @@ __global__ void k_qwen35_gdn_recurrent_panel(
       core[(size_t)token * nV * vHd + vd] = norm[d] * (readout * inv) * qwen35_gdn_silu(zRow[vd]);
     }
     __syncthreads();
+  }
+  if (d < vHd) {
+#pragma unroll
+    for (int i = 0; i < maxKHd; ++i) {
+      if (i < kHd) state[((size_t)h * kHd + i) * vHd + d] = localState[i];
+    }
   }
 }
 __global__ void k_qwen35_gdn_out_proj(
