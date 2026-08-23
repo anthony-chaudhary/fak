@@ -104,3 +104,65 @@ func TestParallelToolCancellationDrainsStartedAndSkipsQueuedInModelOrder(t *test
 		t.Fatalf("call-3 receipt = %+v, want status=%q reason=%q", receipt, ToolResultSkipped, toolCallSkippedByCancellation)
 	}
 }
+
+func TestToolSchedulerOverlapsSafeBodiesAndPreservesModelOrder(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan string, 2)
+	call := func(id string) scheduledToolCall {
+		return scheduledToolCall{call: ToolCall{ID: id}, effect: toolEffectSafe, run: func(context.Context) (string, error) {
+			started <- id
+			<-release
+			return id + " result", nil
+		}}
+	}
+	done := make(chan []scheduledToolResult, 1)
+	go func() {
+		done <- runScheduledToolCalls(context.Background(), 2, []scheduledToolCall{call("first"), call("second")})
+	}()
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("safe tool bodies ran serially")
+		}
+	}
+	close(release)
+	results := <-done
+	if results[0].content != "first result" || results[1].content != "second result" {
+		t.Fatalf("results lost model order: %+v", results)
+	}
+}
+
+func TestToolSchedulerExclusiveCallIsBarrier(t *testing.T) {
+	var active atomic.Int32
+	var crossed atomic.Bool
+	mk := func(id string, effect toolEffectClass) scheduledToolCall {
+		return scheduledToolCall{call: ToolCall{ID: id}, effect: effect, run: func(context.Context) (string, error) {
+			if active.Add(1) != 1 {
+				crossed.Store(true)
+			}
+			time.Sleep(20 * time.Millisecond)
+			active.Add(-1)
+			return id, nil
+		}}
+	}
+	calls := []scheduledToolCall{mk("read-1", toolEffectSafe), mk("write", toolEffectExclusive), mk("read-2", toolEffectSafe)}
+	results := runScheduledToolCalls(context.Background(), 3, calls)
+	if crossed.Load() {
+		t.Fatal("an exclusive call overlapped across its barrier")
+	}
+	for i, want := range []string{"read-1", "write", "read-2"} {
+		if results[i].content != want {
+			t.Fatalf("result[%d]=%q, want %q", i, results[i].content, want)
+		}
+	}
+}
+
+func TestToolEffectForUnknownDefaultsExclusive(t *testing.T) {
+	if got := toolEffectFor("unknown_tool"); got != toolEffectExclusive {
+		t.Fatalf("unknown tool effect = %v, want exclusive", got)
+	}
+	if got := toolEffectFor(toolSearch); got != toolEffectSafe {
+		t.Fatalf("declared read effect = %v, want safe", got)
+	}
+}
