@@ -17,6 +17,7 @@ FAK coordinates the whole agent path, not isolated components. Start with the [c
 |---|---|---|
 | Evaluating fak | [Reproducibility packet](repro-packet.md) | Identify the product, run the offline proof, then inspect its evidence. |
 | Building or integrating an agent or client | [Managed agent runtime](explainers/agent-runtime.md) | Choose an interface, understand ownership, and follow the proposal-to-continuation flow. |
+| Improving or comparing local inference | [Fak-native inference doctrine](native-inference-goal.md) | Keep native product work inside fak, classify explicit llama.cpp uses, and apply the matched-envelope rule. |
 | Deploying or operating | [Deployment guide](fak/deployment-guide.md) | Choose an operating envelope, then configure and observe the service. |
 | Contributing | [Contributor guide](../CONTRIBUTING.md) and [developer tooling](dev-tooling.md) | Find the owning document first, then build, test, change, and prove the repository under its current contracts. |
 | Researching design or history | [Notes archive](notes/) | Find rationale and dated evidence, then check current code and tests before relying on it. |
@@ -95,13 +96,18 @@ the live versions run on the [demos page](demos.html). Or watch the worked examp
 
 ## What fak is not
 
-`fak` is **not** a drop-in replacement for tuned token engines. Use vLLM, SGLang,
-llama.cpp, or a hosted provider when raw tokens/sec is the job, and put `fak serve`
-in front for the agent boundary: which effects are allowed, which results may enter
-memory, when reuse is still legal, what gets audited, and what survives a session
-boundary. The in-kernel model path is a correctness/reference engine with narrow
-witnessed performance rungs; broad serving-speed claims need a benchmark-authority
-row, not a slogan.
+`fak serve` in proxy/gateway mode is **not** a claim that fak authored the upstream token
+engine. An explicitly selected vLLM, SGLang, llama.cpp, or hosted-provider route remains
+external inference while fak owns the agent boundary: which effects are allowed, which
+results may enter memory, when reuse is legal, what gets audited, and what survives a
+session boundary.
+
+That gateway boundary does not turn the native engine into a permanent reference-only path.
+For local inference, [fak-native is the product and performance path](native-inference-goal.md),
+intended to beat llama.cpp in matched, quality-constrained envelopes while retaining ownership
+of kernels, memory, scheduling, cache, adaptation, and operations. Current broad serving-speed
+claims still need a benchmark-authority row; the doctrine is the direction, not a substitute for
+evidence.
 
 ## Tool-call controls
 

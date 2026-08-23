@@ -16,6 +16,19 @@ description: "fak reduces repeated work at the managed-agent boundary; which mec
 
 **Next action:** choose the outcome and run path in the table, then open its proof route and reproduce that witness before quoting a result.
 
+## Native inference target
+
+The local product and performance path is fak-native, not an automatically substituted external
+engine. The [canonical inference doctrine](native-inference-goal.md) sets the target: fak-native
+is intended to beat llama.cpp in matched, quality-constrained envelopes because fak must retain
+control of kernels, memory, scheduling, cache, adaptation, and operations for those gains to
+compose.
+
+This direction does not mint a current win. Each comparison still names the executing engine,
+the matched envelope, and the authority row. llama.cpp can be selected explicitly as a
+benchmark, parity/reference, migration/interoperability, or borrowing aid; it never silently
+turns a failed or unsupported native run into a passing external result.
+
 ## Choose the outcome you need
 
 | Outcome | Applicable run path | Mechanism | Proof route |
@@ -29,7 +42,7 @@ description: "fak reduces repeated work at the managed-agent boundary; which mec
 
 1. **Match the mode.** A provider prompt-cache result does not prove direct KV reuse, and a local-inference result does not describe a hosted provider path.
 2. **Match workload and hardware.** Model, quantization, turn shape, concurrency, device, and warm-state assumptions stay attached to the result.
-3. **Use the tuned alternative.** Quote the tuned baseline as the headline comparison; a naive stateless arm is context, not the real alternative.
+3. **Use the tuned alternative.** Quote the tuned baseline as the headline comparison; a naive stateless arm is context, not the real alternative. For native inference work, apply the [matched-envelope rule](native-inference-goal.md#the-matched-envelope-rule).
 4. **Separate mechanism from outcome.** Cache reuse, context shedding, and low kernel overhead are mechanisms or component measurements. End-to-end latency, throughput, token work, and session longevity are outcomes with different witnesses.
 5. **Stop when evidence is absent.** A result without a reproducible current witness is `not yet`, not a projected gain. Grade a proposed claim with `fak claim-check` under the [net-true-value standard](standards/net-true-value.md).
 

@@ -12,6 +12,15 @@ in [`../../BENCHMARK-GALLERY.md`](../../BENCHMARK-GALLERY.md). Each sheet below 
 own provenance labels (MEASURED / MODELED / WITNESSED / PENDING / GATED); this page just
 tells you where to look.
 
+## Engine identity rule
+
+Use the [fak-native inference doctrine](../native-inference-goal.md) before interpreting any
+native-versus-llama.cpp sheet. fak-native is the product and performance path; llama.cpp is an
+explicit tuned baseline, parity/reference aid, migration/interoperability path, or source of
+ideas to borrow into fak. A llama.cpp run never becomes a native result because fak launched or
+fronted it, and an unsupported native run never passes by silently changing engines. Every
+comparison keeps the executing engine, matched envelope, quality floor, and evidence status.
+
 ## Fleet, cache & session value
 
 | File | Kind | One-liner | Headline |

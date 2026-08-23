@@ -50,6 +50,19 @@ The checkpoint is a **mediation boundary, not an operating-system sandbox**. It 
 
 **Next action:** run `fak agent --offline` and verify that the task completes while the poisoned result and destructive operation are blocked.
 
+## Execution-engine boundary
+
+The kernel supports different model-facing routes, but they do not carry the same ownership
+claim. A gateway may front an explicitly selected provider or external engine. That is external
+inference governed by fak's agent boundary; it is not fak-native model execution.
+
+For local native and performance work, the [fak-native inference doctrine](native-inference-goal.md)
+is authoritative: fak-native is the product and performance path, intended to beat llama.cpp in
+matched, quality-constrained envelopes. llama.cpp remains an explicit benchmark,
+parity/reference, migration/interoperability, or borrowing aid, never a silent fallback. This
+distinction preserves fak's ownership of kernels, memory, scheduling, cache, adaptation, and
+operations while keeping current claims subordinate to benchmark evidence.
+
 ## End-to-end request flow
 
 1. **Enter and normalize.** A managed loop, gateway, MCP transport, or adapter converts the client request into the selected kernel contract.
@@ -154,6 +167,7 @@ Keeping every verb in `fak` was rejected because it blurred the production trust
 Read these only after choosing the applicable interface:
 
 - [Managed runtime responsibilities and flow](explainers/agent-runtime.md) — who proposes, adjudicates, executes, admits, and continues.
+- [Fak-native inference doctrine](native-inference-goal.md) — the engine-ownership boundary, matched-envelope target, and explicit llama.cpp uses.
 - [Frozen ABI and registry architecture](../ARCHITECTURE.md) — contributor-facing package seams and additive registration contract.
 - [Agent integration architecture](fak/agent-integration-architecture.md) — detailed gateway, ABI, policy, extension, and observability reference.
 - [Serving architecture and engines](serving/README.md) — engine selection and service composition.
