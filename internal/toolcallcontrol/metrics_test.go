@@ -59,8 +59,8 @@ func TestResultBudgetMetricsBreaksDownAndCapturesEveryRequiredSignal(t *testing.
 	if snapshot.Schema != ResultBudgetMetricsSchema {
 		t.Fatalf("schema=%q want=%q", snapshot.Schema, ResultBudgetMetricsSchema)
 	}
-	if len(snapshot.Buckets) != 6 {
-		t.Fatalf("buckets=%d want=6: %+v", len(snapshot.Buckets), snapshot.Buckets)
+	if len(snapshot.Buckets) != len(variations)+1 {
+		t.Fatalf("buckets=%d want one base plus %d axis variations: %+v", len(snapshot.Buckets), len(variations), snapshot.Buckets)
 	}
 	got, ok := resultBudgetMetricBucket(snapshot, base)
 	if !ok {
