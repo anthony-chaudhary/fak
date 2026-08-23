@@ -193,3 +193,40 @@ func TestDiffResetOnEmptyTranscriptIsTotalNotError(t *testing.T) {
 		t.Fatal("Explain() should still render bucket headers on an empty diff")
 	}
 }
+
+func TestResetDiffQualityDebt(t *testing.T) {
+	in := Input{
+		Trace: "old", FreshBudgetTok: 100,
+		QualityDebtBefore: []QualityDebt{
+			{CardKey: "ui-quality", Debt: 7, RootDebtSource: "before-ui.json"},
+			{CardKey: "dogfood", Debt: 5, RootDebtSource: "before-dogfood.json"},
+		},
+		QualityDebtAfter: []QualityDebt{
+			{CardKey: "dogfood", Debt: 2, RootDebtSource: "dogfood-control-pane"},
+			{CardKey: "ui-quality", Debt: 9, RootDebtSource: "ui-quality-control-pane"},
+		},
+	}
+	seed := BuildSeed(in)
+	tx := BuildResetTransaction(in, "new", seed)
+	diff := DiffReset(in, seed, tx)
+
+	if len(diff.QualityDebt) != 2 {
+		t.Fatalf("quality debt deltas = %d, want 2: %+v", len(diff.QualityDebt), diff.QualityDebt)
+	}
+	want := []QualityDebtDelta{
+		{CardKey: "dogfood", DebtBefore: 5, DebtAfter: 2, RootDebtSource: "dogfood-control-pane"},
+		{CardKey: "ui-quality", DebtBefore: 7, DebtAfter: 9, RootDebtSource: "ui-quality-control-pane"},
+	}
+	for i := range want {
+		if diff.QualityDebt[i] != want[i] {
+			t.Fatalf("quality debt delta[%d] = %+v, want %+v", i, diff.QualityDebt[i], want[i])
+		}
+	}
+	for _, rendered := range []string{diff.Explain(), diff.Markdown()} {
+		for _, needle := range []string{"dogfood", "debt_before=5", "debt_after=2", "dogfood-control-pane", "ui-quality", "debt_before=7", "debt_after=9", "ui-quality-control-pane"} {
+			if !strings.Contains(rendered, needle) {
+				t.Fatalf("render missing %q:\n%s", needle, rendered)
+			}
+		}
+	}
+}

@@ -53,10 +53,12 @@ type Msg struct {
 // (oldest-first), and the fresh budget the reset will re-arm with (so a contributor
 // can size its contribution to the new window).
 type Input struct {
-	Trace          string
-	Messages       []Msg
-	FreshBudgetTok int // the context-token budget the fresh session is re-armed with (0 = unbounded)
-	DecisionLog    []taskdecision.Entry
+	Trace             string
+	Messages          []Msg
+	FreshBudgetTok    int // the context-token budget the fresh session is re-armed with (0 = unbounded)
+	DecisionLog       []taskdecision.Entry
+	QualityDebtBefore []QualityDebt
+	QualityDebtAfter  []QualityDebt
 }
 
 // Part is one contributor's proposal for the seed. Order fixes the deterministic

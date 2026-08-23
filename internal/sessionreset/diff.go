@@ -82,6 +82,20 @@ type DiffPart struct {
 
 // DiffSpan is one omitted transcript span's projection into the diff — the
 // payload-free handle plus which bucket it landed in.
+type QualityDebt struct {
+	CardKey        string `json:"card_key"`
+	Debt           int    `json:"debt"`
+	RootDebtSource string `json:"root_debt_source"`
+}
+
+// QualityDebtDelta compares one scorecard/control-pane debt reading across a reset.
+type QualityDebtDelta struct {
+	CardKey        string `json:"card_key"`
+	DebtBefore     int    `json:"debt_before"`
+	DebtAfter      int    `json:"debt_after"`
+	RootDebtSource string `json:"root_debt_source"`
+}
+
 type DiffSpan struct {
 	Index  int    `json:"index"`
 	Role   string `json:"role,omitempty"`
@@ -113,6 +127,8 @@ type ResetDiff struct {
 	// actually opens with (len(Seed.Recap)).
 	BeforeSpans int `json:"before_spans"`
 	AfterChars  int `json:"after_chars"`
+
+	QualityDebt []QualityDebtDelta `json:"quality_debt,omitempty"`
 }
 
 // DiffReset renders the before/after diff for one reset from the same three values
@@ -129,6 +145,7 @@ func DiffReset(in Input, seed Seed, tx session.ResetTransaction) ResetDiff {
 		SeedDigest:  tx.SeedDigest,
 		BudgetRearm: tx.BudgetRearm,
 		BeforeSpans: len(in.Messages),
+		QualityDebt: compareQualityDebt(in.QualityDebtBefore, in.QualityDebtAfter),
 		AfterChars:  len(seed.Recap),
 	}
 	for _, p := range seed.Parts {
@@ -185,6 +202,29 @@ func (d ResetDiff) RowCount() int {
 	return len(d.Survived) + len(d.Summarized) + len(d.MustRequery) + len(d.Expired)
 }
 
+func compareQualityDebt(before, after []QualityDebt) []QualityDebtDelta {
+	beforeByCard := make(map[string]QualityDebt, len(before))
+	for _, debt := range before {
+		beforeByCard[debt.CardKey] = debt
+	}
+	deltas := make([]QualityDebtDelta, 0, len(after))
+	for _, current := range after {
+		previous, ok := beforeByCard[current.CardKey]
+		if !ok || current.CardKey == "" {
+			continue
+		}
+		source := current.RootDebtSource
+		if source == "" {
+			source = previous.RootDebtSource
+		}
+		deltas = append(deltas, QualityDebtDelta{
+			CardKey: current.CardKey, DebtBefore: previous.Debt, DebtAfter: current.Debt, RootDebtSource: source,
+		})
+	}
+	sort.Slice(deltas, func(i, j int) bool { return deltas[i].CardKey < deltas[j].CardKey })
+	return deltas
+}
+
 // Explain renders the diff as an operator-readable report: one section per bucket,
 // then the lineage/digest footer — the "what survived, what expired, what was
 // summarized, what needs a follow-up query" account the issue's Done condition asks
@@ -197,11 +237,19 @@ func (d ResetDiff) Explain() string {
 	fmt.Fprintf(&b, "  budget rearm: context_tokens=%d/%d turns=%s tokens=%s\n",
 		d.BudgetRearm.ContextTokensLeft, d.BudgetRearm.ContextTokensCap,
 		unboundedLabel(d.BudgetRearm.TurnsLeft), unboundedLabel(d.BudgetRearm.TokensLeft))
+	writeQualityDebt(&b, d.QualityDebt)
 	writeDiffParts(&b, "SURVIVED     (carried forward near-verbatim)", d.Survived)
 	writeDiffParts(&b, "SUMMARIZED   (folded/distilled into the seed)", d.Summarized)
 	writeDiffSpans(&b, "MUST-REQUERY (cold, recoverable via an explicit follow-up)", d.MustRequery)
 	writeDiffSpans(&b, "EXPIRED      (dropped, no recovery handle beyond the digest)", d.Expired)
 	return b.String()
+}
+
+func writeQualityDebt(b *strings.Builder, deltas []QualityDebtDelta) {
+	for _, delta := range deltas {
+		fmt.Fprintf(b, "  quality debt: %s debt_before=%d debt_after=%d root_debt_source=%s\n",
+			delta.CardKey, delta.DebtBefore, delta.DebtAfter, nz(delta.RootDebtSource))
+	}
 }
 
 func writeDiffParts(b *strings.Builder, title string, parts []DiffPart) {
@@ -234,6 +282,13 @@ func (d ResetDiff) Markdown() string {
 	fmt.Fprintf(&b, "- after: %d char(s) carried over\n", d.AfterChars)
 	fmt.Fprintf(&b, "- budget rearm: context_tokens=%d/%d\n\n", d.BudgetRearm.ContextTokensLeft, d.BudgetRearm.ContextTokensCap)
 
+	if len(d.QualityDebt) > 0 {
+		b.WriteString("## Quality debt\n\n")
+		for _, delta := range d.QualityDebt {
+			fmt.Fprintf(&b, "- `%s`: debt_before=%d, debt_after=%d, root_debt_source=`%s`\n", delta.CardKey, delta.DebtBefore, delta.DebtAfter, nz(delta.RootDebtSource))
+		}
+		b.WriteString("\n")
+	}
 	b.WriteString("## Survived (carried forward near-verbatim)\n\n")
 	writeDiffPartsMD(&b, d.Survived)
 	b.WriteString("## Summarized (folded/distilled into the seed)\n\n")
