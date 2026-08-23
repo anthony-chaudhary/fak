@@ -374,6 +374,7 @@ concurrent = [
   "managedocs",
   "humanctl",
   "toolcatalog",
+  "toolcallcontrol",
   "projectassets",
   "sessionintent",
   "serverproduct",
@@ -529,6 +530,7 @@ autopick = [
   "managedocs",
   "humanctl",
   "toolcatalog",
+  "toolcallcontrol",
   "projectassets",
   "harnessmodelset",
   "modelinventory",
@@ -1130,6 +1132,7 @@ depthadmit = ["internal/depthadmit/**"]
 managedocs = ["internal/managedocs/**"]
 humanctl = ["internal/humanctl/**"]
 toolcatalog = ["internal/toolcatalog/**"]
+toolcallcontrol = ["internal/toolcallcontrol/**"]
 harnesskit = ["pkg/harnesskit/**", "docs/harness-kit-contract.md", "docs/_witnesses/harness-kit-contract*"]
 projectassets = ["internal/projectassets/**"]
 sessionintent = ["internal/sessionintent/**"]
