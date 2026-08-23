@@ -189,7 +189,7 @@ here is the split. It is not a convention you have to learn: the binary carries 
 Don't trust those counts — they move as verbs land, and none of the rest of this page
 depends on them. Repository-development commands are not part of this runtime count; maintainers install the separate `fak-dev` artifact with `go install ./cmd/fak-dev`, and `fak-dev help` lists that surface. Derive your own runtime count: `fak help --all` prints the whole list
 for the build you actually installed, `fak help --all` prints every listed verb tagged with
-its tier, and `fak index verbs --json` emits the same classification as machine-readable
+its tier, and `fak-dev index verbs --json` emits the same classification as machine-readable
 rows. The classification has exactly one home in the source
 ([`internal/devindex/tiers.go`](internal/devindex/tiers.go)) and a test refuses a newly
 dispatched verb that no tier claims, so a verb cannot drift into the wrong column.

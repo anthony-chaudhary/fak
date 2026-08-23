@@ -462,7 +462,7 @@ fak dream     --dir DIR --out-dir DIR                   # offline cleanup pass o
 fak debug     --session DIR --cmd report|info|bt|x|ws|grep|tombstone|context-query|context-diff   # attach to a session core image; demand-page its working set
 fak answer-shape --text - --max-repeat 0.5 [--max-chars N]   # degeneration/verbosity witness over a text; exit 1 when it loops/runs away
 fak doctor    --text - [--max-repeat 0.5] [--max-chars N]   # run the answer-shape witness + the kernel admit cross-check, then recommend
-fak index     lane <path>... | leaf [<query>] | docs <query> | refs <pkg>.<Sym> [--json] [--limit N]   # query the devindex self-index for lane ownership, leaf search, docs, and Go refs; alias: fak devindex
+fak-dev index lane <path>... | leaf [<query>] | docs <query> | refs <pkg>.<Sym> [--json] [--limit N]   # query the devindex self-index for lane ownership, leaf search, docs, and Go refs; alias: fak devindex
 fak codelint  PATH...                                  # lint agent-written code (Go/JSON in-process, Python/CUDA via toolchain); exit 1 on a hard parse/compile error
 fak policy    --dump | --check FILE                        # author/validate the deployable capability floor
 fak route     --aspect tool_call --tool refund_payment [--manifest FILE] [--simulate "a,b,b"]   # which model/ensemble routes this aspect; --dump/--check author the routing manifest

@@ -66,7 +66,7 @@ to reproduce it locally.
 | Documentation | Confirm every link you added or moved resolves |
 | Anything | `git commit -s` (DCO sign-off — enforced) |
 
-You do **not** need `python tools/install_trunk_guard.py`, `make ci`, or `fak ci-preflight`
+You do **not** need `python tools/install_trunk_guard.py`, `make ci`, or `fak-dev ci-preflight`
 for a forked PR. Those are the shared-checkout gates described further down; a maintainer
 runs the equivalent before your change lands on `main`.
 
@@ -101,7 +101,7 @@ witness for completion claims.
 | Existing Go package or CLI behavior | The owning package under `internal/` or `cmd/fak/` | A behavior test that fails before the fix and passes after it |
 | New subsystem capability | [`EXTENDING.md`](EXTENDING.md) and [`ARCHITECTURE.md`](ARCHITECTURE.md) | A leaf implementation, architecture gate, correctness witness, and measured gain where performance is claimed |
 | Documentation | The audience route in [`INDEX.md`](INDEX.md) | Every changed local link resolves, and an independent reader correctly restates the audience, page job, choices, and next action with no ambiguity; visual defects also require a captured render |
-| CI/CD contract | [`docs/ci/ci-spec-change-migration.md`](docs/ci/ci-spec-change-migration.md) | All consumers migrated together and `fak ci-preflight` on the committed tip |
+| CI/CD contract | [`docs/ci/ci-spec-change-migration.md`](docs/ci/ci-spec-change-migration.md) | All consumers migrated together and `fak-dev ci-preflight` on the committed tip |
 
 New here and want a bounded first change? Choose an open
 [`good first issue`](https://github.com/anthony-chaudhary/fak/labels/good%20first%20issue)
@@ -123,7 +123,7 @@ from an old planning note when a current issue or authority disagrees.
    direct commits to *this* shared `main`; it has no role in a fork, so skip it entirely if
    you are opening a pull request.
 2. **Everyone — the compile check.** Compile without writing an in-tree binary:
-   `fak buildcheck --vet`. It exists because this checkout is shared and a peer's untracked
+   `fak-dev buildcheck --vet`. It exists because this checkout is shared and a peer's untracked
    Go files would otherwise change the answer; from a fork, plain
    `go build ./... && go vet ./...` is the same check. If no usable `fak` binary exists yet,
    use a unique temporary output (`go build -o <temp-path> ./cmd/fak`), then use that binary
@@ -142,10 +142,10 @@ from an old planning note when a current issue or authority disagrees.
    tests through `./test.ps1` under WSL because host application control blocks newly
    compiled test executables. Build and vet remain native-safe.
 4. **Maintainers and in-repo agents only — direct-to-`main`.** After the explicit-path commit
-   and before push, run `fak ci-preflight` as the
+   and before push, run `fak-dev ci-preflight` as the
    **required committed-tip gate** in a clean temporary checkout, independent of the
    peer-dirty working tree. Thus "green" means both gates in order: `make ci` before the
-   commit and `fak ci-preflight` after it. A forked PR has no push-to-`main` step, so this
+   commit and `fak-dev ci-preflight` after it. A forked PR has no push-to-`main` step, so this
    gate does not apply to it.
 
 Build-profile details and platform commands live in
