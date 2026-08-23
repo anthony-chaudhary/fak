@@ -56,3 +56,52 @@ func TestObservedHookEventsIncludeStopFamily(t *testing.T) {
 		t.Fatal("unrelated lifecycle event entered tool/Stop profile")
 	}
 }
+
+func TestHookCommandPlatformCompatibility(t *testing.T) {
+	tests := []struct {
+		name, command, goos string
+		want                bool
+	}{
+		{
+			name:    "windows rejects selected POSIX stop command",
+			command: `root="${CODEX_PLUGIN_ROOT:-}"; command -p sh "$root/bin/dos-hook" stop 2>/dev/null || python3 -m dos.cli hook stop`,
+			goos:    "windows",
+			want:    true,
+		},
+		{
+			name:    "windows accepts native adapter",
+			command: `& (Join-Path $env:PLUGIN_ROOT 'bin\dos-hook-codex.ps1') stop --workspace .; exit $LASTEXITCODE`,
+			goos:    "windows",
+		},
+		{
+			name:    "linux accepts POSIX command",
+			command: `root="${CODEX_PLUGIN_ROOT:-}"; command -p sh "$root/bin/dos-hook" stop`,
+			goos:    "linux",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hookCommandPlatformIncompatible(tt.command, tt.goos); got != tt.want {
+				t.Fatalf("incompatible=%v want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClassifyEffectiveHookRejectsIncompatibleWindowsCommand(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("classification follows the current host platform")
+	}
+	h := effectiveHook{
+		Enabled:     true,
+		TrustStatus: "trusted",
+		Command:     `root="${CODEX_PLUGIN_ROOT:-}"; command -p sh "$root/bin/dos-hook" stop`,
+	}
+	classifyEffectiveHook(&h, t.TempDir())
+	if h.State != "platform_incompatible" {
+		t.Fatalf("state=%s want platform_incompatible", h.State)
+	}
+	if h.Remediation == "" {
+		t.Fatal("platform incompatibility needs actionable remediation")
+	}
+}

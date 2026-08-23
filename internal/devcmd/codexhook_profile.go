@@ -219,6 +219,10 @@ func classifyEffectiveHook(h *effectiveHook, home string) {
 	default:
 		h.State = "effective"
 	}
+	if h.State == "effective" && hookCommandPlatformIncompatible(h.Command, runtime.GOOS) {
+		h.State = "platform_incompatible"
+		h.Remediation = "declare a commandWindows entry that invokes the native Codex hook adapter"
+	}
 	h.Identities = resolveHookIdentities(*h, home)
 	for _, id := range h.Identities {
 		if !id.Exists && h.State == "effective" {
@@ -227,6 +231,20 @@ func classifyEffectiveHook(h *effectiveHook, home string) {
 		}
 	}
 }
+func hookCommandPlatformIncompatible(command, goos string) bool {
+	if goos != "windows" {
+		return false
+	}
+	// Codex executes the selected Windows command in PowerShell. POSIX shell
+	// expansion and redirection therefore fail before the hook backend runs.
+	for _, marker := range []string{"${", "command -p sh", "2>/dev/null", "|| python3", "[ -n ", "[ -z "} {
+		if strings.Contains(command, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func resolveHookIdentities(h effectiveHook, home string) []executableIdentity {
 	var out []executableIdentity
 	if h.PluginID != "" && h.SourcePath != "" {
