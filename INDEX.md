@@ -271,6 +271,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Authoritative ultracode accounting dogfood — 2026-08-23](docs/notes/ULTRACODE-ACCOUNTING-DOGFOOD-2026-08-23.md) — the live repository pair returns a typed ABSTAIN and binds receipt gaps to #8559 and #5971.
 - [Native harness live-model and dogfood readout — 2026-08-22](docs/notes/NATIVE-HARNESS-DOGFOOD-2026-08-22.md) -- auto-indexed dated note.
 - [Concept study: mini-sglang's compact serving control loop](docs/notes/CONCEPT-STUDY-MINI-SGLANG-2026-08-22.md) -- auto-indexed dated note.
 - [FlashInfer study — reusable execution plans, workload tuning, and traceable kernels](docs/research/flashinfer-study-2026-08-22.md) -- pinned deep study; files plan/run #8607, offline tuning #8608, and device-event trace #8609.
