@@ -10055,6 +10055,46 @@
           "category": "incidental",
           "reason": "Receipt reason preserving a backend limitation, not a fak support-maturity claim.",
           "token": "backend_does_not_support_transition"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fleet-search implementation symbol is local API vocabulary, not a new support-maturity concept.",
+          "token": "SearchQuery"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fleet-search implementation symbol is local API vocabulary, not a new support-maturity concept.",
+          "token": "SearchResult"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fleet-search implementation symbol is local API vocabulary, not a new support-maturity concept.",
+          "token": "SearchIndex"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fleet-search implementation symbol is local API vocabulary, not a new support-maturity concept.",
+          "token": "ParseQuery"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fleet-search implementation symbol is local API vocabulary, not a new support-maturity concept.",
+          "token": "SearchFacet"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fleet-search implementation symbol is local API vocabulary, not a new support-maturity concept.",
+          "token": "SearchCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fleet-search implementation symbol is local API vocabulary, not a new support-maturity concept.",
+          "token": "CoverageSkipped"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fleet-search implementation symbol is local API vocabulary, not a new support-maturity concept.",
+          "token": "CoverageUnavailable"
         }
       ],
       "id": "support-maturity",
@@ -10071,6 +10111,8 @@
         "ConfigDescriptionCoverage",
         "CorrectnessGate",
         "CorrectnessMargin",
+        "CoverageSkipped",
+        "CoverageUnavailable",
         "DecodeInterleaveUnsupported",
         "DefaultSetupParityPairs",
         "DefaultSetupParityReport",
@@ -10114,6 +10156,7 @@
         "ParitySample",
         "ParityUnknown",
         "ParityUnpublished",
+        "ParseQuery",
         "ProviderSupport",
         "QUANTPROV_UNSUPPORTED_FORMAT",
         "QUANTPROV_UNSUPPORTED_QUANTIZER",
@@ -10137,6 +10180,11 @@
         "ResultUnsupported",
         "RunCommitSubjectCoverage",
         "SUPPORTED_COMBINATION",
+        "SearchCoverage",
+        "SearchFacet",
+        "SearchIndex",
+        "SearchQuery",
+        "SearchResult",
         "SecurityParityConfirmed",
         "SessionSupport",
         "SetupParityBlocks",
