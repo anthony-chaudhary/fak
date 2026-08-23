@@ -320,7 +320,7 @@ func TestCUDAQ4KMatMulApproxMatchesRef(t *testing.T) {
 // TestCUDAQ4KBatchedMatMulApproxMatchesRef — native Q4_K prefill GEMM, dequant fused into the tile,
 // vs the cpuref f32 BatchedMatMul over the dequant of the same bytes. cosine over the full Y ≥
 // cudaQ4KCosineMin.
-func TestCUDAQ4KLargePanelCompensatedTF32MatchesRef(t *testing.T) {
+func TestCUDAQ4KLargePanelCompensatedFP16MatchesRef(t *testing.T) {
 	cb := cudaOrSkip(t)
 	ref := Default()
 	var seed lcg = 0x4b4d
@@ -334,12 +334,12 @@ func TestCUDAQ4KLargePanelCompensatedTF32MatchesRef(t *testing.T) {
 	got := cb.Read(cb.BatchedMatMul(wQ4K, mkResident(cb, []int{P, in}, X), P))
 	cos, maxAbs := cosine(want, got), maxAbsDelta(want, got)
 	if cos < cudaQ4KCosineMin || maxAbs > 0.02 {
-		t.Fatalf("compensated TF32 Q4_K panel: cosine=%.8f maxAbs=%.3e", cos, maxAbs)
+		t.Fatalf("compensated FP16 Q4_K panel: cosine=%.8f maxAbs=%.3e", cos, maxAbs)
 	}
 	if argmaxF32(got) != argmaxF32(want) {
-		t.Fatalf("compensated TF32 Q4_K panel argmax mismatch: got=%d want=%d", argmaxF32(got), argmaxF32(want))
+		t.Fatalf("compensated FP16 Q4_K panel argmax mismatch: got=%d want=%d", argmaxF32(got), argmaxF32(want))
 	}
-	t.Logf("compensated TF32 Q4_K panel P=%d cosine=%.8f maxAbs=%.3e argmax-exact", P, cos, maxAbs)
+	t.Logf("compensated FP16 Q4_K panel P=%d cosine=%.8f maxAbs=%.3e argmax-exact", P, cos, maxAbs)
 }
 
 func TestCUDAQ4KBatchedMatMulApproxMatchesRef(t *testing.T) {

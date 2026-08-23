@@ -347,29 +347,33 @@ __device__ __forceinline__ float qwen35_gdn_weight(
   return (float)((const signed char *)weight)[index] * scale[(size_t)row * nblk + col / 32];
 }
 
-__global__ void k_tf32_split(const float *src, float *hi, float *lo, size_t n) {
+__global__ void k_fp16_split(const float *src, __half *hi, __half *lo, size_t n) {
   size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) return;
-  unsigned bits = __float_as_uint(src[i]);
-  hi[i] = __uint_as_float((bits + 0x1000u) & 0xffffe000u);
-  lo[i] = src[i] - hi[i];
+  __half h = __float2half_rn(src[i]);
+  hi[i] = h;
+  lo[i] = __float2half_rn(src[i] - __half2float(h));
 }
 
-static void tf32_compensated_matmul(const float *W, const float *X, float *Y,
+static void fp16_compensated_matmul(const float *W, const float *X, float *Y,
                                     int out, int in, int tokens) {
   size_t wn = (size_t)out * in, xn = (size_t)tokens * in;
-  float *wHi = (float *)fcuda_malloc(wn * sizeof(float));
-  float *wLo = (float *)fcuda_malloc(wn * sizeof(float));
-  float *xHi = (float *)fcuda_malloc(xn * sizeof(float));
-  float *xLo = (float *)fcuda_malloc(xn * sizeof(float));
-  k_tf32_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(W, wHi, wLo, wn);
-  k_tf32_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(X, xHi, xLo, xn);
-  cublasSetMathMode(g_blas, CUBLAS_TF32_TENSOR_OP_MATH);
+  __half *wHi = (__half *)fcuda_malloc(wn * sizeof(__half));
+  __half *wLo = (__half *)fcuda_malloc(wn * sizeof(__half));
+  __half *xHi = (__half *)fcuda_malloc(xn * sizeof(__half));
+  __half *xLo = (__half *)fcuda_malloc(xn * sizeof(__half));
+  k_fp16_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(W, wHi, wLo, wn);
+  k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(X, xHi, xLo, xn);
   const float one = 1.0f, zero = 0.0f;
-  cublasSgemm(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one, wHi, in, xHi, in, &zero, Y, out);
-  cublasSgemm(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one, wLo, in, xHi, in, &one, Y, out);
-  cublasSgemm(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one, wHi, in, xLo, in, &one, Y, out);
-  cublasSetMathMode(g_blas, CUBLAS_DEFAULT_MATH);
+  cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
+      wHi, CUDA_R_16F, in, xHi, CUDA_R_16F, in, &zero, Y, CUDA_R_32F, out,
+      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
+  cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
+      wLo, CUDA_R_16F, in, xHi, CUDA_R_16F, in, &one, Y, CUDA_R_32F, out,
+      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
+  cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
+      wHi, CUDA_R_16F, in, xLo, CUDA_R_16F, in, &one, Y, CUDA_R_32F, out,
+      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
   fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
 }
 
@@ -387,7 +391,7 @@ static void q8_dequant_sgemm(const void *codes, const float *scales,
   float *wide = (float *)fcuda_malloc((size_t)rows * cols * sizeof(float));
   k_q8_dequant_transient<<<((size_t)rows * cols + 255) / 256, 256, 0, g_stream>>>(
       (const signed char *)codes, scales, wide, rows, cols, block);
-  tf32_compensated_matmul(wide, X, Y, rows, cols, tokens);
+  fp16_compensated_matmul(wide, X, Y, rows, cols, tokens);
   fcuda_free(wide);
 }
 
@@ -1242,7 +1246,7 @@ extern "C" void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float
     float *wide = (float *)fcuda_malloc((size_t)out * in * sizeof(float));
     k_q4k_dequant_transient<<<((size_t)out * in + 255) / 256, 256, 0, g_stream>>>(
         (const unsigned char *)dQ4K, wide, out, in);
-    tf32_compensated_matmul(wide, dX, dY, out, in, P);
+    fp16_compensated_matmul(wide, dX, dY, out, in, P);
     fcuda_free(wide);
     return;
   }
