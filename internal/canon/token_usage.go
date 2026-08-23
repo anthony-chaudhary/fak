@@ -156,6 +156,7 @@ func adaptGeminiUsage(raw []byte) (map[TokenClass]int64, int64, int64, error) {
 	return map[TokenClass]int64{
 		inputFreshClass:      u.PromptTokenCount - u.CachedContentTokenCount + u.ToolUsePromptTokenCount,
 		inputReadClass:       u.CachedContentTokenCount,
+		inputWriteClass:      0, // Gemini reports cached reads but not provider-side cache creation tokens.
 		outputVisibleClass:   u.CandidatesTokenCount,
 		outputReasoningClass: u.ThoughtsTokenCount,
 	}, input, output, nil

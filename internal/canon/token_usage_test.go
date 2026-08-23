@@ -97,3 +97,13 @@ func TestAdaptTokenUsageRejectsUnknownProviderWithoutLosingContract(t *testing.T
 		t.Fatal("expected unsupported provider refusal")
 	}
 }
+
+func TestAdaptGeminiUsageDeclaresUnavailableCacheWriteClass(t *testing.T) {
+	classes, _, _, err := adaptGeminiUsage([]byte(`{"promptTokenCount":2,"cachedContentTokenCount":1,"totalTokenCount":2}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value, present := classes[inputWriteClass]; !present || value != 0 {
+		t.Fatalf("cache-write class=(%d,%v), want explicit unavailable zero", value, present)
+	}
+}
