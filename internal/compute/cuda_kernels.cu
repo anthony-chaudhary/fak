@@ -156,8 +156,11 @@ extern "C" void *fcuda_malloc_managed(size_t bytes) {
   g_managed_live[d] = bytes;
   return d;
 }
+static void q4_coeff_cache_evict(const void *q);
+
 extern "C" void fcuda_free(void *d) {
   if (!d) return;
+  q4_coeff_cache_evict(d);
   auto mit = g_managed_live.find(d);
   if (mit != g_managed_live.end()) {
     g_managed_live.erase(mit);
@@ -255,6 +258,7 @@ extern "C" void *fcuda_malloc_on(int device, size_t bytes) {
 extern "C" void fcuda_free_on(int device, void *d) {
   if (!d) return;
   if (fcuda_set_device(device) != 0) return;
+  q4_coeff_cache_evict(d);
   CK(cudaFree(d));
 }
 
@@ -1133,6 +1137,21 @@ __device__ void getScaleMinK4_dev(int j, const unsigned char *q, unsigned char *
   }
 }
 
+__global__ void k_q4k_coeffs(const unsigned char *Q4K, float2 *coeff, int out, int in) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int nsb = in / 256;
+  int total = out * nsb * 8;
+  if (i >= total) return;
+  int group = i & 7;
+  int block = i >> 3;
+  const unsigned char *blk = Q4K + (size_t)block * 144;
+  unsigned char sc, mn;
+  getScaleMinK4_dev(group, blk + 4, &sc, &mn);
+  float d = __half2float(*(const __half *)blk);
+  float dmin = __half2float(*(const __half *)(blk + 2));
+  coeff[i] = make_float2(d * (float)sc, dmin * (float)mn);
+}
+
 __global__ void k_q4k_dequant_transient(const unsigned char *Q4K, float *W, int out, int in) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   int total = out * in;
@@ -1151,7 +1170,7 @@ __global__ void k_q4k_dequant_transient(const unsigned char *Q4K, float *W, int 
 // 256-value super-blocks, preserving the exact f32-dequantized dot while exposing the short Qwen
 // hidden-width K loop to the GPU. Two rows per block retain 256-thread occupancy; only the four
 // warp totals cross shared memory at the final row reduction.
-__global__ void k_q4k_gemm(const unsigned char *Q4K, const float *X, float *Y, int out, int in, int P) {
+__global__ void k_q4k_gemm(const unsigned char *Q4K, const float2 *coeff, const float *X, float *Y, int out, int in, int P) {
   constexpr int warps_per_row = 4;
   constexpr int rows_per_block = 2;
   int lane = threadIdx.x & 31;
@@ -1168,19 +1187,18 @@ __global__ void k_q4k_gemm(const unsigned char *Q4K, const float *X, float *Y, i
   if (active) {
     for (int sb = row_warp; sb < nsb; sb += warps_per_row) {
       const unsigned char *blk = wrow + (size_t)sb * 144;
-      float d = __half2float(*(const __half *)(blk));
-      float dmin = __half2float(*(const __half *)(blk + 2));
-      const unsigned char *scales = blk + 4;
       const unsigned char *q = blk + 16;
+      const float2 *cb = coeff + ((size_t)o * nsb + sb) * 8;
       const float *xb = xrow + (size_t)sb * 256;
 #pragma unroll
       for (int group = 0; group < 8; group++) {
-        unsigned char sc, mn;
-        getScaleMinK4_dev(group, scales, &sc, &mn);
         int qi = (group >> 1) * 32 + lane;
         unsigned char packed = q[qi];
         int code = (group & 1) ? (packed >> 4) : (packed & 0x0f);
-        sum += (d * (float)sc * (float)code - dmin * (float)mn) * xb[group * 32 + lane];
+        float2 c = cb[group];
+        float xval = xb[group * 32 + lane];
+        sum = fmaf(c.x * (float)code, xval, sum);
+        sum = fmaf(-c.y, xval, sum);
       }
     }
   }
@@ -1240,6 +1258,36 @@ __global__ void k_q4k_gemm_panel(const unsigned char *Q4K, const float *X, float
   }
 }
 
+struct q4_coeff_cache_entry { const uint8_t *q; float2 *coeff; int out; int in; int device; };
+static q4_coeff_cache_entry g_q4_coeff_cache[512];
+static int g_q4_coeff_cache_n = 0;
+static void q4_coeff_cache_evict(const void *q) {
+  int device = 0;
+  CK(cudaGetDevice(&device));
+  for (int i = 0; i < g_q4_coeff_cache_n; ++i) {
+    if (g_q4_coeff_cache[i].q != q || g_q4_coeff_cache[i].device != device) continue;
+    CK(cudaFree(g_q4_coeff_cache[i].coeff));
+    g_q4_coeff_cache[i] = g_q4_coeff_cache[--g_q4_coeff_cache_n];
+    g_q4_coeff_cache[g_q4_coeff_cache_n] = {};
+    return;
+  }
+}
+static float2 *q4_coeffs_for(const uint8_t *q, int out, int in) {
+  int device = 0;
+  CK(cudaGetDevice(&device));
+  for (int i = 0; i < g_q4_coeff_cache_n; ++i) {
+    q4_coeff_cache_entry &entry = g_q4_coeff_cache[i];
+    if (entry.q == q && entry.out == out && entry.in == in && entry.device == device) return entry.coeff;
+  }
+  if (g_q4_coeff_cache_n >= 512) { fprintf(stderr, "fak-cuda: q4 coeff cache full\n"); abort(); }
+  size_t n = (size_t)out * (in / 256) * 8;
+  float2 *coeff = nullptr;
+  CK(cudaMalloc(&coeff, n * sizeof(float2)));
+  k_q4k_coeffs<<<(n + 255) / 256, 256, 0, g_stream>>>(q, coeff, out, in);
+  g_q4_coeff_cache[g_q4_coeff_cache_n++] = {q, coeff, out, in, device};
+  return coeff;
+}
+
 extern "C" void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY,
                                      int out, int in, int P) {
   if (P >= 128) {
@@ -1251,8 +1299,9 @@ extern "C" void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float
     return;
   }
   if (P < 4) {
+    float2 *coeff = q4_coeffs_for(dQ4K, out, in);
     k_q4k_gemm<<<dim3((out + 1) / 2, P), 256, 0, g_stream>>>(
-        (const unsigned char *)dQ4K, dX, dY, out, in, P);
+        (const unsigned char *)dQ4K, coeff, dX, dY, out, in, P);
     return;
   }
   constexpr int token_tile = 4;
