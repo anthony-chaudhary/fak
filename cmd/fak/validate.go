@@ -603,10 +603,6 @@ func copyValidateFileWithin(ctx context.Context, src, dst string, mode os.FileMo
 	return nil
 }
 
-func gofmtOwnedPaths(root string, paths []string) ([]string, error) {
-	return gofmtOwnedPathsWithin(context.Background(), root, paths)
-}
-
 func gofmtOwnedPathsWithin(ctx context.Context, root string, paths []string) ([]string, error) {
 	var goFiles []string
 	for _, rel := range paths {
@@ -686,10 +682,6 @@ func validateTestRunner(goos string, wsl bool) string {
 	return "go test"
 }
 
-func runValidateTests(repo, dir, tip string, args []string, wsl bool) (string, bool) {
-	return runValidateTestsWithin(context.Background(), repo, dir, tip, args, wsl)
-}
-
 func runValidateTestsWithin(ctx context.Context, repo, dir, tip string, args []string, wsl bool) (string, bool) {
 	// The archive checkout is isolated from peer WIP. Windows defaults to WSL so test
 	// binaries execute under Linux rather than the host application-control boundary.
@@ -729,10 +721,6 @@ func runValidateTestsWithin(ctx context.Context, repo, dir, tip string, args []s
 // tracked-file index without attaching the isolated checkout to the peer-dirty worktree.
 // The fetched object database travels with the archive into WSL and is removed with the
 // surrounding temporary checkout on every return path.
-func prepareValidateGitIdentity(repo, dir, tip string) error {
-	return prepareValidateGitIdentityWithin(context.Background(), repo, dir, tip)
-}
-
 func prepareValidateGitIdentityWithin(ctx context.Context, repo, dir, tip string) error {
 	commands := [][]string{
 		{"init", "--quiet"},
@@ -758,10 +746,6 @@ func prepareValidateGitIdentityWithin(ctx context.Context, repo, dir, tip string
 
 func posixQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
-}
-
-func runGoCheck(dir string, args ...string) (string, bool) {
-	return runGoCheckWithin(context.Background(), dir, args...)
 }
 
 func runGoCheckWithin(ctx context.Context, dir string, args ...string) (string, bool) {
