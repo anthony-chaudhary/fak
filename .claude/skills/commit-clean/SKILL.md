@@ -1,6 +1,6 @@
 ---
 name: commit-clean
-description: Commit finished work cleanly on the shared trunk — lint the subject with `fak commit --preview`, then stage-and-commit EXACTLY your paths in one locked step via `fak commit --path … -m "…"`, verify the landed path-set and message are yours, and push when asked. Mechanizes the repo's "commit clean by default" mantra (trunk-only, explicit pathspec, DCO sign-off, Conventional-Commits subject with a bindable `(fak <leaf>)` stamp). Use when the user says "commit this", "ship my work", "commit cleanly", "land my change", or when green work is finished and ready to land on the shared trunk.
+description: Commit finished work cleanly on the shared trunk — lint the subject with `fak commit --preview`, then stage-and-commit EXACTLY your paths in one locked step via `fak commit --path … -m "…"`, verify the landed path-set and message are yours, and push when asked. Mechanizes the repo's "commit clean by default" mantra (trunk-only, explicit pathspec, DCO sign-off, Conventional-Commits subject with a bindable `(fak <leaf>)` stamp). Use when the user says "commit this", "ship my work", "commit cleanly", "land my change".
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep, Glob, Bash

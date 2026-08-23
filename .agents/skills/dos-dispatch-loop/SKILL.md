@@ -1,6 +1,6 @@
 ---
 name: dos-dispatch-loop
-description: "Run recurring `dos-dispatch` cycles, switching to `dos-replan` when the backlog drains and stopping on the kernel's loop verdict. Use for unattended dispatch->replan->dispatch work across disjoint lanes."
+description: Run recurring `dos-dispatch` cycles, switching to `dos-replan` when the backlog drains and stopping on the kernel's loop verdict. Use when you need unattended dispatch->replan->dispatch work across disjoint lanes.
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/dos-dispatch-loop/SKILL.md

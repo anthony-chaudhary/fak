@@ -1,6 +1,6 @@
 ---
 name: claim-repro-score
-description: One repeatable RSI pass over claim reproducibility; run the claim-repro scorecard, retire unfalsifiable witness debt worst-first by adding the real artifact/test/path, re-measure, and commit only the claim-repro lane.
+description: One repeatable RSI pass over claim reproducibility; run the claim-repro scorecard, retire unfalsifiable witness debt worst-first by adding the real artifact/test/path, re-measure, and commit only the claim-repro...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/claim-repro-score/SKILL.md

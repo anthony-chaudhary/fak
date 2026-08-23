@@ -1,6 +1,6 @@
 ---
 name: verify
-description: "Bind a done-claim to a GREEN test run of the changed package, not just diff shape. Use after a commit claims a package/feature is done and you want to run that commit's affected tests and report CLAIM_TEST_GREEN /...
+description: Bind a done-claim to a GREEN test run of the changed package, not just diff shape. Use when acting after a commit claims a package/feature is done and you want to run that commit's affected tests and report...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/verify/SKILL.md

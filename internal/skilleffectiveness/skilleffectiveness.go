@@ -98,11 +98,23 @@ func Scan(root string) []Scanned {
 		s.Readable = true
 		s.HasDescription = strings.Contains(text, "description:")
 		low := strings.ToLower(text)
-		s.HasTrigger = strings.Contains(low, "use when") || strings.Contains(low, "use to")
+		s.HasTrigger = hasTrigger(low)
 		s.MetaWords, s.BodyWords = TierWordCounts(text)
 		out = append(out, s)
 	}
 	return out
+}
+
+func hasTrigger(description string) bool {
+	for _, phrase := range []string{
+		"use when", "use to", "use for", "use after", "use before",
+		"run when", "invoke when", "trigger when", "triggered when", "triggers when",
+	} {
+		if strings.Contains(description, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 // TierWordCounts splits a SKILL.md into its two load tiers and counts words in each: the

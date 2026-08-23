@@ -264,3 +264,21 @@ func TestAffordanceDebtCountsEachAxisOnce(t *testing.T) {
 		t.Errorf("BudgetDebt = (%d,%d), want (1,1)", m, b)
 	}
 }
+
+func TestHasTriggerAcceptsNaturalDiscoveryPhrases(t *testing.T) {
+	for _, description := range []string{
+		"Use for recurring dispatch work.",
+		"Use after a release changes the front door.",
+		"Use before launching workers.",
+		"Run when the queue drains.",
+		"Invoke when an external implementation is relevant.",
+		"Triggers when the operator asks for a score.",
+	} {
+		if !hasTrigger(strings.ToLower(description)) {
+			t.Errorf("hasTrigger(%q) = false", description)
+		}
+	}
+	if hasTrigger("A workflow with no invocation cue.") {
+		t.Fatal("hasTrigger accepted a description without a trigger")
+	}
+}

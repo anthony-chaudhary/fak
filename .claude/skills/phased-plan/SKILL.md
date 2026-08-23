@@ -1,6 +1,6 @@
 ---
 name: phased-plan
-description: Ceremony rules for shipping a phase of a phased plan — when to release, when to emit a handoff prompt, how far to go on type-strengthening, when to fold or split phases, and the hero-exit rule that prevents plans from becoming open-ended. Load when shipping a phase of a docs/*-plan.md (or equivalent) plan.
+description: Ceremony rules for shipping a phase of a phased plan — when to release, when to emit a handoff prompt, how far to go on type-strengthening, when to fold or split phases, and the hero-exit rule that prevents plans from becoming open-ended. Load when shipping a phase of a docs/*-plan.md (or equivalent) plan. Use when this named workflow matches the task.
 disable-model-invocation: true
 user-invocable: false
 allowed-tools: Read, Edit, Bash

@@ -1,6 +1,6 @@
 ---
 name: slop-score
-description: One repeatable RSI pass over CODE SLOP — the slop the compiler can't see. Runs the code-slop scorecard (tools/code_slop_scorecard.py), reads the slop-debt work-list, retires debt worst-first using ONLY genuine fixes (extract a copy-paste clone into a shared helper, delete or wire a dead unexported symbol, add a real assertion to a vacuous test, drop tautological doc comments + commented-out code), re-measures to PROVE the number dropped, regenerates the committed snapshot, grounds the ship in DOS (dos commit-audit on the new commit), and commits by explicit path. The slop sibling of /quality-score (defects) and /appeal-score (prose voice). Use to baseline code slop, drive slop-debt toward 0 worst-first, or on a /loop cadence to keep the kernel from re-accreting clones, dead weight, and assertion-free tests.
+description: One repeatable RSI pass over CODE SLOP — the slop the compiler can't see. Runs the code-slop scorecard (tools/code_slop_scorecard.py), reads the slop-debt work-list, retires debt worst-first using ONLY genuine fixes (extract a copy-paste clone into a shared helper, delete or wire a dead unexported symbol, add a real assertion to a vacuous test, drop tautological doc comments + commented-out code), re-measures to PROVE the number dropped, regenerates the committed snapshot, grounds the ship in DOS (dos commit-audit on the new. Use when this named workflow matches the task.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Write, Edit, Grep, Glob

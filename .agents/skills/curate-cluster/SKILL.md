@@ -1,6 +1,6 @@
 ---
 name: curate-cluster
-description: One curation pass over a research/doc cluster — reconcile the project's index doc (e.g. INDEX.md) against the docs and scripts actually on disk (add missing entries in the house format, fix dangling references,...
+description: Reconcile a research or documentation cluster's index with files on disk, repair dangling references, refresh counts and context, and ignore regenerable artifacts. Commit only quiescent documentation, experiment,...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/curate-cluster/SKILL.md

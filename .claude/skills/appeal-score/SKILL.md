@@ -1,6 +1,6 @@
 ---
 name: appeal-score
-description: One repeatable pass that makes a doc read like a person wrote it, not a model. Runs the doc-appeal scorecard (tools/doc_appeal_scorecard.py), turns each HARD defect into a required edit (em-dash flood, bold-emphasis flood, run-on / overlong sentences, walls of text, stacked "X, not Y" contrast frames, a dense or unanchored lead, LLM-scaffolding phrases) and each SOFT signal into a judgment call, retires appeal-debt worst-axis-first WITHOUT changing any claim, number, or link, re-measures to PROVE the debt dropped, and commits only the doc lane by explicit path. The prose-voice counterpart to refresh-readme (freshness) and quality-score (code). Use to de-LLM-ify the README or any reader-facing prose doc, or on a /loop cadence to keep the front door human.
+description: One repeatable pass that makes a doc read like a person wrote it, not a model. Runs the doc-appeal scorecard (tools/doc_appeal_scorecard.py), turns each HARD defect into a required edit (em-dash flood, bold-emphasis flood, run-on / overlong sentences, walls of text, stacked "X, not Y" contrast frames, a dense or unanchored lead, LLM-scaffolding phrases) and each SOFT signal into a judgment call, retires appeal-debt worst-axis-first WITHOUT changing any claim, number, or link, re-measures to PROVE the debt dropped, and commits only. Use when this named workflow matches the task.
 ---
 
 # appeal-score — make the prose read human, and prove it
