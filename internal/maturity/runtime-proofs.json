@@ -200,6 +200,11 @@
       "lane": "unwitnessedclaim",
       "command": "go test -v ./internal/unwitnessedclaim",
       "output_contains": "TestEvaluate_LatestCommentClaimsDone_Flagged"
+    },
+    {
+      "lane": "unwiredscore",
+      "command": "go test -v ./internal/unwiredscore -run TestScan",
+      "output_contains": "TestScanClassifiesWiredAndOrphans"
     }
   ]
 }
