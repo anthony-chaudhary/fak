@@ -55,6 +55,11 @@
       "lane": "workerenvelope",
       "command": "go test -v ./internal/workerenvelope",
       "output_contains": "TestValidateBlockedAndNotYet"
+    },
+    {
+      "lane": "witness",
+      "command": "go test -v ./internal/witness",
+      "output_contains": "TestExecutionDecision"
     }
   ]
 }
