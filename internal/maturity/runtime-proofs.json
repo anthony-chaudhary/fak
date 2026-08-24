@@ -195,6 +195,11 @@
       "lane": "urllint",
       "command": "go test -v ./internal/urllint",
       "output_contains": "TestNoUnchokepointedDownloadURLs"
+    },
+    {
+      "lane": "unwitnessedclaim",
+      "command": "go test -v ./internal/unwitnessedclaim",
+      "output_contains": "TestEvaluate_LatestCommentClaimsDone_Flagged"
     }
   ]
 }
