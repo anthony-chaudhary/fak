@@ -49,7 +49,7 @@ func TestAgentGuidanceDefaultsSubstantiveWorkToWorkers(t *testing.T) {
 		},
 		"CLAUDE.md": {
 			"Delegate substantive work and keep this coordinator context clean",
-			"independently verify worker effects",
+			"independently verify\n  worker effects",
 		},
 		"GEMINI.md": {
 			"Delegate substantive work and keep the coordinator context clean",
