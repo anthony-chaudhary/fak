@@ -1,6 +1,6 @@
 # Monitored harness repositories
 
-**Checked:** 2026-08-15
+**Checked:** 2026-08-24
 **Machine source:** [`monitored-repositories.json`](monitored-repositories.json)  
 **Refresh view:** `fak study-monitor --due-days 14` (add `--json` for automation)
 
@@ -33,5 +33,6 @@ This list intentionally does not claim that these repositories contain a borrowa
 
 | Repository | Result | Pinned evidence |
 |---|---|---|
+| [`SemiAnalysisAI/InferenceX`](https://github.com/SemiAnalysisAI/InferenceX) | AgentX lifecycle/interactivity, scope-versioned measured-power, and reuse integrity yielded #8773-#8775; lineage reuse otherwise converged with fak. | `0b0138fd7de0a6f927f9769b19d594d01f586107`; [study note](../notes/BORROW-BENCHMARK-SERVING-METRICS-INFERENCEX-STUDY-2026-07-13.md). |
 | [`strukto-ai/mirage`](https://github.com/strukto-ai/mirage) | Deep study retained one borrow: a strict pre-effect drift contract for mutable external inputs on resume/replay. Typed backend capabilities and transactional workspaces map to stronger existing fak seams/issues; a universal VFS is a bounded optional integration, not the default. | [`mirage-study-2026-08-17.md`](mirage-study-2026-08-17.md), revision `e0a4f51109cbe6b8a239700d8348f0cbebd70b26`; 3,499 stars and last push `2026-08-17T23:41:51Z` at check time. |
 | [`agent0ai/agent-zero`](https://github.com/agent0ai/agent-zero) | Deep study found lifecycle legibility and effect-centered Time Travel worth retaining as design guidance. FAK already covers the central kernel mechanisms with stricter typed policy, isolated workers, managed context, and witnessed scheduling; full-computer and semantic-memory breadth remains modular. | [`agent-zero-study-2026-08-18.md`](agent-zero-study-2026-08-18.md), revision `baadd0dd0b09fa769a1027c183b964be85d5c8cc` (`v2.9`), forward edge `add781d3b3e5b3972fbd7cef54657b7bfb274ae9`; 18,903 stars and last push `2026-08-16T17:45:50Z` at check time. |

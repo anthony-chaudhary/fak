@@ -370,7 +370,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Token classes as a guard/server duty — spine and research note](docs/notes/TOKEN-CLASS-SHIFT-LEFT-SPINE-2026-08-06.md) -- auto-indexed dated note.
 - [Knowing the denominator for an agentic trajectory](docs/notes/AGENTIC-TRAJECTORY-DENOMINATOR-2026-08-06.md) -- auto-indexed dated note.
 - [Air-gapped deployment kit + SBOM (#3279) — generation triage, 2026-07-23](docs/notes/AIRGAPPED-KIT-SBOM-TRIAGE-3279-2026-07-23.md) -- auto-indexed dated note.
-- [Borrow study: InferenceMAX/InferenceX — perf-benchmark integrity, serving metrics, SLO/goodput, run-reuse](docs/notes/BORROW-BENCHMARK-SERVING-METRICS-INFERENCEX-STUDY-2026-07-13.md) -- auto-indexed dated note.
+- [Borrow study: InferenceMAX/InferenceX — perf-benchmark integrity, serving metrics, SLO/goodput, run-reuse; pinned AgentX/power refresh](docs/notes/BORROW-BENCHMARK-SERVING-METRICS-INFERENCEX-STUDY-2026-07-13.md) -- pinned refresh at `0b0138f` on 2026-08-24; routes #8773-#8775.
 - [Borrow study: plano (archgw) — routing, signals, provider-handling, guard, budget](docs/notes/BORROW-ROUTING-SIGNALS-GATEWAY-PLANO-STUDY-2026-07-13.md) -- auto-indexed dated note.
 - [Repeated shell tool-result spans: the dedup mechanism decision (2026-07-19)](docs/notes/COMPACTION-REPEATED-TOOL-RESULT-DEDUP-2026-07-19.md) -- auto-indexed dated note.
 - [Plan mode is a control/data-plane split — separate the durable PLAN from ephemeral EXECUTION and extend it 100×](docs/notes/CONCEPT-CONTROL-DATA-PLANE-SPLIT-2026-07-11.md) -- auto-indexed dated note.

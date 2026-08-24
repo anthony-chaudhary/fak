@@ -287,3 +287,116 @@ regression (human reads the delta). fak benchmarks an **agent fleet** for an **o
 floor exactly: **the number must survive a distrustful re-check** — InferenceX via CI re-verifying
 each sign-off, fak via `dos_*` witnesses. The borrowable net-new is narrow (SLO-goodput semantics,
 position-swept decode, run-reuse); the rest is convergence or a validated fork.
+
+---
+
+## Refresh — pinned InferenceX deep pass (2026-08-24)
+
+This refresh resolves the original study's largest evidence defect: the source is now pinned.
+It also covers InferenceX's post-July AgentX and measured-power expansion rather than
+re-litigating the ten axes above.
+
+### Source and scope
+
+- **Source:** [`SemiAnalysisAI/InferenceX`](https://github.com/SemiAnalysisAI/InferenceX)
+  at `0b0138fd7de0a6f927f9769b19d594d01f586107` (commit date 2026-08-23,
+  Apache-2.0). Repository observations below were checked 2026-08-24.
+- **Surface read:** root/docs architecture and procedures; workflow graph; matrix/config
+  generation; result processing, evaluation and ingestion; AgentX request/backend/power
+  adapters; reuse discovery and validation; power integration; representative tests; the
+  available 200-commit history; latest release; open/closed issues, merged PRs, and all four
+  public discussions.
+- **Scale at check:** 1,281 tracked files in the checkout: 510 YAML, 283 shell, 181 JSON,
+  179 Python, and 81 Markdown files. This is primarily a continuous benchmark research and
+  operations repository, not an inference engine.
+- **Method:** four delegated read-only scans were attempted, but InferenceX's own checkout
+  hooks entered repeated `PostToolUse Failed` loops. The coordinator stopped them rather
+  than trusting partial reports, then independently read the pinned source and public
+  GitHub surfaces. No InferenceX code was copied.
+
+### What InferenceX is now
+
+InferenceX treats a benchmark point as a lifecycle, not a timing loop:
+configuration matrix -> managed hardware runner -> engine recipe -> client workload ->
+raw artifacts -> validated aggregate -> staged/production ingestion. The main extension
+unit is a declarative recipe plus narrowly typed processing adapters; CI owns promotion,
+recovery, and provenance. The project intentionally compares external serving stacks
+(vLLM, SGLang, TensorRT-LLM, Dynamo and TileRT among them), while fak's native-performance
+product path must continue to name the fak engine and use those stacks only for explicit
+benchmark/parity envelopes.
+
+Three post-July changes materially extend the earlier study:
+
+1. **AgentX is a first-class workload family.** Request aggregation derives throughput,
+   latency and multiple interactivity views from timestamped request records
+   (`utils/agentic/aggregation/request_metrics.py:137-208@0b0138f`), while backend adapters
+   extract service-side capacities and metrics without forcing every engine into one log
+   grammar (`utils/agentic/aggregation/backends/base.py:1-79@0b0138f`). Result validation
+   refuses missing/invalid required fields rather than converting absence to a zero
+   (`utils/agentic/validation/validate_agentic_result.py:20-121@0b0138f`). Recent merged work
+   added full-response ITL and normalized interactivity
+   ([#2504](https://github.com/SemiAnalysisAI/InferenceX/pull/2504),
+   [#2544](https://github.com/SemiAnalysisAI/InferenceX/pull/2544)).
+2. **Power became measured, windowed, and scope-versioned.** Single-node and multinode
+   paths validate sample timing and integrate device energy over a declared workload
+   interval (`utils/aggregate_power.py:161-225@0b0138f`;
+   `utils/aggregate_power_multinode.py:541-690@0b0138f`). The AgentX adapter keeps power
+   provenance and applicability explicit (`utils/agentic/aggregation/power_adapter.py:18-145@0b0138f`).
+   The implementation arrived as an observable four-part sequence—single-node validation,
+   multinode validation, official disaggregated collection, then strict monitor lifecycle—
+   plus whole-deployment schema semantics
+   ([#2323](https://github.com/SemiAnalysisAI/InferenceX/pull/2323),
+   [#2437](https://github.com/SemiAnalysisAI/InferenceX/pull/2437),
+   [#2456](https://github.com/SemiAnalysisAI/InferenceX/pull/2456),
+   [#2494](https://github.com/SemiAnalysisAI/InferenceX/pull/2494),
+   [#2599](https://github.com/SemiAnalysisAI/InferenceX/pull/2599)).
+3. **Reuse is an operational protocol, not a cache lookup.** Candidate selection binds a
+   source PR/commit and workflow run, admits only explicit conclusions, and supports a
+   pinned recovery path (`utils/find_reusable_sweep_run.py:40-233@0b0138f`). A separate
+   validator checks artifact manifests, expected eval coverage and duplicates before
+   ingestion (`utils/validate_reusable_sweep_artifacts.py:113-368@0b0138f`). The history
+   shows why each step exists: reuse repeatedly needed recovery and cancellation semantics
+   ([#2175](https://github.com/SemiAnalysisAI/InferenceX/pull/2175),
+   [#2389](https://github.com/SemiAnalysisAI/InferenceX/pull/2389),
+   [#2418](https://github.com/SemiAnalysisAI/InferenceX/pull/2418)).
+
+### Witnessed borrow decisions
+
+| Technique | Current fak witness | Verdict / route |
+|---|---|---|
+| Measured-window energy receipt with sample coverage and `device` / `role` / `whole_deployment` scope | `internal/metrics/device_spine.go:64,148-151` exposes instantaneous watts, but no benchmark-window joule integral or scope contract | **Net-new adaptation:** [#8773](https://github.com/anthony-chaudhary/fak/issues/8773) |
+| Client-phase + backend-log request lifecycle join with source digests and explicit missingness | `internal/agenticbench/latency_phases.go` and `result_packet.go` already own agentic phases/receipts; no backend-adapter lifecycle join was found | **Net-new adaptation:** [#8774](https://github.com/anthony-chaudhary/fak/issues/8774) |
+| Quality-constrained full-response interactivity from timestamped stream events | fak has TTFT/ITL and position-SLO work, but no dedicated full-response interactivity receipt; #3079 is adjacent rather than identical | **Net-new adaptation:** [#8775](https://github.com/anthony-chaudhary/fak/issues/8775) |
+| Reusable benchmark artifacts with source identity and separate pre-ingest validation | `internal/benchlineagegate/benchlineagegate.go` and `internal/benchloop/reuse.go` now implement the missing lineage/reuse spine; original #4600 is closed | **Convergence:** no new issue |
+| Goodput/SLO and position-sensitive latency | Existing #2242 and #3079 remain the right homes | **Duplicate:** no new issue |
+| Result-validity gate and performance-change declaration | fak's benchmark authority, claim gates and witnessed commit path already enforce the stronger general contract described above | **Convergence / deliberate divergence:** no new issue |
+| InferenceX engine recipes or Python workflow implementation | Product path and language/ownership differ; silent external-engine fallback would violate the native invariant | **Exclude direct port; borrow semantics only** |
+
+### Worldview delta
+
+The July note characterized InferenceX as declaration-triggered continuous serving
+measurement. The current tree goes further: **agent behavior is itself a serving workload,
+and a publishable point is the joined evidence of client experience, server mechanics,
+quality, power, topology, source identity, and ingestion state.** That worldview is useful
+to fak, but fak should implement it at its own stronger seam: one native-engine receipt that
+can prove task quality, lifecycle, cache/policy effects, and net-true resource cost together.
+
+### Completeness and honest limits
+
+- GitHub surfaces checked on 2026-08-24: 104 total issues, 67 total PRs reported by the
+  repository metadata at check time; merged AgentX/power/reuse PR searches; one current
+  prerelease (`tilert-v0.1.5.post2-inferencex.1`); four public discussions. These are dated
+  observations, not durable counts.
+- The checkout was depth-limited to 200 commits, so history older than that window was
+  sampled through files and GitHub search rather than exhaustively cloned.
+- No production dashboard/database internals or private runner infrastructure were
+  available. Public workflows and result contracts prove the handoff, not the private
+  service implementation.
+- No benchmark number was imported or compared. This study extracts mechanisms only;
+  performance claims still require matched, quality-constrained fak-native runs.
+
+**Companions:** original axes in this note; field-borrow routes
+[#8773](https://github.com/anthony-chaudhary/fak/issues/8773),
+[#8774](https://github.com/anthony-chaudhary/fak/issues/8774), and
+[#8775](https://github.com/anthony-chaudhary/fak/issues/8775); refresh tracker
+[#8770](https://github.com/anthony-chaudhary/fak/issues/8770).
