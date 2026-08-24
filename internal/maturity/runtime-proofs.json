@@ -20,6 +20,11 @@
       "lane": "serviceledger",
       "command": "go test -v ./internal/serviceledger",
       "output_contains": "TestAdapterReplayIsExactOnce"
+    },
+    {
+      "lane": "worktype",
+      "command": "go test -v ./internal/worktype",
+      "output_contains": "TestClassifyDispatchPromptClosedRulesAndUnknown"
     }
   ]
 }
