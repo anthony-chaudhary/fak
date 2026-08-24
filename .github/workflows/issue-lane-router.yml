@@ -153,7 +153,7 @@ jobs:
             | jq -e '((.lanes.concurrent // []) | length) > 0' >/dev/null \
             || { echo "::error::dos lane taxonomy emptied between guard and write — aborting."; exit 1; }
           limit_args=()
-          if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
+          if [ "${ALLOW_BULK}" != "true" ]; then
             limit_args=(--label-change-limit "$DELTA_CAP")
           fi
           python tools/issue_lane_router.py --apply-labels --apply-labels-write --json --issue-limit "$ISSUE_LIMIT" "${limit_args[@]}" > backfill.json
