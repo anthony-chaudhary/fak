@@ -60,7 +60,7 @@ func TestPonytailGateDryRunCannotClaimPass(t *testing.T) {
 	foundReceipt, foundSummary := false, false
 	for _, arm := range r.Arms {
 		if arm.Arm == ponytailNativeMediumArm {
-			foundReceipt = arm.CanonicalProfile == "ponytail:native:medium" && arm.FragmentWitness == ponytailNativeMediumWitness
+			foundReceipt = arm.CanonicalProfile == "ponytail:native:medium" && arm.FragmentDigest == ponytailNativeMediumDigest
 		}
 	}
 	for _, summary := range r.Summary {
