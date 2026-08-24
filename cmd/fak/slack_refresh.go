@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 
@@ -83,7 +84,7 @@ func runSlackRefreshGH(args ...string) ([]byte, error) {
 	if err == nil {
 		return out, nil
 	}
-	var exitErr *os.ExitError
+	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		return nil, fmt.Errorf("gh issue list: %w: %s", err, strings.TrimSpace(string(exitErr.Stderr)))
 	}
