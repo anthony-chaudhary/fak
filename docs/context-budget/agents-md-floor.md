@@ -106,6 +106,14 @@ immediately-preceding **83,681 B / 22,314 estimated tokens** to **49,882 B / 13,
 estimated tokens**: **1.68× smaller**. The section now carries only the preventive
 commit-lane rules, one-hop query commands, setup check, and appeal route.
 
+
+### Follow-on Hard-rules trim (#8698)
+
+The next pass reduced `Hard rules` from **22,782 B / 6,075 estimated tokens** to
+**6,036 B / 1,609 estimated tokens**: **3.77× smaller**. Whole-file AGENTS.md is now
+**33,136 B / 8,836 estimated tokens**, a **2.53× reduction** from the 83,681 B /
+22,314-token pre-cleanup baseline. Preventive invariants remain inline; detailed
+runbooks stay behind their linked project verbs and documents.
 ## Recovery stays queryable
 
 The removed table duplicated the authoritative `[reasons.*]` records in `dos.toml`.
@@ -130,10 +138,10 @@ the refusal slice drops from **144,120** to **6,465** estimated tokens. These ar
 house-estimator values, not provider-billed measurements.
 ## What is deliberately NOT gated here
 
-There is **no ratchet on AGENTS.md bytes**, and adding one now would be a mistake.
+There is still **no ratchet on AGENTS.md bytes**; this page records measured reductions rather than defining a policy ceiling.
 `internal/mcpfootprint/floorgate.go` earns its `FLOOR_BUDGET_STALE` direction
 precisely because a ceiling pinned at today's number *banks* today's bloat: the
-gate would then defend 49,882 B as acceptable. Measure first, trim, and pin the
+gate would have defended 49,882 B as acceptable. The current 33,136 B baseline is now a defensible input for a separate ratchet; pin the
 ceiling at the post-trim number. Until then this page is a dated measurement, not a
 contract, and the regeneration command above is how a reader gets a current one.
 
@@ -159,7 +167,7 @@ contract, and the regeneration command above is how a reader gets a current one.
 
 ## Open follow-ons
 
-The cookbook paging is complete. A separate ratchet can now pin the post-trim ceiling without banking the old bloat.
+The cookbook and Hard-rules paging are complete. A separate ratchet can now pin the post-trim ceiling without banking the old bloat.
 
 ## Cross-links
 
