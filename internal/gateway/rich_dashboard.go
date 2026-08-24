@@ -154,6 +154,16 @@ func (m *richDashboardManager) activate() {
 	compose := m.compose
 	owned := false
 	if base == "" {
+		base = "http://localhost:3000"
+		ctx, cancel := context.WithTimeout(m.ctx, 3*time.Second)
+		ready := m.probe(ctx, base) == nil
+		cancel()
+		if ready {
+			m.mu.Lock()
+			m.baseURL, m.owned, m.state, m.reason = base, false, "ready", ""
+			m.mu.Unlock()
+			return
+		}
 		if compose == "" {
 			compose = findBundledGrafanaCompose()
 		}
@@ -165,14 +175,13 @@ func (m *richDashboardManager) activate() {
 			m.fail("Docker is not available. Install/start Docker, or set FAK_GRAFANA_URL to an existing Grafana.")
 			return
 		}
-		ctx, cancel := context.WithTimeout(m.ctx, richDashboardTimeout)
+		ctx, cancel = context.WithTimeout(m.ctx, richDashboardTimeout)
 		err := m.start(ctx, compose)
 		cancel()
 		if err != nil {
 			m.fail("Bundled Grafana could not start: " + boundedDashboardError(err))
 			return
 		}
-		base = "http://localhost:3000"
 		owned = true
 	}
 

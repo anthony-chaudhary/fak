@@ -196,3 +196,34 @@ func TestRichDashboardEveryCatalogClickPreservesSelectedDestination(t *testing.T
 		})
 	}
 }
+
+func TestRichDashboardReusesReadyBundledStackWithoutOwnership(t *testing.T) {
+	t.Setenv("FAK_DASHBOARDS", "")
+	t.Setenv("FAK_GRAFANA_URL", "")
+	t.Setenv("FAK_GRAFANA_COMPOSE", "compose.yml")
+	m := newRichDashboardManager()
+	startCalls, stopCalls := 0, 0
+	m.probe = func(context.Context, string) error { return nil }
+	m.dockerAvailable = func() bool { t.Fatal("ready stack should not require Docker discovery"); return false }
+	m.start = func(context.Context, string) error { startCalls++; return nil }
+	m.stop = func(context.Context, string) error { stopCalls++; return nil }
+
+	if got := m.ensure(); got.State != "starting" {
+		t.Fatalf("first state = %q, want starting", got.State)
+	}
+	deadline := time.Now().Add(time.Second)
+	for m.snapshot().State != "ready" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	got := m.snapshot()
+	if got.URL != "http://localhost:3000" {
+		t.Fatalf("URL = %q, want canonical bundled endpoint", got.URL)
+	}
+	if startCalls != 0 {
+		t.Fatalf("start calls = %d, want 0", startCalls)
+	}
+	m.close()
+	if stopCalls != 0 {
+		t.Fatalf("stop calls = %d, want 0 for pre-existing stack", stopCalls)
+	}
+}
