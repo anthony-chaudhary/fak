@@ -35,6 +35,11 @@
       "lane": "worklog",
       "command": "go test -v ./internal/worklog",
       "output_contains": "TestBoundedRetentionAndGap"
+    },
+    {
+      "lane": "workflowlint",
+      "command": "go test -v ./internal/workflowlint",
+      "output_contains": "TestWalkDiscoversEveryCurrentWorkflow"
     }
   ]
 }
