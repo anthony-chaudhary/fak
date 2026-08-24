@@ -41,6 +41,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/armbench"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
 )
 
 func cmdArmbench(argv []string) { os.Exit(runArmbench(os.Stdout, os.Stderr, argv)) }
@@ -624,7 +625,8 @@ func armbenchPonytailGates(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "armbench ponytail-gates: --checkout is required")
 		return 2
 	}
-	report, err := armbench.RunPonytailGates(context.Background(), armbench.PonytailGateOptions{Checkout: *checkout, Live: *live, Claude: *claude, Model: *model, Account: *account, Trials: *trials, Replay: *replay})
+	native := syspromptmmu.DescribeWorkProfile(syspromptmmu.WorkProfilePonytailNativeMed)
+	report, err := armbench.RunPonytailGates(context.Background(), armbench.PonytailGateOptions{Checkout: *checkout, Live: *live, Claude: *claude, Model: *model, Account: *account, Trials: *trials, Replay: *replay, NativeMedium: armbench.NativeProfile{Identity: native.Profile, Segment: native.Segment}})
 	if err != nil {
 		fmt.Fprintf(stderr, "armbench ponytail-gates: %v\n", err)
 		return 1
@@ -672,7 +674,8 @@ func armbenchCavemanNative(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "caveman-native: replacement models require --label replacement-...")
 		return 2
 	}
-	p, err := armbench.RunCaveman(context.Background(), armbench.CavemanOptions{InputDir: *input, OutDir: *out, BaseURL: *base, APIKey: os.Getenv(*keyEnv), Model: *model, Label: *label, Trials: *trials, DryRun: *dryRun})
+	native := syspromptmmu.DescribeStyle("caveman:native:medium")
+	p, err := armbench.RunCaveman(context.Background(), armbench.CavemanOptions{InputDir: *input, OutDir: *out, BaseURL: *base, APIKey: os.Getenv(*keyEnv), Model: *model, Label: *label, Trials: *trials, DryRun: *dryRun, NativeMedium: armbench.NativeProfile{Identity: native.Style, Segment: native.Segment}})
 	if err != nil {
 		fmt.Fprintf(stderr, "caveman-native: %v\n", err)
 		return 1

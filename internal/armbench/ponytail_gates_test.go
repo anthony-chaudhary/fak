@@ -47,7 +47,8 @@ func TestPonytailGatePinnedAssertions(t *testing.T) {
 	}
 }
 func TestPonytailGateDryRunCannotClaimPass(t *testing.T) {
-	r, err := RunPonytailGates(context.Background(), PonytailGateOptions{Checkout: pinnedGateCheckout(t)})
+	canonical := syspromptmmu.DescribeWorkProfile(syspromptmmu.WorkProfilePonytailNativeMed)
+	r, err := RunPonytailGates(context.Background(), PonytailGateOptions{Checkout: pinnedGateCheckout(t), NativeMedium: NativeProfile{Identity: canonical.Profile, Segment: canonical.Segment}})
 	if err != nil {
 		t.Fatal(err)
 	}

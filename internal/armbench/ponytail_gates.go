@@ -19,7 +19,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -73,6 +72,11 @@ type GateRunArtifact struct {
 	Output  string `json:"output"`
 	Error   string `json:"error,omitempty"`
 }
+type NativeProfile struct {
+	Identity string
+	Segment  string
+}
+
 type ArmIdentity struct {
 	Arm              string `json:"arm"`
 	Implementation   string `json:"implementation"`
@@ -103,6 +107,7 @@ type PonytailGateOptions struct {
 	Live                                     bool
 	Trials                                   int
 	Timeout                                  time.Duration
+	NativeMedium                             NativeProfile
 }
 
 var gateSourcePaths = []string{
@@ -172,7 +177,7 @@ func RunPonytailGates(ctx context.Context, o PonytailGateOptions) (PonytailGateR
 	if err != nil {
 		return PonytailGateReport{}, err
 	}
-	arms, err := benchmarkArmIdentities(sources)
+	arms, err := benchmarkArmIdentities(sources, o.NativeMedium)
 	if err != nil {
 		return PonytailGateReport{}, err
 	}
@@ -283,7 +288,7 @@ func benchmarkProviderArgs(o PonytailGateOptions, arm, task string) ([]string, e
 	case "ponytail":
 		args = append(args, "--system-prompt-file", filepath.Join(o.Checkout, "skills", "ponytail", "SKILL.md"))
 	case ponytailNativeMediumArm:
-		profile, err := nativeMediumProfile()
+		profile, err := nativeMediumProfile(o.NativeMedium)
 		if err != nil {
 			return nil, err
 		}
@@ -294,23 +299,23 @@ func benchmarkProviderArgs(o PonytailGateOptions, arm, task string) ([]string, e
 	return args, nil
 }
 
-func nativeMediumProfile() (syspromptmmu.WorkProfileReadout, error) {
-	profile := syspromptmmu.DescribeWorkProfile(syspromptmmu.WorkProfilePonytailNativeMed)
-	if !profile.Known || !profile.Applied || profile.Profile != syspromptmmu.WorkProfilePonytailNativeMed || profile.Segment == "" {
-		return syspromptmmu.WorkProfileReadout{}, fmt.Errorf("canonical native medium work profile unavailable: %+v", profile)
+func nativeMediumProfile(profile NativeProfile) (NativeProfile, error) {
+	if profile.Identity != "ponytail:native:medium" || profile.Segment == "" {
+		return NativeProfile{}, fmt.Errorf("canonical native medium work profile unavailable: %+v", profile)
 	}
-	if profile.Witness != ponytailNativeMediumDigest {
-		return syspromptmmu.WorkProfileReadout{}, fmt.Errorf("canonical native medium fragment drift: got %s want %s", profile.Witness, ponytailNativeMediumDigest)
+	witness := fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(profile.Segment)))
+	if witness != ponytailNativeMediumDigest {
+		return NativeProfile{}, fmt.Errorf("canonical native medium fragment drift: got %s want %s", witness, ponytailNativeMediumDigest)
 	}
 	return profile, nil
 }
 
-func benchmarkArmIdentities(sources []GateSource) ([]ArmIdentity, error) {
+func benchmarkArmIdentities(sources []GateSource, native NativeProfile) ([]ArmIdentity, error) {
 	sourceHashes := make(map[string]string, len(sources))
 	for _, source := range sources {
 		sourceHashes[source.Path] = source.SHA256
 	}
-	profile, err := nativeMediumProfile()
+	profile, err := nativeMediumProfile(native)
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +323,7 @@ func benchmarkArmIdentities(sources []GateSource) ([]ArmIdentity, error) {
 		{Arm: "baseline", Implementation: "none", CanonicalProfile: syspromptmmu.WorkProfileStandard},
 		{Arm: "caveman", Implementation: "pinned_upstream", CanonicalProfile: "caveman:upstream:pinned", Source: "benchmarks/arms/caveman-SKILL.md", FragmentDigest: "sha256:" + sourceHashes["benchmarks/arms/caveman-SKILL.md"]},
 		{Arm: "ponytail", Implementation: "pinned_upstream", CanonicalProfile: "ponytail:upstream:pinned", Source: "skills/ponytail/SKILL.md", FragmentDigest: "sha256:" + sourceHashes["skills/ponytail/SKILL.md"]},
-		{Arm: ponytailNativeMediumArm, Implementation: "fak_native", CanonicalProfile: profile.Profile, Source: "syspromptmmu.DescribeWorkProfile", FragmentDigest: profile.Witness},
+		{Arm: ponytailNativeMediumArm, Implementation: "fak_native", CanonicalProfile: profile.Identity, Source: "syspromptmmu.DescribeWorkProfile", FragmentDigest: ponytailNativeMediumDigest},
 	}, nil
 }
 
