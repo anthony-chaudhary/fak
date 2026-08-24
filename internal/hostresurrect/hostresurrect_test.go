@@ -18,6 +18,7 @@ func TestPlanJoinsCrashToLiveRowsIdempotentlyAndCapsWave(t *testing.T) {
 	}
 	cohort := Cohort{Sessions: []CohortEntry{{Handle: "g1", PID: 1, StartedAt: rows[1].StartedAt}, {Handle: "g2", PID: 2, StartedAt: rows[0].StartedAt}}}
 	rows[0].PID, rows[1].PID = 2, 1
+	rows[0].HostRecovery, rows[1].HostRecovery = true, true
 	got, _ := Plan(sig, rows, cohort, map[string]bool{Key("evt-1", "g1"): true}, 1)
 	if len(got) != 1 || got[0].Session != "g2" || got[0].CWD != `C:\b` {
 		t.Fatalf("Plan = %+v", got)
@@ -32,7 +33,7 @@ func TestPlanJoinsCrashToLiveRowsIdempotentlyAndCapsWave(t *testing.T) {
 
 func TestPlanReplacesStaleResumeHandle(t *testing.T) {
 	sig := hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "evt"}
-	rows := []guardsessions.Row{{Schema: guardsessions.Schema, Handle: "g", Interactive: true, CWD: `C:\a`, Command: []string{"claude", "--resume", "old"}, ResumeHandle: "new"}}
+	rows := []guardsessions.Row{optIn(guardsessions.Row{Schema: guardsessions.Schema, Handle: "g", Interactive: true, CWD: `C:\a`, Command: []string{"claude", "--resume", "old"}, ResumeHandle: "new"})}
 	rows[0].PID = 1
 	got, _ := Plan(sig, rows, Cohort{Sessions: []CohortEntry{{Handle: "g", PID: 1, StartedAt: rows[0].StartedAt}}}, nil, 1)
 	if len(got) != 1 || got[0].Command[2] != "new" {
@@ -42,7 +43,7 @@ func TestPlanReplacesStaleResumeHandle(t *testing.T) {
 
 func TestPlanReplacesContinueWithExplicitResume(t *testing.T) {
 	sig := hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "evt"}
-	rows := []guardsessions.Row{{Schema: guardsessions.Schema, Handle: "g", Interactive: true, CWD: `C:\a`, Command: []string{"claude", "--continue"}, ResumeHandle: "g"}}
+	rows := []guardsessions.Row{optIn(guardsessions.Row{Schema: guardsessions.Schema, Handle: "g", Interactive: true, CWD: `C:\a`, Command: []string{"claude", "--continue"}, ResumeHandle: "g"})}
 	rows[0].PID = 1
 	got, _ := Plan(sig, rows, Cohort{Sessions: []CohortEntry{{Handle: "g", PID: 1, StartedAt: rows[0].StartedAt}}}, nil, 1)
 	if len(got) != 1 || len(got[0].Command) != 3 || got[0].Command[1] != "--resume" || got[0].Command[2] != "g" {
@@ -60,9 +61,9 @@ func TestPlanExcludesMoreThanWaveOfStaleRows(t *testing.T) {
 	sig := hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "evt-mixed"}
 	rows := make([]guardsessions.Row, 0, MaxLaunchesPerWindow+2)
 	for i := 0; i < MaxLaunchesPerWindow+1; i++ {
-		rows = append(rows, guardsessions.Row{Schema: guardsessions.Schema, Handle: fmt.Sprintf("stale-%02d", i), PID: 100 + i, Interactive: true, CWD: `C:\stale`, Command: []string{"claude"}, ResumeHandle: fmt.Sprintf("stale-%02d", i), StartedAt: fmt.Sprintf("2026-07-14T19:%02d:00Z", i)})
+		rows = append(rows, optIn(guardsessions.Row{Schema: guardsessions.Schema, Handle: fmt.Sprintf("stale-%02d", i), PID: 100 + i, Interactive: true, CWD: `C:\stale`, Command: []string{"claude"}, ResumeHandle: fmt.Sprintf("stale-%02d", i), StartedAt: fmt.Sprintf("2026-07-14T19:%02d:00Z", i)}))
 	}
-	current := guardsessions.Row{Schema: guardsessions.Schema, Handle: "current", PID: 4242, Interactive: true, CWD: `C:\current`, Command: []string{"codex"}, ResumeHandle: "current", StartedAt: "2026-07-14T20:00:00Z"}
+	current := optIn(guardsessions.Row{Schema: guardsessions.Schema, Handle: "current", PID: 4242, Interactive: true, CWD: `C:\current`, Command: []string{"codex"}, ResumeHandle: "current", StartedAt: "2026-07-14T20:00:00Z"})
 	rows = append(rows, current)
 	cohort := Cohort{CapturedAt: "2026-07-14T20:00:01Z", Sessions: []CohortEntry{{Handle: current.Handle, PID: current.PID, StartedAt: current.StartedAt}}}
 
@@ -77,7 +78,7 @@ func TestPlanExcludesMoreThanWaveOfStaleRows(t *testing.T) {
 
 func TestPlanRejectsCohortPIDMismatch(t *testing.T) {
 	sig := hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "evt-reuse"}
-	row := guardsessions.Row{Schema: guardsessions.Schema, Handle: "g", PID: 42, Interactive: true, CWD: `C:\repo`, Command: []string{"codex"}, ResumeHandle: "g"}
+	row := optIn(guardsessions.Row{Schema: guardsessions.Schema, Handle: "g", PID: 42, Interactive: true, CWD: `C:\repo`, Command: []string{"codex"}, ResumeHandle: "g"})
 	got, counts := Plan(sig, []guardsessions.Row{row}, Cohort{Sessions: []CohortEntry{{Handle: "g", PID: 41, StartedAt: row.StartedAt}}}, nil, 1)
 	if len(got) != 0 || counts.ExcludedPIDMismatch != 1 {
 		t.Fatalf("Plan=%+v counts=%+v", got, counts)
@@ -94,4 +95,34 @@ func TestCaptureKeepsNewestRowPerLivePID(t *testing.T) {
 	if len(cohort.Sessions) != 1 || cohort.Sessions[0].Handle != "current" {
 		t.Fatalf("cohort=%+v", cohort)
 	}
+}
+
+func TestPlanScopesTerminalCrashToOwningHost(t *testing.T) {
+	now := time.Date(2026, 8, 24, 3, 0, 0, 0, time.UTC)
+	one := optIn(guardsessions.NewInteractiveRow("one", "codex", 41, `C:\one`, "", "", now, []string{"codex"}))
+	two := optIn(guardsessions.NewInteractiveRow("two", "codex", 42, `C:\two`, "", "", now.Add(-time.Second), []string{"codex"}))
+	cohort := Cohort{Sessions: []CohortEntry{
+		{Handle: one.Handle, PID: one.PID, StartedAt: one.StartedAt, HostPID: 100},
+		{Handle: two.Handle, PID: two.PID, StartedAt: two.StartedAt, HostPID: 200},
+	}}
+	signal := hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "wt", HostPID: 100, FaultingApp: "WindowsTerminal.exe"}
+	got, counts := Plan(signal, []guardsessions.Row{one, two}, cohort, nil, 10)
+	if len(got) != 1 || got[0].Session != one.Handle || counts.Candidates != 1 || counts.ExcludedHostMismatch != 1 {
+		t.Fatalf("got=%+v counts=%+v", got, counts)
+	}
+}
+
+func TestPlanTerminalCrashFailsClosedWithoutHostBinding(t *testing.T) {
+	now := time.Date(2026, 8, 24, 3, 0, 0, 0, time.UTC)
+	row := optIn(guardsessions.NewInteractiveRow("one", "codex", 41, `C:\one`, "", "", now, []string{"codex"}))
+	signal := hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "wt", HostPID: 100, FaultingApp: "WindowsTerminal.exe"}
+	got, counts := Plan(signal, []guardsessions.Row{row}, Cohort{Sessions: []CohortEntry{{Handle: row.Handle, PID: row.PID, StartedAt: row.StartedAt}}}, nil, 10)
+	if len(got) != 0 || counts.ExcludedHostMismatch != 1 {
+		t.Fatalf("got=%+v counts=%+v", got, counts)
+	}
+}
+
+func optIn(row guardsessions.Row) guardsessions.Row {
+	row.HostRecovery = true
+	return row
 }

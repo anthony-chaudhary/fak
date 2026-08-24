@@ -391,3 +391,16 @@ func TestRecordCompactionTriggerNeverFailsRecord(t *testing.T) {
 		t.Fatalf("folded rows = %d, want %d distinct handles", len(rows), handles)
 	}
 }
+
+func TestNewInteractiveRowHostRecoveryIsExplicit(t *testing.T) {
+	t.Setenv("FAK_HOST_RECOVERY_SESSION", "")
+	row := NewInteractiveRow("trace", "codex", 1, t.TempDir(), "", "", time.Now(), []string{"codex"})
+	if row.HostRecovery {
+		t.Fatal("host recovery unexpectedly defaulted on without a session match")
+	}
+	t.Setenv("FAK_HOST_RECOVERY_SESSION", "current")
+	row = NewInteractiveRow("trace", "codex", 1, t.TempDir(), "", "", time.Now(), []string{"codex"})
+	if !row.HostRecovery {
+		t.Fatal("current session was not opted in")
+	}
+}

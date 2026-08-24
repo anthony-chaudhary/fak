@@ -28,7 +28,13 @@ func CohortPath(regDir string) string { return filepath.Join(regDir, CohortFileN
 // Capture keeps only rows whose current PID is independently alive. The caller
 // supplies the probe so fixture tests never depend on host process state.
 func Capture(rows []guardsessions.Row, capturedAt time.Time, alive func(int) bool, started func(int) (time.Time, bool)) Cohort {
-	if alive == nil || started == nil {
+	return CaptureWithHost(rows, capturedAt, alive, started, func(pid int) (int, bool) { return pid, true })
+}
+
+// CaptureWithHost also binds each live guard process to its owning terminal
+// host, so one host failure cannot relaunch sessions from another window.
+func CaptureWithHost(rows []guardsessions.Row, capturedAt time.Time, alive func(int) bool, started func(int) (time.Time, bool), host func(int) (int, bool)) Cohort {
+	if alive == nil || started == nil || host == nil {
 		return Cohort{}
 	}
 	live := guardsessions.LiveInteractive(rows)
@@ -54,7 +60,11 @@ func Capture(rows []guardsessions.Row, capturedAt time.Time, alive func(int) boo
 		if !ok || err != nil || processStarted.After(rowStarted.Add(time.Second)) {
 			continue
 		}
-		out.Sessions = append(out.Sessions, CohortEntry{Handle: row.Handle, PID: row.PID, StartedAt: row.StartedAt})
+		hostPID, ok := host(row.PID)
+		if !ok || hostPID <= 0 {
+			continue
+		}
+		out.Sessions = append(out.Sessions, CohortEntry{Handle: row.Handle, PID: row.PID, StartedAt: row.StartedAt, HostPID: hostPID})
 	}
 	return out
 }

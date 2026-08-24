@@ -53,6 +53,7 @@ type Row struct {
 	// Relaunch fields are the OS-independent contract consumed by the host-crash
 	// actuator. Interactive distinguishes operator tabs from dispatcher-owned workers.
 	Interactive  bool     `json:"interactive,omitempty"`
+	HostRecovery bool     `json:"host_recovery,omitempty"`
 	ResumeHandle string   `json:"resume_handle,omitempty"`
 	Command      []string `json:"command,omitempty"`
 	WindowID     string   `json:"window_id,omitempty"`
@@ -135,9 +136,15 @@ func IndexPath(regDir string) string { return filepath.Join(regDir, IndexFileNam
 // NewInteractiveRow builds the durable relaunch specification for an operator-owned
 // Guard session. Command is an argv vector, not a shell string, so the actuator can
 // reconstruct it without lossy quoting or command injection.
+// HostRecoveryEnabled marks the row as eligible for automatic terminal-host
+// resurrection. Existing rows default off so rollout cannot fan out across
+// every historical interactive session.
+func HostRecoveryEnabled(row Row) bool { return row.HostRecovery }
+
 func NewInteractiveRow(traceID, agent string, pid int, cwd, auditPath, nonce string, startedAt time.Time, command []string) Row {
 	r := NewRow(traceID, agent, pid, cwd, auditPath, nonce, startedAt)
 	r.Interactive = true
+	r.HostRecovery = hostRecoveryOptIn(r.Handle)
 	r.ResumeHandle = r.Handle
 	r.Command = append([]string(nil), command...)
 	r.WindowID = strings.TrimSpace(os.Getenv("WT_WINDOW"))
@@ -257,6 +264,14 @@ func foldReader(r io.Reader) (rows []Row, rawLines int) {
 
 // startUnix parses a row's RFC3339 start into unix seconds, 0 on any parse failure (so an
 // unstamped row sorts last rather than crashing the sort).
+func hostRecoveryOptIn(handle string) bool {
+	configured := strings.TrimSpace(os.Getenv("FAK_HOST_RECOVERY_SESSION"))
+	if configured == "current" {
+		return true
+	}
+	return configured != "" && configured == strings.TrimSpace(handle)
+}
+
 func startUnix(r Row) int64 {
 	if t, err := time.Parse(time.RFC3339, strings.TrimSpace(r.StartedAt)); err == nil {
 		return t.Unix()

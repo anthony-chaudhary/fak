@@ -455,6 +455,29 @@ try {
   # Log it and continue on whatever resume_plan.json already exists on disk.
   Note ("  registry refresh FAILED: $($_.Exception.Message) -- continuing on existing plan")
 }
+# Publish the interactive guard-session journal into the machine-owned shared
+# registry. The LocalService crash sensor cannot depend on a user-profile path,
+# and this atomic mirror survives Windows Terminal/fak/child process death.
+if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+  $machineRegistry = Join-Path $env:ProgramData 'fak\guard-control\registry'
+  $sourceJournal = Join-Path $regDir 'guard_sessions.jsonl'
+  $destJournal = Join-Path $machineRegistry 'guard_sessions.jsonl'
+  if (Test-Path -LiteralPath $sourceJournal) {
+    $tempJournal = $null
+    try {
+      New-Item -ItemType Directory -Force -Path $machineRegistry | Out-Null
+      $tempJournal = Join-Path $machineRegistry ('.guard_sessions-' + [guid]::NewGuid().ToString('N') + '.tmp')
+      Copy-Item -LiteralPath $sourceJournal -Destination $tempJournal -Force
+      Move-Item -LiteralPath $tempJournal -Destination $destJournal -Force
+      Note "  host registry: published interactive crash cohort source"
+    } catch {
+      Note "  host registry publish FAILED: $($_.Exception.Message)"
+      if ($tempJournal -and (Test-Path -LiteralPath $tempJournal)) {
+        Remove-Item -LiteralPath $tempJournal -Force -ErrorAction SilentlyContinue
+      }
+    }
+  }
+}
 $planPath = Join-Path $regDir 'resume_plan.json'
 $plan = if (Test-Path $planPath) { (Get-Content $planPath -Raw | ConvertFrom-Json).plan } else { @() }
 # Size this tick from the registry snapshot just refreshed above. An explicit

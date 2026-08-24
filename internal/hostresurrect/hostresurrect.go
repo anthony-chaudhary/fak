@@ -39,6 +39,7 @@ type CohortEntry struct {
 	Handle    string `json:"handle"`
 	PID       int    `json:"pid"`
 	StartedAt string `json:"started_at"`
+	HostPID   int    `json:"host_pid,omitempty"`
 }
 
 // Selection makes a relaunch wave auditable without exposing commands or
@@ -49,8 +50,10 @@ type Selection struct {
 	Untombstoned           int `json:"untombstoned"`
 	SnapshotSize           int `json:"snapshot_size"`
 	Candidates             int `json:"candidates"`
+	ExcludedNotOptedIn     int `json:"excluded_not_opted_in"`
 	ExcludedNotInCohort    int `json:"excluded_not_in_cohort"`
 	ExcludedPIDMismatch    int `json:"excluded_pid_mismatch"`
+	ExcludedHostMismatch   int `json:"excluded_host_mismatch"`
 	ExcludedInvalidResume  int `json:"excluded_invalid_resume"`
 	ExcludedAlreadyHandled int `json:"excluded_already_handled"`
 	Selected               int `json:"selected"`
@@ -76,6 +79,10 @@ func Plan(signal hostfault.HostCrashSignal, rows []guardsessions.Row, cohort Coh
 	sort.SliceStable(live, func(i, j int) bool { return live[i].StartedAt > live[j].StartedAt })
 	out := make([]Request, 0, min(limit, len(live)))
 	for _, row := range live {
+		if !guardsessions.HostRecoveryEnabled(row) {
+			counts.ExcludedNotOptedIn++
+			continue
+		}
 		entry, ok := members[row.Handle]
 		if !ok {
 			counts.ExcludedNotInCohort++
@@ -83,6 +90,10 @@ func Plan(signal hostfault.HostCrashSignal, rows []guardsessions.Row, cohort Coh
 		}
 		if entry.PID != row.PID || entry.StartedAt != row.StartedAt {
 			counts.ExcludedPIDMismatch++
+			continue
+		}
+		if terminalHostSignal(signal) && (entry.HostPID <= 0 || int64(entry.HostPID) != signal.HostPID) {
+			counts.ExcludedHostMismatch++
 			continue
 		}
 		counts.Candidates++
@@ -106,6 +117,11 @@ func Plan(signal hostfault.HostCrashSignal, rows []guardsessions.Row, cohort Coh
 
 // resumeCommand makes continuation explicit. A registry row may contain the original
 // cold launch (`claude`) or an already-resumable argv; the actuator must never cold-start.
+func terminalHostSignal(signal hostfault.HostCrashSignal) bool {
+	app := strings.ToLower(strings.TrimSpace(signal.FaultingApp))
+	return signal.HostPID > 0 && (app == "windowsterminal.exe" || app == "openconsole.exe")
+}
+
 func resumeCommand(original []string, handle string) []string {
 	handle = strings.TrimSpace(handle)
 	if len(original) == 0 || handle == "" {
