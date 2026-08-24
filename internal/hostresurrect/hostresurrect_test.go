@@ -100,8 +100,8 @@ func TestCaptureKeepsNewestRowPerLivePID(t *testing.T) {
 
 func TestPlanScopesTerminalCrashToOwningHost(t *testing.T) {
 	now := time.Date(2026, 8, 24, 3, 0, 0, 0, time.UTC)
-	one := optIn(guardsessions.NewInteractiveRow("one", "claude", 41, `C:\one`, "", "", now, []string{"claude"}))
-	two := optIn(guardsessions.NewInteractiveRow("two", "claude", 42, `C:\two`, "", "", now.Add(-time.Second), []string{"claude"}))
+	one := optIn(guardsessions.NewInteractiveRow("one", "claude", 41, `C:\one`, "", "", now, []string{"claude"}, false))
+	two := optIn(guardsessions.NewInteractiveRow("two", "claude", 42, `C:\two`, "", "", now.Add(-time.Second), []string{"claude"}, false))
 	cohort := Cohort{Sessions: []CohortEntry{
 		{Handle: one.Handle, PID: one.PID, StartedAt: one.StartedAt, HostPID: 100},
 		{Handle: two.Handle, PID: two.PID, StartedAt: two.StartedAt, HostPID: 200},
@@ -115,7 +115,7 @@ func TestPlanScopesTerminalCrashToOwningHost(t *testing.T) {
 
 func TestPlanTerminalCrashFailsClosedWithoutHostBinding(t *testing.T) {
 	now := time.Date(2026, 8, 24, 3, 0, 0, 0, time.UTC)
-	row := optIn(guardsessions.NewInteractiveRow("one", "claude", 41, `C:\one`, "", "", now, []string{"claude"}))
+	row := optIn(guardsessions.NewInteractiveRow("one", "claude", 41, `C:\one`, "", "", now, []string{"claude"}, false))
 	signal := hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "wt", HostPID: 100, FaultingApp: "WindowsTerminal.exe"}
 	got, counts := Plan(signal, []guardsessions.Row{row}, Cohort{Sessions: []CohortEntry{{Handle: row.Handle, PID: row.PID, StartedAt: row.StartedAt}}}, nil, 10)
 	if len(got) != 0 || counts.ExcludedHostMismatch != 1 {

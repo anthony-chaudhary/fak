@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -45,19 +44,12 @@ func (h fakWindowsService) Execute(_ []string, changes <-chan svc.ChangeRequest,
 	}
 }
 
-var windowsInteractiveRegistryDir = func() string {
-	if dir := strings.TrimSpace(os.Getenv("FAK_INTERACTIVE_REGISTRY_DIR")); dir != "" {
-		return dir
-	}
-	return filepath.Join(os.Getenv("ProgramData"), "fak", "guard-control", "registry")
-}
-
 func windowsServiceStateDir() string {
 	return filepath.Join(os.Getenv("ProgramData"), "fak", "guard-control")
 }
 
 var windowsControlCrashTick = func(stdout, stderr io.Writer, state string) int {
-	return runHostCrash(stdout, stderr, []string{"--once", "--since", "5m", "--log", filepath.Join(state, "host-crashes.jsonl"), "--reg-dir", windowsInteractiveRegistryDir(), "--resurrect"})
+	return runHostCrash(stdout, stderr, []string{"--once", "--since", "5m", "--log", filepath.Join(state, "host-crashes.jsonl"), "--reg-dir", filepath.Join(state, "registry"), "--resurrect"})
 }
 var windowsControlResumeTick = serviceTick
 

@@ -93,20 +93,26 @@ type richDashboardSnapshot struct {
 	StartedAt time.Time
 }
 
-func newRichDashboardManager() *richDashboardManager {
+type RichDashboardConfig struct {
+	BaseURL     string
+	ComposePath string
+	Disabled    bool
+}
+
+func newRichDashboardManager(cfg RichDashboardConfig) *richDashboardManager {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &richDashboardManager{
 		ctx: ctx, cancel: cancel, state: "dormant",
-		baseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("FAK_GRAFANA_URL")), "/"),
-		compose: strings.TrimSpace(os.Getenv("FAK_GRAFANA_COMPOSE")),
+		baseURL: strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/"),
+		compose: strings.TrimSpace(cfg.ComposePath),
 	}
 	m.dockerAvailable = dashboardDockerAvailable
 	m.start = startBundledGrafana
 	m.stop = stopBundledGrafana
 	m.probe = probeGrafana
-	if disabledDashboardValue(os.Getenv("FAK_DASHBOARDS")) {
+	if cfg.Disabled {
 		m.state = "disabled"
-		m.reason = "Rich dashboards are disabled by FAK_DASHBOARDS. The lightweight live dashboard remains available."
+		m.reason = "Rich dashboards are disabled by explicit gateway configuration. The lightweight live dashboard remains available."
 	}
 	if m.baseURL != "" {
 		if _, err := safeDashboardBaseURL(m.baseURL); err != nil {

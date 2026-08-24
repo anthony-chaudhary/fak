@@ -133,6 +133,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	guardCoreLock, argv = guardLaunchCoreLockAll(argv)
 	setGuardCoreLockAll(guardCoreLock)
 	fs := flag.NewFlagSet(commandName, flag.ExitOnError)
+	hostRecovery := fs.Bool("host-recovery", false, "opt this interactive session into automatic terminal-host recovery")
 	rotateMode := fs.String("rotate", "", "account rotation: auto|off|<seat> (default auto headless, off interactive)")
 	verbFlagUsage(fs, "guard")
 	addr := fs.String("addr", "", "gateway listen address (default: a private 127.0.0.1 port the OS picks)")
@@ -738,7 +739,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	// actuator-ready crash row independent of the terminal host.
 	if guardOwnsInteractiveTerminal() {
 		cwd, _ := os.Getwd()
-		row := guardsessions.NewInteractiveRow(guardTraceID, agentName, os.Getpid(), cwd, auditJournal.Path(), "", time.Now(), command)
+		row := guardsessions.NewInteractiveRow(guardTraceID, agentName, os.Getpid(), cwd, auditJournal.Path(), "", time.Now(), command, *hostRecovery)
 		if err := recordInteractiveSessionRows(row); err != nil && !*quiet {
 			fmt.Fprintf(os.Stderr, "fak guard: interactive session registry start: %v\n", err)
 		}

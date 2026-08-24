@@ -1378,6 +1378,39 @@ class PhantomTreeRegionFidelityTest(unittest.TestCase):
             % (r["lane"], region, self.NAMED))
 
 
+class BoundedLabelReconciliationTest(unittest.TestCase):
+    def test_over_cap_progress_is_deterministic_and_bounded(self):
+        routes = [
+            {"number": number, "class": m.CLASS_DEV}
+            for number in range(668, 0, -1)
+        ]
+        labels = {number: set() for number in range(1, 669)}
+
+        first_plan = m.plan_class_label_changes(routes, labels)
+        first, remaining = m.bound_class_label_changes(first_plan, 200)
+
+        self.assertEqual([change["number"] for change in first], list(range(1, 201)))
+        self.assertEqual(len(first), 200)
+        self.assertEqual(remaining, 468)
+
+        for change in first:
+            labels[change["number"]].update(change["add"])
+            labels[change["number"]].difference_update(change["remove"])
+        second_plan = m.plan_class_label_changes(routes, labels)
+        second, remaining = m.bound_class_label_changes(second_plan, 200)
+
+        self.assertEqual([change["number"] for change in second], list(range(201, 401)))
+        self.assertEqual(len(second), 200)
+        self.assertEqual(remaining, 268)
+
+    def test_zero_limit_preserves_unbounded_manual_reconciliation(self):
+        changes = [{"number": number, "add": [], "remove": []}
+                   for number in range(1, 669)]
+        selected, remaining = m.bound_class_label_changes(changes, 0)
+        self.assertEqual(selected, changes)
+        self.assertEqual(remaining, 0)
+
+
 class PairedFlagTest(unittest.TestCase):
     def test_apply_labels_write_requires_apply_labels(self):
         stderr = io.StringIO()

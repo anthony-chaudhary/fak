@@ -166,7 +166,7 @@ func TestLiveInteractiveReadbackAndCleanExit(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		r := NewInteractiveRow("trace-"+string(rune('a'+i)), "claude", 100+i,
 			filepath.Join(dir, string(rune('a'+i))), filepath.Join(dir, "audit.jsonl"), "", start.Add(time.Duration(i)*time.Second),
-			[]string{"claude", "--continue"})
+			[]string{"claude", "--continue"}, false)
 		if err := Record(dir, r); err != nil {
 			t.Fatalf("Record row %d: %v", i, err)
 		}
@@ -198,7 +198,7 @@ func TestLiveInteractiveReadbackAndCleanExit(t *testing.T) {
 
 func TestLiveInteractiveExcludesDispatcherAndIncompleteRows(t *testing.T) {
 	legacy := NewRow("legacy", "claude", 1, `C:\work`, "", "", time.Now())
-	incomplete := NewInteractiveRow("bad", "claude", 2, "", "", "", time.Now(), nil)
+	incomplete := NewInteractiveRow("bad", "claude", 2, "", "", "", time.Now(), nil, false)
 	if got := LiveInteractive([]Row{legacy, incomplete}); len(got) != 0 {
 		t.Fatalf("LiveInteractive = %+v, want none", got)
 	}
@@ -393,14 +393,12 @@ func TestRecordCompactionTriggerNeverFailsRecord(t *testing.T) {
 }
 
 func TestNewInteractiveRowHostRecoveryIsExplicit(t *testing.T) {
-	t.Setenv("FAK_HOST_RECOVERY_SESSION", "")
-	row := NewInteractiveRow("trace", "codex", 1, t.TempDir(), "", "", time.Now(), []string{"codex"})
+	row := NewInteractiveRow("trace", "codex", 1, t.TempDir(), "", "", time.Now(), []string{"codex"}, false)
 	if row.HostRecovery {
-		t.Fatal("host recovery unexpectedly defaulted on without a session match")
+		t.Fatal("host recovery unexpectedly defaulted on")
 	}
-	t.Setenv("FAK_HOST_RECOVERY_SESSION", "current")
-	row = NewInteractiveRow("trace", "codex", 1, t.TempDir(), "", "", time.Now(), []string{"codex"})
+	row = NewInteractiveRow("trace", "codex", 1, t.TempDir(), "", "", time.Now(), []string{"codex"}, true)
 	if !row.HostRecovery {
-		t.Fatal("current session was not opted in")
+		t.Fatal("explicit host recovery option was not preserved")
 	}
 }
