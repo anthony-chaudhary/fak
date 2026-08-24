@@ -45,6 +45,11 @@
       "lane": "workflowaudit",
       "command": "go test -v ./internal/workflowaudit",
       "output_contains": "TestLiveTreeFullyClassified"
+    },
+    {
+      "lane": "workflow",
+      "command": "go test -v ./internal/workflow",
+      "output_contains": "TestResumeCorroboratedEffectfulStepIsSkipped"
     }
   ]
 }
