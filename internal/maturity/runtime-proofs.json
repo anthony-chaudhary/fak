@@ -85,6 +85,11 @@
       "lane": "wipfence",
       "command": "go test -v ./internal/wipfence",
       "output_contains": "TestFenceUnfenceRoundTrip"
+    },
+    {
+      "lane": "wipattr",
+      "command": "go test -v ./internal/wipattr",
+      "output_contains": "TestResiduePreemptsEveryOtherVerdict"
     }
   ]
 }
