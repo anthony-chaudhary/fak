@@ -100,6 +100,11 @@
       "lane": "wiki",
       "command": "go test -v ./internal/wiki",
       "output_contains": "TestVerifyCitations_ResolvesAndFlags"
+    },
+    {
+      "lane": "whatschanged",
+      "command": "go test -v ./internal/whatschanged",
+      "output_contains": "TestWhatsChangedPreviewListsIntersectingCommitsAndFiles"
     }
   ]
 }
