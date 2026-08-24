@@ -16,7 +16,7 @@ func TestTokenEffectivenessCoversEveryDefaultSaver(t *testing.T) {
 		t.Fatalf("rows = %d, want source-derived 9", len(report.Rows))
 	}
 	for _, row := range report.Rows {
-		if row.Key == "" || row.Default == "" || row.Configured == "" || row.Owner == "" || row.Mechanism == "" || row.EffectMetric == "" || row.WitnessKind == "" || row.Witness == "" || len(row.WitnessPaths) == 0 || row.Control == "" || row.Scope == "" || row.Observed != "captured" {
+		if row.Key == "" || row.Default == "" || row.Configured == "" || row.Owner == "" || row.Mechanism == "" || row.EffectMetric == "" || row.WitnessKind == "" || row.Witness == "" || len(row.Paths) == 0 || row.Control == "" || row.Scope == "" || row.Observed != "captured" {
 			t.Errorf("incomplete row: %+v", row)
 		}
 	}
