@@ -125,6 +125,11 @@
       "lane": "versionskew",
       "command": "go test -v ./internal/versionskew",
       "output_contains": "TestAssessStamp_gitAncestry"
+    },
+    {
+      "lane": "verifierexposure",
+      "command": "go test -v ./internal/verifierexposure",
+      "output_contains": "TestFoldFailsClosedOnInventoryErrors"
     }
   ]
 }
