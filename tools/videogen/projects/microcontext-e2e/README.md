@@ -30,3 +30,17 @@ Before publication, follow `CAPTURE-MACBOOK.md`, replace the placeholder chapter
 change the output names to remove `preproduction`, update `claims.json`, rerender,
 read chapters and duration back with ffprobe, and visually review the poster plus
 one frame from every chapter.
+
+## Twenty-second best-hits cutdown
+
+`cutdown.json` renders the social opener independently from the master. It keeps
+the exact-target operating envelope on screen and sends viewers to the full
+install/run/inspect walkthrough.
+
+```powershell
+go run ./tools/videogen -trailer -config tools/videogen/projects/microcontext-e2e/cutdown.json -verify
+go run ./tools/videogen -trailer -config tools/videogen/projects/microcontext-e2e/cutdown.json -all -ffmpeg $ffmpeg
+```
+
+The checked outputs are `visuals/fak-microcontext-best-hits.{mp4,gif}`, its
+poster, and the machine-readable readability audit.

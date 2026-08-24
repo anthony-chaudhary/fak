@@ -1,0 +1,40 @@
+{
+  "width": 1280,
+  "height": 720,
+  "fps": 30,
+  "mp4": "out/fak-microcontext-best-hits.mp4",
+  "gif": "out/fak-microcontext-best-hits.gif",
+  "poster": "out/fak-microcontext-best-hits-poster.png",
+  "contactSheet": "out/best-hits-contact-sheet.png",
+  "audit": "out/best-hits-readability-audit.json",
+  "scenes": [
+    {
+      "kind": "hook",
+      "secs": 3.0,
+      "title": "10,000 contexts.",
+      "action": "64 bounded workers",
+      "detail": "ONE FABRIC"
+    },
+    {
+      "kind": "checkpoint",
+      "secs": 4.0,
+      "eyebrow": "EXACT QWEN3.8-27B TARGET",
+      "title": "3 / 3 trials passed.",
+      "action": "paired no-thinking campaign"
+    },
+    {
+      "kind": "proof",
+      "secs": 5.0,
+      "title": "3,378 -> 376 ms",
+      "action": "p95 first correct answer",
+      "verdict": "A100 / vLLM envelope"
+    },
+    {
+      "kind": "cta",
+      "secs": 8.0,
+      "eyebrow": "SEE THE WHOLE 99-SECOND PATH",
+      "title": "Install. Run. Inspect.",
+      "command": "github.com/anthony-chaudhary/fak"
+    }
+  ]
+}

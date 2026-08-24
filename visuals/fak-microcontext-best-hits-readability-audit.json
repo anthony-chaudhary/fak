@@ -1,0 +1,23 @@
+{
+  "durationSecs": 20,
+  "scenes": 4,
+  "minTypePx": 48,
+  "ctaStartSecs": 12,
+  "ctaHoldSecs": 8,
+  "maxWordsPerTextRegion": 5,
+  "safeMarginPx": 140,
+  "layoutSamples": 12,
+  "maxTextRightPx": 1095,
+  "maxTextBottomPx": 688,
+  "checks": {
+    "canvas_720p_plus": true,
+    "cta_by_12s": true,
+    "cta_hold_5s": true,
+    "duration_18_30s": true,
+    "max_8_words_per_region": true,
+    "motion_24fps_plus": true,
+    "representative_frames_declared": true,
+    "scene_count_3_6": true,
+    "text_safe_area_declared": true
+  }
+}
