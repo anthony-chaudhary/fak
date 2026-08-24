@@ -16,6 +16,7 @@ import (
 func TestResurrectHostCrashSessionsLaunchesOnceAndPersistsReceipt(t *testing.T) {
 	dir := t.TempDir()
 	row := guardsessions.NewInteractiveRow("trace", "claude", 11, filepath.Join(dir, "repo"), "", "", time.Now(), []string{"claude", "--continue"})
+	row.HostRecovery = true
 	if err := guardsessions.Record(dir, row); err != nil {
 		t.Fatal(err)
 	}
@@ -54,11 +55,13 @@ func TestResurrectHostCrashSessionsUsesPersistedPreCrashCohort(t *testing.T) {
 	now := time.Date(2026, 7, 14, 20, 0, 0, 0, time.UTC)
 	for i := 0; i < hostresurrect.MaxLaunchesPerWindow+1; i++ {
 		row := guardsessions.NewInteractiveRow(fmt.Sprintf("stale-%02d", i), "claude", 100+i, dir, "", "", now.Add(-time.Hour), []string{"claude"})
+		row.HostRecovery = true
 		if err := guardsessions.Record(dir, row); err != nil {
 			t.Fatal(err)
 		}
 	}
 	current := guardsessions.NewInteractiveRow("current", "codex", 4242, dir, "", "", now, []string{"codex"})
+	current.HostRecovery = true
 	if err := guardsessions.Record(dir, current); err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +95,7 @@ func TestResurrectHostCrashSessionsHonorsGlobalLaunchRate(t *testing.T) {
 		}
 	}
 	row := guardsessions.NewInteractiveRow("trace", "claude", 1, dir, "", "", now, []string{"claude"})
+	row.HostRecovery = true
 	_ = guardsessions.Record(dir, row)
 	sig := hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "new", Class: hostfault.HostCrashGeneric}
 	if err := hostresurrect.StoreCohort(hostresurrect.CohortPath(dir), hostresurrect.Cohort{CapturedAt: now.UTC().Format(time.RFC3339Nano), Sessions: []hostresurrect.CohortEntry{{Handle: row.Handle, PID: row.PID, StartedAt: row.StartedAt}}}); err != nil {
@@ -106,6 +110,7 @@ func TestResurrectHostCrashSessionsFailedLaunchIsStillDeduped(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 7, 14, 21, 0, 0, 0, time.UTC)
 	row := guardsessions.NewInteractiveRow("trace-fail", "claude", 1, dir, "", "", now, []string{"claude"})
+	row.HostRecovery = true
 	if err := guardsessions.Record(dir, row); err != nil {
 		t.Fatal(err)
 	}
@@ -132,6 +137,7 @@ func TestResurrectHostCrashSessionsDryRunDoesNotReserve(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 8, 23, 20, 0, 0, 0, time.UTC)
 	row := guardsessions.NewInteractiveRow("trace", "codex", 41, dir, "", "", now.Add(-time.Minute), []string{"codex", "resume", "session-1"})
+	row.HostRecovery = true
 	if err := guardsessions.Record(dir, row); err != nil {
 		t.Fatal(err)
 	}
