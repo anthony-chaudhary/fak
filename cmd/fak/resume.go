@@ -518,25 +518,19 @@ func scanLaunchLedger(path string) (times []int64, last int64) {
 }
 
 // isNonLaunchPhase reports whether a ledger row's phase marks something that is NOT a
-// fired launch — a deferral or consideration is not launch pressure, so counting it would
-// let the gate's own DEFERs cascade into more refusals. Mirrors launch_admission's
-// _NON_LAUNCH_PHASES set (and the watchdogs' NON_LAUNCH_PHASES, including the
-// gate_fail_open governor-unavailable warning row #2173), plus broker_denied — the spawn
-// broker REFUSED, nothing started, so treating it as a launch would poison LastLaunchUnix
-// and trip LAUNCH_SPACING_FLOOR for every following session in the tick — and the
-// status-ledger vocabulary resume.Attempt.IsLaunch already denylists, in case a status
-// row is ever misrouted into the launch ledger. This is the ONE reader-side launch rule
-// in cmd/fak: every ledger scanner classifies through it so the rules cannot drift apart.
-// An empty phase is a launch (the watchdog's launched rows and the other launchers'
-// legacy phase-less rows — pid/cause only — both record a real spawn).
+// fired launch. Named launch phases are an allowlist: "launched" and "resumed" record
+// spawns; every other named phase is bookkeeping and therefore cannot create launch
+// pressure. This matches resume.Attempt's typed classifier and prevents a new decision
+// token such as "revived" from silently resetting LastLaunchUnix on every watchdog tick
+// (#8722). This is the ONE reader-side launch rule in cmd/fak: every ledger scanner
+// classifies through it so the rules cannot drift apart. An empty phase remains a launch
+// for the pre-phase legacy rows that carry pid/cause and recorded a real spawn.
 func isNonLaunchPhase(phase string) bool {
 	switch strings.ToLower(strings.TrimSpace(phase)) {
-	case "deferred", "considered", "skipped", "gate_fail_open", "broker_denied",
-		"queued", "detected", "status", "tick", "snapshot", "progress", "decision",
-		"settled", "operator_settled", "consolidated":
-		return true
-	default:
+	case "", "launched", "resumed":
 		return false
+	default:
+		return true
 	}
 }
 

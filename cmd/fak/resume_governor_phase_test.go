@@ -1,10 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/resume"
 )
 
 // writeGovernorLedger writes the given JSONL rows to a temp resume_ledger.jsonl and
@@ -38,6 +41,77 @@ func TestBrokerDeniedIsNotALaunch(t *testing.T) {
 	// must contribute neither a window timestamp nor a last-launch.
 	if times, last := scanLaunchLedger(p); len(times) != 0 || last != 0 {
 		t.Errorf("broker_denied counted as launch pressure: times=%v last=%d, want none", times, last)
+	}
+}
+
+// #8722: releasing a stale unproven once-latch is a decision, not a spawn. The
+// watchdog can write one revived row on every tick while the session remains queued;
+// those repeated rows must never renew LastLaunchUnix and indefinitely trip the
+// source governor's launch-spacing floor. The 05:43/05:45 ticks mirror the live
+// recurrence that exposed the defect.
+func TestRevivedRowsDoNotRenewLaunchSpacingAcrossTicks(t *testing.T) {
+	launchAt := time.Date(2026, 8, 24, 5, 40, 0, 0, time.UTC)
+	p := writeGovernorLedger(t, fmt.Sprintf(
+		`{"ts":"%s","session":"launched-first","phase":"launched"}`+"\n",
+		launchAt.Format(time.RFC3339),
+	))
+	policy := resume.SourcePolicy{MinLaunchSpacingSeconds: 8}
+
+	for _, tick := range []time.Time{
+		time.Date(2026, 8, 24, 5, 43, 0, 0, time.UTC),
+		time.Date(2026, 8, 24, 5, 45, 0, 0, time.UTC),
+	} {
+		f, err := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, writeErr := fmt.Fprintf(f,
+			`{"ts":"%s","session":"stale-latch","phase":"revived"}`+"\n",
+			tick.Format(time.RFC3339),
+		)
+		closeErr := f.Close()
+		if writeErr != nil {
+			t.Fatal(writeErr)
+		}
+		if closeErr != nil {
+			t.Fatal(closeErr)
+		}
+
+		times, last := scanLaunchLedger(p)
+		if len(times) != 1 || last != launchAt.Unix() {
+			t.Fatalf("tick %s: revived row counted as launch pressure: times=%v last=%d, want [%d] / %d",
+				tick.Format("15:04"), times, last, launchAt.Unix(), launchAt.Unix())
+		}
+		st := scanGovernorLedgerStats(p, tick)
+		if st.Launched24h != 1 || st.LastLaunchUnix != launchAt.Unix() {
+			t.Fatalf("tick %s: revived row counted in governor stats: %+v, want one launch at %d",
+				tick.Format("15:04"), st, launchAt.Unix())
+		}
+		d := resume.AdmitSource(resume.SourceSnapshot{
+			LaunchUnixTimes: times,
+			LastLaunchUnix:  last,
+		}, policy, tick)
+		if !d.Admit {
+			t.Fatalf("tick %s: revived decision renewed launch spacing: %+v", tick.Format("15:04"), d)
+		}
+	}
+}
+
+// The #8722 fix must not weaken the real pressure signal: a fired launched row
+// inside the spacing floor still defers the next queued session.
+func TestLaunchedRowStillEnforcesLaunchSpacing(t *testing.T) {
+	launchAt := time.Date(2026, 8, 24, 5, 45, 0, 0, time.UTC)
+	p := writeGovernorLedger(t, fmt.Sprintf(
+		`{"ts":"%s","session":"real-launch","phase":"launched"}`+"\n",
+		launchAt.Format(time.RFC3339),
+	))
+	times, last := scanLaunchLedger(p)
+	d := resume.AdmitSource(resume.SourceSnapshot{
+		LaunchUnixTimes: times,
+		LastLaunchUnix:  last,
+	}, resume.SourcePolicy{MinLaunchSpacingSeconds: 8}, launchAt.Add(5*time.Second))
+	if d.Admit || d.Reason != resume.ReasonLaunchSpacing {
+		t.Fatalf("real launched row lost spacing pressure: %+v", d)
 	}
 }
 
@@ -93,13 +167,14 @@ func TestIsNonLaunchPhaseVocabulary(t *testing.T) {
 	for _, ph := range []string{
 		"broker_denied", "deferred", "considered", "skipped", "gate_fail_open",
 		"queued", "detected", "status", "tick", "snapshot", "progress", "decision",
-		"settled", "operator_settled", "consolidated",
+		"settled", "operator_settled", "consolidated", "revived",
+		"some_novel_bookkeeping_token",
 	} {
 		if !isNonLaunchPhase(ph) {
 			t.Errorf("isNonLaunchPhase(%q) = false, want true", ph)
 		}
 	}
-	for _, ph := range []string{"launched", ""} {
+	for _, ph := range []string{"launched", "resumed", ""} {
 		if isNonLaunchPhase(ph) {
 			t.Errorf("isNonLaunchPhase(%q) = true, want false (a real launch)", ph)
 		}
