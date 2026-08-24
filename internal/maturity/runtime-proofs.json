@@ -70,6 +70,11 @@
       "lane": "wirescreen",
       "command": "go test -v ./internal/wirescreen -run TestRedactJSONLeaves",
       "output_contains": "TestRedactJSONLeavesNestedResult"
+    },
+    {
+      "lane": "wipref",
+      "command": "go test -v ./internal/wipref -run TestOwnerOfPathStates",
+      "output_contains": "TestOwnerOfPathStates"
     }
   ]
 }
