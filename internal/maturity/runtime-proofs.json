@@ -90,6 +90,11 @@
       "lane": "wipattr",
       "command": "go test -v ./internal/wipattr",
       "output_contains": "TestResiduePreemptsEveryOtherVerdict"
+    },
+    {
+      "lane": "windowgate",
+      "command": "go test -v ./internal/windowgate",
+      "output_contains": "TestConPTYPreflightRefusesStalePairOnLaunchPath"
     }
   ]
 }
