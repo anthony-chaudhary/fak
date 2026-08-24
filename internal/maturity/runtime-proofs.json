@@ -300,6 +300,11 @@
       "lane": "toolseq",
       "command": "go test -v ./internal/toolseq",
       "output_contains": "TestDiscoverBuildsExplainableWorkflowConcepts"
+    },
+    {
+      "lane": "toolsandbox",
+      "command": "go test -v ./internal/toolsandbox",
+      "output_contains": "TestRunSeparatesTaskSuccessFromPolicyCompliance"
     }
   ]
 }
