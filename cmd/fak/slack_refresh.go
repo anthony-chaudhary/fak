@@ -195,9 +195,12 @@ func slackRefreshActions() map[string]slackRefreshAction {
 		},
 		"news": {
 			Kind:    refreshRunnable,
-			Command: "fak news post --title TITLE --notes-file FILE",
-			Detail:  "requires a human/agent-curated, source-linked digest body",
+			Command: "fak slack refresh --surface news [--news-title TITLE --news-file FILE]",
+			Detail:  "audits current digest state by default; publication still requires curated input",
 			Run: func(stdout, stderr io.Writer, dryRun bool, opts slackRefreshOptions) int {
+				if strings.TrimSpace(opts.NewsTitle) == "" || strings.TrimSpace(opts.NewsFile) == "" {
+					return runSlackNewsAudit(stdout, stderr)
+				}
 				return runNewsPost(stdout, stderr, withDryRun([]string{"--title", opts.NewsTitle, "--notes-file", opts.NewsFile}, dryRun))
 			},
 		},
@@ -240,6 +243,40 @@ func runBuiltinScoreboardRefresh(stdout, stderr io.Writer, dryRun bool, _ slackR
 		st.Pending, st.Posted, st.Dead, st.Refused, st.Corrupt, ageOrDash(st.OldestPendingAgeS), ageOrDash(st.LastDrainAgeS))
 	args := []string{"--kpi", "slack-outbox-pending", "--value", fmt.Sprint(st.Pending), "--verdict", verdict, "--detail", detail, "--source", "fak slack outbox status"}
 	return runScoreboardPost(stdout, stderr, withDryRun(args, dryRun))
+}
+
+func runSlackNewsAudit(stdout, stderr io.Writer) int {
+	var news *surfaceReport
+	for _, rep := range buildSurfaceReports() {
+		if rep.Name == "news" {
+			news = rep
+			break
+		}
+	}
+	next := "fak slack refresh --surface news --news-title TITLE --news-file FILE"
+	if news == nil || !news.Ready {
+		fmt.Fprintf(stdout, "news: NEVER_POSTED_OR_UNWIRED - no readable digest; next: %s\n", next)
+		return 1
+	}
+	runAuthChecks([]*surfaceReport{news}, "")
+	if news.Auth == nil || !news.Auth.OK {
+		fmt.Fprintf(stdout, "news: INACCESSIBLE - authentication failed; next: verify fak slack check --auth\n")
+		return 1
+	}
+	age, err := lastPostAge(news, "", time.Now())
+	if err != nil {
+		fmt.Fprintf(stdout, "news: INACCESSIBLE_OR_EMPTY - %v; next: %s\n", err, next)
+		return 1
+	}
+	state := "FRESH"
+	if age > 8*24*time.Hour {
+		state = "STALE"
+	}
+	fmt.Fprintf(stdout, "news: %s - last digest %s ago; source links remain in the digest body; next: %s\n", state, age.Round(time.Second), next)
+	if state == "STALE" {
+		return 1
+	}
+	return 0
 }
 
 func runSlackSurfaceAudit(stdout, stderr io.Writer, surface string, includeOutbox bool) int {
@@ -545,9 +582,6 @@ func refreshSelectedSurfaces(reports []*surfaceReport, dryRun, continueOnError b
 			if res.Detail == "" {
 				res.Detail = "no one-shot refresh action"
 			}
-		case rep.Name == "news" && (strings.TrimSpace(opts.NewsTitle) == "" || strings.TrimSpace(opts.NewsFile) == ""):
-			res.Status = "SKIP"
-			res.Detail = "news refresh needs --news-title and --news-file"
 		case rep.Name == "blockers" && strings.TrimSpace(opts.BlockersIssues) == "":
 			res.Status = "SKIP"
 			res.Detail = "blockers refresh needs --blockers-issues from a GitHub issue-list payload"
