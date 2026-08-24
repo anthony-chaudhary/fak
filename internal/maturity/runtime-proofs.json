@@ -220,6 +220,11 @@
       "lane": "turnkind",
       "command": "go test -v ./internal/turnkind",
       "output_contains": "TestClassify"
+    },
+    {
+      "lane": "turnbench",
+      "command": "go test -v ./internal/turnbench -run TestPolicyReplay",
+      "output_contains": "TestPolicyReplay_ConcurrentEqualsSerial"
     }
   ]
 }
