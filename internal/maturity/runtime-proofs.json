@@ -95,6 +95,11 @@
       "lane": "windowgate",
       "command": "go test -v ./internal/windowgate",
       "output_contains": "TestConPTYPreflightRefusesStalePairOnLaunchPath"
+    },
+    {
+      "lane": "wiki",
+      "command": "go test -v ./internal/wiki",
+      "output_contains": "TestVerifyCitations_ResolvesAndFlags"
     }
   ]
 }
