@@ -59,7 +59,8 @@
     {
       "lane": "witness",
       "command": "go test -v ./internal/witness",
-      "output_contains": "TestExecutionDecision"
+      "output_contains": "TestExecutionWitnessPassesOnlyOnRedToGreenWithStablePassToPass"
     }
   ]
 }
+
