@@ -250,10 +250,7 @@ func RunPonytailGates(ctx context.Context, o PonytailGateOptions) (PonytailGateR
 			if readErr = json.Unmarshal(b, &prior); readErr != nil {
 				return PonytailGateReport{}, readErr
 			}
-			replay = map[string]GateCell{}
-			for _, c := range prior.Cells {
-				replay[c.ScenarioID+"\x00"+c.Arm] = c
-			}
+			replay = indexPriorCells(prior.Cells)
 			r.Assumptions = append(r.Assumptions, "provider outputs replayed from "+o.Replay+"; no provider call repeated")
 		}
 		if strings.TrimSpace(o.Account) == "" {
@@ -274,7 +271,7 @@ func RunPonytailGates(ctx context.Context, o PonytailGateOptions) (PonytailGateR
 					var output string
 					var callErr error
 					if replay != nil {
-						prior, ok := replay[s.ID+"\x00"+arm]
+						prior, ok := replay[trialCellIdentity(s.ID, arm, trial)]
 						if ok && prior.Error == "" {
 							output = prior.Output
 						} else {
@@ -310,6 +307,20 @@ func RunPonytailGates(ctx context.Context, o PonytailGateOptions) (PonytailGateR
 	return r, nil
 }
 
+func indexPriorCells(cells []GateCell) map[string]GateCell {
+	replay := make(map[string]GateCell, len(cells))
+	for _, cell := range cells {
+		replay[trialCellIdentity(cell.ScenarioID, cell.Arm, 0)] = cell
+	}
+	return replay
+}
+
+func trialCellIdentity(scenarioID, arm string, trial int) string {
+	if trial > 0 {
+		scenarioID = fmt.Sprintf("%s.trial-%02d", scenarioID, trial)
+	}
+	return scenarioID + "\x00" + arm
+}
 func callGateProvider(ctx context.Context, o PonytailGateOptions, configDir string, arm, task string) (string, error) {
 	cctx, cancel := context.WithTimeout(ctx, o.Timeout)
 	defer cancel()

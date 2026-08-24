@@ -170,3 +170,20 @@ func TestPonytailDecisionAssessmentFailClosed(t *testing.T) {
 		t.Fatalf("insufficient trials = %+v", got)
 	}
 }
+
+func TestPonytailReplayPreservesEveryTrial(t *testing.T) {
+	cells := []GateCell{
+		{ScenarioID: "up.behavior.hardware-calibration.trial-01", Arm: "baseline", Output: "one"},
+		{ScenarioID: "up.behavior.hardware-calibration.trial-02", Arm: "baseline", Output: "two"},
+	}
+	replay := indexPriorCells(cells)
+	if len(replay) != 2 {
+		t.Fatalf("replay cells collapsed: %+v", replay)
+	}
+	for trial, want := range []string{"one", "two"} {
+		got, ok := replay[trialCellIdentity("up.behavior.hardware-calibration", "baseline", trial+1)]
+		if !ok || got.Output != want {
+			t.Fatalf("trial %d replay = %+v, %v; want %q", trial+1, got, ok, want)
+		}
+	}
+}
