@@ -12,6 +12,8 @@ version change.
 
 ## Evidence rule
 
+A `fak.qwen38-quant-report/1` campaign report carries a typed execution-engine identity. Only `fak-native` may produce a native PROMOTE verdict; the external reference engine is an explicit comparison-only identity and never satisfies native promotion. Compute device/backend (CUDA, Metal, CPU) remains separate from the inference engine. Missing, unknown, or fallback-enabled native identity is rejected.
+
 A `fak.qwen38-quant-report/1` campaign report must bind immutable model,
 checkpoint, artifact, tokenizer, and template hashes; quantizer, runtime, and
 fak `module@rev`; argv-form launch command; hardware/software topology; context

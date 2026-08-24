@@ -66,8 +66,14 @@ type Trial struct {
 	CompletionTokens int     `json:"completion_tokens,omitempty"`
 }
 
+const (
+	EngineFakNative = "fak-native"
+	EngineLlamaCpp  = "llama.cpp"
+)
+
 type Report struct {
 	Schema, CorpusID, CorpusSHA256, Arm string
+	ExecutionEngine                     string      `json:"execution_engine"`
 	Identity                            Identity    `json:"identity"`
 	Environment                         Environment `json:"environment"`
 	Trials                              []Trial     `json:"trials"`
@@ -143,6 +149,18 @@ func Validate(r Report, c Corpus) error {
 	}
 	if r.CorpusID != c.ID || r.CorpusSHA256 != CorpusDigest(c) {
 		return errors.New("corpus drift")
+	}
+	if r.ExecutionEngine == "" {
+		return errors.New("execution_engine is required")
+	}
+	if r.ExecutionEngine != EngineFakNative && r.ExecutionEngine != EngineLlamaCpp {
+		return fmt.Errorf("execution_engine %q is unknown", r.ExecutionEngine)
+	}
+	if r.ExecutionEngine != EngineFakNative && r.Verdict == "PROMOTE" {
+		return fmt.Errorf("execution_engine %q is comparison-only; native promotion requires %q", r.ExecutionEngine, EngineFakNative)
+	}
+	if r.ExecutionEngine == EngineFakNative && !r.Environment.DenyFallback {
+		return errors.New("fak-native execution requires deny_fallback=true")
 	}
 	if !contains(RequiredArms, r.Arm) {
 		return fmt.Errorf("unknown arm %q", r.Arm)
@@ -273,7 +291,7 @@ func validFixture(c Corpus) Report {
 			trials = append(trials, Trial{Workload: w, Repetition: n, Quality: "PASS", LatencyMS: float64(n), CompletionTokens: 1})
 		}
 	}
-	return Report{Schema: Schema, CorpusID: c.ID, CorpusSHA256: CorpusDigest(c), Arm: "q4_k_m", Identity: Identity{Model: "Qwen/Qwen3.8-27B", CheckpointSHA256: h, ArtifactSHA256: h, TokenizerSHA256: h, TemplateSHA256: h, QuantizerRevision: "q@rev", RuntimeRevision: "r@rev", FakModuleRev: "internal/model@r1+gabc"}, Environment: Environment{Command: []string{"fak", "serve"}, Hardware: "A100", Software: "CUDA", ContextTokens: 16384, CacheMode: "on", RequireDevice: "cuda", DenyFallback: true}, Trials: trials, Verdict: "PROMOTE", EvidenceClass: "CAMPAIGN", RawArchiveSHA256: h, StaleAfter: "2026-11-20", RollbackThreshold: "quality pass rate below 100%"}
+	return Report{Schema: Schema, ExecutionEngine: EngineFakNative, CorpusID: c.ID, CorpusSHA256: CorpusDigest(c), Arm: "q4_k_m", Identity: Identity{Model: "Qwen/Qwen3.8-27B", CheckpointSHA256: h, ArtifactSHA256: h, TokenizerSHA256: h, TemplateSHA256: h, QuantizerRevision: "q@rev", RuntimeRevision: "r@rev", FakModuleRev: "internal/model@r1+gabc"}, Environment: Environment{Command: []string{"fak", "serve"}, Hardware: "A100", Software: "CUDA", ContextTokens: 16384, CacheMode: "on", RequireDevice: "cuda", DenyFallback: true}, Trials: trials, Verdict: "PROMOTE", EvidenceClass: "CAMPAIGN", RawArchiveSHA256: h, StaleAfter: "2026-11-20", RollbackThreshold: "quality pass rate below 100%"}
 }
 
 func missingIdentity(i Identity) []string {
