@@ -80,6 +80,11 @@
       "lane": "wiprecon",
       "command": "go test -v ./internal/wiprecon",
       "output_contains": "TestReconcileTotalAndDeterministic"
+    },
+    {
+      "lane": "wipfence",
+      "command": "go test -v ./internal/wipfence",
+      "output_contains": "TestFenceUnfenceRoundTrip"
     }
   ]
 }
