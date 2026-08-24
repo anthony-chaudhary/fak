@@ -7,7 +7,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -160,16 +163,136 @@ func skillDescription(root, path string) (string, error) {
 		if strings.HasPrefix(line, "description:") {
 			description := strings.TrimSpace(strings.TrimPrefix(line, "description:"))
 			if description != "" {
-				return decodeYAMLScalar(description), nil
+				return normalizeYAMLScalar(description), nil
 			}
 		}
 	}
 	return "", fmt.Errorf("%s has no frontmatter description", path)
 }
 
-// decodeYAMLScalar removes the quoting used by canonical skill frontmatter.
-// Generated adapters re-encode the value after truncation; truncating the
-// original quoted token could otherwise leave an unterminated YAML scalar.
+// normalizeYAMLScalar turns the frontmatter representation into the description
+// text that loaders see. Canonical skills use plain, single-quoted, and
+// double-quoted scalars. Some older skills also carry a missing closing quote;
+// accepting an implied close lets sync repair their generated adapters instead
+// of copying the malformed delimiter into another file.
+func normalizeYAMLScalar(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+
+	switch value[0] {
+	case '"':
+		quoted := value
+		if !yamlDoubleQuotedClosed(quoted) {
+			quoted += `"`
+		}
+		if unquoted, err := unquoteYAMLDouble(quoted); err == nil {
+			return unquoted
+		}
+	case '\'':
+		end := len(value)
+		if end > 1 && value[end-1] == '\'' {
+			end--
+		}
+		return strings.ReplaceAll(value[1:end], "''", "'")
+	}
+
+	return value
+}
+
+func yamlDoubleQuotedClosed(value string) bool {
+	if len(value) < 2 || value[len(value)-1] != '"' {
+		return false
+	}
+	backslashes := 0
+	for i := len(value) - 2; i >= 0 && value[i] == '\\'; i-- {
+		backslashes++
+	}
+	return backslashes%2 == 0
+}
+
+// unquoteYAMLDouble maps YAML's extra one-character escapes to Go escapes and
+// then delegates Unicode and hex validation to strconv.Unquote. YAML and Go
+// otherwise share the escape forms used by skill descriptions.
+func unquoteYAMLDouble(value string) (string, error) {
+	if len(value) < 2 || value[0] != '"' || value[len(value)-1] != '"' {
+		return "", fmt.Errorf("not a double-quoted scalar")
+	}
+	var quoted strings.Builder
+	quoted.Grow(len(value) + 8)
+	quoted.WriteByte('"')
+	for i := 1; i < len(value)-1; i++ {
+		if value[i] != '\\' || i+1 >= len(value)-1 {
+			quoted.WriteByte(value[i])
+			continue
+		}
+		i++
+		switch value[i] {
+		case '0':
+			quoted.WriteString(`\x00`)
+		case 'e':
+			quoted.WriteString(`\x1b`)
+		case ' ':
+			quoted.WriteString(`\x20`)
+		case '/':
+			quoted.WriteByte('/')
+		case 'N':
+			quoted.WriteString(`\u0085`)
+		case '_':
+			quoted.WriteString(`\u00a0`)
+		case 'L':
+			quoted.WriteString(`\u2028`)
+		case 'P':
+			quoted.WriteString(`\u2029`)
+		case 'x':
+			if i+2 < len(value)-1 {
+				quoted.WriteString(`\u00`)
+				quoted.WriteByte(value[i+1])
+				quoted.WriteByte(value[i+2])
+				i += 2
+			} else {
+				quoted.WriteString(`\x`)
+			}
+		default:
+			quoted.WriteByte('\\')
+			quoted.WriteByte(value[i])
+		}
+	}
+	quoted.WriteByte('"')
+	return strconv.Unquote(quoted.String())
+}
+
+// yamlScalar emits a block-mapping-safe YAML string without adding quoting
+// churn to descriptions that are already safe as plain scalars. strconv.Quote
+// supplies the escaping for quotes, backslashes, newlines, and control runes.
+func yamlScalar(value string) string {
+	if yamlPlainScalarSafe(value) {
+		return value
+	}
+	return strconv.Quote(value)
+}
+
+func yamlPlainScalarSafe(value string) bool {
+	if value == "" || strings.TrimSpace(value) != value || value == "---" || value == "..." {
+		return false
+	}
+	first, _ := utf8.DecodeRuneInString(value)
+	if unicode.IsDigit(first) || strings.ContainsRune("-+?.:,[]{}#&*!|>'\"%@`", first) {
+		return false
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) || (r != ' ' && unicode.IsSpace(r)) || r == ':' || r == '#' {
+			return false
+		}
+	}
+	switch strings.ToLower(value) {
+	case "null", "true", "false", "yes", "no", "on", "off", "~":
+		return false
+	}
+	return true
+}
+
 func decodeYAMLScalar(value string) string {
 	value = strings.TrimSpace(value)
 	if len(value) < 2 {
@@ -191,7 +314,7 @@ func decodeYAMLScalar(value string) string {
 	return value
 }
 func adapterDescription(description string) string {
-	runes := []rune(strings.TrimSpace(description))
+	runes := []rune(description)
 	if len(runes) <= maxSkillDescriptionChars {
 		return string(runes)
 	}
@@ -200,17 +323,16 @@ func adapterDescription(description string) string {
 	// Preserve its leading trigger instead of inventing a second summary.
 	const suffix = "..."
 	limit := maxSkillDescriptionChars - len([]rune(suffix))
-	cut := strings.TrimSpace(string(runes[:limit]))
+	cut := strings.TrimRightFunc(string(runes[:limit]), unicode.IsSpace)
 	if boundary := strings.LastIndexAny(cut, " \t\r\n"); boundary > limit/2 {
-		cut = strings.TrimSpace(cut[:boundary])
+		cut = strings.TrimRightFunc(cut[:boundary], unicode.IsSpace)
 	}
 	return cut + suffix
 }
 
 func adapter(name, description, rel string) string {
 	description = adapterDescription(description)
-	encoded, _ := json.Marshal(description)
-	return fmt.Sprintf("---\nname: %s\ndescription: %s\nmetadata:\n  generated-by: fak project-assets sync\n  canonical: %s\n---\n\n# Canonical project skill adapter\n\nLoad and follow [`%s`](%s). This generated discovery adapter contains no maintained workflow body.\n\n## Portability contract\n\n- The linked canonical `SKILL.md` is the single semantic workflow body for Claude, Codex, and fak-native loaders.\n- This adapter changes discovery only; it must not fork, summarize, or translate the workflow.\n- Harness-native invocation, permissions, hooks, model routing, and worker launch remain typed adapters outside the semantic body.\n", name, encoded, rel, rel, rel)
+	return fmt.Sprintf("---\nname: %s\ndescription: %s\nmetadata:\n  generated-by: fak project-assets sync\n  canonical: %s\n---\n\n# Canonical project skill adapter\n\nLoad and follow [`%s`](%s). This generated discovery adapter contains no maintained workflow body.\n\n## Portability contract\n\n- The linked canonical `SKILL.md` is the single semantic workflow body for Claude, Codex, and fak-native loaders.\n- This adapter changes discovery only; it must not fork, summarize, or translate the workflow.\n- Harness-native invocation, permissions, hooks, model routing, and worker launch remain typed adapters outside the semantic body.\n", name, yamlScalar(description), rel, rel, rel)
 }
 
 func classify(root, kind string, p Policy) ([]string, []Excluded, error) {

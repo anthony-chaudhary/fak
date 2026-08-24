@@ -1,6 +1,6 @@
 ---
 name: wave-harvest
-description: The honest closing half of a super loop — after a detached bulk wave (`/super-loop`) has run, HARVEST it: witness what each headless worker actually shipped (not what its log claims), re-queue the leaves that were...
+description: "The honest closing half of a super loop — after a detached bulk wave (`/super-loop`) has run, HARVEST it: witness what each headless worker actually shipped (not what its log claims), re-queue the leaves that were..."
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/wave-harvest/SKILL.md

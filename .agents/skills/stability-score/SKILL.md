@@ -1,6 +1,6 @@
 ---
 name: stability-score
-description: One repeatable pass that keeps fak trustworthy while it iterates fast — the question no other scorecard asks: as we add items quickly, how do we KNOW a regression / tail-wag / confusion landed, and how do we REVERT...
+description: "One repeatable pass that keeps fak trustworthy while it iterates fast — the question no other scorecard asks: as we add items quickly, how do we KNOW a regression / tail-wag / confusion landed, and how do we REVERT..."
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/stability-score/SKILL.md
