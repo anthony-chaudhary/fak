@@ -158,7 +158,8 @@ type GatewayRollup struct {
 	// SelfHosted answers "what fraction of the tokens we served did we generate
 	// ourselves?" — nil only when the window held no gateway rows at all, since
 	// with nothing folded there is no question to decline.
-	SelfHosted *SelfHostedRollup `json:"self_hosted,omitempty"`
+	SelfHosted *SelfHostedRollup                    `json:"self_hosted,omitempty"`
+	Dashboard  gatewayusageledger.DashboardAdoption `json:"dashboard"`
 }
 
 // SelfHostedRollup is the who-served-it slice of the gateway rollup: the report's
@@ -516,6 +517,7 @@ func foldUsage(rows []usagelog.Row, since time.Time) (UsageRollup, []VerbWeek) {
 
 func foldGateway(rows []gatewayusageledger.Row, since time.Time) GatewayRollup {
 	g := GatewayRollup{Basis: "observed"}
+	g.Dashboard = gatewayusageledger.FoldDashboardAdoption(rows, since)
 	var filtered []gatewayusageledger.Row
 	for _, r := range rows {
 		if !withinSince(time.UnixMilli(r.UnixMillis).UTC(), since) {

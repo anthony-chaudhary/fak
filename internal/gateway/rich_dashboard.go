@@ -342,9 +342,13 @@ func (s *Server) handleRichDashboard(w http.ResponseWriter, r *http.Request) boo
 	if snap.State == "ready" {
 		destination, err := richDashboardDestination(snap.URL, uid)
 		if err == nil {
+			recordDashboardAdoption("rich_ready")
 			http.Redirect(w, r, destination, http.StatusSeeOther)
 			return true
 		}
+	}
+	if snap.State == "unavailable" || snap.State == "disabled" {
+		recordDashboardAdoption("rich_unavailable")
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")

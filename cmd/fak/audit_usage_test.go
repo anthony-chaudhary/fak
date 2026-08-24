@@ -14,8 +14,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/auditusage"
+	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/logvault"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/usagelog"
@@ -440,5 +442,28 @@ func mustWriteJSONLRow(t *testing.T, path string, row map[string]any) {
 	}
 	if err := os.WriteFile(path, append(b, '\n'), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func TestRunAuditUsageDashboardFold(t *testing.T) {
+	root := t.TempDir()
+	path := gatewayUsagePathForRoot(root)
+	now := time.Now()
+	for _, event := range []string{"lightweight_open", "lightweight_open", "rich_ready", "rich_unavailable"} {
+		row, err := gatewayusageledger.DashboardEventRow(event, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := gatewayusageledger.Append(path, row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runAuditUsage(&stdout, &stderr, []string{"--root", root, "--since", "168h"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	want := "dashboards (window): lightweight=2 rich-ready=1 rich-unavailable=1"
+	if !strings.Contains(stdout.String(), want) {
+		t.Fatalf("missing %q:\n%s", want, stdout.String())
 	}
 }

@@ -2,10 +2,12 @@ package gatewayusageledger
 
 import (
 	"encoding/json"
+	"fmt"
 	"hash/fnv"
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
@@ -499,4 +501,38 @@ func FoldTrend(rows []Row) (Trend, bool) {
 // read+fold split.
 func ScoreTrend(path string) (Trend, bool) {
 	return FoldTrend(ReadLedgerFile(path))
+}
+
+// DashboardAdoption is the privacy-safe seven-day fold of dashboard event rows.
+type DashboardAdoption struct {
+	SinceUnixMillis int64             `json:"since_unix_millis"`
+	Counts          map[string]uint64 `json:"counts"`
+}
+
+// DashboardEventRow creates one bounded dashboard adoption event. event must be
+// one of lightweight_open, rich_ready, or rich_unavailable. No request URL,
+// dashboard UID, client identity, hostname, or filesystem path is retained.
+func DashboardEventRow(event string, now time.Time) (Row, error) {
+	switch event {
+	case "lightweight_open", "rich_ready", "rich_unavailable":
+	default:
+		return Row{}, fmt.Errorf("unsupported dashboard event %q", event)
+	}
+	return NewRow("dashboard_"+event, "serve", "dashboard", "", 0, nil, Counters{}, now), nil
+}
+
+// FoldDashboardAdoption counts bounded dashboard events in the inclusive window.
+func FoldDashboardAdoption(rows []Row, since time.Time) DashboardAdoption {
+	out := DashboardAdoption{SinceUnixMillis: since.UnixMilli(), Counts: map[string]uint64{}}
+	for _, row := range rows {
+		if row.UnixMillis < out.SinceUnixMillis || !strings.HasPrefix(row.Kind, "dashboard_") {
+			continue
+		}
+		event := strings.TrimPrefix(row.Kind, "dashboard_")
+		switch event {
+		case "lightweight_open", "rich_ready", "rich_unavailable":
+			out.Counts[event]++
+		}
+	}
+	return out
 }

@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"path/filepath"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 )
 
 // homePageTemplate is self-contained so the gateway origin stays useful without
@@ -43,6 +47,16 @@ type homePageData struct {
 	RichDashboards          []richDashboardLink
 }
 
+var dashboardUsageLedgerPath = filepath.Join(".fak", "nightrun", "gateway-usage.jsonl")
+
+func recordDashboardAdoption(event string) {
+	row, err := gatewayusageledger.DashboardEventRow(event, time.Now())
+	if err != nil {
+		return
+	}
+	_ = gatewayusageledger.Append(dashboardUsageLedgerPath, row)
+}
+
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	if s.richDashboards != nil && s.handleRichDashboard(w, r) {
 		return
@@ -60,6 +74,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	recordDashboardAdoption("lightweight_open")
 	if r.Method == http.MethodHead {
 		w.WriteHeader(http.StatusOK)
 		return

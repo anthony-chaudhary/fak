@@ -1,11 +1,17 @@
 package gateway
 
 import (
+	"bytes"
+	"context"
+	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGatewayHomepageRendersDiscoverySurface(t *testing.T) {
@@ -162,6 +168,42 @@ func TestGatewayHomepageCapturedRichDashboardRoutesDoNotAliasGateway(t *testing.
 	for _, uid := range []string{"fak-fleet-session", "fak-fleet-overview", "fak-guard-adjudication", "fak-cache-health", "fak-startup-load"} {
 		if !strings.Contains(body, `uid=`+uid+`"`) {
 			t.Errorf("non-gateway selection %q still has no direct route", uid)
+		}
+	}
+}
+
+func TestDashboardRoutesAppendPrivacySafeUsageRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gateway-usage.jsonl")
+	prior := dashboardUsageLedgerPath
+	dashboardUsageLedgerPath = path
+	t.Cleanup(func() { dashboardUsageLedgerPath = prior })
+
+	s, err := New(Config{EngineID: "mock", Model: "m", Provider: "openai"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.richDashboards.probe = func(context.Context, string) error { return nil }
+	s.richDashboards.baseURL = "http://localhost:3000"
+
+	s.Handler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/?private=do-not-log", nil))
+	s.Handler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/?dashboard=rich&uid=fak-cache-health&private=do-not-log", nil))
+	deadline := time.Now().Add(time.Second)
+	for s.richDashboards.snapshot().State != "ready" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	s.Handler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/?dashboard=rich&uid=fak-cache-health&private=do-not-log", nil))
+	rows := gatewayusageledger.ReadLedgerFile(path)
+	if len(rows) != 2 || rows[0].Kind != "dashboard_lightweight_open" || rows[1].Kind != "dashboard_rich_ready" {
+		t.Fatalf("usage rows = %+v", rows)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"private", "do-not-log", "fak-cache-health"} {
+		if bytes.Contains(content, []byte(secret)) {
+			t.Fatalf("usage ledger leaked %q: %s", secret, content)
 		}
 	}
 }
