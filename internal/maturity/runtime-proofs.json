@@ -115,6 +115,11 @@
       "lane": "watchdoghealth",
       "command": "go test -v ./internal/watchdoghealth",
       "output_contains": "TestWatchdogTriageSelfcheck"
+    },
+    {
+      "lane": "waiting",
+      "command": "go test -v ./internal/waiting",
+      "output_contains": "TestFoldPastDeadlineExpiresAndPrescribesTheSafeDefault"
     }
   ]
 }
