@@ -110,6 +110,11 @@
       "lane": "webbench",
       "command": "go test -v ./internal/webbench -run TestGeometryComputeArms",
       "output_contains": "TestGeometryComputeArms"
+    },
+    {
+      "lane": "watchdoghealth",
+      "command": "go test -v ./internal/watchdoghealth",
+      "output_contains": "TestWatchdogTriageSelfcheck"
     }
   ]
 }
