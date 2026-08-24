@@ -91,10 +91,7 @@ func (c *cpuBackend) CloneTensor(t Tensor) (Tensor, error) {
 }
 
 func (c *cpuBackend) Host(t Tensor) ([]float32, bool) {
-	if hb, ok := t.buf.(*hostBuf); ok && hb.f32 != nil {
-		return hb.f32, true
-	}
-	return nil, false
+	return hostF32(t)
 }
 
 // Read returns the host f32 slice backing t (no fence needed on the synchronous reference), or nil if t holds no host buffer.
@@ -377,11 +374,9 @@ func (k *cpuKV) stride() int { return k.cfg.NumKVHeads * k.cfg.HeadDim }
 func (k *cpuKV) KVConfig() KVConfig { return k.cfg }
 
 func (k *cpuKV) ResidentBytes() int64 {
-	var floats int64
-	for i := range k.K {
-		floats += int64(len(k.K[i]) + len(k.Kraw[i]) + len(k.V[i]))
-	}
-	return floats*int64(F32.Bytes()) + int64(len(k.pos))*8
+	return kvResidentBytes(len(k.K), len(k.pos), func(layer int) (int, int, int) {
+		return len(k.K[layer]), len(k.Kraw[layer]), len(k.V[layer])
+	})
 }
 
 func (k *cpuKV) AppendKV(layer int, kRaw, kRoPE, v Tensor, pos int) {

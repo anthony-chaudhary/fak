@@ -210,6 +210,23 @@ func makeTensor(be Backend, dt Dtype, layout Layout, shape []int, q *QuantSpec, 
 	return Tensor{Dtype: dt, Layout: layout, Shape: shape, Quant: q, buf: buf, be: be}
 }
 
+func hostF32(t Tensor) ([]float32, bool) {
+	hb, ok := t.buf.(*hostBuf)
+	if !ok || hb.f32 == nil {
+		return nil, false
+	}
+	return hb.f32, true
+}
+
+func kvResidentBytes(layers, positions int, layerLengths func(int) (keys, rawKeys, values int)) int64 {
+	var floats int64
+	for layer := 0; layer < layers; layer++ {
+		keys, rawKeys, values := layerLengths(layer)
+		floats += int64(keys + rawKeys + values)
+	}
+	return floats*int64(F32.Bytes()) + int64(positions)*8
+}
+
 // ---- Correctness class ----------------------------------------------------------
 
 // CorrectnessClass is typed so the bit-identity contract cannot silently rot. Only a

@@ -240,10 +240,7 @@ func (c *metalBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site s
 // Host returns a host-addressable f32 view only for a host-resident tensor; a
 // device (MTLBuffer) tensor returns (nil,false), since device memory is not host-addressable.
 func (c *metalBackend) Host(t Tensor) ([]float32, bool) {
-	if hb, ok := t.buf.(*hostBuf); ok && hb.f32 != nil {
-		return hb.f32, true
-	}
-	return nil, false // device tensor: not host-addressable
+	return hostF32(t)
 }
 
 // Read is the host fence: device -> host f32.
@@ -430,11 +427,9 @@ type metalKV struct {
 func (k *metalKV) stride() int { return k.cfg.NumKVHeads * k.cfg.HeadDim }
 
 func (k *metalKV) ResidentBytes() int64 {
-	var floats int64
-	for i := range k.K {
-		floats += int64(k.K[i].len + k.Kraw[i].len + k.V[i].len)
-	}
-	return floats*int64(F32.Bytes()) + int64(len(k.pos))*8
+	return kvResidentBytes(len(k.K), len(k.pos), func(layer int) (int, int, int) {
+		return k.K[layer].len, k.Kraw[layer].len, k.V[layer].len
+	})
 }
 
 func (k *metalKV) AppendKV(layer int, kRaw, kRoPE, v Tensor, pos int) {

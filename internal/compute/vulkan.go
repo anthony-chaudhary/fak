@@ -564,10 +564,7 @@ func (v *vulkanBackend) uploadQ8ChunksLocked(shape []int, codes []int8, scales [
 // Host returns the host-addressable f32 view only when the tensor is backed by a host
 // buffer; a device-resident vulkanBuf is not host-addressable, so it returns (nil, false).
 func (v *vulkanBackend) Host(t Tensor) ([]float32, bool) {
-	if hb, ok := t.buf.(*hostBuf); ok && hb.f32 != nil {
-		return hb.f32, true
-	}
-	return nil, false
+	return hostF32(t)
 }
 
 // Read returns the tensor as host f32: a host-backed buffer is returned directly, a
@@ -1204,11 +1201,9 @@ type vulkanKV struct {
 func (k *vulkanKV) stride() int { return k.cfg.NumKVHeads * k.cfg.HeadDim }
 
 func (k *vulkanKV) ResidentBytes() int64 {
-	var floats int64
-	for i := range k.K {
-		floats += int64(k.K[i].len + k.Kraw[i].len + k.V[i].len)
-	}
-	return floats*int64(F32.Bytes()) + int64(len(k.pos))*8
+	return kvResidentBytes(len(k.K), len(k.pos), func(layer int) (int, int, int) {
+		return k.K[layer].len, k.Kraw[layer].len, k.V[layer].len
+	})
 }
 
 func (k *vulkanKV) AppendKV(layer int, kRaw, kRoPE, val Tensor, pos int) {

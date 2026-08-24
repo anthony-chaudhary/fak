@@ -388,3 +388,25 @@ func TestDtypeMetadata(t *testing.T) {
 		}
 	}
 }
+
+func TestHostF32(t *testing.T) {
+	want := []float32{1, 2, 3}
+	got, ok := hostF32(Tensor{buf: &hostBuf{f32: want}})
+	if !ok || len(got) != len(want) || &got[0] != &want[0] {
+		t.Fatalf("hostF32() = (%v, %v), want the original host slice", got, ok)
+	}
+	if got, ok := hostF32(Tensor{buf: &hostBuf{i8: []int8{1}}}); ok || got != nil {
+		t.Fatalf("hostF32(non-f32) = (%v, %v), want (nil, false)", got, ok)
+	}
+}
+
+func TestKVResidentBytes(t *testing.T) {
+	lengths := [][3]int{{1, 2, 3}, {4, 5, 6}}
+	got := kvResidentBytes(len(lengths), 2, func(layer int) (int, int, int) {
+		return lengths[layer][0], lengths[layer][1], lengths[layer][2]
+	})
+	want := int64(21*F32.Bytes() + 2*8)
+	if got != want {
+		t.Fatalf("kvResidentBytes() = %d, want %d", got, want)
+	}
+}

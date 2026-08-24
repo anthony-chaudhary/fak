@@ -705,10 +705,7 @@ func (c *cudaBackend) uploadF16(t Tensor, hb HostBuffer, f []float32, hp uintptr
 // (VRAM) tensor is not host-addressable, so it returns (nil, false) — the Caps.DeviceMemory
 // contract that forces the loop through Read.
 func (c *cudaBackend) Host(t Tensor) ([]float32, bool) {
-	if hb, ok := t.buf.(*hostBuf); ok && hb.f32 != nil {
-		return hb.f32, true
-	}
-	return nil, false // device tensor: not host-addressable
+	return hostF32(t)
 }
 
 // Read is a host fence (#482): it copies device -> host f32 and, because that synchronous d2h
@@ -1115,11 +1112,9 @@ type cudaKV struct {
 func (k *cudaKV) stride() int { return k.cfg.NumKVHeads * k.cfg.HeadDim }
 
 func (k *cudaKV) ResidentBytes() int64 {
-	var floats int64
-	for i := range k.K {
-		floats += int64(k.K[i].len + k.Kraw[i].len + k.V[i].len)
-	}
-	return floats*int64(F32.Bytes()) + int64(len(k.pos))*8
+	return kvResidentBytes(len(k.K), len(k.pos), func(layer int) (int, int, int) {
+		return k.K[layer].len, k.Kraw[layer].len, k.V[layer].len
+	})
 }
 
 func (k *cudaKV) AppendKV(layer int, kRaw, kRoPE, v Tensor, pos int) {
