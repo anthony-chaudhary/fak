@@ -353,9 +353,7 @@ func segmentWriteTargetsWithSpecs(segment string, extra []InlineEvalSpec) []stri
 			add(target)
 		}
 	case "cp", "install", "ln":
-		if target := lastPlainOperand(args); target != "" {
-			add(target)
-		}
+		addLastPlainOperand(args, add)
 	case "mv":
 		for _, target := range plainOperands(args) {
 			add(target)
@@ -365,27 +363,13 @@ func segmentWriteTargetsWithSpecs(segment string, extra []InlineEvalSpec) []stri
 			add(target)
 		}
 	case "sed":
-		if strings.Contains(lc, "sed -i") {
-			if target := lastPlainOperand(args); target != "" {
-				add(target)
-			}
-		}
+		addLastPlainOperandWhen(strings.Contains(lc, "sed -i"), args, add)
 	case "perl", "ruby":
-		if hasInPlaceFlag(args) {
-			if target := lastPlainOperand(args); target != "" {
-				add(target)
-			}
-		}
+		addLastPlainOperandWhen(hasInPlaceFlag(args), args, add)
 	case "awk", "gawk":
-		if strings.Contains(lc, "-i inplace") {
-			if target := lastPlainOperand(args); target != "" {
-				add(target)
-			}
-		}
+		addLastPlainOperandWhen(strings.Contains(lc, "-i inplace"), args, add)
 	case "ed", "ex":
-		if target := lastPlainOperand(args); target != "" {
-			add(target)
-		}
+		addLastPlainOperand(args, add)
 	case "git":
 		for _, target := range gitWriteTargets(args) {
 			add(target)
@@ -407,9 +391,7 @@ func segmentWriteTargetsWithSpecs(segment string, extra []InlineEvalSpec) []stri
 			}
 		}
 	case "rsync":
-		if target := lastPlainOperand(args); target != "" {
-			add(target)
-		}
+		addLastPlainOperand(args, add)
 	case "patch":
 		for _, target := range plainOperands(args) {
 			add(target)
@@ -516,20 +498,32 @@ func remoteExecPayloadStart(words []shellWord, start int) int {
 	return -1
 }
 
-func isSSHExecutable(head string) bool {
-	head = strings.TrimPrefix(strings.ToLower(head), "./")
-	if slash := strings.LastIndexAny(head, "/\\"); slash >= 0 {
-		head = head[slash+1:]
+func addLastPlainOperand(args []shellWord, add func(string)) {
+	if target := lastPlainOperand(args); target != "" {
+		add(target)
 	}
-	return head == "ssh" || head == "ssh.exe"
+}
+
+func addLastPlainOperandWhen(ok bool, args []shellWord, add func(string)) {
+	if ok {
+		addLastPlainOperand(args, add)
+	}
+}
+
+func isSSHExecutable(head string) bool {
+	return executableNamed(head, "ssh")
 }
 
 func isTailscaleExecutable(head string) bool {
+	return executableNamed(head, "tailscale")
+}
+
+func executableNamed(head, name string) bool {
 	head = strings.TrimPrefix(strings.ToLower(head), "./")
 	if slash := strings.LastIndexAny(head, "/\\"); slash >= 0 {
 		head = head[slash+1:]
 	}
-	return head == "tailscale" || head == "tailscale.exe"
+	return head == name || head == name+".exe"
 }
 
 func sshOptionTakesValue(option byte) bool {

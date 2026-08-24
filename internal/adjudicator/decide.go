@@ -996,17 +996,9 @@ func matchGlob(path string, globs []string) string {
 // token boundary — the start of the string, or preceded by a non-word byte
 // (a path separator, whitespace, a quote, '=', shell punctuation, …).
 func dotfileFragmentIn(path, g string) bool {
-	for from := 0; ; {
-		i := strings.Index(path[from:], g)
-		if i < 0 {
-			return false
-		}
-		at := from + i
-		if at == 0 || !wordByte(path[at-1]) {
-			return true
-		}
-		from = at + 1
-	}
+	return fragmentAt(path, g, func(at, _ int) bool {
+		return at == 0 || !wordByte(path[at-1])
+	})
 }
 
 // treeDirFragmentIn reports whether a slash-bearing guarded-tree fragment occurs
@@ -1017,16 +1009,21 @@ func treeDirFragmentIn(path, g string) bool {
 	if g == "" || !strings.Contains(g, "/") {
 		return false
 	}
+	return fragmentAt(path, g, func(at, end int) bool {
+		leftOK := at == 0 || !wordByte(path[at-1])
+		rightOK := end == len(path) || !wordByte(path[end])
+		return leftOK && rightOK
+	})
+}
+
+func fragmentAt(path, fragment string, accept func(at, end int) bool) bool {
 	for from := 0; ; {
-		i := strings.Index(path[from:], g)
+		i := strings.Index(path[from:], fragment)
 		if i < 0 {
 			return false
 		}
 		at := from + i
-		end := at + len(g)
-		leftOK := at == 0 || !wordByte(path[at-1])
-		rightOK := end == len(path) || !wordByte(path[end])
-		if leftOK && rightOK {
+		if accept(at, at+len(fragment)) {
 			return true
 		}
 		from = at + 1

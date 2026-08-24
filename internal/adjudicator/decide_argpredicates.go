@@ -21,6 +21,26 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 	note := func(pr *ArgPredicate, detail string) {
 		notes = append(notes, pr.Tool+"."+pr.Arg+" "+detail)
 	}
+	evalCanonicalRule := func(applies bool, pr *ArgPredicate, val, detail string, present bool, violates func(raw, canon string) bool) (handled bool, verdict abi.Verdict, denied bool) {
+		if !applies {
+			return false, abi.Verdict{}, false
+		}
+		if !present {
+			return true, abi.Verdict{}, false
+		}
+		canon, matches, ok := canonicalArgRegexMatch(pr, val)
+		if !ok {
+			return true, argMalformed(pr), true
+		}
+		if !matches || !violates(val, canon) {
+			return true, abi.Verdict{}, false
+		}
+		if pr.Advisory {
+			note(pr, detail)
+			return true, abi.Verdict{}, false
+		}
+		return true, argDeny(pr, detail), true
+	}
 	for i := range preds {
 		pr := &preds[i]
 		if !strings.EqualFold(pr.Tool, tool) {
@@ -102,23 +122,12 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 			// unidentifiable destination — or an unknown workspace root — keeps the deny.
 			// Gated on the raw match (rawMatches=true) so it never introduces a NEW deny
 			// for a command the regex would not have flagged.
-			if isOutOfTreeWriteArgRule(pr) {
-				if present {
-					canon, ok := canonicalizeArgValue(val)
-					if !ok {
-						return argMalformed(pr), true, notes
-					}
-					if pr.Re != nil && pr.Re.MatchString(canon) {
-						ws, scratch := outOfTreeRoots()
-						if outOfTreeWriteEscapes(val, ws, scratch, true) {
-							if pr.Advisory {
-								note(pr, "out_of_tree_write")
-								continue
-							}
-							return argDeny(pr, "out_of_tree_write"), true, notes
-						}
-						// proven in-tree/scratchpad: the raw regex was a false positive
-					}
+			if handled, verdict, denied := evalCanonicalRule(isOutOfTreeWriteArgRule(pr), pr, val, "out_of_tree_write", present, func(raw, _ string) bool {
+				ws, scratch := outOfTreeRoots()
+				return outOfTreeWriteEscapes(raw, ws, scratch, true)
+			}); handled {
+				if denied {
+					return verdict, true, notes
 				}
 				continue
 			}
@@ -183,22 +192,11 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 			// host payloads so a real elevation stays denied. Gated on the raw match
 			// and purely SUBTRACTIVE, so it never introduces a new deny; every
 			// ambiguity (unterminated quote, -EncodedCommand) keeps the deny.
-			if isRunAsArgRule(pr) {
-				if present {
-					canon, ok := canonicalizeArgValue(val)
-					if !ok {
-						return argMalformed(pr), true, notes
-					}
-					if pr.Re != nil && pr.Re.MatchString(canon) {
-						if commandInvokesRunAsElevation(val) || commandInvokesRunAsElevation(canon) {
-							if pr.Advisory {
-								note(pr, "runas_elevation")
-								continue
-							}
-							return argDeny(pr, "runas_elevation"), true, notes
-						}
-						// quoted mention only: the raw regex was a false positive
-					}
+			if handled, verdict, denied := evalCanonicalRule(isRunAsArgRule(pr), pr, val, "runas_elevation", present, func(raw, canon string) bool {
+				return commandInvokesRunAsElevation(raw) || commandInvokesRunAsElevation(canon)
+			}); handled {
+				if denied {
+					return verdict, true, notes
 				}
 				continue
 			}
@@ -217,23 +215,11 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 			// equivalent — while admitting `plan -destroy` and every read-only
 			// subcommand. Gated on the raw match and purely SUBTRACTIVE, so it never
 			// introduces a new deny; every ambiguity keeps the deny.
-			if isTerraformDestroyArgRule(pr) {
-				if present {
-					canon, ok := canonicalizeArgValue(val)
-					if !ok {
-						return argMalformed(pr), true, notes
-					}
-					if pr.Re != nil && pr.Re.MatchString(canon) {
-						if commandAppliesTerraformDestroy(val) || commandAppliesTerraformDestroy(canon) {
-							if pr.Advisory {
-								note(pr, "terraform_destroy")
-								continue
-							}
-							return argDeny(pr, "terraform_destroy"), true, notes
-						}
-						// plan/read-only subcommand or a quoted mention: the raw regex
-						// was a false positive
-					}
+			if handled, verdict, denied := evalCanonicalRule(isTerraformDestroyArgRule(pr), pr, val, "terraform_destroy", present, func(raw, canon string) bool {
+				return commandAppliesTerraformDestroy(raw) || commandAppliesTerraformDestroy(canon)
+			}); handled {
+				if denied {
+					return verdict, true, notes
 				}
 				continue
 			}
@@ -256,22 +242,11 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 			// an unparseable quote all keep the deny. Gated on the raw match and
 			// purely SUBTRACTIVE, so it never introduces a new deny; a real device
 			// operation stays refused on every surface it ships on.
-			if isDeviceOpArgRule(pr) {
-				if present {
-					canon, ok := canonicalizeArgValue(val)
-					if !ok {
-						return argMalformed(pr), true, notes
-					}
-					if pr.Re != nil && pr.Re.MatchString(canon) {
-						if commandPerformsDeviceOperation(val) || commandPerformsDeviceOperation(canon) {
-							if pr.Advisory {
-								note(pr, "device_op")
-								continue
-							}
-							return argDeny(pr, "device_op"), true, notes
-						}
-						// quoted mention only: the raw regex was a false positive
-					}
+			if handled, verdict, denied := evalCanonicalRule(isDeviceOpArgRule(pr), pr, val, "device_op", present, func(raw, canon string) bool {
+				return commandPerformsDeviceOperation(raw) || commandPerformsDeviceOperation(canon)
+			}); handled {
+				if denied {
+					return verdict, true, notes
 				}
 				continue
 			}
@@ -315,6 +290,18 @@ func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (
 		}
 	}
 	return abi.Verdict{}, false, notes
+}
+
+// canonicalArgRegexMatch decodes a rule argument once and reports whether the
+// rule's regular expression matches that canonical spelling. The ok result is
+// false only when canonicalization fails, so callers can preserve their shared
+// fail-closed MALFORMED path while applying distinct structural decisions.
+func canonicalArgRegexMatch(pr *ArgPredicate, val string) (canon string, matches, ok bool) {
+	canon, ok = canonicalizeArgValue(val)
+	if !ok {
+		return "", false, false
+	}
+	return canon, pr.Re != nil && pr.Re.MatchString(canon), true
 }
 
 // argDeny builds the bounded-disclosure Deny for a violated arg predicate. The
