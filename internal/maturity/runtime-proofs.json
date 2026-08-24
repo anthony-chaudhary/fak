@@ -295,6 +295,11 @@
       "lane": "toolshape",
       "command": "go test -v ./internal/toolshape",
       "output_contains": "TestResultContractMutationSuite"
+    },
+    {
+      "lane": "toolseq",
+      "command": "go test -v ./internal/toolseq",
+      "output_contains": "TestDiscoverBuildsExplainableWorkflowConcepts"
     }
   ]
 }
