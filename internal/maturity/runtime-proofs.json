@@ -270,6 +270,11 @@
       "lane": "trajctlhook",
       "command": "go test -v ./internal/trajctlhook",
       "output_contains": "TestRunTurnEnd_WitnessedProgress"
+    },
+    {
+      "lane": "trajctl",
+      "command": "go test -v ./internal/trajctl -run TestStatus",
+      "output_contains": "TestStatusWorstFirstAndWitnessComposition"
     }
   ]
 }
