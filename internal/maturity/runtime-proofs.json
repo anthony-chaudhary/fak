@@ -190,6 +190,11 @@
       "lane": "usagelog",
       "command": "go test -v ./internal/usagelog",
       "output_contains": "TestParallelAppendsNeverGap"
+    },
+    {
+      "lane": "urllint",
+      "command": "go test -v ./internal/urllint",
+      "output_contains": "TestNoUnchokepointedDownloadURLs"
     }
   ]
 }
