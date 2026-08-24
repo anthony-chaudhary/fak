@@ -170,6 +170,11 @@
       "lane": "vcachegov",
       "command": "go test -v ./internal/vcachegov",
       "output_contains": "TestScheduleNeverAdmitsSecretsEvenWithRoom"
+    },
+    {
+      "lane": "vcacheextract",
+      "command": "go test -v ./internal/vcacheextract",
+      "output_contains": "TestTurnsFromRowsKeepsOnlyTokenCounters"
     }
   ]
 }
