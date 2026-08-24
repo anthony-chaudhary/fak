@@ -116,3 +116,5 @@ Here is the corrected, paste-ready asset.
 - `visuals/social-preview.png` is **committed on `main`** (`git ls-files` confirms tracked), so the OG/Twitter `raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/social-preview.png` card resolves.
 
 **Relevant paths:** `C:\work\fak\visuals\social-preview.png` (the OG card, committed), `C:\work\fak\docs\demos.html` (lines 29/32 carry the og:image and twitter:image meta pointing at that file).
+
+<!-- Freshness review 2026-08-24: commands, links, channel constraints, and product claims rechecked against the current repository; publish only after a final live channel-rule check. -->

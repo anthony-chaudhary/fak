@@ -120,3 +120,5 @@ What I changed:
 7. **Trimmed the closing self-grade** ("No naive-only lead, every fence spoken aloud") to a plain number recap — a self-certifying claim isn't evidence.
 
 Every remaining number traces to the VERIFIED ledger: `max|Δ|=0` (KV-eviction parity, SHIPPED); `8.8–9.7×` (WebVoyager 643 tasks vs naive, SHIPPED); `~1.5–4.1×` (vs tuned warm-cache, conservative headline 4.1×); `~13MB` (distroless/static container); `0/29 novel` (prior-art audit); two-gate framing, "~100% evadable by design," self-host + read-heavy fence, and the ~60×/"agent city" design-target labeling all match the ledger verbatim. The naive number is never led with, and every fence (not-a-token-engine, self-host-only, simulated power, self-signed cert) survives into both the spoken track and the pinned comment.
+
+<!-- Freshness review 2026-08-24: commands, links, channel constraints, and product claims rechecked against the current repository; publish only after a final live channel-rule check. -->
