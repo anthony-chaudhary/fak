@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/slackoutbox"
 )
@@ -116,4 +117,37 @@ func mapsEqual(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func TestRunSlackOutboxCompactPendingAgeRequiresExplicitOptIn(t *testing.T) {
+	outboxTestDir(t)
+	ob, err := openOutbox()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ob.Enqueue(slackoutbox.Row{Channel: "C_STALE", Text: "undelivered", Source: "guard-session", EnqueuedAt: "2020-01-01T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if rc := runSlackOutbox(&out, &errb, []string{"compact", "--dry-run", "--max-pending-age", "24h", "--json"}); rc != 0 {
+		t.Fatalf("dry-run rc=%d stderr=%s", rc, errb.String())
+	}
+	var preview slackoutbox.CompactReport
+	if err := json.Unmarshal(out.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	if preview.DroppedPending != 1 || !preview.DryRun {
+		t.Fatalf("preview=%+v, want one aged pending row without mutation", preview)
+	}
+	out.Reset()
+	if rc := runSlackOutbox(&out, &errb, []string{"compact", "--max-pending-age", "24h", "--json"}); rc != 0 {
+		t.Fatalf("apply rc=%d stderr=%s", rc, errb.String())
+	}
+	st, err := ob.Status(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Pending != 0 {
+		t.Fatalf("pending=%d after explicit aged-row retirement", st.Pending)
+	}
 }

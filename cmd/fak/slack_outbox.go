@@ -345,6 +345,7 @@ func runSlackOutboxCompact(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit the compaction report as JSON")
 	retain := fs.Duration("retain", 0, "settled-row (superseded/refused) retention window (default 1h)")
 	retainDead := fs.Duration("retain-dead", 0, "dead-row retention window before an unretried dead row is dropped (default 336h)")
+	maxPendingAge := fs.Duration("max-pending-age", 0, "drop undelivered rows older than this explicit age (default off; preview with --dry-run)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -353,7 +354,7 @@ func runSlackOutboxCompact(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak slack outbox compact: %v\n", err)
 		return 1
 	}
-	rep, err := ob.Compact(slackoutbox.CompactOpts{RetainSettled: *retain, RetainDead: *retainDead, DryRun: *dryRun})
+	rep, err := ob.Compact(slackoutbox.CompactOpts{RetainSettled: *retain, RetainDead: *retainDead, MaxPendingAge: *maxPendingAge, DryRun: *dryRun})
 	if err == slackoutbox.ErrDrainBusy {
 		fmt.Fprintln(stdout, "another drainer holds the lock — nothing to do")
 		return 0
