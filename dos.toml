@@ -733,6 +733,7 @@ issuefanout = ["internal/issuefanout/**"] # #2522: internal/issuefanout leaf (th
 chatopsdetach = ["internal/chatopsdetach/**"]
 godfileceiling = ["internal/godfileceiling/**"]
 microagent = ["internal/microagent/**"]
+microharnessdemo = ["cmd/microharnessdemo/**"] # bounded harness demo and its privacy-safe usage/health evidence
 microcontextdemo = ["cmd/microcontextdemo/**"]
 l3kv = ["internal/l3kv/**"]
 doomloop = ["internal/doomloop/**"]
@@ -1272,6 +1273,12 @@ worker_launch_template = 'tools/.bin/dispatchworker --lane {lane}'
 # typed-core direction is refusable with a structured, citable reason from a closed
 # set, not free-text -- the same discipline fak imposes on tool results. The floor
 # under each is the architest gate (`go test ./internal/architest`).
+[reasons.MICROHARNESS_UNWITNESSED]
+category = "STALE_CLAIM"
+refusal  = false
+summary  = "A bounded microharness result lacks the typed receipt or usage evidence needed to distinguish a completed child from unsupported narration."
+fix      = "Run `go run ./cmd/microharnessdemo -selfcheck -ledger <path>` and inspect `-score-usage -ledger <path>`; retain the bounded receipt and independently check its declared proof before relying on the result."
+see_also = ["cmd/microharnessdemo", "docs/research/microagents-to-harnesses-2026-08-18.md", "fak help dispatch"]
 [reasons.DOOM_LOOP]
 category = "OPERATOR_GATE"
 refusal  = true
