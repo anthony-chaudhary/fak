@@ -75,6 +75,11 @@
       "lane": "wipref",
       "command": "go test -v ./internal/wipref -run TestOwnerOfPathStates",
       "output_contains": "TestOwnerOfPathStates"
+    },
+    {
+      "lane": "wiprecon",
+      "command": "go test -v ./internal/wiprecon",
+      "output_contains": "TestReconcileTotalAndDeterministic"
     }
   ]
 }
