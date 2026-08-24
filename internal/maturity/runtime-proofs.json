@@ -15,6 +15,11 @@
       "lane": "servicelease",
       "command": "go test -v ./internal/servicelease",
       "output_contains": "TestLiveTwoNodeFencedOwnership"
+    },
+    {
+      "lane": "serviceledger",
+      "command": "go test -v ./internal/serviceledger",
+      "output_contains": "TestAdapterReplayIsExactOnce"
     }
   ]
 }
