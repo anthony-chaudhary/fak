@@ -310,6 +310,21 @@
       "lane": "slackenv",
       "command": "go test -v ./internal/slackenv -run TestLookupFallsToFile",
       "output_contains": "TestLookupFallsToFile"
+    },
+    {
+      "command": "go test -v ./internal/slackmeta -run TestAppendContextIsIdempotent",
+      "lane": "slackmeta",
+      "output_contains": "TestAppendContextIsIdempotent"
+    },
+    {
+      "command": "go test -v ./internal/slackoutbox -run TestCardLifecyclePostUpdateFinal",
+      "lane": "slackoutbox",
+      "output_contains": "TestCardLifecyclePostUpdateFinal"
+    },
+    {
+      "command": "go test -v ./internal/slackwire -run TestPostMessageSendsChannelTextBlocksAndThread",
+      "lane": "slackwire",
+      "output_contains": "TestPostMessageSendsChannelTextBlocksAndThread"
     }
   ]
 }
