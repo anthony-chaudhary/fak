@@ -265,6 +265,11 @@
       "lane": "trajectory",
       "command": "go test -v ./internal/trajectory -run TestDeriveSignals",
       "output_contains": "TestDeriveSignalsBindsPhasesRetriesStallsAndOutcomes"
+    },
+    {
+      "lane": "trajctlhook",
+      "command": "go test -v ./internal/trajctlhook",
+      "output_contains": "TestRunTurnEnd_WitnessedProgress"
     }
   ]
 }
