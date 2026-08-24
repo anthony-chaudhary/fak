@@ -448,6 +448,9 @@ func mustWriteJSONLRow(t *testing.T, path string, row map[string]any) {
 func TestRunAuditUsageDashboardFold(t *testing.T) {
 	root := t.TempDir()
 	path := gatewayUsagePathForRoot(root)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now()
 	for _, event := range []string{"lightweight_open", "lightweight_open", "rich_ready", "rich_unavailable"} {
 		row, err := gatewayusageledger.DashboardEventRow(event, now)
