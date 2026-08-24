@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the unified scorecard debt control-pane.
+"""Tests for the unified scorecard debt control-scp.
 
 Drives the PURE fold: debt-integer extraction across the family's two nestings
 (corpus.* and doc.*), the portfolio sum, the per-metric trend vs a pinned
@@ -1016,3 +1016,50 @@ def _run_all() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(_run_all())
+
+
+
+def test_metric_version_is_pinned_and_version_change_is_incomparable(tmp_path: Path) -> None:
+    card = {"key": "demo", "label": "Demo", "debt": "demo_debt"}
+    metric_v1 = scp.metric_from_payload(
+        card, {"schema": "demo-scorecard/1", "ok": True,
+               "corpus": {"demo_debt": 2, "grade": "B"}})
+    first = scp.fold([metric_v1], None, workspace=str(tmp_path), commit="abc")
+    baseline = scp.baseline_doc(first)
+    assert baseline["schema"] == scp.BASELINE_SCHEMA
+    assert baseline["detector_versions"] == {"demo": "demo-scorecard/1"}
+
+    metric_v2 = scp.metric_from_payload(
+        card, {"schema": "demo-scorecard/2", "ok": True,
+               "corpus": {"demo_debt": 9, "grade": "D"}})
+    changed = scp.fold([metric_v2], baseline, workspace=str(tmp_path), commit="def")
+    assert changed["finding"] == "scorecard_incomparable"
+    assert changed["trend"]["direction"] == "incomparable"
+    assert changed["trend"]["total_delta"] is None
+    assert changed["trend"]["version_changed"] == [
+        {"key": "demo", "baseline": "demo-scorecard/1", "current": "demo-scorecard/2"}
+    ]
+    assert changed["trend"]["worsened"] == []
+    assert "intentionally re-pin" in changed["next_action"]
+    code, message = scp.check_gate(changed)
+    assert code != 0
+    assert "incomparable" in message.lower()
+
+
+def test_legacy_baseline_without_detector_versions_remains_comparable(tmp_path: Path) -> None:
+    legacy = {
+        "schema": scp.LEGACY_BASELINE_SCHEMA,
+        "commit": "old",
+        "total_debt": 2,
+        "grade_debt": 1,
+        "metrics": {"demo": 2},
+        "grade_weights": {"demo": 1},
+    }
+    path = tmp_path / "baseline.json"
+    path.write_text(__import__("json").dumps(legacy), encoding="utf-8")
+    assert scp.load_baseline(path) == legacy
+    metric = {"key": "demo", "label": "Demo", "debt": 1, "grade": "A",
+              "detector_version": "demo-scorecard/2", "error": ""}
+    folded = scp.fold([metric], legacy, workspace=str(tmp_path), commit="new")
+    assert folded["trend"]["direction"] == "improved"
+    assert folded["trend"]["version_changed"] == []

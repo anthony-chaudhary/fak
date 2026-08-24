@@ -100,7 +100,8 @@ from typing import Any
 install_no_window_subprocess_defaults(subprocess)
 
 SCHEMA = "fak-scorecard-control-pane/1"
-BASELINE_SCHEMA = "fak-scorecard-control-pane.baseline/1"
+BASELINE_SCHEMA = "fak-scorecard-control-pane.baseline/2"
+LEGACY_BASELINE_SCHEMA = "fak-scorecard-control-pane.baseline/1"
 BASELINE_REL = "tools/scorecard_baseline.json"
 
 # The grade-carrying ratchet knob (#1423 / #1414's "stays Excellent" half). When
@@ -463,6 +464,7 @@ def metric_from_payload(card: dict[str, str], payload: dict[str, Any] | None,
         "score": find_score(payload, score_key) if score_key else None,
         "ok": bool(payload.get("ok")),
         "verdict": str(payload.get("verdict") or ""),
+        "detector_version": str(payload.get("schema") or ""),
         "error": "" if debt is not None else f"missing {debt_key} in payload",
     }
 
@@ -575,6 +577,7 @@ def fold(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
         for m in by_grade if int(m["grade_weight"]) > 0) or "all A"
 
     regressed = trend["direction"] == "regressed"
+    version_changed = trend.get("version_changed") or []
     early_warning = trend.get("early_warning") or []
     ew_note = ""
     if early_warning and not regressed:
@@ -598,6 +601,12 @@ def fold(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
                        "start with the unique blocker(s) in error_groups; "
                        "re-run python tools/scorecard_control_pane.py"
                        + build_break_hint(errors))
+    elif version_changed:
+        ok, verdict, finding = False, "ACTION", "scorecard_incomparable"
+        changed = ", ".join(str(item.get("key", "?")) for item in version_changed)
+        reason = f"detector version changed for {changed}; raw debt deltas are incomparable"
+        next_action = ("review the detector change, then intentionally re-pin: "
+                       "python tools/scorecard_control_pane.py --pin")
     elif regressed:
         ok, verdict, finding = False, "ACTION", "scorecard_regressed"
         reason = (f"portfolio debt rose {trend['total_delta']:+d} to {total_debt} "
@@ -665,12 +674,14 @@ def compute_trend(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None
     """
     base_metrics = {}
     base_grade_weights = {}
+    base_detector_versions = {}
     base_commit = ""
     base_total = None
     base_grade = None
     if isinstance(baseline, dict):
         base_metrics = baseline.get("metrics") or {}
         base_grade_weights = baseline.get("grade_weights") or {}
+        base_detector_versions = baseline.get("detector_versions") or {}
         base_commit = str(baseline.get("commit") or "")
         base_total = _base_int(baseline, "total_debt")
         base_grade = _base_int(baseline, "grade_debt")
@@ -695,6 +706,7 @@ def compute_trend(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None
     deltas: dict[str, int] = {}
     worsened: list[str] = []
     improved: list[str] = []
+    version_changed: list[dict[str, str]] = []
     # The per-metric GRADE-regression lens (#1423): every metric whose letter grade
     # dropped vs its pinned grade (A->B etc), independent of its raw debt. This is
     # the culprit list the grade ratchet reds on — a severity slip a flat raw total
@@ -714,8 +726,19 @@ def compute_trend(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None
         prior = base_metrics.get(m["key"])
         if not isinstance(prior, int) or isinstance(prior, bool):
             continue
+        current_version = str(m.get("detector_version") or "")
+        prior_version = str(base_detector_versions.get(m["key"]) or "")
+        comparable = not (current_version and prior_version and current_version != prior_version)
+        m["baseline_detector_version"] = prior_version
+        m["comparable"] = comparable
+        if not comparable:
+            m["delta"] = None
+            version_changed.append({"key": str(m["key"]), "baseline": prior_version,
+                                    "current": current_version})
+            continue
         delta = int(m["debt"]) - int(prior)
         deltas[m["key"]] = delta
+        m["delta"] = delta
         if delta > 0:
             worsened.append(m["label"])
             early_warning.append({"key": m["key"], "label": m["label"],
@@ -736,17 +759,21 @@ def compute_trend(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None
                 "to_grade": m.get("eff_grade", "?"),
             })
 
-    total_delta = total_debt - base_total
-    grade_delta = grade_debt - base_grade if base_grade is not None else 0
-    if total_delta > 0:
+    total_delta = None if version_changed else total_debt - base_total
+    grade_delta = None if version_changed else (grade_debt - base_grade if base_grade is not None else 0)
+    if version_changed:
+        direction = "incomparable"
+    elif total_delta > 0:
         direction = "regressed"
     elif total_delta < 0:
         direction = "improved"
     else:
         direction = "flat"
-    summary = (f"{direction} {total_delta:+d} vs @{base_commit or 'baseline'} "
+    summary = ("incomparable: detector version changed"
+               if version_changed else
+               f"{direction} {total_delta:+d} vs @{base_commit or 'baseline'} "
                f"(was {base_total}, now {total_debt})")
-    if base_grade is not None and grade_delta != 0:
+    if base_grade is not None and grade_delta not in (None, 0):
         summary += f"; grade-debt {base_grade}->{grade_debt} ({grade_delta:+d})"
     return {
         "direction": direction,
@@ -762,6 +789,8 @@ def compute_trend(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None
         "improved": improved,
         "early_warning": early_warning,
         "grade_regressed": grade_regressed,
+        "version_changed": version_changed,
+        "comparable": not version_changed,
     }
 
 
@@ -781,6 +810,11 @@ def baseline_doc(payload: dict[str, Any]) -> dict[str, Any]:
         for m in payload.get("metrics", [])
         if isinstance(m.get("debt"), int) and isinstance(m.get("grade_weight"), int)
     }
+    detector_versions = {m["key"]: m["detector_version"]
+                         for m in payload.get("metrics", [])
+                         if isinstance(m.get("debt"), int)
+                         and isinstance(m.get("detector_version"), str)
+                         and m["detector_version"]}
     return {
         "schema": BASELINE_SCHEMA,
         "commit": payload.get("commit", ""),
@@ -788,6 +822,7 @@ def baseline_doc(payload: dict[str, Any]) -> dict[str, Any]:
         "grade_debt": payload.get("grade_debt", 0),
         "metrics": metrics,
         "grade_weights": grade_weights,
+        "detector_versions": detector_versions,
         "_doc": ("Pinned per-metric scorecard-debt baseline for the unified "
                  "control pane. total_debt is the raw-unit ratchet gate; grade_debt "
                  "is the scale-invariant severity companion, and grade_weights pins "
@@ -932,7 +967,9 @@ def load_baseline(path: Path) -> dict[str, Any] | None:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    return doc if isinstance(doc, dict) else None
+    if not isinstance(doc, dict):
+        return None
+    return doc if doc.get("schema") in {BASELINE_SCHEMA, LEGACY_BASELINE_SCHEMA} else None
 
 
 def render(payload: dict[str, Any]) -> str:
@@ -990,6 +1027,11 @@ def check_gate(payload: dict[str, Any]) -> tuple[int, str]:
                    f"{payload['reason']}" + build_break_hint(errored))
     trend = payload.get("trend") or {}
     direction = trend.get("direction")
+    if direction == "incomparable":
+        changed = ", ".join(str(item.get("key", "?"))
+                            for item in trend.get("version_changed", []))
+        return 2, ("RATCHET INCOMPARABLE: detector version changed for " + changed +
+                   "; review the detector and intentionally re-pin")
     if direction == "unpinned":
         return 2, ("RATCHET UNPINNED: no baseline to ratchet against; run "
                    "`python tools/scorecard_control_pane.py --pin` to set one")
