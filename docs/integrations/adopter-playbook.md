@@ -27,14 +27,13 @@ that launcher.
 > the HTTP gateway, the stdio MCP server, and the offline CI check — you add flags,
 > not components.
 >
-> > **Three speedup figures — which one applies to you?** The docs cite different numbers:
-> > * **~60×** = headline session wall-time vs naive stateless re-send loop (README.md,
-> >   concepts-and-story.md). This is the "re-send the whole conversation every turn"
-> >   baseline no serving stack ships.
-> > * **45×** = Phase-0 batched-decode gate threshold (production-benchmark-methodology.md).
-> >   Current local evidence is 40.98× — the gate is still open.
-> > * **~1.5–4×** = realistic gain vs a tuned warm-cache stack. This is the honest comparison
-> >   for adoption decisions. The 60× figure is only versus the naive pattern.
+> > **Decision-grade reuse comparison — one recorded envelope.** On an Apple M3 Pro with
+> > Qwen2.5-1.5B-Instruct Q8 (`T=50`, 5 agents, 2,048-token shared prefix, 32 decode
+> > tokens, 64 result tokens), the fak-fused arm was **4.1× vs tuned per-agent warm KV**.
+> > Against a naive stateless re-send loop, the same run measured 60.3×; that arm is context,
+> > not the adoption baseline. Arms B/C were live, while the naive total was modeled from
+> > sampled prefill costs and validated within about 0.4%. Do not generalize either multiple
+> > beyond that operating envelope; see [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md#readme-headline--50-turn--5-agent-qwen25-15b-the-number-on-the-front-page).
 
 ---
 
@@ -183,19 +182,12 @@ The same `mcpServers` block works for **Cursor** (`.cursor/mcp.json`) and any ot
 client; for HTTP transport instead of stdio, run `fak serve --addr 127.0.0.1:8080` and
 `POST /mcp`.
 
-### The six tools fak exposes
+### Discover the current tool surface
 
-| Tool | What it does |
-|---|---|
-| `fak_adjudicate` | Verdict only (ALLOW / DENY / TRANSFORM / REQUIRE_WITNESS), no execution — call it **before** running a tool your client executes. |
-| `fak_syscall` | Adjudicate **and** execute through the kernel (dispatch + result admission). |
-| `fak_admit` | Screen a result your client already executed through the result-side floor (quarantine + IFC taint) before it enters context. |
-| `fak_changes` | Drain the cross-agent "what changed" feed (typed mutations + revocations since your cursor). |
-| `fak_revoke` | Refute a poisoned/stale world-state witness; every entry admitted under it is evicted fleet-wide. |
-| `fak_context_change` | Record a context-changing event so dependent cached spans are invalidated coherently. |
-
-Full input schemas come back from the MCP `tools/list` discovery call. The in-repo
-one-paste example (with a shipped `.mcp.json`) is
+Use the MCP `tools/list` discovery call on your installed build for the authoritative
+tool inventory and full input schemas; do not copy a version-specific tool count from a
+playbook. The [MCP integration guide](mcp.md) explains the current verbs and discovery
+contract. The in-repo one-paste example (with a shipped `.mcp.json`) is
 [`../../examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md).
 
 ---

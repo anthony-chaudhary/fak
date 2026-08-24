@@ -144,14 +144,17 @@ These cannot be added later without breaking the shared import, so they are all 
    provisional until `Promote`/`Rollback` — so "squash actually retracts the
    effect" is a frozen cross-driver contract, not a gap discovered at integration.
 
-## Bake-in walkthrough (all `touchesCore = false`)
+## Bake-in walkthrough (all `touchesCore = false`; current and hypothetical examples)
 
-- **Speculative execution** → `internal/spec`: registers `OpSpecCommit`/`OpSpecSquash`
-  from the reserved `OpsSpec` range; rides `ToolCall.Spec`; the MMU's
-  `ProvisionalSink` retracts squashed effects. `Outcome` already has `OutcomeSquashed`.
-- **Async / io_uring** → `internal/async`: registers `OpSubmit`/`OpReap`, advertises
-  Capability `"async"`; returns `Status=Pending` + typed `Completion`s. Old workers
-  never negotiate `"async"` and only ever see synchronous results.
+- **Speculative execution (current, feature-gated)** → `internal/model` binds live
+  target/drafter sessions, batched verification, and exact `KVCache.Evict` rollback;
+  `internal/polymodel` owns the draft/accept loop and `AcceptGreedy`/`AcceptTree`.
+  Those packages ride the frozen speculative lifecycle; the former `internal/spec`
+  package is retired.
+- **Hypothetical extension — async / io_uring** → a future `internal/async` package
+  could register `OpSubmit`/`OpReap`, advertise Capability `"async"`, and return
+  `Status=Pending` + typed `Completion`s. No such package exists today; this example
+  shows how old workers would remain synchronous by never negotiating `"async"`.
 - **Zero-copy fusion** → no message-layer change at all: `Args`/`Payload` are
   already `Ref`s; ship a `RegionBackend` whose `Resolver` hands out `RefRegion`
   handles into a shared arena, advertise `"zerocopy"`.
@@ -160,10 +163,11 @@ These cannot be added later without breaking the shared import, so they are all 
   target, and rung transitions already emit typed `LabelRow`s. The model is later
   wired as one more `Adjudicator`; the fold bounds it even if it emits a kind it
   shouldn't.
-- **Unforeseen (e.g. a federated cross-fleet trust gate)** → `internal/fedtrust`:
-  one `Adjudicator` ahead of dispatch, advertises `"trust.federated"`, registers a
-  new `VerdictKind > 1023` with `FallbackDeny`, carries its score on `Result.Ext`.
-  The core never learns federation exists.
+- **Hypothetical extension — federated cross-fleet trust gate** → a future
+  `internal/fedtrust` package could put one `Adjudicator` ahead of dispatch, advertise
+  `"trust.federated"`, register a new `VerdictKind > 1023` with `FallbackDeny`, and
+  carry its score on `Result.Ext`. No such package exists today; the point is that the
+  core would not need to learn federation exists.
 
 ## A sibling seam — the in-kernel model's device compute (`internal/compute`)
 

@@ -1,6 +1,6 @@
 ---
 title: "What Tuned SOTA Serving Optimizations Mean in fak Benchmarks"
-description: "What tuned SOTA means in fak benchmarks: KV cache, batching, quantization, paged attention — and which of these fak implements vs the engine it fronts."
+description: "What tuned SOTA means in fak benchmarks: KV cache, batching, quantization, paged attention — and which mechanisms fak owns natively versus uses as explicit external references."
 ---
 
 # SOTA Serving Optimizations — What "Tuned" Actually Means
@@ -26,9 +26,11 @@ A **tuned SOTA stack** is a production serving setup with these characteristics:
 9. **Request routing** — Route requests to appropriate model tiers or endpoints
 10. **Tool batching** — Process multiple tool calls in a single model call
 
-**The key point:** Most of these are **implemented in the serving engine** (llama.cpp, vLLM,
-SGLang, Ollama, etc.) and apply regardless of whether fak is in front. fak's contribution is
-the **governance layer** on top of these optimizations.
+**The key point:** [fak-native inference](../native-inference-goal.md) is the local product and
+performance path: fak aims to own the model path, kernels, memory, scheduling, cache,
+adaptation, and operations. External engines remain supported when explicitly selected for a
+gateway, benchmark, parity diagnosis, interoperability, or prior-art study; they are never a
+silent fallback or evidence of fak-native performance.
 
 ---
 
@@ -84,20 +86,24 @@ accelerate matrix operations and reduce memory bandwidth.
 
 **SOTA implementations:** llama.cpp (heavily optimized SIMD), vLLM (CUDA kernels), FlashAttention
 
-**fak status:** 🔄 **Partial** — Uses Go's native SIMD where available. For maximal SIMD
-performance, `fak` can front `llama-server` which has extensive hand-tuned SIMD.
+**fak status:** 🔄 **Partial** — Native CPU and device kernels exist, but current matched
+benchmarks still show gaps in some envelopes. llama.cpp may be selected explicitly as a
+benchmark or parity reference; fak does not silently replace a requested native path with it.
 
 ---
 
-### 5. PagedAttention / KV Management ✅ IMPLEMENTED
+### 5. Host-paged KV Management ✅ IMPLEMENTED; Device PagedAttention Kernel ❌ NOT CLAIMED
 
 **What it is:** Manage KV cache in pages rather than contiguous blocks, allowing efficient
 handling of variable-length sequences and cache eviction.
 
 **SOTA implementations:** vLLM (PagedAttention), SGLang
 
-**fak status:** ✅ **Implemented** — `internal/kvmmu` provides context-MMU with span-level
-management. Differentiator: **policy-aware invalidation** (not just memory pressure).
+**fak status:** ✅ **Host-side paging implemented** — `internal/model.PagedKVPool` provides
+fixed-size physical blocks, page tables, copy-on-write prefix sharing, and exact gathers;
+`internal/kvmmu` adds policy-aware span invalidation. The opt-in CPU-reference HAL gathers
+paged K/V into contiguous host tensors before attention. That is not a device PagedAttention
+kernel that consumes page tables directly, and no such device kernel is claimed here.
 
 ---
 
@@ -118,39 +124,46 @@ serving engine's own multi-GPU cluster (e.g. vLLM). See
 
 ---
 
-### 7. Speculative Decoding ❌ NOT IMPLEMENTED
+### 7. Speculative Decoding 🟡 IMPLEMENTED, FEATURE-GATED
 
 **What it is:** Use a small draft model to predict tokens, verify in parallel with the larger
 target model. Can accelerate decoding by 2-3×.
 
 **SOTA implementations:** vLLM, SGLang (experimental), llama.cpp (draft models)
 
-**fak status:** ❌ **Not implemented** — Could be added as an optimization; currently relies
-on serving engine for this.
+**fak status:** 🟡 **Implemented, off by default** — `internal/model` binds live target and
+drafter sessions to one-pass verification plus bit-exact `KVCache.Evict` rollback;
+`internal/polymodel` supplies the draft/accept loop and `AcceptGreedy`/`AcceptTree`.
+`FAK_POLYMODEL` gates the request path. The current authority proves token identity and
+effective tokens per verify pass, not a wall-clock 2–3× hardware speedup.
 
 ---
 
-### 8. Continuous Batching ❌ ENGINE-LEVEL
+### 8. Continuous Batching ✅ NATIVE LIFECYCLE SCHEDULER SHIPPED
 
 **What it is:** Dynamically add and remove requests from batches as they complete, rather
 than fixed batch sizes. Improves throughput for variable-length workloads.
 
 **SOTA implementations:** vLLM (continuous batching), SGLang, TGI
 
-**fak status:** ❌ **Engine-level** — Implemented by serving engines. `fak` works with
-whatever batching strategy the engine uses.
+**fak status:** ✅ **Native scheduler shipped** — `internal/modelengine` registers the
+`inkernel` continuous-batching lifecycle scheduler. Its current benchmark is a synthetic CPU
+modelengine witness, not a vLLM/SGLang production SLA; multi-tenant p99 policy remains a
+separate leaf. Explicit gateway deployments still use the upstream engine's scheduler.
 
 ---
 
-### 9. Request Routing / Tiered Serving ✅ PARTIALLY
+### 9. Request Routing / Tiered Serving ✅ SHIPPED; LEARNED ROUTING OPEN
 
 **What it is:** Route requests to different model tiers or specialized endpoints based on
 request characteristics (complexity, cost, etc.).
 
 **SOTA implementations:** Custom routers, API gateways, provider routing
 
-**fak status:** ✅ **Partial** — `fak` can route to different backends via `--base-url`,
-but doesn't automatically classify requests. This is typically done upstream.
+**fak status:** ✅ **Shipped** — `internal/modelroute` and `fak route` provide deterministic
+per-aspect picks and ensembles. `--route-manifest` executes single-model picks in the served
+gateway and standalone agent path, and ensembles in the gateway. Learned routing remains a
+follow-on; see [model routing](../model-routing.md).
 
 ---
 
@@ -166,20 +179,26 @@ calls are validated individually regardless of batch size.
 
 ---
 
-## Vision / Multimodal ❌ NOT FOCUSED
+## Vision / Multimodal ✅ GOVERNANCE SEAM SHIPPED; NATIVE ENCODER OPEN
 
 **What it is:** Process images, audio, or video alongside text in the same model or pipeline.
 
 **SOTA implementations:** GPT-4V, Claude 3.5 Sonnet (Vision), Gemini Pro Vision, LLaVA
 
-**fak status:** ❌ **Not focused** — fak works with text-only models. Vision models can be
-used via gateway, but vision-specific governance (e.g., image quarantine) is not implemented.
+**fak status:** ✅ **Governed input seam shipped** — `internal/model.ForwardMultimodal`
+accepts ordered text plus externally produced vision embeddings behind a fail-closed
+`MultimodalPolicy`. Image count, bytes, pixels, embedding width/count, media type, and active
+content are bounded; admitted image metadata, raw bytes, and embedding fingerprints bind a
+`vision-sha256:` quarantine pointer. This is not a built-in CLIP/OCR/VLM encoder or classifier.
 
 ---
 
 ## What This Means for Benchmarks
 
-When we report "1.5–4× vs tuned SOTA", we're comparing against a stack that has:
+For any result, its named baseline and operating envelope—not this generic checklist—are
+authoritative. The decision-grade headline reports **4.1× vs tuned per-agent warm KV** in one
+declared 50-turn × 5-agent Qwen2.5-1.5B Q8 envelope. The same run's **60.3×** is versus naive
+stateless re-send and is context, not the tuned adoption baseline. Common tuned stacks include:
 
 - ✅ KV cache / prefix caching
 - ✅ Batched inference
@@ -187,7 +206,7 @@ When we report "1.5–4× vs tuned SOTA", we're comparing against a stack that h
 - ✅ Optimized kernels (SIMD, fused)
 - ✅ Efficient KV management
 
-The **1.5–4× gain comes from**:
+The **4.1× gain in that envelope comes from**:
 1. **Fused serving** — Avoid process spawn per request
 2. **Cross-agent prefix sharing** — Multiple agents share one KV copy
 3. **Batch scheduling** — Cache-aware request ordering
@@ -227,9 +246,9 @@ See [`fak/BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob
 ## FAQ
 
 **Q: Is fak trying to replace llama.cpp or vLLM?**
-A: No. `fak` fronts these engines, adding a governance layer. For raw throughput, use
-`llama-server` or vLLM directly. `fak` is for safety, coherence, and legal reuse — not
-raw tok/s.
+A: For local inference, fak-native is the product path and aims to beat explicit reference
+engines in matched, quality-constrained envelopes. fak can also front external engines for
+gateway and interoperability use, but never silently substitutes one for native execution.
 
 **Q: Why compare against tuned SOTA instead of naive?**
 A: Because tuned SOTA is what people actually use in production. Comparing against a
@@ -237,10 +256,10 @@ stateless loop that re-sends everything would be misleading — nobody runs that
 scale.
 
 **Q: Does fak implement all these optimizations?**
-A: No, and it doesn't need to. The serving engine implements the throughput optimizations.
-`fak` implements the **governance layer** (permissions, quarantine, policy-driven invalidation)
-that serving engines don't have.
+A: Not yet. The native path owns the implementation boundary and labels remaining gaps; an
+explicit external-engine run remains gateway, comparison, or interoperability evidence rather
+than proof that fak-native implements that optimization.
 
 ---
 
-*Last updated: 2026-06-19*
+*Last updated: 2026-08-24*
