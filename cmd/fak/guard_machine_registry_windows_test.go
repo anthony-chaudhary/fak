@@ -18,7 +18,7 @@ func TestRecordInteractiveSessionRowsMirrorsMachineRegistry(t *testing.T) {
 	if err := os.MkdirAll(machine, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	row := guardsessions.NewInteractiveRow("trace", "claude", 1, t.TempDir(), "", "", time.Now(), []string{"claude"})
+	row := guardsessions.NewInteractiveRow("trace", "claude", 1, t.TempDir(), "", "", time.Now(), []string{"claude"}, false)
 	if err := recordInteractiveSessionRows(row); err != nil {
 		t.Fatal(err)
 	}

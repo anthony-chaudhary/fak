@@ -137,7 +137,7 @@ func TestGuardLaunchPublishesGatewayIntoTheRecordedRow(t *testing.T) {
 	// The operator-terminal row goes through its own recorder (guard.go mirrors it into the
 	// machine registry); it must be published too, and stamped IN PLACE so the clean-exit
 	// tombstone recorded from the same variable keeps the fields.
-	interactive := guardsessions.NewInteractiveRow("trace-pub-1", "claude", os.Getpid(), reg, "audit.jsonl", "", started.Add(time.Second), []string{"claude"})
+	interactive := guardsessions.NewInteractiveRow("trace-pub-1", "claude", os.Getpid(), reg, "audit.jsonl", "", started.Add(time.Second), []string{"claude"}, false)
 	if err := guardsessions.Record(reg, interactive); err != nil {
 		t.Fatal(err)
 	}

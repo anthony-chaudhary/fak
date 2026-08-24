@@ -141,10 +141,10 @@ func IndexPath(regDir string) string { return filepath.Join(regDir, IndexFileNam
 // every historical interactive session.
 func HostRecoveryEnabled(row Row) bool { return row.HostRecovery }
 
-func NewInteractiveRow(traceID, agent string, pid int, cwd, auditPath, nonce string, startedAt time.Time, command []string) Row {
+func NewInteractiveRow(traceID, agent string, pid int, cwd, auditPath, nonce string, startedAt time.Time, command []string, hostRecovery bool) Row {
 	r := NewRow(traceID, agent, pid, cwd, auditPath, nonce, startedAt)
 	r.Interactive = true
-	r.HostRecovery = hostRecoveryOptIn(r.Handle)
+	r.HostRecovery = hostRecovery
 	r.ResumeHandle = r.Handle
 	r.Command = append([]string(nil), command...)
 	r.WindowID = strings.TrimSpace(os.Getenv("WT_WINDOW"))
@@ -264,13 +264,6 @@ func foldReader(r io.Reader) (rows []Row, rawLines int) {
 
 // startUnix parses a row's RFC3339 start into unix seconds, 0 on any parse failure (so an
 // unstamped row sorts last rather than crashing the sort).
-func hostRecoveryOptIn(handle string) bool {
-	configured := strings.TrimSpace(os.Getenv("FAK_HOST_RECOVERY_SESSION"))
-	if configured == "current" {
-		return true
-	}
-	return configured != "" && configured == strings.TrimSpace(handle)
-}
 
 func startUnix(r Row) int64 {
 	if t, err := time.Parse(time.RFC3339, strings.TrimSpace(r.StartedAt)); err == nil {
