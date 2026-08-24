@@ -1,5 +1,6 @@
 # INDEX — the full map of the fak repo
 
+- [`docs/notes/CONCEPT-STUDY-ENDLESS-2026-08-24.md`](docs/notes/CONCEPT-STUDY-ENDLESS-2026-08-24.md) — pinned study of Endless's open-turn `wait_for_user_input` mechanism, fak seams, exclusions, and measured borrow portfolio.
 *This page owns one job: exhaustive lookup. It is for a reader who already knows a document, component, or artifact **by name**, or who needs a versioned, research, or historical route that the shorter front doors deliberately omit. It is a reference, not an on-ramp — if you are still deciding, read the [README](README.md); to install and run, use [Getting started](GETTING-STARTED.md); to route a job you already have to one authority, use [START-HERE](START-HERE.md).*
 
 **Audience:** readers doing name-based or lifecycle-based lookup who want the current, versioned, research, or historical documentation route without reconstructing repository history.

@@ -285,6 +285,18 @@
       "stars_at_check": 1480,
       "last_push_at_check": "2026-08-24T18:19:19Z",
       "study_note": "docs/notes/BORROW-BENCHMARK-SERVING-METRICS-INFERENCEX-STUDY-2026-07-13.md"
+    },
+    {
+      "repository": "Mchicao/endless",
+      "url": "https://github.com/Mchicao/endless",
+      "status": "studied",
+      "priority": 18,
+      "why": "Experimental Codex open-turn continuation analogue: one typed wait_for_user_input rendezvous keeps repeated operator messages inside one provider turn. The narrow candidate is a capability-gated, policy-preserving matched experiment; the Bun TUI, Codex-specific host, parallel worker stack, and approval shortcuts are excluded.",
+      "last_checked": "2026-08-24",
+      "checked_revision": "bbf449ca624aca90d8cda0bc21100f2a73a56bf4",
+      "stars_at_check": 2,
+      "last_push_at_check": "2026-08-21T14:38:07Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-ENDLESS-2026-08-24.md"
     }
   ]
 }
