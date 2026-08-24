@@ -141,7 +141,7 @@ func TestRichDashboardCloseStopsOnlyOwnedStack(t *testing.T) {
 
 func testServerWithRichDashboards(t *testing.T, m *richDashboardManager) *Server {
 	t.Helper()
-	s, err := New(Config{EngineID: "mock", Model: "m", Provider: "openai"})
+	s, err := New(Config{EngineID: "test", Model: "m", Provider: "openai"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,4 +160,39 @@ func waitDashboardState(t *testing.T, m *richDashboardManager, want string) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("dashboard state = %q, want %q", m.snapshot().State, want)
+}
+
+func TestRichDashboardCatalogAuditRejectsDuplicateAndIncompleteRoutes(t *testing.T) {
+	if err := auditRichDashboardLinks(richDashboardLinks); err != nil {
+		t.Fatalf("shipped catalog: %v", err)
+	}
+	duplicate := append([]richDashboardLink(nil), richDashboardLinks...)
+	duplicate = append(duplicate, duplicate[0])
+	if err := auditRichDashboardLinks(duplicate); err == nil || !strings.Contains(err.Error(), "duplicated") {
+		t.Fatalf("duplicate audit = %v, want duplicated refusal", err)
+	}
+	incomplete := append([]richDashboardLink(nil), richDashboardLinks...)
+	incomplete[0].Description = ""
+	if err := auditRichDashboardLinks(incomplete); err == nil || !strings.Contains(err.Error(), "incomplete") {
+		t.Fatalf("incomplete audit = %v, want incomplete refusal", err)
+	}
+}
+
+func TestRichDashboardEveryCatalogClickPreservesSelectedDestination(t *testing.T) {
+	for _, dashboard := range richDashboardLinks {
+		t.Run(dashboard.UID, func(t *testing.T) {
+			m := newRichDashboardManager()
+			m.state, m.baseURL = "ready", "https://grafana.example.test/team"
+			s := &Server{richDashboards: m}
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/?dashboard=rich&uid="+dashboard.UID, nil)
+			if !s.handleRichDashboard(rec, req) {
+				t.Fatal("rich dashboard request was not handled")
+			}
+			want := "https://grafana.example.test/team/d/" + dashboard.UID
+			if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != want {
+				t.Fatalf("click %q = (%d, %q), want (303, %q)", dashboard.UID, rec.Code, rec.Header().Get("Location"), want)
+			}
+		})
+	}
 }

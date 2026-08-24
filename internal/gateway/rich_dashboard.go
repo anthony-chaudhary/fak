@@ -24,10 +24,50 @@ var dashboardDockerAvailable = func() bool {
 	_, err := exec.LookPath("docker")
 	return err == nil
 }
-var richDashboardUIDs = map[string]struct{}{
-	"fleet-bottleneck": {}, "fak-gateway-observability": {}, "fak-dogfood-slow-requests": {},
-	"fak-startup-load": {}, "fak-guard-adjudication": {}, "fak-cache-health": {},
-	"fak-cache-value-rollup": {}, "fak-fleet-overview": {}, "fak-fleet-session": {},
+
+type richDashboardLink struct {
+	UID         string
+	Title       string
+	Description string
+	Category    string
+}
+
+var richDashboardLinks = []richDashboardLink{
+	{UID: "fleet-bottleneck", Title: "Fleet bottlenecks", Description: "Rank the live fleet constraints that need operator attention.", Category: "debug"},
+	{UID: "fak-gateway-observability", Title: "Gateway observability", Description: "Inspect gateway request rate, status mix, latency, and in-flight work.", Category: "debug"},
+	{UID: "fak-dogfood-slow-requests", Title: "Slow requests", Description: "Debug slow Claude Code requests through the FAK gateway.", Category: "debug"},
+	{UID: "fak-startup-load", Title: "Startup and model load", Description: "Follow readiness and model-loading phases from process start.", Category: "debug"},
+	{UID: "fak-guard-adjudication", Title: "Guard adjudication", Description: "See verdicts, refusal classes, and guarded-session economics.", Category: "debug"},
+	{UID: "fak-cache-health", Title: "Cache health", Description: "Inspect KV reuse, cache regimes, and provider-cache observations.", Category: "debug"},
+	{UID: "fak-cache-value-rollup", Title: "Cache value", Description: "Compare witnessed reuse with observed and projected savings.", Category: "rollup"},
+	{UID: "fak-fleet-overview", Title: "Fleet sessions", Description: "See which sessions are live and open their operational roll-ups.", Category: "rollup"},
+	{UID: "fak-fleet-session", Title: "Session drill-down", Description: "Inspect one session's liveness, budget, cache posture, and verdicts.", Category: "debug"},
+}
+
+var richDashboardUIDs = func() map[string]struct{} {
+	out := make(map[string]struct{}, len(richDashboardLinks))
+	for _, dashboard := range richDashboardLinks {
+		out[dashboard.UID] = struct{}{}
+	}
+	return out
+}()
+
+func auditRichDashboardLinks(links []richDashboardLink) error {
+	seen := make(map[string]struct{}, len(links))
+	for i, link := range links {
+		link.UID = strings.TrimSpace(link.UID)
+		if link.UID == "" || strings.TrimSpace(link.Title) == "" || strings.TrimSpace(link.Description) == "" {
+			return fmt.Errorf("rich dashboard %d has incomplete route metadata", i)
+		}
+		if _, exists := seen[link.UID]; exists {
+			return fmt.Errorf("rich dashboard UID %q is duplicated", link.UID)
+		}
+		if strings.ContainsAny(link.UID, "/?#&") {
+			return fmt.Errorf("rich dashboard UID %q is not a safe route segment", link.UID)
+		}
+		seen[link.UID] = struct{}{}
+	}
+	return nil
 }
 
 type richDashboardManager struct {

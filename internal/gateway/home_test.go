@@ -125,12 +125,43 @@ func TestGatewayHomepageCapturedHTML(t *testing.T) {
 		t.Fatal(err)
 	}
 	// This captured response is the visual witness: it asserts the actual browser
-	// surface has live state, a title, identity, and all seven navigable modules.
-	if strings.Count(string(raw), `class="card"`) != 7 {
-		t.Fatalf("captured homepage card count = %d, want 7", strings.Count(string(raw), `class="card"`))
+	// surface has live state, a title, identity, and every API + rich-dashboard route.
+	wantCards := 6 + len(richDashboardLinks)
+	if strings.Count(string(raw), `class="card`) != wantCards {
+		t.Fatalf("captured homepage card count = %d, want %d", strings.Count(string(raw), `class="card`), wantCards)
 	}
 	if !strings.Contains(string(raw), "demo-model") || !strings.Contains(string(raw), "local agent kernel") ||
 		!strings.Contains(string(raw), `id="live-state"`) || !strings.Contains(string(raw), "refreshes every 5 seconds") {
 		t.Fatalf("captured homepage lacks live identity: %s", raw)
+	}
+}
+
+func TestGatewayHomepageCapturedRichDashboardRoutesDoNotAliasGateway(t *testing.T) {
+	s, err := New(Config{EngineID: "mock", Model: "demo-model", Provider: "openai"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	body := rec.Body.String()
+	if err := auditRichDashboardLinks(richDashboardLinks); err != nil {
+		t.Fatalf("rich dashboard catalog: %v", err)
+	}
+	if got := strings.Count(body, `class="card rich-dashboard"`); got != len(richDashboardLinks) {
+		t.Fatalf("captured rich dashboard card count = %d, want %d\n%s", got, len(richDashboardLinks), body)
+	}
+	for _, dashboard := range richDashboardLinks {
+		wantRoute := `data-dashboard-uid="` + dashboard.UID + `" href="/?dashboard=rich&amp;uid=` + dashboard.UID + `"`
+		if strings.Count(body, wantRoute) != 1 {
+			t.Errorf("captured homepage route for %q count = %d, want 1", dashboard.UID, strings.Count(body, wantRoute))
+		}
+		if !strings.Contains(body, "<h2>"+dashboard.Title+"</h2>") {
+			t.Errorf("captured homepage missing title %q", dashboard.Title)
+		}
+	}
+	for _, uid := range []string{"fak-fleet-session", "fak-fleet-overview", "fak-guard-adjudication", "fak-cache-health", "fak-startup-load"} {
+		if !strings.Contains(body, `uid=`+uid+`"`) {
+			t.Errorf("non-gateway selection %q still has no direct route", uid)
+		}
 	}
 }
