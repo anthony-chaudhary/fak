@@ -245,6 +245,11 @@
       "lane": "trendreport",
       "command": "go test -v ./internal/trendreport",
       "output_contains": "TestTriageSelfcheck"
+    },
+    {
+      "lane": "treedoctor",
+      "command": "go test -v ./internal/treedoctor -run TestSweepScratch",
+      "output_contains": "TestSweepScratchReapsOnlyGitignored"
     }
   ]
 }
