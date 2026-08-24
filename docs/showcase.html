@@ -174,6 +174,20 @@
   .flip p{margin:0;color:var(--ink-soft);font-size:.96rem}
   .flip code{font-family:var(--mono);font-size:.86em;color:var(--ink);background:rgba(255,255,255,.05);padding:1px 6px;border-radius:5px}
 
+  /* microcontext video */
+  .hero-video-block{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(280px,.8fr);gap:24px;padding:22px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(145deg,rgba(37,99,235,.08),rgba(15,23,42,.82));box-shadow:0 24px 80px rgba(0,0,0,.28)}
+  .hero-player{position:relative;overflow:hidden;border:1px solid rgba(148,163,184,.24);border-radius:13px;background:#020817;box-shadow:0 16px 55px rgba(0,0,0,.42)}
+  .hero-player video{display:block;width:100%;aspect-ratio:16/10;object-fit:contain;background:#020817}
+  .chapter-count{position:absolute;right:12px;bottom:12px;padding:6px 9px;border:1px solid rgba(148,163,184,.28);border-radius:999px;background:rgba(2,8,23,.88);color:var(--muted);font:11px var(--mono);letter-spacing:.06em;text-transform:uppercase}
+  .hero-video-copy{display:flex;flex-direction:column;justify-content:center}
+  .hero-video-copy h3{margin:10px 0 12px;font-size:clamp(24px,3vw,36px);line-height:1.08;letter-spacing:-.03em}
+  .hero-video-copy p{color:var(--muted);line-height:1.72}
+  .hero-video-copy code{color:var(--violet-2);font-family:var(--mono)}
+  .hero-video-links{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+  .hero-video-links .btn{padding:10px 14px;font-size:13px}
+  .hero-video-links .btn-primary{background:linear-gradient(180deg,var(--fak),var(--fak-2));color:#04111f}
+  .hero-video-links .btn-ghost{border-color:var(--line);background:var(--panel);color:var(--ink)}
+  @media (max-width:760px){.hero-video-block{grid-template-columns:1fr;padding:14px}}
   /* worked examples — each idea shrunk to one readable example */
   .examples{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:26px}
   .ex{border:1px solid var(--line);border-radius:14px;padding:18px 18px 16px;background:var(--panel);display:flex;flex-direction:column}
@@ -359,6 +373,37 @@
 </div>
 
 <!-- ============================ THE KERNEL ============================ -->
+<!-- ==================== MICROCONTEXT VIDEO ==================== -->
+<section id="microcontext-video" style="padding-top:8px">
+  <div class="section-head">
+    <span class="sec-num">01</span>
+    <div>
+      <h2>Microcontext: end to end</h2>
+      <p>99-second claim-linked preproduction master · 20-second best-hits cutdown</p>
+    </div>
+  </div>
+  <div class="hero-video-block">
+    <div class="hero-player">
+      <video controls preload="metadata"
+        poster="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/fak-microcontext-e2e-preproduction-poster.png"
+        aria-label="fak microcontext end-to-end preproduction walkthrough">
+        <source src="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/fak-microcontext-e2e-preproduction.mp4" type="video/mp4">
+        Your browser does not support video. <a href="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/fak-microcontext-e2e-preproduction.mp4">Download the MP4</a>.
+      </video>
+      <span class="chapter-count">15 chapters · 99 sec · preproduction</span>
+    </div>
+    <div class="hero-video-copy">
+      <span class="eyebrow">BEST HITS → INSTALL → RUN → INSPECT</span>
+      <h3>See the full value chain—and the evidence boundary.</h3>
+      <p>The exact Qwen3.8-27B campaign shown here is witnessed on A100/vLLM. The master deliberately displays <code>CAPTURE REQUIRED</code> where the requested fak-native Apple Metal recording belongs; <a href="https://github.com/anthony-chaudhary/fak/issues/8795">#8795 tracks that capture</a>.</p>
+      <div class="hero-video-links">
+        <a class="btn btn-primary" href="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/fak-microcontext-e2e-preproduction.mp4">Download master <span>→</span></a>
+        <a class="btn btn-ghost" href="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/fak-microcontext-best-hits.mp4">20-second cutdown <span>→</span></a>
+        <a class="btn btn-ghost" href="launch/microcontext-e2e-video.md">Production brief <span>→</span></a>
+      </div>
+    </div>
+  </div>
+</section>
 <section id="kernel">
   <div class="wrap reveal">
     <div class="sec-head">
