@@ -33,28 +33,30 @@ type lifecycleCounts struct {
 }
 
 type hookCensusReport struct {
-	Schema             string             `json:"schema"`
-	GeneratedAt        time.Time          `json:"generated_at"`
-	Window             string             `json:"window"`
-	CodexHome          string             `json:"codex_home"`
-	LogStore           string             `json:"log_store"`
-	Workspace          string             `json:"workspace"`
-	ObservationStore   string             `json:"observation_store"`
-	ProfileMatch       bool               `json:"profile_match"`
-	DispatchedCalls    int                `json:"dispatched_calls"`
-	DispatchSource     string             `json:"dispatch_source"`
-	PreToolUse         lifecycleCounts    `json:"pre_tool_use"`
-	PostToolUse        lifecycleCounts    `json:"post_tool_use"`
-	Stop               lifecycleCounts    `json:"stop"`
-	StopFailure        lifecycleCounts    `json:"stop_failure"`
-	SubagentStop       lifecycleCounts    `json:"subagent_stop"`
-	StopSource         string             `json:"stop_source,omitempty"`
-	StopRuns           []stopLifecycleRow `json:"stop_runs,omitempty"`
-	TelemetryFresh     bool               `json:"telemetry_fresh"`
-	NewestReceipt      time.Time          `json:"newest_receipt,omitempty"`
-	Verdict            string             `json:"verdict"`
-	PostToolSettlement string             `json:"post_tool_settlement"`
-	Reasons            []string           `json:"reasons,omitempty"`
+	Schema                 string             `json:"schema"`
+	GeneratedAt            time.Time          `json:"generated_at"`
+	Window                 string             `json:"window"`
+	CodexHome              string             `json:"codex_home"`
+	LogStore               string             `json:"log_store"`
+	Workspace              string             `json:"workspace"`
+	ObservationStore       string             `json:"observation_store"`
+	ProfileMatch           bool               `json:"profile_match"`
+	DispatchedCalls        int                `json:"dispatched_calls"`
+	DispatchSource         string             `json:"dispatch_source"`
+	PreToolUse             lifecycleCounts    `json:"pre_tool_use"`
+	PostToolUse            lifecycleCounts    `json:"post_tool_use"`
+	PostToolUseRequirement string             `json:"post_tool_use_requirement"`
+	PostToolUseStatus      string             `json:"post_tool_use_status"`
+	Stop                   lifecycleCounts    `json:"stop"`
+	StopFailure            lifecycleCounts    `json:"stop_failure"`
+	SubagentStop           lifecycleCounts    `json:"subagent_stop"`
+	StopSource             string             `json:"stop_source,omitempty"`
+	StopRuns               []stopLifecycleRow `json:"stop_runs,omitempty"`
+	TelemetryFresh         bool               `json:"telemetry_fresh"`
+	NewestReceipt          time.Time          `json:"newest_receipt,omitempty"`
+	Verdict                string             `json:"verdict"`
+	PostToolSettlement     string             `json:"post_tool_settlement"`
+	Reasons                []string           `json:"reasons,omitempty"`
 }
 
 type hookObservation struct {
@@ -284,6 +286,7 @@ func RunCodexHookCensus(stdout, stderr io.Writer, args []string) int {
 	home := fs.String("codex-home", "", "active Codex home")
 	logHome := fs.String("log-home", "", "Codex home whose sessions are counted")
 	workspace := fs.String("workspace", ".", "workspace whose calls are counted")
+	binary := fs.String("codex-binary", "", "Codex executable used to resolve the effective hook profile")
 	threadID := fs.String("thread-id", os.Getenv("CODEX_THREAD_ID"), "Codex thread whose calls are counted (empty counts workspace)")
 	observations := fs.String("observations", filepath.Join(".dos", "metrics", "observations.jsonl"), "hook observation JSONL")
 	stopEvents := fs.String("stop-events", "", "Codex app-server hook notification JSONL")
@@ -291,7 +294,7 @@ func RunCodexHookCensus(stdout, stderr io.Writer, args []string) int {
 	asJSON := fs.Bool("json", false, "emit JSON")
 	nowText := fs.String("now", "", "fixed RFC3339 clock (tests/captures)")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *since <= 0 {
-		fmt.Fprintln(stderr, "usage: fak-dev codex-hook-census [--codex-home DIR] [--log-home DIR] [--observations FILE] [--stop-events FILE] [--since 24h] [--json]")
+		fmt.Fprintln(stderr, "usage: fak-dev codex-hook-census [--codex-home DIR] [--log-home DIR] [--codex-binary FILE] [--observations FILE] [--stop-events FILE] [--since 24h] [--json]")
 		return 2
 	}
 	now := time.Now().UTC()
@@ -316,7 +319,12 @@ func RunCodexHookCensus(stdout, stderr io.Writer, args []string) int {
 	if *logHome == "" {
 		*logHome = *home
 	}
-	report, err := buildHookCensus(*home, *logHome, *workspace, *threadID, *observations, *since, now)
+	profile, err := inspectCodexHookProfile(*home, *workspace, *binary)
+	if err != nil {
+		fmt.Fprintf(stderr, "codex-hook-census: profile: %v\n", err)
+		return 1
+	}
+	report, err := buildHookCensus(*home, *logHome, *workspace, *threadID, *observations, profile, *since, now)
 	if err != nil {
 		fmt.Fprintf(stderr, "codex-hook-census: %v\n", err)
 		return 1
@@ -341,7 +349,7 @@ func RunCodexHookCensus(stdout, stderr io.Writer, args []string) int {
 	return 0
 }
 
-func buildHookCensus(home, logHome, workspace, threadID, observations string, since time.Duration, now time.Time) (hookCensusReport, error) {
+func buildHookCensus(home, logHome, workspace, threadID, observations string, profile hookProfileReport, since time.Duration, now time.Time) (hookCensusReport, error) {
 	absHome, _ := filepath.Abs(home)
 	absLog, _ := filepath.Abs(logHome)
 	absObs, _ := filepath.Abs(observations)
@@ -354,9 +362,10 @@ func buildHookCensus(home, logHome, workspace, threadID, observations string, si
 	if err != nil {
 		return hookCensusReport{}, err
 	}
-	r := hookCensusReport{Schema: codexHookCensusSchema, GeneratedAt: now, Window: since.String(), PostToolSettlement: codexPostToolSettlementWindow.String(), CodexHome: absHome, LogStore: absLog, Workspace: absWork, ObservationStore: absObs, ProfileMatch: samePath(absHome, absLog), DispatchedCalls: len(calls), DispatchSource: filepath.Join(absLog, "sessions"), NewestReceipt: newest, TelemetryFresh: !newest.IsZero() && now.Sub(newest) <= 5*time.Minute}
+	r := hookCensusReport{Schema: codexHookCensusSchema, GeneratedAt: now, Window: since.String(), PostToolSettlement: codexPostToolSettlementWindow.String(), CodexHome: absHome, LogStore: absLog, Workspace: absWork, ObservationStore: absObs, ProfileMatch: samePath(absHome, absLog), DispatchedCalls: len(calls), DispatchSource: filepath.Join(absLog, "sessions"), NewestReceipt: newest, TelemetryFresh: !newest.IsZero() && now.Sub(newest) <= 5*time.Minute, PostToolUseRequirement: "optional"}
 	r.PreToolUse = phaseCountsForCalls(calls, receipts["pretool"], absHome, absWork, absObs)
 	r.PostToolUse = postToolPhaseCounts(postToolEligibleDispatches(calls, now.Add(-codexPostToolSettlementWindow)), receipts["posttool"], absHome, absWork, absObs)
+	applyHookProfileToCensus(&r, profile)
 	if !r.TelemetryFresh {
 		r.Reasons = append(r.Reasons, "STALE_TELEMETRY")
 	}
@@ -370,16 +379,44 @@ func buildHookCensus(home, logHome, workspace, threadID, observations string, si
 	return r, nil
 }
 
+func applyHookProfileToCensus(r *hookCensusReport, profile hookProfileReport) {
+	present := false
+	for _, h := range profile.Hooks {
+		if normalizeHookEvent(h.EventName) == "post_tool_use" {
+			present = true
+			break
+		}
+	}
+	r.PostToolUseRequirement = "optional"
+	if !present {
+		source := r.PostToolUse.Source
+		r.PostToolUse = lifecycleCounts{Source: source}
+		r.PostToolUseStatus = "intentionally_disabled"
+		return
+	}
+	r.PostToolUseStatus = "observed"
+	if r.PostToolUse.Disabled > 0 {
+		r.PostToolUseStatus = "disabled"
+	} else if r.PostToolUse.Failed > 0 {
+		r.PostToolUseStatus = "failing"
+	} else if r.PostToolUse.Unknown > 0 {
+		r.PostToolUseStatus = "incomplete"
+	}
+}
+
 func finalizeCensusVerdict(r *hookCensusReport) {
 	reasons := append([]string(nil), r.Reasons...)
 	if r.PreToolUse.Unknown > 0 {
 		reasons = append(reasons, "PRE_TOOL_USE_UNKNOWN")
 	}
-	if r.PostToolUse.Unknown > 0 {
+	if r.PostToolUseStatus != "intentionally_disabled" && r.PostToolUse.Unknown > 0 {
 		reasons = append(reasons, "POST_TOOL_USE_UNKNOWN")
 	}
 	if r.PreToolUse.Failed > 0 || r.PostToolUse.Failed > 0 {
 		reasons = append(reasons, "HOOK_FAILURES_PRESENT")
+	}
+	if r.PostToolUse.Disabled > 0 {
+		reasons = append(reasons, "POST_TOOL_USE_DISABLED")
 	}
 	for _, stop := range []struct {
 		name string
@@ -669,12 +706,8 @@ func readHookObservations(path string, after time.Time) (map[string][]hookObserv
 }
 func writeHookCensus(w io.Writer, r hookCensusReport) {
 	fmt.Fprintf(w, "Codex hook lifecycle census (%s)\nprofile: %s\nlog store: %s (match=%t)\ndispatched calls: %d [source=%s]\n", r.Window, r.CodexHome, r.LogStore, r.ProfileMatch, r.DispatchedCalls, r.DispatchSource)
-	for _, p := range []struct {
-		name string
-		c    lifecycleCounts
-	}{{"PreToolUse", r.PreToolUse}, {"PostToolUse", r.PostToolUse}} {
-		fmt.Fprintf(w, "%s: denominator=%d attempted=%d succeeded=%d failed=%d skipped=%d disabled=%d unknown=%d [source=%s]\n", p.name, p.c.Denominator, p.c.Attempted, p.c.Succeeded, p.c.Failed, p.c.Skipped, p.c.Disabled, p.c.Unknown, p.c.Source)
-	}
+	fmt.Fprintf(w, "PreToolUse: denominator=%d attempted=%d succeeded=%d failed=%d skipped=%d disabled=%d unknown=%d [source=%s]\n", r.PreToolUse.Denominator, r.PreToolUse.Attempted, r.PreToolUse.Succeeded, r.PreToolUse.Failed, r.PreToolUse.Skipped, r.PreToolUse.Disabled, r.PreToolUse.Unknown, r.PreToolUse.Source)
+	fmt.Fprintf(w, "PostToolUse: requirement=%s status=%s denominator=%d attempted=%d succeeded=%d failed=%d skipped=%d disabled=%d unknown=%d [source=%s]\n", r.PostToolUseRequirement, r.PostToolUseStatus, r.PostToolUse.Denominator, r.PostToolUse.Attempted, r.PostToolUse.Succeeded, r.PostToolUse.Failed, r.PostToolUse.Skipped, r.PostToolUse.Disabled, r.PostToolUse.Unknown, r.PostToolUse.Source)
 	sort.Strings(r.Reasons)
 	fmt.Fprintf(w, "verdict: %s", r.Verdict)
 	if len(r.Reasons) > 0 {
