@@ -235,6 +235,11 @@
       "lane": "trunkbuildprobe",
       "command": "go test -v ./internal/trunkbuildprobe",
       "output_contains": "TestDiagnoseBuildBrokenCoherence"
+    },
+    {
+      "lane": "trigram",
+      "command": "go test -v ./internal/trigram",
+      "output_contains": "TestRegexpBruteForceStillCorrect"
     }
   ]
 }
