@@ -22,11 +22,14 @@ const (
 // and harness composition. It intentionally carries a typed asset and evidence
 // reference, never a child transcript.
 type ProfileReceipt struct {
-	Kind        ReceiptKind
-	ID          string
-	Verified    bool
-	EvidenceRef string
-	Asset       Asset
+	Kind            ReceiptKind
+	ID              string
+	Verified        bool
+	EvidenceRef     string
+	TaskID          string
+	ParentTaskID    string
+	VerifierOutcome string
+	Asset           Asset
 }
 
 var ErrInvalidReceipt = errors.New("harnesscompose: invalid profile receipt")
