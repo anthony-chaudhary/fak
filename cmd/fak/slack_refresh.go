@@ -245,14 +245,14 @@ func runSlackSurfaceAudit(stdout, stderr io.Writer, surface string, includeOutbo
 		if selected.Auth != nil && selected.Auth.Err != "" {
 			detail = selected.Auth.Err
 		}
-		fmt.Fprintf(stdout, "%s: AUTH_FAIL � %s\n", surface, detail)
+		fmt.Fprintf(stdout, "%s: AUTH_FAIL - %s\n", surface, detail)
 		return 1
 	}
 	age, err := lastPostAge(selected, "", time.Now())
 	if err != nil {
-		fmt.Fprintf(stdout, "%s: NO_RECENT_POST � %v\n", surface, err)
+		fmt.Fprintf(stdout, "%s: NO_RECENT_POST - %v\n", surface, err)
 	} else {
-		fmt.Fprintf(stdout, "%s: OK � last post %s ago\n", surface, age.Round(time.Second))
+		fmt.Fprintf(stdout, "%s: OK - last post %s ago\n", surface, age.Round(time.Second))
 	}
 	if includeOutbox {
 		if code := runSlackOutboxStatus(stdout, stderr, []string{"--json"}); code != 0 {

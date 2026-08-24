@@ -118,3 +118,12 @@ func TestSlackWalkMarksAlertsAndGuardSessionsRunnable(t *testing.T) {
 		}
 	}
 }
+
+func TestSlackRefreshAuditOutputIsPortableASCII(t *testing.T) {
+	clearSlackEnv(t)
+	var out, errb bytes.Buffer
+	_ = runSlackRefresh(&out, &errb, []string{"--surface", "alerts"})
+	if strings.ContainsRune(out.String(), '\ufffd') {
+		t.Fatalf("audit output contains replacement rune: %q", out.String())
+	}
+}
