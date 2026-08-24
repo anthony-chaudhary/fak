@@ -180,6 +180,11 @@
       "lane": "vcachechain",
       "command": "go test -v ./internal/vcachechain",
       "output_contains": "TestProveRecallHeadlineRefusedThenAmortizedProven"
+    },
+    {
+      "lane": "vcachecal",
+      "command": "go test -v ./internal/vcachecal",
+      "output_contains": "TestFitCalibrationMeasuresWriteMultipliersByTTL"
     }
   ]
 }
