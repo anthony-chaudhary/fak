@@ -119,6 +119,13 @@ func (r Request) ManagedArgv(fakExe string, postureArgs, budgetArgs []string) ([
 		return nil, err
 	}
 	argv := []string{fakExe, "m"}
+	// The resume watchdog has already classified this exact session as dead and
+	// eligible. Disable m's current-thread gate for Codex continuations: the
+	// watchdog itself runs from a live operator/session context, so applying that
+	// unrelated context here refuses every detached recovery as "unguarded".
+	if h, _ := r.HarnessName(); h == HarnessCodex {
+		argv = append(argv, "--codex-loop-gate", "off")
+	}
 	argv = append(argv, postureArgs...)
 	argv = append(argv, budgetArgs...)
 	argv = append(argv, "--")

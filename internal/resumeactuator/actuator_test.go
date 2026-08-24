@@ -20,7 +20,7 @@ func TestManagedArgvKeepsFAKOuterAndHarnessAdjustmentSmall(t *testing.T) {
 		{
 			name: "codex",
 			req:  Request{Harness: "CoDeX", Session: "codex-session", Rollout: "rollout.jsonl", GoalFile: "goal.json", ResultFile: "result.json", CWD: "repo"},
-			want: []string{"fak-bin", "m", "--provider", "anthropic", "--budget-envelope", "{}", "--", "fak-bin", "codex-resume", "--json", "--rollout", "rollout.jsonl", "--cwd", "repo", "--prompt-file", "goal.json", "--result-file", "result.json", "codex-session"},
+			want: []string{"fak-bin", "m", "--codex-loop-gate", "off", "--provider", "anthropic", "--budget-envelope", "{}", "--", "fak-bin", "codex-resume", "--json", "--rollout", "rollout.jsonl", "--cwd", "repo", "--prompt-file", "goal.json", "--result-file", "result.json", "codex-session"},
 		},
 		{
 			name: "opencode",
@@ -53,7 +53,7 @@ func TestCodexNativeResumeNeedsOnlySession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"fak", "m", "--", "codex-bin", "exec", "resume", "--json", "--dangerously-bypass-approvals-and-sandbox", "s", "continue"}
+	want := []string{"fak", "m", "--codex-loop-gate", "off", "--", "codex-bin", "exec", "resume", "--json", "--dangerously-bypass-approvals-and-sandbox", "s", "continue"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got=%q want=%q", got, want)
 	}
