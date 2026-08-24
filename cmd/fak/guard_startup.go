@@ -27,6 +27,7 @@ type guardStartupView struct {
 	resolvedBase         string
 	remoteBase           string
 	floorSource          string
+	policyDigest         string
 	injected             [][2]string
 	logLabel             string
 	auditLabel           string
@@ -80,6 +81,9 @@ func renderGuardStartupReport(v guardStartupView) string {
 			localLabel = filepath.Base(v.ggufPath)
 		}
 		printGuardBanner(&startupReport, guardBannerVersion(), guardBannerBuildStamp(), v.gwURL, v.up, v.resolvedBase, v.floorSource, formatGuardInjectedEnvForBanner(v.injected), v.logLabel, v.auditLabel, v.refusalCarryForward, v.remoteBase != "", v.localModel, localLabel, v.command)
+		if v.policyDigest != "" {
+			fmt.Fprintf(&startupReport, "fak guard: active config digest %s\n", v.policyDigest)
+		}
 		// A stamped-but-BEHIND (Skewed) or OFF-trunk (Diverged) guard is a distinct footgun from the
 		// unstamped case printGuardBanner already warns about on its `build` row: this binary CAN attest
 		// its commit — that commit is just provably behind/off origin/main — and the default guard path

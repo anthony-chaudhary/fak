@@ -199,8 +199,12 @@ func renderGuardInfoVisualBlock(v guardInfoVars, tr *guardInfoTrend, width, heig
 // run, and the live liveness (replies / in-flight) — the persistent identity the scrolled-off
 // startup banner can no longer give.
 func guardInfoVisualIdentityRow(v guardInfoVars) string {
-	local := fmt.Sprintf("%s · ↑%s · replies %d · busy %d",
-		guardInfoVersionTag(), humanUptime(v.Gateway.UptimeSeconds), v.Inference.Turns, v.Gateway.InflightRequests)
+	identity := "identity UNKNOWN"
+	if v.RuntimeIdentity != nil {
+		identity = guardInfoRuntimeIdentityRow(*v.RuntimeIdentity)
+	}
+	local := fmt.Sprintf("%s · %s · ↑%s · replies %d · busy %d",
+		guardInfoVersionTag(), identity, humanUptime(v.Gateway.UptimeSeconds), v.Inference.Turns, v.Gateway.InflightRequests)
 	// Fleet posture leads the pinned row when guard publishes it. On narrow terminals the
 	// width cap therefore preserves the cross-machine status instead of truncating it behind
 	// the local gateway identity; the expanded Agents tab carries the complete machine sample.

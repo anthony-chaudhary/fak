@@ -1092,11 +1092,6 @@
           "category": "incidental",
           "reason": "observed campaign receipt field, not a distinct cache mechanism",
           "token": "cache_reset_receipt"
-        },
-        {
-          "category": "incidental",
-          "reason": "Turnavoid paired-arm replay schema implementation identifier; it records one candidate observation or provider-cache attribution and does not introduce a planner, decision subsystem, or cache plane.",
-          "token": "MechanismProviderCache"
         }
       ],
       "id": "cache",
@@ -3182,6 +3177,46 @@
           "category": "incidental",
           "reason": "Private staged-diff checker implementation; the operator concept is the NATIVE_FIRST pre-commit gate.",
           "token": "checkNativeFirst"
+        },
+        {
+          "category": "incidental",
+          "reason": "Runtime identity value type for the existing guard operator surface; not a distinct guard or gate concept.",
+          "token": "guardInfoRuntimeIdentity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Constructor for the runtime identity value; not a distinct guard or gate concept.",
+          "token": "guardInfoRuntimeIdentityFrom"
+        },
+        {
+          "category": "incidental",
+          "reason": "Git metadata helper used by the existing guard info surface; not a distinct guard or gate concept.",
+          "token": "guardInfoSourceHeadFrom"
+        },
+        {
+          "category": "incidental",
+          "reason": "Renderer for the existing guard runtime identity value; not a distinct guard or gate concept.",
+          "token": "guardInfoRuntimeIdentityRow"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON field carrying existing guard runtime identity; not a distinct guard or gate concept.",
+          "token": "RuntimeIdentity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Constructor for the existing guard runtime identity value; not a distinct guard or gate concept.",
+          "token": "guardInfoRuntimeIdentityOf"
+        },
+        {
+          "category": "incidental",
+          "reason": "Collector for the existing guard runtime identity surface; not a distinct guard or gate concept.",
+          "token": "guardInfoCurrentRuntimeIdentity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Parser for the active effective-policy digest in the existing guard startup report; not a distinct guard or gate concept.",
+          "token": "guardInfoStartupDigest"
         }
       ],
       "exclude": [
@@ -3258,6 +3293,7 @@
         "ReportedGates",
         "RoleGate",
         "RunPonytailGates",
+        "RuntimeIdentity",
         "SOAK_GATE",
         "SafetyGate",
         "SessionAffinityGateway",
@@ -3394,11 +3430,18 @@
         "guardInfoBoundedWorkDoneQuery",
         "guardInfoCompareWorkHistory",
         "guardInfoComparedHistoryRecords",
+        "guardInfoCurrentRuntimeIdentity",
         "guardInfoDirectProviderBaseline",
         "guardInfoHistoryIdentity",
         "guardInfoReadWorkHistory",
+        "guardInfoRuntimeIdentity",
+        "guardInfoRuntimeIdentityFrom",
+        "guardInfoRuntimeIdentityOf",
+        "guardInfoRuntimeIdentityRow",
         "guardInfoSessionWorkDoneQuery",
         "guardInfoSignedShortCount",
+        "guardInfoSourceHeadFrom",
+        "guardInfoStartupDigest",
         "guardInfoUnavailableWindowWorkDone",
         "guardInfoUnknownWorkSource",
         "guardInfoWorkDone",
@@ -5464,6 +5507,11 @@
           "category": "incidental",
           "reason": "Private metrics snapshot helper, not a distinct session-runtime concept.",
           "token": "sessionEnvelopeRefusalReasons"
+        },
+        {
+          "category": "incidental",
+          "reason": "Timestamp field on runtime identity; not a distinct session lifecycle concept.",
+          "token": "SessionStarted"
         }
       ],
       "id": "session-runtime",
@@ -5576,6 +5624,7 @@
         "SessionSourceResolution",
         "SessionSourceSelfTestReport",
         "SessionSourceSelfTestSchemaVersion",
+        "SessionStarted",
         "SessionSupport",
         "SessionTerminalView",
         "SetSessionAffinity",
@@ -10913,11 +10962,6 @@
           "category": "incidental",
           "reason": "Provider-specific typed result; not a general decision primitive",
           "token": "TorchAODecision"
-        },
-        {
-          "category": "incidental",
-          "reason": "Turnavoid paired-arm replay schema implementation identifier; it records one candidate observation or provider-cache attribution and does not introduce a planner, decision subsystem, or cache plane.",
-          "token": "DecisionBasisThroughTurn"
         }
       ],
       "id": "decision",
@@ -12277,56 +12321,6 @@
           "category": "incidental",
           "reason": "JSON spelling of a computed comparison metric, not a planning workflow concept.",
           "token": "candidate_mean_tokens_per_second"
-        },
-        {
-          "category": "incidental",
-          "reason": "Turnavoid paired-arm replay schema implementation identifier; it records one candidate observation or provider-cache attribution and does not introduce a planner, decision subsystem, or cache plane.",
-          "token": "CandidateRequired"
-        },
-        {
-          "category": "incidental",
-          "reason": "Turnavoid paired-arm replay schema implementation identifier; it records one candidate observation or provider-cache attribution and does not introduce a planner, decision subsystem, or cache plane.",
-          "token": "CandidateCommittedTurns"
-        },
-        {
-          "category": "incidental",
-          "reason": "Turnavoid paired-arm replay schema implementation identifier; it records one candidate observation or provider-cache attribution and does not introduce a planner, decision subsystem, or cache plane.",
-          "token": "CandidateCommittedModelTurns"
-        },
-        {
-          "category": "incidental",
-          "reason": "Turnavoid paired-arm replay schema implementation identifier; it records one candidate observation or provider-cache attribution and does not introduce a planner, decision subsystem, or cache plane.",
-          "token": "CandidateGross"
-        },
-        {
-          "category": "incidental",
-          "reason": "Turnavoid paired-arm replay schema implementation identifier; it records one candidate observation or provider-cache attribution and does not introduce a planner, decision subsystem, or cache plane.",
-          "token": "GrossCandidateLatencyMS"
-        },
-        {
-          "category": "incidental",
-          "reason": "Turnavoid paired-arm replay schema implementation identifier; it records one candidate observation or provider-cache attribution and does not introduce a planner, decision subsystem, or cache plane.",
-          "token": "NetCandidateLatencyMS"
-        },
-        {
-          "category": "incidental",
-          "reason": "Turnavoid paired-arm replay schema implementation identifier; it records one candidate observation or provider-cache attribution and does not introduce a planner, decision subsystem, or cache plane.",
-          "token": "GrossCandidateCostUSD"
-        },
-        {
-          "category": "incidental",
-          "reason": "Turnavoid paired-arm replay schema implementation identifier; it records one candidate observation or provider-cache attribution and does not introduce a planner, decision subsystem, or cache plane.",
-          "token": "NetCandidateCostUSD"
-        },
-        {
-          "category": "incidental",
-          "reason": "Turnavoid paired-arm replay schema implementation identifier; it records one candidate observation or provider-cache attribution and does not introduce a planner, decision subsystem, or cache plane.",
-          "token": "candidateLatency"
-        },
-        {
-          "category": "incidental",
-          "reason": "Turnavoid paired-arm replay schema implementation identifier; it records one candidate observation or provider-cache attribution and does not introduce a planner, decision subsystem, or cache plane.",
-          "token": "candidateCost"
         }
       ],
       "exclude": [

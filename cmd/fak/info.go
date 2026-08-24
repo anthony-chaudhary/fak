@@ -51,6 +51,7 @@ import (
 // OMITS the block until a turn carries provider cache activity (vcacheVarsFromSnapshot
 // returns nil), so "no cache yet" is distinguishable from "cache proved zero saving".
 type guardInfoVars struct {
+	RuntimeIdentity *guardInfoRuntimeIdentity `json:"runtime_identity,omitempty"`
 	// Observation is the shared semantic view consumed by every output surface.
 	// It is populated from /v1/fak/observation, or explicitly marked
 	// legacy/unknown when an older gateway only serves /debug/vars.
@@ -549,6 +550,8 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 		if !ok {
 			return 1
 		}
+		id := guardInfoCurrentRuntimeIdentity(v)
+		v.RuntimeIdentity = &id
 		return encodeJSONOrFail(stdout, stderr, v, "fak info")
 	}
 	// A TTY stdout (the normal split-pane case) lets the watch loop REDRAW one status line
@@ -853,7 +856,19 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 	// captured log stays intact. A pending needsRepaint (set by a focus-in or a resize) forces a
 	// re-measure first, but KEEPS prevRows real so writeGuardInfoFrame's cursor-up + clear-down
 	// still erases the old block — zeroing prevRows here would skip the clear and leave ghost rows.
+	identityPrinted := false
+	var runtimeIdentity *guardInfoRuntimeIdentity
 	writeFrame := func(v guardInfoVars) {
+		if runtimeIdentity == nil {
+			id := guardInfoCurrentRuntimeIdentity(v)
+			runtimeIdentity = &id
+		}
+		id := *runtimeIdentity
+		v.RuntimeIdentity = runtimeIdentity
+		if !identityPrinted {
+			fmt.Fprintln(stdout, guardInfoRuntimeIdentityRow(id))
+			identityPrinted = true
+		}
 		lastSample, haveSample = v, true
 		// Re-measure on EVERY frame, not only when a focus-in / SIGWINCH latched a repaint.
 		// The interactive frame is padded to exactly `height` rows and drawn in place, so a

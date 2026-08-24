@@ -138,3 +138,16 @@ func TestGuardStartupReportSilentOnAnUnmanagedHost(t *testing.T) {
 		}
 	}
 }
+
+func TestGuardStartupReportCarriesActiveConfigDigest(t *testing.T) {
+	got := renderGuardStartupReport(guardStartupView{
+		gwURL:        "http://127.0.0.1:8080",
+		up:           "anthropic",
+		floorSource:  "built-in guard floor",
+		policyDigest: "sha256:abc123",
+		command:      []string{"claude"},
+	})
+	if !strings.Contains(got, "fak guard: active config digest sha256:abc123\n") {
+		t.Fatalf("startup report missing active config digest:\n%s", got)
+	}
+}

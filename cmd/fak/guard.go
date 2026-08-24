@@ -1407,6 +1407,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		resolvedBase:         resolvedBase,
 		remoteBase:           remoteBase,
 		floorSource:          floorSource,
+		policyDigest:         policyDigest,
 		injected:             injected,
 		logLabel:             logLabel,
 		auditLabel:           auditLabel,

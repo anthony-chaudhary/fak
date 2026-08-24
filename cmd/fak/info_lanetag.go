@@ -4,11 +4,117 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/modver"
 )
+
+type guardInfoRuntimeIdentity struct {
+	Source         string `json:"source"`
+	SourceModule   string `json:"source_module"`
+	RunningBuild   string `json:"running_build"`
+	ConfigDigest   string `json:"config_digest"`
+	SessionStarted string `json:"session_started"`
+	Verdict        string `json:"verdict"`
+	Action         string `json:"action"`
+}
+
+// guardInfoRuntimeIdentityOf joins the source checkout, the binary executing this pane, and
+// the active gateway receipt. It fails closed: only an exact clean build/source match is MATCH;
+// an absent stamp or source revision is UNKNOWN. ConfigDigest is a digest of the gateway's
+// guard-published effective-policy digest, not a path or configuration body, so the pane can bind later
+// dogfood evidence without disclosing operator configuration.
+func guardInfoRuntimeIdentityOf(source, sourceModule, runningBuild, configDigest, sessionStarted string) guardInfoRuntimeIdentity {
+	id := guardInfoRuntimeIdentity{
+		Source:         compactIdentityValue(source),
+		SourceModule:   compactIdentityValue(sourceModule),
+		RunningBuild:   compactIdentityValue(runningBuild),
+		ConfigDigest:   compactIdentityValue(configDigest),
+		SessionStarted: compactIdentityValue(sessionStarted),
+		Verdict:        "UNKNOWN",
+		Action:         "check with fak version --json; run go install ./cmd/fak, then relaunch with fak guard -- claude if identities differ",
+	}
+	if id.Source == "unknown" || id.RunningBuild == "unknown" {
+		return id
+	}
+	running := strings.TrimSuffix(id.RunningBuild, "+dirty")
+	if strings.HasPrefix(id.Source, running) || strings.HasPrefix(running, id.Source) {
+		if strings.HasSuffix(id.RunningBuild, "+dirty") {
+			return id
+		}
+		id.Verdict = "MATCH"
+		id.Action = "none"
+		return id
+	}
+	id.Verdict = "STALE"
+	id.Action = "run go install ./cmd/fak, then relaunch with fak guard -- claude"
+	return id
+}
+
+func compactIdentityValue(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "unknown"
+	}
+	return v
+}
+
+func guardInfoStartupDigest(report string) string {
+	const marker = "fak guard: active config digest "
+	for _, line := range strings.Split(report, "\n") {
+		if strings.HasPrefix(line, marker) {
+			return compactIdentityValue(strings.TrimPrefix(line, marker))
+		}
+	}
+	return "unknown"
+}
+
+func guardInfoSourceHeadFrom(run func(...string) ([]byte, error)) string {
+	out, err := run("rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return "unknown"
+	}
+	head := strings.TrimSpace(string(out))
+	if len(head) > 12 {
+		head = head[:12]
+	}
+	return compactIdentityValue(head)
+}
+
+func guardInfoCurrentRuntimeIdentity(v guardInfoVars) guardInfoRuntimeIdentity {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	root := repoRoot()
+	source := guardInfoSourceHeadFrom(func(args ...string) ([]byte, error) {
+		return modver.RealRunner(ctx, root, args...)
+	})
+	sourceModule := "unknown"
+	if rep, err := modver.Snapshot(ctx, root, modver.RealRunner); err == nil {
+		for _, m := range rep.Modules {
+			if m.Name == "cmd/fak" {
+				sourceModule = fmt.Sprintf("cmd/fak@r%d", m.Rev)
+				break
+			}
+		}
+	}
+	var bi *debug.BuildInfo
+	if got, ok := debug.ReadBuildInfo(); ok {
+		bi = got
+	}
+	running := guardShortBuildIDOf(buildIdentity(bi))
+	started := ""
+	if v.Startup != nil {
+		started = v.Startup.StartedAt
+	}
+	return guardInfoRuntimeIdentityOf(source, sourceModule, running, guardInfoStartupDigest(v.StartupReport), started)
+}
+
+func guardInfoRuntimeIdentityRow(id guardInfoRuntimeIdentity) string {
+	return fmt.Sprintf("identity %s · source %s (%s) · running %s · config %s · session %s · action: %s",
+		id.Verdict, id.Source, id.SourceModule, id.RunningBuild, id.ConfigDigest, id.SessionStarted, id.Action)
+}
 
 // guardInfoNarrowCols is the pane-width threshold below which the verbose multi-line legend
 // is replaced by a single compact line: a narrow split pane (e.g. the --split right column)
