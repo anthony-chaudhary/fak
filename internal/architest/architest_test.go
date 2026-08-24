@@ -89,6 +89,7 @@ var tier = map[string]int{
 	"benchids":               1, // pure deterministic synthetic-token-ID generator for the bench mains (#776); stdlib-only, off the hot path.
 	"benchscore":             2, // pure benchmark score artifact validator/renderer; stdlib-only, off the hot path.
 	"callavoid":              1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
+	"turnavoid":              1, // pure offline whole-model-turn replay/accounting primitive; stdlib-only, folded by CLI.
 	"harnessartifact":        2, // immutable, content-addressed artifacts around harnessresolve locks (#7230).
 	"harnessres":             1, // cross-platform, stdlib-only process resource sampler for the fak guard harness (CPU/mem/IO); imports nothing internal, off the hot path (#2045, epic #2044).
 	"harnessinit":            3, // product scaffold + cross-host conformance; depends on host/resolve/window launch seams (#8227).

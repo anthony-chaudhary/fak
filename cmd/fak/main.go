@@ -652,6 +652,8 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		cmdNodeUsage(args)
 	case "callavoid":
 		cmdCallavoid(args)
+	case "turnavoid":
+		cmdTurnavoid(args)
 	case "savings-vector":
 		cmdSavingsVector(args)
 	case "horizon-recovery":
