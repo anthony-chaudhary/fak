@@ -12,7 +12,7 @@ import (
 )
 
 func TestRichDashboardDormantUntilFirstClickThenRedirects(t *testing.T) {
-	m := newRichDashboardManager()
+	m := newRichDashboardManager(RichDashboardConfig{})
 	defer m.close()
 	m.baseURL = "http://grafana.test"
 	var probes atomic.Int32
@@ -46,7 +46,7 @@ func TestRichDashboardDormantUntilFirstClickThenRedirects(t *testing.T) {
 }
 
 func TestRichDashboardConcurrentClicksDeduplicateStart(t *testing.T) {
-	m := newRichDashboardManager()
+	m := newRichDashboardManager(RichDashboardConfig{})
 	defer m.close()
 	m.compose = "test-compose.yml"
 	m.baseURL = ""
@@ -87,7 +87,7 @@ func TestRichDashboardFailureAndDisabledRenders(t *testing.T) {
 		{"unavailable", "unavailable", "Docker is not available. Install/start Docker, or set FAK_GRAFANA_URL.", "Docker is not available"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newRichDashboardManager()
+			m := newRichDashboardManager(RichDashboardConfig{})
 			defer m.close()
 			m.state, m.reason = tc.state, tc.reason
 			s := testServerWithRichDashboards(t, m)
@@ -106,7 +106,7 @@ func TestRichDashboardRejectsUnsafeOverrideAndUnknownDestination(t *testing.T) {
 			t.Errorf("safeDashboardBaseURL(%q) accepted unsafe URL", raw)
 		}
 	}
-	m := newRichDashboardManager()
+	m := newRichDashboardManager(RichDashboardConfig{})
 	defer m.close()
 	s := testServerWithRichDashboards(t, m)
 	rec := httptest.NewRecorder()
@@ -117,8 +117,7 @@ func TestRichDashboardRejectsUnsafeOverrideAndUnknownDestination(t *testing.T) {
 }
 
 func TestRichDashboardConfiguredURLOverrideSkipsDocker(t *testing.T) {
-	t.Setenv("FAK_GRAFANA_URL", "https://grafana.example.test/team/")
-	m := newRichDashboardManager()
+	m := newRichDashboardManager(RichDashboardConfig{BaseURL: "https://grafana.example.test/team/"})
 	defer m.close()
 	m.probe = func(context.Context, string) error { return nil }
 	m.ensure()
@@ -129,7 +128,7 @@ func TestRichDashboardConfiguredURLOverrideSkipsDocker(t *testing.T) {
 	}
 }
 func TestRichDashboardCloseStopsOnlyOwnedStack(t *testing.T) {
-	m := newRichDashboardManager()
+	m := newRichDashboardManager(RichDashboardConfig{})
 	m.owned, m.compose = true, "compose.yml"
 	var stops atomic.Int32
 	m.stop = func(context.Context, string) error { stops.Add(1); return nil }
@@ -139,7 +138,7 @@ func TestRichDashboardCloseStopsOnlyOwnedStack(t *testing.T) {
 		t.Fatalf("close stopped owned stack %d times, want 1", got)
 	}
 
-	external := newRichDashboardManager()
+	external := newRichDashboardManager(RichDashboardConfig{})
 	external.baseURL = "http://grafana.test"
 	external.stop = func(context.Context, string) error { return errors.New("must not stop external Grafana") }
 	external.close()
@@ -147,7 +146,7 @@ func TestRichDashboardCloseStopsOnlyOwnedStack(t *testing.T) {
 
 func testServerWithRichDashboards(t *testing.T, m *richDashboardManager) *Server {
 	t.Helper()
-	s, err := New(Config{EngineID: "test", Model: "m", Provider: "openai"})
+	s, err := New(Config{EngineID: "mock", Model: "m", Provider: "openai"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +186,7 @@ func TestRichDashboardCatalogAuditRejectsDuplicateAndIncompleteRoutes(t *testing
 func TestRichDashboardEveryCatalogClickPreservesSelectedDestination(t *testing.T) {
 	for _, dashboard := range richDashboardLinks {
 		t.Run(dashboard.UID, func(t *testing.T) {
-			m := newRichDashboardManager()
+			m := newRichDashboardManager(RichDashboardConfig{})
 			m.state, m.baseURL = "ready", "https://grafana.example.test/team"
 			s := &Server{richDashboards: m}
 			rec := httptest.NewRecorder()
@@ -207,7 +206,7 @@ func TestRichDashboardReusesReadyBundledStackWithoutOwnership(t *testing.T) {
 	t.Setenv("FAK_DASHBOARDS", "")
 	t.Setenv("FAK_GRAFANA_URL", "")
 	t.Setenv("FAK_GRAFANA_COMPOSE", "compose.yml")
-	m := newRichDashboardManager()
+	m := newRichDashboardManager(RichDashboardConfig{})
 	startCalls, stopCalls := 0, 0
 	m.probe = func(context.Context, string) error { return nil }
 	m.dockerAvailable = func() bool { t.Fatal("ready stack should not require Docker discovery"); return false }

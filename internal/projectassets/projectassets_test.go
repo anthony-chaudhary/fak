@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -247,6 +248,114 @@ func TestAdapterDescriptionHonorsAgentSkillsLimit(t *testing.T) {
 	short := "Use when a project needs portable skill discovery."
 	if got := adapterDescription(short); got != short {
 		t.Fatalf("short description = %q, want %q", got, short)
+	}
+}
+
+func TestSkillDescriptionNormalizesYAMLScalars(t *testing.T) {
+	tests := []struct {
+		name   string
+		scalar string
+		want   string
+	}{
+		{name: "quoted", scalar: `"Use when a quoted description is canonical."`, want: "Use when a quoted description is canonical."},
+		{name: "unquoted", scalar: "Use when a plain description is canonical.", want: "Use when a plain description is canonical."},
+		{name: "escaped", scalar: `"Say \"go\" from C:\\work."`, want: `Say "go" from C:\work.`},
+		{name: "YAML escapes", scalar: `"slash\/ nul\0 esc\e nbsp\_ nel\N line\L para\P"`, want: "slash/ nul\x00 esc\x1b nbsp\u00a0 nel\u0085 line\u2028 para\u2029"},
+		{name: "YAML hex escapes", scalar: `"latin\xE9 pair\xC3\xA9"`, want: "latin\u00e9 pair\u00c3\u00a9"},
+		{name: "colon", scalar: "Use when input has a colon: preserve it.", want: "Use when input has a colon: preserve it."},
+		{name: "newline", scalar: `"First line\nsecond line."`, want: "First line\nsecond line."},
+		{name: "single quoted", scalar: `'It''s portable.'`, want: "It's portable."},
+		{name: "quoted whitespace", scalar: `"  preserve semantic spacing  "`, want: "  preserve semantic spacing  "},
+		{name: "unterminated quote", scalar: `"Repair this legacy description`, want: "Repair this legacy description"},
+		{name: "unterminated escaped quote", scalar: `"Repair the trailing \"`, want: `Repair the trailing "`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := ".claude/skills/example/SKILL.md"
+			write(t, root, path, "---\nname: example\ndescription: "+tt.scalar+"\n---\n")
+			got, err := skillDescription(root, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Fatalf("description = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAdapterEmitsRoundTrippableYAMLScalars(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{name: "plain", text: "Portable skill discovery.", want: "Portable skill discovery."},
+		{name: "colon", text: "Use when input has a colon: preserve it.", want: strconv.Quote("Use when input has a colon: preserve it.")},
+		{name: "escaped", text: `Say "go" from C:\work.`, want: strconv.Quote(`Say "go" from C:\work.`)},
+		{name: "newline", text: "First line\nsecond line.", want: strconv.Quote("First line\nsecond line.")},
+		{name: "semantic whitespace", text: "  preserve semantic spacing  ", want: strconv.Quote("  preserve semantic spacing  ")},
+		{name: "implicit positive number", text: "+1.0", want: strconv.Quote("+1.0")},
+		{name: "implicit fractional number", text: ".5", want: strconv.Quote(".5")},
+		{name: "implicit special float", text: ".nan", want: strconv.Quote(".nan")},
+		{name: "YAML line separator", text: "before\u2028after", want: strconv.Quote("before\u2028after")},
+		{name: "YAML paragraph separator", text: "before\u2029after", want: strconv.Quote("before\u2029after")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := adapter("example", tt.text, "../../../.claude/skills/example/SKILL.md")
+			line := ""
+			for _, candidate := range strings.Split(body, "\n") {
+				if strings.HasPrefix(candidate, "description: ") {
+					line = strings.TrimPrefix(candidate, "description: ")
+					break
+				}
+			}
+			if line != tt.want {
+				t.Fatalf("emitted scalar = %q, want %q\n%s", line, tt.want, body)
+			}
+			if got := normalizeYAMLScalar(line); got != tt.text {
+				t.Fatalf("round trip = %q, want %q", got, tt.text)
+			}
+		})
+	}
+}
+
+func TestQuotedDescriptionIsNormalizedBeforeTruncation(t *testing.T) {
+	semantic := strings.Repeat("quoted discovery trigger ", 20)
+	root := t.TempDir()
+	path := ".claude/skills/example/SKILL.md"
+	write(t, root, ManifestPath, baseManifest())
+	write(t, root, path, "---\nname: example\ndescription: "+strconv.Quote(semantic)+"\n---\n")
+	write(t, root, ".claude/memory/base.md", "memory\n")
+	write(t, root, ".claude/goal-prompts/base.md", "prompt\n")
+
+	description, err := skillDescription(root, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := adapterDescription(description)
+	if chars := len([]rune(got)); chars > maxSkillDescriptionChars {
+		t.Fatalf("description has %d characters, want at most %d", chars, maxSkillDescriptionChars)
+	}
+	if strings.HasPrefix(got, `"`) || !strings.HasSuffix(got, "...") {
+		t.Fatalf("truncated semantic description = %q", got)
+	}
+
+	if _, err = Build(root, true); err != nil {
+		t.Fatal(err)
+	}
+	bodyBytes, err := os.ReadFile(filepath.Join(root, ".agents", "skills", "example", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(bodyBytes)
+	line := strings.SplitN(strings.SplitN(body, "description: ", 2)[1], "\n", 2)[0]
+	if roundTrip := normalizeYAMLScalar(line); roundTrip != got {
+		t.Fatalf("emitted description round trip = %q, want %q\n%s", roundTrip, got, body)
 	}
 }
 

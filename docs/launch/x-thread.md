@@ -256,3 +256,5 @@ model or a projection:
 - **Reproduce command** — `go run ./cmd/fanrun -agent-max 1024 -grid log` runs with no model,
   no GPU, no key (deterministic offline planner) and writes the identical counter+geometry
   artifact. Verified on this host (full sweep N=1…1024 in <2 s).
+
+<!-- Freshness review 2026-08-24: commands, links, channel constraints, and product claims rechecked against the current repository; publish only after a final live channel-rule check. -->

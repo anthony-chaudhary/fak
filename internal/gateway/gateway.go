@@ -274,6 +274,7 @@ const DefaultDeferColdTools = true
 // Config configures a gateway Server. The zero value is not valid — use New,
 // which fills defaults and validates against the registered ABI.
 type Config struct {
+	RichDashboards RichDashboardConfig
 	// OTLPEndpoint enables bounded asynchronous OTLP/HTTP JSON trace export. Empty disables it.
 	OTLPEndpoint      string
 	OTLPQueueCapacity int
@@ -2105,7 +2106,7 @@ func New(cfg Config) (*Server, error) {
 		toolPreferences:              cfg.ToolPreferences,
 		engineID:                     engineID,
 		model:                        model,
-		richDashboards:               newRichDashboardManager(),
+		richDashboards:               newRichDashboardManager(cfg.RichDashboards),
 		servedSide:                   servedSide,
 		upstream:                     upstreamSide,
 		requireKey:                   cfg.RequireKey,

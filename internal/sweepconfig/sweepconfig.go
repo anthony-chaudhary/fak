@@ -156,7 +156,7 @@ func profileFromMap(raw map[string]any) (SweepProfile, error) {
 			}
 			m := ModelConfig{
 				Name:      str(mm["name"]),
-				Provider:  strmatch.FirstTrimmed(str(mm["provider"]), "unknown"),
+				Provider:  strmatch.FirstNonBlank(str(mm["provider"]), "unknown"),
 				BaseURL:   str(mm["base_url"]),
 				APIKeyEnv: str(mm["api_key_env"]),
 				LocalShim: str(mm["local_shim"]),
@@ -169,7 +169,7 @@ func profileFromMap(raw map[string]any) (SweepProfile, error) {
 				m.PriceHint = &PriceHint{
 					Input:  floatv(ph["input"]),
 					Output: floatv(ph["output"]),
-					Source: strmatch.FirstTrimmed(str(ph["source"]), "manual"),
+					Source: strmatch.FirstNonBlank(str(ph["source"]), "manual"),
 				}
 			}
 			if m.Name != "" {
@@ -185,106 +185,209 @@ func parseYAMLProfile(text string) (SweepProfile, error) {
 	var section string
 	var current map[string]any
 	var priceHint map[string]any
+	var currentLine int
 	var models []any
 	var tags []any
 	workload := map[string]any{}
-	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+	for index, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+		lineNumber := index + 1
+		line = strings.TrimSuffix(line, "\r")
 		if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "#") {
 			continue
 		}
-		indent := len(line) - len(strings.TrimLeft(line, " "))
+		indent, err := yamlIndent(line)
+		if err != nil {
+			return SweepProfile{}, yamlLineError(lineNumber, err)
+		}
 		trimmed := strings.TrimSpace(line)
 		if indent == 0 {
-			key, value, ok := cutYAML(trimmed)
-			if !ok {
-				continue
+			if err := validateYAMLModel(current, currentLine); err != nil {
+				return SweepProfile{}, err
+			}
+			current = nil
+			currentLine = 0
+			priceHint = nil
+			key, value, err := cutYAML(trimmed)
+			if err != nil {
+				return SweepProfile{}, yamlLineError(lineNumber, err)
+			}
+			if _, exists := raw[key]; exists {
+				return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("duplicate key %q", key))
 			}
 			section = key
-			current = nil
-			priceHint = nil
-			if value != "" {
-				raw[key] = scalar(value)
+			switch key {
+			case "name", "description", "output_dir":
+				parsed, err := yamlString(value)
+				if err != nil {
+					return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("%s: %w", key, err))
+				}
+				if key == "name" && parsed == "" {
+					return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("profile name is required"))
+				}
+				raw[key] = parsed
 				section = ""
-			} else if key == "workload" {
+			case "skip_api", "skip_offline", "skip_local_shim", "fail_fast", "public":
+				parsed, err := yamlBool(value)
+				if err != nil {
+					return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("%s: %w", key, err))
+				}
+				raw[key] = parsed
+				section = ""
+			case "workload":
+				if value != "" {
+					return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("workload must use an indented mapping"))
+				}
 				raw[key] = workload
+			case "models":
+				if value != "" {
+					return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("models must use an indented sequence"))
+				}
+				raw[key] = models
+			case "tags":
+				if value != "" {
+					return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("tags must use an indented sequence"))
+				}
+				raw[key] = tags
+			default:
+				return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("unsupported key %q", key))
 			}
 			continue
 		}
 		switch section {
 		case "workload":
-			key, value, ok := cutYAML(trimmed)
-			if ok {
-				workload[key] = scalar(value)
+			if indent != 2 {
+				return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("workload fields must be indented by 2 spaces"))
+			}
+			key, value, err := cutYAML(trimmed)
+			if err != nil {
+				return SweepProfile{}, yamlLineError(lineNumber, err)
+			}
+			if _, exists := workload[key]; exists {
+				return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("duplicate workload key %q", key))
+			}
+			switch key {
+			case "max_turns", "trials", "timeout_s":
+				parsed, err := yamlInt(value)
+				if err != nil {
+					return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("%s: %w", key, err))
+				}
+				workload[key] = parsed
+			case "transcript_path":
+				parsed, err := yamlString(value)
+				if err != nil {
+					return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("%s: %w", key, err))
+				}
+				workload[key] = parsed
+			default:
+				return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("unsupported workload key %q", key))
 			}
 		case "models":
-			if strings.HasPrefix(trimmed, "- ") {
+			if indent == 2 && (trimmed == "-" || strings.HasPrefix(trimmed, "- ")) {
+				if err := validateYAMLModel(current, currentLine); err != nil {
+					return SweepProfile{}, err
+				}
 				current = map[string]any{}
 				models = append(models, current)
-				priceHint = nil
-				rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
-				if rest != "" {
-					key, value, ok := cutYAML(rest)
-					if ok {
-						current[key] = scalar(value)
-					}
-				}
 				raw["models"] = models
+				priceHint = nil
+				currentLine = lineNumber
+				rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
+				if trimmed == "-" {
+					rest = ""
+				}
+				if rest == "" {
+					continue
+				}
+				key, value, err := cutYAML(rest)
+				if err != nil {
+					return SweepProfile{}, yamlLineError(lineNumber, err)
+				}
+				if err := setYAMLModelField(current, &priceHint, key, value); err != nil {
+					return SweepProfile{}, yamlLineError(lineNumber, err)
+				}
 				continue
 			}
 			if current == nil {
+				return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("model fields require a preceding sequence item"))
+			}
+			key, value, err := cutYAML(trimmed)
+			if err != nil {
+				return SweepProfile{}, yamlLineError(lineNumber, err)
+			}
+			if indent == 4 {
+				priceHint = nil
+				if err := setYAMLModelField(current, &priceHint, key, value); err != nil {
+					return SweepProfile{}, yamlLineError(lineNumber, err)
+				}
 				continue
 			}
-			key, value, ok := cutYAML(trimmed)
-			if !ok {
+			if indent == 6 && priceHint != nil {
+				if _, exists := priceHint[key]; exists {
+					return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("duplicate price_hint key %q", key))
+				}
+				switch key {
+				case "input", "output":
+					parsed, err := yamlFloat(value)
+					if err != nil {
+						return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("%s: %w", key, err))
+					}
+					priceHint[key] = parsed
+				case "source":
+					parsed, err := yamlString(value)
+					if err != nil {
+						return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("source: %w", err))
+					}
+					priceHint[key] = parsed
+				default:
+					return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("unsupported price_hint key %q", key))
+				}
 				continue
 			}
-			if key == "price_hint" && value == "" {
-				priceHint = map[string]any{}
-				current["price_hint"] = priceHint
-				continue
-			}
-			if priceHint != nil && indent >= 6 {
-				priceHint[key] = scalar(value)
-			} else {
-				current[key] = scalar(value)
-			}
+			return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("model fields must be indented by 4 spaces, or price_hint fields by 6"))
 		case "tags":
-			if strings.HasPrefix(trimmed, "- ") {
-				tags = append(tags, strings.TrimSpace(strings.TrimPrefix(trimmed, "- ")))
-				raw["tags"] = tags
+			if indent != 2 || !strings.HasPrefix(trimmed, "- ") {
+				return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("tags must be sequence items indented by 2 spaces"))
 			}
+			parsed, err := yamlString(strings.TrimPrefix(trimmed, "- "))
+			if err != nil {
+				return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("tag: %w", err))
+			}
+			tags = append(tags, parsed)
+			raw["tags"] = tags
+		default:
+			return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("unexpected indented content"))
 		}
 	}
-	if _, ok := raw["workload"]; !ok && len(workload) > 0 {
-		raw["workload"] = workload
+	if err := validateYAMLModel(current, currentLine); err != nil {
+		return SweepProfile{}, err
 	}
 	return profileFromMap(raw)
 }
 
 func renderYAML(p SweepProfile) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "name: %s\n", p.Name)
+	fmt.Fprintf(&b, "name: %s\n", yamlQuote(p.Name))
 	if p.Description != "" {
-		fmt.Fprintf(&b, "description: %s\n", p.Description)
+		fmt.Fprintf(&b, "description: %s\n", yamlQuote(p.Description))
 	}
 	b.WriteString("models:\n")
 	for _, m := range p.Models {
-		fmt.Fprintf(&b, "  - name: %s\n", m.Name)
-		fmt.Fprintf(&b, "    provider: %s\n", strmatch.FirstTrimmed(m.Provider, "unknown"))
+		fmt.Fprintf(&b, "  - name: %s\n", yamlQuote(m.Name))
+		fmt.Fprintf(&b, "    provider: %s\n", yamlQuote(strmatch.FirstNonBlank(m.Provider, "unknown")))
 		if m.BaseURL != "" {
-			fmt.Fprintf(&b, "    base_url: %s\n", m.BaseURL)
+			fmt.Fprintf(&b, "    base_url: %s\n", yamlQuote(m.BaseURL))
 		}
 		if m.APIKeyEnv != "" {
-			fmt.Fprintf(&b, "    api_key_env: %s\n", m.APIKeyEnv)
+			fmt.Fprintf(&b, "    api_key_env: %s\n", yamlQuote(m.APIKeyEnv))
 		}
 		if m.LocalShim != "" {
-			fmt.Fprintf(&b, "    local_shim: %s\n", m.LocalShim)
+			fmt.Fprintf(&b, "    local_shim: %s\n", yamlQuote(m.LocalShim))
 		}
 		if m.PriceHint != nil {
 			b.WriteString("    price_hint:\n")
 			fmt.Fprintf(&b, "      input: %g\n", m.PriceHint.Input)
 			fmt.Fprintf(&b, "      output: %g\n", m.PriceHint.Output)
-			fmt.Fprintf(&b, "      source: %s\n", strmatch.FirstTrimmed(m.PriceHint.Source, "manual"))
+			fmt.Fprintf(&b, "      source: %s\n", yamlQuote(strmatch.FirstNonBlank(m.PriceHint.Source, "manual")))
 		}
 		fmt.Fprintf(&b, "    enabled: %t\n", m.Enabled)
 	}
@@ -293,44 +396,268 @@ func renderYAML(p SweepProfile) string {
 	fmt.Fprintf(&b, "  trials: %d\n", p.Workload.Trials)
 	fmt.Fprintf(&b, "  timeout_s: %d\n", p.Workload.TimeoutS)
 	if p.Workload.TranscriptPath != "" {
-		fmt.Fprintf(&b, "  transcript_path: %s\n", p.Workload.TranscriptPath)
+		fmt.Fprintf(&b, "  transcript_path: %s\n", yamlQuote(p.Workload.TranscriptPath))
 	}
-	fmt.Fprintf(&b, "output_dir: %s\n", p.OutputDir)
+	fmt.Fprintf(&b, "output_dir: %s\n", yamlQuote(p.OutputDir))
 	fmt.Fprintf(&b, "skip_api: %t\n", p.SkipAPI)
 	fmt.Fprintf(&b, "skip_offline: %t\n", p.SkipOffline)
 	fmt.Fprintf(&b, "skip_local_shim: %t\n", p.SkipLocalShim)
 	fmt.Fprintf(&b, "fail_fast: %t\n", p.FailFast)
 	b.WriteString("tags:\n")
 	for _, tag := range p.Tags {
-		fmt.Fprintf(&b, "  - %s\n", tag)
+		fmt.Fprintf(&b, "  - %s\n", yamlQuote(tag))
 	}
 	fmt.Fprintf(&b, "public: %t\n", p.Public)
 	return b.String()
 }
 
-func cutYAML(line string) (string, string, bool) {
+func cutYAML(line string) (string, string, error) {
 	key, value, ok := strings.Cut(line, ":")
 	if !ok {
-		return "", "", false
+		return "", "", fmt.Errorf("expected key: value")
 	}
-	return strings.TrimSpace(key), strings.TrimSpace(value), true
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", "", fmt.Errorf("empty key")
+	}
+	value, err := stripYAMLComment(value)
+	if err != nil {
+		return "", "", err
+	}
+	return key, strings.TrimSpace(value), nil
 }
 
-func scalar(value string) any {
+func yamlIndent(line string) (int, error) {
+	for i := 0; i < len(line); i++ {
+		switch line[i] {
+		case ' ':
+			continue
+		case '\t':
+			return 0, fmt.Errorf("tabs are not supported for indentation")
+		default:
+			return i, nil
+		}
+	}
+	return len(line), nil
+}
+
+func stripYAMLComment(value string) (string, error) {
+	start := 0
+	for start < len(value) && (value[start] == ' ' || value[start] == '\t') {
+		start++
+	}
+	if start == len(value) {
+		return value, nil
+	}
+	quote := value[start]
+	if quote != '\'' && quote != '"' {
+		for i := start; i < len(value); i++ {
+			if value[i] == '#' && (i == start || value[i-1] == ' ' || value[i-1] == '\t') {
+				return value[:i], nil
+			}
+		}
+		return value, nil
+	}
+	escaped := false
+	for i := start + 1; i < len(value); i++ {
+		c := value[i]
+		if quote == '\'' {
+			if c == '\'' {
+				if i+1 < len(value) && value[i+1] == '\'' {
+					i++
+					continue
+				}
+				return stripYAMLTrailingComment(value, i+1)
+			}
+			continue
+		}
+		if escaped {
+			escaped = false
+			continue
+		}
+		if c == '\\' {
+			escaped = true
+		} else if c == '"' {
+			return stripYAMLTrailingComment(value, i+1)
+		}
+	}
+	return "", fmt.Errorf("unterminated quoted scalar")
+}
+
+func stripYAMLTrailingComment(value string, start int) (string, error) {
+	for start < len(value) && (value[start] == ' ' || value[start] == '\t') {
+		start++
+	}
+	if start == len(value) {
+		return value, nil
+	}
+	if value[start] == '#' {
+		return value[:start], nil
+	}
+	return value, nil
+}
+
+func scalar(value string) (any, error) {
+	var err error
+	value, err = stripYAMLComment(value)
+	if err != nil {
+		return nil, err
+	}
 	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	switch value[0] {
+	case '"':
+		decoded, err := strconv.Unquote(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid double-quoted scalar: %w", err)
+		}
+		return decoded, nil
+	case '\'':
+		return unquoteYAMLSingle(value)
+	case '[', '{':
+		return nil, fmt.Errorf("flow collections are not supported")
+	case '|', '>':
+		return nil, fmt.Errorf("block scalars are not supported")
+	case '&', '*', '!':
+		return nil, fmt.Errorf("anchors, aliases, and tags are not supported")
+	}
+	if strings.Contains(value, ": ") {
+		return nil, fmt.Errorf("plain nested mappings are not supported; quote the value")
+	}
 	switch strings.ToLower(value) {
 	case "true":
-		return true
+		return true, nil
 	case "false":
-		return false
+		return false, nil
+	case "null", "~":
+		return nil, fmt.Errorf("null scalars are not supported")
 	}
 	if i, err := strconv.Atoi(value); err == nil {
-		return i
+		return i, nil
 	}
 	if f, err := strconv.ParseFloat(value, 64); err == nil {
-		return f
+		return f, nil
 	}
-	return strings.Trim(value, `"'`)
+	return value, nil
+}
+
+func unquoteYAMLSingle(value string) (string, error) {
+	if len(value) < 2 || value[len(value)-1] != '\'' {
+		return "", fmt.Errorf("unterminated single-quoted scalar")
+	}
+	var b strings.Builder
+	for i := 1; i < len(value)-1; i++ {
+		if value[i] != '\'' {
+			b.WriteByte(value[i])
+			continue
+		}
+		if i+1 >= len(value)-1 || value[i+1] != '\'' {
+			return "", fmt.Errorf("invalid single-quoted scalar")
+		}
+		b.WriteByte('\'')
+		i++
+	}
+	return b.String(), nil
+}
+
+func yamlString(value string) (string, error) {
+	parsed, err := scalar(value)
+	if err != nil {
+		return "", err
+	}
+	text, ok := parsed.(string)
+	if !ok {
+		return "", fmt.Errorf("expected a string")
+	}
+	return text, nil
+}
+
+func yamlBool(value string) (bool, error) {
+	parsed, err := scalar(value)
+	if err != nil {
+		return false, err
+	}
+	boolean, ok := parsed.(bool)
+	if !ok {
+		return false, fmt.Errorf("expected true or false")
+	}
+	return boolean, nil
+}
+
+func yamlInt(value string) (int, error) {
+	parsed, err := scalar(value)
+	if err != nil {
+		return 0, err
+	}
+	integer, ok := parsed.(int)
+	if !ok {
+		return 0, fmt.Errorf("expected an integer")
+	}
+	return integer, nil
+}
+
+func yamlFloat(value string) (float64, error) {
+	parsed, err := scalar(value)
+	if err != nil {
+		return 0, err
+	}
+	switch number := parsed.(type) {
+	case int:
+		return float64(number), nil
+	case float64:
+		return number, nil
+	default:
+		return 0, fmt.Errorf("expected a number")
+	}
+}
+
+func setYAMLModelField(current map[string]any, priceHint *map[string]any, key, value string) error {
+	if _, exists := current[key]; exists {
+		return fmt.Errorf("duplicate model key %q", key)
+	}
+	switch key {
+	case "name", "provider", "base_url", "api_key_env", "local_shim":
+		parsed, err := yamlString(value)
+		if err != nil {
+			return fmt.Errorf("%s: %w", key, err)
+		}
+		current[key] = parsed
+	case "enabled":
+		parsed, err := yamlBool(value)
+		if err != nil {
+			return fmt.Errorf("enabled: %w", err)
+		}
+		current[key] = parsed
+	case "price_hint":
+		if value != "" {
+			return fmt.Errorf("price_hint must use an indented mapping")
+		}
+		*priceHint = map[string]any{}
+		current[key] = *priceHint
+	default:
+		return fmt.Errorf("unsupported model key %q", key)
+	}
+	return nil
+}
+
+func validateYAMLModel(current map[string]any, line int) error {
+	if current == nil {
+		return nil
+	}
+	if str(current["name"]) == "" {
+		return yamlLineError(line, fmt.Errorf("model name is required"))
+	}
+	return nil
+}
+
+func yamlLineError(line int, err error) error {
+	return fmt.Errorf("line %d: %w", line, err)
+}
+
+func yamlQuote(value string) string {
+	return strconv.Quote(value)
 }
 
 func str(v any) string {

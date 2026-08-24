@@ -278,36 +278,46 @@ func tomlStringArray(v string) ([]string, error) {
 	return out, nil
 }
 
-// --- tolerant YAML-ish line readers for job.yaml / oracle.yaml ---
+// --- strict, dependency-free YAML subset readers for job.yaml / oracle.yaml ---
 //
-// Only the named flat fields are read: a `key: scalar` line, a `key: [a, b]`
-// inline array, or a `key:` header followed by `  - item` block-list lines. This
-// is deliberately a small tolerant reader, not a YAML implementation — it folds
-// the spine's fields and ignores everything else.
+// Only the documented top-level flat fields are accepted: `key: scalar`,
+// `key: [a, b]`, or `key:` followed by exact `  - item` block-list lines.
+// Unknown keys, duplicate keys, malformed quoting, malformed lists, indentation
+// drift, and integer shape errors are all parse errors with source lines.
 
 func parseJobYAML(data []byte, j *Job) error {
-	fields := scanYAML(data)
+	fields, err := parseYAMLSubset(data, map[string]yamlFieldKind{
+		"agents":              yamlFieldList,
+		"n_attempts":          yamlFieldInt,
+		"n_concurrent_trials": yamlFieldInt,
+		"artifacts":           yamlFieldList,
+	})
+	if err != nil {
+		return err
+	}
 	if v, ok := fields["agents"]; ok {
-		j.Agents = v.list
+		j.Agents = append([]string(nil), v.list...)
 	}
 	if v, ok := fields["n_attempts"]; ok {
-		if n, err := yamlInt(v.scalar); err == nil {
-			j.NAttempts = n
-		}
+		j.NAttempts = v.number
 	}
 	if v, ok := fields["n_concurrent_trials"]; ok {
-		if n, err := yamlInt(v.scalar); err == nil {
-			j.NConcurrentTrial = n
-		}
+		j.NConcurrentTrial = v.number
 	}
 	if v, ok := fields["artifacts"]; ok {
-		j.Artifacts = v.list
+		j.Artifacts = append([]string(nil), v.list...)
 	}
 	return nil
 }
 
 func parseOracleYAML(data []byte, o *Oracle) error {
-	fields := scanYAML(data)
+	fields, err := parseYAMLSubset(data, map[string]yamlFieldKind{
+		"command":    yamlFieldScalar,
+		"reward_key": yamlFieldScalar,
+	})
+	if err != nil {
+		return err
+	}
 	if v, ok := fields["command"]; ok {
 		o.Command = v.scalar
 	}
@@ -317,105 +327,306 @@ func parseOracleYAML(data []byte, o *Oracle) error {
 	return nil
 }
 
+type yamlFieldKind int
+
+const (
+	yamlFieldScalar yamlFieldKind = iota + 1
+	yamlFieldList
+	yamlFieldInt
+)
+
 type yamlValue struct {
 	scalar string
 	list   []string
+	number int
 }
 
-// scanYAML reads top-level (column-0) `key:` lines and, for each, captures
-// either an inline scalar, an inline [a, b] array, or a following indented
-// `- item` block list. Nested mappings and anything past the named fields are
-// ignored — this is a field folder, not a parser.
-func scanYAML(data []byte) map[string]yamlValue {
-	out := map[string]yamlValue{}
+func parseYAMLSubset(data []byte, allowed map[string]yamlFieldKind) (map[string]yamlValue, error) {
 	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	out := make(map[string]yamlValue, len(allowed))
+	seen := make(map[string]struct{}, len(allowed))
+
 	for i := 0; i < len(lines); i++ {
-		raw := lines[i]
-		line := stripYAMLComment(raw)
+		lineNo := i + 1
+		line, err := stripYAMLCommentStrict(lines[i], lineNo)
+		if err != nil {
+			return nil, err
+		}
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		// Only top-level keys (no leading whitespace) start a field.
-		if line[0] == ' ' || line[0] == '\t' || line[0] == '-' {
-			continue
+		if line[0] == ' ' || line[0] == '\t' {
+			return nil, fmt.Errorf("line %d: unexpected indentation", lineNo)
 		}
-		key, rest, ok := strings.Cut(line, ":")
+		if line[0] == '-' {
+			return nil, fmt.Errorf("line %d: malformed line %q", lineNo, strings.TrimSpace(line))
+		}
+
+		key, _, ok := strings.Cut(line, ":")
 		if !ok {
-			continue
+			return nil, fmt.Errorf("line %d: malformed line %q", lineNo, strings.TrimSpace(line))
 		}
 		key = strings.TrimSpace(key)
-		rest = strings.TrimSpace(rest)
-		switch {
-		case rest == "":
-			// A block list may follow on indented `- item` lines.
-			var list []string
-			for j := i + 1; j < len(lines); j++ {
-				nxt := stripYAMLComment(lines[j])
-				if strings.TrimSpace(nxt) == "" {
-					continue
-				}
-				trimmed := strings.TrimSpace(nxt)
-				if (nxt[0] == ' ' || nxt[0] == '\t') && strings.HasPrefix(trimmed, "- ") {
-					list = append(list, yamlScalar(strings.TrimSpace(trimmed[2:])))
-					i = j
-					continue
-				}
-				break
+		kind, ok := allowed[key]
+		if !ok {
+			return nil, fmt.Errorf("line %d: unknown field %q", lineNo, key)
+		}
+		if _, dup := seen[key]; dup {
+			return nil, fmt.Errorf("line %d: duplicate field %q", lineNo, key)
+		}
+		seen[key] = struct{}{}
+
+		value, next, err := parseYAMLFieldValue(lines, i, kind)
+		if err != nil {
+			return nil, err
+		}
+		out[key] = value
+		i = next
+	}
+	return out, nil
+}
+
+func parseYAMLFieldValue(lines []string, index int, kind yamlFieldKind) (yamlValue, int, error) {
+	lineNo := index + 1
+	line, err := stripYAMLCommentStrict(lines[index], lineNo)
+	if err != nil {
+		return yamlValue{}, index, err
+	}
+	_, rest, _ := strings.Cut(line, ":")
+	rest = strings.TrimSpace(rest)
+
+	switch kind {
+	case yamlFieldScalar:
+		if rest == "|" || rest == ">" || strings.HasPrefix(rest, "| ") || strings.HasPrefix(rest, "> ") {
+			return yamlValue{}, index, fmt.Errorf("line %d: unsupported block scalar", lineNo)
+		}
+		scalar, err := parseYAMLScalar(rest, lineNo)
+		if err != nil {
+			return yamlValue{}, index, err
+		}
+		return yamlValue{scalar: scalar}, index, nil
+	case yamlFieldInt:
+		scalar, err := parseYAMLScalar(rest, lineNo)
+		if err != nil {
+			return yamlValue{}, index, err
+		}
+		n, err := parseYAMLInt(scalar, lineNo)
+		if err != nil {
+			return yamlValue{}, index, err
+		}
+		return yamlValue{scalar: scalar, number: n}, index, nil
+	case yamlFieldList:
+		if rest == "" {
+			list, next, err := parseYAMLBlockList(lines, index)
+			if err != nil {
+				return yamlValue{}, index, err
 			}
-			out[key] = yamlValue{list: list}
-		case strings.HasPrefix(rest, "["):
-			out[key] = yamlValue{list: yamlInlineArray(rest)}
-		default:
-			out[key] = yamlValue{scalar: yamlScalar(rest)}
+			return yamlValue{list: list}, next, nil
 		}
+		if !strings.HasPrefix(rest, "[") {
+			return yamlValue{}, index, fmt.Errorf("line %d: expected list", lineNo)
+		}
+		list, err := parseYAMLInlineList(rest, lineNo)
+		if err != nil {
+			return yamlValue{}, index, err
+		}
+		return yamlValue{list: list}, index, nil
+	default:
+		return yamlValue{}, index, fmt.Errorf("line %d: unsupported field kind", lineNo)
 	}
-	return out
 }
 
-func stripYAMLComment(s string) string {
-	inStr := false
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '"', '\'':
-			inStr = !inStr
-		case '#':
-			if !inStr {
-				return s[:i]
-			}
+func parseYAMLBlockList(lines []string, index int) ([]string, int, error) {
+	var out []string
+	next := index
+	for j := index + 1; j < len(lines); j++ {
+		lineNo := j + 1
+		line, err := stripYAMLCommentStrict(lines[j], lineNo)
+		if err != nil {
+			return nil, index, err
 		}
+		if strings.TrimSpace(line) == "" {
+			next = j
+			continue
+		}
+		if line[0] != ' ' && line[0] != '\t' {
+			return out, next, nil
+		}
+		if !strings.HasPrefix(line, "  - ") {
+			return nil, index, fmt.Errorf("line %d: invalid list indentation", lineNo)
+		}
+		item, err := parseYAMLScalar(strings.TrimSpace(line[4:]), lineNo)
+		if err != nil {
+			return nil, index, err
+		}
+		out = append(out, item)
+		next = j
 	}
-	return s
+	return out, next, nil
 }
 
-// yamlScalar strips a matching pair of single or double quotes from a scalar.
-func yamlScalar(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) >= 2 {
-		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
-			return s[1 : len(s)-1]
-		}
-	}
-	return s
-}
-
-func yamlInlineArray(s string) []string {
-	s = strings.TrimSpace(s)
-	if len(s) < 2 || s[0] != '[' || s[len(s)-1] != ']' {
-		return nil
+func parseYAMLInlineList(s string, line int) ([]string, error) {
+	if !strings.HasSuffix(s, "]") {
+		return nil, fmt.Errorf("line %d: missing closing ]", line)
 	}
 	body := strings.TrimSpace(s[1 : len(s)-1])
 	if body == "" {
-		return []string{}
+		return []string{}, nil
 	}
-	var out []string
-	for _, part := range strings.Split(body, ",") {
-		if v := yamlScalar(part); v != "" {
-			out = append(out, v)
+
+	var (
+		parts   []string
+		buf     strings.Builder
+		inQuote byte
+	)
+	for i := 0; i < len(body); i++ {
+		ch := body[i]
+		switch inQuote {
+		case '"':
+			buf.WriteByte(ch)
+			if ch == '\\' {
+				i++
+				if i >= len(body) {
+					return nil, fmt.Errorf("line %d: unterminated double-quoted string", line)
+				}
+				buf.WriteByte(body[i])
+				continue
+			}
+			if ch == '"' {
+				inQuote = 0
+			}
+		case '\'':
+			buf.WriteByte(ch)
+			if ch == '\'' {
+				if i+1 < len(body) && body[i+1] == '\'' {
+					buf.WriteByte(body[i+1])
+					i++
+					continue
+				}
+				inQuote = 0
+			}
+		default:
+			switch ch {
+			case '"', '\'':
+				inQuote = ch
+				buf.WriteByte(ch)
+			case ',':
+				part := strings.TrimSpace(buf.String())
+				if part == "" {
+					return nil, fmt.Errorf("line %d: empty list item", line)
+				}
+				parts = append(parts, part)
+				buf.Reset()
+			case '[', ']':
+				return nil, fmt.Errorf("line %d: nested or malformed inline list", line)
+			default:
+				buf.WriteByte(ch)
+			}
 		}
 	}
-	return out
+	if inQuote != 0 {
+		return nil, fmt.Errorf("line %d: unterminated quoted string", line)
+	}
+	part := strings.TrimSpace(buf.String())
+	if part == "" {
+		return nil, fmt.Errorf("line %d: empty list item", line)
+	}
+	parts = append(parts, part)
+
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		item, err := parseYAMLScalar(part, line)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, nil
 }
 
-func yamlInt(s string) (int, error) {
-	return strconv.Atoi(strings.TrimSpace(s))
+func stripYAMLCommentStrict(s string, line int) (string, error) {
+	var inQuote byte
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch inQuote {
+		case '"':
+			if ch == '\\' {
+				i++
+				continue
+			}
+			if ch == '"' {
+				inQuote = 0
+			}
+		case '\'':
+			if ch == '\'' {
+				if i+1 < len(s) && s[i+1] == '\'' {
+					i++
+					continue
+				}
+				inQuote = 0
+			}
+		default:
+			switch ch {
+			case '"', '\'':
+				inQuote = ch
+			case '#':
+				return s[:i], nil
+			}
+		}
+	}
+	if inQuote == '"' {
+		return "", fmt.Errorf("line %d: unterminated double-quoted string", line)
+	}
+	if inQuote == '\'' {
+		return "", fmt.Errorf("line %d: unterminated single-quoted string", line)
+	}
+	return s, nil
+}
+
+func parseYAMLScalar(s string, line int) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", nil
+	}
+	if s[0] == '"' {
+		if len(s) < 2 || s[len(s)-1] != '"' {
+			return "", fmt.Errorf("line %d: unterminated double-quoted string", line)
+		}
+		v, err := strconv.Unquote(s)
+		if err != nil {
+			return "", fmt.Errorf("line %d: invalid double-quoted string: %w", line, err)
+		}
+		return v, nil
+	}
+	if s[0] == '\'' {
+		if len(s) < 2 || s[len(s)-1] != '\'' {
+			return "", fmt.Errorf("line %d: unterminated single-quoted string", line)
+		}
+		body := s[1 : len(s)-1]
+		var out strings.Builder
+		for i := 0; i < len(body); i++ {
+			if body[i] != '\'' {
+				out.WriteByte(body[i])
+				continue
+			}
+			if i+1 >= len(body) || body[i+1] != '\'' {
+				return "", fmt.Errorf("line %d: invalid single-quoted string", line)
+			}
+			out.WriteByte('\'')
+			i++
+		}
+		return out.String(), nil
+	}
+	if strings.ContainsAny(s, "[]") {
+		return "", fmt.Errorf("line %d: nested or malformed inline list", line)
+	}
+	return s, nil
+}
+
+func parseYAMLInt(s string, line int) (int, error) {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
+		return 0, fmt.Errorf("line %d: expected integer, got %q", line, s)
+	}
+	return n, nil
 }

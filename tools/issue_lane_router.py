@@ -1513,7 +1513,15 @@ def plan_class_label_changes(
         remove = sorted(have_class - {want})
         if add or remove:
             changes.append({"number": num, "add": add, "remove": remove})
-    return changes
+    return sorted(changes, key=lambda change: change["number"])
+
+
+def bound_class_label_changes(
+    changes: list[dict[str, Any]], limit: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """Select a deterministic bounded prefix and report the unapplied remainder."""
+    selected = changes[:limit] if limit else changes
+    return selected, len(changes) - len(selected)
 
 
 def ensure_class_labels(workspace: Path, *, apply: bool) -> list[str]:
@@ -1608,9 +1616,13 @@ def main(argv: list[str] | None = None) -> int:
                     help="with --apply-labels, actually WRITE the class:* labels to "
                          "GitHub (create the labels + `gh issue edit`). The only "
                          "outward-facing action this tool takes; operator-gated.")
+    ap.add_argument("--label-change-limit", type=int, default=0,
+                    help="apply at most N deterministic class-label changes (0 = unlimited)")
     args = ap.parse_args(argv)
     if args.apply_labels_write and not args.apply_labels:
         ap.error("--apply-labels-write requires --apply-labels")
+    if args.label_change_limit < 0:
+        ap.error("--label-change-limit must be non-negative")
 
     workspace = Path(args.workspace).resolve() if args.workspace else repo_root()
     scope_alias = label_alias = None
@@ -1663,9 +1675,14 @@ def main(argv: list[str] | None = None) -> int:
             int(i.get("number") or 0): _label_names(i) for i in src_issues
         }
         routed_rows = [r for r in payload.get("issues", []) if r.get("number")]
-        changes = plan_class_label_changes(routed_rows, current_labels)
+        all_changes = plan_class_label_changes(routed_rows, current_labels)
+        limit = args.label_change_limit
+        changes, remaining = bound_class_label_changes(all_changes, limit)
         ensure_class_labels(workspace, apply=do_write)
         result = apply_class_label_changes(workspace, changes, apply=do_write)
+        result["total_changes"] = len(all_changes)
+        result["remaining"] = remaining
+        result["change_limit"] = limit
         if args.json:
             print(json.dumps({"label_backfill": result, "changes": changes}, indent=2))
         else:

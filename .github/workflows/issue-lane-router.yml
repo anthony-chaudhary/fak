@@ -26,10 +26,9 @@ name: issue-lane-router
 # event-scoped reconciliation is a documented follow-up (feed the triggering issue via the
 # router's `--issues -` path).
 #
-# BLAST-RADIUS GUARD: a max-delta cap fails the run when a single reconcile would rewrite
-# more than $DELTA_CAP labels (e.g. a first bulk backfill or a lane-taxonomy flip), unless
-# it is a manual dispatch with allow_bulk=true. Steady-state cron runs write only the small
-# add/remove delta and pass the cap untouched.
+# BLAST-RADIUS GUARD: scheduled runs reconcile at most $DELTA_CAP labels in deterministic
+# issue-number order, so a large backlog converges over bounded runs without one bulk write.
+# Manual runs still fail above the cap unless allow_bulk=true explicitly authorizes it.
 
 on:
   schedule:
@@ -73,7 +72,7 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # Cover the FULL open backlog (>1000 today) so the tail is never silently unlabeled.
       ISSUE_LIMIT: "3000"
-      # Max class:* label writes a single reconcile may apply without allow_bulk.
+      # Max class:* label writes a scheduled reconcile may apply in one run.
       DELTA_CAP: "200"
       ALLOW_BULK: ${{ github.event.inputs.allow_bulk || 'false' }}
     steps:
@@ -124,7 +123,8 @@ jobs:
 
       # PRECEDING DRY-RUN: compute the exact class:* add/remove delta the write will apply
       # (--apply-labels WITHOUT --apply-labels-write = plan only), and ENFORCE the blast-
-      # radius cap before any write happens.
+      # radius cap before any write happens. Scheduled runs above the cap continue with a
+      # bounded batch; manual runs retain the explicit allow_bulk release gate.
       - name: plan class:* label backfill + enforce delta cap (dry-run)
         run: |
           set -euo pipefail
@@ -132,8 +132,12 @@ jobs:
           delta=$(jq '(.changes // []) | length' label-plan.json)
           echo "planned class:* label delta: ${delta} (cap ${DELTA_CAP}, allow_bulk=${ALLOW_BULK})"
           if [ "${delta}" -gt "${DELTA_CAP}" ] && [ "${ALLOW_BULK}" != "true" ]; then
-            echo "::error::planned delta ${delta} exceeds cap ${DELTA_CAP}. This is a bulk reclassification (first backfill or lane-taxonomy shift). Re-run via workflow_dispatch with allow_bulk=true after eyeballing label-plan.json."
-            exit 1
+            if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
+              echo "::notice::planned delta ${delta} exceeds cap ${DELTA_CAP}; scheduled reconciliation will apply the first deterministic batch of ${DELTA_CAP}, leaving $((delta - DELTA_CAP)) for later runs."
+            else
+              echo "::error::planned delta ${delta} exceeds cap ${DELTA_CAP}. This is a bulk reclassification (first backfill or lane-taxonomy shift). Re-run via workflow_dispatch with allow_bulk=true after eyeballing label-plan.json."
+              exit 1
+            fi
           fi
 
       # THE WRITE. BOTH flags are mandatory: --apply-labels arms the write branch,
@@ -148,7 +152,11 @@ jobs:
           dos doctor --workspace "$GITHUB_WORKSPACE" --json \
             | jq -e '((.lanes.concurrent // []) | length) > 0' >/dev/null \
             || { echo "::error::dos lane taxonomy emptied between guard and write — aborting."; exit 1; }
-          python tools/issue_lane_router.py --apply-labels --apply-labels-write --json --issue-limit "$ISSUE_LIMIT" > backfill.json
+          limit_args=()
+          if [ "${ALLOW_BULK}" != "true" ]; then
+            limit_args=(--label-change-limit "$DELTA_CAP")
+          fi
+          python tools/issue_lane_router.py --apply-labels --apply-labels-write --json --issue-limit "$ISSUE_LIMIT" "${limit_args[@]}" > backfill.json
           cat backfill.json
 
       # Emit counts + the UNROUTED disposition to the run summary (always — even if a
@@ -168,9 +176,11 @@ jobs:
               echo "- by confidence: \`${byconf}\`"
             fi
             if [ -f backfill.json ]; then
-              planned=$(jq -r '(.changes // []) | length' backfill.json)
+              applied=$(jq -r '(.changes // []) | length' backfill.json)
+              total=$(jq -r '.label_backfill.total_changes // ((.changes // []) | length)' backfill.json)
+              remaining=$(jq -r '.label_backfill.remaining // 0' backfill.json)
               errs=$(jq -r '(.label_backfill.errors // []) | length' backfill.json)
-              echo "- class:* label writes (delta applied): **${planned}**, errors: **${errs}**"
+              echo "- class:* label writes: **${applied}** selected of **${total}** planned, **${remaining}** remaining; errors: **${errs}**"
             else
               echo "- write step skipped (manual dry-run)."
             fi
