@@ -147,7 +147,7 @@ func TestRichDashboardCloseStopsOnlyOwnedStack(t *testing.T) {
 
 func testServerWithRichDashboards(t *testing.T, m *richDashboardManager) *Server {
 	t.Helper()
-	s, err := New(Config{EngineID: "mock", Model: "m", Provider: "openai"})
+	s, err := New(Config{EngineID: "test", Model: "m", Provider: "openai"})
 	if err != nil {
 		t.Fatal(err)
 	}
