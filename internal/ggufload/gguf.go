@@ -35,6 +35,10 @@ const (
 	// byte) that index the 16-entry kvaluesIQ4NL codebook = 18 bytes per block.
 	qkIQ4NL         = 32
 	blockIQ4NLBytes = 2 + qkIQ4NL/2
+	// IQ3_S: one f16 scale, 64 grid bytes, 8 high-index bytes, 32 sign bytes,
+	// and four packed subscale bytes for 256 elements = 110 bytes.
+	qkIQ3S         = 256
+	blockIQ3SBytes = 2 + qkIQ3S/4 + qkIQ3S/32 + qkIQ3S/8 + qkIQ3S/64
 	// IQ4_XS: the super-block sibling of IQ4_NL over a 256-element block — one
 	// f16 super-scale d, a u16 high-bit scale field, qkK/64 low-bit scale bytes,
 	// then qkK/2 bytes of packed 4-bit codes = 136 bytes per super-block. Each of
@@ -104,6 +108,7 @@ const (
 	TensorQ6_K    TensorType = 14
 	TensorIQ3_XXS TensorType = 18
 	TensorIQ4_NL  TensorType = 20
+	TensorIQ3_S   TensorType = 21
 	TensorIQ4_XS  TensorType = 23
 	TensorBF16    TensorType = 30
 	TensorMXFP4   TensorType = 39
@@ -171,6 +176,8 @@ func (t TensorType) String() string {
 		return "IQ3_XXS"
 	case TensorIQ4_NL:
 		return "IQ4_NL"
+	case TensorIQ3_S:
+		return "IQ3_S"
 	case TensorIQ4_XS:
 		return "IQ4_XS"
 	case TensorBF16:

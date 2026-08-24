@@ -111,6 +111,11 @@ func tensorPayloadBytes(t TensorInfo) (uint64, error) {
 			return 0, fmt.Errorf("gguf: tensor %s IQ4_NL element count %d is not a multiple of %d", t.Name, elems, qkIQ4NL)
 		}
 		return elems / qkIQ4NL * blockIQ4NLBytes, nil
+	case TensorIQ3_S:
+		if elems%qkIQ3S != 0 {
+			return 0, fmt.Errorf("gguf: tensor %s IQ3_S element count %d is not a multiple of %d", t.Name, elems, qkIQ3S)
+		}
+		return elems / qkIQ3S * blockIQ3SBytes, nil
 	case TensorIQ4_XS:
 		if elems%qkK != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s IQ4_XS element count %d is not a multiple of %d", t.Name, elems, qkK)
@@ -364,6 +369,11 @@ func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, err
 			return nil, err
 		}
 		dequantIQ4NL(out, raw)
+	case TensorIQ3_S:
+		if _, err := checkQuantPayload(t, elems, raw, qkIQ3S, blockIQ3SBytes, "IQ3_S"); err != nil {
+			return nil, err
+		}
+		dequantIQ3S(out, raw)
 	case TensorIQ4_XS:
 		if _, err := checkQuantPayload(t, elems, raw, qkK, blockIQ4XSBytes, "IQ4_XS"); err != nil {
 			return nil, err
@@ -1069,5 +1079,59 @@ func (r *countingReader) value(typ ValueType) (Value, error) {
 		return Value{Type: typ, Value: math.Float64frombits(v)}, err
 	default:
 		return Value{}, fmt.Errorf("unsupported value type %d", typ)
+	}
+}
+
+// dequantIQ3S expands GGML IQ3_S super-blocks. Each 256-value block stores one
+// f16 scale, 64 low grid-index bytes, 8 high-bit bytes, 32 sign masks, and four
+// packed 4-bit subscales. The indexing and sign order intentionally mirror
+// llama.cpp dequantize_row_iq3_s so that file-format parity has one oracle.
+func dequantIQ3S(out []float32, raw []byte) {
+	const (
+		qsOffset     = 2
+		qhOffset     = qsOffset + 64
+		signsOffset  = qhOffset + 8
+		scalesOffset = signsOffset + 32
+	)
+	for block, off := 0, 0; off < len(raw); block, off = block+1, off+blockIQ3SBytes {
+		d := f16At(raw, off)
+		qs := raw[off+qsOffset : off+qhOffset]
+		qh := raw[off+qhOffset : off+signsOffset]
+		signs := raw[off+signsOffset : off+scalesOffset]
+		scales := raw[off+scalesOffset : off+blockIQ3SBytes]
+		base := block * qkIQ3S
+		for pair := 0; pair < 4; pair++ {
+			scaleByte := scales[pair]
+			for half := 0; half < 2; half++ {
+				ib32 := pair*2 + half
+				nibble := scaleByte & 0x0f
+				if half != 0 {
+					nibble = scaleByte >> 4
+				}
+				db := d * float32(1+2*int(nibble))
+				qBase := ib32 * 8
+				high := qh[ib32]
+				signBase := ib32 * 4
+				outBase := base + ib32*32
+				for group := 0; group < 4; group++ {
+					idx1 := uint16(qs[qBase+2*group]) | (uint16(high)<<uint(8-2*group))&0x100
+					idx2 := uint16(qs[qBase+2*group+1]) | (uint16(high)<<uint(7-2*group))&0x100
+					grid1, grid2 := iq3SGrid[idx1], iq3SGrid[idx2]
+					sign := signs[signBase+group]
+					for j := 0; j < 4; j++ {
+						v1 := float32(byte(grid1 >> uint(8*j)))
+						v2 := float32(byte(grid2 >> uint(8*j)))
+						if sign&(1<<uint(j)) != 0 {
+							v1 = -v1
+						}
+						if sign&(1<<uint(j+4)) != 0 {
+							v2 = -v2
+						}
+						out[outBase+group*8+j] = db * v1
+						out[outBase+group*8+j+4] = db * v2
+					}
+				}
+			}
+		}
 	}
 }
