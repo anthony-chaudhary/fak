@@ -150,6 +150,11 @@
       "lane": "vcachesnapshot",
       "command": "go test -v ./internal/vcachesnapshot",
       "output_contains": "TestWriteConfiguredBoundsToDefaultWindow"
+    },
+    {
+      "lane": "vcachescore",
+      "command": "go test -v ./internal/vcachescore",
+      "output_contains": "TestDefaultReadinessPassesWithWitnessedPlanes"
     }
   ]
 }
