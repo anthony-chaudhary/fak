@@ -31,6 +31,8 @@ fak native-performance
 fak native-performance --json
 fak native-performance --baseline metal.command-buffer-amortization > baseline.json
 fak native-performance --compare baseline.json --candidate candidate.json
+fak native-performance --profile profile.json
+fak native-performance --profile-next profile.json
 fak native-performance --next
 fak native-performance --dot
 ```
@@ -247,7 +249,7 @@ client's `max_tokens`/`temperature`/`top_p`/`stop` are now forwarded per request
 long completions are no longer truncated.) Full walkthrough (Tiers 0–2):
 [`GETTING-STARTED.md`](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md).
 
-> **Status: shipped & benchmarked** (current release `v0.30.0` — single source of truth is
+> **Status: shipped & benchmarked** (release version comes from the single source of truth at
 > the root [`VERSION`](https://github.com/anthony-chaudhary/fak/blob/main/VERSION) file). `go build`/`go vet`/`go test ./...` green across the
 > internal packages, CI green, and the A/B benchmark gate passes. Confirmed not by self-report
 > but by the DOS truth syscall (`dos_verify`): the shipped line runs from **`v0.1.0`** (the
@@ -522,6 +524,7 @@ fak cachevalue report|review|feed [--since DATE] [--usage-ledger FILE] [--contex
 fak cachevalue shapes [--since DATE] [--json] [--trend] [--ledger FILE]   # cluster the WITNESSED Track-1 kernel ledger by session SHAPE — length band (single/short/long) × realized-reuse outcome (n/a/cold/partial/warm) — so a reader sees WHICH KINDS of sessions earn KV-prefix reuse, a fact the week×session_type trend hides (#3115); --trend swaps the static snapshot for each shape's week-over-week reuse-share drift. #1066 fence: outcome bands cut on WITNESSED realized reuse only, never the vs-naive re-prefill multiple. The default `--ledger` (`docs/nightrun/cache-value.jsonl`) is a **gitignored local nightrun artifact**, so a fresh checkout renders `INSUFFICIENT` (0 sessions) until a nightrun writes it — that is the empty-ledger read, not a broken verb; point `--ledger` at your own Track-1 JSONL to fold rows meanwhile
 fak kvbm      replay|trace [--artifact/--trace FILE] [--json] [--check]   # KVBM eviction validation: replay proves pin/restore safety; trace proves cost-aware>=LRU, oracle score, and no-thrash stability
 fak callavoid prove-memo | account [--in FILE] [--json] [--gate]   # avoided-call economics: break-even memo proof + per-window amplification scorecard (JSON in/out)
+fak turnavoid replay --in TRACE.jsonl [--json]             # offline whole-model-turn avoidance replay; strict JSONL, effect-witnessed credit
 fak cadence   [--json] [--check] [--append-history] [--window N]   # consolidated regular-cadence report: folds scores + maturity + work-done + releases into one control-pane envelope, including the top public `fak maturity route` seed; --append-history writes the durable ledger with standing_score + difficulty fields (docs/cadence/history.jsonl)
 fak milestone report|post [--json] [--check] [--append-history]   # milestone report: the maturity CLIMB (model x backend M0-M7 grid) + the epic ROADMAP, split by WORK CLASS — DISCRETE epics on a completion % vs ONGOING optimization programs (kernel-opt, cache-opt) shown as frontier activity with NO % (they have no 100%). Trended in docs/milestones/history.jsonl
 fak program   report [--json] [--check] [--append-history] [--window N]   # ongoing-program report (the milestone sibling for never-'done' work): kernel-optimization, cache-optimization, and human-operator-effectiveness by FRONTIER + TREND, never a completion %. Trended in docs/programs/history.jsonl
@@ -567,6 +570,27 @@ parse in-process via the stdlib, Python and CUDA shell out to their toolchains
 parse/compile errors (the zero-false-positive tier — semantic checks are out of
 scope) and exits `1` so it gates a pipeline. Because the input is untrusted model
 output, it honors no in-content ignore comment, and it runs off the hot path.
+
+`fak turnavoid replay` is the offline, whole-model-turn counterpart. It reads strict
+`fak.turnavoid.trace/v1` JSONL, pairs every candidate with its immutable control row,
+and credits a realized avoided model turn only when an independent required-effect
+observation is equivalent. Retained-turn token/latency reductions, avoided tool calls,
+invalidated opportunities, and counterfactual-only rows remain separate:
+
+```bash
+fak turnavoid replay --in trace.jsonl          # concise, arm-by-arm text
+fak turnavoid replay --in trace.jsonl --json   # fak.turnavoid.report/v1
+cat trace.jsonl | fak turnavoid replay --in - --json
+```
+
+Each arm reports committed turns, realized and withheld turn deltas, preserved and
+suppressed required effects, gross model/tool latency and cost, and net values after
+validation, speculation, retry, and recovery overhead. Overhead can make net savings
+negative without erasing a witnessed realized-turn count.
+
+The command exits `0` on a valid replay and `2` on usage, schema, validation, or output
+errors. See [`docs/notes/TURN-AVOIDANCE-FIRST-CLASS-2026-08-24.md`](notes/TURN-AVOIDANCE-FIRST-CLASS-2026-08-24.md)
+for the taxonomy, accounting boundary, research provenance, and rollback contract.
 
 `fak callavoid` is the operator-facing surface over the avoided-call economics leaf —
 no Go required. Both subcommands are JSON-first (read input from stdin or `--in FILE`,
@@ -1310,10 +1334,10 @@ fak value-chain audit --manifest examples/value-chain/support-manifest.json --ob
 Run or inspect the lock-aware daily Git maintenance job:
 
 ```text
-fak git-daily [--root DIR] [--dry-run] [--force] [--prune-worktrees] [--emit task-scheduler|systemd|cron] [--install] [--status N] [--score] [--json]
+fak git-daily [--root DIR] [--dry-run] [--force] [--prune-worktrees] [--emit-unit launchd|systemd|taskscheduler] [--interval DURATION] [--fak-bin PATH] [--label NAME] [--status N] [--score] [--json]
 ```
 
-`--dry-run` is the safe preview. `--status N` and `--score` are read-only ledger views; they do not run a maintenance tick. `--emit` prints an OS scheduler unit, while `--install` explicitly installs it. Use `--root` in scheduled jobs so repository discovery never depends on the scheduler's working directory.
+`--dry-run` is the safe preview. `--status N` and `--score` are read-only ledger views; they do not run a maintenance tick. `--emit-unit` prints a scheduler definition; install it with the operating system's own scheduler tooling after review. Use `--root` in scheduled jobs so repository discovery never depends on the scheduler's working directory.
 
 ## `fak temp-artifacts`
 
@@ -1349,3 +1373,10 @@ deterministic JSON comparison. It refuses envelope/control drift, absent repetit
 execution identity, nonzero fallback, private path/host details, and undeclared multi-axis
 changes. Templates contain `FILL_*` placeholders and are not benchmark evidence until capture
 fills every required field and validation succeeds.
+
+
+`--profile FILE` validates a backend-specific profile manifest and emits its deterministic
+bottleneck classification. `--profile-next FILE` returns the measured recommended lever and
+refuses disagreement with graph-order selection unless the manifest carries an issue-backed
+reason. Metal and CUDA counters remain backend-specific; phase names and evidence semantics are
+shared, not counter values.
