@@ -35,6 +35,8 @@ type AuditOptions struct {
 	Since    time.Duration
 	Now      time.Time
 	Baseline *AuditSummaryRow
+	// UserContains keeps only transcripts whose user-authored prompts contain this case-insensitive literal.
+	UserContains string
 }
 
 // AuditTokens are the four disjoint, exact billing buckets normalized across
@@ -73,6 +75,7 @@ type AuditDenominatorRow struct {
 	RootPresent           bool           `json:"root_present"`
 	FilesDiscovered       int            `json:"files_discovered"`
 	FilesScanned          int            `json:"files_scanned"`
+	FilesMatched          int            `json:"files_matched,omitempty"`
 	FixtureFilesExcluded  int            `json:"fixture_files_excluded"`
 	Records               int            `json:"records"`
 	UsageRecordsSeen      int            `json:"usage_records_seen"`
@@ -124,6 +127,7 @@ type AuditSummaryRow struct {
 	FilesDiscovered      int         `json:"files_discovered"`
 	FilesScanned         int         `json:"files_scanned"`
 	FixtureFilesExcluded int         `json:"fixture_files_excluded"`
+	FilesMatched         int         `json:"files_matched,omitempty"`
 	Records              int         `json:"records"`
 	UsageRecordsExact    int         `json:"usage_records_exact"`
 	RefusedRecords       int         `json:"refused_records"`
@@ -133,6 +137,13 @@ type AuditSummaryRow struct {
 	RepeatedFailures     int         `json:"repeated_failures"`
 	MutationChurn        int         `json:"mutation_churn"`
 	HookP95MS            *int64      `json:"hook_p95_ms"`
+	DistinctTranscripts  int         `json:"distinct_transcripts"`
+	DuplicateFragments   int         `json:"duplicate_fragments"`
+	EmptyUsageFiles      int         `json:"empty_usage_files"`
+	ToolCalls            int         `json:"tool_calls"`
+	ToolErrors           int         `json:"tool_errors"`
+	ToolErrorFraction    *float64    `json:"tool_error_fraction"`
+	TopTenTokenFraction  *float64    `json:"top_ten_token_fraction"`
 }
 
 // AuditDeltaRow compares one higher-is-worse metric with a prior summary.
@@ -304,6 +315,16 @@ func auditSource(source AuditSource, opts AuditOptions) (AuditDenominatorRow, []
 			return denominator, nil, nil, nil, fmt.Errorf("trajectory audit: relativize transcript: %w", relErr)
 		}
 		rel = filepath.ToSlash(rel)
+		if opts.UserContains != "" {
+			matched, matchErr := auditFileUserContains(path, opts.UserContains)
+			if matchErr != nil {
+				return denominator, nil, nil, nil, matchErr
+			}
+			if !matched {
+				continue
+			}
+			denominator.FilesMatched++
+		}
 		if source.Name == AuditSourceClaude && auditIsClaudePytestFixture(path, rel) {
 			denominator.FixtureFilesExcluded++
 			continue
@@ -320,20 +341,90 @@ func auditSource(source AuditSource, opts AuditOptions) (AuditDenominatorRow, []
 	return denominator, transcripts, refusals, hookDurations, nil
 }
 
+func auditFileUserContains(path, needle string) (bool, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return false, fmt.Errorf("trajectory audit: open transcript for --user-contains: %w", err)
+	}
+	defer file.Close()
+
+	needle = strings.ToLower(needle)
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
+	for scanner.Scan() {
+		var record map[string]any
+		decoder := json.NewDecoder(strings.NewReader(scanner.Text()))
+		if decoder.Decode(&record) != nil {
+			continue
+		}
+		if strings.Contains(strings.ToLower(auditUserText(record)), needle) {
+			return true, nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return false, fmt.Errorf("trajectory audit: scan transcript for --user-contains: %w", err)
+	}
+	return false, nil
+}
+
+func auditUserText(record map[string]any) string {
+	kind, _ := record["type"].(string)
+	switch kind {
+	case "user": // Claude transcript row.
+		message, _ := record["message"].(map[string]any)
+		if role, _ := message["role"].(string); role == "user" {
+			return auditText(message["content"])
+		}
+	case "response_item": // Codex transcript row.
+		payload, _ := record["payload"].(map[string]any)
+		if itemType, _ := payload["type"].(string); itemType == "message" {
+			if role, _ := payload["role"].(string); role == "user" {
+				return auditText(payload["content"])
+			}
+		}
+	}
+	return ""
+}
+
 func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTranscriptRow, hookDurations []int64) AuditSummaryRow {
 	summary := AuditSummaryRow{Schema: AuditSchema, Kind: "summary", Sources: len(denominators), Transcripts: len(transcripts)}
 	for _, row := range denominators {
 		summary.FilesDiscovered += row.FilesDiscovered
 		summary.FilesScanned += row.FilesScanned
+		summary.FilesMatched += row.FilesMatched
 		summary.FixtureFilesExcluded += row.FixtureFilesExcluded
 		summary.Records += row.Records
 		summary.UsageRecordsExact += row.UsageRecordsExact
 		summary.RefusedRecords += row.RefusedRecords
 	}
+	transcriptIDs := make(map[string]struct{}, len(transcripts))
+	accountedTokens := make([]int64, 0, len(transcripts))
 	for _, transcript := range transcripts {
 		summary.Tokens.add(transcript.Tokens)
 		summary.RepeatedFailures += transcript.RepeatedFailures
 		summary.MutationChurn += transcript.MutationChurn
+		summary.ToolCalls += transcript.ToolCalls
+		summary.ToolErrors += transcript.ToolErrors
+		if transcript.Tokens.accountedTotal() == 0 {
+			summary.EmptyUsageFiles++
+		}
+		transcriptIDs[transcript.Source+"\x00"+transcript.TranscriptID] = struct{}{}
+		accountedTokens = append(accountedTokens, transcript.Tokens.accountedTotal())
+	}
+	summary.DistinctTranscripts = len(transcriptIDs)
+	summary.DuplicateFragments = summary.Transcripts - summary.DistinctTranscripts
+	if summary.ToolCalls > 0 {
+		v := float64(summary.ToolErrors) / float64(summary.ToolCalls)
+		summary.ToolErrorFraction = &v
+	}
+	sort.Slice(accountedTokens, func(i, j int) bool { return accountedTokens[i] > accountedTokens[j] })
+	if total := summary.Tokens.accountedTotal(); total > 0 {
+		var top int64
+		for i := 0; i < len(accountedTokens) && i < 10; i++ {
+			top += accountedTokens[i]
+		}
+		v := float64(top) / float64(total)
+		summary.TopTenTokenFraction = &v
 	}
 	if summary.Tokens.OutputTokens > 0 {
 		v := float64(summary.Tokens.inputTotal()) / float64(summary.Tokens.OutputTokens)

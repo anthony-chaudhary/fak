@@ -37,6 +37,7 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 	jsonlPath := flags.String("jsonl", "", "write versioned JSONL rows to this path")
 	markdownPath := flags.String("md", "", "write the operator markdown report to this path")
 	baselinePath := flags.String("baseline", "", "compare with a prior fak-trajectory-audit/1 JSONL artifact")
+	userContains := flags.String("user-contains", "", "keep transcripts whose user-authored prompts contain this case-insensitive literal")
 	claudeRoot := flags.String("claude-root", "", "override Claude projects root")
 	codexRoot := flags.String("codex-root", "", "override Codex sessions root")
 	if err := flags.Parse(args); err != nil {
@@ -77,7 +78,7 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 			return 2
 		}
 	}
-	result, err := trajectory.RunAudit(trajectory.AuditOptions{Sources: sources, Since: since, Baseline: baseline})
+	result, err := trajectory.RunAudit(trajectory.AuditOptions{Sources: sources, Since: since, Baseline: baseline, UserContains: strings.TrimSpace(*userContains)})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1

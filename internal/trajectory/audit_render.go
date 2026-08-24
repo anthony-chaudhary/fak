@@ -14,16 +14,21 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 	fmt.Fprintf(&out, "Schema: `%s`\n\n", AuditSchema)
 	out.WriteString("## Exact totals\n\n")
 	fmt.Fprintf(&out, "- Sources: %d; sessions: %d; files scanned: %d/%d; records: %d.\n", summary.Sources, summary.Transcripts, summary.FilesScanned, summary.FilesDiscovered, summary.Records)
+	if summary.FilesMatched > 0 {
+		fmt.Fprintf(&out, "- Topical cohort: %d user-prompt-matched transcript files.\n", summary.FilesMatched)
+	}
 	fmt.Fprintf(&out, "- Input: %d; output: %d; cache create: %d; cache read: %d exact tokens.\n", summary.Tokens.InputTokens, summary.Tokens.OutputTokens, summary.Tokens.CacheCreateTokens, summary.Tokens.CacheReadTokens)
 	fmt.Fprintf(&out, "- Input:output ratio: %s; cache-create burden: %s.\n", auditFloat(summary.InputOutputRatio, 3), auditPercent(summary.PromptWriteFraction))
 	fmt.Fprintf(&out, "- Repeated failures: %d; mutation churn: %d; hook p95: %s ms.\n", summary.RepeatedFailures, summary.MutationChurn, auditInt(summary.HookP95MS))
+	fmt.Fprintf(&out, "- Distinct transcripts: %d; duplicate fragments: %d; empty-usage files: %d.\n", summary.DistinctTranscripts, summary.DuplicateFragments, summary.EmptyUsageFiles)
+	fmt.Fprintf(&out, "- Tool errors: %d/%d (%s); top-10 token concentration: %s.\n", summary.ToolErrors, summary.ToolCalls, auditPercent(summary.ToolErrorFraction), auditPercent(summary.TopTenTokenFraction))
 
 	out.WriteString("\n## Source denominator\n\n")
-	out.WriteString("| Source | Root | Present | Files scanned/non-session/discovered | Records | Exact usage | Applied usage | Duplicates | Refused |\n")
+	out.WriteString("| Source | Root | Present | Files scanned/matched/non-session/discovered | Records | Exact usage | Applied usage | Duplicates | Refused |\n")
 	out.WriteString("|---|---|---:|---:|---:|---:|---:|---:|---:|\n")
 	for _, denominator := range result.Denominators {
-		fmt.Fprintf(&out, "| %s | `%s` | %t | %d/%d/%d | %d | %d/%d | %d | %d | %d |\n",
-			denominator.Source, denominator.Root, denominator.RootPresent, denominator.FilesScanned, denominator.FixtureFilesExcluded, denominator.FilesDiscovered,
+		fmt.Fprintf(&out, "| %s | `%s` | %t | %d/%d/%d/%d | %d | %d/%d | %d | %d | %d |\n",
+			denominator.Source, denominator.Root, denominator.RootPresent, denominator.FilesScanned, denominator.FilesMatched, denominator.FixtureFilesExcluded, denominator.FilesDiscovered,
 			denominator.Records, denominator.UsageRecordsExact, denominator.UsageRecordsSeen, denominator.UsageRecordsApplied,
 			denominator.DuplicateUsageRecords, denominator.RefusedRecords)
 		fmt.Fprintf(&out, "\n%s token semantics: %s.\n", denominator.Source, denominator.TokenSemantics)

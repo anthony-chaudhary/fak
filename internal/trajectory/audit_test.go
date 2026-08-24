@@ -275,6 +275,41 @@ func TestAuditUnsupportedUsageShapeIsExplicit(t *testing.T) {
 	}
 }
 
+func TestAuditUserContainsSelectsTopicalCohort(t *testing.T) {
+	root := t.TempDir()
+	qwen := `{"type":"session_meta","payload":{"id":"qwen-session"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Measure QWEN decode performance"}]}}`
+	other := `{"type":"session_meta","payload":{"id":"other-session"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Unrelated task"}]}}`
+	if err := os.WriteFile(filepath.Join(root, "qwen.jsonl"), []byte(qwen), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "other.jsonl"), []byte(other), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := RunAudit(AuditOptions{
+		Sources:      []AuditSource{{Name: AuditSourceCodex, Root: root, RootLabel: "codex/sessions"}},
+		UserContains: "qwen",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Transcripts) != 1 || result.Transcripts[0].TranscriptID != "qwen-session" {
+		t.Fatalf("transcripts = %#v, want only qwen-session", result.Transcripts)
+	}
+	denominator := result.Denominators[0]
+	if denominator.FilesDiscovered != 2 || denominator.FilesMatched != 1 || denominator.FilesScanned != 1 {
+		t.Fatalf("denominator = %#v, want discovered=2 matched=1 scanned=1", denominator)
+	}
+	if result.Summary.FilesMatched != 1 || result.Summary.Transcripts != 1 {
+		t.Fatalf("summary = %#v, want matched=1 sessions=1", result.Summary)
+	}
+	if result.Summary.DistinctTranscripts != 1 || result.Summary.DuplicateFragments != 0 || result.Summary.EmptyUsageFiles != 1 {
+		t.Fatalf("summary process signals = %#v", result.Summary)
+	}
+}
+
 func TestAuditEdgeMatrix(t *testing.T) {
 	fixtureRoot := filepath.Join("testdata", "audit", "issue-8493", "edge", "empty")
 	for _, test := range []struct {
