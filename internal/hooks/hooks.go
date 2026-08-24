@@ -107,6 +107,7 @@ func PreCommitGates() []Gate {
 		{Name: "CONCEPT_FRESHNESS", ModeEnv: "FLEET_CONCEPT_FRESHNESS_GUARD", EscapeEnv: "ALLOW_STALE_CONCEPT_DOCS", Check: checkConceptFreshness},
 		{Name: "PROVENANCE_LABEL", ModeEnv: "FLEET_PROVENANCE_GUARD", EscapeEnv: "ALLOW_PROVENANCE_DRIFT", Check: gateProvenanceLabel},
 		{Name: "HARDWARE_TELL", ModeEnv: "FLEET_HW_GUARD", EscapeEnv: "FLEET_ALLOW_HW", Check: gateHardwareTell},
+		{Name: "NATIVE_FIRST", ModeEnv: "NATIVEFIRST_HOOK_MODE", EscapeEnv: "ALLOW_NATIVE_SUBSTITUTION", Check: checkNativeFirst},
 		// BARE_COMMIT_SWEEP is ADVISORY (issue #3615): DefaultMode "warn" so it never reds a shared
 		// trunk out of the box. It closes the raw-git bypass in safecommit's prestaged discipline —
 		// a `git commit` / `git add -A && git commit` that did NOT come through `fak commit` (no

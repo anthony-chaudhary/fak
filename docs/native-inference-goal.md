@@ -21,13 +21,13 @@ restating a different engine policy.
 **Product path:** fak-native is the product and performance path for local inference.
 
 <!-- native-engine-doctrine:matched-envelope -->
-**Performance target:** In matched, quality-constrained envelopes, fak-native is intended to beat llama.cpp.
+**Performance target:** In matched, quality-constrained envelopes, fak-native must beat llama.cpp.
 
 <!-- native-engine-doctrine:explicit-reference-only -->
 **Reference boundary:** llama.cpp is permitted only when explicitly selected for benchmarks, parity/reference diagnosis, migration/interoperability, or ego-free borrowing.
 
 <!-- native-engine-doctrine:no-silent-fallback -->
-**Fallback boundary:** llama.cpp is never a silent fallback for native or performance work.
+**Fallback boundary:** fak never selects llama.cpp as a fallback for native or performance work.
 
 <!-- native-engine-doctrine:owned-stack -->
 **Ownership reason:** fak must understand and control the full engine stack so higher-order gains compose. That stack covers kernels and memory, scheduling and cache, plus adaptation and operations.
@@ -58,7 +58,7 @@ the model is an external runtime even when fak launched it, fronts it, or consum
 |---|---|
 | fak-native | Model loading and inference execute through fak's in-kernel model and compute path. This is the local product and performance path. |
 | native backend | A compute-HAL implementation selected inside fak-native, such as CPU, CUDA, or Metal. Changing a native backend does not replace the inference engine. |
-| external reference runtime | llama.cpp or another independently implemented engine selected explicitly for a bounded comparison, diagnosis, or interoperability task. |
+| explicit external reference runtime | llama.cpp or another independently implemented engine selected explicitly for a bounded benchmark, comparison, parity/reference diagnosis, migration/interoperability task, or ego-free study and borrowing. |
 | gateway/provider upstream | A remote or separately served model behind the fak gateway. This can be a supported operating mode, but it is external inference and is never evidence for fak-native performance. |
 
 ## Why engine ownership matters
@@ -158,9 +158,9 @@ that make the doctrine discoverable. Run it from the repository root:
 $canonical = 'docs/native-inference-goal.md'
 $requiredPhrases = @(
   'fak-native is the product and performance path for local inference.'
-  'In matched, quality-constrained envelopes, fak-native is intended to beat llama.cpp.'
+  'In matched, quality-constrained envelopes, fak-native must beat llama.cpp.'
   'llama.cpp is permitted only when explicitly selected for benchmarks, parity/reference diagnosis, migration/interoperability, or ego-free borrowing.'
-  'llama.cpp is never a silent fallback for native or performance work.'
+  'fak never selects llama.cpp as a fallback for native or performance work.'
   'fak must understand and control the full engine stack so higher-order gains compose. That stack covers kernels and memory, scheduling and cache, plus adaptation and operations.'
 )
 $requiredLinks = [ordered]@{

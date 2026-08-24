@@ -1,12 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
 
-	"bufio"
-	"strings"
+	"github.com/anthony-chaudhary/fak/internal/nativefirst"
 )
 
 func cmdNativeFirstLint(args []string) int {
@@ -54,27 +54,10 @@ func scanNativeFirst(r io.Reader) ([]nativeFirstFinding, error) {
 	var out []nativeFirstFinding
 	s := bufio.NewScanner(r)
 	for line := 1; s.Scan(); line++ {
-		raw := strings.TrimSpace(s.Text())
-		text := strings.ToLower(raw)
-		if !mentionsExternalLlama(text) || isWhitelistedReferenceUse(text) {
-			continue
-		}
-		native := strings.Contains(text, "native") || strings.Contains(text, "performance") || strings.Contains(text, "qwen3.8") || strings.Contains(text, "qwen38")
-		sub := strings.Contains(text, "default") || strings.Contains(text, "fallback") || strings.Contains(text, "fall back") || strings.Contains(text, "falls back") || strings.Contains(text, "auto") || strings.Contains(text, "delegate") || strings.Contains(text, "backend")
-		if native && sub {
-			out = append(out, nativeFirstFinding{line, raw, "llama.cpp may be selected only explicitly for benchmark, parity/reference diagnosis, interop/migration, or borrowing; native/performance paths must remain fak-native"})
+		finding := nativefirst.ScanLine(s.Text())
+		if finding != nil {
+			out = append(out, nativeFirstFinding{line, finding.Phrase, finding.Reason})
 		}
 	}
 	return out, s.Err()
-}
-func mentionsExternalLlama(s string) bool {
-	return strings.Contains(s, "llama.cpp") || strings.Contains(s, "llama cpp") || strings.Contains(s, "llamacpp") || strings.Contains(s, "llama-server")
-}
-func isWhitelistedReferenceUse(s string) bool {
-	for _, w := range []string{"benchmark", "comparison", "compare", "reference", "parity", "diagnos", "interop", "migration", "borrow", "study", "explicit"} {
-		if strings.Contains(s, w) {
-			return true
-		}
-	}
-	return false
 }

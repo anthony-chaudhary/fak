@@ -685,6 +685,7 @@ var tier = map[string]int{
 	"qwen38ladder":               1, // stdlib-only paired evidence gate from pinned Qwen3.5 proxies to exact Qwen3.8-27B (#8011).
 	"scratchmark":                1, // #6616 stdlib-only bounded detector for source artifacts self-declared disposable in their leading comment block.
 	"fleetsearch":                3, // read-only join over lifecycle/sessionjournal/toolproc evidence; no runtime kernel.
+	"nativefirst":                1, // stdlib-only native-engine substitution policy shared by CLI lint and commit gates.
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
