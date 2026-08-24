@@ -32,8 +32,17 @@ func Capture(rows []guardsessions.Row, capturedAt time.Time, alive func(int) boo
 		return Cohort{}
 	}
 	live := guardsessions.LiveInteractive(rows)
-	out := Cohort{CapturedAt: capturedAt.UTC().Format(time.RFC3339Nano)}
+	// Re-publishing a registry row can leave several handles attached to the
+	// same long-lived guard PID. One process can own only one relaunch slot; keep
+	// its newest durable row so aliases cannot multiply a crash wave.
+	newest := make(map[int]guardsessions.Row, len(live))
 	for _, row := range live {
+		if previous, ok := newest[row.PID]; !ok || row.StartedAt > previous.StartedAt {
+			newest[row.PID] = row
+		}
+	}
+	out := Cohort{CapturedAt: capturedAt.UTC().Format(time.RFC3339Nano)}
+	for _, row := range newest {
 		if row.PID <= 0 || !alive(row.PID) {
 			continue
 		}
@@ -42,7 +51,7 @@ func Capture(rows []guardsessions.Row, capturedAt time.Time, alive func(int) boo
 		if err != nil {
 			rowStarted, err = time.Parse(time.RFC3339, row.StartedAt)
 		}
-		if !ok || err != nil || processStarted.Before(rowStarted.Add(-time.Second)) {
+		if !ok || err != nil || processStarted.After(rowStarted.Add(time.Second)) {
 			continue
 		}
 		out.Sessions = append(out.Sessions, CohortEntry{Handle: row.Handle, PID: row.PID, StartedAt: row.StartedAt})

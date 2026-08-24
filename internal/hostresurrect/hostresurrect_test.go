@@ -83,3 +83,15 @@ func TestPlanRejectsCohortPIDMismatch(t *testing.T) {
 		t.Fatalf("Plan=%+v counts=%+v", got, counts)
 	}
 }
+
+func TestCaptureKeepsNewestRowPerLivePID(t *testing.T) {
+	now := time.Date(2026, 8, 24, 2, 0, 0, 0, time.UTC)
+	rows := []guardsessions.Row{
+		{Schema: guardsessions.Schema, Handle: "old-alias", PID: 42, Interactive: true, CWD: `C:\repo`, Command: []string{"codex"}, ResumeHandle: "alias", StartedAt: now.Add(-time.Minute).Format(time.RFC3339Nano)},
+		{Schema: guardsessions.Schema, Handle: "current", PID: 42, Interactive: true, CWD: `C:\repo`, Command: []string{"codex"}, ResumeHandle: "alias", StartedAt: now.Format(time.RFC3339Nano)},
+	}
+	cohort := Capture(rows, now, func(pid int) bool { return pid == 42 }, func(pid int) (time.Time, bool) { return now.Add(-2 * time.Hour), pid == 42 })
+	if len(cohort.Sessions) != 1 || cohort.Sessions[0].Handle != "current" {
+		t.Fatalf("cohort=%+v", cohort)
+	}
+}

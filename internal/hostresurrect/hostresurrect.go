@@ -96,9 +96,8 @@ func Plan(signal hostfault.HostCrashSignal, rows []guardsessions.Row, cohort Coh
 			counts.ExcludedInvalidResume++
 			continue
 		}
-		out = append(out, Request{Schema: Schema, EventID: signal.EventID, CrashClass: string(signal.Class), Session: row.Handle, CWD: row.CWD, Command: command, ResumeHandle: row.ResumeHandle, WindowID: row.WindowID})
-		if len(out) == limit {
-			break
+		if len(out) < limit {
+			out = append(out, Request{Schema: Schema, EventID: signal.EventID, CrashClass: string(signal.Class), Session: row.Handle, CWD: row.CWD, Command: command, ResumeHandle: row.ResumeHandle, WindowID: row.WindowID})
 		}
 	}
 	counts.Selected = len(out)
