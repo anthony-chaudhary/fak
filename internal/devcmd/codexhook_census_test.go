@@ -33,7 +33,7 @@ func TestBuildHookCensusClassifiesCompleteLifecycle(t *testing.T) {
 	if err := os.WriteFile(obs, b.Bytes(), 0644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := buildHookCensus(home, home, home, "", obs, time.Hour, now)
+	got, err := buildHookCensus(home, home, home, "", obs, effectivePostToolProfile(), time.Hour, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,6 +41,101 @@ func TestBuildHookCensusClassifiesCompleteLifecycle(t *testing.T) {
 		t.Fatalf("report=%+v", got)
 	}
 }
+
+func TestBuildHookCensusAcceptsIntentionallyDisabledPostToolUse(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "profile")
+	sessions := filepath.Join(home, "sessions")
+	if err := os.MkdirAll(sessions, 0755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	rows := `{"timestamp":"2026-08-17T11:59:00Z","type":"session_meta","payload":{"session_id":"thread-1","cwd":"` + filepath.ToSlash(home) + `"}}` + "\n" +
+		`{"timestamp":"2026-08-17T11:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"a","name":"Read"}}` + "\n" +
+		`{"timestamp":"2026-08-17T11:01:00Z","type":"response_item","payload":{"type":"function_call_output","call_id":"a","name":"Read"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(sessions, "r.jsonl"), []byte(rows), 0644); err != nil {
+		t.Fatal(err)
+	}
+	obs := filepath.Join(root, "observations.jsonl")
+	var b bytes.Buffer
+	_ = json.NewEncoder(&b).Encode(hookObservation{CallID: "a", SessionID: "thread-1", Workspace: home, Profile: home, PhaseState: "succeeded", Verb: "pretool", TS: now.Add(-time.Minute)})
+	_ = json.NewEncoder(&b).Encode(hookObservation{CallID: "foreign", SessionID: "thread-1", Workspace: filepath.Join(root, "foreign"), Profile: home, PhaseState: "failed", Verb: "posttool", TS: now.Add(-time.Minute)})
+	if err := os.WriteFile(obs, b.Bytes(), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := buildHookCensus(home, home, home, "", obs, mandatoryOnlyHookProfile(), time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != "HEALTHY" || got.PreToolUse.Succeeded != 1 || got.PostToolUseRequirement != "optional" || got.PostToolUseStatus != "intentionally_disabled" || got.PostToolUse.Denominator != 0 || got.PostToolUse.Unknown != 0 {
+		t.Fatalf("report=%+v", got)
+	}
+	var out bytes.Buffer
+	writeHookCensus(&out, got)
+	if !strings.Contains(out.String(), "PostToolUse: requirement=optional status=intentionally_disabled") {
+		t.Fatalf("human census did not explain optional PostToolUse:\n%s", out.String())
+	}
+}
+
+func TestBuildHookCensusRejectsPresentPostToolUseWithoutReceipt(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "profile")
+	sessions := filepath.Join(home, "sessions")
+	if err := os.MkdirAll(sessions, 0755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	rows := `{"timestamp":"2026-08-17T11:59:00Z","type":"session_meta","payload":{"session_id":"thread-1","cwd":"` + filepath.ToSlash(home) + `"}}` + "\n" +
+		`{"timestamp":"2026-08-17T11:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"a","name":"Read"}}` + "\n" +
+		`{"timestamp":"2026-08-17T11:01:00Z","type":"response_item","payload":{"type":"function_call_output","call_id":"a","name":"Read"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(sessions, "r.jsonl"), []byte(rows), 0644); err != nil {
+		t.Fatal(err)
+	}
+	obs := filepath.Join(root, "observations.jsonl")
+	o := hookObservation{CallID: "a", SessionID: "thread-1", Workspace: home, Profile: home, PhaseState: "succeeded", Verb: "pretool", TS: now.Add(-time.Minute)}
+	raw, _ := json.Marshal(o)
+	if err := os.WriteFile(obs, append(raw, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := buildHookCensus(home, home, home, "", obs, effectivePostToolProfile(), time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != "UNHEALTHY" || got.PostToolUseStatus != "incomplete" || got.PostToolUse.Denominator != 1 || got.PostToolUse.Unknown != 1 || !slices.Contains(got.Reasons, "POST_TOOL_USE_UNKNOWN") {
+		t.Fatalf("report=%+v", got)
+	}
+}
+
+func TestBuildHookCensusDiagnosesFailingPresentPostToolUse(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "profile")
+	sessions := filepath.Join(home, "sessions")
+	if err := os.MkdirAll(sessions, 0755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	rows := `{"timestamp":"2026-08-17T11:59:00Z","type":"session_meta","payload":{"session_id":"thread-1","cwd":"` + filepath.ToSlash(home) + `"}}` + "\n" +
+		`{"timestamp":"2026-08-17T11:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"a","name":"Read"}}` + "\n" +
+		`{"timestamp":"2026-08-17T11:01:00Z","type":"response_item","payload":{"type":"function_call_output","call_id":"a","name":"Read"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(sessions, "r.jsonl"), []byte(rows), 0644); err != nil {
+		t.Fatal(err)
+	}
+	obs := filepath.Join(root, "observations.jsonl")
+	var b bytes.Buffer
+	_ = json.NewEncoder(&b).Encode(hookObservation{CallID: "a", SessionID: "thread-1", Workspace: home, Profile: home, PhaseState: "succeeded", Verb: "pretool", TS: now.Add(-time.Minute)})
+	_ = json.NewEncoder(&b).Encode(hookObservation{CallID: "a", SessionID: "thread-1", Workspace: home, Profile: home, PhaseState: "failed", Exit: 1, Verb: "posttool", TS: now.Add(-time.Minute)})
+	if err := os.WriteFile(obs, b.Bytes(), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := buildHookCensus(home, home, home, "", obs, effectivePostToolProfile(), time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != "UNHEALTHY" || got.PostToolUseStatus != "failing" || got.PostToolUse.Failed != 1 || !slices.Contains(got.Reasons, "HOOK_FAILURES_PRESENT") {
+		t.Fatalf("report=%+v", got)
+	}
+}
+
 func TestBuildHookCensusPostToolUseExcludesActiveCalls(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "profile")
@@ -68,7 +163,7 @@ func TestBuildHookCensusPostToolUseExcludesActiveCalls(t *testing.T) {
 	if err := os.WriteFile(obs, b.Bytes(), 0644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := buildHookCensus(home, home, home, "", obs, time.Hour, now)
+	got, err := buildHookCensus(home, home, home, "", obs, effectivePostToolProfile(), time.Hour, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +194,7 @@ func TestBuildHookCensusExcludesToolsOutsidePostMatcher(t *testing.T) {
 	if err := os.WriteFile(obs, append(raw, '\n'), 0644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := buildHookCensus(home, home, home, "", obs, time.Hour, now)
+	got, err := buildHookCensus(home, home, home, "", obs, effectivePostToolProfile(), time.Hour, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +222,7 @@ func TestBuildHookCensusSettlesFreshPostToolReceipt(t *testing.T) {
 	if err := os.WriteFile(obs, append(raw, '\n'), 0644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := buildHookCensus(home, home, home, "", obs, time.Hour, now)
+	got, err := buildHookCensus(home, home, home, "", obs, effectivePostToolProfile(), time.Hour, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +244,7 @@ func TestBuildHookCensusFailsClosedOnUnknownFailureAndProfileMismatch(t *testing
 	o := hookObservation{CallID: "a", SessionID: "thread-1", Workspace: logHome, Profile: home, PhaseState: "failed", Exit: 3, Verb: "posttool", TS: now.Add(-time.Minute)}
 	raw, _ := json.Marshal(o)
 	_ = os.WriteFile(obs, append(raw, '\n'), 0644)
-	got, err := buildHookCensus(home, logHome, logHome, "", obs, time.Hour, now)
+	got, err := buildHookCensus(home, logHome, logHome, "", obs, effectivePostToolProfile(), time.Hour, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,11 +271,11 @@ func TestBuildHookCensusRejectsAbsentTelemetry(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(home, "sessions", "r.jsonl"), []byte(row), 0644)
 	obs := filepath.Join(root, "o.jsonl")
 	_ = os.WriteFile(obs, nil, 0644)
-	got, err := buildHookCensus(home, home, home, "", obs, time.Hour, now)
+	got, err := buildHookCensus(home, home, home, "", obs, mandatoryOnlyHookProfile(), time.Hour, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Verdict != "UNHEALTHY" || got.PreToolUse.Unknown != 1 || got.PostToolUse.Unknown != 1 {
+	if got.Verdict != "UNHEALTHY" || got.PreToolUse.Unknown != 1 || got.PostToolUse.Unknown != 0 || got.PostToolUseStatus != "intentionally_disabled" {
 		t.Fatalf("report=%+v", got)
 	}
 }

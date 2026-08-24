@@ -160,11 +160,35 @@ func skillDescription(root, path string) (string, error) {
 		if strings.HasPrefix(line, "description:") {
 			description := strings.TrimSpace(strings.TrimPrefix(line, "description:"))
 			if description != "" {
-				return description, nil
+				return decodeYAMLScalar(description), nil
 			}
 		}
 	}
 	return "", fmt.Errorf("%s has no frontmatter description", path)
+}
+
+// decodeYAMLScalar removes the quoting used by canonical skill frontmatter.
+// Generated adapters re-encode the value after truncation; truncating the
+// original quoted token could otherwise leave an unterminated YAML scalar.
+func decodeYAMLScalar(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) < 2 {
+		return value
+	}
+	switch value[0] {
+	case '"':
+		if value[len(value)-1] == '"' {
+			var decoded string
+			if json.Unmarshal([]byte(value), &decoded) == nil {
+				return decoded
+			}
+		}
+	case '\'':
+		if value[len(value)-1] == '\'' {
+			return strings.ReplaceAll(value[1:len(value)-1], "''", "'")
+		}
+	}
+	return value
 }
 func adapterDescription(description string) string {
 	runes := []rune(strings.TrimSpace(description))
@@ -185,7 +209,8 @@ func adapterDescription(description string) string {
 
 func adapter(name, description, rel string) string {
 	description = adapterDescription(description)
-	return fmt.Sprintf("---\nname: %s\ndescription: %s\nmetadata:\n  generated-by: fak project-assets sync\n  canonical: %s\n---\n\n# Canonical project skill adapter\n\nLoad and follow [`%s`](%s). This generated discovery adapter contains no maintained workflow body.\n\n## Portability contract\n\n- The linked canonical `SKILL.md` is the single semantic workflow body for Claude, Codex, and fak-native loaders.\n- This adapter changes discovery only; it must not fork, summarize, or translate the workflow.\n- Harness-native invocation, permissions, hooks, model routing, and worker launch remain typed adapters outside the semantic body.\n", name, description, rel, rel, rel)
+	encoded, _ := json.Marshal(description)
+	return fmt.Sprintf("---\nname: %s\ndescription: %s\nmetadata:\n  generated-by: fak project-assets sync\n  canonical: %s\n---\n\n# Canonical project skill adapter\n\nLoad and follow [`%s`](%s). This generated discovery adapter contains no maintained workflow body.\n\n## Portability contract\n\n- The linked canonical `SKILL.md` is the single semantic workflow body for Claude, Codex, and fak-native loaders.\n- This adapter changes discovery only; it must not fork, summarize, or translate the workflow.\n- Harness-native invocation, permissions, hooks, model routing, and worker launch remain typed adapters outside the semantic body.\n", name, encoded, rel, rel, rel)
 }
 
 func classify(root, kind string, p Policy) ([]string, []Excluded, error) {

@@ -46,16 +46,23 @@ type effectiveHook struct {
 	Remediation  string               `json:"remediation,omitempty"`
 	Identities   []executableIdentity `json:"identities,omitempty"`
 }
+type hookEventContract struct {
+	EventName   string `json:"event_name"`
+	Requirement string `json:"requirement"`
+	Status      string `json:"status"`
+	Detail      string `json:"detail,omitempty"`
+}
 type hookProfileReport struct {
-	Schema          string             `json:"schema"`
-	CodexHome       string             `json:"codex_home"`
-	Workspace       string             `json:"workspace"`
-	ConfigPath      string             `json:"config_path"`
-	CodexExecutable executableIdentity `json:"codex_executable"`
-	Hooks           []effectiveHook    `json:"hooks"`
-	Warnings        []string           `json:"warnings,omitempty"`
-	Errors          []string           `json:"errors,omitempty"`
-	Verdict         string             `json:"verdict"`
+	Schema          string              `json:"schema"`
+	CodexHome       string              `json:"codex_home"`
+	Workspace       string              `json:"workspace"`
+	ConfigPath      string              `json:"config_path"`
+	CodexExecutable executableIdentity  `json:"codex_executable"`
+	Hooks           []effectiveHook     `json:"hooks"`
+	EventContracts  []hookEventContract `json:"event_contracts"`
+	Warnings        []string            `json:"warnings,omitempty"`
+	Errors          []string            `json:"errors,omitempty"`
+	Verdict         string              `json:"verdict"`
 }
 type appServerReply struct {
 	ID     int `json:"id"`
@@ -157,9 +164,6 @@ func inspectCodexHookProfileContext(ctx context.Context, home, workspace, binary
 		x := effectiveHook{EventName: event, Key: h.Key, Source: h.Source, SourcePath: h.SourcePath, PluginID: h.PluginID, DisplayOrder: h.DisplayOrder, Enabled: h.Enabled, Managed: h.IsManaged, CurrentHash: h.CurrentHash, TrustStatus: h.TrustStatus, Command: h.Command, Matcher: h.Matcher, TimeoutSec: h.TimeoutSec}
 		classifyEffectiveHook(&x, home)
 		r.Hooks = append(r.Hooks, x)
-		if x.State != "effective" {
-			r.Verdict = "UNHEALTHY"
-		}
 	}
 	sort.Slice(r.Hooks, func(i, j int) bool {
 		if r.Hooks[i].EventName == r.Hooks[j].EventName {
@@ -167,21 +171,91 @@ func inspectCodexHookProfileContext(ctx context.Context, home, workspace, binary
 		}
 		return r.Hooks[i].EventName < r.Hooks[j].EventName
 	})
-	for _, event := range []string{"pre_tool_use", "post_tool_use", "stop", "subagent_stop"} {
-		found := false
-		for _, h := range r.Hooks {
-			found = found || h.EventName == event
-		}
-		if !found {
-			r.Errors = append(r.Errors, "missing effective "+event+" hook")
-			r.Verdict = "UNHEALTHY"
-		}
-	}
-	if len(r.Errors) > 0 {
-		r.Verdict = "UNHEALTHY"
-	}
+	applyCodexHookContract(&r)
 	return r, nil
 }
+
+func applyCodexHookContract(r *hookProfileReport) {
+	r.EventContracts = nil
+	r.Errors = withoutGeneratedHookContractErrors(r.Errors)
+	byEvent := make(map[string][]effectiveHook)
+	unhealthy := len(r.Errors) > 0
+	for _, h := range r.Hooks {
+		event := normalizeHookEvent(h.EventName)
+		byEvent[event] = append(byEvent[event], h)
+		if h.State != "effective" {
+			unhealthy = true
+		}
+	}
+
+	for _, event := range []string{"pre_tool_use", "stop", "subagent_stop"} {
+		hooks := byEvent[event]
+		status := "effective"
+		effective := false
+		for _, h := range hooks {
+			effective = effective || h.State == "effective"
+		}
+		if !effective {
+			status = "missing"
+			if len(hooks) > 0 {
+				status = "unhealthy"
+			}
+			r.Errors = append(r.Errors, "missing effective "+event+" hook")
+			unhealthy = true
+		} else {
+			for _, h := range hooks {
+				if h.State != "effective" {
+					status = "unhealthy"
+					break
+				}
+			}
+		}
+		r.EventContracts = append(r.EventContracts, hookEventContract{EventName: event, Requirement: "mandatory", Status: status})
+	}
+
+	postHooks := byEvent["post_tool_use"]
+	post := hookEventContract{
+		EventName:   "post_tool_use",
+		Requirement: "optional",
+		Status:      "intentionally_disabled",
+		Detail:      "zero handlers are intentional because successful advisory PostToolUse hooks create foreground spam",
+	}
+	if len(postHooks) > 0 {
+		post.Status = "effective"
+		post.Detail = "optional handler is present and is still diagnosed"
+		for _, h := range postHooks {
+			if h.State != "effective" {
+				post.Status = "unhealthy"
+				unhealthy = true
+				break
+			}
+		}
+	}
+	r.EventContracts = append(r.EventContracts, post)
+	r.Errors = uniqueStrings(r.Errors)
+	r.Verdict = "HEALTHY"
+	if unhealthy || len(r.Errors) > 0 {
+		r.Verdict = "UNHEALTHY"
+	}
+}
+
+func withoutGeneratedHookContractErrors(errors []string) []string {
+	out := errors[:0]
+	for _, err := range errors {
+		generated := false
+		for _, event := range []string{"pre_tool_use", "post_tool_use", "stop", "subagent_stop"} {
+			if err == "missing effective "+event+" hook" {
+				generated = true
+				break
+			}
+		}
+		if !generated {
+			out = append(out, err)
+		}
+	}
+	return out
+}
+
 func isObservedHookEvent(event string) bool {
 	switch event {
 	case "pre_tool_use", "post_tool_use", "stop", "subagent_stop", "stop_failure":
@@ -333,6 +407,13 @@ func queryCodexHooksContext(ctx context.Context, home, workspace, binary string)
 }
 func writeHookProfile(w io.Writer, r hookProfileReport) {
 	fmt.Fprintf(w, "Codex effective hook profile\nCODEX_HOME: %s\nconfig: %s\nworkspace: %s\nCodex binary: %s %s\n", r.CodexHome, r.ConfigPath, r.Workspace, r.CodexExecutable.Path, r.CodexExecutable.SHA256)
+	for _, c := range r.EventContracts {
+		fmt.Fprintf(w, "%s requirement=%s status=%s", c.EventName, c.Requirement, c.Status)
+		if c.Detail != "" {
+			fmt.Fprintf(w, " (%s)", c.Detail)
+		}
+		fmt.Fprintln(w)
+	}
 	for _, h := range r.Hooks {
 		fmt.Fprintf(w, "%s order=%d state=%s enabled=%t trust=%s source=%s sourcePath=%s\n  key: %s\n  command: %s\n", h.EventName, h.DisplayOrder, h.State, h.Enabled, h.TrustStatus, h.Source, h.SourcePath, h.Key, h.Command)
 		for _, id := range h.Identities {
