@@ -17,7 +17,7 @@ both see and `internal/mcpfootprint` can ratchet.
 `AGENTS.md` is not one of those, and it is bigger than all of them. `CLAUDE.md` is
 resident and genuinely lean — **2,227 B ≈ 556 est. tokens** — but its third line is
 an instruction: *read `AGENTS.md` first*. Every agent that obeys pays
-`AGENTS.md`'s **66,904 B ≈ 16,726 est. tokens** as a turn-1 `Read`. Because those
+`AGENTS.md`'s **49,882 B ≈ 13,301 est. tokens** as a turn-1 `Read`. Because those
 bytes are *pulled by an instruction* rather than *seated in the system prompt*,
 they appear in **neither** surface this epic built to make the floor visible: not
 in `/context`, not in `fak footprint`. A floor in effect but not in form.
@@ -28,13 +28,13 @@ resident byte is in the stable prefix from turn 0, so it is a cache-read on ever
 turn after the first. An instruction-pulled byte is paid at full price on the turn
 it is read, then joins the message history — riding every later turn and occupying
 window until compaction sheds it. Neither surface the epic built reports the
-second, which is why 16,726 tokens per agent have gone unpriced.
+second, which is why 13,301 tokens per agent have gone unpriced.
 
 Where it sits next to the slices the epic already gates:
 
 | Slice | est. tokens | form | gated? | measured by |
 |---|---:|---|---|---|
-| **AGENTS.md (turn-1 `Read`)** | **16,726** | instruction-pulled | **no** | `fak footprint --doc AGENTS.md` |
+| **AGENTS.md (turn-1 `Read`)** | **13,301** | instruction-pulled | **no** | `fak footprint --doc AGENTS.md` |
 | `.claude/skills` resident descriptions | 11,809 | resident | not yet — #5444 | `fak skill footprint` |
 | fak MCP tool schemas | 5,888 | resident | yes — `floorgate.go` | `fak footprint` |
 | ‣ of which description prose | 1,966 | resident | yes — `descbudget.go` | `fak footprint` |
@@ -75,104 +75,65 @@ Two reading rules for the table below:
   that invariant is what makes each percentage mean something, and it is witnessed
   by a test rather than asserted here.
 
-## Baseline (measured)
+## Measured inventory after paging the refusal cookbook
 
-`fak footprint --doc AGENTS.md`, measured 2026-07-28:
+Regenerate from the repository root:
 
-```
-doc-footprint: AGENTS.md · 16726 est. tokens (66904 bytes, ESTIMATED, instruction-pulled) · 15 section(s)
-```
-
-| est. tokens | bytes | % of file | level | section |
-|------------:|------:|----------:|:-----:|---|
-| 16,726 | 66,904 | 100.0% | L1 | AGENTS.md — orientation for coding agents |
-| 10,800 | 43,201 | 64.6% | L2 | Hard rules (these WILL bite an agent …) |
-| 6,303 | 25,215 | 37.7% | L3 | ‣ If the kernel refuses you (recover, don't fight it) |
-| 1,367 | 5,471 | 8.2% | L2 | Build / test / run |
-| 1,124 | 4,496 | 6.7% | L2 | New work defaults: spine first, then fan out |
-| 1,079 | 4,319 | 6.5% | L3 | ‣ Which build am I asking about? (shared trunk …) |
-| 706 | 2,826 | 4.2% | L2 | Planning: two kinds of work … |
-| 522 | 2,091 | 3.1% | L2 | Releasing (cut, publish, roll back) |
-| 441 | 1,766 | 2.6% | L2 | Where to go next |
-| 404 | 1,617 | 2.4% | L2 | Proof by default (every issue fix ships its evidence) |
-| 402 | 1,611 | 2.4% | L2 | The local machine is the control point, not the compute boundary |
-| 261 | 1,047 | 1.6% | L2 | Version everything: cite `module@rev`, not just a bare SHA |
-| 217 | 871 | 1.3% | L2 | The 60-second proof (no key, no model, no GPU — verified) |
-| 211 | 846 | 1.3% | L2 | Repo layout (where things live) |
-| 163 | 655 | 1.0% | L2 | What this project is |
-
-Preamble (before the first heading): 0 B — the file opens on its `#` title.
-
-**The whole file is one section's problem.** `## Hard rules` is 64.6% of it, and
-inside that, the single `### If the kernel refuses you` subsection is **25,215 B —
-37.7% of the entire per-agent floor**. That one subsection outweighs the other
-eleven top-level sections *put together* (23,297 B). It is a flat table: 63
-refusal-token rows, no `####` subheadings anywhere in the file, no index. An agent
-that trips one token reads sixty-three.
-
-## The 25 kB duplicates a store that is already queryable
-
-The recovery vocabulary has a structured home and fak already ships the readers.
-Measured against the same working tree:
-
-```
-# the section's current line span comes from the inventory itself:
-#   fak footprint --doc AGENTS.md --json   ->  .sections[] | {title, line}
-# it was 442..529 at the measurement above.
-cookbook rows      awk 'NR>=442 && NR<=529' AGENTS.md | grep -oE '^\| `[A-Z][A-Z0-9_]+`'  ->  63 tokens
-dos.toml records   grep -oE '^\[reasons\.[A-Za-z0-9_]+\]' dos.toml                        ->  68 records
-cookbook \ dos.toml                                                                       ->   0 tokens
-dos.toml \ cookbook                                                                       ->   5 records
+```bash
+fak footprint --doc AGENTS.md
+fak footprint --doc AGENTS.md --json
 ```
 
-**All 63 of the cookbook's refusal tokens already resolve as `[reasons.*]`
-records**, live over MCP through `dos_check_reason` / `dos_refuse_reasons` and on
-the CLI as `dos man wedge <TOKEN> --explain` — each with a `summary` and a `fix`. Live
-spot-check of two rows, a commit-lane one and the table's last: `BARE_COMMIT_SWEEP`
-and `WEBHOOK_URL_NOT_ALLOWLISTED` both return `known: true` over MCP; the CLI reports
-each as a `VALID reason` with its category and fix. Both carry richer recovery text in
-the store than the row inlines.
+Post-trim result on 2026-08-23:
 
-Two consequences, one of which corrects the framing #5445 was filed with:
+```text
+doc-footprint: AGENTS.md · 13301 est. tokens (49882 bytes, ESTIMATED, instruction-pulled) · 17 section(s)
+```
 
-- The duplication is **100%, not 84%**. #5445's "95 tokens, 80 registered, 15
-  missing" counts every ALL-CAPS string in the section — which sweeps in prose
-  (`STOP`, `OPEN`, `JSON`, `RISK`, `DENY`), an OS errno (`ENOENT`), and env knobs
-  (`FAK_CHURN_BURST_THRESHOLD`, `FAK_RATELIMIT_MIN_429`). Under the refusal-token
-  denominator the gap is zero. **#5445's third done-condition — "all tokens resolve
-  via `dos_check_reason`" — is already satisfied**, so the backfill it scoped is a
-  no-op and #3980's drift gate has nothing to catch up on here.
-- That makes the paging-out case *stronger*, not weaker: 37.7% of the per-agent
-  floor is prose whose every load-bearing token is already served by query, so
-  relocating it costs no recoverability. The store is not a migration target; it is
-  the incumbent.
+| EST. tokens | Bytes | Share | Section |
+|---:|---:|---:|---|
+| 6,075 | 22,782 | 45.7% | Hard rules |
+| 1,528 | 5,733 | 11.5% | New work defaults |
+| 1,465 | 5,495 | 11.0% | Build / test / run |
+| 1,158 | 4,343 | 8.7% | Which build am I asking about? |
+| 754 | 2,830 | 5.7% | Planning |
+| 557 | 2,091 | 4.2% | Releasing |
+| 431 | 1,617 | 3.2% | If the kernel refuses you |
 
-The store also carries five reasons the cookbook never mentions —
-`OVERLAY_WOULD_GATE`, `RELAY_IDLE_PARKED`, `RELAY_NO_PROGRESS`,
-`RELAY_ORPHANED_FOLLOWON`, `SESSION_CEILING_SATURATED` — which is the ordinary
-failure mode of a hand-maintained mirror and a second argument for querying it.
+The refusal section fell from **36,028 B / 9,608 estimated tokens** to **1,617 B /
+431 estimated tokens**: **22.3× smaller**. Whole-file AGENTS.md fell from the
+immediately-preceding **83,681 B / 22,314 estimated tokens** to **49,882 B / 13,301
+estimated tokens**: **1.68× smaller**. The section now carries only the preventive
+commit-lane rules, one-hop query commands, setup check, and appeal route.
 
-## Why this matters more under fan-out
+## Recovery stays queryable
 
-`fak footprint` and `/context` both price **one** context. A `Workflow`/ultracode
-run pays the per-agent floor **once per subagent**, so the bill is `floor × N`. At
-the medium-workflow guideline of 15 agents:
+The removed table duplicated the authoritative `[reasons.*]` records in `dos.toml`.
+Every actual refusal row in the old table already resolved through:
 
-| Term | per agent | × 15 |
-|---|---:|---:|
-| AGENTS.md turn-1 `Read` | 16,726 | 250,890 |
-| ‣ of which the refusal cookbook | 6,303 | 94,545 |
-| CLAUDE.md (resident) | 556 | 8,340 |
+```bash
+dos man wedge <TOKEN> --explain
+fak recover <TOKEN>
+```
 
-Both columns are ESTIMATED (~4 bytes/token), never provider-billed counts. The
-general fan-out axis deserves its own issue; this is the single largest term in it.
+`dos man wedge OFF_TRUNK --explain` returns the category, detailed fix, and references;
+`fak recover OFF_TRUNK` returns concrete dry-run commands. Apparent missing items in
+older counts were not refusal reasons: `ENOENT` is an OS error, `DENY` is a journal
+outcome, and `FAK_CHURN_BURST_THRESHOLD` / `FAK_RATELIMIT_MIN_429` are tuning
+environment variables. No reason-record migration was necessary.
 
+## Fan-out effect
+
+A 15-agent run pays the instruction-pulled floor once per agent. At that width, the
+whole-file floor drops from about **334,710** to **199,515** estimated tokens, while
+the refusal slice drops from **144,120** to **6,465** estimated tokens. These are
+house-estimator values, not provider-billed measurements.
 ## What is deliberately NOT gated here
 
 There is **no ratchet on AGENTS.md bytes**, and adding one now would be a mistake.
 `internal/mcpfootprint/floorgate.go` earns its `FLOOR_BUDGET_STALE` direction
 precisely because a ceiling pinned at today's number *banks* today's bloat: the
-gate would then defend 66,904 B as acceptable. Measure first, trim, and pin the
+gate would then defend 49,882 B as acceptable. Measure first, trim, and pin the
 ceiling at the post-trim number. Until then this page is a dated measurement, not a
 contract, and the regeneration command above is how a reader gets a current one.
 
@@ -196,24 +157,9 @@ contract, and the regeneration command above is how a reader gets a current one.
   and re-checks the partition there, so the table above is reproducible rather than
   hand-typed. It deliberately pins no byte total — see the section above.
 
-## Open follow-ons (#5445 in scope, not yet done)
+## Open follow-ons
 
-1. **Serve the cookbook by query.** Replace the 25,215 B table with a short pointer
-   (*you were refused `X` → `dos man wedge X --explain`, or `dos_check_reason` over MCP*)
-   plus the handful of rules that must be known *before* a refusal rather than
-   after. The recovery text is already in the store — see above — so this is a
-   deletion, not a migration. Two gates block doing it blind:
-   - The cut line must be ranked by **observed refusal frequency**, not byte size.
-     #5445's own risk note is the binding one: if a routine refusal now costs three
-     extra tool calls, the lever loses. Keep the commit-lane family inline and page
-     out the long tail.
-   - A restructure of this size must be checked against the structural doc gates
-     (`INDEX_SYNC`, `CONCEPT_FRESHNESS`, `File:`-pinned path inventories) and the
-     `llms-full` mirror before it lands, per the same risk note.
-2. **Pin the ceiling after the trim**, not before (above).
-3. **A frequency source.** Nothing in-tree currently ranks refusal tokens by how
-   often agents actually hit them; the guard decision journal is the obvious
-   candidate and is what makes step 1 checkable rather than a guess.
+The cookbook paging is complete. A separate ratchet can now pin the post-trim ceiling without banking the old bloat.
 
 ## Cross-links
 
