@@ -38,7 +38,7 @@ func TestResumeBrokerSelectsCodexWithoutLeakingGoal(t *testing.T) {
 	if got.Backend != "codex" {
 		t.Fatalf("backend=%q", got.Backend)
 	}
-	want := []string{"fak-bin", "m", "--", "fak-bin", "codex-resume", "--json", "--rollout", "rollout.jsonl", "--cwd", p.CWD, "--prompt-file", "goal.txt", "--result-file", "result.json", "thread-id"}
+	want := []string{"fak-bin", "m", "--codex-loop-gate", "off", "--", "fak-bin", "codex-resume", "--json", "--rollout", "rollout.jsonl", "--cwd", p.CWD, "--prompt-file", "goal.txt", "--result-file", "result.json", "thread-id"}
 	if !reflect.DeepEqual(got.Argv, want) {
 		t.Fatalf("argv=%q want=%q", got.Argv, want)
 	}

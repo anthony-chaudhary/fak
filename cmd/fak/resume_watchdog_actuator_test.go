@@ -20,7 +20,7 @@ func TestResumeWatchdogBrokerUsesFakManagedEnvelopeForEveryHarness(t *testing.T)
 		want string
 	}{
 		{name: "claude", plan: resume.WatchdogPlanRow{Session: "claude-session"}, want: "fak-bin m -- claude-bin --resume claude-session"},
-		{name: "codex", plan: resume.WatchdogPlanRow{Harness: "codex", Session: "codex-session", Rollout: "rollout.jsonl", GoalFile: "goal.json", ResultFile: "result.json"}, want: "fak-bin m -- fak-bin codex-resume"},
+		{name: "codex", plan: resume.WatchdogPlanRow{Harness: "codex", Session: "codex-session", Rollout: "rollout.jsonl", GoalFile: "goal.json", ResultFile: "result.json"}, want: "fak-bin m --codex-loop-gate off -- fak-bin codex-resume"},
 		{name: "opencode", plan: resume.WatchdogPlanRow{Harness: "opencode", Session: "opencode-session"}, want: "fak-bin m -- opencode run --session opencode-session"},
 	}
 	for _, tt := range tests {
