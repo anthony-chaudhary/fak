@@ -398,19 +398,13 @@ func CaptureSubjects(ad Adapter, subjects []SubjectMutation) (*SubjectReceipt, S
 	idh.Write([]byte("fak-effect-receipt/1\x00" + rc.binding))
 	for _, s := range names {
 		p := rc.plans[s]
-		st := SubjectState{Subject: s}
-		v, err := ad.Read(s)
+		st, value, err := effectReadSubjectState(ad, p, s, true)
 		if err != nil {
 			st.Fault = FaultReadFailed
 			st.ValueDigest = "unreadable"
 		} else {
-			rc.before[s] = v
+			rc.before[s] = value
 			rc.readable[s] = true
-			st.Readable = true
-			st.ValueDigest = effectDigest(s, v)
-			if p.rule() == EquivalenceSemantic {
-				st.NormalizedDigest = effectDigest(s, effectNormalize(p, v))
-			}
 		}
 		idh.Write([]byte{0})
 		idh.Write([]byte(s + "=" + st.ValueDigest))
@@ -425,6 +419,44 @@ func effectNormalize(p SubjectMutation, v string) string {
 		return p.Normalize(v)
 	}
 	return v
+}
+
+func effectObservedSubjectState(p SubjectMutation, subject, value string, normalize bool) SubjectState {
+	st := SubjectState{Subject: subject, Readable: true, ValueDigest: effectDigest(subject, value)}
+	if normalize && p.rule() == EquivalenceSemantic {
+		st.NormalizedDigest = effectDigest(subject, effectNormalize(p, value))
+	}
+	return st
+}
+
+func effectReadSubjectState(ad Adapter, p SubjectMutation, subject string, normalize bool) (SubjectState, string, error) {
+	value, err := ad.Read(subject)
+	if err != nil {
+		return SubjectState{Subject: subject}, "", err
+	}
+	return effectObservedSubjectState(p, subject, value, normalize), value, nil
+}
+
+func effectReadEffectiveState(ad Adapter, p SubjectMutation, subject string) (SubjectState, string, bool) {
+	st, value, err := effectReadSubjectState(ad, p, subject, true)
+	if err != nil {
+		st.Effect = "unreadable"
+		st.Fault = FaultEffectReadFailed
+		st.ValueDigest = "unreadable"
+		return st, "", false
+	}
+	return st, value, true
+}
+
+func effectReadRestoredState(ad Adapter, p SubjectMutation, subject string) (SubjectState, string, bool) {
+	st, value, err := effectReadSubjectState(ad, p, subject, true)
+	if err != nil {
+		st.Restoration = SubjectUnknown
+		st.Fault = FaultPostReadFailed
+		st.ValueDigest = "unreadable"
+		return st, "", false
+	}
+	return st, value, true
 }
 
 // RunEffectArm drives one arm through all five stages against the receipt captured
@@ -470,10 +502,7 @@ func RunEffectArm(ctx context.Context, rc *SubjectReceipt, arm EffectArm, ad Ada
 	rejected := false
 	for _, s := range rc.order {
 		p := rc.plans[s]
-		st := SubjectState{Subject: s, Readable: true, ValueDigest: effectDigest(s, p.Requested)}
-		if p.rule() == EquivalenceSemantic {
-			st.NormalizedDigest = effectDigest(s, effectNormalize(p, p.Requested))
-		}
+		st := effectObservedSubjectState(p, s, p.Requested, true)
 		applied = append(applied, s)
 		if err := ad.Apply(s, p.Requested); err != nil {
 			st.Request = "rejected"
@@ -495,20 +524,10 @@ func RunEffectArm(ctx context.Context, rc *SubjectReceipt, arm EffectArm, ad Ada
 	ineffective := false
 	for _, s := range applied {
 		p := rc.plans[s]
-		st := SubjectState{Subject: s}
-		v, err := ad.Read(s)
-		switch {
-		case err != nil:
-			st.Effect = "unreadable"
-			st.Fault = FaultEffectReadFailed
-			st.ValueDigest = "unreadable"
+		st, v, readable := effectReadEffectiveState(ad, p, s)
+		if !readable {
 			ineffective = true
-		default:
-			st.Readable = true
-			st.ValueDigest = effectDigest(s, v)
-			if p.rule() == EquivalenceSemantic {
-				st.NormalizedDigest = effectDigest(s, effectNormalize(p, v))
-			}
+		} else {
 			if p.equivalent(p.Requested, v) {
 				st.Effect = "effective"
 			} else {
@@ -660,25 +679,14 @@ func effectCompensate(out EffectReceipt, rc *SubjectReceipt, ad Adapter, applied
 	if rc != nil {
 		for _, s := range rc.order {
 			p := rc.plans[s]
-			st := SubjectState{Subject: s}
-			v, err := ad.Read(s)
+			st, v, readable := effectReadRestoredState(ad, p, s)
 			switch {
-			case err != nil:
-				st.Restoration = SubjectUnknown
-				st.Fault = FaultPostReadFailed
-				st.ValueDigest = "unreadable"
+			case !readable:
 			case !rc.readable[s]:
 				// No captured "before" to compare against: the subject's restoration
 				// is unknowable, not clean.
-				st.Readable = true
-				st.ValueDigest = effectDigest(s, v)
 				st.Restoration = SubjectUnknown
 			default:
-				st.Readable = true
-				st.ValueDigest = effectDigest(s, v)
-				if p.rule() == EquivalenceSemantic {
-					st.NormalizedDigest = effectDigest(s, effectNormalize(p, v))
-				}
 				if p.equivalent(rc.before[s], v) {
 					st.Restoration = SubjectRestored
 				} else {

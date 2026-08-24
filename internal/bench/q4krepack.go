@@ -24,10 +24,7 @@
 package bench
 
 import (
-	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
@@ -290,56 +287,8 @@ func q4kGemvInterleaved(packed []byte, out, in, width int, x, y []float32) {
 		for l := 0; l < w; l++ {
 			acc[l] = 0
 		}
-		for b := 0; b < nblk; b++ {
-			base := groupStart + b*w*Q4KBlockBytes
-			dOff, mOff, scOff := base, base+2*w, base+4*w
-			qsOff := base + q4kHeadBytes*w
-
-			for j := 0; j < Q4KSuperBlockWeights; j += 64 {
-				is := j / 32
-				for l := 0; l < w; l++ {
-					d := math.Float32frombits(model.F16BitsToF32Bits(binary.LittleEndian.Uint16(packed[dOff+2*l:])))
-					dmin := math.Float32frombits(model.F16BitsToF32Bits(binary.LittleEndian.Uint16(packed[mOff+2*l:])))
-					sc := packed[scOff+q4kScaleBytes*l:][:q4kScaleBytes]
-					a, c := model.GetScaleMinK4(is, sc)
-					dLo[l], mLo[l] = d*float32(a), dmin*float32(c)
-					a, c = model.GetScaleMinK4(is+1, sc)
-					dHi[l], mHi[l] = d*float32(a), dmin*float32(c)
-				}
-				qi := (j / 64) * 32
-				for k := 0; k < 32; k++ {
-					lanes := packed[qsOff+(qi+k)*w:][:w] // w contiguous bytes: no gather
-					lo := buf[(j+k)*width:][:w]
-					hi := buf[(j+32+k)*width:][:w]
-					for l := 0; l < w; l++ {
-						q := lanes[l]
-						lo[l] = dLo[l]*float32(q&0x0f) - mLo[l]
-						hi[l] = dHi[l]*float32(q>>4) - mHi[l]
-					}
-				}
-			}
-
-			xs := x[b*Q4KSuperBlockWeights:]
-			for l := 0; l < w; l++ {
-				s0[l], s1[l], s2[l], s3[l] = 0, 0, 0, 0
-			}
-			for i := 0; i < Q4KSuperBlockWeights; i += 4 {
-				b0 := buf[i*width:][:w]
-				b1 := buf[(i+1)*width:][:w]
-				b2 := buf[(i+2)*width:][:w]
-				b3 := buf[(i+3)*width:][:w]
-				x0, x1, x2, x3 := xs[i], xs[i+1], xs[i+2], xs[i+3]
-				for l := 0; l < w; l++ {
-					s0[l] += b0[l] * x0
-					s1[l] += b1[l] * x1
-					s2[l] += b2[l] * x2
-					s3[l] += b3[l] * x3
-				}
-			}
-			for l := 0; l < w; l++ {
-				acc[l] += (s0[l] + s1[l]) + (s2[l] + s3[l])
-			}
-		}
+		q4kAccumulateInterleavedGroup(packed, groupStart, nblk, w, width, x,
+			acc[:w], dLo[:w], mLo[:w], dHi[:w], mHi[:w], s0[:w], s1[:w], s2[:w], s3[:w], buf)
 		for l := 0; l < w; l++ {
 			y[row0+l] = acc[l]
 		}
@@ -422,6 +371,75 @@ func q4kGemvInterleaved8(packed []byte, out, in int, x, y []float32) int {
 	return row0
 }
 
+func q4kAccumulateInterleavedGroup(
+	packed []byte,
+	groupStart, blocks, lanes, stride int,
+	x, acc, dLo, mLo, dHi, mHi, s0, s1, s2, s3, buf []float32,
+) {
+	for block := 0; block < blocks; block++ {
+		base := groupStart + block*lanes*Q4KBlockBytes
+		dOff, mOff, scOff := base, base+2*lanes, base+4*lanes
+		qsOff := base + q4kHeadBytes*lanes
+
+		for j := 0; j < Q4KSuperBlockWeights; j += 64 {
+			scaleIndex := j / 32
+			q4kInterleavedScales(packed, dOff, mOff, scOff, scaleIndex, dLo, mLo, dHi, mHi)
+			quantIndex := (j / 64) * 32
+			for k := 0; k < 32; k++ {
+				quantLanes := packed[qsOff+(quantIndex+k)*lanes:][:lanes]
+				lo := buf[(j+k)*stride:][:lanes]
+				hi := buf[(j+32+k)*stride:][:lanes]
+				q4kInterleavedQuants(quantLanes, lo, hi, dLo, mLo, dHi, mHi)
+			}
+		}
+
+		xBlock := x[block*Q4KSuperBlockWeights:]
+		q4kAccumulateInterleaved(acc, s0, s1, s2, s3, buf, xBlock, stride)
+	}
+}
+
+func q4kInterleavedScales(packed []byte, dOff, mOff, scOff, scaleIndex int, dLo, mLo, dHi, mHi []float32) {
+	for lane := range dLo {
+		d := math.Float32frombits(model.F16BitsToF32Bits(binary.LittleEndian.Uint16(packed[dOff+2*lane:])))
+		dmin := math.Float32frombits(model.F16BitsToF32Bits(binary.LittleEndian.Uint16(packed[mOff+2*lane:])))
+		scales := packed[scOff+q4kScaleBytes*lane:][:q4kScaleBytes]
+		scale, min := model.GetScaleMinK4(scaleIndex, scales)
+		dLo[lane], mLo[lane] = d*float32(scale), dmin*float32(min)
+		scale, min = model.GetScaleMinK4(scaleIndex+1, scales)
+		dHi[lane], mHi[lane] = d*float32(scale), dmin*float32(min)
+	}
+}
+
+func q4kInterleavedQuants(lanes []byte, lo, hi, dLo, mLo, dHi, mHi []float32) {
+	for lane, q := range lanes {
+		lo[lane] = dLo[lane]*float32(q&0x0f) - mLo[lane]
+		hi[lane] = dHi[lane]*float32(q>>4) - mHi[lane]
+	}
+}
+
+func q4kAccumulateInterleaved(acc, s0, s1, s2, s3, buf, x []float32, stride int) {
+	clear(s0)
+	clear(s1)
+	clear(s2)
+	clear(s3)
+	for i := 0; i < Q4KSuperBlockWeights; i += 4 {
+		b0 := buf[i*stride:][:len(acc)]
+		b1 := buf[(i+1)*stride:][:len(acc)]
+		b2 := buf[(i+2)*stride:][:len(acc)]
+		b3 := buf[(i+3)*stride:][:len(acc)]
+		x0, x1, x2, x3 := x[i], x[i+1], x[i+2], x[i+3]
+		for lane := range acc {
+			s0[lane] += b0[lane] * x0
+			s1[lane] += b1[lane] * x1
+			s2[lane] += b2[lane] * x2
+			s3[lane] += b3[lane] * x3
+		}
+	}
+	for lane := range acc {
+		acc[lane] += (s0[lane] + s1[lane]) + (s2[lane] + s3[lane])
+	}
+}
+
 // Q4KRepackConfig sizes one A/B run. Zero fields take the defaults in withQ4KDefaults, so
 // a bare Q4KRepackConfig{} is a valid full run.
 type Q4KRepackConfig struct {
@@ -496,15 +514,7 @@ type Q4KRepackReport struct {
 // computeDigest returns the SHA-256 hex of the canonical report JSON with Digest cleared,
 // so a reader can recompute it and confirm the witness was not edited after the fact.
 func (r *Q4KRepackReport) computeDigest() string {
-	saved := r.Digest
-	r.Digest = ""
-	b, err := json.Marshal(r)
-	r.Digest = saved
-	if err != nil {
-		return ""
-	}
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
+	return computeReportDigest(r, &r.Digest)
 }
 
 // VerifyDigest recomputes the digest and reports whether it still matches.

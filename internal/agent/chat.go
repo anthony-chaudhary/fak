@@ -936,17 +936,15 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			if p.PendingTurnCheckpoint != nil {
 				p.PendingTurnCheckpoint(attempt+1, rs.lastStatus, turnStart.UnixNano())
 			}
-			// Surface the retry BEFORE the silent backoff sleep, then wait; when the TIME
-			// budget is the bound a spent budget stops the loop (surface the last error) and a
-			// cancelled context returns promptly — carrying the classified 429/5xx truth when
-			// one is pending (#2257). See retryBackoffWait for the shared step.
-			stop, err := p.retryBackoffWait(ctx, attempt, rs.lastStatus, rs.lastRetryAfter, rs.lastCapWait, rs.lastStatusErr, deadline, budgetOn)
-			if err != nil {
-				return nil, err
-			}
-			if stop {
-				break
-			}
+		}
+		// Surface the retry before the silent backoff sleep. A spent time budget stops the
+		// loop, while a cancelled context returns the classified pending status (#2257).
+		stop, err := p.waitBeforeAttempt(ctx, attempt, &rs, deadline, budgetOn)
+		if err != nil {
+			return nil, err
+		}
+		if stop {
+			break
 		}
 		req, err := http.NewRequestWithContext(ctx, "POST", call.url, bytes.NewReader(call.body))
 		if err != nil {
@@ -958,11 +956,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			req.Header.Set("Accept", "text/event-stream")
 		}
 		resp, err := p.Client.Do(req)
-		providerStatus := 0
-		if resp != nil {
-			providerStatus = resp.StatusCode
-		}
-		finishProvider(providerStatus, err)
+		finishProvider(providerResponseStatus(resp), err)
 		if err != nil {
 			// A deterministic dial-time failure (refused / NXDOMAIN / TLS) will not
 			// resolve on retry — retrying only adds ~8s of backoff latency to what is a
@@ -975,102 +969,21 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		raw, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			if retryableStatus(resp.StatusCode) {
-				// A 429 that names an ACCOUNT CAP (session/weekly/usage), or a generic 429 whose only
-				// cap signal is an hours-away relayed reset, is not a seconds-long throttle: its wait
-				// can be hours (or a multi-account/billing wall) away. Rather than sleep on the capped
-				// seat toward that reset, the shared seam rehomes the session ONCE to a permitted
-				// sibling seat that can serve the turn now, or — on no free seat / a real transient
-				// throttle — falls through to the existing cap-aware backoff below, unchanged.
-				if call.noteRetryableCapMaybeRehome(p, &rs, resp.StatusCode, raw, resp.Header, 200, false, &triedRehome, &rehomePending, attempt) == capRehomeResend {
-					attempt-- // the rehome probe is uncounted against the 429 backoff budget
-				}
+			retry, rewind, statusErr := call.handleRejectedResponse(ctx, p, &rs, resp, raw, attempt, rejectedResponseRetry{
+				triedAuthRefresh: &triedAuthRefresh, forbidden: &fbState,
+				triedRehome: &triedRehome, rehomePending: &rehomePending,
+				triedFailover: &triedFailover, failoverPending: &failoverPending,
+				recordRefreshState: true, bodyCap: 200,
+			})
+			if statusErr != nil {
+				return nil, statusErr
+			}
+			if rewind {
+				attempt--
+			}
+			if retry {
 				continue
 			}
-			// A 401 on the rotating-subscription path: re-resolve the credential fresh and
-			// retry ONCE. refreshAPIKeyWait returns false (so we fall through to the raw
-			// error) when there is no fresher token to try — a static/passthrough key, or
-			// the same token the upstream just rejected with no re-login landing within the
-			// grace window — so a truly-bad credential is not masked. The wait closes the
-			// re-login race: a user logging back in mid-session has a beat to rewrite the
-			// credential file, and this poll adopts the fresh token so the live session
-			// self-heals in place instead of the 401 surfacing to the wrapped agent.
-			if resp.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && call.authRefreshable {
-				if call.refreshAPIKeyWait(ctx, p) {
-					triedAuthRefresh = true
-					notifyAuthRefresh(p, AuthRefreshRecovered, attempt)
-					rs.lastErr = &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200), RetryAfter: resp.Header.Get("Retry-After")}
-					rs.lastStatus = resp.StatusCode
-					rs.lastRetryAfter = "" // re-send immediately with the fresh token; do not wait
-					// Do not count the credential-refresh retry against the backoff schedule:
-					// rewind so the next iteration re-sends immediately with the fresh token.
-					attempt--
-					continue
-				}
-				// On the rotating path we WAITED the grace window and no fresher token landed —
-				// the session is about to drop into its own /login. Surface that distinctly so
-				// the otherwise-silent give-up is visible (counted once: triedAuthRefresh would
-				// gate a second 401, but the window already elapsed so we fail now).
-				notifyAuthRefresh(p, AuthRefreshExhausted, attempt)
-			}
-			// A 403/402 that carries a USAGE/OVERAGE rejection is NOT a permanent wall and NOT a
-			// transient abuse flap — it is an account cap (a rolling 5h/7d window at its limit with
-			// overage disabled) that self-recovers at its named reset, but which Anthropic surfaces
-			// as a 403 with an org-flavored body indistinguishable from a real org wall. Only the
-			// anthropic-ratelimit-unified-*/overage headers tell them apart (usageOrOverageRejected).
-			// So it must take the SAME path a 429 account cap does — record it as a retryable cap
-			// (noteRetryableStatus sets lastCapWait from unifiedResetFor, now header-aware for a 403),
-			// then either REHOME to a permitted sibling seat or ride the cap-aware backoff toward the
-			// reset under the multi-hour budget — never the seconds-scale forbidden arm below, and
-			// never the org-wall failover. This precedes the transient and failover arms because a
-			// cap is neither a flap nor a wall.
-			if (resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusPaymentRequired) &&
-				usageOrOverageRejected(resp.Header) {
-				// The overage headers already proved a recovering cap (mustRehome=true): the seam
-				// swaps to a free seat or rides the cap-aware backoff toward the reset (retryBackoffWait
-				// uses lastCapWait) — never the seconds-scale forbidden arm, never the org-wall failover.
-				if call.noteRetryableCapMaybeRehome(p, &rs, resp.StatusCode, raw, resp.Header, 200, true, &triedRehome, &rehomePending, attempt) == capRehomeResend {
-					attempt-- // the rehome probe is uncounted against the backoff budget
-				}
-				continue
-			}
-			// A 403's bounded recovery arm: retry a transient abuse/capacity denial a few times
-			// across a short window before surfacing it. The arm is SELF-CONTAINED — it sleeps its
-			// own short paced wait (never the 429/5xx hour-budget backoff) and rewinds attempt so
-			// the probe does not consume the transient attempt budget. On its own exhaustion
-			// (window or attempts spent) or a body the upstream marks as a hard entitlement denial,
-			// it falls through to the terminal return with the actionable /login answer. The
-			// "recovered" notify is fired NOT here but at loop top on the next 200 (see below), so
-			// it reports a CONFIRMED heal, never an optimistic one; here we only note give-up.
-			if resp.StatusCode == http.StatusForbidden {
-				if fbState.step403(ctx, p, raw, attempt) {
-					attempt-- // uncounted against the 429/5xx budget; the arm bounds itself
-					continue
-				}
-			}
-			// An ACCOUNT-SCOPED wall (a 403/402 whose body says this credential's org/region/billing
-			// is denied — classifyUpstream -> RemedyFailoverAccount) is not fixable by retry or
-			// re-login on THIS account: every re-login mints another token for the same walled org.
-			// The one remedy is a DIFFERENT account whose org still permits the request. Try it ONCE,
-			// after the transient arm above has ruled out a clearing capacity flap. On success adopt
-			// the sibling credential and re-send in place (uncounted); the guard's failover closure
-			// also stickily redirects APIKeyFunc so the swap persists across turns. On no target,
-			// fall through to the terminal return with the honest message.
-			if classifyUpstream(resp.StatusCode, raw, resp.Header) == RemedyFailoverAccount && !triedFailover && p.AccountFailoverFunc != nil {
-				if call.failoverAccountCred(p, RemedyFailoverAccount.String()) {
-					triedFailover = true
-					failoverPending = true // confirmed-heal notify fires at the next 200, not here
-					rs.lastErr = &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 200), RetryAfter: resp.Header.Get("Retry-After")}
-					rs.lastStatus = resp.StatusCode
-					rs.lastRetryAfter = "" // re-send immediately with the permitted account; do not wait
-					attempt--
-					continue
-				}
-				// No permitted sibling to fail over to — every account is walled or absent. Report
-				// the spent-but-fruitless failover so the account-scoped 403 give-up is visible.
-				notifyAccountFailover(p, AccountFailoverExhausted, attempt)
-			}
-			return nil, &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 400), RetryAfter: resp.Header.Get("Retry-After")}
 		}
 		// A 200 after the 403 arm fired is a CONFIRMED transient-403 self-heal: the abuse/capacity
 		// gate cleared and the live session healed in place instead of dropping into a spurious

@@ -10,8 +10,6 @@ import (
 	"strings"
 )
 
-const modulePrefix = "github.com/anthony-chaudhary/fak/internal/"
-
 const DiagnosticStaleTierDeclaration = "stale-tier-declaration"
 
 type Tier struct {
@@ -594,6 +592,33 @@ func lexicalStringsLess(left, right []string) bool {
 	return strings.Join(left, "\x00") < strings.Join(right, "\x00")
 }
 
+func residualSearch(capacity map[string]map[string]int, start, stop string) map[string]string {
+	parent := map[string]string{start: ""}
+	queue := []string{start}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		neighbors := make([]string, 0, len(capacity[current]))
+		for next, residual := range capacity[current] {
+			if residual > 0 {
+				neighbors = append(neighbors, next)
+			}
+		}
+		sort.Strings(neighbors)
+		for _, next := range neighbors {
+			if _, seen := parent[next]; seen {
+				continue
+			}
+			parent[next] = current
+			queue = append(queue, next)
+			if stop != "" && next == stop {
+				return parent
+			}
+		}
+	}
+	return parent
+}
+
 func unitVertexMaxFlow(source, sink string, members []string, adjacency map[string]map[string]struct{}) (int, []string) {
 	const inSuffix, outSuffix = "\x00in", "\x00out"
 	inNode := func(member string) string { return member + inSuffix }
@@ -629,26 +654,7 @@ func unitVertexMaxFlow(source, sink string, members []string, adjacency map[stri
 	start, target := outNode(source), inNode(sink)
 	flow := 0
 	for {
-		parent := map[string]string{start: ""}
-		queue := []string{start}
-		for len(queue) > 0 {
-			current := queue[0]
-			queue = queue[1:]
-			neighbors := make([]string, 0, len(capacity[current]))
-			for next, residual := range capacity[current] {
-				if residual > 0 {
-					neighbors = append(neighbors, next)
-				}
-			}
-			sort.Strings(neighbors)
-			for _, next := range neighbors {
-				if _, seen := parent[next]; seen {
-					continue
-				}
-				parent[next] = current
-				queue = append(queue, next)
-			}
-		}
+		parent := residualSearch(capacity, start, "")
 		if _, found := parent[target]; !found {
 			break
 		}
@@ -665,26 +671,7 @@ func unitVertexMaxFlow(source, sink string, members []string, adjacency map[stri
 		}
 		flow += bottleneck
 	}
-	reachable := map[string]struct{}{start: {}}
-	queue := []string{start}
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		neighbors := make([]string, 0, len(capacity[current]))
-		for next, residual := range capacity[current] {
-			if residual > 0 {
-				neighbors = append(neighbors, next)
-			}
-		}
-		sort.Strings(neighbors)
-		for _, next := range neighbors {
-			if _, seen := reachable[next]; seen {
-				continue
-			}
-			reachable[next] = struct{}{}
-			queue = append(queue, next)
-		}
-	}
+	reachable := residualSearch(capacity, start, "")
 	separator := make([]string, 0, flow)
 	for _, member := range members {
 		if member == source || member == sink {
@@ -752,32 +739,7 @@ func unitEdgeMaxFlow(source, sink string, edges map[string][2]string, members ma
 	}
 	flow := 0
 	for {
-		parent := map[string]string{source: ""}
-		queue := []string{source}
-		for len(queue) > 0 {
-			u := queue[0]
-			queue = queue[1:]
-			neighbors := make([]string, 0, len(capacity[u]))
-			for v, c := range capacity[u] {
-				if c > 0 {
-					neighbors = append(neighbors, v)
-				}
-			}
-			sort.Strings(neighbors)
-			for _, v := range neighbors {
-				if _, ok := parent[v]; ok {
-					continue
-				}
-				parent[v] = u
-				queue = append(queue, v)
-				if v == sink {
-					break
-				}
-			}
-			if _, ok := parent[sink]; ok {
-				break
-			}
-		}
+		parent := residualSearch(capacity, source, sink)
 		if _, ok := parent[sink]; !ok {
 			break
 		}
@@ -789,26 +751,7 @@ func unitEdgeMaxFlow(source, sink string, edges map[string][2]string, members ma
 		}
 		flow++
 	}
-	reachable := map[string]struct{}{source: {}}
-	queue := []string{source}
-	for len(queue) > 0 {
-		u := queue[0]
-		queue = queue[1:]
-		neighbors := make([]string, 0, len(capacity[u]))
-		for v, residual := range capacity[u] {
-			if residual > 0 {
-				neighbors = append(neighbors, v)
-			}
-		}
-		sort.Strings(neighbors)
-		for _, v := range neighbors {
-			if _, seen := reachable[v]; seen {
-				continue
-			}
-			reachable[v] = struct{}{}
-			queue = append(queue, v)
-		}
-	}
+	reachable := residualSearch(capacity, source, "")
 	keys := make([]string, 0, len(unique))
 	for key := range unique {
 		keys = append(keys, key)
@@ -850,12 +793,9 @@ func lateralBiconnectedBlocks(edges []ArchitectureEdge, components []LateralComp
 	adjacency := map[string][]string{}
 	undirected := map[string][2]string{}
 	for _, edge := range edges {
-		if edge.Direction != "lateral" {
+		left, right, ok := normalizedLateralEdge(edge)
+		if !ok {
 			continue
-		}
-		left, right := edge.From, edge.To
-		if right < left {
-			left, right = right, left
 		}
 		key := left + "\x00" + right
 		if _, ok := undirected[key]; ok {
@@ -999,7 +939,7 @@ func lateralArticulationPoints(edges []ArchitectureEdge, components []LateralCom
 				if _, ok := seen[start]; ok {
 					continue
 				}
-				fragment := reachableWithoutVertex(start, removed, edges, remaining)
+				fragment := reachableLateral(start, edges, remaining, removed, "", "")
 				for _, member := range fragment {
 					seen[member] = struct{}{}
 				}
@@ -1033,7 +973,18 @@ func lateralArticulationPoints(edges []ArchitectureEdge, components []LateralCom
 	return out
 }
 
-func reachableWithoutVertex(start, removed string, edges []ArchitectureEdge, members map[string]struct{}) []string {
+func normalizedLateralEdge(edge ArchitectureEdge) (left, right string, ok bool) {
+	if edge.Direction != "lateral" {
+		return "", "", false
+	}
+	left, right = edge.From, edge.To
+	if right < left {
+		left, right = right, left
+	}
+	return left, right, true
+}
+
+func reachableLateral(start string, edges []ArchitectureEdge, members map[string]struct{}, removed, skipLeft, skipRight string) []string {
 	seen := map[string]struct{}{start: {}}
 	pending := []string{start}
 	for len(pending) > 0 {
@@ -1041,7 +992,8 @@ func reachableWithoutVertex(start, removed string, edges []ArchitectureEdge, mem
 		pending = pending[1:]
 		var next []string
 		for _, edge := range edges {
-			if edge.Direction != "lateral" || edge.From == removed || edge.To == removed {
+			left, right, ok := normalizedLateralEdge(edge)
+			if !ok || removed != "" && (left == removed || right == removed) || skipLeft != "" && left == skipLeft && right == skipRight {
 				continue
 			}
 			neighbor := ""
@@ -1093,7 +1045,7 @@ func lateralBridges(edges []ArchitectureEdge, components []LateralComponent) []L
 			if right < left {
 				left, right = right, left
 			}
-			leftSide := reachableWithoutEdge(left, left, right, edges, members)
+			leftSide := reachableLateral(left, edges, members, "", left, right)
 			if slices.Contains(leftSide, right) {
 				continue
 			}
@@ -1122,52 +1074,6 @@ func lateralBridges(edges []ArchitectureEdge, components []LateralComponent) []L
 		}
 		return out[i].Right < out[j].Right
 	})
-	return out
-}
-
-func reachableWithoutEdge(start, skipLeft, skipRight string, edges []ArchitectureEdge, members map[string]struct{}) []string {
-	seen := map[string]struct{}{start: {}}
-	pending := []string{start}
-	for len(pending) > 0 {
-		current := pending[0]
-		pending = pending[1:]
-		var next []string
-		for _, edge := range edges {
-			if edge.Direction != "lateral" {
-				continue
-			}
-			left, right := edge.From, edge.To
-			if right < left {
-				left, right = right, left
-			}
-			if left == skipLeft && right == skipRight {
-				continue
-			}
-			neighbor := ""
-			if edge.From == current {
-				neighbor = edge.To
-			} else if edge.To == current {
-				neighbor = edge.From
-			}
-			if neighbor == "" {
-				continue
-			}
-			if _, ok := members[neighbor]; !ok {
-				continue
-			}
-			if _, ok := seen[neighbor]; !ok {
-				seen[neighbor] = struct{}{}
-				next = append(next, neighbor)
-			}
-		}
-		sort.Strings(next)
-		pending = append(pending, next...)
-	}
-	out := make([]string, 0, len(seen))
-	for member := range seen {
-		out = append(out, member)
-	}
-	sort.Strings(out)
 	return out
 }
 

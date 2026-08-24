@@ -535,14 +535,12 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 	rehomePending := false
 	var resp *http.Response
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		if attempt > 0 {
-			stop, err := p.retryBackoffWait(ctx, attempt, rs.lastStatus, rs.lastRetryAfter, rs.lastCapWait, rs.lastStatusErr, deadline, budgetOn)
-			if err != nil {
-				return nil, err
-			}
-			if stop {
-				break
-			}
+		stop, err := p.waitBeforeAttempt(ctx, attempt, &rs, deadline, budgetOn)
+		if err != nil {
+			return nil, err
+		}
+		if stop {
+			break
 		}
 		req, err := http.NewRequestWithContext(ctx, "POST", call.url, bytes.NewReader(call.body))
 		if err != nil {
@@ -552,11 +550,7 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 		finishProvider := BeginProviderCall(req)
 		req.Header.Set("Accept", "text/event-stream")
 		r, err := p.Client.Do(req)
-		providerStatus := 0
-		if r != nil {
-			providerStatus = r.StatusCode
-		}
-		finishProvider(providerStatus, err)
+		finishProvider(providerResponseStatus(r), err)
 		if err != nil {
 			if uerr := classifyDoError(err, &rs); uerr != nil {
 				return nil, uerr
@@ -573,55 +567,20 @@ func (p *HTTPPlanner) streamConnect(ctx context.Context, call *upstreamCall) (*h
 		}
 		raw, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
 		r.Body.Close()
-		if retryableStatus(r.StatusCode) {
-			// A 429 ACCOUNT CAP (session/weekly/usage, or a generic 429 whose relayed wait is
-			// hours-away) rehomes the session ONCE to a permitted sibling seat rather than sleep on
-			// the capped one; a transient rate_limited throttle keeps its seat and rides the backoff.
-			// The seam records the status and makes that decision for all three loops identically.
-			if call.noteRetryableCapMaybeRehome(p, &rs, r.StatusCode, raw, r.Header, 400, false, &triedRehome, &rehomePending, attempt) == capRehomeResend {
-				attempt--
-			}
+		retry, rewind, statusErr := call.handleRejectedResponse(ctx, p, &rs, r, raw, attempt, rejectedResponseRetry{
+			triedAuthRefresh: &triedAuthRefresh, forbidden: &fbState,
+			triedRehome: &triedRehome, rehomePending: &rehomePending,
+			recordRefreshState: true, bodyCap: 400,
+		})
+		if statusErr != nil {
+			return nil, statusErr
+		}
+		if rewind {
+			attempt--
+		}
+		if retry {
 			continue
 		}
-		// A 401 on the rotating-subscription path: re-resolve the credential fresh and retry
-		// ONCE (attempt-- so the refresh re-send is immediate and uncounted), mirroring Complete.
-		// refreshAPIKeyWait polls the on-disk token across the re-login grace window, so a user
-		// logging back in mid-stream is adopted and the live session self-heals in place.
-		if r.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && call.authRefreshable {
-			if call.refreshAPIKeyWait(ctx, p) {
-				triedAuthRefresh = true
-				notifyAuthRefresh(p, AuthRefreshRecovered, attempt)
-				rs.lastErr = &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
-				rs.lastStatus = r.StatusCode
-				rs.lastRetryAfter = ""
-				attempt--
-				continue
-			}
-			notifyAuthRefresh(p, AuthRefreshExhausted, attempt)
-		}
-		// A 403/402 USAGE/OVERAGE cap (see Complete): a self-recovering rolling-window cap that
-		// Anthropic surfaces as a 403 with an org-flavored body — only the unified/overage headers
-		// reveal it. Take the same path a 429 account cap does (record as a retryable cap, then
-		// rehome to a free seat or ride the cap-aware backoff toward the reset), never the
-		// seconds-scale forbidden arm and never the org-wall failover. Precedes both.
-		if (r.StatusCode == http.StatusForbidden || r.StatusCode == http.StatusPaymentRequired) &&
-			usageOrOverageRejected(r.Header) {
-			// The overage headers already proved a recovering cap (mustRehome=true): swap to a free
-			// seat or ride the cap-aware backoff toward the reset — never the seconds-scale 403 arm.
-			if call.noteRetryableCapMaybeRehome(p, &rs, r.StatusCode, raw, r.Header, 400, true, &triedRehome, &rehomePending, attempt) == capRehomeResend {
-				attempt--
-			}
-			continue
-		}
-		// A 403's bounded transient-recovery arm (self-contained short paced wait; see Complete):
-		// retry a transient abuse/capacity denial a few times before surfacing it terminally.
-		if r.StatusCode == http.StatusForbidden {
-			if fbState.step403(ctx, p, raw, attempt) {
-				attempt--
-				continue
-			}
-		}
-		return nil, &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
 	}
 	if resp == nil {
 		return nil, rs.exhausted("planner: streaming failed after retries")

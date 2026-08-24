@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -22,6 +23,93 @@ type retryState struct {
 	lastCapWait    string               // classified account-cap wait (#1362): toward the named reset when Retry-After is absent
 }
 
+// waitBeforeAttempt applies the common between-attempt wait. Attempt zero is a
+// no-op so callers can keep checkpoint work conditional without duplicating the
+// retry-loop control flow.
+func (p *HTTPPlanner) waitBeforeAttempt(ctx context.Context, attempt int, s *retryState, deadline time.Time, budgetOn bool) (bool, error) {
+	if attempt == 0 {
+		return false, nil
+	}
+	return p.retryBackoffWait(ctx, attempt, s.lastStatus, s.lastRetryAfter, s.lastCapWait, s.lastStatusErr, deadline, budgetOn)
+}
+
+func providerResponseStatus(resp *http.Response) int {
+	if resp == nil {
+		return 0
+	}
+	return resp.StatusCode
+}
+
+func newUpstreamStatusError(status int, raw []byte, hdr http.Header, bodyCap int) *UpstreamStatusError {
+	return &UpstreamStatusError{
+		Status:     status,
+		Body:       truncate(raw, bodyCap),
+		RetryAfter: hdr.Get("Retry-After"),
+	}
+}
+
+// noteImmediateRetry records an uncounted credential refresh or account
+// failover resend. Unlike noteRetryableStatus, this path deliberately carries
+// no backoff or cap classification because the next attempt runs immediately.
+func (s *retryState) noteImmediateRetry(status int, raw []byte, hdr http.Header, bodyCap int) {
+	s.lastErr = newUpstreamStatusError(status, raw, hdr, bodyCap)
+	s.lastStatus = status
+	s.lastRetryAfter = ""
+}
+
+type rejectedResponseRetry struct {
+	triedAuthRefresh   *bool
+	forbidden          *forbiddenRetryState
+	triedRehome        *bool
+	rehomePending      *bool
+	triedFailover      *bool
+	failoverPending    *bool
+	recordRefreshState bool
+	bodyCap            int
+}
+
+// handleRejectedResponse is the shared pre-first-byte recovery policy for the
+// buffered, OpenAI-stream, and Anthropic-stream paths. It returns retry=true
+// for a counted transient retry and rewind=true for an immediate, uncounted
+// credential/account resend. Every other response becomes the terminal status
+// error returned in err.
+func (c *upstreamCall) handleRejectedResponse(ctx context.Context, p *HTTPPlanner, s *retryState, resp *http.Response, raw []byte, attempt int, ctl rejectedResponseRetry) (retry, rewind bool, err error) {
+	status := resp.StatusCode
+	if retryableStatus(status) {
+		action := c.noteRetryableCapMaybeRehome(p, s, status, raw, resp.Header, ctl.bodyCap, false, ctl.triedRehome, ctl.rehomePending, attempt)
+		return true, action == capRehomeResend, nil
+	}
+	if status == http.StatusUnauthorized && !*ctl.triedAuthRefresh && c.authRefreshable {
+		if c.refreshAPIKeyWait(ctx, p) {
+			*ctl.triedAuthRefresh = true
+			notifyAuthRefresh(p, AuthRefreshRecovered, attempt)
+			if ctl.recordRefreshState {
+				s.noteImmediateRetry(status, raw, resp.Header, ctl.bodyCap)
+			}
+			return true, true, nil
+		}
+		notifyAuthRefresh(p, AuthRefreshExhausted, attempt)
+	}
+	if (status == http.StatusForbidden || status == http.StatusPaymentRequired) && usageOrOverageRejected(resp.Header) {
+		action := c.noteRetryableCapMaybeRehome(p, s, status, raw, resp.Header, ctl.bodyCap, true, ctl.triedRehome, ctl.rehomePending, attempt)
+		return true, action == capRehomeResend, nil
+	}
+	if status == http.StatusForbidden && ctl.forbidden.step403(ctx, p, raw, attempt) {
+		return true, true, nil
+	}
+	if ctl.triedFailover != nil && classifyUpstream(status, raw, resp.Header) == RemedyFailoverAccount && !*ctl.triedFailover && p.AccountFailoverFunc != nil {
+		if c.failoverAccountCred(p, RemedyFailoverAccount.String()) {
+			*ctl.triedFailover = true
+			*ctl.failoverPending = true
+			s.noteImmediateRetry(status, raw, resp.Header, ctl.bodyCap)
+			return true, true, nil
+		}
+		*ctl.triedFailover = true
+		notifyAccountFailover(p, AccountFailoverExhausted, attempt)
+	}
+	return false, false, newUpstreamStatusError(status, raw, resp.Header, 400)
+}
+
 // noteTransportGlitch records a transient transport error: no HTTP status, no
 // Retry-After to honor, and — a glitch is not a cap — no cap wait to stretch the
 // next retry toward. lastStatusErr is deliberately left intact (#1358).
@@ -39,7 +127,7 @@ func (s *retryState) noteTransportGlitch(err error) {
 // response's Retry-After as the next wait. bodyCap bounds the echoed error body.
 func (s *retryState) noteRetryableStatus(status int, raw []byte, hdr http.Header, bodyCap int) {
 	ra := hdr.Get("Retry-After")
-	se := &UpstreamStatusError{Status: status, Body: truncate(raw, bodyCap), RetryAfter: ra}
+	se := newUpstreamStatusError(status, raw, hdr, bodyCap)
 	cls, capWait := classifyLimit429(status, raw, hdr, time.Now())
 	se.LimitReason, se.LimitResetHint = cls.Reason, cls.ResetHint
 	s.lastErr = se

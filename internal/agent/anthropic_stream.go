@@ -123,17 +123,14 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 	maxAttempts, deadline, budgetOn := retryBounds(time.Now())
 	var rs retryState // shared between-attempt truth (#1358, #1362) — see retry_state.go
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		if attempt > 0 {
-			// Surface the retry BEFORE the otherwise-invisible backoff sleep (the same hook the
-			// buffered + OpenAI-stream paths use, so the gateway's `fak-turn … retry` line fires
-			// for the streaming passthrough too), then wait. See retryBackoffWait.
-			stop, err := p.retryBackoffWait(ctx, attempt, rs.lastStatus, rs.lastRetryAfter, rs.lastCapWait, rs.lastStatusErr, deadline, budgetOn)
-			if err != nil {
-				return err
-			}
-			if stop {
-				break
-			}
+		// Surface the retry before the otherwise-invisible backoff sleep (the same hook the
+		// buffered + OpenAI-stream paths use), then wait. Attempt zero is a no-op.
+		stop, err := p.waitBeforeAttempt(ctx, attempt, &rs, deadline, budgetOn)
+		if err != nil {
+			return err
+		}
+		if stop {
+			break
 		}
 		req, err := http.NewRequestWithContext(ctx, "POST", adapter.Endpoint(p.BaseURL, p.ModelID), bytes.NewReader(body))
 		if err != nil {
@@ -147,11 +144,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		req.Header.Set("Accept", "text/event-stream")
 
 		r, derr := p.Client.Do(req)
-		providerStatus := 0
-		if r != nil {
-			providerStatus = r.StatusCode
-		}
-		finishProvider(providerStatus, derr)
+		finishProvider(providerResponseStatus(r), derr)
 		if derr != nil {
 			// A deterministic dial failure (refused/NXDOMAIN/TLS) cannot be retried away —
 			// fail fast and tagged. A transient transport error (timeout, mid-flight reset)
@@ -186,7 +179,7 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 				// invalid_request_error / authentication_error): surface the status it maps
 				// to immediately, exactly as the same status on the wire would be — no retry
 				// burst, and no 502 costume over a 400.
-				return &UpstreamStatusError{Status: refusalStatus, Body: truncate(refusalFrame, 400), RetryAfter: r.Header.Get("Retry-After")}
+				return newUpstreamStatusError(refusalStatus, refusalFrame, r.Header, 400)
 			}
 			// Transient in-band refusal: note it as the triggering status (so the backoff, the
 			// RetryNotify line, and the exhausted error all read the same as the HTTP-status
@@ -196,70 +189,21 @@ func (p *HTTPPlanner) StreamAnthropicRaw(ctx context.Context, rawBody []byte, ap
 		}
 		raw, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
 		r.Body.Close()
-		if retryableStatus(r.StatusCode) {
-			// A 429 ACCOUNT CAP (session/weekly/usage, or a generic 429 whose relayed wait is
-			// hours-away) rehomes the live stream ONCE to a permitted sibling seat rather than
-			// sleep the guarded session on the capped one toward a reset no wrapped client can
-			// outlast; a transient throttle keeps its seat. The SAME seam the buffered and planner-
-			// stream loops call, so the flagship path no longer diverges (its prior bare backoff
-			// was the reason a capped `fak guard -- claude` session never rehomed).
-			if call.noteRetryableCapMaybeRehome(p, &rs, r.StatusCode, raw, r.Header, 400, false, &triedRehome, &rehomePending, attempt) == capRehomeResend {
-				attempt--
-			}
+		retry, rewind, statusErr := call.handleRejectedResponse(ctx, p, &rs, r, raw, attempt, rejectedResponseRetry{
+			triedAuthRefresh: &triedAuthRefresh, forbidden: &fbState,
+			triedRehome: &triedRehome, rehomePending: &rehomePending,
+			triedFailover: &triedAccountFailover, failoverPending: &accountFailoverPending,
+			bodyCap: 400,
+		})
+		if statusErr != nil {
+			return statusErr
+		}
+		if rewind {
+			attempt--
+		}
+		if retry {
 			continue
 		}
-		// A 401 on the rotating-subscription path: re-resolve the credential fresh and retry
-		// ONCE (attempt-- so the refresh re-send is immediate and uncounted), mirroring
-		// Complete/CompleteStream. refreshAPIKeyWait polls the on-disk token across the re-login
-		// grace window so a user logging back in mid-stream is adopted (updating call.apiKey) and
-		// the live session self-heals; a no-op (func gone, or no fresher token within the window)
-		// falls through to the raw 401.
-		if r.StatusCode == http.StatusUnauthorized && !triedAuthRefresh && call.authRefreshable {
-			if call.refreshAPIKeyWait(ctx, p) {
-				triedAuthRefresh = true
-				notifyAuthRefresh(p, AuthRefreshRecovered, attempt)
-				attempt--
-				continue
-			}
-			notifyAuthRefresh(p, AuthRefreshExhausted, attempt)
-		}
-		// A 403/402 USAGE/OVERAGE cap (see Complete): a self-recovering rolling-window cap that
-		// Anthropic surfaces as a 403 with an org-flavored body — only the unified/overage headers
-		// reveal it. The overage headers already proved a recovering cap (mustRehome=true): swap to
-		// a free seat or ride the cap-aware backoff toward the reset — never the seconds-scale
-		// forbidden arm and not a terminal wall. Precedes the transient arm below.
-		if (r.StatusCode == http.StatusForbidden || r.StatusCode == http.StatusPaymentRequired) &&
-			usageOrOverageRejected(r.Header) {
-			if call.noteRetryableCapMaybeRehome(p, &rs, r.StatusCode, raw, r.Header, 400, true, &triedRehome, &rehomePending, attempt) == capRehomeResend {
-				attempt--
-			}
-			continue
-		}
-		// A 403's bounded transient-recovery arm (self-contained short paced wait; see Complete).
-		if r.StatusCode == http.StatusForbidden {
-			if fbState.step403(ctx, p, raw, attempt) {
-				attempt--
-				continue
-			}
-		}
-		// The raw Anthropic SSE path is the path used by an interactive `fak guard -- claude`
-		// turn. It must not diverge from the buffered/planner-stream paths here: once the
-		// transient-403 arm has ruled out a clearing flap, an account-scoped org/entitlement
-		// wall gets one sibling-account swap and an immediate invisible re-send.
-		if classifyUpstream(r.StatusCode, raw, r.Header) == RemedyFailoverAccount && !triedAccountFailover && p.AccountFailoverFunc != nil {
-			if call.failoverAccountCred(p, RemedyFailoverAccount.String()) {
-				triedAccountFailover = true
-				accountFailoverPending = true
-				rs.lastErr = &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
-				rs.lastStatus = r.StatusCode
-				rs.lastRetryAfter = ""
-				attempt--
-				continue
-			}
-			triedAccountFailover = true
-			notifyAccountFailover(p, AccountFailoverExhausted, attempt)
-		}
-		return &UpstreamStatusError{Status: r.StatusCode, Body: truncate(raw, 400), RetryAfter: r.Header.Get("Retry-After")}
 	}
 	return rs.exhausted("planner: streaming failed after retries")
 }

@@ -442,15 +442,11 @@ func upgradeAnthropicStableCacheTTL1hOnce(raw []byte, includeMessages bool) ([]b
 			if !ok {
 				return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonSpliceFailed, Target: head.key}
 			}
-			cc := el[ccStart:ccEnd]
-			var parsed struct {
-				Type string `json:"type"`
-				TTL  string `json:"ttl"`
-			}
-			if json.Unmarshal(cc, &parsed) != nil || parsed.Type != "ephemeral" {
+			cc, ttl, ok := parseEphemeralCacheControl(el, ccStart, ccEnd)
+			if !ok {
 				return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonSpliceFailed, Target: head.key}
 			}
-			switch parsed.TTL {
+			switch ttl {
 			case "1h":
 				already1h++
 			case "":
@@ -498,15 +494,11 @@ func upgradeAnthropicStableCacheTTL1hOnce(raw []byte, includeMessages bool) ([]b
 				if !ok {
 					return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonSpliceFailed, Target: "messages"}
 				}
-				cc := block[ccStart:ccEnd]
-				var parsed struct {
-					Type string `json:"type"`
-					TTL  string `json:"ttl"`
-				}
-				if json.Unmarshal(cc, &parsed) != nil || parsed.Type != "ephemeral" {
+				cc, ttl, ok := parseEphemeralCacheControl(block, ccStart, ccEnd)
+				if !ok {
 					return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonSpliceFailed, Target: "messages"}
 				}
-				switch parsed.TTL {
+				switch ttl {
 				case "1h":
 					already1h++
 				case "":
@@ -541,6 +533,18 @@ func upgradeAnthropicStableCacheTTL1hOnce(raw []byte, includeMessages bool) ([]b
 		return raw, TTLUpgradeOutcome{Reason: TTLUpgradeReasonRedecodeFail, Target: primaryTarget}
 	}
 	return out, TTLUpgradeOutcome{Reason: TTLUpgradeReasonNone, Target: primaryTarget, UpgradedHeadBreakpoints: headSplices, UpgradedMessageBreakpoints: messageSplices}
+}
+
+func parseEphemeralCacheControl(raw []byte, start, end int) (cc []byte, ttl string, ok bool) {
+	cc = raw[start:end]
+	var parsed struct {
+		Type string `json:"type"`
+		TTL  string `json:"ttl"`
+	}
+	if json.Unmarshal(cc, &parsed) != nil || parsed.Type != "ephemeral" {
+		return nil, "", false
+	}
+	return cc, parsed.TTL, true
 }
 
 func anyHeadElementVolatile(elems []json.RawMessage) bool {

@@ -619,10 +619,14 @@ func percentiles(samples []int64) (p50, p90, p99, max int64, mean float64) {
 // Digest field cleared, so a reader can recompute and confirm the witness was
 // not edited after the fact.
 func (r *CPUMemReport) computeDigest() string {
-	saved := r.Digest
-	r.Digest = ""
-	b, err := json.Marshal(r)
-	r.Digest = saved
+	return computeReportDigest(r, &r.Digest)
+}
+
+func computeReportDigest(report any, digest *string) string {
+	saved := *digest
+	*digest = ""
+	b, err := json.Marshal(report)
+	*digest = saved
 	if err != nil {
 		return ""
 	}

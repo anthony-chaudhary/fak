@@ -153,15 +153,6 @@ func dominatorOrder(left, right string, dominators map[string]map[string]struct{
 	return left < right
 }
 
-func compareDependencyDominator(left, right string, dominators map[string]map[string]struct{}) bool {
-	_, leftDominatesRight := dominators[right][left]
-	_, rightDominatesLeft := dominators[left][right]
-	if leftDominatesRight != rightDominatesLeft {
-		return leftDominatesRight
-	}
-	return left < right
-}
-
 func tierName(names []string, level int) string {
 	if level >= 0 && level < len(names) {
 		return names[level]
