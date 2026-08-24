@@ -255,6 +255,11 @@
       "lane": "trajquery",
       "command": "go test -v ./internal/trajquery",
       "output_contains": "TestValidate_RejectsHiddenColumnProbe"
+    },
+    {
+      "lane": "trajhook",
+      "command": "go test -v ./internal/trajhook",
+      "output_contains": "TestContextHealth_RealCorpusVerdicts"
     }
   ]
 }
