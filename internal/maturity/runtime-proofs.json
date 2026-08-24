@@ -240,6 +240,11 @@
       "lane": "trigram",
       "command": "go test -v ./internal/trigram",
       "output_contains": "TestRegexpBruteForceStillCorrect"
+    },
+    {
+      "lane": "trendreport",
+      "command": "go test -v ./internal/trendreport",
+      "output_contains": "TestTriageSelfcheck"
     }
   ]
 }
