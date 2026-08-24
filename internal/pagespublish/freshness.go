@@ -60,6 +60,13 @@ func LoadFreshnessTargets(path string) (FreshnessTargets, error) {
 // AuditFreshness checks only declared review targets. Durable assets are inventoried but
 // never expire merely because their content remains stable.
 func AuditFreshness(root string, targets FreshnessTargets, now time.Time) (FreshnessReport, error) {
+	shallow, err := gitOutput(root, "rev-parse", "--is-shallow-repository")
+	if err != nil {
+		return FreshnessReport{}, err
+	}
+	if strings.TrimSpace(shallow) == "true" {
+		return FreshnessReport{}, fmt.Errorf("freshness audit requires full git history (checkout must use fetch-depth: 0)")
+	}
 	report := FreshnessReport{Schema: "fak-pages-freshness/2", Due: []FreshnessEntry{}}
 	if targets.Schema != FreshnessTargetsSchema {
 		return report, fmt.Errorf("freshness targets schema %q, want %q", targets.Schema, FreshnessTargetsSchema)

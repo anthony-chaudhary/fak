@@ -49,6 +49,24 @@ func TestAuditFreshnessRequiresEveryRootAssetClassified(t *testing.T) {
 	}
 }
 
+func TestAuditFreshnessRejectsShallowHistory(t *testing.T) {
+	d := initFreshnessRepo(t)
+	writeCommit(t, d, "2026-07-01T00:00:00Z", map[string]string{"docs/marketing/campaign.md": "old"})
+	writeCommit(t, d, "2026-08-10T00:00:00Z", map[string]string{"README.md": "unrelated"})
+	head, err := gitOutput(d, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(d, ".git", "shallow"), []byte(strings.TrimSpace(head)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	targets := FreshnessTargets{Schema: FreshnessTargetsSchema, Roots: []string{"docs/marketing"}, Targets: []FreshnessTarget{{Path: "docs/marketing/campaign.md", Class: "review", ReviewAfterDays: 21, Check: "Claims remain current."}}}
+	_, err = AuditFreshness(d, targets, time.Date(2026, 8, 15, 0, 0, 0, 0, time.UTC))
+	if err == nil || !strings.Contains(err.Error(), "full git history") {
+		t.Fatalf("error = %v, want full-history refusal", err)
+	}
+}
+
 func initFreshnessRepo(t *testing.T) string {
 	t.Helper()
 	d := t.TempDir()
