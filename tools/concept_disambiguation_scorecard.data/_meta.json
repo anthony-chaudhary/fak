@@ -1087,6 +1087,11 @@
           "category": "incidental",
           "reason": "Derived benchmark metric, not a cache implementation",
           "token": "CacheAvoidedTokens"
+        },
+        {
+          "category": "incidental",
+          "reason": "observed campaign receipt field, not a distinct cache mechanism",
+          "token": "cache_reset_receipt"
         }
       ],
       "id": "cache",
@@ -1196,6 +1201,7 @@
         "cache_no_longer_verifies",
         "cache_read_at_fire",
         "cache_read_rate_ms_per_token",
+        "cache_reset_receipt",
         "cache_state_changed",
         "cache_state_fingerprint",
         "cache_token_equiv_owner",
@@ -8287,6 +8293,11 @@
           "category": "incidental",
           "reason": "Runtime admit refusal code, not a distinct policy capability",
           "token": "AdmitPolicyDeny"
+        },
+        {
+          "category": "incidental",
+          "reason": "campaign ordering metadata, not a reusable policy capability",
+          "token": "OrderPolicy"
         }
       ],
       "exclude": [
@@ -8329,6 +8340,7 @@
         "MaxPostures",
         "MisfirePolicy",
         "NewWithTierBudgetsAndEvictionPolicy",
+        "OrderPolicy",
         "OrgPolicyCachePath",
         "OrgPolicyCachePathEnv",
         "OrgPolicyURLEnv",

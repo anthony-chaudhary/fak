@@ -1,0 +1,94 @@
+{
+  "schema": "fak-ultracode-factorial-report/1",
+  "source_artifact": "internal/ultracodebench/testdata/issue8648-factorial-campaign.json",
+  "metric": "prompt_eval_duration_ns",
+  "widths": [
+    {
+      "width": 1,
+      "verdict": "GAIN",
+      "generic_prefix_b_minus_a": {
+        "estimate": -5935074500,
+        "std_error": 8944056.979357857
+      },
+      "micro_scope_c_minus_a": {
+        "estimate": -5043597000,
+        "std_error": 9151851.45202871
+      },
+      "combined_d_minus_a": {
+        "estimate": -5939180000,
+        "std_error": 8943053.729012255
+      },
+      "interaction_d_minus_b_minus_c_plus_a": {
+        "estimate": 5039491500,
+        "std_error": 9152936.810117286
+      }
+    },
+    {
+      "width": 2,
+      "verdict": "GAIN",
+      "generic_prefix_b_minus_a": {
+        "estimate": -11860046500,
+        "std_error": 7455746.190020151
+      },
+      "micro_scope_c_minus_a": {
+        "estimate": -10079036000,
+        "std_error": 7271147.811728214
+      },
+      "combined_d_minus_a": {
+        "estimate": -11861835500,
+        "std_error": 6840512.718356716
+      },
+      "interaction_d_minus_b_minus_c_plus_a": {
+        "estimate": 10077247000,
+        "std_error": 7871862.263784854
+      }
+    },
+    {
+      "width": 4,
+      "verdict": "GAIN",
+      "generic_prefix_b_minus_a": {
+        "estimate": -23726523500,
+        "std_error": 3211446.5977188535
+      },
+      "micro_scope_c_minus_a": {
+        "estimate": -20152366000,
+        "std_error": 27220214.14316941
+      },
+      "combined_d_minus_a": {
+        "estimate": -23734700000,
+        "std_error": 3198928.72693344
+      },
+      "interaction_d_minus_b_minus_c_plus_a": {
+        "estimate": 20144189500,
+        "std_error": 27224486.29910214
+      }
+    },
+    {
+      "width": 8,
+      "verdict": "GAIN",
+      "generic_prefix_b_minus_a": {
+        "estimate": -47440733500,
+        "std_error": 79613810.0535956
+      },
+      "micro_scope_c_minus_a": {
+        "estimate": -40320267500,
+        "std_error": 80087789.41417974
+      },
+      "combined_d_minus_a": {
+        "estimate": -47466699500,
+        "std_error": 79617288.01742747
+      },
+      "interaction_d_minus_b_minus_c_plus_a": {
+        "estimate": 40294301500,
+        "std_error": 80176288.4757707
+      }
+    }
+  ],
+  "hill_climb": {
+    "chosen_width": 8
+  },
+  "replay_command": "go test ./internal/ultracodebench -run TestIssue8648FactorialArtifact -count=1",
+  "promotion_evidence": "all equal-outcome cells with positive warm cache logs are evaluator-eligible",
+  "demotion_evidence": "any unequal outcome or missing telemetry ABSTAINs; hill climb stops before it",
+  "invalidating_assumption": "Ollama cached_n_tokens and prompt_eval_duration remain comparable across alternating cells on this node"
+}

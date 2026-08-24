@@ -1,0 +1,665 @@
+{
+  "schema": "fak-ultracode-factorial-campaign/1",
+  "evidence_kind": "observed_run",
+  "source_artifact": "internal/ultracodebench/testdata/issue8648-factorial-campaign.json",
+  "captured_at": "2026-08-23T19:27:22.245565+00:00",
+  "node": "fak-realmodel",
+  "runtime": "ollama 0.30.10 llama-server prompt cache",
+  "model": "qwen2.5:0.5b",
+  "tokenizer": "qwen2 tokenizer via ollama model manifest",
+  "task_digest": "91679c58801b1b4ce5029377c16d3e528012b3ee7e1c92138fbbbb8110879887",
+  "accepted_outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+  "metric": "prompt_eval_duration_ns",
+  "order_policy": "alternating",
+  "cells": [
+    {
+      "width": 1,
+      "treatment": "A",
+      "context": "full",
+      "cache": "cold",
+      "order": 1,
+      "replicates": [
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 5953544000,
+          "input_tokens": 1237,
+          "cached_tokens": 0,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:19:26.913473+00:00",
+          "warmup_receipt": "",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)"
+          ]
+        },
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 5971430000,
+          "input_tokens": 1237,
+          "cached_tokens": 0,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:19:35.003194+00:00",
+          "warmup_receipt": "",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)"
+          ]
+        }
+      ]
+    },
+    {
+      "width": 1,
+      "treatment": "D",
+      "context": "scoped",
+      "cache": "warm",
+      "order": 2,
+      "replicates": [
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 23276000,
+          "input_tokens": 212,
+          "cached_tokens": 211,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:19:43.118333+00:00",
+          "warmup_receipt": "warmup:212tokens:920010000ns",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 5 | cached n_tokens = 211, memory_seq_rm [211, end)"
+          ]
+        },
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 23338000,
+          "input_tokens": 212,
+          "cached_tokens": 211,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:19:46.858659+00:00",
+          "warmup_receipt": "warmup:212tokens:920098000ns",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 5 | cached n_tokens = 211, memory_seq_rm [211, end)"
+          ]
+        }
+      ]
+    },
+    {
+      "width": 1,
+      "treatment": "C",
+      "context": "scoped",
+      "cache": "cold",
+      "order": 3,
+      "replicates": [
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 916946000,
+          "input_tokens": 212,
+          "cached_tokens": 0,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:19:50.612440+00:00",
+          "warmup_receipt": "",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)"
+          ]
+        },
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 920834000,
+          "input_tokens": 212,
+          "cached_tokens": 0,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:19:53.643590+00:00",
+          "warmup_receipt": "",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)"
+          ]
+        }
+      ]
+    },
+    {
+      "width": 1,
+      "treatment": "B",
+      "context": "full",
+      "cache": "warm",
+      "order": 4,
+      "replicates": [
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 27275000,
+          "input_tokens": 1237,
+          "cached_tokens": 1236,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:19:56.693622+00:00",
+          "warmup_receipt": "warmup:1237tokens:5941127000ns",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 6 | cached n_tokens = 1236, memory_seq_rm [1236, end)"
+          ]
+        },
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 27550000,
+          "input_tokens": 1237,
+          "cached_tokens": 1236,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:20:05.550073+00:00",
+          "warmup_receipt": "warmup:1237tokens:5998738000ns",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 6 | cached n_tokens = 1236, memory_seq_rm [1236, end)"
+          ]
+        }
+      ]
+    },
+    {
+      "width": 2,
+      "treatment": "D",
+      "context": "scoped",
+      "cache": "warm",
+      "order": 1,
+      "replicates": [
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 56265000,
+          "input_tokens": 424,
+          "cached_tokens": 422,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:20:14.441572+00:00",
+          "warmup_receipt": "warmup:212tokens:916674000ns",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 5 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 9 | cached n_tokens = 211, memory_seq_rm [211, end)"
+          ]
+        },
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 57041000,
+          "input_tokens": 424,
+          "cached_tokens": 422,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:20:18.897329+00:00",
+          "warmup_receipt": "warmup:212tokens:918134000ns",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 5 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 9 | cached n_tokens = 211, memory_seq_rm [211, end)"
+          ]
+        }
+      ]
+    },
+    {
+      "width": 2,
+      "treatment": "A",
+      "context": "full",
+      "cache": "cold",
+      "order": 2,
+      "replicates": [
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 11911659000,
+          "input_tokens": 2474,
+          "cached_tokens": 0,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:20:23.372369+00:00",
+          "warmup_receipt": "",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)"
+          ]
+        },
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 11925318000,
+          "input_tokens": 2474,
+          "cached_tokens": 0,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:20:39.596801+00:00",
+          "warmup_receipt": "",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)"
+          ]
+        }
+      ]
+    },
+    {
+      "width": 2,
+      "treatment": "B",
+      "context": "full",
+      "cache": "warm",
+      "order": 3,
+      "replicates": [
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 61433000,
+          "input_tokens": 2474,
+          "cached_tokens": 2472,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:20:55.860271+00:00",
+          "warmup_receipt": "warmup:1237tokens:5967471000ns",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 6 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 11 | cached n_tokens = 1236, memory_seq_rm [1236, end)"
+          ]
+        },
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 55451000,
+          "input_tokens": 2474,
+          "cached_tokens": 2472,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:21:05.553888+00:00",
+          "warmup_receipt": "warmup:1237tokens:5964715000ns",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 6 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 11 | cached n_tokens = 1236, memory_seq_rm [1236, end)"
+          ]
+        }
+      ]
+    },
+    {
+      "width": 2,
+      "treatment": "C",
+      "context": "scoped",
+      "cache": "cold",
+      "order": 4,
+      "replicates": [
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 1836957000,
+          "input_tokens": 424,
+          "cached_tokens": 0,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:21:15.216316+00:00",
+          "warmup_receipt": "",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)"
+          ]
+        },
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 1841948000,
+          "input_tokens": 424,
+          "cached_tokens": 0,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:21:21.336175+00:00",
+          "warmup_receipt": "",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)"
+          ]
+        }
+      ]
+    },
+    {
+      "width": 4,
+      "treatment": "A",
+      "context": "full",
+      "cache": "cold",
+      "order": 1,
+      "replicates": [
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 23840610000,
+          "input_tokens": 4948,
+          "cached_tokens": 0,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:21:27.456876+00:00",
+          "warmup_receipt": "",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)"
+          ]
+        },
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 23834236000,
+          "input_tokens": 4948,
+          "cached_tokens": 0,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:22:00.033853+00:00",
+          "warmup_receipt": "",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)"
+          ]
+        }
+      ]
+    },
+    {
+      "width": 4,
+      "treatment": "D",
+      "context": "scoped",
+      "cache": "warm",
+      "order": 2,
+      "replicates": [
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 102999000,
+          "input_tokens": 848,
+          "cached_tokens": 844,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:22:32.625665+00:00",
+          "warmup_receipt": "warmup:212tokens:909567000ns",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 5 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 9 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 13 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 17 | cached n_tokens = 211, memory_seq_rm [211, end)"
+          ]
+        },
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 102447000,
+          "input_tokens": 848,
+          "cached_tokens": 844,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:22:38.671215+00:00",
+          "warmup_receipt": "warmup:212tokens:920327000ns",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 5 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 9 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 13 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 17 | cached n_tokens = 211, memory_seq_rm [211, end)"
+          ]
+        }
+      ]
+    },
+    {
+      "width": 4,
+      "treatment": "C",
+      "context": "scoped",
+      "cache": "cold",
+      "order": 3,
+      "replicates": [
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 3712090000,
+          "input_tokens": 848,
+          "cached_tokens": 0,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:22:44.744709+00:00",
+          "warmup_receipt": "",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)"
+          ]
+        },
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 3658024000,
+          "input_tokens": 848,
+          "cached_tokens": 0,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:22:57.101684+00:00",
+          "warmup_receipt": "",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)"
+          ]
+        }
+      ]
+    },
+    {
+      "width": 4,
+      "treatment": "B",
+      "context": "full",
+      "cache": "warm",
+      "order": 4,
+      "replicates": [
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 110504000,
+          "input_tokens": 4948,
+          "cached_tokens": 4944,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:23:09.408653+00:00",
+          "warmup_receipt": "warmup:1237tokens:5986862000ns",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 6 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 11 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 16 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 21 | cached n_tokens = 1236, memory_seq_rm [1236, end)"
+          ]
+        },
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 111295000,
+          "input_tokens": 4948,
+          "cached_tokens": 4944,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:23:20.869477+00:00",
+          "warmup_receipt": "warmup:1237tokens:5956309000ns",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 6 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 11 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 16 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 21 | cached n_tokens = 1236, memory_seq_rm [1236, end)"
+          ]
+        }
+      ]
+    },
+    {
+      "width": 8,
+      "treatment": "D",
+      "context": "scoped",
+      "cache": "warm",
+      "order": 1,
+      "replicates": [
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 200536000,
+          "input_tokens": 1696,
+          "cached_tokens": 1688,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:23:32.365921+00:00",
+          "warmup_receipt": "warmup:212tokens:958480000ns",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 5 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 9 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 13 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 17 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 21 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 25 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 29 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 33 | cached n_tokens = 211, memory_seq_rm [211, end)"
+          ]
+        },
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 195107000,
+          "input_tokens": 1696,
+          "cached_tokens": 1688,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:23:41.641988+00:00",
+          "warmup_receipt": "warmup:212tokens:920258000ns",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 5 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 9 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 13 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 17 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 21 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 25 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 29 | cached n_tokens = 211, memory_seq_rm [211, end)",
+            "slot update_slots: id  1 | task 33 | cached n_tokens = 211, memory_seq_rm [211, end)"
+          ]
+        }
+      ]
+    },
+    {
+      "width": 8,
+      "treatment": "A",
+      "context": "full",
+      "cache": "cold",
+      "order": 2,
+      "replicates": [
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 47584950000,
+          "input_tokens": 9896,
+          "cached_tokens": 0,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:23:50.891348+00:00",
+          "warmup_receipt": "",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)"
+          ]
+        },
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 47744092000,
+          "input_tokens": 9896,
+          "cached_tokens": 0,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:24:56.229307+00:00",
+          "warmup_receipt": "",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 1024, memory_seq_rm [1024, end)"
+          ]
+        }
+      ]
+    },
+    {
+      "width": 8,
+      "treatment": "B",
+      "context": "full",
+      "cache": "warm",
+      "order": 3,
+      "replicates": [
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 221177000,
+          "input_tokens": 9896,
+          "cached_tokens": 9888,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:26:01.812715+00:00",
+          "warmup_receipt": "warmup:1237tokens:5958310000ns",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 6 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 11 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 16 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 21 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 26 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 31 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 36 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 41 | cached n_tokens = 1236, memory_seq_rm [1236, end)"
+          ]
+        },
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 226398000,
+          "input_tokens": 9896,
+          "cached_tokens": 9888,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:26:16.856538+00:00",
+          "warmup_receipt": "warmup:1237tokens:6022345000ns",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 6 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 11 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 16 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 21 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 26 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 31 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 36 | cached n_tokens = 1236, memory_seq_rm [1236, end)",
+            "slot update_slots: id  1 | task 41 | cached n_tokens = 1236, memory_seq_rm [1236, end)"
+          ]
+        }
+      ]
+    },
+    {
+      "width": 8,
+      "treatment": "C",
+      "context": "scoped",
+      "cache": "cold",
+      "order": 4,
+      "replicates": [
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 7353337000,
+          "input_tokens": 1696,
+          "cached_tokens": 0,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:26:31.979164+00:00",
+          "warmup_receipt": "",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)"
+          ]
+        },
+        {
+          "accepted": true,
+          "outcome_digest": "25ab960d578e9fb9c7cb17ddbf211f8188564f13e24e64ad515b1a22cbf51f1c",
+          "work": 7335170000,
+          "input_tokens": 1696,
+          "cached_tokens": 0,
+          "cache_reset_receipt": "model-unload:2026-08-23T19:26:57.078204+00:00",
+          "warmup_receipt": "",
+          "cache_log_excerpt": [
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)",
+            "slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)"
+          ]
+        }
+      ]
+    }
+  ],
+  "promotion_evidence": "all equal-outcome cells with positive warm cache logs are evaluator-eligible",
+  "demotion_evidence": "any unequal outcome or missing telemetry ABSTAINs; hill climb stops before it",
+  "invalidating_assumption": "Ollama cached_n_tokens and prompt_eval_duration remain comparable across alternating cells on this node"
+}
