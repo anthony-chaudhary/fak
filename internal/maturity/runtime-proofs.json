@@ -10,6 +10,11 @@
       "lane": "ablate",
       "command": "fak ablate --sweep vdso --baseline all-off",
       "output_contains": "fak ablate"
+    },
+    {
+      "lane": "servicelease",
+      "command": "go test -v ./internal/servicelease",
+      "output_contains": "TestLiveTwoNodeFencedOwnership"
     }
   ]
 }
