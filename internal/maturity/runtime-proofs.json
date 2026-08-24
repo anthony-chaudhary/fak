@@ -305,6 +305,11 @@
       "lane": "toolsandbox",
       "command": "go test -v ./internal/toolsandbox",
       "output_contains": "TestRunSeparatesTaskSuccessFromPolicyCompliance"
+    },
+    {
+      "lane": "slackenv",
+      "command": "go test -v ./internal/slackenv -run TestLookupFallsToFile",
+      "output_contains": "TestLookupFallsToFile"
     }
   ]
 }
