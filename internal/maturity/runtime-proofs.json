@@ -260,6 +260,11 @@
       "lane": "trajhook",
       "command": "go test -v ./internal/trajhook",
       "output_contains": "TestContextHealth_RealCorpusVerdicts"
+    },
+    {
+      "lane": "trajectory",
+      "command": "go test -v ./internal/trajectory -run TestDeriveSignals",
+      "output_contains": "TestDeriveSignalsBindsPhasesRetriesStallsAndOutcomes"
     }
   ]
 }
