@@ -221,6 +221,10 @@ func axisState(axes workdelivery.Axes, axis workdelivery.Axis) (string, error) {
 		return string(axes.Integration), nil
 	case workdelivery.AxisRelease:
 		return string(axes.Release), nil
+	case workdelivery.AxisActivation:
+		return displayActivation(axes.Activation), nil
+	case workdelivery.AxisAcceptance:
+		return displayAcceptance(axes.Acceptance), nil
 	default:
 		return "", fmt.Errorf("unknown axis %q", axis)
 	}
@@ -231,4 +235,17 @@ func joinStageIDs(ids []deliverystages.StageID) string {
 		values[i] = string(id)
 	}
 	return strings.Join(values, ", ")
+}
+
+func displayActivation(state workdelivery.ActivationState) string {
+	if state == "" {
+		return string(workdelivery.ActivationInactive)
+	}
+	return string(state)
+}
+func displayAcceptance(state workdelivery.AcceptanceState) string {
+	if state == "" {
+		return string(workdelivery.AcceptanceUnaccepted)
+	}
+	return string(state)
 }

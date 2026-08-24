@@ -39,3 +39,12 @@ fak work-delivery stages --local 'CI red'
 ```
 
 The rule is mechanical: consume the receipt for the stage you are deciding. Never infer release readiness from commit, build, test, or push success.
+
+## Final-mile uptake: release is not activation
+
+Operator-facing work has two additional independent facts:
+
+- **activated**: a witnessed runtime receipt names the exact `module@rev`, build digest, and configuration digest currently running.
+- **operator-accepted**: a captured operator journey (for example, a post-hook result appearing in the TUI or a click changing views) is witnessed against that same runtime identity.
+
+`release-ready` never implies either fact. Activation does not imply acceptance. A stale build, changed configuration, missing journey, or self-reported evidence fails closed. `fak work-delivery inspect --file UNIT.json` prints the missing final-mile receipt as the next action.

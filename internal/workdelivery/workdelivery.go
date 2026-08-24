@@ -1,5 +1,5 @@
 // Package workdelivery defines the versioned contract for independently tracking
-// authored work, compile admission, verification, integration, and release.
+// authored work, compile admission, verification, integration, release, activation, and operator acceptance.
 package workdelivery
 
 import (
@@ -19,6 +19,8 @@ const (
 	AxisVerification Axis = "verification"
 	AxisIntegration  Axis = "integration"
 	AxisRelease      Axis = "release"
+	AxisActivation   Axis = "activation"
+	AxisAcceptance   Axis = "operator_acceptance"
 )
 
 type AuthoringState string
@@ -26,6 +28,8 @@ type AdmissionState string
 type VerificationState string
 type IntegrationState string
 type ReleaseState string
+type ActivationState string
+type AcceptanceState string
 
 const (
 	AuthoringDraft    AuthoringState = "draft"
@@ -45,6 +49,12 @@ const (
 	ReleaseNotReady ReleaseState = "not_ready"
 	ReleaseReady    ReleaseState = "ready"
 	ReleaseReleased ReleaseState = "released"
+
+	ActivationInactive  ActivationState = "inactive"
+	ActivationActivated ActivationState = "activated"
+
+	AcceptanceUnaccepted AcceptanceState = "unaccepted"
+	AcceptanceAccepted   AcceptanceState = "accepted"
 )
 
 type Axes struct {
@@ -53,10 +63,12 @@ type Axes struct {
 	Verification VerificationState `json:"verification"`
 	Integration  IntegrationState  `json:"integration"`
 	Release      ReleaseState      `json:"release"`
+	Activation   ActivationState   `json:"activation,omitempty"`
+	Acceptance   AcceptanceState   `json:"operator_acceptance,omitempty"`
 }
 
 func InitialAxes() Axes {
-	return Axes{AuthoringDraft, AdmissionUndeclared, VerificationUnverified, IntegrationUnintegrated, ReleaseNotReady}
+	return Axes{Authoring: AuthoringDraft, Admission: AdmissionUndeclared, Verification: VerificationUnverified, Integration: IntegrationUnintegrated, Release: ReleaseNotReady, Activation: ActivationInactive, Acceptance: AcceptanceUnaccepted}
 }
 
 type Artifact struct {
@@ -65,12 +77,25 @@ type Artifact struct {
 	Kind   string `json:"kind,omitempty"`
 }
 
+type RuntimeIdentity struct {
+	Revision     string `json:"revision"`
+	BuildDigest  string `json:"build_digest"`
+	ConfigDigest string `json:"config_digest"`
+}
+
+type OperatorAcceptance struct {
+	RuntimeIdentity
+	Journey string `json:"journey"`
+}
+
 type WorkUnit struct {
-	Schema    string     `json:"schema"`
-	ID        string     `json:"id"`
-	Revision  string     `json:"revision,omitempty"`
-	Artifacts []Artifact `json:"artifacts,omitempty"`
-	Axes      Axes       `json:"axes"`
+	Schema    string              `json:"schema"`
+	ID        string              `json:"id"`
+	Revision  string              `json:"revision,omitempty"`
+	Artifacts []Artifact          `json:"artifacts,omitempty"`
+	Axes      Axes                `json:"axes"`
+	Activated *RuntimeIdentity    `json:"activated,omitempty"`
+	Accepted  *OperatorAcceptance `json:"accepted,omitempty"`
 }
 
 type Evidence struct {
@@ -95,15 +120,17 @@ type Transition struct {
 }
 
 type Receipt struct {
-	Schema     string     `json:"schema"`
-	UnitID     string     `json:"unit_id"`
-	Transition Transition `json:"transition"`
-	Gate       string     `json:"gate"`
-	Evidence   []Evidence `json:"evidence,omitempty"`
-	Owner      string     `json:"owner,omitempty"`
-	Lease      string     `json:"lease,omitempty"`
-	ObservedAt time.Time  `json:"observed_at"`
-	Blocker    *Blocker   `json:"blocker,omitempty"`
+	Schema          string           `json:"schema"`
+	UnitID          string           `json:"unit_id"`
+	Transition      Transition       `json:"transition"`
+	Gate            string           `json:"gate"`
+	Evidence        []Evidence       `json:"evidence,omitempty"`
+	Owner           string           `json:"owner,omitempty"`
+	Lease           string           `json:"lease,omitempty"`
+	ObservedAt      time.Time        `json:"observed_at"`
+	Blocker         *Blocker         `json:"blocker,omitempty"`
+	RuntimeIdentity *RuntimeIdentity `json:"runtime_identity,omitempty"`
+	Journey         string           `json:"journey,omitempty"`
 }
 
 func (u WorkUnit) Validate() error {
@@ -187,8 +214,25 @@ func Apply(unit WorkUnit, receipt Receipt) (WorkUnit, error) {
 	if receipt.Blocker != nil {
 		return unit, nil
 	}
+	if receipt.Transition.Axis == AxisActivation {
+		if err := validateActivationReceipt(unit, receipt); err != nil {
+			return WorkUnit{}, err
+		}
+	}
+	if receipt.Transition.Axis == AxisAcceptance {
+		if err := validateAcceptanceReceipt(unit, receipt); err != nil {
+			return WorkUnit{}, err
+		}
+	}
 	if err := unit.Axes.set(receipt.Transition.Axis, receipt.Transition.To); err != nil {
 		return WorkUnit{}, err
+	}
+	if receipt.Transition.Axis == AxisActivation && receipt.Transition.To == string(ActivationActivated) {
+		identity := *receipt.RuntimeIdentity
+		unit.Activated = &identity
+	}
+	if receipt.Transition.Axis == AxisAcceptance && receipt.Transition.To == string(AcceptanceAccepted) {
+		unit.Accepted = &OperatorAcceptance{RuntimeIdentity: *receipt.RuntimeIdentity, Journey: receipt.Journey}
 	}
 	return unit, nil
 }
@@ -205,6 +249,10 @@ func (a Axes) state(axis Axis) (string, error) {
 		return string(a.Integration), nil
 	case AxisRelease:
 		return string(a.Release), nil
+	case AxisActivation:
+		return string(normalizeActivation(a.Activation)), nil
+	case AxisAcceptance:
+		return string(normalizeAcceptance(a.Acceptance)), nil
 	default:
 		return "", fmt.Errorf("unknown axis %q", axis)
 	}
@@ -222,6 +270,10 @@ func (a *Axes) set(axis Axis, state string) error {
 		a.Integration = IntegrationState(state)
 	case AxisRelease:
 		a.Release = ReleaseState(state)
+	case AxisActivation:
+		a.Activation = ActivationState(state)
+	case AxisAcceptance:
+		a.Acceptance = AcceptanceState(state)
 	default:
 		return fmt.Errorf("unknown axis %q", axis)
 	}
@@ -235,6 +287,8 @@ func validTransition(axis Axis, from, to string) bool {
 		AxisVerification: {string(VerificationUnverified): {string(VerificationPassed), string(VerificationFailed)}, string(VerificationPassed): {string(VerificationUnverified), string(VerificationFailed)}, string(VerificationFailed): {string(VerificationUnverified), string(VerificationPassed)}},
 		AxisIntegration:  {string(IntegrationUnintegrated): {string(IntegrationIntegrated)}, string(IntegrationIntegrated): {string(IntegrationUnintegrated)}},
 		AxisRelease:      {string(ReleaseNotReady): {string(ReleaseReady)}, string(ReleaseReady): {string(ReleaseNotReady), string(ReleaseReleased)}, string(ReleaseReleased): {string(ReleaseNotReady)}},
+		AxisActivation:   {string(ActivationInactive): {string(ActivationActivated)}, string(ActivationActivated): {string(ActivationInactive)}},
+		AxisAcceptance:   {string(AcceptanceUnaccepted): {string(AcceptanceAccepted)}, string(AcceptanceAccepted): {string(AcceptanceUnaccepted)}},
 	}
 	for _, candidate := range allowed[axis][from] {
 		if candidate == to {
@@ -247,6 +301,70 @@ func validTransition(axis Axis, from, to string) bool {
 func oneOf(value string, values ...string) bool {
 	for _, candidate := range values {
 		if value == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeActivation(v ActivationState) ActivationState {
+	if v == "" {
+		return ActivationInactive
+	}
+	return v
+}
+func normalizeAcceptance(v AcceptanceState) AcceptanceState {
+	if v == "" {
+		return AcceptanceUnaccepted
+	}
+	return v
+}
+func validActivation(v ActivationState) bool {
+	return v == ActivationInactive || v == ActivationActivated
+}
+func validAcceptance(v AcceptanceState) bool {
+	return v == AcceptanceUnaccepted || v == AcceptanceAccepted
+}
+
+func validateActivationReceipt(unit WorkUnit, receipt Receipt) error {
+	if receipt.Transition.To != string(ActivationActivated) {
+		return nil
+	}
+	if receipt.RuntimeIdentity == nil {
+		return errors.New("activation receipt requires runtime_identity")
+	}
+	if unit.Revision == "" || receipt.RuntimeIdentity.Revision != unit.Revision {
+		return fmt.Errorf("activation revision %q does not match unit revision %q", receipt.RuntimeIdentity.Revision, unit.Revision)
+	}
+	if strings.TrimSpace(receipt.RuntimeIdentity.BuildDigest) == "" || strings.TrimSpace(receipt.RuntimeIdentity.ConfigDigest) == "" {
+		return errors.New("activation receipt requires build_digest and config_digest")
+	}
+	if !receiptHasAttestedArtifact(receipt.Evidence) {
+		return errors.New("activation receipt requires witnessed evidence")
+	}
+	return nil
+}
+func validateAcceptanceReceipt(unit WorkUnit, receipt Receipt) error {
+	if receipt.Transition.To != string(AcceptanceAccepted) {
+		return nil
+	}
+	if unit.Activated == nil || unit.Axes.Activation != ActivationActivated {
+		return errors.New("operator acceptance requires an activated runtime")
+	}
+	if receipt.RuntimeIdentity == nil || *receipt.RuntimeIdentity != *unit.Activated {
+		return errors.New("operator acceptance runtime_identity does not match activated build/config")
+	}
+	if strings.TrimSpace(receipt.Journey) == "" {
+		return errors.New("operator acceptance requires a named journey")
+	}
+	if !receiptHasAttestedArtifact(receipt.Evidence) {
+		return errors.New("operator acceptance requires witnessed evidence")
+	}
+	return nil
+}
+func receiptHasAttestedArtifact(evidence []Evidence) bool {
+	for _, item := range evidence {
+		if item.Witnessed && strings.TrimSpace(item.Reference) != "" {
 			return true
 		}
 	}

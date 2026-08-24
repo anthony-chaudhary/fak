@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/workdelivery"
 )
 
 func TestWorkDeliveryStatusKeepsAxesIndependent(t *testing.T) {
@@ -100,5 +102,26 @@ func TestWorkDeliveryStagesRejectsUnknownQueries(t *testing.T) {
 		if code := runWorkDelivery(&stdout, &stderr, args); code == 0 || !strings.Contains(stderr.String(), "unknown") {
 			t.Fatalf("args=%v code=%d stderr=%q", args, code, stderr.String())
 		}
+	}
+}
+
+func TestRunWorkDeliveryInspectNamesMissingFinalMileReceipt(t *testing.T) {
+	dir := t.TempDir()
+	unit := workdelivery.WorkUnit{Schema: workdelivery.Schema, ID: "issue-8781", Revision: "cmd/fak@r123+gabc", Axes: workdelivery.Axes{
+		Authoring: workdelivery.AuthoringRecorded, Admission: workdelivery.AdmissionAdmitted,
+		Verification: workdelivery.VerificationPassed, Integration: workdelivery.IntegrationIntegrated,
+		Release: workdelivery.ReleaseReady, Activation: workdelivery.ActivationInactive,
+		Acceptance: workdelivery.AcceptanceUnaccepted,
+	}}
+	path := filepath.Join(dir, "unit.json")
+	if err := writeJSONFile(path, unit); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := runWorkDelivery(&out, &errOut, []string{"inspect", "--file", path}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "activation: inactive") || !strings.Contains(out.String(), "next: capture an activation receipt") {
+		t.Fatalf("missing activation diagnosis:\n%s", out.String())
 	}
 }

@@ -30,8 +30,8 @@ func TestRecordingDoesNotImplyOtherAxes(t *testing.T) {
 
 func TestAxesRemainIndependent(t *testing.T) {
 	states := []Axes{
-		{AuthoringRecorded, AdmissionExcluded, VerificationUnverified, IntegrationUnintegrated, ReleaseNotReady},
-		{AuthoringRecorded, AdmissionAdmitted, VerificationPassed, IntegrationIntegrated, ReleaseNotReady},
+		{Authoring: AuthoringRecorded, Admission: AdmissionExcluded, Verification: VerificationUnverified, Integration: IntegrationUnintegrated, Release: ReleaseNotReady},
+		{Authoring: AuthoringRecorded, Admission: AdmissionAdmitted, Verification: VerificationPassed, Integration: IntegrationIntegrated, Release: ReleaseNotReady},
 	}
 	for _, axes := range states {
 		unit := WorkUnit{Schema: Schema, ID: "independent", Axes: axes}

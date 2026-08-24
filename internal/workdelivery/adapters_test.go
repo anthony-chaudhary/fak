@@ -88,7 +88,7 @@ func TestFailedVerificationDoesNotMutateIntegrationOrRelease(t *testing.T) {
 }
 
 func TestReleaseAdmissionRequiresMatchingWitnessedReceipt(t *testing.T) {
-	unit := WorkUnit{Schema: Schema, ID: "release-unit", Axes: Axes{AuthoringRecorded, AdmissionAdmitted, VerificationPassed, IntegrationIntegrated, ReleaseNotReady}}
+	unit := WorkUnit{Schema: Schema, ID: "release-unit", Axes: Axes{Authoring: AuthoringRecorded, Admission: AdmissionAdmitted, Verification: VerificationPassed, Integration: IntegrationIntegrated, Release: ReleaseNotReady}}
 	obs, err := ReleaseReadinessObservation(unit, "shipgate://run/9", "release-gate", time.Unix(9, 0))
 	if err != nil {
 		t.Fatal(err)
