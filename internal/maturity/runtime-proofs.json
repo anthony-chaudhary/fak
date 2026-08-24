@@ -205,6 +205,11 @@
       "lane": "unwiredscore",
       "command": "go test -v ./internal/unwiredscore -run TestScan",
       "output_contains": "TestScanClassifiesWiredAndOrphans"
+    },
+    {
+      "lane": "uiquality",
+      "command": "go test -v ./internal/uiquality",
+      "output_contains": "TestHelpCompletenessCatchesUndocumented"
     }
   ]
 }
