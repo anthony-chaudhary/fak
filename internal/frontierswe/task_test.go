@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -161,6 +162,86 @@ func TestLoadTask_OptionalFilesAbsent(t *testing.T) {
 	}
 	if !reflect.DeepEqual(task.Oracle, Oracle{}) {
 		t.Errorf("Oracle = %+v, want zero value", task.Oracle)
+	}
+}
+
+func TestYAMLFlatSubset_PreservesQuotedScalarsAndLists(t *testing.T) {
+	var oracle Oracle
+	err := parseOracleYAML([]byte(`command: "say \"it's #1, ready\", then \\done\nnext"
+reward_key: 'score,#1, "quoted", it''s fine'
+`), &oracle)
+	if err != nil {
+		t.Fatalf("parseOracleYAML: %v", err)
+	}
+	if want := "say \"it's #1, ready\", then \\done\nnext"; oracle.Command != want {
+		t.Errorf("Command = %q, want %q", oracle.Command, want)
+	}
+	if want := `score,#1, "quoted", it's fine`; oracle.RewardKey != want {
+		t.Errorf("RewardKey = %q, want %q", oracle.RewardKey, want)
+	}
+
+	var job Job
+	err = parseJobYAML([]byte(`agents: ["claude,#1", 'codex, #2', "mix 'single' and \"double\""] # outside comment
+n_attempts: 3 # outside comment
+n_concurrent_trials: 2
+artifacts:
+  - 'report,#1.json'
+  - "quote \"double\" and 'single', # kept"
+`), &job)
+	if err != nil {
+		t.Fatalf("parseJobYAML: %v", err)
+	}
+	if want := []string{"claude,#1", "codex, #2", `mix 'single' and "double"`}; !reflect.DeepEqual(job.Agents, want) {
+		t.Errorf("Agents = %#v, want %#v", job.Agents, want)
+	}
+	if want := []string{"report,#1.json", `quote "double" and 'single', # kept`}; !reflect.DeepEqual(job.Artifacts, want) {
+		t.Errorf("Artifacts = %#v, want %#v", job.Artifacts, want)
+	}
+	if job.NAttempts != 3 || job.NConcurrentTrial != 2 {
+		t.Errorf("integer fields = (%d, %d), want (3, 2)", job.NAttempts, job.NConcurrentTrial)
+	}
+}
+
+func TestYAMLFlatSubset_RejectsMalformedInputWithLine(t *testing.T) {
+	tests := []struct {
+		name   string
+		data   string
+		oracle bool
+		line   string
+	}{
+		{name: "malformed line", data: "agents\n", line: "line 1:"},
+		{name: "duplicate relevant key", data: "n_attempts: 1\nn_attempts: 2\n", line: "line 2:"},
+		{name: "invalid integer", data: "n_attempts: many\n", line: "line 1:"},
+		{name: "non-integral integer", data: "n_concurrent_trials: 2.5\n", line: "line 1:"},
+		{name: "top-level indentation", data: " agents: []\n", line: "line 1:"},
+		{name: "nested list indentation", data: "agents:\n    - codex\n", line: "line 2:"},
+		{name: "unterminated inline quote", data: "agents: [\"codex, claude]\n", line: "line 1:"},
+		{name: "missing inline bracket", data: "agents: [codex, claude\n", line: "line 1:"},
+		{name: "extra inline bracket", data: "agents: [codex]]\n", line: "line 1:"},
+		{name: "empty inline item", data: "agents: [codex,, claude]\n", line: "line 1:"},
+		{name: "nested inline list", data: "agents: [[codex]]\n", line: "line 1:"},
+		{name: "unterminated block quote", data: "agents:\n  - \"codex\n", line: "line 2:"},
+		{name: "unknown field", data: "timeout: 3\n", line: "line 1:"},
+		{name: "unterminated scalar quote", data: "command: \"run # forever\n", oracle: true, line: "line 1:"},
+		{name: "unsupported block scalar", data: "command: |\n", oracle: true, line: "line 1:"},
+		{name: "duplicate scalar key", data: "command: run\ncommand: again\n", oracle: true, line: "line 2:"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var err error
+			if tt.oracle {
+				err = parseOracleYAML([]byte(tt.data), &Oracle{})
+			} else {
+				err = parseJobYAML([]byte(tt.data), &Job{})
+			}
+			if err == nil {
+				t.Fatal("parse succeeded, want error")
+			}
+			if !strings.Contains(err.Error(), tt.line) {
+				t.Fatalf("error = %q, want %q", err, tt.line)
+			}
+		})
 	}
 }
 
