@@ -1,7 +1,7 @@
 ---
 name: score-2x
-intent: Drive one scorecard surface's debt down 2×, rescore to prove the drop, then harden the metric itself once the surface saturates.
-description: The generic 2×-then-harden loop the whole scorecard family runs — score a surface, drive its debt down 2× with genuine fixes, rescore to PROVE the drop, and when the surface saturates (grade A, zero debt, nothing left to retire) HARDEN the metric itself — tighten a real threshold, promote a SOFT KPI to HARD, or add a dimension — so the score stays a live gradient instead of a frozen A. The conductor over the per-surface instruments (quality-score, industry-score, persona-score. Use when this named workflow matches the task.
+intent: Drive one scorecard surface's raw debt down 2×, rescore to prove the drop, then extend discovery without bounding or erasing the ledger.
+description: The generic 2×-then-discover loop the scorecard family runs — enumerate exhaustive raw debt, drive it down 2× with genuine fixes, rescore to PROVE the drop, and continuously harden discovery under a new metric version without capping debt or rewriting history. The conductor over the per-surface instruments (quality-score, industry-score, persona-score). Use when this named workflow matches the task.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Write, Edit, Grep, Glob
@@ -10,25 +10,28 @@ metadata:
   opencode: claude-only
 ---
 
-# /score-2x — drive a metric 2×, then harden it when it saturates
+# /score-2x — drive raw debt 2×, then extend discovery
 
 > **What this is.** Every `*-score` skill measures one surface and retires its debt
 > worst-first. This is the loop *around* all of them — the process the operator
 > described in one line: **"fresh score on X. work issues that improve it 2× if
 > possible. rescore. if the score is too high, refresh and make the metric harder."**
 > The per-surface skills are the instruments; this is the conductor. Its distinctive
-> move — the one no single scorecard skill owns — is the last step: when a surface
-> saturates (grade A, zero debt, nothing genuine left to retire), the metric has
-> stopped doing work, so you **raise the bar** and the loop has a real gradient again.
+> move — the one no single scorecard skill owns — is continuous discovery: a grade A
+> or raw debt of zero is only the current result for a named metric version and corpus,
+> never proof that the surface is debt-free.
 
-This is the Goodhart defense made into a routine. A scorecard pinned at A rewards the
-status quo; it no longer tells you the surface improved, only that it stopped getting
-measured. The 2×-then-harden loop keeps the number a *live* measure: debt ratchets
-**down** while the surface is dirty, the bar ratchets **up** when the surface is clean.
+This is the Goodhart defense made into a routine. Raw debt is an **unbounded,
+non-negative, exhaustive ledger** of every currently detected HARD defect and coverage
+gap. A bounded 0–100 score or A–F grade may summarize that ledger for presentation,
+but must never cap, normalize away, sample, or top-N-truncate the raw count or work-list.
+Debt ratchets **down** through real fixes; discovery expands under an explicit new metric
+version while old results remain comparable.
 
-The shape: **pick a surface + record the baseline → retire debt to halve it (genuine
-fixes only) → rescore with `--compare` to prove the drop → decide: ship the 2×, or
-(if saturated) harden the metric and re-pin → commit ONLY that lane by explicit path.**
+The shape: **pick a surface + record the metric version, corpus, and baseline → retire
+raw debt to halve it (genuine fixes only) → rescore with `--compare` to prove the drop →
+ship the 2× or extend discovery under a new version → commit ONLY that lane by explicit
+path.**
 
 This skill writes nothing on its own beyond the genuine fixes, the regenerated
 snapshot, and — on the harden branch — the threshold/KPI edit plus the re-pinned
@@ -70,8 +73,9 @@ python tools/<x>_scorecard.py --json > /tmp/<x>-base.json    # Bash > preserves 
 
 Read `corpus.score`, `corpus.grade`, `corpus.<x>_debt`, and `corpus.breakdown` (per-KPI
 debt, worst first). The per-KPI `defects` arrays ARE the work-list. **Write down
-`debt = N`, `score = S`, `grade = G`.** If `N == 0` and `G == A`, the surface is
-already saturated — skip to Step 4 (harden); there is no 2× to do.
+`debt = N`, `score = S`, `grade = G`, metric version `V`, and corpus identity `C`.**
+If `N == 0`, there is no arithmetic 2× target for this version; skip to Step 4 to audit
+and extend discovery. Grade A does not close the ledger.
 
 ## Step 2 — Retire debt worst-first to HALVE it (genuine fixes only)
 
@@ -119,19 +123,20 @@ python tools/<x>_scorecard.py --markdown --stamp YYYY-MM-DD > docs/<X>-SCORECARD
 > target in prose — compute the delta by hand from the two `--json` reads: `debt N→M`.
 
 If you hit the 2× (or 3×) target: this is a normal ship — **go to Step 5**. If the
-`--compare` ratio reads `∞ (zero)` / debt is already 0 / grade is A and there is
-nothing genuine left to retire: the surface is **saturated** — **go to Step 4**.
+`--compare` ratio reads `∞ (zero)`, debt is currently 0, the field moved, or discovery
+has known blind spots, **go to Step 4**. Zero means only that this metric version found
+no debt in this corpus; keep the discovery loop open.
 
-## Step 4 — Saturated? HARDEN the metric, then re-pin (the distinctive move)
+## Step 4 — Extend discovery under a new metric version, then re-pin
 
-A metric at grade A with zero debt has stopped discriminating: a clean small tree and
-a clean 10×-bigger tree both read A, and the next pass would be rewarded for nothing.
-"The score is too high" is the signal to **raise the bar** — make the metric measure
-a genuinely higher standard, so it surfaces real new work and the loop continues.
+Grades and normalized scores are bounded presentation signals; raw debt is not. Extend
+the detector when a defensible standard or missing axis can expose real work. Record a
+new metric version, preserve the prior snapshot, and report old→new counts as a metric
+change rather than pretending they are a same-version regression or improvement.
 
-**The saturation signals (any of):** `<x>_debt == 0` across two consecutive passes;
-`--compare` ratio prints `∞ (zero)`; grade A with an empty work-list; the control pane
-shows this metric flat at its pinned floor while the field/repo has plainly moved.
+**Discovery prompts (any of):** current raw debt is zero; repeated passes find no new
+work; the field/repo moved; an audit exposes blind spots; a SOFT signal now has a real,
+non-gameable witness. None means “done.”
 
 **The four genuine harden moves** (pick the one that reflects a real higher standard):
 
@@ -159,11 +164,11 @@ or the field should actually hold. Do NOT: invent a KPI that's trivially passed 
 the count; add a size-coupled signal that reddens just from growth (the doctrine's
 growth-invariant law forbids it — a 2×-bigger tree at the same discipline must still
 score the same); or tighten a threshold so far past reality that it floods the
-work-list with cosmetic noise. A good harden surfaces a *handful* of real new
-outliers, not a wall of them. If you can't name why the tighter bar is a better
+work-list with cosmetic noise. A good harden surfaces real new outliers. Their count is evidence, not a quota: never
+sample or truncate a large work-list merely to keep the debt visually manageable. If you can't name why the tighter bar is a better
 standard, don't tighten it — leave the A and say the surface is genuinely clean.
 
-**Re-pin the ratchet.** Hardening RAISES this metric's debt (by design — it just found
+**Version and re-pin the ratchet.** Hardening may RAISE this metric's raw debt (by design — it just found
 new work), so the control-pane `--check` gate would read it as a regression until you
 re-floor it. After the harden edit lands and you've retired the first round of newly
 surfaced debt, re-pin:
@@ -217,7 +222,7 @@ are why you can trust it moved. The loop is monotone in BOTH directions:
 
 A metric that only goes one way eventually freezes at A and stops measuring. This loop
 is what keeps "is X getting better" a question with a live, ungameable answer — the
-debt can't drift past the cross-check, and the bar can't saturate into theater.
+debt can't drift past the cross-check, and a bounded grade can't conceal an unbounded work-list.
 
 ## The honesty rules (internalize — the loop is only as good as its honesty)
 
@@ -237,7 +242,7 @@ debt can't drift past the cross-check, and the bar can't saturate into theater.
 
 - To run a **2× pass** on any one surface (the per-surface skill does the retiring;
   this sequences baseline → prove → ship).
-- When a scorecard has **saturated at grade A** and you need to decide whether — and
+- When a scorecard reports **grade A or zero current debt** and you need to decide whether — and
   how — to make the metric harder.
 - After a benchmark/feature lands that should move a surface, to prove it did.
 - On a **/loop cadence** across the portfolio: each tick, pick the surface with the

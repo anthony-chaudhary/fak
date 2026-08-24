@@ -20,6 +20,21 @@ The whole idea in one line: **a scorecard reads reality, folds it into a `*-debt
 integer the cross-check won't let you fake, and a paired skill drives that integer
 down by adding the real thing — never by gaming the detector.**
 
+## Raw debt is an unbounded discovery ledger
+
+Every `<surface>_debt` value is an **unbounded non-negative integer**: the exhaustive
+count of all currently detected HARD defects and coverage gaps in the named corpus
+under a named metric version. “Unbounded” means the schema and process impose no
+maximum; a finite repository still produces a finite count.
+
+The 0–100 score and A–F grade are separate, bounded presentation signals. They must
+never replace, clamp, normalize away, sample, or top-N-truncate raw debt. A renderer
+may preview a work-list only if the machine payload still emits every defect and the
+preview labels both its limit and the full count. Zero means “metric version V found
+no debt in corpus C now,” not “no debt exists” or “stop discovering.” When a new check
+finds more debt, bump the metric version and preserve the prior snapshot so same-version
+improvement and cross-version discovery stay distinguishable.
+
 ---
 
 ## Discover the live family; do not hard-code a roster
@@ -191,8 +206,8 @@ for a *tree-reading* scorecard (no data dir).
    only the data file, it's not a real check.
 
 4. **Fold to a payload.** Compute the weighted composite, the `A–F` grade
-   (`grade_letter`), the `<surface>_debt` integer (sum of HARD defects + coverage
-   gaps), and emit the control-pane envelope with `corpus.<surface>_debt` and
+   (`grade_letter`), the `<surface>_debt` unbounded integer (exhaustive sum of HARD
+   defects + coverage gaps, never clamped or truncated), and emit the control-pane envelope with `corpus.<surface>_debt` and
    `corpus.grade`.
 
 5. **Add renderers + flags.** `render` (terminal work-list), `--json`, `--compare
@@ -200,8 +215,8 @@ for a *tree-reading* scorecard (no data dir).
    `--markdown-dir`). For catalog scorecards add `--chart` / `--critical` / `--gaps`.
 
 6. **Write the test.** Fixtures for each KPI's defect trigger AND its clean case, the
-   fold to `*-debt`, plus a **live smoke** asserting the real tree's current floor
-   (usually zero debt) — that smoke is the regression sentinel.
+   fold to `*-debt`, plus a **live smoke** asserting a named metric-version/corpus
+   result. If it is zero, call it the current detector floor, not proof of completion.
 
 7. **Wire it into the control pane + re-pin.** Add a row to `SCORECARDS` in
    `tools/scorecard_control_pane.py` binding `{key, debt, script, label}`. Adding a
