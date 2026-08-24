@@ -105,6 +105,11 @@
       "lane": "whatschanged",
       "command": "go test -v ./internal/whatschanged",
       "output_contains": "TestWhatsChangedPreviewListsIntersectingCommitsAndFiles"
+    },
+    {
+      "lane": "webbench",
+      "command": "go test -v ./internal/webbench -run TestGeometryComputeArms",
+      "output_contains": "TestGeometryComputeArms"
     }
   ]
 }
