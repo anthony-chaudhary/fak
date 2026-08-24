@@ -75,6 +75,15 @@ type IssueRef struct {
 	URL    string `json:"url"`
 }
 
+type Feature struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	RungID     string `json:"rung_id"`
+	Enabled    bool   `json:"enabled"`
+	Status     Status `json:"status"`
+	Observable string `json:"observable"`
+}
+
 type Rung struct {
 	ID            string        `json:"id"`
 	Name          string        `json:"name"`
@@ -92,6 +101,7 @@ type Graph struct {
 	Envelope   Envelope   `json:"envelope"`
 	Comparison Throughput `json:"comparison"`
 	Rungs      []Rung     `json:"rungs"`
+	Features   []Feature  `json:"features"`
 }
 
 // ActiveGraph returns the committed Qwen3.8-27B Apple M3 Pro P32/T64 graph.
@@ -185,6 +195,11 @@ func ActiveGraph() Graph {
 				NextIssue: issue(8697),
 			},
 		},
+		Features: []Feature{
+			{ID: "resident-q4k-weights", Name: "Resident Q4_K weights", RungID: "resident-q4k-baseline", Enabled: true, Status: StatusPresent, Observable: "receipt identifies fak-native metal/qwen35-hybrid-session-v1 and the exact artifact hash"},
+			{ID: "coarse-token-submission", Name: "Coarse token-level Metal submission", RungID: "coarse-resident-hybrid-graph", Enabled: false, Status: StatusPartial, Observable: "receipt reports one owned token submission spanning activations, recurrent/KV state, and synchronization"},
+			{ID: "matched-envelope-receipt", Name: "Matched P32/T64 native receipt", RungID: "matched-native-parity", Enabled: false, Status: StatusAbsent, Observable: "before/after receipt matches artifact, machine, P32/T64, repetitions, quality, and fak-native execution identity"},
+		},
 	}
 }
 
@@ -248,6 +263,33 @@ func Validate(graph Graph) error {
 			}
 		}
 	}
+	featureIDs := make(map[string]struct{}, len(graph.Features))
+	for i, feature := range graph.Features {
+		label := fmt.Sprintf("feature[%d]", i)
+		if strings.TrimSpace(feature.ID) == "" {
+			findings = append(findings, label+" has empty id")
+		} else if _, exists := featureIDs[feature.ID]; exists {
+			findings = append(findings, fmt.Sprintf("duplicate feature id %q", feature.ID))
+		} else {
+			featureIDs[feature.ID] = struct{}{}
+		}
+		if _, exists := byID[feature.RungID]; !exists {
+			findings = append(findings, fmt.Sprintf("feature %q owns unknown rung %q", feature.ID, feature.RungID))
+		}
+		if !validStatus(feature.Status) {
+			findings = append(findings, fmt.Sprintf("feature %q has invalid status %q", feature.ID, feature.Status))
+		}
+		if feature.Enabled && feature.Status == StatusAbsent {
+			findings = append(findings, fmt.Sprintf("feature %q is enabled but absent", feature.ID))
+		}
+		if !feature.Enabled && feature.Status == StatusPresent {
+			findings = append(findings, fmt.Sprintf("feature %q is present but disabled", feature.ID))
+		}
+		if strings.TrimSpace(feature.Observable) == "" {
+			findings = append(findings, fmt.Sprintf("feature %q has empty observable", feature.ID))
+		}
+	}
+
 	if cycle := dependencyCycle(graph.Rungs, byID); len(cycle) > 0 {
 		findings = append(findings, "dependency cycle: "+strings.Join(cycle, " -> "))
 	}

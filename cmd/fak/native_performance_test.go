@@ -45,6 +45,9 @@ func TestNativePerformanceHumanOutputIsChecklistTable(t *testing.T) {
 		"3.3 [witnessed/approximate]",
 		"coarse-resident-hybrid-graph",
 		"5..6.966061 [hypothesis]",
+		"Feature stack:",
+		"[x] resident-q4k-weights",
+		"[ ] coarse-token-submission",
 		"Gaps:",
 		"#8697",
 	} {

@@ -73,6 +73,14 @@ func renderNativePerformance(w io.Writer, graph nativeperf.Graph) {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t#%d\n", enabled, rung.Status, rung.ID, deps, expected, witnessed, rung.NextIssue.Number)
 	}
 	_ = tw.Flush()
+	fmt.Fprintln(w, "Feature stack:")
+	for _, feature := range graph.Features {
+		enabled := "[ ]"
+		if feature.Enabled {
+			enabled = "[x]"
+		}
+		fmt.Fprintf(w, "- %s %s (%s; rung=%s): %s\n", enabled, feature.ID, feature.Status, feature.RungID, feature.Observable)
+	}
 	fmt.Fprintln(w, "Gaps:")
 	for _, rung := range graph.Rungs {
 		fmt.Fprintf(w, "- %s: %s (next #%d)\n", rung.ID, rung.Gap, rung.NextIssue.Number)
