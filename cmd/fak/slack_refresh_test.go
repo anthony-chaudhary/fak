@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -32,16 +33,43 @@ func TestSlackRefreshNewsNeedsDigestInput(t *testing.T) {
 	}
 }
 
-func TestSlackRefreshBlockersNeedsIssuePayload(t *testing.T) {
+func TestSlackRefreshGitHubPayloadAppearsInDryRun(t *testing.T) {
 	clearSlackEnv(t)
+	t.Setenv("FAK_BACKLOG_CHANNEL", "C-BACKLOG")
+	payload := []byte(`[{"number":8790,"title":"refresh blockers and backlog from GitHub","url":"https://github.com/anthony-chaudhary/fak/issues/8790","assignees":[],"labels":[{"name":"blocked"}]}]`)
 	var out, errb bytes.Buffer
-	code := runSlackRefresh(&out, &errb, []string{"--surface", "blockers"})
+	code := runSlackRefreshWithGH(&out, &errb, []string{"--surface", "blockers,backlog"}, func(args ...string) ([]byte, error) {
+		got := strings.Join(args, " ")
+		if !strings.Contains(got, "--limit 100") || !strings.Contains(got, "number,title,url,assignees,labels") {
+			t.Fatalf("unbounded or incomplete gh request: %s", got)
+		}
+		return payload, nil
+	})
 	if code != 0 {
-		t.Fatalf("slack refresh blockers exit = %d, stderr=%s", code, errb.String())
+		t.Fatalf("refresh exit = %d, stderr=%s\nstdout=%s", code, errb.String(), out.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "blockers: SKIP") || !strings.Contains(got, "needs --blockers-issues") {
-		t.Fatalf("refresh output should skip blockers without issue payload:\n%s", got)
+	if !strings.Contains(got, "#8790") || !strings.Contains(got, "refresh blockers and backlog from GitHub") {
+		t.Fatalf("dry-run omitted current issue data:\n%s", got)
+	}
+	if !strings.Contains(got, "== blockers: DRY-RUN ==") || !strings.Contains(got, "== backlog: DRY-RUN ==") {
+		t.Fatalf("both GitHub-backed surfaces did not execute:\n%s", got)
+	}
+}
+
+func TestSlackRefreshGitHubFailureIsTypedAndNeverAllClear(t *testing.T) {
+	clearSlackEnv(t)
+	var out, errb bytes.Buffer
+	code := runSlackRefreshWithGH(&out, &errb, []string{"--surface", "blockers,backlog", "--json"}, func(args ...string) ([]byte, error) { return nil, fmt.Errorf("authentication required") })
+	if code == 0 {
+		t.Fatalf("GitHub failure unexpectedly succeeded: %s", out.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, `"error_type": "GITHUB_FETCH_FAILED"`) || !strings.Contains(got, "no all-clear rendered") {
+		t.Fatalf("GitHub failure is not typed:\n%s", got)
+	}
+	if strings.Contains(strings.ToLower(got), "no standing blockers") {
+		t.Fatalf("failure fabricated all-clear:\n%s", got)
 	}
 }
 

@@ -2,12 +2,16 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/ghexec"
 )
 
 type slackRefreshKind string
@@ -32,6 +36,7 @@ type slackRefreshOptions struct {
 	BlockersIssues  string
 	BlockersLabel   string
 	BlockersRepoURL string
+	BacklogIssues   string
 }
 
 type slackWalkRow struct {
@@ -47,13 +52,42 @@ type slackWalkRow struct {
 }
 
 type slackRefreshResult struct {
-	Surface  string `json:"surface"`
-	Status   string `json:"status"`
-	ExitCode int    `json:"exit_code,omitempty"`
-	Command  string `json:"command"`
-	Detail   string `json:"detail,omitempty"`
-	Stdout   string `json:"stdout,omitempty"`
-	Stderr   string `json:"stderr,omitempty"`
+	Surface   string `json:"surface"`
+	Status    string `json:"status"`
+	ExitCode  int    `json:"exit_code,omitempty"`
+	Command   string `json:"command"`
+	Detail    string `json:"detail,omitempty"`
+	Stdout    string `json:"stdout,omitempty"`
+	Stderr    string `json:"stderr,omitempty"`
+	ErrorType string `json:"error_type,omitempty"`
+}
+
+type slackGitHubIssue struct {
+	Number    int    `json:"number"`
+	Title     string `json:"title"`
+	URL       string `json:"url"`
+	Assignees []struct {
+		Login string `json:"login"`
+	} `json:"assignees"`
+	Labels []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+}
+
+type slackGitHubRunner func(args ...string) ([]byte, error)
+
+func runSlackRefreshGH(args ...string) ([]byte, error) {
+	cmd, cancel := ghexec.CommandTimeout(nil, ghexec.DefaultTimeout, args...)
+	defer cancel()
+	out, err := cmd.Output()
+	if err == nil {
+		return out, nil
+	}
+	var exitErr *os.ExitError
+	if errors.As(err, &exitErr) {
+		return nil, fmt.Errorf("gh issue list: %w: %s", err, strings.TrimSpace(string(exitErr.Stderr)))
+	}
+	return nil, fmt.Errorf("gh issue list: %w", err)
 }
 
 func slackRefreshActions() map[string]slackRefreshAction {
@@ -116,9 +150,22 @@ func slackRefreshActions() map[string]slackRefreshAction {
 			},
 		},
 		"backlog": {
-			Kind:    refreshInputNeeded,
-			Command: "gh issue list ... then fak scoreboard post --channel $FAK_BACKLOG_CHANNEL --kpi backlog-triage ...",
-			Detail:  "backlog needs the GitHub issue-list/readout payload from the workflow",
+			Kind:    refreshRunnable,
+			Command: "gh issue list --state open --limit 100 ... then fak scoreboard post --kpi backlog-triage",
+			Detail:  "bounded current GitHub issue readout",
+			Run: func(stdout, stderr io.Writer, dryRun bool, opts slackRefreshOptions) int {
+				issues, err := decodeSlackGitHubIssues([]byte(opts.BacklogIssues))
+				if err != nil {
+					fmt.Fprintf(stderr, "fak slack refresh backlog: %v\n", err)
+					return 2
+				}
+				detail, verdict := backlogRefreshDetail(issues), "ACTION"
+				if len(issues) == 0 {
+					detail, verdict = "GitHub returned zero open issues", "OK"
+				}
+				args := []string{"--channel", os.Getenv("FAK_BACKLOG_CHANNEL"), "--kpi", "backlog-triage", "--value", fmt.Sprint(len(issues)), "--verdict", verdict, "--detail", detail}
+				return runScoreboardPost(stdout, stderr, withDryRun(args, dryRun))
+			},
 		},
 		"marketing": {
 			Kind:    refreshRunnable,
@@ -221,6 +268,10 @@ func renderSlackWalk(w io.Writer, rows []slackWalkRow) {
 }
 
 func runSlackRefresh(stdout, stderr io.Writer, argv []string) int {
+	return runSlackRefreshWithGH(stdout, stderr, argv, runSlackRefreshGH)
+}
+
+func runSlackRefreshWithGH(stdout, stderr io.Writer, argv []string, gh slackGitHubRunner) int {
 	fs := flag.NewFlagSet("fak slack refresh", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	surfaceList := fs.String("surface", "", "comma-separated surfaces to refresh (default: all registered surfaces)")
@@ -243,11 +294,30 @@ func runSlackRefresh(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	opts := slackRefreshOptions{
-		NewsTitle:       *newsTitle,
-		NewsFile:        *newsFile,
-		BlockersIssues:  *blockersIssues,
-		BlockersLabel:   *blockersLabel,
-		BlockersRepoURL: *blockersRepoURL,
+		NewsTitle: *newsTitle, NewsFile: *newsFile, BlockersIssues: *blockersIssues,
+		BlockersLabel: *blockersLabel, BlockersRepoURL: *blockersRepoURL,
+	}
+	cleanup := func() {}
+	if needsGitHubPayload(selected, opts.BlockersIssues) {
+		payload, ghErr := gh("issue", "list", "--state", "open", "--limit", "100", "--json", "number,title,url,assignees,labels")
+		if ghErr != nil {
+			results := githubFailureResults(selected, ghErr)
+			if *asJSON {
+				if code := encodeJSONOrFail(stdout, stderr, results, "fak slack refresh"); code != 0 {
+					return code
+				}
+			} else {
+				renderSlackRefresh(stdout, results, !*live)
+			}
+			return refreshExit(results)
+		}
+		var prepErr error
+		opts, cleanup, prepErr = prepareGitHubRefreshPayload(payload, opts)
+		if prepErr != nil {
+			fmt.Fprintf(stderr, "fak slack refresh: GITHUB_PAYLOAD_INVALID: %v\n", prepErr)
+			return 2
+		}
+		defer cleanup()
 	}
 	results := refreshSelectedSurfaces(selected, !*live, *continueOnError, opts)
 
@@ -259,6 +329,84 @@ func runSlackRefresh(stdout, stderr io.Writer, argv []string) int {
 	}
 	renderSlackRefresh(stdout, results, !*live)
 	return refreshExit(results)
+}
+
+func needsGitHubPayload(reports []*surfaceReport, blockersPath string) bool {
+	for _, rep := range reports {
+		if rep.Name == "backlog" || (rep.Name == "blockers" && strings.TrimSpace(blockersPath) == "") {
+			return true
+		}
+	}
+	return false
+}
+
+func decodeSlackGitHubIssues(payload []byte) ([]slackGitHubIssue, error) {
+	var issues []slackGitHubIssue
+	if err := json.Unmarshal(payload, &issues); err != nil {
+		return nil, fmt.Errorf("decode bounded issue payload: %w", err)
+	}
+	return issues, nil
+}
+
+func prepareGitHubRefreshPayload(payload []byte, opts slackRefreshOptions) (slackRefreshOptions, func(), error) {
+	issues, err := decodeSlackGitHubIssues(payload)
+	if err != nil {
+		return opts, func() {}, err
+	}
+	canonical, err := json.Marshal(issues)
+	if err != nil {
+		return opts, func() {}, err
+	}
+	opts.BacklogIssues = string(canonical)
+	if strings.TrimSpace(opts.BlockersIssues) != "" {
+		return opts, func() {}, nil
+	}
+	f, err := os.CreateTemp("", "fak-slack-refresh-issues-*.json")
+	if err != nil {
+		return opts, func() {}, fmt.Errorf("stage issue payload: %w", err)
+	}
+	name := f.Name()
+	cleanup := func() { _ = os.Remove(name) }
+	if _, err := f.Write(canonical); err != nil {
+		_ = f.Close()
+		cleanup()
+		return opts, func() {}, fmt.Errorf("stage issue payload: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return opts, func() {}, fmt.Errorf("stage issue payload: %w", err)
+	}
+	opts.BlockersIssues = name
+	return opts, cleanup, nil
+}
+
+func githubFailureResults(reports []*surfaceReport, err error) []slackRefreshResult {
+	var results []slackRefreshResult
+	for _, rep := range reports {
+		if rep.Name != "blockers" && rep.Name != "backlog" {
+			continue
+		}
+		results = append(results, slackRefreshResult{Surface: rep.Name, Status: "FAIL", ExitCode: 1, Command: slackRefreshActions()[rep.Name].Command, Detail: "GitHub issue payload unavailable; no all-clear rendered", Stderr: err.Error(), ErrorType: "GITHUB_FETCH_FAILED"})
+	}
+	return results
+}
+
+func backlogRefreshDetail(issues []slackGitHubIssue) string {
+	if len(issues) == 0 {
+		return ""
+	}
+	const shown = 5
+	parts := make([]string, 0, shown)
+	for i, issue := range issues {
+		if i == shown {
+			break
+		}
+		parts = append(parts, fmt.Sprintf("#%d %s", issue.Number, issue.Title))
+	}
+	if len(issues) > shown {
+		parts = append(parts, fmt.Sprintf("+%d more", len(issues)-shown))
+	}
+	return strings.Join(parts, "; ")
 }
 
 func selectSlackSurfaces(reports []*surfaceReport, surfaceList string) ([]*surfaceReport, error) {
