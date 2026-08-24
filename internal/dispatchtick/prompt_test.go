@@ -479,3 +479,15 @@ func TestIssuePromptMissingBodyStillRenders(t *testing.T) {
 		t.Fatalf("prompt missing fallback body or issue:\n%s", rec.Prompt)
 	}
 }
+func TestIssuePromptInvokesBoundedHarnessProbeByDefault(t *testing.T) {
+	p := RenderIssuePrompt(sampleIssuePrompt())
+	for _, want := range []string{
+		"default bounded-harness probe",
+		"go run ./cmd/microharnessdemo -selfcheck -ledger <temp.jsonl>",
+		"does not widen the issue",
+	} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, p)
+		}
+	}
+}
