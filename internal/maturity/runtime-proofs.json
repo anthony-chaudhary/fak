@@ -175,6 +175,11 @@
       "lane": "vcacheextract",
       "command": "go test -v ./internal/vcacheextract",
       "output_contains": "TestTurnsFromRowsKeepsOnlyTokenCounters"
+    },
+    {
+      "lane": "vcachechain",
+      "command": "go test -v ./internal/vcachechain",
+      "output_contains": "TestProveRecallHeadlineRefusedThenAmortizedProven"
     }
   ]
 }
