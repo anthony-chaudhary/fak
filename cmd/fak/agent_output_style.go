@@ -83,6 +83,23 @@ type agentOutputProfile struct {
 	Meaning        string `json:"meaning"`
 }
 
+type agentProfileSweepPlan struct {
+	Schema          string                 `json:"schema"`
+	Axes            string                 `json:"axes"`
+	ResultSemantics string                 `json:"result_semantics"`
+	Rows            []agentProfileSweepRow `json:"rows"`
+}
+
+type agentProfileSweepRow struct {
+	Axis      string `json:"axis"`
+	Rung      string `json:"rung"`
+	Selection string `json:"selection"`
+	Canonical string `json:"canonical"`
+	Meaning   string `json:"meaning"`
+	Command   string `json:"command"`
+	Result    string `json:"result"`
+}
+
 func agentOutputProfiles() []agentOutputProfile {
 	return []agentOutputProfile{
 		{Selection: "full", Canonical: "full", Family: "native", Implementation: "native", Intensity: "off", Status: "shipped", Meaning: "No response-shape steering."},
@@ -106,15 +123,86 @@ func agentWorkProfiles() []agentOutputProfile {
 	}
 }
 
+func agentProfileSweepRows() []agentProfileSweepRow {
+	return []agentProfileSweepRow{
+		{Axis: "response", Rung: "off", Selection: "full", Canonical: "full", Meaning: "No response-shape steering.", Command: "fak agent --output-style full --work-profile ponytail:medium", Result: "not-measured"},
+		{Axis: "response", Rung: "low", Selection: "caveman:low", Canonical: "caveman:native:low", Meaning: "Light response compression.", Command: "fak agent --output-style caveman:low --work-profile ponytail:medium", Result: "not-measured"},
+		{Axis: "response", Rung: "medium", Selection: "caveman:medium", Canonical: "caveman:native:medium", Meaning: "Concise response shape with correctness carve-outs.", Command: "fak agent --output-style caveman:medium --work-profile ponytail:medium", Result: "not-measured"},
+		{Axis: "response", Rung: "high", Selection: "caveman:high", Canonical: "caveman:native:high", Meaning: "Strong response compression.", Command: "fak agent --output-style caveman:high --work-profile ponytail:medium", Result: "not-measured"},
+		{Axis: "work", Rung: "off", Selection: "standard", Canonical: "standard", Meaning: "No implementation-policy steering.", Command: "fak agent --work-profile standard --output-style caveman:medium", Result: "not-measured"},
+		{Axis: "work", Rung: "low", Selection: "ponytail:low", Canonical: "ponytail:native:low", Meaning: "Brief simplicity check before adding machinery.", Command: "fak agent --work-profile ponytail:low --output-style caveman:medium", Result: "not-measured"},
+		{Axis: "work", Rung: "medium", Selection: "ponytail:medium", Canonical: "ponytail:native:medium", Meaning: "Simplicity ladder with correctness carve-outs.", Command: "fak agent --work-profile ponytail:medium --output-style caveman:medium", Result: "not-measured"},
+		{Axis: "work", Rung: "high", Selection: "ponytail:high", Canonical: "ponytail:native:high", Meaning: "Actively resist avoidable complexity.", Command: "fak agent --work-profile ponytail:high --output-style caveman:medium", Result: "not-measured"},
+	}
+}
+
+func agentResponseProfileValue(style syspromptmmu.StyleReadout) string {
+	switch style.Intensity {
+	case "low":
+		return "light response compression"
+	case "medium":
+		return "concise response shape with correctness carve-outs"
+	case "high":
+		return "strong response compression"
+	default:
+		return "no response-shape steering"
+	}
+}
+
+func agentWorkProfileValue(profile syspromptmmu.WorkProfileReadout) string {
+	switch profile.Intensity {
+	case "low":
+		return "brief simplicity check"
+	case "medium":
+		return "simplicity ladder with correctness carve-outs"
+	case "high":
+		return "actively resist avoidable complexity"
+	default:
+		return "no implementation-policy steering"
+	}
+}
+
+func printAgentProfileValue(w io.Writer, response agentOutputStylePreference, work agentWorkProfilePreference) {
+	fmt.Fprintf(w, "fak agent profile value: response=%s (source=%s; value=%s); work=%s (source=%s; value=%s); off means response=full adds no response-shape steering and work=standard adds no implementation-policy steering; inspect sweep: fak agent profiles --sweep\n",
+		response.Style.Style, response.Source, agentResponseProfileValue(response.Style),
+		work.Profile.Profile, work.Source, agentWorkProfileValue(work.Profile))
+}
+
+func printAgentProfileSweep(w io.Writer, jsonOut bool) error {
+	rows := agentProfileSweepRows()
+	if jsonOut {
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(agentProfileSweepPlan{
+			Schema:          "fak-agent-profile-sweep/1",
+			Axes:            "independent",
+			ResultSemantics: "not-measured means this row is a stable control plan, not a benchmark result",
+			Rows:            rows,
+		})
+	}
+	fmt.Fprintln(w, "Profile sweep plan (independent controls; stable off/low/medium/high rows):")
+	for _, row := range rows {
+		fmt.Fprintf(w, "  %-8s %-6s %-18s %-13s %s\n", row.Axis, row.Rung, row.Selection, row.Result, row.Command)
+	}
+	fmt.Fprintln(w, "Run the same recorded task or fixture with fixed options for each row, then compare its receipts.")
+	fmt.Fprintln(w, "No benchmark results are bundled; every row is not-measured until you run it.")
+	fmt.Fprintln(w, "Machine-readable plan: fak agent profiles --sweep --json")
+	return nil
+}
+
 func printAgentOutputProfiles(w io.Writer, argv []string) error {
 	fs := flag.NewFlagSet("agent profiles", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	jsonOut := fs.Bool("json", false, "emit stable JSON")
+	sweep := fs.Bool("sweep", false, "emit the stable independent-axis sweep plan")
 	if err := fs.Parse(argv); err != nil {
 		return fmt.Errorf("agent profiles: %w", err)
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("agent profiles: unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	if *sweep {
+		return printAgentProfileSweep(w, *jsonOut)
 	}
 	profiles := agentOutputProfiles()
 	if *jsonOut {
@@ -140,6 +228,7 @@ func printAgentOutputProfiles(w io.Writer, argv []string) error {
 	fmt.Fprintln(w, "  fak console settings --json                                           # show canonical value + source")
 	fmt.Fprintln(w, "  fak console settings --set-default adapt.output-style=full             # disable")
 	fmt.Fprintln(w, "  precedence: CLI --output-style > persisted preference > shipped default")
+	fmt.Fprintln(w, "\nSweep controls: fak agent profiles --sweep")
 	fmt.Fprintln(w, "\nPrecedence: policy and explicit requirements > repository instructions > work profile > response profile.")
 	return nil
 }

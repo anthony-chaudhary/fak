@@ -53,6 +53,7 @@ func TestAgentOutputProfilesUserReadout(t *testing.T) {
 		"--set-default adapt.output-style=caveman:medium",
 		"--set-default adapt.output-style=full",
 		"CLI --output-style > persisted preference > shipped default",
+		"Sweep controls: fak agent profiles --sweep",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("profiles readout missing %q:\n%s", want, text)

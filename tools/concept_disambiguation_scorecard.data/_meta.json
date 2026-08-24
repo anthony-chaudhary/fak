@@ -12209,6 +12209,11 @@
           "category": "incidental",
           "reason": "Internal bounded-retry implementation detail; it does not define a new operator-facing plan concept.",
           "token": "auditDispatchWaveExecutionPlanWithFallback"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI-local data type for rendering profile sweep commands; not a new planning-domain concept",
+          "token": "agentProfileSweepPlan"
         }
       ],
       "exclude": [
@@ -12302,6 +12307,7 @@
         "WatchdogIncludeAbruptInteractive",
         "WatchdogPlanRows",
         "WriteMergePlan",
+        "agentProfileSweepPlan",
         "auditDispatchWaveExecutionPlanBounded",
         "auditDispatchWaveExecutionPlanWithFallback",
         "auditedPlan",
