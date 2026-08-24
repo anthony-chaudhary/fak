@@ -13,7 +13,7 @@ func EncodeRequest(req Request) (string, error) {
 		return "", fmt.Errorf("incomplete host resurrection request")
 	}
 	exe := strings.ToLower(filepath.Base(req.Command[0]))
-	if exe != "claude" && exe != "claude.exe" {
+	if exe != "claude" && exe != "claude.exe" && exe != "codex" && exe != "codex.exe" {
 		return "", fmt.Errorf("unsupported relaunch executable %q", req.Command[0])
 	}
 	resume := 0
