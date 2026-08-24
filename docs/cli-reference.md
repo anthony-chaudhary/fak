@@ -21,21 +21,37 @@ in-process, served from a local **tool vDSO** when possible, screened by a
 
 ## `native-performance`: query the raw-model hill climb
 
-`fak native-performance` renders the committed Qwen3.8-27B Q4_K_M Apple M3 Pro
-P32/T64 optimization graph as a human checklist/table. `--json` emits the same
-validated typed graph for agents and automation.
+`fak native-performance` renders the committed Qwen3.8-27B optimization graph as a
+human checklist/table. It preserves the original Metal P32/T64 aggregate rungs and
+adds independently attributable levers in separate pinned Metal and CUDA/A100
+envelopes.
 
 ```bash
 fak native-performance
 fak native-performance --json
+fak native-performance --next
+fak native-performance --dot
 ```
 
-Each rung reports dependency IDs, independent enabled state, present/partial/absent
-status, a provenance-labeled hypothetical floor/roof, a separate witnessed throughput
-or explicit `null`, the remaining gap, and its next GitHub issue. The command performs no model execution. Every performance rung remains fak-native; llama.cpp appears only as an explicitly selected parity/reference benchmark comparison. The current 3.3 tok/s fak-native
-witness and 6.966061 tok/s llama.cpp comparison remain separately classified and only
-approximately comparable until #8697 captures a joint matched receipt. Graph semantics,
-the update checklist, and source provenance are in
+`--json` emits the validated typed graph. `--next` deterministically prints the first
+dependency-ready unwitnessed lever, its owning issue, and exact receipt requirement.
+`--dot` emits deterministic Graphviz DOT with dependency/conflict edges and separate
+envelope clusters; fak does not invoke Graphviz.
+
+Each lever reports a stable ID, platform/envelope applicability, independent enabled
+state and present/partial/absent status, dependency and conflict IDs, a
+provenance-labelled expected planning effect, a separately receipt-backed witnessed
+effect or `null`, owning issue, and next witness. Validation fails closed on cycles,
+conflicts, cross-envelope edges, invalid applicability, duplicate IDs, and
+expected/witnessed evidence conflation.
+
+The command performs no model execution. Every execution envelope remains fak-native;
+llama.cpp appears only as an explicitly selected parity/reference comparison. The
+current 3.3 tok/s Metal fak-native witness and 6.966061 tok/s llama.cpp comparison
+remain separately classified and only approximately comparable until #8697 captures
+a joint matched receipt. CUDA #8635 targets are hypotheses, not measurements, and are
+never combined with the Metal throughput curve. Graph semantics, the update checklist,
+and source provenance are in
 [`NATIVE-PERFORMANCE-HILLCLIMB.md`](benchmarks/NATIVE-PERFORMANCE-HILLCLIMB.md).
 
 ## `dup cache-maintain`: bound the shared token-window cache

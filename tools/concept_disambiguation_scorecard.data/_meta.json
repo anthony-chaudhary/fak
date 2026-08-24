@@ -6748,6 +6748,16 @@
           "category": "incidental",
           "reason": "Typed recovery reason emitted by the microharness witness advisory, not a distinct witness or proof mechanism.",
           "token": "MICROHARNESS_UNWITNESSED"
+        },
+        {
+          "category": "incidental",
+          "reason": "Field label carrying an existing lever receipt requirement, not a new witness type.",
+          "token": "NextWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Native-performance schema record for receipt-backed lever evidence; it reuses existing witness semantics.",
+          "token": "WitnessedEffect"
         }
       ],
       "id": "witness-proof",
@@ -6770,6 +6780,7 @@
         "MICROHARNESS_UNWITNESSED",
         "MotifCatalogReproduceFixWitness",
         "NewTreeWitness",
+        "NextWitness",
         "OutcomeEvidence",
         "OutputStyleWitness",
         "POPULATION_LIFT_UNWITNESSED",
@@ -6808,6 +6819,7 @@
         "WitnessMove",
         "WitnessRoute",
         "WitnessSHA256",
+        "WitnessedEffect",
         "WitnessedProgressFloor",
         "WitnessedShips",
         "WorkProfileWitness",
@@ -11389,6 +11401,11 @@
           "category": "incidental",
           "reason": "Fleet-search command renderer is a local output helper, not a separate render-materialization concept.",
           "token": "renderSearchHuman"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI-local serializer for the native-performance next-arm view; it does not introduce a domain concept.",
+          "token": "renderNextNativePerformance"
         }
       ],
       "id": "render-materialize",
@@ -11452,6 +11469,7 @@
         "renderGitSpawnDelta",
         "renderGitSpawnReport",
         "renderLaunchPosture",
+        "renderNextNativePerformance",
         "renderProviders",
         "renderREADME",
         "renderRanks",
@@ -12214,6 +12232,11 @@
           "category": "incidental",
           "reason": "CLI-local data type for rendering profile sweep commands; not a new planning-domain concept",
           "token": "agentProfileSweepPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Native-performance schema record separating projected lever effects from measurements; it is not a planning workflow concept.",
+          "token": "PlanningEffect"
         }
       ],
       "exclude": [
@@ -12275,6 +12298,7 @@
         "PlanStepDecision",
         "PlanUnits",
         "PlanUnregisteredResidue",
+        "PlanningEffect",
         "PressuredSnapshotCandidates",
         "ProjectWatchdogCandidates",
         "QueryPlan",
