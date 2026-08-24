@@ -66,6 +66,7 @@ class Witness:
 
 
 WITNESSES: tuple[Witness, ...] = (
+    Witness("dashboarddemo-selfcheck", ("go", "run", "./cmd/dashboarddemo", "-selfcheck"), ('"verdict":"pass"', '"rich_dashboard_count":9')),
     Witness("archreportdemo-selfcheck", ("go", "run", "./cmd/archreportdemo", "-selfcheck"), ("selfcheck: PASS",)),
     Witness("disambiguationdemo-selfcheck", ("go", "run", "./cmd/disambiguationdemo", "-selfcheck"), ("SELFCHECK PASS",)),
     Witness("fabricmapdemo-selfcheck", ("go", "run", "./cmd/fabricmapdemo", "-selfcheck"), ("PASS:",)),
