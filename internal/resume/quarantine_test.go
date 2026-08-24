@@ -228,7 +228,7 @@ func TestWatchdogQuarantineGuardOutranksEveryRowFact(t *testing.T) {
 	// the reset/recovery shapes that beat the lower guards: a revived re-death and a
 	// replay-safe preserved partial turn.
 	revived, released := ReviveOutcome(OutcomeProgressed, ReDeathEvidence{
-		ProcessScanOK: true, TranscriptIdleSeconds: DeadTranscriptIdleFloorSeconds,
+		ProcessScanOK: true, TranscriptIdleSeconds: DeadTranscriptIdleFloorSeconds, PostLaunchProgress: true,
 	})
 	if !released {
 		t.Fatalf("setup: re-death evidence must release the burn-once latch")

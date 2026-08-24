@@ -292,11 +292,16 @@ func runResumeWatchdogTick(stdout, stderr io.Writer, argv []string) int {
 		// outcome is revived to recoverable and the same attempt cap takes over.
 		if resume.CountAttempts(hist) > 0 &&
 			(outcome == resume.OutcomeProgressed || outcome == resume.OutcomeUnknown) {
-			ev := rwReDeathEvidence(home, p.Session, procScan, time.Now())
+			ev := rwReDeathEvidence(home, p.Session, procScan, time.Now(),
+				resume.LastLaunchUnix(hist), progress.NewTurns > 0)
 			if revived, released := resume.ReviveOutcome(outcome, ev); released {
 				outcome = revived
-				note("  REVIVE %s â€” resume took once, but no live process holds it and the transcript has been idle %s: stale once-latch released, session re-eligible (#2368)",
-					sid8, humanIdle(ev.TranscriptIdleSeconds))
+				graceAge, basis := ev.TranscriptIdleSeconds, "post-progress transcript"
+				if !ev.PostLaunchProgress {
+					graceAge, basis = ev.LaunchAgeSeconds, "launch without a post-launch turn"
+				}
+				note("  REVIVE %s â€” no live process holds it and the %s has aged %s: stale once-latch released, session re-eligible (#2368/#8722)",
+					sid8, basis, humanIdle(graceAge))
 			}
 		}
 		effective := guards
@@ -791,12 +796,20 @@ func (s *rwProcScan) sessionProcess(sid string) (cmdline string, live, ok bool) 
 	return "", false, true
 }
 
-// rwReDeathEvidence gathers the stale-latch facts (#2368) for one planned session:
-// process liveness from the tick's table snapshot, transcript idleness from the newest
-// copy's mtime. A missing transcript reads as idle unknown (-1), which never revives.
-func rwReDeathEvidence(home, sid string, scan *rwProcScan, now time.Time) resume.ReDeathEvidence {
-	ev := resume.ReDeathEvidence{TranscriptIdleSeconds: -1}
+// rwReDeathEvidence gathers the stale-latch facts (#2368/#8722) for one planned
+// session: process liveness from the tick's table snapshot, transcript idleness from
+// the newest copy's mtime, and the launch age used only when no post-launch model turn
+// exists. Missing/unreadable timestamps stay -1 and never prove a retry.
+func rwReDeathEvidence(home, sid string, scan *rwProcScan, now time.Time, lastLaunchUnix int64, postLaunchProgress bool) resume.ReDeathEvidence {
+	ev := resume.ReDeathEvidence{
+		TranscriptIdleSeconds: -1,
+		LaunchAgeSeconds:      -1,
+		PostLaunchProgress:    postLaunchProgress,
+	}
 	ev.ProcessLive, ev.ProcessScanOK = scan.sessionLive(sid)
+	if lastLaunchUnix > 0 {
+		ev.LaunchAgeSeconds = int64(now.Sub(time.Unix(lastLaunchUnix, 0)).Seconds())
+	}
 	if path := rwNewestTranscript(home, sid); path != "" {
 		if fi, err := os.Stat(path); err == nil {
 			ev.TranscriptIdleSeconds = int64(now.Sub(fi.ModTime()).Seconds())

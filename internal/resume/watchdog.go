@@ -332,12 +332,12 @@ func CodexWatchdogChildEnv(environ []string) []string {
 // --- the stale resume-took latch (#2368) --------------------------------------------
 
 // ReDeathEvidence is the typed, shell-extracted proof that a session whose last resume
-// TOOK (or whose outcome is unreadable) has since died AGAIN. The burn-once retry gate
-// reads a progressed/unknown outcome as "resumed once — done"; that latch goes stale
-// the moment the session stops a second time: the sweep re-plans the session every
-// tick and the watchdog skips it every tick with "already resumed once (resume took)",
-// forever. Every field defaults to "unproven", so the zero value revives nothing and a
-// caller that cannot gather evidence keeps today's conservative burn-once behavior.
+// TOOK has since died AGAIN, or that an unreadable/unproven launch never took at all. The
+// burn-once retry gate reads a progressed/unknown outcome as "resumed once — done"; that
+// latch goes stale when the session later stops or when a launch produces no progress and
+// no driver survives its startup grace. Every field defaults to "unproven", so the zero
+// value revives nothing and a caller that cannot gather evidence keeps today's
+// conservative burn-once behavior.
 type ReDeathEvidence struct {
 	// ProcessScanOK: the process table was actually readable. False = liveness unknown
 	// → never revive (racing two `claude` processes on one transcript is worse than
@@ -347,29 +347,48 @@ type ReDeathEvidence struct {
 	// `claude --resume <sid>` child still running).
 	ProcessLive bool `json:"process_live"`
 	// TranscriptIdleSeconds: seconds since the session's newest transcript copy last
-	// changed; -1 when no transcript could be found (unknown → never revive).
+	// changed; -1 when no transcript could be found. An unknown transcript clock cannot
+	// prove a later death after progress; an unproven launch uses LaunchAgeSeconds instead.
 	TranscriptIdleSeconds int64 `json:"transcript_idle_seconds"`
+	// LaunchAgeSeconds is the age of the newest fired launch; -1 when its timestamp is
+	// unreadable. It supplies the startup grace when that launch produced no transcript
+	// turn at all: a missing transcript can become a bounded failed-launch fact without
+	// pretending it is transcript-idleness evidence.
+	LaunchAgeSeconds int64 `json:"launch_age_seconds"`
+	// PostLaunchProgress reports that at least one real model turn landed after the newest
+	// launch. Progressed launches use transcript idleness to prove a later re-death;
+	// unproven launches use launch age to prove their startup grace expired.
+	PostLaunchProgress bool `json:"post_launch_progress"`
 }
 
 // DeadTranscriptIdleFloorSeconds is how long a session's transcript must have been
 // silent before "no live process" reads as a new death rather than startup latency: a
 // just-fired resume can take a while to write its first record, and a live session
 // deep in one long tool call writes nothing either — but neither state survives ten
-// minutes of transcript silence WITH no process holding the session id.
+// minutes of transcript silence WITH no process holding the session id. An unproven
+// launch reuses the same duration as its bounded startup grace.
 const DeadTranscriptIdleFloorSeconds int64 = 10 * 60
 
-// DiedAgain reports whether the evidence proves a new death: the process table was
-// readable, no live process holds the session id, and the transcript has been silent
-// past the dead floor. Any unknown fact fails the proof — a wrong revive races two
-// processes on one transcript NOW, while a wrong keep just waits for stronger evidence
-// on a later tick.
+// DiedAgain reports whether the evidence proves either a later death after witnessed
+// progress or an unproven launch that never took. Both require a readable process table
+// with no live driver. A progressed launch additionally requires transcript silence past
+// the dead floor; a launch with zero post-launch turns requires its own launch age past
+// that same bounded startup grace. Any unknown clock fails the proof — a wrong revive
+// races two processes on one transcript NOW, while a wrong keep waits for stronger
+// evidence on a later tick.
 func (ev ReDeathEvidence) DiedAgain() bool {
-	return ev.ProcessScanOK && !ev.ProcessLive &&
-		ev.TranscriptIdleSeconds >= DeadTranscriptIdleFloorSeconds
+	if !ev.ProcessScanOK || ev.ProcessLive {
+		return false
+	}
+	if ev.PostLaunchProgress {
+		return ev.TranscriptIdleSeconds >= DeadTranscriptIdleFloorSeconds
+	}
+	return ev.LaunchAgeSeconds >= DeadTranscriptIdleFloorSeconds
 }
 
-// ReviveOutcome folds re-death evidence into the outcome the retry gate reads. With
-// proof of a new death, a progressed/unknown outcome reads RECOVERABLE, which
+// ReviveOutcome folds re-death/failed-launch evidence into the outcome the retry gate
+// reads. With proof that the driver is gone after the relevant grace, a
+// progressed/unknown outcome reads RECOVERABLE, which
 // re-admits the session through RetryGate under the same attempt cap while every
 // higher-precedence block (operator-settled, auth wall, spent cap) keeps binding
 // exactly as before. The bool reports whether the latch was released, so the shell

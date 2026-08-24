@@ -236,7 +236,7 @@ func TestWatchdogChildEnvStripsGuardWiringAndPinsConfigDir(t *testing.T) {
 }
 
 func TestReviveOutcomeReleasesStaleTookLatchOnProvenDeath(t *testing.T) {
-	dead := ReDeathEvidence{ProcessScanOK: true, TranscriptIdleSeconds: 3600}
+	dead := ReDeathEvidence{ProcessScanOK: true, TranscriptIdleSeconds: 3600, PostLaunchProgress: true}
 	for _, tc := range []struct {
 		in      Outcome
 		want    Outcome
@@ -258,10 +258,10 @@ func TestReviveOutcomeReleasesStaleTookLatchOnProvenDeath(t *testing.T) {
 func TestReviveOutcomeAnyUnprovenFactKeepsTheBurn(t *testing.T) {
 	for name, ev := range map[string]ReDeathEvidence{
 		"zero value":       {},
-		"live process":     {ProcessScanOK: true, ProcessLive: true, TranscriptIdleSeconds: 3600},
-		"unreadable table": {ProcessScanOK: false, TranscriptIdleSeconds: 3600},
-		"no transcript":    {ProcessScanOK: true, TranscriptIdleSeconds: -1},
-		"fresh transcript": {ProcessScanOK: true, TranscriptIdleSeconds: DeadTranscriptIdleFloorSeconds - 1},
+		"live process":     {ProcessScanOK: true, ProcessLive: true, TranscriptIdleSeconds: 3600, PostLaunchProgress: true},
+		"unreadable table": {ProcessScanOK: false, TranscriptIdleSeconds: 3600, PostLaunchProgress: true},
+		"no transcript":    {ProcessScanOK: true, TranscriptIdleSeconds: -1, LaunchAgeSeconds: 3600, PostLaunchProgress: true},
+		"fresh transcript": {ProcessScanOK: true, TranscriptIdleSeconds: DeadTranscriptIdleFloorSeconds - 1, PostLaunchProgress: true},
 	} {
 		if got, revived := ReviveOutcome(OutcomeProgressed, ev); revived || got != OutcomeProgressed {
 			t.Fatalf("%s: ReviveOutcome = (%s, %v), want the burn kept", name, got, revived)
@@ -269,11 +269,48 @@ func TestReviveOutcomeAnyUnprovenFactKeepsTheBurn(t *testing.T) {
 	}
 }
 
+func TestReviveOutcomeUnprovenLaunchRequiresGraceAndNoLiveDriver(t *testing.T) {
+	for name, tc := range map[string]struct {
+		ev      ReDeathEvidence
+		revived bool
+	}{
+		"past grace and dead": {
+			ev:      ReDeathEvidence{ProcessScanOK: true, TranscriptIdleSeconds: -1, LaunchAgeSeconds: DeadTranscriptIdleFloorSeconds},
+			revived: true,
+		},
+		"inside grace": {
+			// A stale pre-launch transcript must not collapse the launch's own startup grace.
+			ev: ReDeathEvidence{ProcessScanOK: true, TranscriptIdleSeconds: 3600, LaunchAgeSeconds: DeadTranscriptIdleFloorSeconds - 1},
+		},
+		"past grace but live": {
+			ev: ReDeathEvidence{ProcessScanOK: true, ProcessLive: true, TranscriptIdleSeconds: -1, LaunchAgeSeconds: DeadTranscriptIdleFloorSeconds},
+		},
+		"past grace but scan unreadable": {
+			ev: ReDeathEvidence{ProcessScanOK: false, TranscriptIdleSeconds: -1, LaunchAgeSeconds: DeadTranscriptIdleFloorSeconds},
+		},
+		"launch timestamp unknown": {
+			ev: ReDeathEvidence{ProcessScanOK: true, TranscriptIdleSeconds: -1, LaunchAgeSeconds: -1},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, revived := ReviveOutcome(OutcomeUnknown, tc.ev)
+			want := OutcomeUnknown
+			if tc.revived {
+				want = OutcomeRecoverable
+			}
+			if got != want || revived != tc.revived {
+				t.Fatalf("ReviveOutcome(unknown, %+v) = (%s, %v), want (%s, %v)",
+					tc.ev, got, revived, want, tc.revived)
+			}
+		})
+	}
+}
+
 func TestReviveOutcomeThroughWatchdogGate(t *testing.T) {
 	// The #2368 acceptance chain, leaf half: a prior take marker (launched history,
 	// progressed outcome) plus proof of a new death must reach LAUNCH, not the
 	// "already resumed once" skip.
-	dead := ReDeathEvidence{ProcessScanOK: true, TranscriptIdleSeconds: 3600}
+	dead := ReDeathEvidence{ProcessScanOK: true, TranscriptIdleSeconds: 3600, PostLaunchProgress: true}
 	row := WatchdogPlanRow{Session: "sid-relatch", Account: ".claude-x"}
 	hist := []Attempt{{Phase: "launched"}}
 
@@ -331,7 +368,7 @@ func TestOperatorHoldOutranksReviveCapAndPolicy(t *testing.T) {
 	// A stopped operator hold must beat every lower-precedence path: a revived re-death that
 	// WOULD otherwise LAUNCH, a spent attempt cap, and a non-worker account — and must itself
 	// yield to the self-guard (never race two `claude` on one transcript).
-	dead := ReDeathEvidence{ProcessScanOK: true, TranscriptIdleSeconds: 3600}
+	dead := ReDeathEvidence{ProcessScanOK: true, TranscriptIdleSeconds: 3600, PostLaunchProgress: true}
 	revived, ok := ReviveOutcome(OutcomeProgressed, dead)
 	if !ok {
 		t.Fatal("precondition: proven death must revive the latch (else this test is vacuous)")
