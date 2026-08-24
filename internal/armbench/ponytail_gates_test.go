@@ -57,6 +57,20 @@ func TestPonytailGateDryRunCannotClaimPass(t *testing.T) {
 	if len(r.DeterministicRuns) != 1 || !r.DeterministicRuns[0].Pass {
 		t.Fatalf("regression suite: %+v", r.DeterministicRuns)
 	}
+	foundReceipt, foundSummary := false, false
+	for _, arm := range r.Arms {
+		if arm.Arm == ponytailNativeMediumArm {
+			foundReceipt = arm.CanonicalProfile == "ponytail:native:medium" && arm.FragmentWitness == ponytailNativeMediumWitness
+		}
+	}
+	for _, summary := range r.Summary {
+		if summary.Arm == ponytailNativeMediumArm && summary.Category == "behavior" {
+			foundSummary = summary.NotRun == 3 && !summary.GatePass
+		}
+	}
+	if !foundReceipt || !foundSummary {
+		t.Fatalf("native medium dry-run identity missing: arms=%+v summary=%+v", r.Arms, r.Summary)
+	}
 }
 func pinnedGateCheckout(t *testing.T) string {
 	t.Helper()

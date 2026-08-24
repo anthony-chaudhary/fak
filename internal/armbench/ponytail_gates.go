@@ -19,10 +19,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 const PonytailGatesRevision = PonytailRevision
+
+const (
+	ponytailNativeMediumArm    = "native_medium"
+	ponytailNativeMediumDigest = "sha256:fb03503c5d7d3e75155796ddf34c426ba5126f86c10d2b929c1f1796328fb7ed"
+)
+
+var ponytailBenchmarkArms = []string{"baseline", "caveman", "ponytail", ponytailNativeMediumArm}
 
 type GateSource struct {
 	Path   string `json:"path"`
@@ -65,6 +73,13 @@ type GateRunArtifact struct {
 	Output  string `json:"output"`
 	Error   string `json:"error,omitempty"`
 }
+type ArmIdentity struct {
+	Arm              string `json:"arm"`
+	Implementation   string `json:"implementation"`
+	CanonicalProfile string `json:"canonical_profile"`
+	Source           string `json:"source,omitempty"`
+	FragmentDigest   string `json:"fragment_digest,omitempty"`
+}
 type PonytailGateReport struct {
 	Schema            string            `json:"schema"`
 	Comparator        string            `json:"comparator"`
@@ -73,6 +88,7 @@ type PonytailGateReport struct {
 	Model             string            `json:"model,omitempty"`
 	Account           string            `json:"account,omitempty"`
 	Trials            int               `json:"trials"`
+	Arms              []ArmIdentity     `json:"arms"`
 	Sources           []GateSource      `json:"sources"`
 	Scenarios         []GateScenario    `json:"scenarios"`
 	Cells             []GateCell        `json:"cells"`
@@ -156,6 +172,10 @@ func RunPonytailGates(ctx context.Context, o PonytailGateOptions) (PonytailGateR
 	if err != nil {
 		return PonytailGateReport{}, err
 	}
+	arms, err := benchmarkArmIdentities(sources)
+	if err != nil {
+		return PonytailGateReport{}, err
+	}
 	if o.Timeout <= 0 {
 		o.Timeout = 2 * time.Minute
 	}
@@ -168,7 +188,7 @@ func RunPonytailGates(ctx context.Context, o PonytailGateOptions) (PonytailGateR
 	if o.Model == "" {
 		o.Model = "haiku"
 	}
-	r := PonytailGateReport{Schema: "fak.armbench.ponytail-gates.v1", Comparator: "DietrichGebert/ponytail@" + PonytailGatesRevision, GeneratedAt: time.Now().UTC().Format(time.RFC3339), Live: o.Live, Model: o.Model, Account: o.Account, Trials: o.Trials, Sources: sources, Scenarios: scenarios, Assumptions: []string{"one provider sample per scenario/arm unless --trials overrides; stochastic repeat-rate claims are excluded", "provider output is scored by unchanged pinned JavaScript; no LLM judge", "baseline has no skill system prompt; Caveman and Ponytail use the pinned skill files", "all upstream robustness-audit TASKS are included; its live n=20 loop and baseline/Ponytail-only arm roster are execution settings, not additional scenarios"}, Extensions: extensionFixtureCells()}
+	r := PonytailGateReport{Schema: "fak.armbench.ponytail-gates.v1", Comparator: "DietrichGebert/ponytail@" + PonytailGatesRevision, GeneratedAt: time.Now().UTC().Format(time.RFC3339), Live: o.Live, Model: o.Model, Account: o.Account, Trials: o.Trials, Arms: arms, Sources: sources, Scenarios: scenarios, Assumptions: []string{"one provider sample per scenario/arm unless --trials overrides; stochastic repeat-rate claims are excluded", "provider output is scored by unchanged pinned JavaScript; no LLM judge", "baseline has no system prompt; Caveman and Ponytail use pinned upstream skill files; native_medium uses the canonical fak-native ponytail:native:medium fragment", "all upstream robustness-audit TASKS are included; its live n=20 loop and baseline/Ponytail-only arm roster are execution settings, not additional scenarios"}, Extensions: extensionFixtureCells()}
 	regCells, artifact := runRegressionSuite(ctx, o.Checkout)
 	r.Cells = append(r.Cells, regCells...)
 	r.DeterministicRuns = append(r.DeterministicRuns, artifact)
@@ -201,7 +221,7 @@ func RunPonytailGates(ctx context.Context, o PonytailGateOptions) (PonytailGateR
 				if !s.RequiresProvider {
 					continue
 				}
-				for _, arm := range PonytailArms {
+				for _, arm := range ponytailBenchmarkArms {
 					start := time.Now()
 					var output string
 					var callErr error
@@ -237,12 +257,9 @@ func RunPonytailGates(ctx context.Context, o PonytailGateOptions) (PonytailGateR
 func callGateProvider(ctx context.Context, o PonytailGateOptions, configDir string, arm, task string) (string, error) {
 	cctx, cancel := context.WithTimeout(ctx, o.Timeout)
 	defer cancel()
-	args := []string{"-p", task, "--model", o.Model, "--output-format", "text", "--allowedTools", ""}
-	switch arm {
-	case "caveman":
-		args = append(args, "--system-prompt-file", filepath.Join(o.Checkout, "benchmarks", "arms", "caveman-SKILL.md"))
-	case "ponytail":
-		args = append(args, "--system-prompt-file", filepath.Join(o.Checkout, "skills", "ponytail", "SKILL.md"))
+	args, err := benchmarkProviderArgs(o, arm, task)
+	if err != nil {
+		return "", err
 	}
 	cmd := exec.CommandContext(cctx, o.Claude, args...)
 	windowgate.ConfigureBackgroundCommand(cmd)
@@ -255,6 +272,54 @@ func callGateProvider(ctx context.Context, o PonytailGateOptions, configDir stri
 		return string(b), fmt.Errorf("%s: %w", strings.TrimSpace(string(b)), err)
 	}
 	return string(b), nil
+}
+
+func benchmarkProviderArgs(o PonytailGateOptions, arm, task string) ([]string, error) {
+	args := []string{"-p", task, "--model", o.Model, "--output-format", "text", "--allowedTools", ""}
+	switch arm {
+	case "baseline":
+	case "caveman":
+		args = append(args, "--system-prompt-file", filepath.Join(o.Checkout, "benchmarks", "arms", "caveman-SKILL.md"))
+	case "ponytail":
+		args = append(args, "--system-prompt-file", filepath.Join(o.Checkout, "skills", "ponytail", "SKILL.md"))
+	case ponytailNativeMediumArm:
+		profile, err := nativeMediumProfile()
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, "--system-prompt", profile.Segment)
+	default:
+		return nil, fmt.Errorf("unknown Ponytail gate arm %q", arm)
+	}
+	return args, nil
+}
+
+func nativeMediumProfile() (syspromptmmu.WorkProfileReadout, error) {
+	profile := syspromptmmu.DescribeWorkProfile(syspromptmmu.WorkProfilePonytailNativeMed)
+	if !profile.Known || !profile.Applied || profile.Profile != syspromptmmu.WorkProfilePonytailNativeMed || profile.Segment == "" {
+		return syspromptmmu.WorkProfileReadout{}, fmt.Errorf("canonical native medium work profile unavailable: %+v", profile)
+	}
+	if profile.Witness != ponytailNativeMediumDigest {
+		return syspromptmmu.WorkProfileReadout{}, fmt.Errorf("canonical native medium fragment drift: got %s want %s", profile.Witness, ponytailNativeMediumDigest)
+	}
+	return profile, nil
+}
+
+func benchmarkArmIdentities(sources []GateSource) ([]ArmIdentity, error) {
+	sourceHashes := make(map[string]string, len(sources))
+	for _, source := range sources {
+		sourceHashes[source.Path] = source.SHA256
+	}
+	profile, err := nativeMediumProfile()
+	if err != nil {
+		return nil, err
+	}
+	return []ArmIdentity{
+		{Arm: "baseline", Implementation: "none", CanonicalProfile: syspromptmmu.WorkProfileStandard},
+		{Arm: "caveman", Implementation: "pinned_upstream", CanonicalProfile: "caveman:upstream:pinned", Source: "benchmarks/arms/caveman-SKILL.md", FragmentDigest: "sha256:" + sourceHashes["benchmarks/arms/caveman-SKILL.md"]},
+		{Arm: "ponytail", Implementation: "pinned_upstream", CanonicalProfile: "ponytail:upstream:pinned", Source: "skills/ponytail/SKILL.md", FragmentDigest: "sha256:" + sourceHashes["skills/ponytail/SKILL.md"]},
+		{Arm: ponytailNativeMediumArm, Implementation: "fak_native", CanonicalProfile: profile.Profile, Source: "syspromptmmu.DescribeWorkProfile", FragmentDigest: profile.Witness},
+	}, nil
 }
 
 const nodeGateScript = `const fs=require('fs'); const m=require(process.argv[1]); const kind=process.argv[2]; const id=process.argv[3]; const task=process.argv[4]; const out=fs.readFileSync(0,'utf8'); let r; if(kind==='behavior'){r=m(out,{vars:{probe:id}})} else if(kind==='correctness'){r=m(out,{vars:{task}})} else {const t=m.TASKS.find(x=>x.name===id); if(!t) throw Error('unknown robustness task '+id); r=m.checkPy(m.pyBlock(out),t)}; process.stdout.write(JSON.stringify(r));`
@@ -362,7 +427,7 @@ func summarizeGates(sc []GateScenario, cells []GateCell, live bool, trials int) 
 		}
 	}
 	if !live {
-		for _, a := range PonytailArms {
+		for _, a := range ponytailBenchmarkArms {
 			for _, cat := range []string{"behavior", "correctness", "robustness"} {
 				n := 0
 				for _, s := range sc {
