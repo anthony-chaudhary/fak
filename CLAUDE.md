@@ -8,7 +8,7 @@
 The canonical agent instructions for this repo are in **[`AGENTS.md`](AGENTS.md)** —
 read it first for build/test/run, the repo map, and the rules.
 
-The four that will bite you if you skip them:
+The five that will bite you if you skip them:
 
 - **Work directly on the trunk (`main`). Never open a feature branch or new worktree** —
   the trunk guard *refuses* off-trunk commits (`OFF_TRUNK`). The *one* sanctioned
@@ -29,6 +29,11 @@ The four that will bite you if you skip them:
 - **Default is to ship** — once the tree is green (`make ci`), commit AND push
   unprompted. Stay on the trunk, never force-push, defer to the guard (`OFF_TRUNK` / a peer
   merge in flight). Full default + verify command in [`AGENTS.md`](AGENTS.md).
+- **Delegate substantive work and keep this coordinator context clean** — use guarded
+  headless agents or equivalent isolated workers for investigation, implementation, tests,
+  and review. Keep only decisions and compact witnessed evidence here; independently verify
+  worker effects before landing or reporting them. Reserve direct work for lightweight
+  coordination and truly trivial tasks. Full contract in [`AGENTS.md`](AGENTS.md).
 - **The Go module is the repository root** — run `go` commands from the clone root;
   `go install github.com/anthony-chaudhary/fak/cmd/fak@latest` resolves directly.
 

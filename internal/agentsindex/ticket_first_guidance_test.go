@@ -34,3 +34,42 @@ func TestAgentGuidanceTracksWorkInGitHubBeforeImplementation(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentGuidanceDefaultsSubstantiveWorkToWorkers(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve test file")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	checks := map[string][]string{
+		"AGENTS.md": {
+			"Delegate real work; keep the coordinator context clean",
+			"Use guarded headless agents or an equivalent isolated worker for every substantive",
+			"independently witness worker results",
+		},
+		"CLAUDE.md": {
+			"Delegate substantive work and keep this coordinator context clean",
+			"independently verify worker effects",
+		},
+		"GEMINI.md": {
+			"Delegate substantive work and keep the coordinator context clean",
+			"compact witnessed evidence in the primary context",
+		},
+		filepath.Join(".github", "copilot-instructions.md"): {
+			"Delegate substantive work and keep the coordinator context clean",
+			"compact witnessed evidence in the primary context",
+		},
+	}
+
+	for rel, wants := range checks {
+		body, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		for _, want := range wants {
+			if !strings.Contains(string(body), want) {
+				t.Errorf("%s must retain worker-first context-hygiene guidance %q", rel, want)
+			}
+		}
+	}
+}

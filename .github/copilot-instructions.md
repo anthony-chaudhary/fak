@@ -6,6 +6,11 @@ it first for build/test/run, the repo map, and the rules. Curated doc map:
 
 Must-know rules (enforced below the agent layer):
 
+- **Delegate substantive work and keep the coordinator context clean** — use guarded
+  headless agents or equivalent isolated workers for investigation, implementation, tests,
+  and review. Keep only decisions and compact witnessed evidence in the primary context;
+  independently verify worker effects before landing or reporting them. Direct work is for
+  lightweight coordination and truly trivial tasks. See [`AGENTS.md`](../AGENTS.md).
 - **Default is to ship** — when the tree is green (`make ci`), commit AND push unprompted;
   decide from the work in front of you, you don't wait to be asked. The rules below gate
   that default (stay on trunk, commit by path, never force-push); if a guard refuses

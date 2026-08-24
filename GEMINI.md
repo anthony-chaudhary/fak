@@ -15,6 +15,11 @@ malformed calls, quarantine poisoned results. Its MCP server is wired in `.mcp.j
 
 Must-know rules (enforced below the agent layer):
 
+- **Delegate substantive work and keep the coordinator context clean** — use guarded
+  headless agents or equivalent isolated workers for investigation, implementation, tests,
+  and review. Keep only decisions and compact witnessed evidence in the primary context;
+  independently verify worker effects before landing or reporting them. Direct work is for
+  lightweight coordination and truly trivial tasks. See [`AGENTS.md`](AGENTS.md).
 - Work directly on the trunk (`main`); never open a feature branch or worktree — the
   trunk guard refuses off-trunk commits (`OFF_TRUNK`). The one sanctioned exception: a
   **detached** per-worker worktree that lands on `main` via `fak worktree worker
