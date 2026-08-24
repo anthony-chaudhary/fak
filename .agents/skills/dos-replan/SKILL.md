@@ -1,6 +1,6 @@
 ---
 name: dos-replan
-description: Refresh a plan portfolio from evidence: close shipped queue items, update cooldown state, and surface the few decisions an operator must make. Use when acting after dispatch bursts, drained backlogs, or recurring...
+description: "Refresh a plan portfolio from evidence: close shipped queue items, update cooldown state, and surface the few decisions an operator must make. Use after dispatch bursts, drained backlogs, or recurring findings."
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/dos-replan/SKILL.md

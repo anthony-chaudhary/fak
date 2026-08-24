@@ -1,6 +1,6 @@
 ---
 name: fleet-wave
-description: "Run ONE wave of N fak-guarded ultracode sessions against the top open issues under a closing target and a wall-clock deadline — price, render fuel, launch, monitor, reconcile from git, release. N defaults to 30 (30...
+description: Run ONE wave of N fak-guarded ultracode sessions against the top open issues under a closing target and a wall-clock deadline — price, render fuel, launch, monitor, reconcile from git, release. N defaults to 30 (30...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/fleet-wave/SKILL.md
