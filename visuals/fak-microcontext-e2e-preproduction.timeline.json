@@ -1,0 +1,687 @@
+{
+  "totalSecs": 99.11999999999999,
+  "frames": 59,
+  "skippedUnits": 0,
+  "barMarks": 0,
+  "frameLog": [
+    {
+      "n": 1,
+      "startSecs": 0,
+      "secs": 1.2,
+      "class": "card",
+      "step": 0,
+      "line": "10,000 CONTEXTS . ONE BOUNDED FABRIC"
+    },
+    {
+      "n": 2,
+      "startSecs": 1.2,
+      "secs": 0.3,
+      "class": "card",
+      "step": 0
+    },
+    {
+      "n": 3,
+      "startSecs": 1.5,
+      "secs": 0.3,
+      "class": "card",
+      "step": 0,
+      "line": "Exact Qwen3.8-27B target: 3 / 3 paired trials"
+    },
+    {
+      "n": 4,
+      "startSecs": 1.8,
+      "secs": 1.2,
+      "class": "card",
+      "step": 0,
+      "line": "3,378 ms -\u003e 376 ms to first correct answer"
+    },
+    {
+      "n": 5,
+      "startSecs": 3,
+      "secs": 0.3,
+      "class": "card",
+      "step": 0
+    },
+    {
+      "n": 6,
+      "startSecs": 3.3,
+      "secs": 3.7,
+      "class": "card",
+      "step": 0,
+      "line": "Results are source-linked. Envelope appears before the claim."
+    },
+    {
+      "n": 7,
+      "startSecs": 7,
+      "secs": 3,
+      "class": "image",
+      "step": 0,
+      "line": "65-pay-the-prefix-once.png"
+    },
+    {
+      "n": 8,
+      "startSecs": 10,
+      "secs": 3,
+      "class": "image",
+      "step": 0,
+      "line": "06-context-mmu.png"
+    },
+    {
+      "n": 9,
+      "startSecs": 13,
+      "secs": 3,
+      "class": "image",
+      "step": 0,
+      "line": "09-shared-prefix.png"
+    },
+    {
+      "n": 10,
+      "startSecs": 16,
+      "secs": 1.2,
+      "class": "card",
+      "step": 0,
+      "line": "INSTALL -\u003e PREFLIGHT -\u003e MICROCONTEXT -\u003e RECEIPT"
+    },
+    {
+      "n": 11,
+      "startSecs": 17.2,
+      "secs": 0.3,
+      "class": "card",
+      "step": 0
+    },
+    {
+      "n": 12,
+      "startSecs": 17.5,
+      "secs": 1.2,
+      "class": "card",
+      "step": 0,
+      "line": "One binary. Copyable commands. Explicit evidence."
+    },
+    {
+      "n": 13,
+      "startSecs": 18.7,
+      "secs": 0.3,
+      "class": "card",
+      "step": 0
+    },
+    {
+      "n": 14,
+      "startSecs": 19,
+      "secs": 6.2,
+      "class": "card",
+      "step": 0,
+      "line": "The next chapter is a recreated walkthrough, not a screen recording."
+    },
+    {
+      "n": 15,
+      "startSecs": 25.2,
+      "secs": 0.5,
+      "class": "prose",
+      "step": 0,
+      "line": "@c RECREATED WALKTHROUGH . COMMANDS ARE COPYABLE"
+    },
+    {
+      "n": 16,
+      "startSecs": 25.7,
+      "secs": 1.6,
+      "class": "step",
+      "step": 1,
+      "line": "-- STEP 01 . install one Go binary"
+    },
+    {
+      "n": 17,
+      "startSecs": 27.3,
+      "secs": 0.5,
+      "class": "cmd",
+      "step": 1,
+      "line": "$ go install github.com/anthony-chaudhary/fak/cmd/fak@latest"
+    },
+    {
+      "n": 18,
+      "startSecs": 27.8,
+      "secs": 0.13,
+      "class": "out",
+      "step": 1,
+      "line": "installed: fak"
+    },
+    {
+      "n": 19,
+      "startSecs": 27.93,
+      "secs": 0.55,
+      "class": "rc",
+      "step": 1,
+      "line": "[rc=0]"
+    },
+    {
+      "n": 20,
+      "startSecs": 28.48,
+      "secs": 1.6,
+      "class": "step",
+      "step": 2,
+      "line": "-- STEP 02 . prove the checkpoint without a key or GPU"
+    },
+    {
+      "n": 21,
+      "startSecs": 30.080000000000002,
+      "secs": 0.5,
+      "class": "cmd",
+      "step": 2,
+      "line": "$ fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args '{}'"
+    },
+    {
+      "n": 22,
+      "startSecs": 30.580000000000002,
+      "secs": 0.13,
+      "class": "out",
+      "step": 2,
+      "line": "DENY  POLICY_BLOCK  refused by structure; no model in the loop"
+    },
+    {
+      "n": 23,
+      "startSecs": 30.71,
+      "secs": 0.55,
+      "class": "rc",
+      "step": 2,
+      "line": "[rc=0]"
+    },
+    {
+      "n": 24,
+      "startSecs": 31.26,
+      "secs": 1.6,
+      "class": "step",
+      "step": 3,
+      "line": "-- STEP 03 . run the bounded microcontext fabric"
+    },
+    {
+      "n": 25,
+      "startSecs": 32.86,
+      "secs": 0.5,
+      "class": "cmd",
+      "step": 3,
+      "line": "$ go run ./cmd/microcontextdemo -selfcheck -contexts 10000 -workers 64"
+    },
+    {
+      "n": 26,
+      "startSecs": 33.36,
+      "secs": 0.13,
+      "class": "out",
+      "step": 3,
+      "line": "PASS  10,000 logical contexts scheduled over 64 bounded workers"
+    },
+    {
+      "n": 27,
+      "startSecs": 33.49,
+      "secs": 0.55,
+      "class": "rc",
+      "step": 3,
+      "line": "[rc=0]"
+    },
+    {
+      "n": 28,
+      "startSecs": 34.04,
+      "secs": 1.6,
+      "class": "step",
+      "step": 4,
+      "line": "-- STEP 04 . verify the exact Qwen target campaign"
+    },
+    {
+      "n": 29,
+      "startSecs": 35.64,
+      "secs": 0.5,
+      "class": "cmd",
+      "step": 4,
+      "line": "$ fak model qwen38-ladder verify docs/_witnesses/issue-8623-qwen38-27b/evidence-complete.json"
+    },
+    {
+      "n": 30,
+      "startSecs": 36.14,
+      "secs": 0.13,
+      "class": "out",
+      "step": 4,
+      "line": "PASS  Qwen/Qwen3.8-27B exact target . 3/3 paired trials"
+    },
+    {
+      "n": 31,
+      "startSecs": 36.27,
+      "secs": 0.55,
+      "class": "rc",
+      "step": 4,
+      "line": "[rc=0]"
+    },
+    {
+      "n": 32,
+      "startSecs": 36.82,
+      "secs": 1.2,
+      "class": "card",
+      "step": 4,
+      "line": "CAPTURE REQUIRED . DO NOT FAKE THIS FRAME"
+    },
+    {
+      "n": 33,
+      "startSecs": 38.02,
+      "secs": 0.3,
+      "class": "card",
+      "step": 4
+    },
+    {
+      "n": 34,
+      "startSecs": 38.32,
+      "secs": 0.3,
+      "class": "card",
+      "step": 4,
+      "line": "Qwen/Qwen3.8-27B . fak-native engine . Apple Metal"
+    },
+    {
+      "n": 35,
+      "startSecs": 38.62,
+      "secs": 1.2,
+      "class": "card",
+      "step": 4,
+      "line": "receipt must name model, revision, quant, engine and hardware"
+    },
+    {
+      "n": 36,
+      "startSecs": 39.82,
+      "secs": 0.3,
+      "class": "card",
+      "step": 4
+    },
+    {
+      "n": 37,
+      "startSecs": 40.12,
+      "secs": 0.3,
+      "class": "card",
+      "step": 4,
+      "line": "Current exact-target witness is A100 / vLLM, not Mac native."
+    },
+    {
+      "n": 38,
+      "startSecs": 40.419999999999995,
+      "secs": 9.2,
+      "class": "card",
+      "step": 4,
+      "line": "Replace this card only after CAPTURE-MACBOOK.md passes."
+    },
+    {
+      "n": 39,
+      "startSecs": 49.61999999999999,
+      "secs": 1.2,
+      "class": "card",
+      "step": 4,
+      "line": "3,378 ms -\u003e 376 ms"
+    },
+    {
+      "n": 40,
+      "startSecs": 50.81999999999999,
+      "secs": 0.3,
+      "class": "card",
+      "step": 4
+    },
+    {
+      "n": 41,
+      "startSecs": 51.11999999999999,
+      "secs": 0.3,
+      "class": "card",
+      "step": 4,
+      "line": "p95 time to first correct answer . 88.86% lower"
+    },
+    {
+      "n": 42,
+      "startSecs": 51.41999999999999,
+      "secs": 1.2,
+      "class": "card",
+      "step": 4,
+      "line": "Qwen3.8-27B . no-thinking campaign . 3 trials / arm"
+    },
+    {
+      "n": 43,
+      "startSecs": 52.61999999999999,
+      "secs": 0.3,
+      "class": "card",
+      "step": 4
+    },
+    {
+      "n": 44,
+      "startSecs": 52.91999999999999,
+      "secs": 0.3,
+      "class": "card",
+      "step": 4,
+      "line": "NVIDIA A100 . vLLM server . paired campaign"
+    },
+    {
+      "n": 45,
+      "startSecs": 53.219999999999985,
+      "secs": 8.2,
+      "class": "card",
+      "step": 4,
+      "line": "This is not yet the Mac-native result."
+    },
+    {
+      "n": 46,
+      "startSecs": 61.41999999999999,
+      "secs": 7,
+      "class": "image",
+      "step": 4,
+      "line": "info-overlay-screenshot.png"
+    },
+    {
+      "n": 47,
+      "startSecs": 68.41999999999999,
+      "secs": 7,
+      "class": "image",
+      "step": 4,
+      "line": "info-overlay-cache.png"
+    },
+    {
+      "n": 48,
+      "startSecs": 75.41999999999999,
+      "secs": 1.2,
+      "class": "card",
+      "step": 4,
+      "line": "ONE BASE . BOUNDED SLOTS . MANY LOGICAL CONTEXTS"
+    },
+    {
+      "n": 49,
+      "startSecs": 76.61999999999999,
+      "secs": 0.3,
+      "class": "card",
+      "step": 4
+    },
+    {
+      "n": 50,
+      "startSecs": 76.91999999999999,
+      "secs": 1.2,
+      "class": "card",
+      "step": 4,
+      "line": "install -\u003e schedule -\u003e execute -\u003e inspect -\u003e verify"
+    },
+    {
+      "n": 51,
+      "startSecs": 78.11999999999999,
+      "secs": 0.3,
+      "class": "card",
+      "step": 4
+    },
+    {
+      "n": 52,
+      "startSecs": 78.41999999999999,
+      "secs": 7.2,
+      "class": "card",
+      "step": 4,
+      "line": "Setup is reused. Work stays bounded. Receipts keep claims honest."
+    },
+    {
+      "n": 53,
+      "startSecs": 85.61999999999999,
+      "secs": 1.2,
+      "class": "card",
+      "step": 4,
+      "line": "MAKE FAK THE CHECKPOINT"
+    },
+    {
+      "n": 54,
+      "startSecs": 86.82,
+      "secs": 0.3,
+      "class": "card",
+      "step": 4
+    },
+    {
+      "n": 55,
+      "startSecs": 87.11999999999999,
+      "secs": 0.3,
+      "class": "card",
+      "step": 4,
+      "line": "Reuse context. Route compute. Serve repeats locally."
+    },
+    {
+      "n": 56,
+      "startSecs": 87.41999999999999,
+      "secs": 1.2,
+      "class": "card",
+      "step": 4,
+      "line": "Keep the native engine and its proof visible."
+    },
+    {
+      "n": 57,
+      "startSecs": 88.61999999999999,
+      "secs": 0.3,
+      "class": "card",
+      "step": 4
+    },
+    {
+      "n": 58,
+      "startSecs": 88.91999999999999,
+      "secs": 7.2,
+      "class": "card",
+      "step": 4,
+      "line": "github.com/anthony-chaudhary/fak . issue #8782"
+    },
+    {
+      "n": 59,
+      "startSecs": 96.11999999999999,
+      "secs": 3,
+      "class": "tail",
+      "step": 4
+    }
+  ],
+  "segments": [
+    {
+      "index": 0,
+      "kind": "card",
+      "startSecs": 0,
+      "secs": 7,
+      "title": "BEST HITS . ONE KERNEL"
+    },
+    {
+      "index": 1,
+      "kind": "image",
+      "startSecs": 7,
+      "secs": 3,
+      "title": "BEST HIT . PAY THE PREFIX ONCE"
+    },
+    {
+      "index": 2,
+      "kind": "image",
+      "startSecs": 10,
+      "secs": 3,
+      "title": "BEST HIT . MANAGED CONTEXT"
+    },
+    {
+      "index": 3,
+      "kind": "image",
+      "startSecs": 13,
+      "secs": 3,
+      "title": "BEST HIT . SHARED PREFIX"
+    },
+    {
+      "index": 4,
+      "kind": "card",
+      "startSecs": 16,
+      "secs": 9.2,
+      "title": "FROM ZERO TO RUNNING"
+    },
+    {
+      "index": 5,
+      "kind": "replay",
+      "startSecs": 25.2,
+      "secs": 11.620000000000001,
+      "title": "capture.typescript"
+    },
+    {
+      "index": 6,
+      "kind": "card",
+      "startSecs": 36.82,
+      "secs": 12.79999999999999,
+      "title": "MACBOOK . NATIVE RUN"
+    },
+    {
+      "index": 7,
+      "kind": "card",
+      "startSecs": 49.61999999999999,
+      "secs": 11.799999999999997,
+      "title": "THE RESULT . EXACT ENVELOPE"
+    },
+    {
+      "index": 8,
+      "kind": "image",
+      "startSecs": 61.41999999999999,
+      "secs": 7,
+      "title": "THE INTERFACE . REAL CAPTURE"
+    },
+    {
+      "index": 9,
+      "kind": "image",
+      "startSecs": 68.41999999999999,
+      "secs": 7,
+      "title": "SEE WHAT THE KERNEL SAVED"
+    },
+    {
+      "index": 10,
+      "kind": "card",
+      "startSecs": 75.41999999999999,
+      "secs": 10.200000000000003,
+      "title": "MICROCONTEXT . END TO END"
+    },
+    {
+      "index": 11,
+      "kind": "card",
+      "startSecs": 85.61999999999999,
+      "secs": 10.5,
+      "title": "BUILD LONGER-RUNNING AGENTS"
+    }
+  ],
+  "steps": [
+    {
+      "title": "-- STEP 01 . install one Go binary",
+      "startSecs": 25.7,
+      "secs": 2.780000000000001,
+      "frames": 4
+    },
+    {
+      "title": "-- STEP 02 . prove the checkpoint without a key or GPU",
+      "startSecs": 28.48,
+      "secs": 2.780000000000001,
+      "frames": 4
+    },
+    {
+      "title": "-- STEP 03 . run the bounded microcontext fabric",
+      "startSecs": 31.26,
+      "secs": 2.7799999999999976,
+      "frames": 4
+    },
+    {
+      "title": "-- STEP 04 . verify the exact Qwen target campaign",
+      "startSecs": 34.04,
+      "secs": 2.780000000000001,
+      "frames": 32
+    }
+  ],
+  "chapters": [
+    {
+      "startSecs": 0,
+      "endSecs": 7,
+      "title": "BEST HITS . ONE KERNEL"
+    },
+    {
+      "startSecs": 7,
+      "endSecs": 10,
+      "title": "BEST HIT . PAY THE PREFIX ONCE"
+    },
+    {
+      "startSecs": 10,
+      "endSecs": 13,
+      "title": "BEST HIT . MANAGED CONTEXT"
+    },
+    {
+      "startSecs": 13,
+      "endSecs": 16,
+      "title": "BEST HIT . SHARED PREFIX"
+    },
+    {
+      "startSecs": 16,
+      "endSecs": 25.7,
+      "title": "FROM ZERO TO RUNNING"
+    },
+    {
+      "startSecs": 25.7,
+      "endSecs": 28.48,
+      "title": "-- STEP 01 . install one Go binary"
+    },
+    {
+      "startSecs": 28.48,
+      "endSecs": 31.26,
+      "title": "-- STEP 02 . prove the checkpoint without a key or GPU"
+    },
+    {
+      "startSecs": 31.26,
+      "endSecs": 34.04,
+      "title": "-- STEP 03 . run the bounded microcontext fabric"
+    },
+    {
+      "startSecs": 34.04,
+      "endSecs": 36.82,
+      "title": "-- STEP 04 . verify the exact Qwen target campaign"
+    },
+    {
+      "startSecs": 36.82,
+      "endSecs": 49.61999999999999,
+      "title": "MACBOOK . NATIVE RUN"
+    },
+    {
+      "startSecs": 49.61999999999999,
+      "endSecs": 61.41999999999999,
+      "title": "THE RESULT . EXACT ENVELOPE"
+    },
+    {
+      "startSecs": 61.41999999999999,
+      "endSecs": 68.41999999999999,
+      "title": "THE INTERFACE . REAL CAPTURE"
+    },
+    {
+      "startSecs": 68.41999999999999,
+      "endSecs": 75.41999999999999,
+      "title": "SEE WHAT THE KERNEL SAVED"
+    },
+    {
+      "startSecs": 75.41999999999999,
+      "endSecs": 85.61999999999999,
+      "title": "MICROCONTEXT . END TO END"
+    },
+    {
+      "startSecs": 85.61999999999999,
+      "endSecs": 99.11999999999999,
+      "title": "BUILD LONGER-RUNNING AGENTS"
+    }
+  ],
+  "notableHolds": null,
+  "unitsByClass": {
+    "card": 36,
+    "cmd": 4,
+    "image": 5,
+    "out": 4,
+    "prose": 1,
+    "rc": 4,
+    "step": 4,
+    "tail": 1
+  },
+  "secsByClass": {
+    "card": 61.5,
+    "cmd": 2,
+    "image": 23,
+    "out": 0.52,
+    "prose": 0.5,
+    "rc": 2.2,
+    "step": 6.4,
+    "tail": 3
+  },
+  "minDwellByClass": {
+    "card": 0.3,
+    "cmd": 0.5,
+    "image": 3,
+    "out": 0.13,
+    "prose": 0.5,
+    "rc": 0.55,
+    "step": 1.6,
+    "tail": 3
+  }
+}

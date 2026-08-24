@@ -1,0 +1,130 @@
+{
+  "cols": 92,
+  "rows": 25,
+  "pad": 12,
+  "out": "out/fak-microcontext-e2e-preproduction.gif",
+  "mp4": "out/fak-microcontext-e2e-preproduction.mp4",
+  "pacing": {
+    "stepPattern": "^-- ",
+    "cmdPattern": "^\\$ ",
+    "rcPattern": "^\\[rc=",
+    "cardReveal": 0.3,
+    "cardConceptHold": 0.9
+  },
+  "verify": {
+    "minStepSecs": 1.5,
+    "minCmdSecs": 0.35,
+    "minRCSecs": 0.4,
+    "minCardRevealSecs": 0.25,
+    "minConceptHoldSecs": 0.75,
+    "minOpeningSecs": 4.0,
+    "totalSecsMin": 75.0,
+    "totalSecsMax": 120.0,
+    "minChapters": 10,
+    "mp4ToleranceSecs": 0.5
+  },
+  "segments": [
+    {
+      "chapter": "BEST HITS . ONE KERNEL",
+      "cardSecs": 2.5,
+      "card": [
+        "@c 10,000 CONTEXTS . ONE BOUNDED FABRIC",
+        "",
+        "@w Exact Qwen3.8-27B target: 3 / 3 paired trials",
+        "@w 3,378 ms -> 376 ms to first correct answer",
+        "",
+        "@d Results are source-linked. Envelope appears before the claim."
+      ]
+    },
+    {
+      "chapter": "BEST HIT . PAY THE PREFIX ONCE",
+      "image": "../../../../visuals/65-pay-the-prefix-once.png",
+      "imageSecs": 3.0
+    },
+    {
+      "chapter": "BEST HIT . MANAGED CONTEXT",
+      "image": "../../../../visuals/06-context-mmu.png",
+      "imageSecs": 3.0
+    },
+    {
+      "chapter": "BEST HIT . SHARED PREFIX",
+      "image": "../../../../visuals/09-shared-prefix.png",
+      "imageSecs": 3.0
+    },
+    {
+      "chapter": "FROM ZERO TO RUNNING",
+      "cardSecs": 5.0,
+      "card": [
+        "@c INSTALL -> PREFLIGHT -> MICROCONTEXT -> RECEIPT",
+        "",
+        "@w One binary. Copyable commands. Explicit evidence.",
+        "",
+        "@d The next chapter is a recreated walkthrough, not a screen recording."
+      ]
+    },
+    {
+      "typescript": "capture.typescript",
+      "timing": "capture.timing",
+      "clear": true
+    },
+    {
+      "chapter": "MACBOOK . NATIVE RUN",
+      "cardSecs": 8.0,
+      "card": [
+        "@c CAPTURE REQUIRED . DO NOT FAKE THIS FRAME",
+        "",
+        "@w Qwen/Qwen3.8-27B . fak-native engine . Apple Metal",
+        "@w receipt must name model, revision, quant, engine and hardware",
+        "",
+        "@d Current exact-target witness is A100 / vLLM, not Mac native.",
+        "@d Replace this card only after CAPTURE-MACBOOK.md passes."
+      ]
+    },
+    {
+      "chapter": "THE RESULT . EXACT ENVELOPE",
+      "cardSecs": 7.0,
+      "card": [
+        "@c 3,378 ms -> 376 ms",
+        "",
+        "@w p95 time to first correct answer . 88.86% lower",
+        "@w Qwen3.8-27B . no-thinking campaign . 3 trials / arm",
+        "",
+        "@d NVIDIA A100 . vLLM server . paired campaign",
+        "@d This is not yet the Mac-native result."
+      ]
+    },
+    {
+      "chapter": "THE INTERFACE . REAL CAPTURE",
+      "image": "../../../../visuals/info-overlay-screenshot.png",
+      "imageSecs": 7.0
+    },
+    {
+      "chapter": "SEE WHAT THE KERNEL SAVED",
+      "image": "../../../../visuals/info-overlay-cache.png",
+      "imageSecs": 7.0
+    },
+    {
+      "chapter": "MICROCONTEXT . END TO END",
+      "cardSecs": 6.0,
+      "card": [
+        "@c ONE BASE . BOUNDED SLOTS . MANY LOGICAL CONTEXTS",
+        "",
+        "@w install -> schedule -> execute -> inspect -> verify",
+        "",
+        "@d Setup is reused. Work stays bounded. Receipts keep claims honest."
+      ]
+    },
+    {
+      "chapter": "BUILD LONGER-RUNNING AGENTS",
+      "cardSecs": 6.0,
+      "card": [
+        "@c MAKE FAK THE CHECKPOINT",
+        "",
+        "@w Reuse context. Route compute. Serve repeats locally.",
+        "@w Keep the native engine and its proof visible.",
+        "",
+        "@d github.com/anthony-chaudhary/fak . issue #8782"
+      ]
+    }
+  ]
+}

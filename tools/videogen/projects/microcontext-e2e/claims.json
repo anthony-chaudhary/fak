@@ -1,0 +1,54 @@
+{
+  "schema": "fak.video-claims/1",
+  "issue": 8782,
+  "claims": [
+    {
+      "id": "install",
+      "screenCopy": "go install github.com/anthony-chaudhary/fak/cmd/fak@latest",
+      "kind": "reproducible-command",
+      "source": "README.md",
+      "status": "shipped"
+    },
+    {
+      "id": "microcontext-selfcheck",
+      "screenCopy": "10,000 logical contexts / 64 bounded workers",
+      "kind": "reproducible-command",
+      "source": "docs/cli-reference.md#microcontextdemo-bounded-logical-context-fabric",
+      "command": "go run ./cmd/microcontextdemo -selfcheck -contexts 10000 -workers 64",
+      "status": "shipped-offline-selfcheck",
+      "limitation": "This is deterministic orchestration evidence, not a 10,000-context real-model throughput claim."
+    },
+    {
+      "id": "qwen38-target",
+      "screenCopy": "Qwen/Qwen3.8-27B exact target: 3/3 paired trials passed",
+      "kind": "committed-real-model-witness",
+      "source": "docs/_witnesses/issue-8623-qwen38-27b/evidence-complete.json",
+      "status": "witnessed",
+      "limitation": "The committed target witness ran on NVIDIA A100-SXM4-40GB through a vLLM server. It does not prove MacBook or fak-native Metal execution."
+    },
+    {
+      "id": "qwen38-result",
+      "screenCopy": "3,378 ms to 376 ms p95 time-to-first-correct-answer",
+      "kind": "paired-campaign-result",
+      "source": "docs/_witnesses/issue-8623-qwen38-27b/evidence-complete.json",
+      "status": "witnessed",
+      "limitation": "Exact no-thinking campaign on one prompt, three trials per arm; not a general model-speed claim."
+    },
+    {
+      "id": "mac-native",
+      "screenCopy": "Qwen3.8-27B / fak-native / Apple Metal",
+      "kind": "required-live-capture",
+      "source": "CAPTURE-MACBOOK.md",
+      "status": "missing",
+      "limitation": "No checked-in receipt currently proves this run. The preproduction master labels this chapter CAPTURE REQUIRED."
+    },
+    {
+      "id": "interface",
+      "screenCopy": "fak operator interface",
+      "kind": "real-existing-capture",
+      "source": "visuals/info-overlay-screenshot.png",
+      "status": "shipped",
+      "limitation": "Existing interface capture is not the missing Mac Qwen session."
+    }
+  ]
+}

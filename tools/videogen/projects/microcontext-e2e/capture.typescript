@@ -1,0 +1,21 @@
+Script started on Mon Aug 24 12:00:00 2026
+@c RECREATED WALKTHROUGH . COMMANDS ARE COPYABLE
+-- STEP 01 . install one Go binary
+$ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
+installed: fak
+[rc=0]
+-- STEP 02 . prove the checkpoint without a key or GPU
+$ fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args '{}'
+DENY  POLICY_BLOCK  refused by structure; no model in the loop
+[rc=0]
+-- STEP 03 . run the bounded microcontext fabric
+$ go run ./cmd/microcontextdemo -selfcheck -contexts 10000 -workers 64
+PASS  10,000 logical contexts scheduled over 64 bounded workers
+NOTE  deterministic orchestration selfcheck; not a real-model throughput claim
+[rc=0]
+-- STEP 04 . verify the exact Qwen target campaign
+$ fak model qwen38-ladder verify docs/_witnesses/issue-8623-qwen38-27b/evidence-complete.json
+PASS  Qwen/Qwen3.8-27B exact target . 3/3 paired trials
+RESULT p95 first correct answer . 3378 ms -> 376 ms
+NOTE  A100/vLLM campaign; not the missing Mac native receipt
+[rc=0]
