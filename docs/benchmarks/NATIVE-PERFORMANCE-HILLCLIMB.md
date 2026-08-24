@@ -143,6 +143,11 @@ lever → candidate artifact → promotion gate → durable regression witness**
 schema should stay native-performance-specific; shared process language belongs in issue
 and worker templates rather than a false universal metric schema.
 
+[#8764](https://github.com/anthony-chaudhary/fak/issues/8764) owns that shared issue/worker-packet
+shift-left adapter. It must reuse each context's existing witness primitive and preserve
+read-only, trivial-change, urgent-response, and unavailable-system exceptions rather than
+turning native-performance fields into universal ceremony.
+
 ## Priority path and ticket map
 
 | Order | Ticket | Why it is next | Exit evidence |
