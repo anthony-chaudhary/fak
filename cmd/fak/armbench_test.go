@@ -114,3 +114,21 @@ func TestArmbenchCavemanFactorialSpine(t *testing.T) {
 		t.Fatalf("wrong manifest: %s", b)
 	}
 }
+
+func TestArmbenchCavemanNativeDryRunNeedsNoCredentials(t *testing.T) {
+	t.Setenv("OPENAI_BASE_URL", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	outDir := t.TempDir()
+	input := filepath.Join("..", "..", "docs", "_witnesses", "armbench-caveman-native", "inputs")
+	var out, errout bytes.Buffer
+	code := runArmbench(&out, &errout, []string{"caveman-native", "--dry-run", "--input", input, "--out", outDir, "--model", "deterministic-fixture", "--label", "replacement-no-spend"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errout.String())
+	}
+	if !strings.Contains(out.String(), `"Identity": "caveman:native:medium"`) {
+		t.Fatalf("missing native identity: %s", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "manifest.json")); err != nil {
+		t.Fatal(err)
+	}
+}

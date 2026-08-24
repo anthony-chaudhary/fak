@@ -1,9 +1,19 @@
 package armbench
 
 import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
 )
 
 func TestCavemanPinnedInputsAndSemanticGate(t *testing.T) {
@@ -65,4 +75,64 @@ func TestCavemanRetiredExactModelWitness(t *testing.T) {
 		t.Fatal(werr)
 	}
 	t.Log(err)
+}
+
+func TestCavemanNativeMediumCanonicalArmAndRawOutput(t *testing.T) {
+	canonical, err := syspromptmmu.ResolveStyle("caveman:native:medium")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDigest := sha256.Sum256([]byte(canonical.Segment))
+	root := filepath.Join("..", "..", "docs", "_witnesses", "armbench-caveman-native", "inputs")
+	p, err := RunCaveman(context.Background(), CavemanOptions{InputDir: root, OutDir: t.TempDir(), Model: "fixture", Label: "replacement-fixture", Trials: 3, DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := p.Profiles["native_medium"]
+	if profile.Identity != "caveman:native:medium" || profile.SHA256 != hex.EncodeToString(wantDigest[:]) {
+		t.Fatalf("profile witness = %#v", profile)
+	}
+	if len(p.Calls) != 90 || len(p.Summary) != 3 || p.Summary[2].Arm != "native_medium" {
+		t.Fatalf("arms not paired: calls=%d summary=%#v", len(p.Calls), p.Summary)
+	}
+	for _, call := range p.Calls {
+		if len(call.Raw) == 0 || !bytes.Contains(call.Raw, []byte(`"dry_run":true`)) {
+			t.Fatalf("raw output missing for %#v", call)
+		}
+		if !call.SemanticPass {
+			t.Fatalf("dry-run semantic gate failed for %s/%s: %v", call.PromptID, call.Arm, call.Missing)
+		}
+	}
+}
+
+func TestCavemanNativeMediumProviderReceivesCanonicalFragment(t *testing.T) {
+	canonical, err := syspromptmmu.ResolveStyle("caveman:native:medium")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nativeCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var request struct {
+			Messages []struct{ Role, Content string } `json:"messages"`
+		}
+		if err := json.Unmarshal(body, &request); err != nil {
+			t.Error(err)
+		}
+		if len(request.Messages) != 2 {
+			t.Errorf("messages=%#v", request.Messages)
+		} else if request.Messages[0].Content == canonical.Segment {
+			nativeCalls++
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"model":"fixture","choices":[{"message":{"content":"Reference identity memo useMemo seconds Date.now 1000 pool timeout error history rebase merge async await not found measure profile complexity operational SQL injection parameter placeholder FROM AS builder npm ci CMD atomic transaction returning update componentDidCatch getDerivedStateFromError retry log"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`)
+	}))
+	defer srv.Close()
+	root := filepath.Join("..", "..", "docs", "_witnesses", "armbench-caveman-native", "inputs")
+	if _, err := RunCaveman(context.Background(), CavemanOptions{InputDir: root, OutDir: t.TempDir(), BaseURL: srv.URL, APIKey: "fixture", Model: "fixture", Label: "replacement-fixture", Trials: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if nativeCalls != 30 {
+		t.Fatalf("canonical native calls=%d, want 30", nativeCalls)
+	}
 }

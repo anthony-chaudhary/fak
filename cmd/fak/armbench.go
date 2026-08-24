@@ -660,10 +660,11 @@ func armbenchCavemanNative(stdout, stderr io.Writer, argv []string) int {
 	model := fs.String("model", armbench.CavemanModel, "model snapshot; override only for a labeled replacement run")
 	label := fs.String("label", "exact-model", "run label")
 	trials := fs.Int("trials", 3, "trials per prompt per arm (must be 3)")
+	dryRun := fs.Bool("dry-run", false, "write a deterministic no-spend construction witness")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
-	if *base == "" || os.Getenv(*keyEnv) == "" {
+	if !*dryRun && (*base == "" || os.Getenv(*keyEnv) == "") {
 		fmt.Fprintln(stderr, "caveman-native: provider base URL and key are required")
 		return 2
 	}
@@ -671,7 +672,7 @@ func armbenchCavemanNative(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "caveman-native: replacement models require --label replacement-...")
 		return 2
 	}
-	p, err := armbench.RunCaveman(context.Background(), armbench.CavemanOptions{InputDir: *input, OutDir: *out, BaseURL: *base, APIKey: os.Getenv(*keyEnv), Model: *model, Label: *label, Trials: *trials})
+	p, err := armbench.RunCaveman(context.Background(), armbench.CavemanOptions{InputDir: *input, OutDir: *out, BaseURL: *base, APIKey: os.Getenv(*keyEnv), Model: *model, Label: *label, Trials: *trials, DryRun: *dryRun})
 	if err != nil {
 		fmt.Fprintf(stderr, "caveman-native: %v\n", err)
 		return 1

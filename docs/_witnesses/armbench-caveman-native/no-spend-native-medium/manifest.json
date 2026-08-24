@@ -1,0 +1,1709 @@
+{
+  "Schema": "fak/armbench-caveman-native/2",
+  "Source": "JuliusBrussee/caveman",
+  "Revision": "c72984e4392c7a154e55c11dbf445f01ce5c35d4",
+  "RunLabel": "replacement-no-spend",
+  "ProviderEndpoint": "",
+  "RequestedModel": "claude-sonnet-4-20250514",
+  "ResolvedModel": "deterministic-fixture",
+  "ExactModel": false,
+  "Temperature": 0,
+  "MaxOutputTokens": 4096,
+  "Trials": 3,
+  "Hashes": {
+    "SKILL.md": "daf9cec496ebd039809d8236f99f17fa1b4beaadf8ce4e2d532d0da51d70afce",
+    "prompts.json": "773e557f9187363c44e7e5aae2d27268720bcd8772865e119825078b06da93d7",
+    "run.py": "530a387918418713e64ded97794f41a1ffe6a01e833a69d2cb447bf4640facce"
+  },
+  "Profiles": {
+    "native_medium": {
+      "Identity": "caveman:native:medium",
+      "SHA256": "c7cbbff08f461ab50a843cbe0c075fbb4e33f8d9d26cee1401062bb0758013fd"
+    }
+  },
+  "Calls": [
+    {
+      "PromptID": "react-rerender",
+      "Arm": "normal",
+      "Trial": 1,
+      "Text": "Reference identity changes; use React.memo and useMemo.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "Reference identity changes; use React.memo and useMemo."
+      }
+    },
+    {
+      "PromptID": "react-rerender",
+      "Arm": "normal",
+      "Trial": 2,
+      "Text": "Reference identity changes; use React.memo and useMemo.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "Reference identity changes; use React.memo and useMemo."
+      }
+    },
+    {
+      "PromptID": "react-rerender",
+      "Arm": "normal",
+      "Trial": 3,
+      "Text": "Reference identity changes; use React.memo and useMemo.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "Reference identity changes; use React.memo and useMemo."
+      }
+    },
+    {
+      "PromptID": "react-rerender",
+      "Arm": "caveman",
+      "Trial": 1,
+      "Text": "Reference identity changes; use React.memo and useMemo.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "Reference identity changes; use React.memo and useMemo."
+      }
+    },
+    {
+      "PromptID": "react-rerender",
+      "Arm": "caveman",
+      "Trial": 2,
+      "Text": "Reference identity changes; use React.memo and useMemo.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "Reference identity changes; use React.memo and useMemo."
+      }
+    },
+    {
+      "PromptID": "react-rerender",
+      "Arm": "caveman",
+      "Trial": 3,
+      "Text": "Reference identity changes; use React.memo and useMemo.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "Reference identity changes; use React.memo and useMemo."
+      }
+    },
+    {
+      "PromptID": "react-rerender",
+      "Arm": "native_medium",
+      "Trial": 1,
+      "Text": "Reference identity changes; use React.memo and useMemo.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "Reference identity changes; use React.memo and useMemo."
+      }
+    },
+    {
+      "PromptID": "react-rerender",
+      "Arm": "native_medium",
+      "Trial": 2,
+      "Text": "Reference identity changes; use React.memo and useMemo.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "Reference identity changes; use React.memo and useMemo."
+      }
+    },
+    {
+      "PromptID": "react-rerender",
+      "Arm": "native_medium",
+      "Trial": 3,
+      "Text": "Reference identity changes; use React.memo and useMemo.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "Reference identity changes; use React.memo and useMemo."
+      }
+    },
+    {
+      "PromptID": "auth-middleware-fix",
+      "Arm": "normal",
+      "Trial": 1,
+      "Text": "exp is seconds; compare Date.now()/1000.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "exp is seconds; compare Date.now()/1000."
+      }
+    },
+    {
+      "PromptID": "auth-middleware-fix",
+      "Arm": "normal",
+      "Trial": 2,
+      "Text": "exp is seconds; compare Date.now()/1000.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "exp is seconds; compare Date.now()/1000."
+      }
+    },
+    {
+      "PromptID": "auth-middleware-fix",
+      "Arm": "normal",
+      "Trial": 3,
+      "Text": "exp is seconds; compare Date.now()/1000.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "exp is seconds; compare Date.now()/1000."
+      }
+    },
+    {
+      "PromptID": "auth-middleware-fix",
+      "Arm": "caveman",
+      "Trial": 1,
+      "Text": "exp is seconds; compare Date.now()/1000.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "exp is seconds; compare Date.now()/1000."
+      }
+    },
+    {
+      "PromptID": "auth-middleware-fix",
+      "Arm": "caveman",
+      "Trial": 2,
+      "Text": "exp is seconds; compare Date.now()/1000.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "exp is seconds; compare Date.now()/1000."
+      }
+    },
+    {
+      "PromptID": "auth-middleware-fix",
+      "Arm": "caveman",
+      "Trial": 3,
+      "Text": "exp is seconds; compare Date.now()/1000.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "exp is seconds; compare Date.now()/1000."
+      }
+    },
+    {
+      "PromptID": "auth-middleware-fix",
+      "Arm": "native_medium",
+      "Trial": 1,
+      "Text": "exp is seconds; compare Date.now()/1000.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "exp is seconds; compare Date.now()/1000."
+      }
+    },
+    {
+      "PromptID": "auth-middleware-fix",
+      "Arm": "native_medium",
+      "Trial": 2,
+      "Text": "exp is seconds; compare Date.now()/1000.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "exp is seconds; compare Date.now()/1000."
+      }
+    },
+    {
+      "PromptID": "auth-middleware-fix",
+      "Arm": "native_medium",
+      "Trial": 3,
+      "Text": "exp is seconds; compare Date.now()/1000.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "exp is seconds; compare Date.now()/1000."
+      }
+    },
+    {
+      "PromptID": "postgres-pool",
+      "Arm": "normal",
+      "Trial": 1,
+      "Text": "Use a pool timeout and handle the error.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "Use a pool timeout and handle the error."
+      }
+    },
+    {
+      "PromptID": "postgres-pool",
+      "Arm": "normal",
+      "Trial": 2,
+      "Text": "Use a pool timeout and handle the error.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "Use a pool timeout and handle the error."
+      }
+    },
+    {
+      "PromptID": "postgres-pool",
+      "Arm": "normal",
+      "Trial": 3,
+      "Text": "Use a pool timeout and handle the error.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "Use a pool timeout and handle the error."
+      }
+    },
+    {
+      "PromptID": "postgres-pool",
+      "Arm": "caveman",
+      "Trial": 1,
+      "Text": "Use a pool timeout and handle the error.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "Use a pool timeout and handle the error."
+      }
+    },
+    {
+      "PromptID": "postgres-pool",
+      "Arm": "caveman",
+      "Trial": 2,
+      "Text": "Use a pool timeout and handle the error.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "Use a pool timeout and handle the error."
+      }
+    },
+    {
+      "PromptID": "postgres-pool",
+      "Arm": "caveman",
+      "Trial": 3,
+      "Text": "Use a pool timeout and handle the error.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "Use a pool timeout and handle the error."
+      }
+    },
+    {
+      "PromptID": "postgres-pool",
+      "Arm": "native_medium",
+      "Trial": 1,
+      "Text": "Use a pool timeout and handle the error.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "Use a pool timeout and handle the error."
+      }
+    },
+    {
+      "PromptID": "postgres-pool",
+      "Arm": "native_medium",
+      "Trial": 2,
+      "Text": "Use a pool timeout and handle the error.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "Use a pool timeout and handle the error."
+      }
+    },
+    {
+      "PromptID": "postgres-pool",
+      "Arm": "native_medium",
+      "Trial": 3,
+      "Text": "Use a pool timeout and handle the error.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "Use a pool timeout and handle the error."
+      }
+    },
+    {
+      "PromptID": "git-rebase-merge",
+      "Arm": "normal",
+      "Trial": 1,
+      "Text": "History differs: rebase rewrites history; merge preserves it.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "History differs: rebase rewrites history; merge preserves it."
+      }
+    },
+    {
+      "PromptID": "git-rebase-merge",
+      "Arm": "normal",
+      "Trial": 2,
+      "Text": "History differs: rebase rewrites history; merge preserves it.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "History differs: rebase rewrites history; merge preserves it."
+      }
+    },
+    {
+      "PromptID": "git-rebase-merge",
+      "Arm": "normal",
+      "Trial": 3,
+      "Text": "History differs: rebase rewrites history; merge preserves it.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "History differs: rebase rewrites history; merge preserves it."
+      }
+    },
+    {
+      "PromptID": "git-rebase-merge",
+      "Arm": "caveman",
+      "Trial": 1,
+      "Text": "History differs: rebase rewrites history; merge preserves it.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "History differs: rebase rewrites history; merge preserves it."
+      }
+    },
+    {
+      "PromptID": "git-rebase-merge",
+      "Arm": "caveman",
+      "Trial": 2,
+      "Text": "History differs: rebase rewrites history; merge preserves it.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "History differs: rebase rewrites history; merge preserves it."
+      }
+    },
+    {
+      "PromptID": "git-rebase-merge",
+      "Arm": "caveman",
+      "Trial": 3,
+      "Text": "History differs: rebase rewrites history; merge preserves it.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "History differs: rebase rewrites history; merge preserves it."
+      }
+    },
+    {
+      "PromptID": "git-rebase-merge",
+      "Arm": "native_medium",
+      "Trial": 1,
+      "Text": "History differs: rebase rewrites history; merge preserves it.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "History differs: rebase rewrites history; merge preserves it."
+      }
+    },
+    {
+      "PromptID": "git-rebase-merge",
+      "Arm": "native_medium",
+      "Trial": 2,
+      "Text": "History differs: rebase rewrites history; merge preserves it.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "History differs: rebase rewrites history; merge preserves it."
+      }
+    },
+    {
+      "PromptID": "git-rebase-merge",
+      "Arm": "native_medium",
+      "Trial": 3,
+      "Text": "History differs: rebase rewrites history; merge preserves it.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "History differs: rebase rewrites history; merge preserves it."
+      }
+    },
+    {
+      "PromptID": "async-refactor",
+      "Arm": "normal",
+      "Trial": 1,
+      "Text": "Use async and await; handle not found.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "Use async and await; handle not found."
+      }
+    },
+    {
+      "PromptID": "async-refactor",
+      "Arm": "normal",
+      "Trial": 2,
+      "Text": "Use async and await; handle not found.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "Use async and await; handle not found."
+      }
+    },
+    {
+      "PromptID": "async-refactor",
+      "Arm": "normal",
+      "Trial": 3,
+      "Text": "Use async and await; handle not found.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "Use async and await; handle not found."
+      }
+    },
+    {
+      "PromptID": "async-refactor",
+      "Arm": "caveman",
+      "Trial": 1,
+      "Text": "Use async and await; handle not found.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "Use async and await; handle not found."
+      }
+    },
+    {
+      "PromptID": "async-refactor",
+      "Arm": "caveman",
+      "Trial": 2,
+      "Text": "Use async and await; handle not found.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "Use async and await; handle not found."
+      }
+    },
+    {
+      "PromptID": "async-refactor",
+      "Arm": "caveman",
+      "Trial": 3,
+      "Text": "Use async and await; handle not found.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "Use async and await; handle not found."
+      }
+    },
+    {
+      "PromptID": "async-refactor",
+      "Arm": "native_medium",
+      "Trial": 1,
+      "Text": "Use async and await; handle not found.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "Use async and await; handle not found."
+      }
+    },
+    {
+      "PromptID": "async-refactor",
+      "Arm": "native_medium",
+      "Trial": 2,
+      "Text": "Use async and await; handle not found.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "Use async and await; handle not found."
+      }
+    },
+    {
+      "PromptID": "async-refactor",
+      "Arm": "native_medium",
+      "Trial": 3,
+      "Text": "Use async and await; handle not found.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "Use async and await; handle not found."
+      }
+    },
+    {
+      "PromptID": "microservices-monolith",
+      "Arm": "normal",
+      "Trial": 1,
+      "Text": "Measure and profile operational complexity first.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "Measure and profile operational complexity first."
+      }
+    },
+    {
+      "PromptID": "microservices-monolith",
+      "Arm": "normal",
+      "Trial": 2,
+      "Text": "Measure and profile operational complexity first.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "Measure and profile operational complexity first."
+      }
+    },
+    {
+      "PromptID": "microservices-monolith",
+      "Arm": "normal",
+      "Trial": 3,
+      "Text": "Measure and profile operational complexity first.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "Measure and profile operational complexity first."
+      }
+    },
+    {
+      "PromptID": "microservices-monolith",
+      "Arm": "caveman",
+      "Trial": 1,
+      "Text": "Measure and profile operational complexity first.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "Measure and profile operational complexity first."
+      }
+    },
+    {
+      "PromptID": "microservices-monolith",
+      "Arm": "caveman",
+      "Trial": 2,
+      "Text": "Measure and profile operational complexity first.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "Measure and profile operational complexity first."
+      }
+    },
+    {
+      "PromptID": "microservices-monolith",
+      "Arm": "caveman",
+      "Trial": 3,
+      "Text": "Measure and profile operational complexity first.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "Measure and profile operational complexity first."
+      }
+    },
+    {
+      "PromptID": "microservices-monolith",
+      "Arm": "native_medium",
+      "Trial": 1,
+      "Text": "Measure and profile operational complexity first.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "Measure and profile operational complexity first."
+      }
+    },
+    {
+      "PromptID": "microservices-monolith",
+      "Arm": "native_medium",
+      "Trial": 2,
+      "Text": "Measure and profile operational complexity first.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "Measure and profile operational complexity first."
+      }
+    },
+    {
+      "PromptID": "microservices-monolith",
+      "Arm": "native_medium",
+      "Trial": 3,
+      "Text": "Measure and profile operational complexity first.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "Measure and profile operational complexity first."
+      }
+    },
+    {
+      "PromptID": "pr-security-review",
+      "Arm": "normal",
+      "Trial": 1,
+      "Text": "SQL injection: use a parameter placeholder and handle errors.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "SQL injection: use a parameter placeholder and handle errors."
+      }
+    },
+    {
+      "PromptID": "pr-security-review",
+      "Arm": "normal",
+      "Trial": 2,
+      "Text": "SQL injection: use a parameter placeholder and handle errors.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "SQL injection: use a parameter placeholder and handle errors."
+      }
+    },
+    {
+      "PromptID": "pr-security-review",
+      "Arm": "normal",
+      "Trial": 3,
+      "Text": "SQL injection: use a parameter placeholder and handle errors.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "SQL injection: use a parameter placeholder and handle errors."
+      }
+    },
+    {
+      "PromptID": "pr-security-review",
+      "Arm": "caveman",
+      "Trial": 1,
+      "Text": "SQL injection: use a parameter placeholder and handle errors.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "SQL injection: use a parameter placeholder and handle errors."
+      }
+    },
+    {
+      "PromptID": "pr-security-review",
+      "Arm": "caveman",
+      "Trial": 2,
+      "Text": "SQL injection: use a parameter placeholder and handle errors.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "SQL injection: use a parameter placeholder and handle errors."
+      }
+    },
+    {
+      "PromptID": "pr-security-review",
+      "Arm": "caveman",
+      "Trial": 3,
+      "Text": "SQL injection: use a parameter placeholder and handle errors.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "SQL injection: use a parameter placeholder and handle errors."
+      }
+    },
+    {
+      "PromptID": "pr-security-review",
+      "Arm": "native_medium",
+      "Trial": 1,
+      "Text": "SQL injection: use a parameter placeholder and handle errors.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "SQL injection: use a parameter placeholder and handle errors."
+      }
+    },
+    {
+      "PromptID": "pr-security-review",
+      "Arm": "native_medium",
+      "Trial": 2,
+      "Text": "SQL injection: use a parameter placeholder and handle errors.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "SQL injection: use a parameter placeholder and handle errors."
+      }
+    },
+    {
+      "PromptID": "pr-security-review",
+      "Arm": "native_medium",
+      "Trial": 3,
+      "Text": "SQL injection: use a parameter placeholder and handle errors.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "SQL injection: use a parameter placeholder and handle errors."
+      }
+    },
+    {
+      "PromptID": "docker-multi-stage",
+      "Arm": "normal",
+      "Trial": 1,
+      "Text": "FROM node AS builder; RUN npm ci; final CMD.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "FROM node AS builder; RUN npm ci; final CMD."
+      }
+    },
+    {
+      "PromptID": "docker-multi-stage",
+      "Arm": "normal",
+      "Trial": 2,
+      "Text": "FROM node AS builder; RUN npm ci; final CMD.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "FROM node AS builder; RUN npm ci; final CMD."
+      }
+    },
+    {
+      "PromptID": "docker-multi-stage",
+      "Arm": "normal",
+      "Trial": 3,
+      "Text": "FROM node AS builder; RUN npm ci; final CMD.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "FROM node AS builder; RUN npm ci; final CMD."
+      }
+    },
+    {
+      "PromptID": "docker-multi-stage",
+      "Arm": "caveman",
+      "Trial": 1,
+      "Text": "FROM node AS builder; RUN npm ci; final CMD.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "FROM node AS builder; RUN npm ci; final CMD."
+      }
+    },
+    {
+      "PromptID": "docker-multi-stage",
+      "Arm": "caveman",
+      "Trial": 2,
+      "Text": "FROM node AS builder; RUN npm ci; final CMD.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "FROM node AS builder; RUN npm ci; final CMD."
+      }
+    },
+    {
+      "PromptID": "docker-multi-stage",
+      "Arm": "caveman",
+      "Trial": 3,
+      "Text": "FROM node AS builder; RUN npm ci; final CMD.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "FROM node AS builder; RUN npm ci; final CMD."
+      }
+    },
+    {
+      "PromptID": "docker-multi-stage",
+      "Arm": "native_medium",
+      "Trial": 1,
+      "Text": "FROM node AS builder; RUN npm ci; final CMD.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "FROM node AS builder; RUN npm ci; final CMD."
+      }
+    },
+    {
+      "PromptID": "docker-multi-stage",
+      "Arm": "native_medium",
+      "Trial": 2,
+      "Text": "FROM node AS builder; RUN npm ci; final CMD.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "FROM node AS builder; RUN npm ci; final CMD."
+      }
+    },
+    {
+      "PromptID": "docker-multi-stage",
+      "Arm": "native_medium",
+      "Trial": 3,
+      "Text": "FROM node AS builder; RUN npm ci; final CMD.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "FROM node AS builder; RUN npm ci; final CMD."
+      }
+    },
+    {
+      "PromptID": "race-condition-debug",
+      "Arm": "normal",
+      "Trial": 1,
+      "Text": "Use an atomic transaction UPDATE RETURNING.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "Use an atomic transaction UPDATE RETURNING."
+      }
+    },
+    {
+      "PromptID": "race-condition-debug",
+      "Arm": "normal",
+      "Trial": 2,
+      "Text": "Use an atomic transaction UPDATE RETURNING.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "Use an atomic transaction UPDATE RETURNING."
+      }
+    },
+    {
+      "PromptID": "race-condition-debug",
+      "Arm": "normal",
+      "Trial": 3,
+      "Text": "Use an atomic transaction UPDATE RETURNING.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "Use an atomic transaction UPDATE RETURNING."
+      }
+    },
+    {
+      "PromptID": "race-condition-debug",
+      "Arm": "caveman",
+      "Trial": 1,
+      "Text": "Use an atomic transaction UPDATE RETURNING.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "Use an atomic transaction UPDATE RETURNING."
+      }
+    },
+    {
+      "PromptID": "race-condition-debug",
+      "Arm": "caveman",
+      "Trial": 2,
+      "Text": "Use an atomic transaction UPDATE RETURNING.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "Use an atomic transaction UPDATE RETURNING."
+      }
+    },
+    {
+      "PromptID": "race-condition-debug",
+      "Arm": "caveman",
+      "Trial": 3,
+      "Text": "Use an atomic transaction UPDATE RETURNING.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "Use an atomic transaction UPDATE RETURNING."
+      }
+    },
+    {
+      "PromptID": "race-condition-debug",
+      "Arm": "native_medium",
+      "Trial": 1,
+      "Text": "Use an atomic transaction UPDATE RETURNING.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "Use an atomic transaction UPDATE RETURNING."
+      }
+    },
+    {
+      "PromptID": "race-condition-debug",
+      "Arm": "native_medium",
+      "Trial": 2,
+      "Text": "Use an atomic transaction UPDATE RETURNING.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "Use an atomic transaction UPDATE RETURNING."
+      }
+    },
+    {
+      "PromptID": "race-condition-debug",
+      "Arm": "native_medium",
+      "Trial": 3,
+      "Text": "Use an atomic transaction UPDATE RETURNING.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "Use an atomic transaction UPDATE RETURNING."
+      }
+    },
+    {
+      "PromptID": "error-boundary",
+      "Arm": "normal",
+      "Trial": 1,
+      "Text": "Use getDerivedStateFromError and componentDidCatch to log; add retry.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "Use getDerivedStateFromError and componentDidCatch to log; add retry."
+      }
+    },
+    {
+      "PromptID": "error-boundary",
+      "Arm": "normal",
+      "Trial": 2,
+      "Text": "Use getDerivedStateFromError and componentDidCatch to log; add retry.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "Use getDerivedStateFromError and componentDidCatch to log; add retry."
+      }
+    },
+    {
+      "PromptID": "error-boundary",
+      "Arm": "normal",
+      "Trial": 3,
+      "Text": "Use getDerivedStateFromError and componentDidCatch to log; add retry.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "normal",
+        "dry_run": true,
+        "text": "Use getDerivedStateFromError and componentDidCatch to log; add retry."
+      }
+    },
+    {
+      "PromptID": "error-boundary",
+      "Arm": "caveman",
+      "Trial": 1,
+      "Text": "Use getDerivedStateFromError and componentDidCatch to log; add retry.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "Use getDerivedStateFromError and componentDidCatch to log; add retry."
+      }
+    },
+    {
+      "PromptID": "error-boundary",
+      "Arm": "caveman",
+      "Trial": 2,
+      "Text": "Use getDerivedStateFromError and componentDidCatch to log; add retry.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "Use getDerivedStateFromError and componentDidCatch to log; add retry."
+      }
+    },
+    {
+      "PromptID": "error-boundary",
+      "Arm": "caveman",
+      "Trial": 3,
+      "Text": "Use getDerivedStateFromError and componentDidCatch to log; add retry.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "caveman",
+        "dry_run": true,
+        "text": "Use getDerivedStateFromError and componentDidCatch to log; add retry."
+      }
+    },
+    {
+      "PromptID": "error-boundary",
+      "Arm": "native_medium",
+      "Trial": 1,
+      "Text": "Use getDerivedStateFromError and componentDidCatch to log; add retry.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "Use getDerivedStateFromError and componentDidCatch to log; add retry."
+      }
+    },
+    {
+      "PromptID": "error-boundary",
+      "Arm": "native_medium",
+      "Trial": 2,
+      "Text": "Use getDerivedStateFromError and componentDidCatch to log; add retry.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "Use getDerivedStateFromError and componentDidCatch to log; add retry."
+      }
+    },
+    {
+      "PromptID": "error-boundary",
+      "Arm": "native_medium",
+      "Trial": 3,
+      "Text": "Use getDerivedStateFromError and componentDidCatch to log; add retry.",
+      "FinishReason": "dry_run",
+      "Usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "SemanticPass": true,
+      "Raw": {
+        "arm": "native_medium",
+        "dry_run": true,
+        "text": "Use getDerivedStateFromError and componentDidCatch to log; add retry."
+      }
+    }
+  ],
+  "Summary": [
+    {
+      "Arm": "normal",
+      "MedianOutputByPrompt": {
+        "async-refactor": 0,
+        "auth-middleware-fix": 0,
+        "docker-multi-stage": 0,
+        "error-boundary": 0,
+        "git-rebase-merge": 0,
+        "microservices-monolith": 0,
+        "postgres-pool": 0,
+        "pr-security-review": 0,
+        "race-condition-debug": 0,
+        "react-rerender": 0
+      },
+      "AverageMedian": 0,
+      "SemanticPassed": 30,
+      "SemanticTotal": 30
+    },
+    {
+      "Arm": "caveman",
+      "MedianOutputByPrompt": {
+        "async-refactor": 0,
+        "auth-middleware-fix": 0,
+        "docker-multi-stage": 0,
+        "error-boundary": 0,
+        "git-rebase-merge": 0,
+        "microservices-monolith": 0,
+        "postgres-pool": 0,
+        "pr-security-review": 0,
+        "race-condition-debug": 0,
+        "react-rerender": 0
+      },
+      "AverageMedian": 0,
+      "SemanticPassed": 30,
+      "SemanticTotal": 30
+    },
+    {
+      "Arm": "native_medium",
+      "MedianOutputByPrompt": {
+        "async-refactor": 0,
+        "auth-middleware-fix": 0,
+        "docker-multi-stage": 0,
+        "error-boundary": 0,
+        "git-rebase-merge": 0,
+        "microservices-monolith": 0,
+        "postgres-pool": 0,
+        "pr-security-review": 0,
+        "race-condition-debug": 0,
+        "react-rerender": 0
+      },
+      "AverageMedian": 0,
+      "SemanticPassed": 30,
+      "SemanticTotal": 30
+    }
+  ],
+  "Upstream": {
+    "average_caveman": 294,
+    "average_normal": 1214,
+    "quality": "unevaluated",
+    "saved_percent": 65
+  },
+  "GeneratedAt": "1970-01-01T00:00:00Z"
+}

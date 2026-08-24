@@ -15,19 +15,23 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
 )
 
 const (
-	CavemanRevision   = "c72984e4392c7a154e55c11dbf445f01ce5c35d4"
-	CavemanModel      = "claude-sonnet-4-20250514"
-	cavemanPromptsSHA = "773e557f9187363c44e7e5aae2d27268720bcd8772865e119825078b06da93d7"
-	cavemanSkillSHA   = "daf9cec496ebd039809d8236f99f17fa1b4beaadf8ce4e2d532d0da51d70afce"
-	cavemanRunSHA     = "530a387918418713e64ded97794f41a1ffe6a01e833a69d2cb447bf4640facce"
+	CavemanRevision        = "c72984e4392c7a154e55c11dbf445f01ce5c35d4"
+	CavemanModel           = "claude-sonnet-4-20250514"
+	cavemanPromptsSHA      = "773e557f9187363c44e7e5aae2d27268720bcd8772865e119825078b06da93d7"
+	cavemanSkillSHA        = "daf9cec496ebd039809d8236f99f17fa1b4beaadf8ce4e2d532d0da51d70afce"
+	cavemanRunSHA          = "530a387918418713e64ded97794f41a1ffe6a01e833a69d2cb447bf4640facce"
+	cavemanNativeMediumSHA = "c7cbbff08f461ab50a843cbe0c075fbb4e33f8d9d26cee1401062bb0758013fd"
 )
 
 type CavemanOptions struct {
 	InputDir, OutDir, BaseURL, APIKey, Model, Label string
 	Trials                                          int
+	DryRun                                          bool
 }
 type cavemanCorpus struct {
 	Version int             `json:"version"`
@@ -60,10 +64,15 @@ type CavemanPacket struct {
 	Temperature                                                                         int
 	MaxOutputTokens, Trials                                                             int
 	Hashes                                                                              map[string]string
+	Profiles                                                                            map[string]CavemanProfile
 	Calls                                                                               []CavemanCall
 	Summary                                                                             []CavemanSummary
 	Upstream                                                                            map[string]any
 	GeneratedAt                                                                         string
+}
+
+type CavemanProfile struct {
+	Identity, SHA256 string
 }
 
 func RunCaveman(ctx context.Context, o CavemanOptions) (CavemanPacket, error) {
@@ -89,16 +98,40 @@ func RunCaveman(ctx context.Context, o CavemanOptions) (CavemanPacket, error) {
 		return CavemanPacket{}, err
 	}
 	skill, _ := os.ReadFile(filepath.Join(o.InputDir, "SKILL.md"))
-	p := CavemanPacket{Schema: "fak/armbench-caveman-native/1", Source: "JuliusBrussee/caveman", Revision: CavemanRevision, RunLabel: o.Label, ProviderEndpoint: sanitizeEndpoint(o.BaseURL), RequestedModel: CavemanModel, ResolvedModel: o.Model, ExactModel: o.Model == CavemanModel, Temperature: 0, MaxOutputTokens: 4096, Trials: 3, Hashes: hashes, Upstream: map[string]any{"average_normal": 1214, "average_caveman": 294, "saved_percent": 65, "quality": "unevaluated"}, GeneratedAt: time.Now().UTC().Format(time.RFC3339)}
+	native, err := syspromptmmu.ResolveStyle("caveman:native:medium")
+	if err != nil {
+		return CavemanPacket{}, fmt.Errorf("resolve canonical native profile: %w", err)
+	}
+	if !native.Applied {
+		return CavemanPacket{}, errors.New("canonical native profile did not render")
+	}
+	nativeSHA := sha256.Sum256([]byte(native.Segment))
+	nativeDigest := hex.EncodeToString(nativeSHA[:])
+	if nativeDigest != cavemanNativeMediumSHA {
+		return CavemanPacket{}, fmt.Errorf("caveman:native:medium digest %s, want %s", nativeDigest, cavemanNativeMediumSHA)
+	}
+	p := CavemanPacket{Schema: "fak/armbench-caveman-native/2", Source: "JuliusBrussee/caveman", Revision: CavemanRevision, RunLabel: o.Label, ProviderEndpoint: sanitizeEndpoint(o.BaseURL), RequestedModel: CavemanModel, ResolvedModel: o.Model, ExactModel: o.Model == CavemanModel, Temperature: 0, MaxOutputTokens: 4096, Trials: 3, Hashes: hashes, Profiles: map[string]CavemanProfile{"native_medium": {Identity: native.Style, SHA256: nativeDigest}}, Upstream: map[string]any{"average_normal": 1214, "average_caveman": 294, "saved_percent": 65, "quality": "unevaluated"}, GeneratedAt: time.Now().UTC().Format(time.RFC3339)}
+	if o.DryRun {
+		p.ProviderEndpoint = ""
+		p.GeneratedAt = "1970-01-01T00:00:00Z"
+	}
 	client := &http.Client{Timeout: 5 * time.Minute}
 	for _, q := range corpus.Prompts {
-		for _, arm := range []string{"normal", "caveman"} {
+		for _, arm := range []string{"normal", "caveman", "native_medium"} {
 			sys := "You are a helpful assistant."
 			if arm == "caveman" {
 				sys = string(skill)
+			} else if arm == "native_medium" {
+				sys = native.Segment
 			}
 			for trial := 1; trial <= 3; trial++ {
-				c, e := callOpenAI(ctx, client, o, sys, q, arm, trial)
+				var c CavemanCall
+				var e error
+				if o.DryRun {
+					c = dryRunCavemanCall(q, arm, trial)
+				} else {
+					c, e = callOpenAI(ctx, client, o, sys, q, arm, trial)
+				}
 				if e != nil {
 					return p, fmt.Errorf("%s %s trial %d: %w", q.ID, arm, trial, e)
 				}
@@ -186,7 +219,7 @@ func semanticGate(id, text string) (bool, []string) {
 }
 func summarizeCaveman(cs []CavemanCall) []CavemanSummary {
 	out := []CavemanSummary{}
-	for _, arm := range []string{"normal", "caveman"} {
+	for _, arm := range []string{"normal", "caveman", "native_medium"} {
 		by := map[string][]int{}
 		pass, total := 0, 0
 		for _, c := range cs {
@@ -209,6 +242,13 @@ func summarizeCaveman(cs []CavemanCall) []CavemanSummary {
 	}
 	return out
 }
+func dryRunCavemanCall(q CavemanPrompt, arm string, trial int) CavemanCall {
+	// This deterministic semantic fixture exercises receipt plumbing without contacting a provider.
+	text := map[string]string{"react-rerender": "Reference identity changes; use React.memo and useMemo.", "auth-middleware-fix": "exp is seconds; compare Date.now()/1000.", "postgres-pool": "Use a pool timeout and handle the error.", "git-rebase-merge": "History differs: rebase rewrites history; merge preserves it.", "async-refactor": "Use async and await; handle not found.", "microservices-monolith": "Measure and profile operational complexity first.", "pr-security-review": "SQL injection: use a parameter placeholder and handle errors.", "docker-multi-stage": "FROM node AS builder; RUN npm ci; final CMD.", "race-condition-debug": "Use an atomic transaction UPDATE RETURNING.", "error-boundary": "Use getDerivedStateFromError and componentDidCatch to log; add retry."}[q.ID]
+	raw, _ := json.Marshal(map[string]any{"dry_run": true, "arm": arm, "text": text})
+	return CavemanCall{PromptID: q.ID, Arm: arm, Trial: trial, Text: text, FinishReason: "dry_run", Raw: raw}
+}
+
 func sanitizeEndpoint(s string) string {
 	if s == "" {
 		return ""
