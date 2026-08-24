@@ -160,6 +160,11 @@
       "lane": "vcacheqa",
       "command": "go test -v ./internal/vcacheqa",
       "output_contains": "TestDogfood_RealGuardAuditJournalVerifies"
+    },
+    {
+      "lane": "vcacheobserve",
+      "command": "go test -v ./internal/vcacheobserve",
+      "output_contains": "TestObserveWarmthBeliefNeverFalseWarms"
     }
   ]
 }
