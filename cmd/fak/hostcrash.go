@@ -62,14 +62,26 @@ func runHostCrash(stdout, stderr io.Writer, args []string) int {
 			fmt.Fprintln(stdout, string(b))
 		}
 		if *resurrect {
-			receipts, err := resurrectHostCrashSessions(*logPath, resolveSweepRegDir(*regDir), emitted, launchHostSessionPlatform, time.Now())
-			if err != nil {
-				fmt.Fprintf(stderr, "fak host-crash: resurrect: %v\n", err)
-				return 1
-			}
-			for _, receipt := range receipts {
-				b, _ := json.Marshal(receipt)
-				fmt.Fprintln(stdout, string(b))
+			registry := resolveSweepRegDir(*regDir)
+			if len(emitted) == 0 {
+				if _, err := refreshHostResurrectionCohort(registry, time.Now()); err != nil {
+					fmt.Fprintf(stderr, "fak host-crash: snapshot cohort: %v\n", err)
+					return 1
+				}
+			} else {
+				receipts, selections, err := resurrectHostCrashSessions(*logPath, registry, emitted, launchHostSessionPlatform, time.Now())
+				if err != nil {
+					fmt.Fprintf(stderr, "fak host-crash: resurrect: %v\n", err)
+					return 1
+				}
+				for _, selection := range selections {
+					b, _ := json.Marshal(selection)
+					fmt.Fprintln(stdout, string(b))
+				}
+				for _, receipt := range receipts {
+					b, _ := json.Marshal(receipt)
+					fmt.Fprintln(stdout, string(b))
+				}
 			}
 		}
 		return 0

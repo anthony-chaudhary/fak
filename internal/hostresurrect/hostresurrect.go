@@ -27,23 +27,72 @@ type Request struct {
 	WindowID     string   `json:"window_id,omitempty"`
 }
 
+// Cohort is a liveness snapshot captured by the control loop before a host
+// crash. PID is part of the identity so a stale registry handle cannot borrow
+// a later process that reused the same numeric PID.
+type Cohort struct {
+	CapturedAt string        `json:"captured_at"`
+	Sessions   []CohortEntry `json:"sessions"`
+}
+
+type CohortEntry struct {
+	Handle string `json:"handle"`
+	PID    int    `json:"pid"`
+}
+
+// Selection makes a relaunch wave auditable without exposing commands or
+// resume handles. Every untombstoned row is either a candidate or has a typed
+// exclusion below.
+type Selection struct {
+	Inventory              int `json:"inventory"`
+	Untombstoned           int `json:"untombstoned"`
+	SnapshotSize           int `json:"snapshot_size"`
+	Candidates             int `json:"candidates"`
+	ExcludedNotInCohort    int `json:"excluded_not_in_cohort"`
+	ExcludedPIDMismatch    int `json:"excluded_pid_mismatch"`
+	ExcludedInvalidResume  int `json:"excluded_invalid_resume"`
+	ExcludedAlreadyHandled int `json:"excluded_already_handled"`
+	Selected               int `json:"selected"`
+}
+
 // Plan joins one independently-observed host crash to the durable interactive
 // inventory. already is keyed by event-id + session handle, making repeated Event
 // Log scans harmless. limit is the existing per-wave launch budget.
-func Plan(signal hostfault.HostCrashSignal, rows []guardsessions.Row, already map[string]bool, limit int) []Request {
+func Plan(signal hostfault.HostCrashSignal, rows []guardsessions.Row, cohort Cohort, already map[string]bool, limit int) ([]Request, Selection) {
+	counts := Selection{Inventory: len(rows), SnapshotSize: len(cohort.Sessions)}
 	if signal.Schema != hostfault.HostCrashSignalSchema || strings.TrimSpace(signal.EventID) == "" || limit <= 0 {
-		return nil
+		return nil, counts
 	}
 	live := guardsessions.LiveInteractive(rows)
-	sort.SliceStable(live, func(i, j int) bool { return live[i].StartedAt < live[j].StartedAt })
+	counts.Untombstoned = len(live)
+	members := make(map[string]int, len(cohort.Sessions))
+	for _, entry := range cohort.Sessions {
+		if strings.TrimSpace(entry.Handle) != "" && entry.PID > 0 {
+			members[entry.Handle] = entry.PID
+		}
+	}
+	// Prefer the newest witnessed sessions if a cohort itself exceeds the cap.
+	sort.SliceStable(live, func(i, j int) bool { return live[i].StartedAt > live[j].StartedAt })
 	out := make([]Request, 0, min(limit, len(live)))
 	for _, row := range live {
+		pid, ok := members[row.Handle]
+		if !ok {
+			counts.ExcludedNotInCohort++
+			continue
+		}
+		if pid != row.PID {
+			counts.ExcludedPIDMismatch++
+			continue
+		}
+		counts.Candidates++
 		key := Key(signal.EventID, row.Handle)
 		if already[key] {
+			counts.ExcludedAlreadyHandled++
 			continue
 		}
 		command := resumeCommand(row.Command, row.ResumeHandle)
 		if len(command) == 0 {
+			counts.ExcludedInvalidResume++
 			continue
 		}
 		out = append(out, Request{Schema: Schema, EventID: signal.EventID, CrashClass: string(signal.Class), Session: row.Handle, CWD: row.CWD, Command: command, ResumeHandle: row.ResumeHandle, WindowID: row.WindowID})
@@ -51,7 +100,8 @@ func Plan(signal hostfault.HostCrashSignal, rows []guardsessions.Row, already ma
 			break
 		}
 	}
-	return out
+	counts.Selected = len(out)
+	return out, counts
 }
 
 // resumeCommand makes continuation explicit. A registry row may contain the original

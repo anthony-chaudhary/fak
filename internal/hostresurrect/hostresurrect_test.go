@@ -1,6 +1,7 @@
 package hostresurrect
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -15,7 +16,9 @@ func TestPlanJoinsCrashToLiveRowsIdempotentlyAndCapsWave(t *testing.T) {
 		{Schema: guardsessions.Schema, Handle: "g1", Interactive: true, CWD: `C:\a`, Command: []string{"claude", "--resume", "stale"}, ResumeHandle: "g1", StartedAt: "2026-07-14T20:00:01Z"},
 		{Schema: guardsessions.Schema, Handle: "ended", Interactive: true, CWD: `C:\c`, Command: []string{"claude"}, ResumeHandle: "ended", EndedAt: "2026-07-14T20:01:00Z"},
 	}
-	got := Plan(sig, rows, map[string]bool{Key("evt-1", "g1"): true}, 1)
+	cohort := Cohort{Sessions: []CohortEntry{{Handle: "g1", PID: 1}, {Handle: "g2", PID: 2}}}
+	rows[0].PID, rows[1].PID = 2, 1
+	got, _ := Plan(sig, rows, cohort, map[string]bool{Key("evt-1", "g1"): true}, 1)
 	if len(got) != 1 || got[0].Session != "g2" || got[0].CWD != `C:\b` {
 		t.Fatalf("Plan = %+v", got)
 	}
@@ -30,7 +33,8 @@ func TestPlanJoinsCrashToLiveRowsIdempotentlyAndCapsWave(t *testing.T) {
 func TestPlanReplacesStaleResumeHandle(t *testing.T) {
 	sig := hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "evt"}
 	rows := []guardsessions.Row{{Schema: guardsessions.Schema, Handle: "g", Interactive: true, CWD: `C:\a`, Command: []string{"claude", "--resume", "old"}, ResumeHandle: "new"}}
-	got := Plan(sig, rows, nil, 1)
+	rows[0].PID = 1
+	got, _ := Plan(sig, rows, Cohort{Sessions: []CohortEntry{{Handle: "g", PID: 1}}}, nil, 1)
 	if len(got) != 1 || got[0].Command[2] != "new" {
 		t.Fatalf("Plan=%+v", got)
 	}
@@ -39,7 +43,8 @@ func TestPlanReplacesStaleResumeHandle(t *testing.T) {
 func TestPlanReplacesContinueWithExplicitResume(t *testing.T) {
 	sig := hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "evt"}
 	rows := []guardsessions.Row{{Schema: guardsessions.Schema, Handle: "g", Interactive: true, CWD: `C:\a`, Command: []string{"claude", "--continue"}, ResumeHandle: "g"}}
-	got := Plan(sig, rows, nil, 1)
+	rows[0].PID = 1
+	got, _ := Plan(sig, rows, Cohort{Sessions: []CohortEntry{{Handle: "g", PID: 1}}}, nil, 1)
 	if len(got) != 1 || len(got[0].Command) != 3 || got[0].Command[1] != "--resume" || got[0].Command[2] != "g" {
 		t.Fatalf("Plan=%+v", got)
 	}
@@ -48,5 +53,33 @@ func TestRecentCountUsesRollingWindow(t *testing.T) {
 	now := time.Date(2026, 7, 14, 20, 0, 0, 0, time.UTC)
 	if got := RecentCount([]time.Time{now.Add(-299 * time.Second), now.Add(-301 * time.Second), now.Add(time.Second)}, now, 300*time.Second); got != 1 {
 		t.Fatalf("RecentCount=%d", got)
+	}
+}
+
+func TestPlanExcludesMoreThanWaveOfStaleRows(t *testing.T) {
+	sig := hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "evt-mixed"}
+	rows := make([]guardsessions.Row, 0, MaxLaunchesPerWindow+2)
+	for i := 0; i < MaxLaunchesPerWindow+1; i++ {
+		rows = append(rows, guardsessions.Row{Schema: guardsessions.Schema, Handle: fmt.Sprintf("stale-%02d", i), PID: 100 + i, Interactive: true, CWD: `C:\stale`, Command: []string{"claude"}, ResumeHandle: fmt.Sprintf("stale-%02d", i), StartedAt: fmt.Sprintf("2026-07-14T19:%02d:00Z", i)})
+	}
+	current := guardsessions.Row{Schema: guardsessions.Schema, Handle: "current", PID: 4242, Interactive: true, CWD: `C:\current`, Command: []string{"codex"}, ResumeHandle: "current", StartedAt: "2026-07-14T20:00:00Z"}
+	rows = append(rows, current)
+	cohort := Cohort{CapturedAt: "2026-07-14T20:00:01Z", Sessions: []CohortEntry{{Handle: current.Handle, PID: current.PID}}}
+
+	got, counts := Plan(sig, rows, cohort, nil, MaxLaunchesPerWindow)
+	if len(got) != 1 || got[0].Session != current.Handle {
+		t.Fatalf("Plan=%+v", got)
+	}
+	if counts.Inventory != MaxLaunchesPerWindow+2 || counts.Candidates != 1 || counts.ExcludedNotInCohort != MaxLaunchesPerWindow+1 || counts.Selected != 1 {
+		t.Fatalf("counts=%+v", counts)
+	}
+}
+
+func TestPlanRejectsCohortPIDMismatch(t *testing.T) {
+	sig := hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "evt-reuse"}
+	row := guardsessions.Row{Schema: guardsessions.Schema, Handle: "g", PID: 42, Interactive: true, CWD: `C:\repo`, Command: []string{"codex"}, ResumeHandle: "g"}
+	got, counts := Plan(sig, []guardsessions.Row{row}, Cohort{Sessions: []CohortEntry{{Handle: "g", PID: 41}}}, nil, 1)
+	if len(got) != 0 || counts.ExcludedPIDMismatch != 1 {
+		t.Fatalf("Plan=%+v counts=%+v", got, counts)
 	}
 }

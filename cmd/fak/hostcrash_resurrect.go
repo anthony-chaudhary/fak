@@ -13,6 +13,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/guardsessions"
 	"github.com/anthony-chaudhary/fak/internal/hostfault"
 	"github.com/anthony-chaudhary/fak/internal/hostresurrect"
+	"github.com/anthony-chaudhary/fak/internal/processalive"
 )
 
 type hostResurrectionReceipt struct {
@@ -24,21 +25,28 @@ type hostResurrectionReceipt struct {
 	PID        int    `json:"pid,omitempty"`
 }
 
+type hostResurrectionSelection struct {
+	Schema     string                  `json:"schema"`
+	EventID    string                  `json:"event_id"`
+	CapturedAt string                  `json:"cohort_captured_at,omitempty"`
+	Counts     hostresurrect.Selection `json:"counts"`
+}
+
 type hostSessionLauncher func(hostresurrect.Request) (int, error)
 
 func hostResurrectionReceiptPath(logPath string) string { return logPath + ".relaunch.jsonl" }
 
-func resurrectHostCrashSessions(logPath, regDir string, signals []hostfault.HostCrashSignal, launch hostSessionLauncher, now time.Time) ([]hostResurrectionReceipt, error) {
+func resurrectHostCrashSessions(logPath, regDir string, signals []hostfault.HostCrashSignal, launch hostSessionLauncher, now time.Time) ([]hostResurrectionReceipt, []hostResurrectionSelection, error) {
 	if len(signals) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	path := hostResurrectionReceiptPath(logPath)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer lock.Close()
 	deadline := time.Now().Add(5 * time.Second)
@@ -48,7 +56,7 @@ func resurrectHostCrashSessions(logPath, regDir string, signals []hostfault.Host
 			break
 		}
 		if !errors.Is(err, flock.ErrLockBusy) || time.Now().After(deadline) {
-			return nil, fmt.Errorf("relaunch ledger lock: %w", err)
+			return nil, nil, fmt.Errorf("relaunch ledger lock: %w", err)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -56,37 +64,49 @@ func resurrectHostCrashSessions(logPath, regDir string, signals []hostfault.Host
 
 	seen, times, err := readHostResurrectionReceipts(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	remaining := hostresurrect.MaxLaunchesPerWindow - hostresurrect.RecentCount(times, now, hostresurrect.LaunchWindow)
 	if remaining <= 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	rows := guardsessions.Load(regDir)
+	cohort, err := hostresurrect.LoadCohort(hostresurrect.CohortPath(regDir))
+	if err != nil {
+		return nil, nil, err
+	}
 	var written []hostResurrectionReceipt
+	var selections []hostResurrectionSelection
 	for _, signal := range signals {
-		for _, req := range hostresurrect.Plan(signal, rows, seen, remaining) {
+		requests, counts := hostresurrect.Plan(signal, rows, cohort, seen, remaining)
+		selections = append(selections, hostResurrectionSelection{Schema: hostresurrect.Schema, EventID: signal.EventID, CapturedAt: cohort.CapturedAt, Counts: counts})
+		for _, req := range requests {
 			// Reserve before spawn, matching FleetResumeWatchdog's ledger-first rule:
 			// if this process crashes after Start, a repeated Event-Log poll cannot
 			// double-launch the same event/session pair.
 			receipt := hostResurrectionReceipt{Schema: hostresurrect.Schema, Key: hostresurrect.Key(req.EventID, req.Session), EventID: req.EventID, Session: req.Session, LaunchedAt: now.UTC().Format(time.RFC3339Nano)}
 			if err := appendHostResurrectionReceipt(path, receipt); err != nil {
-				return written, err
+				return written, selections, err
 			}
 			seen[receipt.Key] = true
 			pid, err := launch(req)
 			if err != nil {
-				return written, fmt.Errorf("relaunch %s: %w", req.Session, err)
+				return written, selections, fmt.Errorf("relaunch %s: %w", req.Session, err)
 			}
 			receipt.PID = pid
 			written = append(written, receipt)
 			remaining--
 			if remaining == 0 {
-				return written, nil
+				return written, selections, nil
 			}
 		}
 	}
-	return written, nil
+	return written, selections, nil
+}
+
+func refreshHostResurrectionCohort(regDir string, now time.Time) (hostresurrect.Cohort, error) {
+	cohort := hostresurrect.Capture(guardsessions.Load(regDir), now, processalive.Check)
+	return cohort, hostresurrect.StoreCohort(hostresurrect.CohortPath(regDir), cohort)
 }
 
 func appendHostResurrectionReceipt(path string, r hostResurrectionReceipt) error {
