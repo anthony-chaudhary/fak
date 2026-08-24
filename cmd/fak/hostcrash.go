@@ -15,6 +15,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/flock"
 	"github.com/anthony-chaudhary/fak/internal/hostfault"
+	"github.com/anthony-chaudhary/fak/internal/hostresurrect"
 )
 
 func cmdHostCrash(args []string) { os.Exit(runHostCrash(os.Stdout, os.Stderr, args)) }
@@ -29,11 +30,16 @@ func runHostCrash(stdout, stderr io.Writer, args []string) int {
 	fixture := fs.String("fixture", "", "read Event-1000 fixture JSON instead of Windows Event Log")
 	regDir := fs.String("reg-dir", "", "interactive-session registry directory (default: fleet registry)")
 	resurrect := fs.Bool("resurrect", false, "relaunch live interactive rows for each new host-crash signal")
+	dryRun := fs.Bool("dry-run", false, "plan and report resurrection without queueing or launching sessions")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "usage: fak host-crash [--once] [--interval 15s] [--since 5m] [--log PATH] [--fixture PATH] [--resurrect] [--reg-dir DIR]")
+		fmt.Fprintln(stderr, "usage: fak host-crash [--once] [--interval 15s] [--since 5m] [--log PATH] [--fixture PATH] [--resurrect] [--dry-run] [--reg-dir DIR]")
+		return 2
+	}
+	if *dryRun && !*resurrect {
+		fmt.Fprintln(stderr, "fak host-crash: --dry-run requires --resurrect")
 		return 2
 	}
 	if *interval <= 0 || *since <= 0 {
@@ -69,7 +75,11 @@ func runHostCrash(stdout, stderr io.Writer, args []string) int {
 					return 1
 				}
 			} else {
-				receipts, selections, err := resurrectHostCrashSessions(*logPath, registry, emitted, launchHostSessionPlatform, time.Now())
+				launcher := launchHostSessionPlatform
+				if *dryRun {
+					launcher = func(hostresurrect.Request) (int, error) { return 0, nil }
+				}
+				receipts, selections, err := resurrectHostCrashSessions(*logPath, registry, emitted, launcher, time.Now(), !*dryRun)
 				if err != nil {
 					fmt.Fprintf(stderr, "fak host-crash: resurrect: %v\n", err)
 					return 1

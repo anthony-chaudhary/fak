@@ -36,7 +36,7 @@ type hostSessionLauncher func(hostresurrect.Request) (int, error)
 
 func hostResurrectionReceiptPath(logPath string) string { return logPath + ".relaunch.jsonl" }
 
-func resurrectHostCrashSessions(logPath, regDir string, signals []hostfault.HostCrashSignal, launch hostSessionLauncher, now time.Time) ([]hostResurrectionReceipt, []hostResurrectionSelection, error) {
+func resurrectHostCrashSessions(logPath, regDir string, signals []hostfault.HostCrashSignal, launch hostSessionLauncher, now time.Time, persist bool) ([]hostResurrectionReceipt, []hostResurrectionSelection, error) {
 	if len(signals) == 0 {
 		return nil, nil, nil
 	}
@@ -85,10 +85,12 @@ func resurrectHostCrashSessions(logPath, regDir string, signals []hostfault.Host
 			// if this process crashes after Start, a repeated Event-Log poll cannot
 			// double-launch the same event/session pair.
 			receipt := hostResurrectionReceipt{Schema: hostresurrect.Schema, Key: hostresurrect.Key(req.EventID, req.Session), EventID: req.EventID, Session: req.Session, LaunchedAt: now.UTC().Format(time.RFC3339Nano)}
-			if err := appendHostResurrectionReceipt(path, receipt); err != nil {
-				return written, selections, err
+			if persist {
+				if err := appendHostResurrectionReceipt(path, receipt); err != nil {
+					return written, selections, err
+				}
+				seen[receipt.Key] = true
 			}
-			seen[receipt.Key] = true
 			pid, err := launch(req)
 			if err != nil {
 				return written, selections, fmt.Errorf("relaunch %s: %w", req.Session, err)
