@@ -16,15 +16,39 @@ import (
 
 const ultracodeStatusSchema = "fak.ultracode_status.v1"
 
+const (
+	ultracodeActivationVerdictPending          = "pending"
+	ultracodeActivationVerdictVerifiedActive   = "verified-active"
+	ultracodeActivationVerdictVerifiedInactive = "verified-inactive"
+	ultracodeActivationVerdictDegraded         = "degraded"
+	ultracodeActivationVerdictFailed           = "failed"
+	ultracodeActivationVerdictUnknown          = "unknown"
+
+	ultracodeActivationReasonPending          = "ACTIVATION_EVIDENCE_PENDING"
+	ultracodeActivationReasonDeadlineExceeded = "ACTIVATION_EVIDENCE_DEADLINE_EXCEEDED"
+	ultracodeActivationReasonChildExited      = "CHILD_EXITED_BEFORE_ACTIVATION_EVIDENCE"
+	ultracodeActivationReasonReceiptMissing   = "ACTIVATION_RECEIPT_MISSING"
+	ultracodeActivationReasonDegraded         = "ACTIVATION_DEGRADED"
+
+	ultracodeBudgetPhaseProvisional = "provisional"
+	ultracodeBudgetPhaseFinal       = "final"
+	ultracodeBudgetPhaseInvalid     = "invalid"
+	ultracodeBudgetPhaseMissing     = "missing"
+)
+
 var ultracodeStatusNow = time.Now
 
 type ultracodeWorkerStatus struct {
-	ChildID        string                         `json:"child_id"`
-	State          string                         `json:"state"`
-	TurnsStarted   int                            `json:"turns_started"`
-	TurnsCompleted int                            `json:"turns_completed"`
-	LastEvent      string                         `json:"last_event,omitempty"`
-	Activation     ultracodebench.ActivationState `json:"activation"`
+	ChildID            string                         `json:"child_id"`
+	State              string                         `json:"state"`
+	TurnsStarted       int                            `json:"turns_started"`
+	TurnsCompleted     int                            `json:"turns_completed"`
+	LastEvent          string                         `json:"last_event,omitempty"`
+	Activation         ultracodebench.ActivationState `json:"activation"`
+	ActivationVerdict  string                         `json:"activation_verdict"`
+	ActivationReason   string                         `json:"activation_reason,omitempty"`
+	ActivationAgeMS    int64                          `json:"activation_age_ms"`
+	ActivationDeadline time.Time                      `json:"activation_deadline_at,omitempty"`
 }
 
 type ultracodeStatus struct {
@@ -37,6 +61,7 @@ type ultracodeStatus struct {
 	Outcome          orchestrationOutcomeStatus             `json:"outcome"`
 	Activation       ultracodebench.ActivationSummary       `json:"activation"`
 	Budget           orchestration.UltracodeEnvelopeReceipt `json:"budget"`
+	BudgetPhase      string                                 `json:"budget_phase"`
 	Workers          []ultracodeWorkerStatus                `json:"workers"`
 }
 
@@ -89,24 +114,34 @@ func runUltracodeStatus(stdout, stderr io.Writer, argv []string) int {
 	fmt.Fprintf(stdout, "Ultracode %s - %s\n", status.RunID, status.State)
 	fmt.Fprintf(stdout, "  activation %.1f%% verified | active=%d inactive=%d degraded=%d unknown=%d\n",
 		status.Activation.Ratio*100, status.Activation.Active, status.Activation.Inactive, status.Activation.Degraded, status.Activation.Unknown)
-	fmt.Fprintf(stdout, "  budget tokens=%d/%d remaining=%d | children=%d/%d | wall=%d/%dms remaining=%dms | authority=%s | overrun=%t | admitted=%t\n",
+	fmt.Fprintf(stdout, "  budget %s tokens=%d/%d remaining=%d | children=%d/%d | wall=%d/%dms remaining=%dms | authority=%s | overrun=%t | admitted=%t\n",
+		status.BudgetPhase,
 		status.Budget.ConsumedTokens, status.Budget.DeclaredTokens, status.Budget.RemainingTokens,
 		status.Budget.CoveredChildren, status.Budget.TotalChildren, status.Budget.ConsumedWallMS,
 		status.Budget.WallBudgetMS, status.Budget.RemainingWallMS, status.Budget.Authority,
 		status.Budget.Overrun, status.Budget.Admitted)
 	for _, worker := range status.Workers {
-		fmt.Fprintf(stdout, "  %-12s %-9s activation=%s turns=%d/%d\n", worker.ChildID, worker.State, worker.Activation, worker.TurnsCompleted, worker.TurnsStarted)
+		fmt.Fprintf(stdout, "  %-12s %-9s activation=%s raw=%s reason=%s age=%dms turns=%d/%d\n", worker.ChildID, worker.State, worker.ActivationVerdict, worker.Activation, worker.ActivationReason, worker.ActivationAgeMS, worker.TurnsCompleted, worker.TurnsStarted)
 	}
 	return 0
 }
 
 func projectUltracodeStatus(root string, receipt codexOrchestrationLaunchReceipt) (ultracodeStatus, error) {
 	runStatus := inspectOrchestrationRun(root, receipt)
+	now := ultracodeStatusNow().UTC()
 	coverage, err := ultracodebench.SummarizeActivation(receipt.Activations)
 	if err != nil {
 		return ultracodeStatus{}, err
 	}
 	states := make(map[string]ultracodebench.ActivationState, len(coverage.Children))
+	activationReceipts := make(map[string]ultracodebench.ActivationReceipt, len(receipt.Activations))
+	launchWorkers := make(map[string]codexOrchestrationWorkerLaunch, len(receipt.Workers))
+	for _, activation := range receipt.Activations {
+		activationReceipts[activation.ChildID] = activation
+	}
+	for _, worker := range receipt.Workers {
+		launchWorkers[worker.RoleID] = worker
+	}
 	for _, child := range coverage.Children {
 		states[child.ChildID] = child.State
 	}
@@ -137,7 +172,7 @@ func projectUltracodeStatus(root string, receipt codexOrchestrationLaunchReceipt
 			}
 		}
 		var err error
-		budget, err = orchestration.FoldUltracodeEnvelopeReceipt(budget, usage, ultracodeStatusNow().UTC())
+		budget, err = orchestration.FoldUltracodeEnvelopeReceipt(budget, usage, now)
 		if err != nil {
 			return ultracodeStatus{}, err
 		}
@@ -148,20 +183,104 @@ func projectUltracodeStatus(root string, receipt codexOrchestrationLaunchReceipt
 		Schema: ultracodeStatusSchema, SessionID: receipt.SessionID, RunID: receipt.RunID,
 		RequestedProfile: receipt.RequestedProfile, ResolvedProfile: receipt.ResolvedProfile,
 		State: runStatus.State, Outcome: runStatus.Outcome, Activation: coverage, Budget: budget,
-		Workers: make([]ultracodeWorkerStatus, 0, len(runStatus.Workers)),
+		BudgetPhase: ultracodeBudgetPhaseProvisional,
+		Workers:     make([]ultracodeWorkerStatus, 0, len(runStatus.Workers)),
 	}
-	if budget.Overrun || (runStatus.Running == 0 && !budget.Complete) {
+	if receipt.Budget.Schema != orchestration.UltracodeEnvelopeReceiptSchema {
+		out.BudgetPhase = ultracodeBudgetPhaseMissing
+	} else if runStatus.Running == 0 && budget.Complete {
+		out.BudgetPhase = ultracodeBudgetPhaseFinal
+	}
+	launchPending := false
+	for _, worker := range receipt.Workers {
+		if worker.Status == "starting" {
+			launchPending = true
+			break
+		}
+	}
+	if launchPending && runStatus.Running == 0 {
+		out.State = "launching"
+	}
+	if budget.Overrun || (!launchPending && runStatus.Running == 0 && !budget.Complete) {
 		out.State = "invalid"
 		out.Outcome.Verdict = "invalid"
 		out.Outcome.Reason = budget.Reason
+		out.BudgetPhase = ultracodeBudgetPhaseInvalid
 	}
 	for _, worker := range runStatus.Workers {
-		out.Workers = append(out.Workers, ultracodeWorkerStatus{
+		workerStatus := ultracodeWorkerStatus{
 			ChildID: worker.RoleID, State: worker.State, TurnsStarted: worker.TurnsStarted,
 			TurnsCompleted: worker.TurnsDone, LastEvent: worker.LastEvent, Activation: states[worker.RoleID],
-		})
+		}
+		if launchWorkers[worker.RoleID].Status == "starting" {
+			workerStatus.State = "starting"
+		}
+		projectUltracodeActivationVerdict(&workerStatus, receipt, launchWorkers[worker.RoleID], activationReceipts[worker.RoleID], now)
+		if states[worker.RoleID] == ultracodebench.ActivationUnknown && workerStatus.Activation == ultracodebench.ActivationDegraded {
+			markUltracodeActivationDegraded(&out.Activation, worker.RoleID)
+		}
+		out.Workers = append(out.Workers, workerStatus)
 	}
 	return out, nil
+}
+
+func projectUltracodeActivationVerdict(status *ultracodeWorkerStatus, receipt codexOrchestrationLaunchReceipt, launched codexOrchestrationWorkerLaunch, activation ultracodebench.ActivationReceipt, now time.Time) {
+	if !receipt.LaunchedAt.IsZero() && now.After(receipt.LaunchedAt) {
+		status.ActivationAgeMS = now.Sub(receipt.LaunchedAt).Milliseconds()
+	}
+	status.ActivationDeadline = launched.DeadlineAt
+	if status.ActivationDeadline.IsZero() {
+		status.ActivationDeadline = receipt.Budget.DeadlineAt
+	}
+	switch status.Activation {
+	case ultracodebench.ActivationActive:
+		status.ActivationVerdict = ultracodeActivationVerdictVerifiedActive
+		return
+	case ultracodebench.ActivationInactive:
+		status.ActivationVerdict = ultracodeActivationVerdictVerifiedInactive
+		return
+	case ultracodebench.ActivationDegraded:
+		status.ActivationVerdict = ultracodeActivationVerdictDegraded
+		status.ActivationReason = ultracodeActivationReasonDegraded
+		return
+	}
+	if activation.Schema != ultracodebench.ActivationSchema && status.ActivationDeadline.IsZero() {
+		status.ActivationVerdict = ultracodeActivationVerdictUnknown
+		status.ActivationReason = ultracodeActivationReasonReceiptMissing
+		return
+	}
+	if status.State != "running" && status.State != "starting" {
+		status.Activation = ultracodebench.ActivationDegraded
+		status.ActivationVerdict = ultracodeActivationVerdictFailed
+		status.ActivationReason = ultracodeActivationReasonChildExited
+		return
+	}
+	if !status.ActivationDeadline.IsZero() && !now.Before(status.ActivationDeadline) {
+		status.Activation = ultracodebench.ActivationDegraded
+		status.ActivationVerdict = ultracodeActivationVerdictFailed
+		status.ActivationReason = ultracodeActivationReasonDeadlineExceeded
+		return
+	}
+	if activation.Schema != ultracodebench.ActivationSchema {
+		status.ActivationVerdict = ultracodeActivationVerdictPending
+		status.ActivationReason = ultracodeActivationReasonReceiptMissing
+		return
+	}
+	status.ActivationVerdict = ultracodeActivationVerdictPending
+	status.ActivationReason = ultracodeActivationReasonPending
+}
+
+func markUltracodeActivationDegraded(summary *ultracodebench.ActivationSummary, childID string) {
+	if summary.Unknown > 0 {
+		summary.Unknown--
+	}
+	summary.Degraded++
+	for i := range summary.Children {
+		if summary.Children[i].ChildID == childID {
+			summary.Children[i].State = ultracodebench.ActivationDegraded
+			break
+		}
+	}
 }
 
 func legacyIncompleteUltracodeBudget(receipt codexOrchestrationLaunchReceipt) orchestration.UltracodeEnvelopeReceipt {

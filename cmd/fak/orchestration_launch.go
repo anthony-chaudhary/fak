@@ -126,6 +126,7 @@ type orchestrationWorkerLaunchRequest struct {
 	RunID         string
 	OutputProfile string
 	WorkProfile   string
+	RecordStarted func(codexOrchestrationWorkerLaunch) error
 }
 
 var orchestrationWorkerLauncher = launchGuardedCodexOrchestrationWorker
@@ -224,9 +225,6 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 			return receipt, fmt.Errorf("activation receipt %s: %w", role.ID, activationErr)
 		}
 		receipt.Activations = append(receipt.Activations, activation)
-		if err := persistCodexOrchestrationLaunchReceipt(home, receipt); err != nil {
-			return receipt, fmt.Errorf("persist pre-spawn activation %s: %w", role.ID, err)
-		}
 		remainingWall := receipt.Budget.DeadlineAt.Sub(orchestrationLaunchNow())
 		if remainingWall <= 0 {
 			deadlineErr := fmt.Errorf("%s: parent wall deadline elapsed before child %q launch", orchestration.UltracodeBudgetReasonWallOverrun, role.ID)
@@ -242,29 +240,60 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 			TokenBudget: childBudgets[role.ID].ReservedTokens, DeadlineAt: receipt.Budget.DeadlineAt,
 			RemainingWall: remainingWall, RunID: receipt.RunID, OutputProfile: outputProfile, WorkProfile: workProfile,
 		}
-		launched, launchErr := orchestrationWorkerLauncher(request)
-		launched.OutputProfile = outputProfile
-		launched.WorkProfile = workProfile
-		launched.Model = route.Model
-		launched.Mode = string(route.Mode)
-		launched.Effort = route.ReasoningEffort
-		launched.AccessMode = string(access.Mode)
-		launched.ReadOnly = access.Admission.ReadOnly
-		launched.PolicyPath = access.PolicyPath
-		launched.ReservedTokens = request.TokenBudget
-		launched.DeadlineAt = request.DeadlineAt
-		if len(access.Admission.Tree) > 0 {
-			launched.WriteTree = access.Admission.Tree[0]
+		joinWorker := func(launched codexOrchestrationWorkerLaunch) codexOrchestrationWorkerLaunch {
+			launched.OutputProfile = outputProfile
+			launched.WorkProfile = workProfile
+			launched.Model = route.Model
+			launched.Mode = string(route.Mode)
+			launched.Effort = route.ReasoningEffort
+			launched.AccessMode = string(access.Mode)
+			launched.ReadOnly = access.Admission.ReadOnly
+			launched.PolicyPath = access.PolicyPath
+			launched.ReservedTokens = request.TokenBudget
+			launched.DeadlineAt = request.DeadlineAt
+			if launched.RoleID == "" {
+				launched.RoleID = role.ID
+			}
+			if len(access.Admission.Tree) > 0 {
+				launched.WriteTree = access.Admission.Tree[0]
+			}
+			receipt.Workers = joinCodexOrchestrationWorker(receipt.Workers, launched)
+			return launched
 		}
+		joinWorker(codexOrchestrationWorkerLaunch{
+			RoleID: role.ID, Status: "starting", LogPath: filepath.Join(runDir, role.ID+".jsonl"),
+		})
+		receipt.Status = "launching"
+		if err := persistCodexOrchestrationLaunchReceipt(home, receipt); err != nil {
+			return receipt, fmt.Errorf("persist pre-spawn child %s: %w", role.ID, err)
+		}
+		request.RecordStarted = func(started codexOrchestrationWorkerLaunch) error {
+			if started.RoleID != "" && started.RoleID != role.ID {
+				return fmt.Errorf("started child identity %q does not match launch role %q", started.RoleID, role.ID)
+			}
+			if started.PID <= 0 {
+				return fmt.Errorf("started child %q has no process id", role.ID)
+			}
+			if started.Status == "" {
+				started.Status = "started"
+			}
+			joinWorker(started)
+			receipt.Status = "launching"
+			if err := persistCodexOrchestrationLaunchReceipt(home, receipt); err != nil {
+				return fmt.Errorf("persist started child %s: %w", role.ID, err)
+			}
+			return nil
+		}
+		launched, launchErr := orchestrationWorkerLauncher(request)
+		launched = joinWorker(launched)
 		if launchErr != nil {
 			launched.RoleID = role.ID
 			launched.Status = "failed"
-			receipt.Workers = append(receipt.Workers, launched)
+			joinWorker(launched)
 			receipt.Status = "partial"
 			_ = persistCodexOrchestrationLaunchReceipt(home, receipt)
 			return receipt, fmt.Errorf("launch %s: %w", role.ID, launchErr)
 		}
-		receipt.Workers = append(receipt.Workers, launched)
 		if !access.Admission.ReadOnly {
 			live = append(live, laneadmit.Lease{
 				ID: "orchestration-child-" + role.ID, Lane: access.Admission.Lane,
@@ -277,6 +306,20 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 		return receipt, err
 	}
 	return receipt, nil
+}
+
+// joinCodexOrchestrationWorker replaces a launch-time worker observation with
+// the launcher's final joined row. Appending only on first sight keeps a
+// controller-crash receipt truthful without duplicating the child after the
+// controller survives to collect its final result.
+func joinCodexOrchestrationWorker(workers []codexOrchestrationWorkerLaunch, joined codexOrchestrationWorkerLaunch) []codexOrchestrationWorkerLaunch {
+	for i := range workers {
+		if workers[i].RoleID == joined.RoleID {
+			workers[i] = joined
+			return workers
+		}
+	}
+	return append(workers, joined)
 }
 
 func orchestrationWorkerArgs(req orchestrationWorkerLaunchRequest, auditPath string) []string {
@@ -339,6 +382,14 @@ func launchGuardedCodexOrchestrationWorker(req orchestrationWorkerLaunchRequest)
 		return codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, LogPath: logPath}, fmt.Errorf("worker started without process")
 	}
 	pid := cmd.Process.Pid
+	started := codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, PID: pid, Status: "started", LogPath: logPath}
+	if req.RecordStarted != nil {
+		if err := req.RecordStarted(started); err != nil {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+			return started, err
+		}
+	}
 	time.Sleep(3 * time.Second)
 	if !dispatchPIDAlive(pid) {
 		return codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, PID: pid, Status: "failed", LogPath: logPath}, fmt.Errorf("worker exited during launch probe; inspect %s", logPath)
@@ -346,7 +397,7 @@ func launchGuardedCodexOrchestrationWorker(req orchestrationWorkerLaunchRequest)
 	if err := cmd.Process.Release(); err != nil {
 		return codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, PID: pid, Status: "failed", LogPath: logPath}, fmt.Errorf("release worker process handle: %w", err)
 	}
-	return codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, PID: pid, Status: "started", LogPath: logPath}, nil
+	return started, nil
 }
 
 func orchestrationWorkerPrompt(req orchestrationWorkerLaunchRequest) string {
