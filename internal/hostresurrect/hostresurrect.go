@@ -127,6 +127,9 @@ func resumeCommand(original []string, handle string) []string {
 	if len(original) == 0 || handle == "" {
 		return nil
 	}
+	if commandBase(original[0]) == "codex" {
+		return exactCodexResumeCommand(original)
+	}
 	command := make([]string, 0, len(original)+2)
 	for i := 0; i < len(original); i++ {
 		switch original[i] {
@@ -142,6 +145,62 @@ func resumeCommand(original []string, handle string) []string {
 		}
 	}
 	return append(command, "--resume", handle)
+}
+
+// Codex continuation uses a subcommand and Codex's own UUID. A fak guard handle
+// is not a Codex thread identity, and --last/picker fallback could attach the
+// wrong transcript, so only a pre-bound exact invocation is actuator-safe.
+func exactCodexResumeCommand(command []string) []string {
+	resumeAt := -1
+	for i := 1; i+1 < len(command); i++ {
+		if command[i] == "resume" && isUUID(command[i+1]) {
+			resumeAt = i
+			break
+		}
+	}
+	if resumeAt < 0 {
+		return nil
+	}
+
+	end := len(command)
+	if end >= resumeAt+4 && command[end-2] == "--resume" && strings.TrimSpace(command[end-1]) != "" {
+		// Older generic resurrection appended fak's guard handle to Codex's
+		// already-exact invocation. Strip that poisoned suffix while retaining
+		// Codex's UUID and any legitimate resume-subcommand arguments.
+		end -= 2
+	}
+	return append([]string(nil), command[:end]...)
+}
+
+func commandBase(command string) string {
+	command = strings.TrimSpace(strings.ReplaceAll(command, `\`, "/"))
+	if cut := strings.LastIndexByte(command, '/'); cut >= 0 {
+		command = command[cut+1:]
+	}
+	command = strings.ToLower(command)
+	for _, suffix := range []string{".exe", ".cmd", ".bat", ".ps1"} {
+		command = strings.TrimSuffix(command, suffix)
+	}
+	return command
+}
+
+func isUUID(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) != 36 {
+		return false
+	}
+	for i, c := range value {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
+			}
+			continue
+		}
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 func Key(eventID, handle string) string {

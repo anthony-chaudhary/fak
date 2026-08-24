@@ -2,6 +2,7 @@ package hostresurrect
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -63,7 +64,7 @@ func TestPlanExcludesMoreThanWaveOfStaleRows(t *testing.T) {
 	for i := 0; i < MaxLaunchesPerWindow+1; i++ {
 		rows = append(rows, optIn(guardsessions.Row{Schema: guardsessions.Schema, Handle: fmt.Sprintf("stale-%02d", i), PID: 100 + i, Interactive: true, CWD: `C:\stale`, Command: []string{"claude"}, ResumeHandle: fmt.Sprintf("stale-%02d", i), StartedAt: fmt.Sprintf("2026-07-14T19:%02d:00Z", i)}))
 	}
-	current := optIn(guardsessions.Row{Schema: guardsessions.Schema, Handle: "current", PID: 4242, Interactive: true, CWD: `C:\current`, Command: []string{"codex"}, ResumeHandle: "current", StartedAt: "2026-07-14T20:00:00Z"})
+	current := optIn(guardsessions.Row{Schema: guardsessions.Schema, Handle: "current", PID: 4242, Interactive: true, CWD: `C:\current`, Command: []string{"claude"}, ResumeHandle: "current", StartedAt: "2026-07-14T20:00:00Z"})
 	rows = append(rows, current)
 	cohort := Cohort{CapturedAt: "2026-07-14T20:00:01Z", Sessions: []CohortEntry{{Handle: current.Handle, PID: current.PID, StartedAt: current.StartedAt}}}
 
@@ -78,7 +79,7 @@ func TestPlanExcludesMoreThanWaveOfStaleRows(t *testing.T) {
 
 func TestPlanRejectsCohortPIDMismatch(t *testing.T) {
 	sig := hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "evt-reuse"}
-	row := optIn(guardsessions.Row{Schema: guardsessions.Schema, Handle: "g", PID: 42, Interactive: true, CWD: `C:\repo`, Command: []string{"codex"}, ResumeHandle: "g"})
+	row := optIn(guardsessions.Row{Schema: guardsessions.Schema, Handle: "g", PID: 42, Interactive: true, CWD: `C:\repo`, Command: []string{"claude"}, ResumeHandle: "g"})
 	got, counts := Plan(sig, []guardsessions.Row{row}, Cohort{Sessions: []CohortEntry{{Handle: "g", PID: 41, StartedAt: row.StartedAt}}}, nil, 1)
 	if len(got) != 0 || counts.ExcludedPIDMismatch != 1 {
 		t.Fatalf("Plan=%+v counts=%+v", got, counts)
@@ -99,8 +100,8 @@ func TestCaptureKeepsNewestRowPerLivePID(t *testing.T) {
 
 func TestPlanScopesTerminalCrashToOwningHost(t *testing.T) {
 	now := time.Date(2026, 8, 24, 3, 0, 0, 0, time.UTC)
-	one := optIn(guardsessions.NewInteractiveRow("one", "codex", 41, `C:\one`, "", "", now, []string{"codex"}))
-	two := optIn(guardsessions.NewInteractiveRow("two", "codex", 42, `C:\two`, "", "", now.Add(-time.Second), []string{"codex"}))
+	one := optIn(guardsessions.NewInteractiveRow("one", "claude", 41, `C:\one`, "", "", now, []string{"claude"}))
+	two := optIn(guardsessions.NewInteractiveRow("two", "claude", 42, `C:\two`, "", "", now.Add(-time.Second), []string{"claude"}))
 	cohort := Cohort{Sessions: []CohortEntry{
 		{Handle: one.Handle, PID: one.PID, StartedAt: one.StartedAt, HostPID: 100},
 		{Handle: two.Handle, PID: two.PID, StartedAt: two.StartedAt, HostPID: 200},
@@ -114,7 +115,7 @@ func TestPlanScopesTerminalCrashToOwningHost(t *testing.T) {
 
 func TestPlanTerminalCrashFailsClosedWithoutHostBinding(t *testing.T) {
 	now := time.Date(2026, 8, 24, 3, 0, 0, 0, time.UTC)
-	row := optIn(guardsessions.NewInteractiveRow("one", "codex", 41, `C:\one`, "", "", now, []string{"codex"}))
+	row := optIn(guardsessions.NewInteractiveRow("one", "claude", 41, `C:\one`, "", "", now, []string{"claude"}))
 	signal := hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "wt", HostPID: 100, FaultingApp: "WindowsTerminal.exe"}
 	got, counts := Plan(signal, []guardsessions.Row{row}, Cohort{Sessions: []CohortEntry{{Handle: row.Handle, PID: row.PID, StartedAt: row.StartedAt}}}, nil, 10)
 	if len(got) != 0 || counts.ExcludedHostMismatch != 1 {
@@ -125,4 +126,43 @@ func TestPlanTerminalCrashFailsClosedWithoutHostBinding(t *testing.T) {
 func optIn(row guardsessions.Row) guardsessions.Row {
 	row.HostRecovery = true
 	return row
+}
+
+func TestPlanRejectsCodexWithoutExactThreadBinding(t *testing.T) {
+	row := optIn(guardsessions.Row{Schema: guardsessions.Schema, Handle: "guard-handle", PID: 42, Interactive: true, CWD: `C:\repo`, Command: []string{"codex"}, ResumeHandle: "guard-handle"})
+	got, counts := Plan(hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "evt"}, []guardsessions.Row{row}, Cohort{Sessions: []CohortEntry{{Handle: row.Handle, PID: row.PID}}}, nil, 10)
+	if len(got) != 0 || counts.Candidates != 1 || counts.ExcludedInvalidResume != 1 {
+		t.Fatalf("got=%+v counts=%+v", got, counts)
+	}
+}
+
+func TestPlanPreservesExactCodexThreadBinding(t *testing.T) {
+	const thread = "01a03148-a78e-7af1-b4b3-dda99323b55a"
+	command := []string{`C:\tools\codex.exe`, "resume", thread}
+	row := optIn(guardsessions.Row{Schema: guardsessions.Schema, Handle: "guard-handle", PID: 42, Interactive: true, CWD: `C:\repo`, Command: command, ResumeHandle: "guard-handle"})
+	got, counts := Plan(hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "evt"}, []guardsessions.Row{row}, Cohort{Sessions: []CohortEntry{{Handle: row.Handle, PID: row.PID}}}, nil, 10)
+	if len(got) != 1 || counts.Selected != 1 || !reflect.DeepEqual(got[0].Command, command) {
+		t.Fatalf("got=%+v counts=%+v", got, counts)
+	}
+}
+
+func TestPlanPreservesCodexThreadBindingAfterLauncherConfig(t *testing.T) {
+	const thread = "01a02fe5-37cd-7252-ba6e-5bd8b19ee8d8"
+	command := []string{"codex", `developer_instructions="guard steering"`, "resume", thread}
+	row := optIn(guardsessions.Row{Schema: guardsessions.Schema, Handle: "guard-handle", PID: 42, Interactive: true, CWD: `C:\repo`, Command: command, ResumeHandle: "guard-handle"})
+	got, counts := Plan(hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "evt"}, []guardsessions.Row{row}, Cohort{Sessions: []CohortEntry{{Handle: row.Handle, PID: row.PID}}}, nil, 10)
+	if len(got) != 1 || counts.Selected != 1 || !reflect.DeepEqual(got[0].Command, command) {
+		t.Fatalf("got=%+v counts=%+v", got, counts)
+	}
+}
+
+func TestPlanRepairsLegacyCodexGuardResumeSuffix(t *testing.T) {
+	const thread = "01a02fe5-37cd-7252-ba6e-5bd8b19ee8d8"
+	command := []string{"codex", `developer_instructions="guard steering"`, "resume", thread, "--resume", "guard-handle"}
+	want := command[:4]
+	row := optIn(guardsessions.Row{Schema: guardsessions.Schema, Handle: "guard-handle", PID: 42, Interactive: true, CWD: `C:\repo`, Command: command, ResumeHandle: "guard-handle"})
+	got, counts := Plan(hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "evt"}, []guardsessions.Row{row}, Cohort{Sessions: []CohortEntry{{Handle: row.Handle, PID: row.PID}}}, nil, 10)
+	if len(got) != 1 || counts.Selected != 1 || !reflect.DeepEqual(got[0].Command, want) {
+		t.Fatalf("got=%+v counts=%+v", got, counts)
+	}
 }
