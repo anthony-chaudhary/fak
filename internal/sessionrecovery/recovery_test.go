@@ -63,7 +63,7 @@ func TestSelectIgnoresInventoryRowsWithoutThreads(t *testing.T) {
 
 func TestSelectPreservesPromptAsOneArg(t *testing.T) {
 	got := Select(InventoryReport{Sessions: []Session{candidate(`C:\work\fak`)}}, Options{Limit: 1, Prompt: "continue the exact task", ReceiptDir: t.TempDir()})
-	want := []string{"fak", "guard", "--", "codex", "resume", "t1", "continue the exact task"}
+	want := []string{"fak", "guard", "--", "codex", "resume", "--cd", `C:\work\fak`, "t1", "continue the exact task"}
 	if len(got) != 1 || !reflect.DeepEqual(got[0].Argv, want) {
 		t.Fatalf("argv=%q want %q", got[0].Argv, want)
 	}
@@ -163,7 +163,7 @@ func TestMergeJournalCrashesUsesRecordedCWDAndDeduplicates(t *testing.T) {
 	if got[0].ThreadID != "already" || got[0].CWD != `C:\authoritative` || got[0].Source != "session_journal" {
 		t.Fatalf("journal did not replace reconstructed cwd: %+v", got[0])
 	}
-	wantArgv := []string{"fak", "guard", "--", "codex", "resume", "journal", "resume safely"}
+	wantArgv := []string{"fak", "guard", "--", "codex", "resume", "--cd", `D:\repos\real tree`, "journal", "resume safely"}
 	if got[1].CWD != `D:\repos\real tree` || got[1].Source != "session_journal" || !reflect.DeepEqual(got[1].Argv, wantArgv) {
 		t.Fatalf("journal request=%+v", got[1])
 	}

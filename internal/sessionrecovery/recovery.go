@@ -129,7 +129,7 @@ func Select(report InventoryReport, opts Options) []Request {
 			out = append(out, req)
 			continue
 		}
-		req.Argv = []string{opts.ManagerBin, "guard", "--", opts.CodexBin, "resume", id}
+		req.Argv = codexResumeArgv(opts.ManagerBin, opts.CodexBin, id, cwd)
 		if opts.Prompt != "" {
 			req.Argv = append(req.Argv, opts.Prompt)
 		}
@@ -152,6 +152,14 @@ func Select(report InventoryReport, opts Options) []Request {
 		}
 	}
 	return out
+}
+
+func codexResumeArgv(managerBin, codexBin, threadID, cwd string) []string {
+	// Windows Terminal's startingDirectory and exec.Cmd.Dir establish the process CWD,
+	// but Codex owns the resumed agent's working root. Pin that root explicitly so a
+	// terminal-profile startup command or Codex's saved-session state cannot leave the
+	// recovered session in the launcher's directory and trigger another directory prompt.
+	return []string{managerBin, "guard", "--", codexBin, "resume", "--cd", cwd, threadID}
 }
 
 func recoveryEligibility(row Session, explicit bool) (string, string) {
@@ -213,7 +221,7 @@ func MergeJournalCrashes(requests []Request, classified []sessionjournal.Classif
 			if codexBin == "" {
 				codexBin = "codex"
 			}
-			req.Argv = []string{managerBin, "guard", "--", codexBin, "resume", row.Session.ID}
+			req.Argv = codexResumeArgv(managerBin, codexBin, row.Session.ID, cwd)
 			if opts.Prompt != "" {
 				req.Argv = append(req.Argv, opts.Prompt)
 			}

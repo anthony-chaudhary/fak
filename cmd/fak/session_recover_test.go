@@ -163,7 +163,7 @@ func TestSessionRecoverPromptAndCWD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{guardBin, "guard", "--", "codex", "resume", "t1", "continue this exact task"}
+	want := []string{guardBin, "guard", "--", "codex", "resume", "--cd", `C:\work\fak`, "t1", "continue this exact task"}
 	if len(cap.got) != 1 || !reflect.DeepEqual(cap.got[0].Argv, want) || cap.got[0].CWD != `C:\work\fak` {
 		t.Fatalf("launch=%+v", cap.got)
 	}
@@ -299,7 +299,7 @@ func TestSessionRecoverUsesJournalRecordedCWD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantArgv := []string{guardBin, "guard", "--", "codex", "resume", "journal-thread", "continue exactly"}
+	wantArgv := []string{guardBin, "guard", "--", "codex", "resume", "--cd", `D:\repos\actual tree`, "journal-thread", "continue exactly"}
 	if len(got.Results) != 1 || got.Results[0].CWD != `D:\repos\actual tree` || got.Results[0].Source != "session_journal" || !reflect.DeepEqual(got.Results[0].Argv, wantArgv) {
 		t.Fatalf("summary=%+v", got)
 	}
