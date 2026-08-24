@@ -48,14 +48,16 @@ type GateScenario struct {
 	Exclusion        string `json:"exclusion,omitempty"`
 }
 type GateCell struct {
-	ScenarioID string `json:"scenario_id"`
-	Arm        string `json:"arm"`
-	Category   string `json:"category"`
-	Pass       bool   `json:"pass"`
-	Reason     string `json:"reason"`
-	Output     string `json:"output,omitempty"`
-	DurationMS int64  `json:"duration_ms,omitempty"`
-	Error      string `json:"error,omitempty"`
+	ScenarioID    string `json:"scenario_id"`
+	Arm           string `json:"arm"`
+	Category      string `json:"category"`
+	Pass          bool   `json:"pass"`
+	Reason        string `json:"reason"`
+	Output        string `json:"output,omitempty"`
+	DurationMS    int64  `json:"duration_ms,omitempty"`
+	ScheduleSeed  string `json:"schedule_seed,omitempty"`
+	ScheduleOrder int    `json:"schedule_order,omitempty"`
+	Error         string `json:"error,omitempty"`
 }
 type GateSummary struct {
 	Arm      string `json:"arm"`
@@ -84,30 +86,60 @@ type ArmIdentity struct {
 	Source           string `json:"source,omitempty"`
 	FragmentDigest   string `json:"fragment_digest,omitempty"`
 }
+type CategoryResult struct {
+	Category         string `json:"category"`
+	BaselinePassed   int    `json:"baseline_passed"`
+	ComparatorPassed int    `json:"comparator_passed"`
+	NativePassed     int    `json:"native_passed"`
+	Expected         int    `json:"expected"`
+	Complete         bool   `json:"complete"`
+	Regression       bool   `json:"regression"`
+	Improvement      bool   `json:"improvement"`
+}
+type ProfileVerdict struct {
+	Decision      string           `json:"decision"`
+	Complete      bool             `json:"complete"`
+	Sufficient    bool             `json:"sufficient"`
+	NonRegression bool             `json:"non_regression"`
+	Improvement   bool             `json:"improvement"`
+	Reason        string           `json:"reason"`
+	Categories    []CategoryResult `json:"categories"`
+}
 type PonytailGateReport struct {
-	Schema            string            `json:"schema"`
-	Comparator        string            `json:"comparator"`
-	GeneratedAt       string            `json:"generated_at"`
-	Live              bool              `json:"live"`
-	Model             string            `json:"model,omitempty"`
-	Account           string            `json:"account,omitempty"`
-	Trials            int               `json:"trials"`
-	Arms              []ArmIdentity     `json:"arms"`
-	Sources           []GateSource      `json:"sources"`
-	Scenarios         []GateScenario    `json:"scenarios"`
-	Cells             []GateCell        `json:"cells"`
-	Summary           []GateSummary     `json:"summary"`
-	DeterministicRuns []GateRunArtifact `json:"deterministic_runs"`
-	OverallPass       bool              `json:"overall_pass"`
-	Assumptions       []string          `json:"assumptions"`
-	Extensions        []GateCell        `json:"extensions"`
+	Schema                     string            `json:"schema"`
+	Comparator                 string            `json:"comparator"`
+	GeneratedAt                string            `json:"generated_at"`
+	Live                       bool              `json:"live"`
+	Model                      string            `json:"model,omitempty"`
+	Account                    string            `json:"account,omitempty"`
+	Trials                     int               `json:"trials"`
+	EvaluationMode             bool              `json:"evaluation_mode"`
+	ScheduleSeed               string            `json:"schedule_seed,omitempty"`
+	ProviderSeedControlled     bool              `json:"provider_seed_controlled"`
+	ProviderSamplingControlled bool              `json:"provider_sampling_controlled"`
+	Arms                       []ArmIdentity     `json:"arms"`
+	Sources                    []GateSource      `json:"sources"`
+	Scenarios                  []GateScenario    `json:"scenarios"`
+	Cells                      []GateCell        `json:"cells"`
+	Summary                    []GateSummary     `json:"summary"`
+	DeterministicRuns          []GateRunArtifact `json:"deterministic_runs"`
+	OverallPass                bool              `json:"overall_pass"`
+	Assessment                 *ProfileVerdict   `json:"assessment,omitempty"`
+	Assumptions                []string          `json:"assumptions"`
+	Extensions                 []GateCell        `json:"extensions"`
 }
 type PonytailGateOptions struct {
-	Checkout, Claude, Model, Account, Replay string
-	Live                                     bool
-	Trials                                   int
-	Timeout                                  time.Duration
-	NativeMedium                             NativeProfile
+	Checkout       string
+	Live           bool
+	Claude         string
+	Model          string
+	Account        string
+	Trials         int
+	Replay         string
+	EvaluationMode bool
+	ScheduleSeed   string
+	NativeMedium   NativeProfile
+	Timeout        time.Duration
 }
 
 var gateSourcePaths = []string{
@@ -173,6 +205,15 @@ func PonytailGateInventory(checkout string) ([]GateSource, []GateScenario, error
 }
 
 func RunPonytailGates(ctx context.Context, o PonytailGateOptions) (PonytailGateReport, error) {
+	if o.Trials <= 0 {
+		o.Trials = 1
+	}
+	// The CLI's existing --trials 5 form selects the pre-live decision audit
+	// without changing ordinary one-trial compatibility. Package callers may
+	// opt in explicitly to validate a planned run before provider spend.
+	if err := validateEvaluationModeOptions(o); err != nil {
+		return PonytailGateReport{}, err
+	}
 	sources, scenarios, err := PonytailGateInventory(o.Checkout)
 	if err != nil {
 		return PonytailGateReport{}, err
@@ -184,16 +225,17 @@ func RunPonytailGates(ctx context.Context, o PonytailGateOptions) (PonytailGateR
 	if o.Timeout <= 0 {
 		o.Timeout = 2 * time.Minute
 	}
-	if o.Trials <= 0 {
-		o.Trials = 1
-	}
 	if o.Claude == "" {
 		o.Claude = "claude"
 	}
 	if o.Model == "" {
 		o.Model = "haiku"
 	}
-	r := PonytailGateReport{Schema: "fak.armbench.ponytail-gates.v1", Comparator: "DietrichGebert/ponytail@" + PonytailGatesRevision, GeneratedAt: time.Now().UTC().Format(time.RFC3339), Live: o.Live, Model: o.Model, Account: o.Account, Trials: o.Trials, Arms: arms, Sources: sources, Scenarios: scenarios, Assumptions: []string{"one provider sample per scenario/arm unless --trials overrides; stochastic repeat-rate claims are excluded", "provider output is scored by unchanged pinned JavaScript; no LLM judge", "baseline has no system prompt; Caveman and Ponytail use pinned upstream skill files; native_medium uses the canonical fak-native ponytail:native:medium fragment", "all upstream robustness-audit TASKS are included; its live n=20 loop and baseline/Ponytail-only arm roster are execution settings, not additional scenarios"}, Extensions: extensionFixtureCells()}
+	scheduleSeed := o.ScheduleSeed
+	if scheduleSeed == "" {
+		scheduleSeed = "sha256(DietrichGebert/ponytail@" + PonytailGatesRevision + "|scenario_id); rotate by trial"
+	}
+	r := PonytailGateReport{Schema: "fak.armbench.ponytail-gates.v1", Comparator: "DietrichGebert/ponytail@" + PonytailGatesRevision, GeneratedAt: time.Now().UTC().Format(time.RFC3339), Live: o.Live, Model: o.Model, Account: o.Account, Trials: o.Trials, EvaluationMode: o.EvaluationMode, ScheduleSeed: scheduleSeed, ProviderSeedControlled: false, ProviderSamplingControlled: false, Arms: arms, Sources: sources, Scenarios: scenarios, Assumptions: []string{"one provider sample per scenario/arm unless --trials overrides; stochastic repeat-rate claims are excluded", "provider output is scored by unchanged pinned JavaScript; no LLM judge", "baseline has no system prompt; Caveman and Ponytail use pinned upstream skill files; native_medium uses the canonical fak-native ponytail:native:medium fragment", "all upstream robustness-audit TASKS are included; its live n=20 loop and baseline/Ponytail-only arm roster are execution settings, not additional scenarios", "Claude CLI exposes no provider seed or sampling controls for this invocation; both are uncontrolled and the recorded schedule controls only arm order"}, Extensions: extensionFixtureCells()}
 	regCells, artifact := runRegressionSuite(ctx, o.Checkout)
 	r.Cells = append(r.Cells, regCells...)
 	r.DeterministicRuns = append(r.DeterministicRuns, artifact)
@@ -226,7 +268,8 @@ func RunPonytailGates(ctx context.Context, o PonytailGateOptions) (PonytailGateR
 				if !s.RequiresProvider {
 					continue
 				}
-				for _, arm := range ponytailBenchmarkArms {
+				orderedArms, cellSeed := counterbalancedArmOrder(scheduleSeed+"|"+s.ID, trial)
+				for order, arm := range orderedArms {
 					start := time.Now()
 					var output string
 					var callErr error
@@ -241,6 +284,10 @@ func RunPonytailGates(ctx context.Context, o PonytailGateOptions) (PonytailGateR
 						output, callErr = callGateProvider(ctx, o, configDir, arm, s.Task)
 					}
 					cell := GateCell{ScenarioID: s.ID, Arm: arm, Category: s.Category, Output: output, DurationMS: time.Since(start).Milliseconds()}
+					if o.EvaluationMode {
+						cell.ScheduleSeed = cellSeed
+						cell.ScheduleOrder = order + 1
+					}
 					if o.Trials > 1 {
 						cell.ScenarioID = fmt.Sprintf("%s.trial-%02d", s.ID, trial)
 					}
@@ -256,6 +303,10 @@ func RunPonytailGates(ctx context.Context, o PonytailGateOptions) (PonytailGateR
 		}
 	}
 	r.Summary, r.OverallPass = summarizeGates(scenarios, r.Cells, o.Live, o.Trials)
+	if o.EvaluationMode {
+		a := assessPonytailProfile(scenarios, r.Summary, o.Live, o.Trials)
+		r.Assessment = &a
+	}
 	return r, nil
 }
 
@@ -320,7 +371,7 @@ func benchmarkArmIdentities(sources []GateSource, native NativeProfile) ([]ArmId
 		return nil, err
 	}
 	return []ArmIdentity{
-		{Arm: "baseline", Implementation: "none", CanonicalProfile: syspromptmmu.WorkProfileStandard},
+		{Arm: "baseline", Implementation: "none", CanonicalProfile: "standard"},
 		{Arm: "caveman", Implementation: "pinned_upstream", CanonicalProfile: "caveman:upstream:pinned", Source: "benchmarks/arms/caveman-SKILL.md", FragmentDigest: "sha256:" + sourceHashes["benchmarks/arms/caveman-SKILL.md"]},
 		{Arm: "ponytail", Implementation: "pinned_upstream", CanonicalProfile: "ponytail:upstream:pinned", Source: "skills/ponytail/SKILL.md", FragmentDigest: "sha256:" + sourceHashes["skills/ponytail/SKILL.md"]},
 		{Arm: ponytailNativeMediumArm, Implementation: "fak_native", CanonicalProfile: profile.Identity, Source: "syspromptmmu.DescribeWorkProfile", FragmentDigest: ponytailNativeMediumDigest},
@@ -408,12 +459,109 @@ func runRegressionSuite(ctx context.Context, checkout string) ([]GateCell, GateR
 		if !pass {
 			reason = "fixture pass not observed in pinned node:test output"
 		}
-		cells = append(cells, GateCell{"up.correctness-regression." + n, "deterministic", "correctness-regression", pass, reason, "", 0, a.Error})
+		cells = append(cells, GateCell{ScenarioID: "up.correctness-regression." + n, Arm: "deterministic", Category: "correctness-regression", Pass: pass, Reason: reason, Error: a.Error})
 	}
 	return cells, a
 }
 func extensionFixtureCells() []GateCell {
-	return []GateCell{{"ext.instruction-leakage", "detector", "extension", true, "expected rejection: leaked skill instruction detected", "ALWAYS ask one question", 0, ""}, {"ext.malformed", "detector", "extension", true, "expected rejection: malformed no-code response detected", "plain prose", 0, ""}, {"ext.over-compression", "detector", "extension", true, "expected rejection: trivial pass-only code detected", "```py\npass\n```", 0, ""}}
+	return []GateCell{
+		{ScenarioID: "ext.instruction-leakage", Arm: "detector", Category: "extension", Pass: true, Reason: "expected rejection: leaked skill instruction detected", Output: "ALWAYS ask one question"},
+		{ScenarioID: "ext.malformed", Arm: "detector", Category: "extension", Pass: true, Reason: "expected rejection: malformed no-code response detected", Output: "plain prose"},
+		{ScenarioID: "ext.over-compression", Arm: "detector", Category: "extension", Pass: true, Reason: "expected rejection: trivial pass-only code detected", Output: "```py\npass\n```"},
+	}
+}
+
+func validateEvaluationModeOptions(o PonytailGateOptions) error {
+	if !o.EvaluationMode {
+		return nil
+	}
+
+	if o.Trials < 5 {
+		return errors.New("decision audit requires --trials >= 5 before provider spend")
+	}
+	if strings.TrimSpace(o.Model) == "" || isClaudeModelAlias(o.Model) {
+		return errors.New("decision audit requires a nonempty exact model snapshot, not a Claude CLI alias")
+	}
+	if strings.TrimSpace(o.Account) == "" {
+		return errors.New("decision audit requires a nonempty exact account identity")
+	}
+	if !o.Live {
+		return errors.New("decision audit requires --live provider execution")
+	}
+	if strings.TrimSpace(o.ScheduleSeed) == "" {
+		return errors.New("decision audit requires --schedule-seed")
+	}
+	return nil
+}
+
+func isClaudeModelAlias(model string) bool {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "haiku", "sonnet", "opus", "default":
+		return true
+	default:
+		return false
+	}
+}
+
+func counterbalancedArmOrder(scenarioID string, trial int) ([]string, string) {
+	seed := sha256.Sum256([]byte("DietrichGebert/ponytail@" + PonytailGatesRevision + "\x00" + scenarioID))
+	seedText := hex.EncodeToString(seed[:])
+	start := (int(seed[0]) + trial - 1) % len(ponytailBenchmarkArms)
+	arms := make([]string, len(ponytailBenchmarkArms))
+	for i := range arms {
+		arms[i] = ponytailBenchmarkArms[(start+i)%len(ponytailBenchmarkArms)]
+	}
+	return arms, seedText
+}
+
+func assessPonytailProfile(sc []GateScenario, summaries []GateSummary, live bool, trials int) ProfileVerdict {
+	assessment := ProfileVerdict{Decision: "tune", Sufficient: live && trials >= 5, NonRegression: true}
+	byKey := make(map[string]GateSummary, len(summaries))
+	for _, summary := range summaries {
+		byKey[summary.Arm+"\x00"+summary.Category] = summary
+	}
+	for _, category := range []string{"behavior", "correctness", "robustness"} {
+		expected := 0
+		for _, scenario := range sc {
+			if scenario.RequiresProvider && scenario.Category == category {
+				expected += trials
+			}
+		}
+		base, baseOK := byKey["baseline\x00"+category]
+		pinned, pinnedOK := byKey["ponytail\x00"+category]
+		native, nativeOK := byKey[ponytailNativeMediumArm+"\x00"+category]
+		complete := live && baseOK && pinnedOK && nativeOK &&
+			base.Passed+base.Failed == expected && pinned.Passed+pinned.Failed == expected && native.Passed+native.Failed == expected
+		regression := complete && (native.Passed < base.Passed || native.Passed < pinned.Passed)
+		improvement := complete && (native.Passed > base.Passed || native.Passed > pinned.Passed)
+		assessment.Categories = append(assessment.Categories, CategoryResult{
+			Category: category, BaselinePassed: base.Passed, ComparatorPassed: pinned.Passed,
+			NativePassed: native.Passed, Expected: expected, Complete: complete,
+			Regression: regression, Improvement: improvement,
+		})
+		assessment.Complete = assessment.Complete || len(assessment.Categories) == 1
+		assessment.Complete = assessment.Complete && complete
+		assessment.NonRegression = assessment.NonRegression && !regression
+		assessment.Improvement = assessment.Improvement || improvement
+		if category == "robustness" && regression {
+			assessment.Decision = "revert"
+		}
+	}
+	if !assessment.Complete || !assessment.Sufficient {
+		assessment.Reason = "missing or insufficient category evidence"
+		return assessment
+	}
+	if assessment.Decision == "revert" {
+		assessment.Reason = "native medium has a robustness regression"
+		return assessment
+	}
+	if !assessment.NonRegression || !assessment.Improvement {
+		assessment.Reason = "category evidence is mixed or shows no improvement"
+		return assessment
+	}
+	assessment.Decision = "keep"
+	assessment.Reason = "all categories are complete and sufficient, with no regression and at least one improvement"
+	return assessment
 }
 
 func summarizeGates(sc []GateScenario, cells []GateCell, live bool, trials int) ([]GateSummary, bool) {

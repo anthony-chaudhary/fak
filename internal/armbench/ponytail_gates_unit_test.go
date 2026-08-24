@@ -20,7 +20,7 @@ func TestPonytailGateUnknownFailsClosed(t *testing.T) {
 
 func TestPonytailGateNativeMediumUsesCanonicalRenderedFragment(t *testing.T) {
 	canonical := syspromptmmu.DescribeWorkProfile(syspromptmmu.WorkProfilePonytailNativeMed)
-	args, err := benchmarkProviderArgs(PonytailGateOptions{Model: "haiku"}, ponytailNativeMediumArm, "task")
+	args, err := benchmarkProviderArgs(PonytailGateOptions{Model: "haiku", NativeMedium: NativeProfile{Identity: canonical.Profile, Segment: canonical.Segment}}, ponytailNativeMediumArm, "task")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestPonytailArmIdentitysIdentifyNativeMedium(t *testing.T) {
 	arms, err := benchmarkArmIdentities([]GateSource{
 		{Path: "benchmarks/arms/caveman-SKILL.md", SHA256: strings.Repeat("c", 64)},
 		{Path: "skills/ponytail/SKILL.md", SHA256: strings.Repeat("p", 64)},
-	})
+	}, NativeProfile{Identity: syspromptmmu.WorkProfilePonytailNativeMed, Segment: syspromptmmu.DescribeWorkProfile(syspromptmmu.WorkProfilePonytailNativeMed).Segment})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,5 +88,85 @@ func TestExtensionFixturesAreSeparateDetectorPasses(t *testing.T) {
 		if c.Category != "extension" || !c.Pass || c.Arm != "detector" {
 			t.Fatalf("bad extension %+v", c)
 		}
+	}
+}
+
+func TestPonytailEvaluationModePreSpendValidation(t *testing.T) {
+	cases := []struct {
+		name string
+		opts PonytailGateOptions
+		want string
+	}{
+		{"trials", PonytailGateOptions{EvaluationMode: true, Trials: 4, Model: "claude-haiku-4-5-20251001", Account: "seat-a"}, "--trials >= 5"},
+		{"model empty", PonytailGateOptions{EvaluationMode: true, Trials: 5, Account: "seat-a"}, "exact model snapshot"},
+		{"model alias", PonytailGateOptions{EvaluationMode: true, Trials: 5, Model: "haiku", Account: "seat-a"}, "exact model snapshot"},
+		{"account", PonytailGateOptions{EvaluationMode: true, Trials: 5, Model: "claude-haiku-4-5-20251001"}, "account identity"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateEvaluationModeOptions(tc.opts)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err=%v want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestPonytailEvaluationModeScheduleIsDeterministicAndCounterbalanced(t *testing.T) {
+	seenFirst := map[string]bool{}
+	var prior []string
+	for trial := 1; trial <= len(ponytailBenchmarkArms); trial++ {
+		arms, seed := counterbalancedArmOrder("up.behavior.hardware-calibration", trial)
+		if len(seed) != 64 || len(arms) != len(ponytailBenchmarkArms) {
+			t.Fatalf("trial %d arms=%v seed=%q", trial, arms, seed)
+		}
+		if seenFirst[arms[0]] {
+			t.Fatalf("first arm repeated before balance completed: %v", arms)
+		}
+		seenFirst[arms[0]] = true
+		again, againSeed := counterbalancedArmOrder("up.behavior.hardware-calibration", trial)
+		if !slices.Equal(arms, again) || seed != againSeed {
+			t.Fatalf("schedule not deterministic: %v/%q vs %v/%q", arms, seed, again, againSeed)
+		}
+		if trial > 1 && slices.Equal(prior, arms) {
+			t.Fatalf("trial order did not rotate: %v", arms)
+		}
+		prior = arms
+	}
+}
+
+func TestPonytailDecisionAssessmentFailClosed(t *testing.T) {
+	scenarios := []GateScenario{
+		{ID: "b", Category: "behavior", RequiresProvider: true},
+		{ID: "c", Category: "correctness", RequiresProvider: true},
+		{ID: "r", Category: "robustness", RequiresProvider: true},
+	}
+	summaries := func(nativeBehavior, nativeCorrectness, nativeRobustness int) []GateSummary {
+		var out []GateSummary
+		for _, category := range []string{"behavior", "correctness", "robustness"} {
+			out = append(out,
+				GateSummary{Arm: "baseline", Category: category, Passed: 4, Failed: 1},
+				GateSummary{Arm: "ponytail", Category: category, Passed: 4, Failed: 1})
+		}
+		out = append(out,
+			GateSummary{Arm: ponytailNativeMediumArm, Category: "behavior", Passed: nativeBehavior, Failed: 5 - nativeBehavior},
+			GateSummary{Arm: ponytailNativeMediumArm, Category: "correctness", Passed: nativeCorrectness, Failed: 5 - nativeCorrectness},
+			GateSummary{Arm: ponytailNativeMediumArm, Category: "robustness", Passed: nativeRobustness, Failed: 5 - nativeRobustness})
+		return out
+	}
+	if got := assessPonytailProfile(scenarios, summaries(5, 4, 4), true, 5); got.Decision != "keep" {
+		t.Fatalf("complete non-regression plus improvement = %+v", got)
+	}
+	if got := assessPonytailProfile(scenarios, summaries(5, 4, 3), true, 5); got.Decision != "revert" {
+		t.Fatalf("robustness regression = %+v", got)
+	}
+	if got := assessPonytailProfile(scenarios, summaries(5, 3, 4), true, 5); got.Decision != "tune" {
+		t.Fatalf("mixed categories = %+v", got)
+	}
+	if got := assessPonytailProfile(scenarios, summaries(5, 4, 4)[:8], true, 5); got.Decision != "tune" || got.Complete {
+		t.Fatalf("missing category = %+v", got)
+	}
+	if got := assessPonytailProfile(scenarios, summaries(5, 4, 4), true, 4); got.Decision != "tune" || got.Sufficient {
+		t.Fatalf("insufficient trials = %+v", got)
 	}
 }

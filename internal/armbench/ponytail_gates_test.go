@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
 )
 
 func TestPonytailGateInventoryStableComplete(t *testing.T) {

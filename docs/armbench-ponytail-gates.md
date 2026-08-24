@@ -51,3 +51,18 @@ Ponytail failures are explicit in the raw witness: hardware calibration (pinned 
 - Complete provider witness: [`_witnesses/armbench-ponytail-gates-live-final-2026-08-14.json`](_witnesses/armbench-ponytail-gates-live-final-2026-08-14.json)
 
 Intermediate provider/re-score files are intentionally not authoritative; the final witness contains the complete output set and assumptions.
+
+## Native-medium decision audit (#8800)
+
+A run with `--trials 5` or greater enables the decision-audit controls before any live provider call. It requires an exact, non-alias model snapshot and a nonempty configured account identity. The pinned comparator revision, scorer source hashes, and canonical native-medium fragment digest remain fail-closed.
+
+```powershell
+fak armbench ponytail-gates --checkout $env:TEMP\ponytail-2ed6c52-8800 `
+  --live --trials 5 --account aug8-netra `
+  --model claude-haiku-4-5-20251001 `
+  --out docs/_witnesses/armbench-ponytail-native-medium-decision.json
+```
+
+The runner derives a stable SHA-256 schedule seed from the pinned comparator and scenario ID, rotates the four-arm order by trial, and records `schedule_seed` and `schedule_order` on every provider cell. This counterbalances order; it does not claim deterministic provider output. Claude CLI provides no seed or sampling flags for this invocation, so the receipt records `provider_seed_controlled=false` and `provider_sampling_controlled=false` rather than inventing controls.
+
+The machine-readable `assessment` is fail-closed and reports category evidence plus `decision: keep|tune|revert`. A native-medium robustness regression yields `revert`. Missing, fewer-than-five, incomplete, or mixed category evidence yields `tune`. `keep` requires complete sufficient behavior, correctness, and robustness evidence, no category regression versus both baseline and pinned Ponytail, and at least one category improvement. Pooled scores cannot override this decision.

@@ -615,6 +615,8 @@ func armbenchPonytailGates(stdout, stderr io.Writer, argv []string) int {
 	model := fs.String("model", "haiku", "provider model alias/snapshot")
 	account := fs.String("account", "", "configured Claude account identity (required with --live)")
 	trials := fs.Int("trials", 1, "provider trials per scenario and arm")
+	evaluationMode := fs.Bool("decision-audit", false, "require decision-grade live controls and emit keep/tune/revert assessment")
+	scheduleSeed := fs.String("schedule-seed", "", "deterministic arm-order schedule seed (required with --decision-audit)")
 	replay := fs.String("replay", "", "re-score provider outputs from an earlier raw witness")
 	out := fs.String("out", "", "raw JSON witness path")
 	jsonOut := fs.Bool("json", false, "emit strict JSON")
@@ -626,7 +628,7 @@ func armbenchPonytailGates(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	native := syspromptmmu.DescribeWorkProfile(syspromptmmu.WorkProfilePonytailNativeMed)
-	report, err := armbench.RunPonytailGates(context.Background(), armbench.PonytailGateOptions{Checkout: *checkout, Live: *live, Claude: *claude, Model: *model, Account: *account, Trials: *trials, Replay: *replay, NativeMedium: armbench.NativeProfile{Identity: native.Profile, Segment: native.Segment}})
+	report, err := armbench.RunPonytailGates(context.Background(), armbench.PonytailGateOptions{Checkout: *checkout, Live: *live, Claude: *claude, Model: *model, Account: *account, Trials: *trials, Replay: *replay, EvaluationMode: *evaluationMode, ScheduleSeed: *scheduleSeed, NativeMedium: armbench.NativeProfile{Identity: native.Profile, Segment: native.Segment}})
 	if err != nil {
 		fmt.Fprintf(stderr, "armbench ponytail-gates: %v\n", err)
 		return 1
