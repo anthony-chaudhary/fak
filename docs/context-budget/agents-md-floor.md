@@ -114,6 +114,14 @@ The next pass reduced `Hard rules` from **22,782 B / 6,075 estimated tokens** to
 **33,136 B / 8,836 estimated tokens**, a **2.53× reduction** from the 83,681 B /
 22,314-token pre-cleanup baseline. Preventive invariants remain inline; detailed
 runbooks stay behind their linked project verbs and documents.
+
+### Whole-file 3× threshold (#8705)
+
+The final orientation, build, new-work, release, and planning pass reduced whole-file
+`AGENTS.md` to **21,769 B / 5,805 estimated tokens**: **3.84× smaller** than the
+83,681 B / 22,314-token pre-cleanup baseline and below the 7,438-token 3× target.
+Shared-trunk, native-inference, proof, commit, scratch, private-control, Windows, and
+external-write invariants remain inline; detailed procedures remain one hop away.
 ## Recovery stays queryable
 
 The removed table duplicated the authoritative `[reasons.*]` records in `dos.toml`.
@@ -141,7 +149,7 @@ house-estimator values, not provider-billed measurements.
 There is still **no ratchet on AGENTS.md bytes**; this page records measured reductions rather than defining a policy ceiling.
 `internal/mcpfootprint/floorgate.go` earns its `FLOOR_BUDGET_STALE` direction
 precisely because a ceiling pinned at today's number *banks* today's bloat: the
-gate would have defended 49,882 B as acceptable. The current 33,136 B baseline is now a defensible input for a separate ratchet; pin the
+gate would have defended 49,882 B as acceptable. The current 21,769 B baseline is now a defensible input for a separate ratchet; pin the
 ceiling at the post-trim number. Until then this page is a dated measurement, not a
 contract, and the regeneration command above is how a reader gets a current one.
 

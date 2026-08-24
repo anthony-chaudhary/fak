@@ -60,81 +60,38 @@ is the current focus; the security floor rides along for free on the same seam.
 
 ## Build / test / run
 
-> **The Go module is the repository root** — run `go` commands from the clone root.
-> Needs Go 1.26+ (`GOTOOLCHAIN=auto` self-fetches). Zero external deps, so no `go.sum`.
+The Go module is the repository root and needs Go 1.26+ (`GOTOOLCHAIN=auto`). Zero external
+dependencies means no `go.sum`.
 
 ```bash
-go build ./cmd/fak        # -> ./fak  (fak.exe on Windows).
-make build                # debuggable ./fak via the dev profile (DWARF/symbols kept, Delve-ready)
-make test-fast            # ~2s smoke gate: build + vet + `go test -short ./...`
-make test-race            # fast LOCAL race gate (#1311): WSL `go test -short -race ./...`, cgo-preflighted
-make build-race           # race-detector ./fak via the race profile (cgo-preflighted, like test-race)
-make test                 # full suite incl. the weight-backed model witnesses
-make ci                   # the full gate: build + vet + test + claims-lint  (Windows: scripts/ci.ps1)
+go build ./cmd/fak        # build ./fak (fak.exe on Windows)
+make build                # debuggable binary
+make test-fast            # build + vet + short tests
+make test-race            # WSL race gate
+make test                 # full suite, including model witnesses
+make ci                   # build + vet + test + claims lint
 ```
 
-The profiles behind `make build` / `make build-race` / `make release` (debuggable vs race-detector vs
-stripped-shipped) are the single flag-delta table in [`docs/dev-tooling.md`](docs/dev-tooling.md#build-profiles),
-all routed through the one `scripts/build.sh` entrypoint (#3709/#3710).
+Build profiles and their one flag-delta table: [`docs/dev-tooling.md`](docs/dev-tooling.md#build-profiles).
+Install: `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`.
 
-### Which build am I asking about? (shared trunk — name the question first)
+### Which shared-tree question are you asking?
 
-This checkout is permanently *peer-dirty*: hundreds of uncommitted files and half-wired
-untracked `.go` siblings from other live sessions. A bare `go build ./...` / `go vet ./...`
-**run in place therefore answers no clean question** — a peer's broken WIP can fabricate a
-red, and a peer's uncommitted fix can mask a real one. Name the question, run the one verb:
+This checkout is permanently peer-dirty; raw in-place `go build ./...` or `go vet ./...` can
+mix your work with peers' WIP. Use the matching isolated verb:
 
-| Your question | Run |
+| Question | Command |
 |---|---|
-| Is the **committed trunk** buildable + gofmt-clean? *(what CI gates — what "clean **git** build" means)* | `fak-dev ci-preflight` |
-| Does the committed tip plus **only my explicit uncommitted paths** pass full build/vet and affected tests? | `fak validate --mine <path> [--mine <path>...]` |
-| Does **my change** compile, ignoring peers' broken untracked WIP? | `fak-dev buildcheck [--vet]` |
-| Does the **literal working tree** compile — *my own* untracked WIP included? | `fak-dev buildcheck --isolate=false --vet` |
-| Will my **push** red another worker's build graph? | `fak hooks pre-push` |
+| Is committed trunk buildable and gofmt-clean? | `fak-dev ci-preflight` |
+| Does trunk plus only my paths pass build, vet, and affected tests? | `fak validate --mine <path>...` |
+| Does my change compile while hiding peer WIP? | `fak-dev buildcheck [--vet] [--mine <file>]` |
+| Does the literal working tree compile? | `fak-dev buildcheck --isolate=false --vet` |
+| Will my push break another worker's graph? | `fak hooks pre-push` |
 
-`fak validate` archives the committed tip, overlays only repeatable explicit `--mine` paths, then runs
-full `go build ./...`, `go vet ./...`, and dependency-aware affected tests; it never infers ownership
-from the shared dirty tree.
-`fak-dev ci-preflight` archives the tip to a throwaway checkout (immune to the dirty tree;
-`--skip-build` = gofmt-only fast path). `fak-dev buildcheck` discards output to the null device
-and, by default, `-overlay`s away untracked siblings so a peer's WIP can't red your compile —
-an untracked `.go` in a package *you're* already editing is auto-kept as the matched new file,
-`--mine <file>` force-keeps one wired in from elsewhere, and a red that's purely mask-induced is
-re-checked against the live tree and reported OK before it reaches you; `--isolate=false` builds
-the live tree as-is, which is the one that catches *your own* broken untracked `_test.go`. None
-of the three writes an in-tree binary. `make test-fast` / `make ci` remain the local full-suite
-gates. **When you report "the build is clean" from a raw `go build`/`go vet` in this working
-tree, say which question you mean** — they give different answers here.
-
-Or install the released binary directly — the module is at the repo root, so this resolves:
-
-```bash
-go install github.com/anthony-chaudhary/fak/cmd/fak@latest
-```
-
-> **Windows:** `go build` / `go vet` / `go run` work natively, but native `go test` is
-> blocked by an OS Application-Control policy on the freshly-compiled test binaries — run
-> the suite under WSL: `./test.ps1` from the repo root. This is an OS quirk, not a code failure.
-> For now, **use WSL/CI for tests and the GPU/cloud nodes for a real serve** — keep tests
-> and long-lived local `fak serve` off the dev box. See
-> [`docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md`](docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md).
-
-> **Build *verification* must never write the in-tree binary.** A bare `go build ./cmd/fak`
-> drops `fak.exe` into the repo root; while a fleet process holds the old binary open, Windows
-> throws `open fak.exe: The process cannot access the file because it is being used by another
-> process` (#2373). The fleet-safe way to compile-check on the shared trunk is **`fak
-> buildcheck [pkgs...]`**: it discards the output to the null device (never an in-tree binary,
-> universal across lib/main/multi-pkg) *and* generates a `go build -overlay` that hides peers'
-> untracked in-flight `.go` files (keeping any that sit in a package you're already editing, since
-> those are almost always the matched new half of your edit) so a sibling's WIP can't red your
-> compile — `--mine <file>` force-keeps one wired in from elsewhere, `--vet` runs `go vet`,
-> `--json` reports. The raw fallback
-> (when the binary is unbuildable) is `go build -o $env:TEMP\fak-verify.exe ./cmd/fak`
-> (PowerShell) / `go build -o /tmp/fak-verify.exe ./cmd/fak` (bash), or `go vet ./cmd/fak` —
-> but note a *fixed* temp name still collides when two agents run it at once, which is exactly
-> what `fak-dev buildcheck`'s per-process temp overlay avoids. The in-tree `go build -o fak` above
-> is for *producing* the binary you run, not for a compile check.
-
+Compile verification must never write the in-tree binary: prefer `fak-dev buildcheck`; if the
+binary itself is broken, use a unique temp output. On Windows, native `go test` is blocked by
+Application Control: run `./test.ps1` under WSL, use fleet nodes for real serves, and follow
+[`docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md`](docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md).
 ## The 60-second proof (no key, no model, no GPU — verified)
 
 This is the canonical first command. Run it before anything else:
@@ -196,71 +153,29 @@ witness instead of claiming a fix.
 
 ## New work defaults: spine first, then fan out
 
-Two defaults fire for **any new unit of work** (feature, leaf, verb, demo, process change) —
-full doctrine in [`docs/spine-first-defaults.md`](docs/spine-first-defaults.md), agent
-checklist in the `/spine-fanout` skill. Before either, classify the work's **problem
-centrality** (`Core`, `Enabling`, `Stewardship`, or `Peripheral`) and run all four rows of
-the [`P1`-`P4` problem checklist](docs/problems-we-solve.md): managed context, net-true
-efficiency, bounded adaptation, and integrated operations. These are all-work checks, not
-competing priority buckets or a choose-one ID. Then pass the
-[Feynman-simple value frame](docs/shift-left-task-organization.md): name **For / Problem /
-Today / Better because / Witness** in plain language. Compare against the real next-best alternative,
-not an imagined baseline. If a new operator cannot repeat why the smallest spine should
-improve an observable user outcome, keep scoping; do not compensate with architecture,
-fan-out, or exhaustive proof.
+For every new unit, classify centrality (`Core`, `Enabling`, `Stewardship`, `Peripheral`), run
+all P1-P4 checks in [`docs/problems-we-solve.md`](docs/problems-we-solve.md), and state **For /
+Problem / Today / Better because / Witness** against the real next-best alternative. Then:
 
-1. **Ship the minimal WORKING end-to-end spine first, in the same session the work starts** —
-   the smallest runnable path through the real seam (LCD demo with `-selfcheck` for a
-   user-facing surface; a test driving the real object plus one captured live run for a
-   library/verb). **Order the work applied implementation → captured spine witness →
-   exhaustive operating-envelope proof → measured optimization.** Do not lead with a broad
-   comparison matrix, exhaustive edge proving, or component optimization while the primary
-   end-to-end outcome is still "almost there"; those are follow-ons anchored to a working
-   path. Safety and fail-closed behavior needed to run the path remain part of the spine.
-   If that is not achievable this session with high confidence, **file the
-   spine itself as the first issue** (`gen/now`, milestoned, missing witness named) — a spine
-   is never silently deferred.
-2. **File the follow-on backlog at creation time (3..50+ issues)** — the moment a spine
-   ships, run `fak-dev issue fanout --title T --leaf L --spine <sha|cmd|doc> --json` to expand
-   the QA / dogfood / productization / observability / integration / docs / release taxonomy
-   into contract-ready candidates (every one dispatchable under `fak-dev issue contract`), then
-   file them with milestone + labels at creation, or wave-plan first via
-   `fak-dev issue cohort --from-plan`. The verb refuses to plan without a spine witness — that
-   refusal is default 1 talking.
+1. Ship the smallest working end-to-end spine in the same session: applied implementation,
+   captured witness, operating-envelope proof, then optimization. Include the safety needed to
+   run it. If it cannot ship confidently, file that spine first as a `gen/now` issue with its
+   missing witness; never defer it silently.
+2. Once it ships, create the 3..50+ QA, dogfood, productization, observability, integration,
+   docs, and release follow-ons with
+   `fak-dev issue fanout --title T --leaf L --spine <sha|cmd|doc> --json` (or cohort-plan first).
 
-**End of run: file the leftovers, don't narrate them.** `never silently deferred` binds
-every run, not just new-work spines. If a task finishes and surfaces remaining or
-out-of-scope follow-ups — the "there are two more things worth doing" you'd otherwise
-list at the end — **file each as an open gh issue** before you stop (dedupe →
-done-condition → leak-check the body → label), then report those issue numbers. A
-follow-up named in prose but left unfiled is silently-deferred work: it becomes an OPEN
-issue or it does not leave the run. This binds headless workers, in-session loops, and
-interactive turns alike; if there is genuinely nothing left, say so plainly.
+Full doctrine: [`docs/spine-first-defaults.md`](docs/spine-first-defaults.md) and `/spine-fanout`.
+At run end, dedupe and file every real leftover as an open issue; otherwise say nothing remains.
 
-**Promote scratch up the tooling ladder — a working artifact must not die with the
-session.** The rungs are **scratchpad → committed tool → first-class verb → captured
-knowledge**, and the failure mode is stopping one rung too low. A throwaway script that
-*worked* is a deliverable, not a probe: left on rung 1 it evaporates with the session, and
-the next agent re-derives it and re-hits the same traps. Promote **by default, without
-being asked**, when any of these holds — it succeeded at a real task (not merely probed),
-it would plausibly be re-run (same question next cycle, same environment next quarter), it
-encodes a non-obvious operational fact the ecosystem already got wrong once, or its design
-beats the committed equivalent. Rung 1 is correct *only* for a true one-off: a diagnostic
-probe, a throwaway data pull, or logic a committed tool already covers. Two fences bind the
-climb **here**: a promotion lands as a **Go leaf + a `fak` verb**, never a new `tools/*.py`
-(the `internal/pythongate` ratchet reds the trunk — see "New tooling is Go, not Python"),
-and a rung-4 operational fact goes where the next agent *looks* — a dated
-[`docs/notes/`](docs/notes/) note or the leaf's doc — not buried in a script's control
-flow. The asymmetry is the whole argument: over-promoting costs a short tool and a test,
-while under-promoting costs the next agent the entire re-derivation. The harness session
-scratchpad is lossy by construction — it is keyed by session-uuid and strands on resume
-([`docs/notes/CONCEPT-HARNESS-SESSION-SCRATCHPAD-2026-07-02.md`](docs/notes/CONCEPT-HARNESS-SESSION-SCRATCHPAD-2026-07-02.md)),
-so "I'll promote it later" is not a plan. (This is the *tooling* ladder — an artifact's
-route out of scratch. It is not `internal/maturity`'s capability-lifecycle ladder, which
-scores a declared leaf's rung; see [`fak maturity`](docs/cli-reference.md).)
+Promote reusable successful scratch through **scratchpad → committed Go tool → `fak` verb →
+captured knowledge**. Promote when it solved a real recurring task, records a non-obvious fact,
+or beats the committed equivalent; keep only true probes disposable. New tooling is a Go leaf,
+not `tools/*.py`, and operational facts belong in the leaf doc or dated `docs/notes/`. Allocate
+and reap scratch through `fak tree-doctor`; see [`docs/generated-output-defaults.md`](docs/generated-output-defaults.md).
 
-**Close operator-facing turns with scannable bullets, verdict first; make the last line a bullet carrying the next checkable step.** This binds the summaries and handoffs an operator reads — headless workers, in-session loops, and interactive turns alike; tool-call arguments, commit subjects, and PR bodies keep their own conventions. One claim per line, evidence and paths inline. A short single-line closer ("nothing left; pushed abc123") already ends clean, so the "genuinely nothing left, say so plainly" escape above still holds.
-
+Close operator-facing turns with verdict-first bullets, one claim and inline evidence per line;
+make the final line the next checkable step. A one-line “nothing left; pushed X” is sufficient.
 ## Version everything: cite `module@rev`, not just a bare SHA
 
 Every module carries a **derived** version — there are no hand-maintained per-module version
@@ -320,77 +235,26 @@ file its witnessed, deduplicated appeal with `fak complain --summary "…" --rea
 first; appeal only when the guard, not the call, is wrong. Taxonomy and routing:
 [`docs/notes/CONCEPT-AGENT-FRICTION-COMPLAINT-CHANNELS-2026-06-29.md`](docs/notes/CONCEPT-AGENT-FRICTION-COMPLAINT-CHANNELS-2026-06-29.md).
 
-## Releasing (cut, publish, roll back)
+## Releasing and planning
 
-The version source-of-truth is the bare `VERSION` file; the shipped history is the
-`vX.Y.Z` git tags; release notes live under [`docs/releases/`](docs/releases/).
-`@latest` (what `go install …/cmd/fak@latest` resolves) is the newest tag, so if no
-tag is cut as work lands, `@latest` rots behind HEAD — check the lag any time with
-`make release-staleness` (`fak release-staleness --json`), and the whole release
-posture with `make release-readiness` (the deterministic release-debt scorecard).
+Use `/release` for the full release path. It enforces a clean synchronized `main`, full CI,
+version bump, release notes, signed commit/tag, push, GitHub release, and rollback guidance.
+Never hand-edit version constants, tag partially, force-push, or publish from a dirty/diverged
+tree. Release history and channel contract: [`docs/releases/`](docs/releases/) and [`docs/releases-channel.md`](docs/releases-channel.md).
 
-To cut one from the normal hot shared tree, run `fak release ship --execute --json`.
-It creates a transient detached worktree at `origin/main`, shares the repo-level
-release lock, runs the mechanical helpers in order, pushes the release commit to
-`main`, tags after the CI witness, creates the GitHub release page, and removes the
-worktree. The lower-level helpers remain available for diagnosis:
+Choose the planning primitive by work shape:
 
-1. **Decide** — `python tools/release_decide.py --json`. `decision: "hold"` names a
-   blocker (`CI_BASE_RED`, `VERSION_DRIFT`, `NOTHING_TO_SHIP`); don't cut through it.
-2. **Lock** (multi-session tree) — `python tools/release_lock.py acquire --ttl 1800`
-   so a second `/release` session can't race `VERSION`/the tag.
-3. **Cut** — bump `VERSION` + draft the note + commit, by explicit path only (never
-   `git add -A` — the lock's `guard` verb catches a sweep that grabbed a peer's file).
-4. **Push then tag** — push the release commit to `main` *first* (the tag check reads
-   local `main`), then `release_tag`; then `release_publish` creates the GitHub release
-   page (the `release-artifacts.yml` workflow decorates it with the cross-platform
-   binaries + checksums — it fails `release not found` if the page doesn't exist yet).
+- **Phased deliverable:** finite ordered phases with observable completion. Use
+  keep **Current state** accurate, append to
+  **Execution log**, run `/phased-plan` each phase, and archive completed plans under
+  `docs/plans/completed/`. `fak plan-audit` catches drift.
+- **Ongoing program:** recurring unbounded work. Use
+  track health/cadence/next run rather
+  than percent complete, and archive under `docs/programs/completed/` only when retired.
 
-Same trunk rules as everything else: commit on `main`, by path, `-s` for DCO; on a
-**hot tree** use `fak release ship --execute` rather than stashing peers' work.
-Stable rollback anchors are a separate, slower channel — see
-[`docs/stable-releases/`](docs/stable-releases/).
-
-## Planning: two kinds of work (don't put an ongoing program on a % bar)
-
-Before you track a piece of work as an epic, classify it. The project draws one line,
-encoded in [`internal/worktype`](internal/worktype/worktype.go):
-
-- An **ongoing optimization program** is never "done": **kernel-optimization** (chasing
-  decode/prefill throughput + numeric parity toward and past SOTA) and
-  **cache-optimization** (agent memory + reuse — multi-agent KV reuse, O(1) bounded
-  context, provider-cache preservation, addressable KV deletion). Its honest measure is a
-  **frontier + a trend**, never a completion %. A "60% complete" line on either is a
-  category error — there is always a faster kernel and a better reuse ratio. Track it with
-  `fak program report`; its operating spines are
-  [`docs/perf-parity-rsi-loop.md`](docs/perf-parity-rsi-loop.md) and
-  [`docs/cache-value-rollup.md`](docs/cache-value-rollup.md).
-
-  **Before you optimize a kernel, check the prior art — build on known art rather than
-  re-deriving it.** Almost every contraction fak performs (a quantized GEMM, a fused
-  attention, a KV-cache reuse, a MoE dispatch) has a production reference (llama.cpp / Marlin / CUTLASS / FlashInfer / vLLM /
-  SGLang / a named paper). Run `fak sota <operation|file>` to surface the reference, route,
-  and oracle *before* writing from scratch; read [`docs/sota/README.md`](docs/sota/README.md)
-  for the map and the process; stamp the kernel commit with a `Prior-art:` trailer naming what
-  you consulted. The source of truth is [`internal/sotamatrix`](internal/sotamatrix/sotamatrix.go);
-  the `PRIOR_ART` advisory gate nudges at commit time and `tools/sota_coverage_scorecard.py`
-  keeps the matrix complete against the tree.
-- A **discrete deliverable epic** has a definition of done and converges on 100% (the
-  native harness, release-at-agentic-speed, support-maturity). Completion % is the right
-  lens; track it in the `fak milestone report` roadmap.
-
-`fak milestone report` shows both, in separate sections, so a never-done program is never
-read as a stalled deliverable. To mark a new epic as a program, add its number to the
-`epicClass` map in `internal/worktype` (one line) — not a magic number in a report.
-
-A second, orthogonal axis separates work by **class** — fleet **infra** (CI, dispatch
-loops, observability, slack, build) vs product **dev** leaves vs the public
-**front-door / mainline** release path. It is derived from the file-tree lane an issue
-routes to (`tools/issue_lane_router.py`) and surfaced as three issue-views —
-`fak-dev index work dev-leaves` (product only, plumbing hidden), `... infra`, and
-`... front-door` (the fenced release path). Use it to dispatch one class at a time; see
-[`docs/work-class-axis.md`](docs/work-class-axis.md).
-
+Plans are canonical state, not narration. Update them in the same commit as the work; document
+scope changes explicitly. For parallel work, assign distinct file sets and integrate only after
+all workers finish. Audit before starting a new plan when active-plan load is high.
 ## Where to go next
 
 | If you want to… | Read |
