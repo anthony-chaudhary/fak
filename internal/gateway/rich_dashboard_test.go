@@ -51,7 +51,13 @@ func TestRichDashboardConcurrentClicksDeduplicateStart(t *testing.T) {
 	m.compose = "test-compose.yml"
 	m.baseURL = ""
 	m.start = func(context.Context, string) error { return nil }
-	m.probe = func(context.Context, string) error { return nil }
+	var probes atomic.Int32
+	m.probe = func(context.Context, string) error {
+		if probes.Add(1) == 1 {
+			return errors.New("not ready before start")
+		}
+		return nil
+	}
 	// Bypass environment/host discovery so this test witnesses the manager's
 	// single-flight transition independently of Docker availability.
 	m.dockerAvailable = func() bool { return true }
@@ -141,7 +147,7 @@ func TestRichDashboardCloseStopsOnlyOwnedStack(t *testing.T) {
 
 func testServerWithRichDashboards(t *testing.T, m *richDashboardManager) *Server {
 	t.Helper()
-	s, err := New(Config{EngineID: "test", Model: "m", Provider: "openai"})
+	s, err := New(Config{EngineID: "mock", Model: "m", Provider: "openai"})
 	if err != nil {
 		t.Fatal(err)
 	}
