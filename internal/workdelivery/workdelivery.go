@@ -319,13 +319,6 @@ func normalizeAcceptance(v AcceptanceState) AcceptanceState {
 	}
 	return v
 }
-func validActivation(v ActivationState) bool {
-	return v == ActivationInactive || v == ActivationActivated
-}
-func validAcceptance(v AcceptanceState) bool {
-	return v == AcceptanceUnaccepted || v == AcceptanceAccepted
-}
-
 func validateActivationReceipt(unit WorkUnit, receipt Receipt) error {
 	if receipt.Transition.To != string(ActivationActivated) {
 		return nil

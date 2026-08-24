@@ -156,12 +156,6 @@ func (p *scriptedModel) Complete(_ context.Context, msgs []agent.Message, _ []ag
 	return &agent.Completion{Message: agent.Message{Role: agent.RoleAssistant, Content: "bounded evidence accepted"}}, nil
 }
 
-func (p *scriptedModel) transcriptBytes() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.bytes
-}
-
 type boundedAgent struct {
 	task          task
 	turns         int

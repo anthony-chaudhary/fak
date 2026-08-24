@@ -123,15 +123,6 @@ func newRichDashboardManager(cfg RichDashboardConfig) *richDashboardManager {
 	return m
 }
 
-func disabledDashboardValue(raw string) bool {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "0", "false", "off", "disabled":
-		return true
-	default:
-		return false
-	}
-}
-
 func safeDashboardBaseURL(raw string) (*url.URL, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {

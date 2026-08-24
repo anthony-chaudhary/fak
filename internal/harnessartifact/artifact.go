@@ -47,24 +47,6 @@ func Fingerprint(k ed25519.PublicKey) string {
 	s := sha256.Sum256(k)
 	return "sha256:" + hex.EncodeToString(s[:])
 }
-func artifactID(payload Payload, publicKey string) (string, error) {
-	raw, e := json.Marshal(struct {
-		Payload   Payload `json:"payload"`
-		PublicKey string  `json:"public_key"`
-	}{payload, publicKey})
-	if e != nil {
-		return "", e
-	}
-	s := sha256.Sum256(raw)
-	return "sha256:" + hex.EncodeToString(s[:]), nil
-}
-func signBytes(id string, payload Payload, pub string) ([]byte, error) {
-	return json.Marshal(struct {
-		ID        string  `json:"id"`
-		Payload   Payload `json:"payload"`
-		PublicKey string  `json:"public_key"`
-	}{id, payload, pub})
-}
 func digestHex(id string) (string, error) {
 	if !strings.HasPrefix(id, "sha256:") {
 		return "", fmt.Errorf("artifact reference must pin sha256 digest")
@@ -77,19 +59,6 @@ func digestHex(id string) (string, error) {
 		return "", fmt.Errorf("invalid sha256 digest")
 	}
 	return h, nil
-}
-func blobPath(root, id string) (string, error) {
-	h, e := digestHex(id)
-	if e != nil {
-		return "", e
-	}
-	return filepath.Join(root, "blobs", "sha256", h+".json"), nil
-}
-func channelPath(root, name string) (string, error) {
-	if !safeName.MatchString(name) {
-		return "", fmt.Errorf("invalid channel %q", name)
-	}
-	return filepath.Join(root, "channels", name+".json"), nil
 }
 func writeJSONAtomic(path string, v any, perm os.FileMode) error {
 	raw, e := json.MarshalIndent(v, "", "  ")

@@ -824,16 +824,6 @@ func (s *Server) debugAdjudication() *AdjudicationSummary {
 	return &sum
 }
 
-// debugHarness projects the host-supplied harness-resource provider into the
-// /debug/vars "harness" block, or nil when unset / unsampled. See session_endpoints.go.
-func (s *Server) debugHarness() *SessionHarness {
-	h, ok := s.sessionHarness()
-	if !ok {
-		return nil
-	}
-	return &h
-}
-
 // debugFleet projects the host-supplied cross-machine fleet provider into the
 // /debug/vars "fleet" block, or nil when no provider is set / the fleet is empty (the
 // block is then omitted). See session_fleet.go.
