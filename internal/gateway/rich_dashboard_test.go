@@ -117,8 +117,7 @@ func TestRichDashboardRejectsUnsafeOverrideAndUnknownDestination(t *testing.T) {
 }
 
 func TestRichDashboardConfiguredURLOverrideSkipsDocker(t *testing.T) {
-	t.Setenv("FAK_GRAFANA_URL", "https://grafana.example.test/team/")
-	m := newRichDashboardManager(RichDashboardConfig{})
+	m := newRichDashboardManager(RichDashboardConfig{BaseURL: "https://grafana.example.test/team/"})
 	defer m.close()
 	m.probe = func(context.Context, string) error { return nil }
 	m.ensure()
@@ -147,7 +146,7 @@ func TestRichDashboardCloseStopsOnlyOwnedStack(t *testing.T) {
 
 func testServerWithRichDashboards(t *testing.T, m *richDashboardManager) *Server {
 	t.Helper()
-	s, err := New(Config{EngineID: "test", Model: "m", Provider: "openai"})
+	s, err := New(Config{EngineID: "mock", Model: "m", Provider: "openai"})
 	if err != nil {
 		t.Fatal(err)
 	}
