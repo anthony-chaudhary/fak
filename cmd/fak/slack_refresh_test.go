@@ -84,3 +84,37 @@ func TestSlackRefreshUnknownSurface(t *testing.T) {
 		t.Fatalf("unknown surface error not surfaced: %s", errb.String())
 	}
 }
+
+func TestSlackRefreshAlertsAndGuardSessionsAreAuditable(t *testing.T) {
+	clearSlackEnv(t)
+	var out, errb bytes.Buffer
+	code := runSlackRefresh(&out, &errb, []string{"--surface", "alerts,guard-sessions", "--continue-on-error"})
+	if code == 0 {
+		t.Fatalf("unwired surfaces unexpectedly healthy: %s", out.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "== alerts: FAIL ==") || !strings.Contains(got, "INCOMPLETE") {
+		t.Fatalf("alerts audit did not preserve incomplete evidence:\n%s", got)
+	}
+	if !strings.Contains(got, "== guard-sessions: FAIL ==") || !strings.Contains(got, `"pending"`) {
+		t.Fatalf("guard-session audit omitted durable outbox evidence:\n%s", got)
+	}
+	if strings.Contains(strings.ToLower(got), "all clear") {
+		t.Fatalf("audit synthesized an all-clear alert:\n%s", got)
+	}
+}
+
+func TestSlackWalkMarksAlertsAndGuardSessionsRunnable(t *testing.T) {
+	clearSlackEnv(t)
+	var out, errb bytes.Buffer
+	code := runSlackWalk(&out, &errb, nil)
+	if code != 0 {
+		t.Fatalf("walk exit = %d, stderr=%s", code, errb.String())
+	}
+	got := out.String()
+	for _, surface := range []string{"alerts", "guard-sessions"} {
+		if !strings.Contains(got, surface) || !strings.Contains(got, "audit-only") {
+			t.Fatalf("walk did not expose %s audit action:\n%s", surface, got)
+		}
+	}
+}

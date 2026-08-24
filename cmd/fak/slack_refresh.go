@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/ghexec"
 )
@@ -103,6 +104,22 @@ func slackRefreshActions() map[string]slackRefreshAction {
 			Command: "fak product post --status",
 			Run: func(stdout, stderr io.Writer, dryRun bool, _ slackRefreshOptions) int {
 				return runProductPost(stdout, stderr, withDryRun([]string{"--status"}, dryRun))
+			},
+		},
+		"alerts": {
+			Kind:    refreshRunnable,
+			Command: "fak slack refresh --surface alerts",
+			Detail:  "audit-only readback; never synthesizes an all-clear alert",
+			Run: func(stdout, stderr io.Writer, _ bool, _ slackRefreshOptions) int {
+				return runSlackSurfaceAudit(stdout, stderr, "alerts", false)
+			},
+		},
+		"guard-sessions": {
+			Kind:    refreshRunnable,
+			Command: "fak slack refresh --surface guard-sessions",
+			Detail:  "audit-only readback plus durable outbox status",
+			Run: func(stdout, stderr io.Writer, _ bool, _ slackRefreshOptions) int {
+				return runSlackSurfaceAudit(stdout, stderr, "guard-sessions", true)
 			},
 		},
 		"grafana": {
@@ -201,6 +218,51 @@ func slackRefreshActions() map[string]slackRefreshAction {
 			Detail:  "long-lived bridge, not a one-shot refresh feed",
 		},
 	}
+}
+
+func runSlackSurfaceAudit(stdout, stderr io.Writer, surface string, includeOutbox bool) int {
+	var selected *surfaceReport
+	for _, rep := range buildSurfaceReports() {
+		if rep.Name == surface {
+			selected = rep
+			break
+		}
+	}
+	if selected == nil {
+		fmt.Fprintf(stderr, "fak slack refresh %s: surface is not registered\n", surface)
+		return 2
+	}
+	if !selected.Ready {
+		fmt.Fprintf(stdout, "%s: INCOMPLETE - token or channel unresolved\n", surface)
+		if includeOutbox {
+			_ = runSlackOutboxStatus(stdout, stderr, []string{"--json"})
+		}
+		return 1
+	}
+	runAuthChecks([]*surfaceReport{selected}, "")
+	if selected.Auth == nil || !selected.Auth.OK {
+		detail := "auth probe unavailable"
+		if selected.Auth != nil && selected.Auth.Err != "" {
+			detail = selected.Auth.Err
+		}
+		fmt.Fprintf(stdout, "%s: AUTH_FAIL � %s\n", surface, detail)
+		return 1
+	}
+	age, err := lastPostAge(selected, "", time.Now())
+	if err != nil {
+		fmt.Fprintf(stdout, "%s: NO_RECENT_POST � %v\n", surface, err)
+	} else {
+		fmt.Fprintf(stdout, "%s: OK � last post %s ago\n", surface, age.Round(time.Second))
+	}
+	if includeOutbox {
+		if code := runSlackOutboxStatus(stdout, stderr, []string{"--json"}); code != 0 {
+			return code
+		}
+	}
+	if err != nil {
+		return 1
+	}
+	return 0
 }
 
 func runSlackWalk(stdout, stderr io.Writer, argv []string) int {
