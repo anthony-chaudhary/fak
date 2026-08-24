@@ -61,7 +61,7 @@ func TestBuildSyncsWindowsSafeCodexAdapterAndParity(t *testing.T) {
 	if string(b) == "body\n" {
 		t.Fatal("adapter copied maintained skill body")
 	}
-	if !strings.Contains(string(b), "description: Verify.") {
+	if !strings.Contains(string(b), "description:") || !strings.Contains(string(b), "Verify.") {
 		t.Fatalf("adapter lost canonical discovery description:\n%s", b)
 	}
 }
@@ -270,5 +270,35 @@ func TestCodexAdapterDescriptionsCutResidentFloorByThree(t *testing.T) {
 	}
 	if total*3 > baselineChars {
 		t.Fatalf("adapter descriptions total %d characters, want at most one third of baseline %d", total, baselineChars)
+	}
+}
+
+func TestAdapterDecodesAndRequotesYAMLDescriptions(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, ".claude/skills/quoted/SKILL.md", "---\nname: quoted\ndescription: \"Use a colon: safely and say \\\"hello\\\".\"\n---\n")
+	description, err := skillDescription(root, ".claude/skills/quoted/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `Use a colon: safely and say "hello".`; description != want {
+		t.Fatalf("description = %q, want %q", description, want)
+	}
+	body := adapter("quoted", strings.Repeat(description+" ", 20), "../../../.claude/skills/quoted/SKILL.md")
+	line := strings.Split(body, "\n")[2]
+	if !strings.HasPrefix(line, `description: "`) || !strings.HasSuffix(line, `..."`) {
+		t.Fatalf("adapter description is not a complete quoted scalar: %q", line)
+	}
+	var decoded string
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "description: ")), &decoded); err != nil {
+		t.Fatalf("generated description is invalid JSON/YAML quoting: %v", err)
+	}
+	if len([]rune(decoded)) > maxSkillDescriptionChars {
+		t.Fatalf("decoded description has %d characters", len([]rune(decoded)))
+	}
+}
+
+func TestDecodeYAMLScalarSingleQuotedEscapes(t *testing.T) {
+	if got, want := decodeYAMLScalar(`'agent''s trigger'`), "agent's trigger"; got != want {
+		t.Fatalf("decodeYAMLScalar = %q, want %q", got, want)
 	}
 }
