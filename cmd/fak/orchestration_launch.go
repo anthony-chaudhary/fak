@@ -64,6 +64,8 @@ const orchestrationChildEnv = "FAK_ORCHESTRATION_CHILD"
 
 type codexOrchestrationWorkerLaunch struct {
 	RoleID         string    `json:"role_id"`
+	OutputProfile  string    `json:"output_profile"`
+	WorkProfile    string    `json:"work_profile"`
 	PID            int       `json:"pid,omitempty"`
 	Status         string    `json:"status"`
 	LogPath        string    `json:"log_path,omitempty"`
@@ -88,6 +90,9 @@ type codexOrchestrationLaunchReceipt struct {
 	RequestedProfile  string                                 `json:"requested_profile"`
 	ResolvedProfile   string                                 `json:"resolved_profile"`
 	WorkClass         string                                 `json:"work_class"`
+	OutputProfile     string                                 `json:"output_profile"`
+	WorkProfile       string                                 `json:"work_profile"`
+	ProfileSource     string                                 `json:"profile_source"`
 	CapabilityProfile string                                 `json:"capability_profile"`
 	Degradations      []string                               `json:"degradations"`
 	Status            string                                 `json:"status"`
@@ -119,11 +124,17 @@ type orchestrationWorkerLaunchRequest struct {
 	DeadlineAt    time.Time
 	RemainingWall time.Duration
 	RunID         string
+	OutputProfile string
+	WorkProfile   string
 }
 
 var orchestrationWorkerLauncher = launchGuardedCodexOrchestrationWorker
 
 func launchCodexOrchestrationWorkers(home, sessionID, requestedProfile, capabilityProfile, taskText string, resolution orchestration.Resolution, wallLimitArg ...time.Duration) (codexOrchestrationLaunchReceipt, error) {
+	return launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfile, capabilityProfile, taskText, agentDefaultOutputStyle, agentDefaultWorkProfile, "shipped-default", resolution, wallLimitArg...)
+}
+
+func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfile, capabilityProfile, taskText, outputProfile, workProfile, profileSource string, resolution orchestration.Resolution, wallLimitArg ...time.Duration) (codexOrchestrationLaunchReceipt, error) {
 	runID, err := newCodexOrchestrationRunID()
 	if err != nil {
 		return codexOrchestrationLaunchReceipt{}, err
@@ -229,9 +240,11 @@ func launchCodexOrchestrationWorkers(home, sessionID, requestedProfile, capabili
 			Role: role, Access: access, WorkClass: resolution.Resolved.WorkClass, TaskText: taskText,
 			Root: root, RunDir: runDir, Model: route.Model, Mode: route.Mode, Effort: route.ReasoningEffort,
 			TokenBudget: childBudgets[role.ID].ReservedTokens, DeadlineAt: receipt.Budget.DeadlineAt,
-			RemainingWall: remainingWall, RunID: receipt.RunID,
+			RemainingWall: remainingWall, RunID: receipt.RunID, OutputProfile: outputProfile, WorkProfile: workProfile,
 		}
 		launched, launchErr := orchestrationWorkerLauncher(request)
+		launched.OutputProfile = outputProfile
+		launched.WorkProfile = workProfile
 		launched.Model = route.Model
 		launched.Mode = string(route.Mode)
 		launched.Effort = route.ReasoningEffort
@@ -269,6 +282,7 @@ func launchCodexOrchestrationWorkers(home, sessionID, requestedProfile, capabili
 func orchestrationWorkerArgs(req orchestrationWorkerLaunchRequest, auditPath string) []string {
 	args := []string{
 		"guard", "--codex-loop-gate", "off", "--provider", "openai-responses", "--audit", auditPath, "--expose-profile", "headless",
+		"--output-profile", req.OutputProfile, "--work-profile", req.WorkProfile,
 	}
 	if req.Access.PolicyPath != "" {
 		args = append(args, "--policy", req.Access.PolicyPath)

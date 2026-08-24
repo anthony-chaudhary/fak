@@ -29,6 +29,8 @@ type orchestrationOutcomeStatus struct {
 
 type orchestrationWorkerStatus struct {
 	RoleID            string    `json:"role_id"`
+	OutputProfile     string    `json:"output_profile"`
+	WorkProfile       string    `json:"work_profile"`
 	PID               int       `json:"pid,omitempty"`
 	State             string    `json:"state"`
 	ProcessAlive      bool      `json:"process_alive"`
@@ -54,6 +56,9 @@ type orchestrationRunStatus struct {
 	RequestedProfile string                      `json:"requested_profile"`
 	ResolvedProfile  string                      `json:"resolved_profile"`
 	WorkClass        string                      `json:"work_class"`
+	OutputProfile    string                      `json:"output_profile"`
+	WorkProfile      string                      `json:"work_profile"`
+	ProfileSource    string                      `json:"profile_source"`
 	State            string                      `json:"state"`
 	Running          int                         `json:"running"`
 	Completed        int                         `json:"completed"`
@@ -145,9 +150,9 @@ func newestOrchestrationReceipt(home, sessionID string) (codexOrchestrationLaunc
 }
 
 func inspectOrchestrationRun(home string, receipt codexOrchestrationLaunchReceipt) orchestrationRunStatus {
-	out := orchestrationRunStatus{Schema: orchestrationStatusSchema, SessionID: receipt.SessionID, RunID: receipt.RunID, LaunchedAt: receipt.LaunchedAt, RequestedProfile: receipt.RequestedProfile, ResolvedProfile: receipt.ResolvedProfile, WorkClass: receipt.WorkClass, State: "complete", Outcome: unverifiedOrchestrationOutcome(), Workers: make([]orchestrationWorkerStatus, 0, len(receipt.Workers))}
+	out := orchestrationRunStatus{Schema: orchestrationStatusSchema, SessionID: receipt.SessionID, RunID: receipt.RunID, LaunchedAt: receipt.LaunchedAt, RequestedProfile: receipt.RequestedProfile, ResolvedProfile: receipt.ResolvedProfile, WorkClass: receipt.WorkClass, OutputProfile: receipt.OutputProfile, WorkProfile: receipt.WorkProfile, ProfileSource: receipt.ProfileSource, State: "complete", Outcome: unverifiedOrchestrationOutcome(), Workers: make([]orchestrationWorkerStatus, 0, len(receipt.Workers))}
 	for _, worker := range receipt.Workers {
-		ws := orchestrationWorkerStatus{RoleID: worker.RoleID, PID: worker.PID, LogPath: worker.LogPath, ProcessAlive: processalive.Check(worker.PID)}
+		ws := orchestrationWorkerStatus{RoleID: worker.RoleID, OutputProfile: worker.OutputProfile, WorkProfile: worker.WorkProfile, PID: worker.PID, LogPath: worker.LogPath, ProcessAlive: processalive.Check(worker.PID)}
 		path := worker.LogPath
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(home, path)

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/orchestration"
+	"github.com/anthony-chaudhary/fak/internal/syspromptmmu"
 )
 
 func cmdOrchestration(args []string) {
@@ -30,6 +31,8 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("orchestration plan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	profile := fs.String("profile", "auto", "orchestration profile: off, auto, or ultracode")
+	outputProfile := fs.String("output-profile", agentDefaultOutputStyle, "fleet response profile")
+	workProfile := fs.String("work-profile", agentDefaultWorkProfile, "fleet work profile")
 	taskPath := fs.String("task", "", "versioned task fixture JSON")
 	taskText := fs.String("task-text", "", "current task text (converted to a typed task without persisting prompt text)")
 	strict := fs.Bool("strict", false, "reject any capability degradation")
@@ -47,6 +50,26 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	fs.Var(&attended, "attended", "operator interaction policy (true or false)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
+	}
+	profilesExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "output-profile" || f.Name == "work-profile" {
+			profilesExplicit = true
+		}
+	})
+	output := syspromptmmu.DescribeStyle(*outputProfile)
+	if !output.Known {
+		fmt.Fprintf(stderr, "fak orchestration plan: invalid --output-profile %q\n", *outputProfile)
+		return 2
+	}
+	work := syspromptmmu.DescribeWorkProfile(*workProfile)
+	if !work.Known {
+		fmt.Fprintf(stderr, "fak orchestration plan: invalid --work-profile %q\n", *workProfile)
+		return 2
+	}
+	profileSource := "shipped-default"
+	if profilesExplicit {
+		profileSource = "cli"
 	}
 	if (*taskPath == "") == (strings.TrimSpace(*taskText) == "") || fs.NArg() != 0 || (*launch && *selfcheck) {
 		fmt.Fprintln(stderr, "fak orchestration plan: exactly one of --task or --task-text is required, positional arguments are not accepted, and --launch conflicts with --selfcheck")
@@ -150,7 +173,7 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 		if *capset == "unsupported" {
 			capabilityProfile = "unsupported"
 		}
-		launched, launchErr := launchCodexOrchestrationWorkers(*codexHome, sessionID, *profile, capabilityProfile, *taskText, resolved, *maxWall)
+		launched, launchErr := launchCodexOrchestrationWorkersWithProfiles(*codexHome, sessionID, *profile, capabilityProfile, *taskText, output.Style, work.Profile, profileSource, resolved, *maxWall)
 		if launchErr != nil {
 			fmt.Fprintf(stderr, "fak orchestration plan: %v\n", launchErr)
 			return 1
