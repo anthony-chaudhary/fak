@@ -94,17 +94,18 @@ func runSlackRefreshGH(args ...string) ([]byte, error) {
 
 func slackRefreshActions() map[string]slackRefreshAction {
 	return map[string]slackRefreshAction{
-		"scoreboard": {
-			Kind:    refreshInputNeeded,
-			Command: "fak scoreboard post --from FILE | --kpi NAME ...",
-			Detail:  "scoreboard needs an explicit scorecard payload or KPI",
-		},
 		"product": {
 			Kind:    refreshRunnable,
 			Command: "fak product post --status",
 			Run: func(stdout, stderr io.Writer, dryRun bool, _ slackRefreshOptions) int {
 				return runProductPost(stdout, stderr, withDryRun([]string{"--status"}, dryRun))
 			},
+		},
+		"scoreboard": {
+			Kind:    refreshRunnable,
+			Command: "fak scoreboard post --kpi slack-outbox-pending",
+			Detail:  "built-in rollup sourced from the durable Slack outbox status fold",
+			Run:     runBuiltinScoreboardRefresh,
 		},
 		"alerts": {
 			Kind:    refreshRunnable,
@@ -218,6 +219,27 @@ func slackRefreshActions() map[string]slackRefreshAction {
 			Detail:  "long-lived bridge, not a one-shot refresh feed",
 		},
 	}
+}
+
+func runBuiltinScoreboardRefresh(stdout, stderr io.Writer, dryRun bool, _ slackRefreshOptions) int {
+	ob, err := openOutbox()
+	if err != nil {
+		fmt.Fprintf(stderr, "fak slack refresh scoreboard: open outbox: %v\n", err)
+		return 1
+	}
+	st, err := ob.Status(time.Now())
+	if err != nil {
+		fmt.Fprintf(stderr, "fak slack refresh scoreboard: fold outbox: %v\n", err)
+		return 1
+	}
+	verdict := "OK"
+	if st.Pending > 0 || st.Dead > 0 || st.Refused > 0 || st.Corrupt > 0 {
+		verdict = "ACTION"
+	}
+	detail := fmt.Sprintf("source=fak slack outbox status; pending=%d posted=%d dead=%d refused=%d corrupt=%d oldest_pending=%s last_drain=%s",
+		st.Pending, st.Posted, st.Dead, st.Refused, st.Corrupt, ageOrDash(st.OldestPendingAgeS), ageOrDash(st.LastDrainAgeS))
+	args := []string{"--kpi", "slack-outbox-pending", "--value", fmt.Sprint(st.Pending), "--verdict", verdict, "--detail", detail, "--source", "fak slack outbox status"}
+	return runScoreboardPost(stdout, stderr, withDryRun(args, dryRun))
 }
 
 func runSlackSurfaceAudit(stdout, stderr io.Writer, surface string, includeOutbox bool) int {

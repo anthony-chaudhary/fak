@@ -127,3 +127,20 @@ func TestSlackRefreshAuditOutputIsPortableASCII(t *testing.T) {
 		t.Fatalf("audit output contains replacement rune: %q", out.String())
 	}
 }
+
+func TestSlackRefreshScoreboardUsesBuiltInOutboxRollup(t *testing.T) {
+	clearSlackEnv(t)
+	t.Setenv("FAK_SLACK_OUTBOX_DIR", t.TempDir())
+	t.Setenv("FAK_SCOREBOARD_CHANNEL", "C-SCOREBOARD")
+	var out, errb bytes.Buffer
+	code := runSlackRefresh(&out, &errb, []string{"--surface", "scoreboard"})
+	if code != 0 {
+		t.Fatalf("scoreboard refresh exit = %d, stderr=%s, stdout=%s", code, errb.String(), out.String())
+	}
+	got := out.String()
+	for _, want := range []string{"scoreboard: DRY-RUN", "slack-outbox-pending", "source=fak slack outbox status", "pending=0"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("built-in scoreboard omitted %q:\n%s", want, got)
+		}
+	}
+}
