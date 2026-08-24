@@ -91,6 +91,7 @@ var tier = map[string]int{
 	"callavoid":              1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
 	"turnavoid":              1, // pure offline whole-model-turn replay/accounting primitive; stdlib-only, folded by CLI.
 	"cavemansafety":          1, // pure deterministic blinded safety judge; stdlib-only, offline benchmark evidence.
+	"cavemanpairwise":        1, // pure blinded pairwise benchmark judge and fail-closed evidence accounting; stdlib-only, off the product path.
 	"harnessartifact":        2, // immutable, content-addressed artifacts around harnessresolve locks (#7230).
 	"harnessres":             1, // cross-platform, stdlib-only process resource sampler for the fak guard harness (CPU/mem/IO); imports nothing internal, off the hot path (#2045, epic #2044).
 	"harnessinit":            3, // product scaffold + cross-host conformance; depends on host/resolve/window launch seams (#8227).

@@ -3217,11 +3217,23 @@
           "category": "incidental",
           "reason": "Parser for the active effective-policy digest in the existing guard startup report; not a distinct guard or gate concept.",
           "token": "guardInfoStartupDigest"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Receipt schema field grouping deterministic checks, not a guard or gate primitive",
+          "token": "deterministic_gates"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Decoded upstream receipt field, not a guard or gate implementation",
+          "token": "SafetyGatePass"
         }
       ],
       "exclude": [
+        "SafetyGatePass",
         "aggregat",
         "delegat",
+        "deterministic_gates",
         "gateway",
         "investigat",
         "litigated",
@@ -10265,7 +10277,15 @@
           "category": "incidental",
           "reason": "Serialized provider-version abstention code; not a general support maturity level",
           "token": "unsupported_version"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Fixed rubric JSON field, not a support-maturity lifecycle concept",
+          "token": "factual_correctness"
         }
+      ],
+      "exclude": [
+        "factual_correctness"
       ],
       "id": "support-maturity",
       "ignore": [
