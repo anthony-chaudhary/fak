@@ -48,3 +48,7 @@ Operator-facing work has two additional independent facts:
 - **operator-accepted**: a captured operator journey (for example, a post-hook result appearing in the TUI or a click changing views) is witnessed against that same runtime identity.
 
 `release-ready` never implies either fact. Activation does not imply acceptance. A stale build, changed configuration, missing journey, or self-reported evidence fails closed. `fak work-delivery inspect --file UNIT.json` prints the missing final-mile receipt as the next action.
+
+### Operator-facing closure gate
+
+`fak dispatch close-batch` accepts typed `candidates` for closure. An operator-facing candidate remains held until its work-delivery state is both `activated` and `operator_acceptance: accepted`, and both records name the same revision, build digest, and configuration digest. A non-operator-facing candidate must carry a concrete `non_operator_reason`; omission fails closed. Legacy bare issue arrays remain accepted for upstream workflows that already supplied witnessed, classified issue numbers.

@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/mutationbudget"
+	"github.com/anthony-chaudhary/fak/internal/workdelivery"
 )
 
 // DefaultBatchSize is used when Input.BatchSize is <= 0.
@@ -43,6 +44,55 @@ type Input struct {
 	// NowUnix is the clock, injected so a held batch's reset-window text is
 	// deterministic rather than reading a live clock.
 	NowUnix int64
+}
+
+// Candidate binds issue closure classification to final-mile delivery evidence.
+type Candidate struct {
+	Issue             int                    `json:"issue"`
+	OperatorFacing    bool                   `json:"operator_facing"`
+	NonOperatorReason string                 `json:"non_operator_reason,omitempty"`
+	Delivery          *workdelivery.WorkUnit `json:"delivery,omitempty"`
+}
+
+// EligibleIssues fails operator-facing closure closed unless the activated runtime
+// and captured operator journey name the same revision/build/config identity.
+func EligibleIssues(candidates []Candidate) ([]int, map[int]string) {
+	issues := make([]int, 0, len(candidates))
+	held := make(map[int]string)
+	for _, candidate := range candidates {
+		if err := finalMileReady(candidate); err != nil {
+			held[candidate.Issue] = err.Error()
+			continue
+		}
+		issues = append(issues, candidate.Issue)
+	}
+	return issues, held
+}
+
+func finalMileReady(candidate Candidate) error {
+	if !candidate.OperatorFacing {
+		if strings.TrimSpace(candidate.NonOperatorReason) == "" {
+			return fmt.Errorf("non-operator-facing closure requires a reason")
+		}
+		return nil
+	}
+	if candidate.Delivery == nil {
+		return fmt.Errorf("operator-facing closure requires delivery evidence")
+	}
+	u := candidate.Delivery
+	if err := u.Validate(); err != nil {
+		return fmt.Errorf("delivery evidence: %w", err)
+	}
+	if u.Axes.Activation != workdelivery.ActivationActivated || u.Activated == nil {
+		return fmt.Errorf("operator-facing work is not activated")
+	}
+	if u.Axes.Acceptance != workdelivery.AcceptanceAccepted || u.Accepted == nil {
+		return fmt.Errorf("operator-facing work is not operator-accepted")
+	}
+	if u.Accepted.RuntimeIdentity != *u.Activated {
+		return fmt.Errorf("operator acceptance identity does not match activated identity")
+	}
+	return nil
 }
 
 // Batch is one dry-run group of witnessed closes: the issues it would close,

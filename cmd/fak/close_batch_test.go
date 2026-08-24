@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -87,5 +88,17 @@ func TestRunDispatchCloseBatch_JSONOutput(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"total_issues": 3`) {
 		t.Fatalf("want total_issues=3 in the json report, got %s", stdout.String())
+	}
+}
+
+func TestParseCloseBatchInputFinalMileGate(t *testing.T) {
+	accepted := `{"candidates":[{"issue":7,"operator_facing":true,"delivery":{"schema":"fak.work-delivery/v1","id":"issue-7","revision":"cmd/fak@r1+gabc","axes":{"authoring":"recorded","compile_admission":"admitted","verification":"passed","integration":"integrated","release":"ready","activation":"activated","operator_acceptance":"accepted"},"activated":{"revision":"cmd/fak@r1+gabc","build_digest":"sha256:build","config_digest":"sha256:config"},"accepted":{"revision":"cmd/fak@r1+gabc","build_digest":"sha256:build","config_digest":"sha256:config","journey":"TUI changed"}}}]}`
+	issues, _, err := parseCloseBatchInput([]byte(accepted))
+	if err != nil || !reflect.DeepEqual(issues, []int{7}) {
+		t.Fatalf("issues=%v err=%v", issues, err)
+	}
+	releaseOnly := `{"candidates":[{"issue":8,"operator_facing":true,"delivery":{"schema":"fak.work-delivery/v1","id":"issue-8","revision":"cmd/fak@r1+gabc","axes":{"authoring":"recorded","compile_admission":"admitted","verification":"passed","integration":"integrated","release":"ready"}}}]}`
+	if _, _, err := parseCloseBatchInput([]byte(releaseOnly)); err == nil || !strings.Contains(err.Error(), "not activated") {
+		t.Fatalf("release-only err=%v", err)
 	}
 }

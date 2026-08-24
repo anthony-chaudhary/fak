@@ -72,8 +72,9 @@ var closeBatchNow = func() int64 { return time.Now().Unix() }
 // closeBatchInputJSON mirrors the accepted --in shapes: a bare JSON array of
 // issue numbers, or an object naming "issues" and an optional "budget".
 type closeBatchInputJSON struct {
-	Issues []int `json:"issues"`
-	Budget *struct {
+	Issues     []int                  `json:"issues"`
+	Candidates []closebatch.Candidate `json:"candidates,omitempty"`
+	Budget     *struct {
 		Remaining   int   `json:"remaining"`
 		Limit       int   `json:"limit"`
 		ResetAtUnix int64 `json:"reset_unix"`
@@ -91,6 +92,13 @@ func parseCloseBatchInput(raw []byte) ([]int, mutationbudget.Budget, error) {
 	var obj closeBatchInputJSON
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return nil, mutationbudget.Budget{}, fmt.Errorf("parse close-batch input json: %w", err)
+	}
+	if len(obj.Candidates) > 0 {
+		eligible, held := closebatch.EligibleIssues(obj.Candidates)
+		if len(held) > 0 {
+			return nil, mutationbudget.Budget{}, fmt.Errorf("final-mile closure gate held issues: %v", held)
+		}
+		obj.Issues = eligible
 	}
 	budget := defaultCloseBatchBudget
 	if obj.Budget != nil {

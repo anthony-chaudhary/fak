@@ -1,8 +1,11 @@
 package closebatch
 
 import (
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/workdelivery"
 
 	"github.com/anthony-chaudhary/fak/internal/mutationbudget"
 )
@@ -149,5 +152,42 @@ func TestRollbackNote_NamesGhIssueReopenAndIssues(t *testing.T) {
 		if !strings.Contains(note, want) {
 			t.Errorf("want rollback note to name issue %s, got %q", want, note)
 		}
+	}
+}
+
+func TestEligibleIssuesRequiresOperatorFinalMile(t *testing.T) {
+	identity := workdelivery.RuntimeIdentity{Revision: "cmd/fak@r1+gabc", BuildDigest: "sha256:build", ConfigDigest: "sha256:config"}
+	base := workdelivery.WorkUnit{Schema: workdelivery.Schema, ID: "issue-8798", Revision: identity.Revision, Axes: workdelivery.Axes{
+		Authoring: workdelivery.AuthoringRecorded, Admission: workdelivery.AdmissionAdmitted, Verification: workdelivery.VerificationPassed,
+		Integration: workdelivery.IntegrationIntegrated, Release: workdelivery.ReleaseReady,
+		Activation: workdelivery.ActivationInactive, Acceptance: workdelivery.AcceptanceUnaccepted,
+	}}
+	issues, held := EligibleIssues([]Candidate{{Issue: 1, OperatorFacing: true, Delivery: &base}})
+	if len(issues) != 0 || !strings.Contains(held[1], "not activated") {
+		t.Fatalf("release-ready admitted: issues=%v held=%v", issues, held)
+	}
+	base.Axes.Activation = workdelivery.ActivationActivated
+	base.Activated = &identity
+	issues, held = EligibleIssues([]Candidate{{Issue: 2, OperatorFacing: true, Delivery: &base}})
+	if len(issues) != 0 || !strings.Contains(held[2], "not operator-accepted") {
+		t.Fatalf("activation-only admitted: issues=%v held=%v", issues, held)
+	}
+	base.Axes.Acceptance = workdelivery.AcceptanceAccepted
+	base.Accepted = &workdelivery.OperatorAcceptance{RuntimeIdentity: identity, Journey: "TUI changed"}
+	issues, held = EligibleIssues([]Candidate{{Issue: 3, OperatorFacing: true, Delivery: &base}})
+	if !reflect.DeepEqual(issues, []int{3}) || len(held) != 0 {
+		t.Fatalf("accepted held: issues=%v held=%v", issues, held)
+	}
+	base.Accepted.ConfigDigest = "sha256:stale"
+	issues, held = EligibleIssues([]Candidate{{Issue: 4, OperatorFacing: true, Delivery: &base}})
+	if len(issues) != 0 || !strings.Contains(held[4], "does not match") {
+		t.Fatalf("mismatch admitted: issues=%v held=%v", issues, held)
+	}
+}
+
+func TestEligibleIssuesRequiresExplicitNonOperatorReason(t *testing.T) {
+	issues, held := EligibleIssues([]Candidate{{Issue: 5}, {Issue: 6, NonOperatorReason: "documentation-only"}})
+	if !reflect.DeepEqual(issues, []int{6}) || !strings.Contains(held[5], "requires a reason") {
+		t.Fatalf("issues=%v held=%v", issues, held)
 	}
 }
