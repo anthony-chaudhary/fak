@@ -12,7 +12,7 @@ filename:
 ```powershell
 $run = fak tree-doctor --scratch-dir fleet-loop
 fak loop --json > (Join-Path $run 'dosloop.out')
-fak tick --json > (Join-Path $run 'tick.json')
+fak dispatch tick --json > (Join-Path $run 'tick.json')
 
 $cover = fak tree-doctor --scratch-path coverage/unit.cover
 fak go test -coverprofile $cover ./internal/...
@@ -21,7 +21,7 @@ fak go test -coverprofile $cover ./internal/...
 ```bash
 run="$(fak tree-doctor --scratch-dir fleet-loop)"
 fak loop --json >"$run/dosloop.out"
-fak tick --json >"$run/tick.json"
+fak dispatch tick --json >"$run/tick.json"
 
 cover="$(fak tree-doctor --scratch-path coverage/unit.cover)"
 fak go test -coverprofile "$cover" ./internal/...

@@ -28,7 +28,7 @@ fak tags every capability with exactly one of three honest states:
 | Feature | Status | What it does |
 |---|---|---|
 | Provable-deny / unprovable-defer | Shipped | Provable refusal returns Deny, anything unprovable returns Defer; default-deny on an empty policy. |
-| Structured 12-reason refusal | Shipped | Refusals come from a closed 12-reason vocabulary with a bounded-disclosure witness (a SELF_MODIFY deny returns only the offending glob). |
+| Structured 17-reason refusal | Shipped | Refusals come from a closed 17-reason vocabulary with a bounded-disclosure witness (a SELF_MODIFY deny returns only the offending glob). |
 | Deny-as-value | Shipped | A refusal carries a derived disposition (RETRYABLE / WAIT / ESCALATE / TERMINAL) the loop consumes. |
 | Batch adjudication | Shipped | Adjudicating a set of calls in one pass equals the serial result. |
 | Deployable capability floor | Shipped | The policy is a declarative, version-tagged JSON manifest loaded at runtime (`--policy FILE`); unknown fields, reasons, or versions are a fatal load error. `fak policy --dump`/`--check` authors and validates it. |

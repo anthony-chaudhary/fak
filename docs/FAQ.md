@@ -96,7 +96,7 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
       "name": "Why one Go binary instead of a Python serving stack like vLLM or SGLang?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Because serving an agent safely is a whole stack, not just a token engine, and most of that stack is governance rather than throughput. A model server (vLLM, SGLang) gives you fast tokens. To run a governed agent fleet you then assemble several pieces around it: a gateway and a capability/policy layer, a result-screening layer and an audit pipeline, and an MCP bridge plus a reverse proxy for auth. Those engines are Python on a CUDA/PyTorch stack and multi-process by design. Their production container is multi-GB because it bundles CUDA + PyTorch (pip/uv into an existing env is the lighter path), and vLLM's own security docs direct you to front it with a reverse proxy for auth and endpoint allow-listing. Its --api-key covers only the /v1 routes. fak collapses the governance + gateway half of that stack into one static Go binary whose whole external dependency set is two golang.org/x extended-standard-library modules (pinned by a 4-line go.sum: no Python, no CUDA toolchain). That one binary does a lot at once. It speaks the OpenAI and Anthropic wires plus MCP, enforces a reviewable capability floor, quarantines tool results, emits a trace-correlated audit log, and exposes Prometheus metrics. It runs on a laptop …"
+        "text": "Because serving an agent safely is a whole stack, not just a token engine, and most of that stack is governance rather than throughput. A model server (vLLM, SGLang) gives you fast tokens. To run a governed agent fleet you then assemble several pieces around it: a gateway and a capability/policy layer, a result-screening layer and an audit pipeline, and an MCP bridge plus a reverse proxy for auth. Those engines are Python on a CUDA/PyTorch stack and multi-process by design. Their production container is multi-GB because it bundles CUDA + PyTorch (pip/uv into an existing env is the lighter path), and vLLM's own security docs direct you to front it with a reverse proxy for auth and endpoint allow-listing. Its --api-key covers only the /v1 routes. fak collapses the governance + gateway half of that stack into one static Go binary whose whole external dependency set is two golang.org/x extended-standard-library modules (pinned by a 4-line go.sum: no Python, no CUDA toolchain). That one binary does a lot at once. It speaks the OpenAI and Anthropic wires plus MCP, enforces a reviewable capability floor, quarantines tool results, emits a trace-correlated audit log, and exposes …"
       }
     },
     {
@@ -288,7 +288,7 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
       "name": "What is the closed refusal vocabulary, and what are the exact reason codes?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "fak refuses only with one of 12 codes from a closed vocabulary, never free text: DEFAULT_DENY, POLICY_BLOCK, SELF_MODIFY, LEASE_HELD, TRUST_VIOLATION, MALFORMED, MISROUTE, RATE_LIMITED, SECRET_EXFIL, UNWITNESSED, OVERSIZE, and UNKNOWN_TOOL (plus NONE, which is not a refusal). The set is the source of truth in internal/abi/reasons.go and is the same vocabulary the policy loader validates against. It is forward-compatible: an unknown code renders as REASON_<n> rather than panicking, so a newer rung can add a code without breaking an older reader."
+        "text": "fak refuses only with one of 17 codes from a closed vocabulary, never free text: DEFAULT_DENY, POLICY_BLOCK, SELF_MODIFY, LEASE_HELD, TRUST_VIOLATION, MALFORMED, MISROUTE, RATE_LIMITED, SECRET_EXFIL, UNWITNESSED, OVERSIZE, UNKNOWN_TOOL, RESULT_SECRET_DISCOVERED, SECRET_REDACTED, SHELL_DIALECT, PII_REDACTED, and PII_EXFIL (plus NONE, which is not a refusal). The set is the source of truth in internal/abi/reasons.go and is the same vocabulary the policy loader validates against. It is forward-compatible: an unknown code renders as REASON_<n> rather than panicking, so a newer rung can add a code without breaking an older reader."
       }
     },
     {
@@ -520,7 +520,7 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
       "name": "What reason codes can a quarantine carry, and where do they come from?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "A quarantine carries one code from the kernel's closed 12-reason refusal vocabulary: secret-shaped results return SECRET_EXFIL, injection-shaped results return TRUST_VIOLATION, and byte-repeat pollution returns OVERSIZE. These come from the same fixed vocabulary the call-side adjudicator uses, so a result refusal is as structured and citable as a call refusal — never free-text. An unknown forward-compatible code renders as REASON_<n> and never panics. (On the gateway proxy path, a result that cannot be admitted at all is held out fail-closed with the wire-level marker ADMIT_ERROR, which is a fail-closed signal rather than a vocabulary code.)"
+        "text": "A quarantine carries one code from the kernel's closed 17-reason refusal vocabulary: secret-shaped results return SECRET_EXFIL, injection-shaped results return TRUST_VIOLATION, and byte-repeat pollution returns OVERSIZE. These come from the same fixed vocabulary the call-side adjudicator uses, so a result refusal is as structured and citable as a call refusal — never free-text. An unknown forward-compatible code renders as REASON_<n> and never panics. (On the gateway proxy path, a result that cannot be admitted at all is held out fail-closed with the wire-level marker ADMIT_ERROR, which is a fail-closed signal rather than a vocabulary code.)"
       }
     },
     {
@@ -1224,7 +1224,7 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
       "name": "When a fak policy refuses a call, is that an error your agent has to handle?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "No — a refusal is a successful response carried as a value, not an exception, so your agent never treats \"the kernel said no\" as a crash. On the served path a denied tool call returns HTTP 200 with the verdict in the response body; HTTP error statuses are reserved for malformed requests, auth failures, and upstream faults. The denied call is simply dropped from the model's tool-call list for that turn, with the structured verdict (reason from the closed 12-code vocabulary plus a disposition like RETRYABLE, WAIT, ESCALATE, or TERMINAL) available in the fak response extension and, for Claude Code, also prepended as a leading [fak] text block. Deny-as-value is what lets the agent loop read the refusal in-band and adapt on the next turn rather than erroring out."
+        "text": "No — a refusal is a successful response carried as a value, not an exception, so your agent never treats \"the kernel said no\" as a crash. On the served path a denied tool call returns HTTP 200 with the verdict in the response body; HTTP error statuses are reserved for malformed requests, auth failures, and upstream faults. The denied call is simply dropped from the model's tool-call list for that turn, with the structured verdict (reason from the closed 17-code vocabulary plus a disposition like RETRYABLE, WAIT, ESCALATE, or TERMINAL) available in the fak response extension and, for Claude Code, also prepended as a leading [fak] text block. Deny-as-value is what lets the agent loop read the refusal in-band and adapt on the next turn rather than erroring out."
       }
     },
     {
@@ -1248,7 +1248,7 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
       "name": "What happens if I make a typo in a policy manifest?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "A typo is a hard error at load time, not a silently weakened floor — fak refuses to start or reload rather than run with a policy it could not parse. The manifest loader rejects unknown fields, so writing allows instead of allow fails with invalid manifest: json: unknown field \"allows\". An unknown deny reason fails the same way, printing the offending value and the full list of the twelve valid reason codes. A bad posture, a malformed argument rule, or a different major schema version all hard-error too. Because policy load propagates a fatal error at startup, there is no fallback to a more permissive default."
+        "text": "A typo is a hard error at load time, not a silently weakened floor — fak refuses to start or reload rather than run with a policy it could not parse. The manifest loader rejects unknown fields, so writing allows instead of allow fails with invalid manifest: json: unknown field \"allows\". An unknown deny reason fails the same way, printing the offending value and the full list of the 17 valid reason codes. A bad posture, a malformed argument rule, or a different major schema version all hard-error too. Because policy load propagates a fatal error at startup, there is no fallback to a more permissive default."
       }
     },
     {
@@ -1472,7 +1472,7 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
       "name": "What does fak give me that hand-rolled middleware around my model API does not?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Custom middleware can log and block calls, but fak ships the hard parts as a kernel: deny-as-value, a closed refusal vocabulary, result quarantine, and a tamper-evident audit journal. A refusal is a successful HTTP 200 carried as a verdict value, not an exception, so your client never treats \"the kernel said no\" as a transport error; error statuses are reserved for malformed requests, auth failures, and upstream faults. Refusals draw from a fixed 12-code vocabulary (DEFAULT_DENY, POLICY_BLOCK, SELF_MODIFY, SECRET_EXFIL, and so on) rather than free text, and each verdict carries a bounded witness naming only the offending rule. The opt-in decision journal hash-chains each event and records content digests, never the arguments or result bytes."
+        "text": "Custom middleware can log and block calls, but fak ships the hard parts as a kernel: deny-as-value, a closed refusal vocabulary, result quarantine, and a tamper-evident audit journal. A refusal is a successful HTTP 200 carried as a verdict value, not an exception, so your client never treats \"the kernel said no\" as a transport error; error statuses are reserved for malformed requests, auth failures, and upstream faults. Refusals draw from a fixed 17-code vocabulary (DEFAULT_DENY, POLICY_BLOCK, SELF_MODIFY, SECRET_EXFIL, and so on) rather than free text, and each verdict carries a bounded witness naming only the offending rule. The opt-in decision journal hash-chains each event and records content digests, never the arguments or result bytes."
       }
     },
     {
@@ -1488,7 +1488,7 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
       "name": "Can a rate limiter or quota gateway do what fak's capability floor does?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "No, a rate limiter caps how often a tool is called, while fak's capability floor decides whether a given effect is permitted at all. The floor is by tool name and is default-deny: an unlisted irreversible tool is refused structurally, and the refusal does not depend on catching an attack. fak does have a rate-limit reason code (RATE_LIMITED) in its closed vocabulary, but that is one verdict among twelve, not the model. The honest scope is that the floor bounds tool names, not the resolved arguments of an allow-listed coarse tool, so you keep exfil-shaped tools off the allow-list and lean on the result-side quarantine for the rest."
+        "text": "No, a rate limiter caps how often a tool is called, while fak's capability floor decides whether a given effect is permitted at all. The floor is by tool name and is default-deny: an unlisted irreversible tool is refused structurally, and the refusal does not depend on catching an attack. fak does have a rate-limit reason code (RATE_LIMITED) in its closed vocabulary, but that is one verdict among 17, not the model. The honest scope is that the floor bounds tool names, not the resolved arguments of an allow-listed coarse tool, so you keep exfil-shaped tools off the allow-list and lean on the result-side quarantine for the rest."
       }
     },
     {
@@ -1552,7 +1552,7 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
       "name": "How do I debug a tool call that fak denied?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Run fak preflight to replay that exact call through the policy and print the verdict, the reason code, and which rung decided it — no server, model, or network required. Pass the tool name and JSON args (and your policy file) and it prints verdict=… reason=… by=monitor; add --explain or --json to dump the full per-rung Decision trace so you can see whether the grammar rung, the preflight ladder, or the adjudicator monitor refused it. The reason comes from a closed 12-code vocabulary (DEFAULT_DENY, POLICY_BLOCK, SELF_MODIFY, UNKNOWN_TOOL, and so on), so the refusal is citable rather than free text. A DEFAULT_DENY usually means the tool was never allow-listed; a POLICY_BLOCK or SELF_MODIFY means an explicit deny or a write-shaped self-modify rule fired."
+        "text": "Run fak preflight to replay that exact call through the policy and print the verdict, the reason code, and which rung decided it — no server, model, or network required. Pass the tool name and JSON args (and your policy file) and it prints verdict=… reason=… by=monitor; add --explain or --json to dump the full per-rung Decision trace so you can see whether the grammar rung, the preflight ladder, or the adjudicator monitor refused it. The reason comes from a closed 17-code vocabulary (DEFAULT_DENY, POLICY_BLOCK, SELF_MODIFY, UNKNOWN_TOOL, and so on), so the refusal is citable rather than free text. A DEFAULT_DENY usually means the tool was never allow-listed; a POLICY_BLOCK or SELF_MODIFY means an explicit deny or a write-shaped self-modify rule fired."
       }
     },
     {
@@ -1560,7 +1560,7 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
       "name": "What do fak's refusal reason codes mean?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Every refusal carries exactly one code from a closed 12-reason vocabulary, so you can route on it instead of parsing free text: DEFAULT_DENY, POLICY_BLOCK, SELF_MODIFY, LEASE_HELD, TRUST_VIOLATION, MALFORMED, MISROUTE, RATE_LIMITED, SECRET_EXFIL, UNWITNESSED, OVERSIZE, and UNKNOWN_TOOL. DEFAULT_DENY is the fail-closed floor — the tool was never allow-listed; POLICY_BLOCK is an explicit named deny; SELF_MODIFY fires on a write-shaped call that touches a guarded path or runs a mutating shell command; MALFORMED and MISROUTE flag broken or unrepairable call shapes. The vocabulary is forward-compatible: an unknown code renders as REASON_<n> and never panics. Each code also maps to a disposition (RETRYABLE, WAIT, ESCALATE, or TERMINAL) so the next agent turn knows whether retrying, waiting, or escalating is appropriate."
+        "text": "Every refusal carries exactly one code from a closed 17-reason vocabulary, so you can route on it instead of parsing free text: DEFAULT_DENY, POLICY_BLOCK, SELF_MODIFY, LEASE_HELD, TRUST_VIOLATION, MALFORMED, MISROUTE, RATE_LIMITED, SECRET_EXFIL, UNWITNESSED, OVERSIZE, UNKNOWN_TOOL, RESULT_SECRET_DISCOVERED, SECRET_REDACTED, SHELL_DIALECT, PII_REDACTED, and PII_EXFIL. DEFAULT_DENY is the fail-closed floor — the tool was never allow-listed; POLICY_BLOCK is an explicit named deny; SELF_MODIFY fires on a write-shaped call that touches a guarded path or runs a mutating shell command; MALFORMED and MISROUTE flag broken or unrepairable call shapes. The vocabulary is forward-compatible: an unknown code renders as REASON_<n> and never panics. Each code also maps to a disposition (RETRYABLE, WAIT, ESCALATE, or TERMINAL) so the next agent turn knows whether retrying, waiting, or escalating is appropriate."
       }
     },
     {
@@ -2078,7 +2078,7 @@ Default-deny means any tool you did not explicitly allow-list is refused, regard
 
 ## What is the closed refusal vocabulary, and what are the exact reason codes?
 
-`fak` refuses only with one of 12 codes from a closed vocabulary, never free text: `DEFAULT_DENY`, `POLICY_BLOCK`, `SELF_MODIFY`, `LEASE_HELD`, `TRUST_VIOLATION`, `MALFORMED`, `MISROUTE`, `RATE_LIMITED`, `SECRET_EXFIL`, `UNWITNESSED`, `OVERSIZE`, and `UNKNOWN_TOOL` (plus `NONE`, which is not a refusal). The set is the source of truth in `internal/abi/reasons.go` and is the same vocabulary the policy loader validates against. It is forward-compatible: an unknown code renders as `REASON_<n>` rather than panicking, so a newer rung can add a code without breaking an older reader.
+`fak` refuses only with one of 17 codes from a closed vocabulary, never free text: `DEFAULT_DENY`, `POLICY_BLOCK`, `SELF_MODIFY`, `LEASE_HELD`, `TRUST_VIOLATION`, `MALFORMED`, `MISROUTE`, `RATE_LIMITED`, `SECRET_EXFIL`, `UNWITNESSED`, `OVERSIZE`, `UNKNOWN_TOOL`, `RESULT_SECRET_DISCOVERED`, `SECRET_REDACTED`, `SHELL_DIALECT`, `PII_REDACTED`, and `PII_EXFIL` (plus `NONE`, which is not a refusal). The set is the source of truth in `internal/abi/reasons.go` and is the same vocabulary the policy loader validates against. It is forward-compatible: an unknown code renders as `REASON_<n>` rather than panicking, so a newer rung can add a code without breaking an older reader.
 
 ## How do allow, allow_prefix, and deny work in a policy manifest?
 
@@ -2207,7 +2207,7 @@ No — the audit surfaces record names, verdicts, reasons, and content *digests*
 
 ## What reason codes can a quarantine carry, and where do they come from?
 
-A quarantine carries one code from the kernel's closed 12-reason refusal vocabulary: secret-shaped results return `SECRET_EXFIL`, injection-shaped results return `TRUST_VIOLATION`, and byte-repeat pollution returns `OVERSIZE`. These come from the same fixed vocabulary the call-side adjudicator uses, so a result refusal is as structured and citable as a call refusal — never free-text. An unknown forward-compatible code renders as `REASON_<n>` and never panics. (On the gateway proxy path, a result that cannot be admitted at all is held out fail-closed with the wire-level marker `ADMIT_ERROR`, which is a fail-closed signal rather than a vocabulary code.)
+A quarantine carries one code from the kernel's closed 17-reason refusal vocabulary: secret-shaped results return `SECRET_EXFIL`, injection-shaped results return `TRUST_VIOLATION`, and byte-repeat pollution returns `OVERSIZE`. These come from the same fixed vocabulary the call-side adjudicator uses, so a result refusal is as structured and citable as a call refusal — never free-text. An unknown forward-compatible code renders as `REASON_<n>` and never panics. (On the gateway proxy path, a result that cannot be admitted at all is held out fail-closed with the wire-level marker `ADMIT_ERROR`, which is a fail-closed signal rather than a vocabulary code.)
 
 ## Does quarantine guarantee you catch every injection, or only contain the ones it flags?
 
@@ -2591,7 +2591,7 @@ No — `fak`'s audit surfaces record tool NAMES, verdicts, dispositions, and tim
 
 ## When a fak policy refuses a call, is that an error your agent has to handle?
 
-No — a refusal is a successful response carried as a value, not an exception, so your agent never treats "the kernel said no" as a crash. On the served path a denied tool call returns HTTP 200 with the verdict in the response body; HTTP error statuses are reserved for malformed requests, auth failures, and upstream faults. The denied call is simply dropped from the model's tool-call list for that turn, with the structured verdict (reason from the closed 12-code vocabulary plus a disposition like `RETRYABLE`, `WAIT`, `ESCALATE`, or `TERMINAL`) available in the `fak` response extension and, for Claude Code, also prepended as a leading `[fak]` text block. Deny-as-value is what lets the agent loop read the refusal in-band and adapt on the next turn rather than erroring out.
+No — a refusal is a successful response carried as a value, not an exception, so your agent never treats "the kernel said no" as a crash. On the served path a denied tool call returns HTTP 200 with the verdict in the response body; HTTP error statuses are reserved for malformed requests, auth failures, and upstream faults. The denied call is simply dropped from the model's tool-call list for that turn, with the structured verdict (reason from the closed 17-code vocabulary plus a disposition like `RETRYABLE`, `WAIT`, `ESCALATE`, or `TERMINAL`) available in the `fak` response extension and, for Claude Code, also prepended as a leading `[fak]` text block. Deny-as-value is what lets the agent loop read the refusal in-band and adapt on the next turn rather than erroring out.
 
 ## What should I pair fak with for a complete agent security posture?
 
@@ -2613,7 +2613,7 @@ fak serve --policy floor.json --base-url http://localhost:11434/v1 --model qwen2
 
 ## What happens if I make a typo in a policy manifest?
 
-A typo is a hard error at load time, not a silently weakened floor — `fak` refuses to start or reload rather than run with a policy it could not parse. The manifest loader rejects unknown fields, so writing `allows` instead of `allow` fails with `invalid manifest: json: unknown field "allows"`. An unknown deny reason fails the same way, printing the offending value and the full list of the twelve valid reason codes. A bad posture, a malformed argument rule, or a different major schema version all hard-error too. Because policy load propagates a fatal error at startup, there is no fallback to a more permissive default.
+A typo is a hard error at load time, not a silently weakened floor — `fak` refuses to start or reload rather than run with a policy it could not parse. The manifest loader rejects unknown fields, so writing `allows` instead of `allow` fails with `invalid manifest: json: unknown field "allows"`. An unknown deny reason fails the same way, printing the offending value and the full list of the 17 valid reason codes. A bad posture, a malformed argument rule, or a different major schema version all hard-error too. Because policy load propagates a fatal error at startup, there is no fallback to a more permissive default.
 
 ## Does loading a policy add to the default allow-list or replace it?
 
@@ -2769,7 +2769,7 @@ A platform's built-in guard is tied to that platform; `fak` is an open, self-hos
 
 ## What does fak give me that hand-rolled middleware around my model API does not?
 
-Custom middleware can log and block calls, but `fak` ships the hard parts as a kernel: deny-as-value, a closed refusal vocabulary, result quarantine, and a tamper-evident audit journal. A refusal is a successful HTTP 200 carried as a verdict value, not an exception, so your client never treats "the kernel said no" as a transport error; error statuses are reserved for malformed requests, auth failures, and upstream faults. Refusals draw from a fixed 12-code vocabulary (`DEFAULT_DENY`, `POLICY_BLOCK`, `SELF_MODIFY`, `SECRET_EXFIL`, and so on) rather than free text, and each verdict carries a bounded witness naming only the offending rule. The opt-in decision journal hash-chains each event and records content digests, never the arguments or result bytes.
+Custom middleware can log and block calls, but `fak` ships the hard parts as a kernel: deny-as-value, a closed refusal vocabulary, result quarantine, and a tamper-evident audit journal. A refusal is a successful HTTP 200 carried as a verdict value, not an exception, so your client never treats "the kernel said no" as a transport error; error statuses are reserved for malformed requests, auth failures, and upstream faults. Refusals draw from a fixed 17-code vocabulary (`DEFAULT_DENY`, `POLICY_BLOCK`, `SELF_MODIFY`, `SECRET_EXFIL`, and so on) rather than free text, and each verdict carries a bounded witness naming only the offending rule. The opt-in decision journal hash-chains each event and records content digests, never the arguments or result bytes.
 
 ## Isn't fak just a WAF or API gateway for LLM traffic?
 
@@ -2777,7 +2777,7 @@ No, a WAF or API gateway screens traffic from the outside and typically fails op
 
 ## Can a rate limiter or quota gateway do what fak's capability floor does?
 
-No, a rate limiter caps how often a tool is called, while `fak`'s capability floor decides whether a given effect is permitted at all. The floor is by tool name and is default-deny: an unlisted irreversible tool is refused structurally, and the refusal does not depend on catching an attack. `fak` does have a rate-limit reason code (`RATE_LIMITED`) in its closed vocabulary, but that is one verdict among twelve, not the model. The honest scope is that the floor bounds tool names, not the resolved arguments of an allow-listed coarse tool, so you keep exfil-shaped tools off the allow-list and lean on the result-side quarantine for the rest.
+No, a rate limiter caps how often a tool is called, while `fak`'s capability floor decides whether a given effect is permitted at all. The floor is by tool name and is default-deny: an unlisted irreversible tool is refused structurally, and the refusal does not depend on catching an attack. `fak` does have a rate-limit reason code (`RATE_LIMITED`) in its closed vocabulary, but that is one verdict among 17, not the model. The honest scope is that the floor bounds tool names, not the resolved arguments of an allow-listed coarse tool, so you keep exfil-shaped tools off the allow-list and lean on the result-side quarantine for the rest.
 
 ## How does fak's result quarantine differ from a guardrails output-content filter?
 
@@ -2817,7 +2817,7 @@ curl -s http://127.0.0.1:8080/metrics | grep fak_kernel
 
 ## How do I debug a tool call that fak denied?
 
-Run `fak preflight` to replay that exact call through the policy and print the verdict, the reason code, and which rung decided it — no server, model, or network required. Pass the tool name and JSON args (and your policy file) and it prints `verdict=… reason=… by=monitor`; add `--explain` or `--json` to dump the full per-rung Decision trace so you can see whether the grammar rung, the preflight ladder, or the adjudicator monitor refused it. The reason comes from a closed 12-code vocabulary (`DEFAULT_DENY`, `POLICY_BLOCK`, `SELF_MODIFY`, `UNKNOWN_TOOL`, and so on), so the refusal is citable rather than free text. A `DEFAULT_DENY` usually means the tool was never allow-listed; a `POLICY_BLOCK` or `SELF_MODIFY` means an explicit deny or a write-shaped self-modify rule fired.
+Run `fak preflight` to replay that exact call through the policy and print the verdict, the reason code, and which rung decided it — no server, model, or network required. Pass the tool name and JSON args (and your policy file) and it prints `verdict=… reason=… by=monitor`; add `--explain` or `--json` to dump the full per-rung Decision trace so you can see whether the grammar rung, the preflight ladder, or the adjudicator monitor refused it. The reason comes from a closed 17-code vocabulary (`DEFAULT_DENY`, `POLICY_BLOCK`, `SELF_MODIFY`, `UNKNOWN_TOOL`, and so on), so the refusal is citable rather than free text. A `DEFAULT_DENY` usually means the tool was never allow-listed; a `POLICY_BLOCK` or `SELF_MODIFY` means an explicit deny or a write-shaped self-modify rule fired.
 
 ```bash
 fak preflight --tool refund_payment --args '{}' --policy floor.json --explain
@@ -2825,7 +2825,7 @@ fak preflight --tool refund_payment --args '{}' --policy floor.json --explain
 
 ## What do fak's refusal reason codes mean?
 
-Every refusal carries exactly one code from a closed 12-reason vocabulary, so you can route on it instead of parsing free text: `DEFAULT_DENY`, `POLICY_BLOCK`, `SELF_MODIFY`, `LEASE_HELD`, `TRUST_VIOLATION`, `MALFORMED`, `MISROUTE`, `RATE_LIMITED`, `SECRET_EXFIL`, `UNWITNESSED`, `OVERSIZE`, and `UNKNOWN_TOOL`. `DEFAULT_DENY` is the fail-closed floor — the tool was never allow-listed; `POLICY_BLOCK` is an explicit named deny; `SELF_MODIFY` fires on a write-shaped call that touches a guarded path or runs a mutating shell command; `MALFORMED` and `MISROUTE` flag broken or unrepairable call shapes. The vocabulary is forward-compatible: an unknown code renders as `REASON_<n>` and never panics. Each code also maps to a disposition (`RETRYABLE`, `WAIT`, `ESCALATE`, or `TERMINAL`) so the next agent turn knows whether retrying, waiting, or escalating is appropriate.
+Every refusal carries exactly one code from a closed 17-reason vocabulary, so you can route on it instead of parsing free text: `DEFAULT_DENY`, `POLICY_BLOCK`, `SELF_MODIFY`, `LEASE_HELD`, `TRUST_VIOLATION`, `MALFORMED`, `MISROUTE`, `RATE_LIMITED`, `SECRET_EXFIL`, `UNWITNESSED`, `OVERSIZE`, `UNKNOWN_TOOL`, `RESULT_SECRET_DISCOVERED`, `SECRET_REDACTED`, `SHELL_DIALECT`, `PII_REDACTED`, and `PII_EXFIL`. `DEFAULT_DENY` is the fail-closed floor — the tool was never allow-listed; `POLICY_BLOCK` is an explicit named deny; `SELF_MODIFY` fires on a write-shaped call that touches a guarded path or runs a mutating shell command; `MALFORMED` and `MISROUTE` flag broken or unrepairable call shapes. The vocabulary is forward-compatible: an unknown code renders as `REASON_<n>` and never panics. Each code also maps to a disposition (`RETRYABLE`, `WAIT`, `ESCALATE`, or `TERMINAL`) so the next agent turn knows whether retrying, waiting, or escalating is appropriate.
 
 ## Does fak's audit log record my tool arguments or result contents?
 
