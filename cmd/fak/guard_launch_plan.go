@@ -61,6 +61,13 @@ func (p guardLaunchPlan) withExecutableCommand(command []string) guardLaunchPlan
 
 func (p guardLaunchPlan) resolveProvider(explicit string) (string, bool) {
 	if provider := strings.ToLower(strings.TrimSpace(explicit)); provider != "" {
+		// `fak m --provider openai -- codex ...` is the documented OpenAI spelling,
+		// but Codex speaks the Responses wire. Keep the operator's explicit billing
+		// choice while selecting the wire required by the harness; otherwise the
+		// subscription resolver is skipped and an empty OPENAI_API_KEY fails launch.
+		if provider == "openai" && p.recognizedProfile && p.profile.Wire == harnessprofile.WireOpenAIResponses {
+			return string(p.profile.Wire), false
+		}
 		return provider, false
 	}
 	if p.recognizedProfile {

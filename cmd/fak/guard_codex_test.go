@@ -92,6 +92,15 @@ func TestGuardLaunchPlanIdentityComposition(t *testing.T) {
 		})
 	}
 
+	codex := newGuardLaunchPlan([]string{"codex", "resume", "thread-id"})
+	if provider, autodetected := codex.resolveProvider("openai"); provider != "openai-responses" || autodetected {
+		t.Fatalf("explicit Codex OpenAI provider = %q autodetected=%v, want openai-responses false", provider, autodetected)
+	}
+	claude := newGuardLaunchPlan([]string{"claude"})
+	if provider, autodetected := claude.resolveProvider("openai"); provider != "openai" || autodetected {
+		t.Fatalf("non-Codex explicit OpenAI provider = %q autodetected=%v, want openai false", provider, autodetected)
+	}
+
 	unknown := newGuardLaunchPlan([]string{"custom-agent", "run"})
 	if unknown.recognized() || unknown.harnessProfile().Recognized() {
 		t.Fatalf("unknown command resolved a profile: %+v", unknown.harnessProfile())
