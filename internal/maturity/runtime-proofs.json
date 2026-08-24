@@ -40,6 +40,11 @@
       "lane": "workflowlint",
       "command": "go test -v ./internal/workflowlint",
       "output_contains": "TestWalkDiscoversEveryCurrentWorkflow"
+    },
+    {
+      "lane": "workflowaudit",
+      "command": "go test -v ./internal/workflowaudit",
+      "output_contains": "TestLiveTreeFullyClassified"
     }
   ]
 }
