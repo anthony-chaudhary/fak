@@ -17,14 +17,24 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/sessionrecovery"
 )
 
-type captureLauncher struct{ got []sessionrecovery.Request }
+type captureLauncher struct {
+	got      []sessionrecovery.Request
+	onLaunch func(int, sessionrecovery.Request)
+}
 
 func (c *captureLauncher) Launch(r sessionrecovery.Request) error {
 	c.got = append(c.got, r)
+	if c.onLaunch != nil {
+		c.onLaunch(len(c.got), r)
+	}
 	return nil
 }
 
 func TestRecoveryInventoryReconcilesRuntimeSources(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("FLEET_REG_DIR", filepath.Join(home, "registry"))
 	oldSources, oldRegistryPath, oldNow := recoveryInventorySources, recoveryInventoryRegistryPath, recoveryNow
 	defer func() {
 		recoveryInventorySources, recoveryInventoryRegistryPath, recoveryNow = oldSources, oldRegistryPath, oldNow
@@ -135,10 +145,11 @@ func TestSessionRecoverAllAndThreadAreMutuallyExclusive(t *testing.T) {
 }
 
 func TestSessionRecoverPromptAndCWD(t *testing.T) {
-	oldInv, oldJournal, oldLaunch, oldSleep := recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep
+	oldInv, oldJournal, oldLaunch, oldSleep, oldNow := recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep, recoveryNow
 	defer func() {
-		recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep = oldInv, oldJournal, oldLaunch, oldSleep
+		recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep, recoveryNow = oldInv, oldJournal, oldLaunch, oldSleep, oldNow
 	}()
+	recoveryNow = func() time.Time { return time.Date(2026, 8, 18, 1, 30, 0, 0, time.UTC) }
 	recoveryJournalCrashes = func(string, time.Time) ([]sessionjournal.Classified, error) { return nil, nil }
 	calls := 0
 	recoveryInventory = func(time.Duration) (sessionrecovery.InventoryReport, error) {
@@ -163,7 +174,7 @@ func TestSessionRecoverPromptAndCWD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{guardBin, "guard", "--", "codex", "resume", "--cd", `C:\work\fak`, "t1", "continue this exact task"}
+	want := []string{guardBin, "guard", "--", "codex", "exec", "--cd", `C:\work\fak`, "resume", "t1", "continue this exact task"}
 	if len(cap.got) != 1 || !reflect.DeepEqual(cap.got[0].Argv, want) || cap.got[0].CWD != `C:\work\fak` {
 		t.Fatalf("launch=%+v", cap.got)
 	}
@@ -205,7 +216,7 @@ func TestSessionRecoverPollsUntilProductiveAndPreservesObservedCardinality(t *te
 	}
 }
 
-func TestSessionRecoverKeepsExactGuardedTreeActiveWithoutFreshTurn(t *testing.T) {
+func TestSessionRecoverIdleShellIsNotFalseDone(t *testing.T) {
 	oldInv, oldJournal, oldLaunch, oldSleep, oldNow := recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep, recoveryNow
 	defer func() {
 		recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep, recoveryNow = oldInv, oldJournal, oldLaunch, oldSleep, oldNow
@@ -228,15 +239,15 @@ func TestSessionRecoverKeepsExactGuardedTreeActiveWithoutFreshTurn(t *testing.T)
 
 	var stdout, stderr bytes.Buffer
 	code := runSessionRecover(&stdout, &stderr, []string{"--apply", "--thread", "t1", "--json", "--journal=false", "--receipts", t.TempDir(), "--verify-timeout", "2s", "--poll-interval", "1s"})
-	if code != 0 {
-		t.Fatalf("runSessionRecover code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	if code != 1 {
+		t.Fatalf("runSessionRecover code=%d, want 1 for unproven idle shell; stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	var summary sessionrecovery.Summary
 	if err := json.Unmarshal(stdout.Bytes(), &summary); err != nil {
 		t.Fatal(err)
 	}
-	if summary.Counts.Active != 1 || summary.Counts.LaunchedUnproven != 0 || summary.Counts.ExactCardinality != 1 {
-		t.Fatalf("counts = %+v, want active exact tree without fresh turn", summary.Counts)
+	if summary.Counts.Active != 0 || summary.Counts.LaunchedUnproven != 1 || summary.Counts.ExactCardinality != 1 || summary.Results[0].Advanced {
+		t.Fatalf("counts = %+v result=%+v, idle shell must remain unproven", summary.Counts, summary.Results[0])
 	}
 }
 
@@ -299,8 +310,185 @@ func TestSessionRecoverUsesJournalRecordedCWD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantArgv := []string{guardBin, "guard", "--", "codex", "resume", "--cd", `D:\repos\actual tree`, "journal-thread", "continue exactly"}
-	if len(got.Results) != 1 || got.Results[0].CWD != `D:\repos\actual tree` || got.Results[0].Source != "session_journal" || !reflect.DeepEqual(got.Results[0].Argv, wantArgv) {
+	wantArgv := []string{guardBin, "guard", "--", "claude", "--resume", "journal-thread", "continue exactly"}
+	if len(got.Results) != 1 || got.Results[0].CWD != `D:\repos\actual tree` || got.Results[0].Source != "session_journal" || got.Results[0].Provider != sessionrecovery.ProviderClaude || !reflect.DeepEqual(got.Results[0].Argv, wantArgv) {
 		t.Fatalf("summary=%+v", got)
+	}
+}
+
+func TestSessionRecoverUsesCodexJournalOnlyWithExactStateRequest(t *testing.T) {
+	oldInv, oldJournal := recoveryInventory, recoveryJournalCrashes
+	defer func() { recoveryInventory, recoveryJournalCrashes = oldInv, oldJournal }()
+	const id = "94100001-0000-4000-8000-000000000001"
+	recoveryInventory = func(time.Duration) (sessionrecovery.InventoryReport, error) {
+		return sessionrecovery.InventoryReport{Sessions: []sessionrecovery.Session{{
+			Thread: &sessionrecovery.Thread{ID: id, Source: "cli", CWD: `C:\old`}, Provider: sessionrecovery.ProviderCodex,
+			Category: sessionrecovery.CategorySubstantive, Action: sessionrecovery.ActionRecover,
+		}}}, nil
+	}
+	recoveryJournalCrashes = func(string, time.Time) ([]sessionjournal.Classified, error) {
+		return []sessionjournal.Classified{{Session: sessionjournal.Session{ID: id, CWD: `D:\authoritative`, Agent: "codex"}, Status: sessionjournal.StatusCrashed, Reason: "MACHINE_REBOOT"}}, nil
+	}
+	var out, stderr bytes.Buffer
+	if code := runSessionRecover(&out, &stderr, []string{"--json", "--receipts", t.TempDir()}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var got sessionrecovery.Summary
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	guardBin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{guardBin, "guard", "--", "codex", "exec", "--cd", `D:\authoritative`, "resume", id}
+	if len(got.Results) != 1 || got.Results[0].Provider != sessionrecovery.ProviderCodex || !reflect.DeepEqual(got.Results[0].Argv, want) {
+		t.Fatalf("summary=%+v want=%q", got, want)
+	}
+}
+
+func TestMergeClaudeRecoveryInventoryClassifiesMixedCohortAndHighRecordProbe(t *testing.T) {
+	home := t.TempDir()
+	now := time.Date(2026, 8, 24, 2, 0, 0, 0, time.UTC)
+	write := func(sid string, rows []map[string]any) {
+		t.Helper()
+		path := filepath.Join(home, ".claude-a", "projects", "C--work-fak", sid+".jsonl")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		var body strings.Builder
+		for _, row := range rows {
+			raw, _ := json.Marshal(row)
+			body.Write(raw)
+			body.WriteByte('\n')
+		}
+		if err := os.WriteFile(path, []byte(body.String()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.Chtimes(path, now, now)
+	}
+	record := func(role, text, id, at string, isErr bool) map[string]any {
+		row := map[string]any{"uuid": id, "timestamp": at, "message": map[string]any{"role": role, "content": text}}
+		if isErr {
+			row["isApiErrorMessage"] = true
+		}
+		return row
+	}
+	probeID := "a1000001-0000-4000-8000-000000000001"
+	probe := []map[string]any{record("user", "Reply exactly LOGIN_OK", "p0", "2026-08-24T01:00:00Z", false)}
+	for i := 0; i < 30; i++ {
+		probe = append(probe, record("assistant", "probe bookkeeping", "", "2026-08-24T01:00:10Z", false))
+	}
+	probe = append(probe, record("assistant", "Not logged in. Please run /login", "pe", "2026-08-24T01:01:00Z", true))
+	write(probeID, probe)
+	substantiveID := "a1000002-0000-4000-8000-000000000002"
+	write(substantiveID, []map[string]any{
+		record("user", "finish issue 8787", "s0", "2026-08-24T01:00:00Z", false),
+		record("assistant", "API Error: Overloaded (529)", "se", "2026-08-24T01:01:00Z", true),
+	})
+	liveID := "a1000003-0000-4000-8000-000000000003"
+	write(liveID, []map[string]any{
+		record("user", "continue real work", "l0", "2026-08-24T01:00:00Z", false),
+		record("assistant", "API Error: Overloaded (529)", "le", "2026-08-24T01:01:00Z", true),
+	})
+
+	report := mergeClaudeRecoveryInventory(sessionrecovery.InventoryReport{}, home, time.Hour, now, map[string]bool{liveID: true})
+	byID := map[string]sessionrecovery.Session{}
+	for _, row := range report.Sessions {
+		byID[row.Thread.ID] = row
+	}
+	if byID[probeID].Category != sessionrecovery.CategoryProbe || byID[probeID].Action != sessionrecovery.ActionExcludeProbe {
+		t.Fatalf("high-record probe=%+v", byID[probeID])
+	}
+	if byID[substantiveID].Category != sessionrecovery.CategorySubstantive || byID[substantiveID].Action != sessionrecovery.ActionRecover {
+		t.Fatalf("substantive=%+v", byID[substantiveID])
+	}
+	if byID[liveID].Category != sessionrecovery.CategoryLive || byID[liveID].Action != sessionrecovery.ActionLeaveLive {
+		t.Fatalf("live=%+v", byID[liveID])
+	}
+}
+
+func TestSessionRecoverUnifiedPreviewAndLiveWitness(t *testing.T) {
+	oldInv, oldJournal, oldLaunch, oldSleep, oldNow := recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep, recoveryNow
+	defer func() {
+		recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep, recoveryNow = oldInv, oldJournal, oldLaunch, oldSleep, oldNow
+	}()
+	now := time.Date(2026, 8, 24, 1, 30, 0, 0, time.UTC)
+	recoveryNow = func() time.Time { return now }
+	recoverySleep = func(d time.Duration) { now = now.Add(d) }
+	recoveryJournalCrashes = func(string, time.Time) ([]sessionjournal.Classified, error) { return nil, nil }
+	const claudeID = "b1000001-0000-4000-8000-000000000001"
+	const codexID = "b1000002-0000-4000-8000-000000000002"
+	base := sessionrecovery.InventoryReport{Sessions: []sessionrecovery.Session{
+		{Thread: &sessionrecovery.Thread{ID: claudeID, Source: "claude_transcript", CWD: `C:\work\fak`}, Provider: sessionrecovery.ProviderClaude, Category: sessionrecovery.CategorySubstantive, Action: sessionrecovery.ActionRecover, Cursor: "a0", CursorAt: "2026-08-24T01:00:00Z"},
+		{Thread: &sessionrecovery.Thread{ID: codexID, Source: "host_resurrection", CWD: `C:\work\fak`}, Provider: sessionrecovery.ProviderCodex, Category: sessionrecovery.CategorySubstantive, Action: sessionrecovery.ActionRecover, LatestTurn: &sessionrecovery.Turn{ID: "t0", Status: "inProgress", StartedAt: "2026-08-24T01:00:00Z"}},
+		{Thread: &sessionrecovery.Thread{ID: "probe-row"}, Provider: sessionrecovery.ProviderClaude, Category: sessionrecovery.CategoryProbe, Action: sessionrecovery.ActionExcludeProbe, Reason: "semantic_probe"},
+		{Thread: &sessionrecovery.Thread{ID: "login-row"}, Provider: sessionrecovery.ProviderClaude, Category: sessionrecovery.CategoryIdentityBlocked, Action: sessionrecovery.ActionLoginRequired, Reason: "claude_login_required"},
+		{Thread: &sessionrecovery.Thread{ID: "live-row"}, Provider: sessionrecovery.ProviderCodex, Category: sessionrecovery.CategoryLive, Action: sessionrecovery.ActionLeaveLive, Reason: "live_process_tree"},
+	}}
+	calls := 0
+	recoveryInventory = func(time.Duration) (sessionrecovery.InventoryReport, error) {
+		calls++
+		out := base
+		out.Sessions = append([]sessionrecovery.Session(nil), base.Sessions...)
+		if calls > 1 {
+			out.Sessions[0].Cursor, out.Sessions[0].CursorAt = "a1", "2026-08-24T02:00:00Z"
+			out.Sessions[1].LatestTurn = &sessionrecovery.Turn{ID: "t1", Status: "inProgress", StartedAt: "2026-08-24T02:00:00Z"}
+		}
+		return out, nil
+	}
+	launcher := &captureLauncher{}
+	recoveryLaunch = launcher
+
+	previewDir := t.TempDir()
+	var previewOut, previewErr bytes.Buffer
+	if code := runSessionRecover(&previewOut, &previewErr, []string{"--json", "--journal=false", "--limit", "10", "--receipts", previewDir}); code != 0 {
+		t.Fatalf("preview code=%d stderr=%s", code, previewErr.String())
+	}
+	if len(launcher.got) != 0 {
+		t.Fatalf("preview launched %+v", launcher.got)
+	}
+	var preview sessionrecovery.Summary
+	if err := json.Unmarshal(previewOut.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Results) != 5 || preview.WitnessPath == "" {
+		t.Fatalf("preview=%+v", preview)
+	}
+	if _, err := os.Stat(preview.WitnessPath); err != nil {
+		t.Fatalf("preview witness: %v", err)
+	}
+
+	// Reset the inventory call counter so live gets the same pre-launch baseline.
+	calls = 0
+	liveDir := t.TempDir()
+	launcher.onLaunch = func(launchNumber int, _ sessionrecovery.Request) {
+		if calls != 1 {
+			t.Fatalf("provider observation ran before all windows launched: calls=%d launch=%d", calls, launchNumber)
+		}
+		witnesses, err := filepath.Glob(filepath.Join(liveDir, "run-*.json"))
+		if err != nil || len(witnesses) != 1 {
+			t.Fatalf("run witness missing before launch %d: paths=%v err=%v", launchNumber, witnesses, err)
+		}
+	}
+	var liveOut, liveErr bytes.Buffer
+	if code := runSessionRecover(&liveOut, &liveErr, []string{"--live", "--all", "--json", "--journal=false", "--receipts", liveDir, "--verify-timeout", "1s"}); code != 0 {
+		t.Fatalf("live code=%d stderr=%s stdout=%s", code, liveErr.String(), liveOut.String())
+	}
+	if len(launcher.got) != 2 {
+		t.Fatalf("launches=%+v, want one per actionable session", launcher.got)
+	}
+	if !strings.Contains(strings.Join(launcher.got[0].Argv, " ")+" "+strings.Join(launcher.got[1].Argv, " "), "codex exec --cd C:\\work\\fak resume "+codexID) {
+		t.Fatalf("missing exact codex exec resume argv: %+v", launcher.got)
+	}
+	var live sessionrecovery.Summary
+	if err := json.Unmarshal(liveOut.Bytes(), &live); err != nil {
+		t.Fatal(err)
+	}
+	if live.Counts.Productive != 2 || live.Counts.Probe != 1 || live.Counts.IdentityBlocked != 1 || live.Counts.Live != 1 {
+		t.Fatalf("live counts=%+v results=%+v", live.Counts, live.Results)
+	}
+	if raw, err := os.ReadFile(live.WitnessPath); err != nil || !bytes.Contains(raw, []byte(`"advanced": true`)) {
+		t.Fatalf("durable live witness err=%v body=%s", err, raw)
 	}
 }

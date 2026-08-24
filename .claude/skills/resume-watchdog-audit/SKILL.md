@@ -1,17 +1,17 @@
 ---
 name: resume-watchdog-audit
-description: The watchdog-watchdog — one read-only pass that proves the resume watchdog (the n¹ layer that revives dead autonomous Claude sessions) is itself ALIVE, TICKING, and reviving PRODUCTIVE instances, versus silently STALLED. Distrusts self-report: reads the live Fleet registry ledgers (%LOCALAPPDATA%\Fleet\registry), the scheduled-task exit codes AND each task's Principal.LogonType, never the watchdog's own "I'm fine". Verifies the n² layer (is the watchdog ticking, is its backlog draining, are resumes witnessed as real transcript turns, or merely launched_unproven) and the n³ layer. Use when this named workflow matches the task.
+description: Audit and recover crashed Claude and Codex sessions through one dry-run-first cohort surface, with exact provider identity and post-launch transcript/thread advancement; then audit the scheduler tower that keeps automatic recovery alive. Use when this named workflow matches the task.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, PowerShell, Grep, Glob, Write
-argument-hint: "[--fix] (no args = read-only audit; --fix offers the operator-gated live drain)"
+argument-hint: "[--fix] (no args = read-only cross-provider preview; --fix offers the operator-gated visible live drain)"
 ---
 
 # /resume-watchdog-audit — is the watchdog itself alive, or silently stalled?
 
-> **The recursion.** The resume watchdog (`fleet_resume_watchdog.ps1 -Live`, task
-> `FleetResumeWatchdog`) is the **n¹** layer: it revives dead autonomous Claude
-> sessions across accounts. But a watchdog that dies takes the whole fleet down
+> **The recursion.** `fak session recover` is the cross-provider recovery surface;
+> the resume watchdog (`fleet_resume_watchdog.ps1 -Live`, task
+> `FleetResumeWatchdog`) is the **n¹** automatic Claude layer. But a watchdog that dies takes the fleet down
 > **silently** — every dead session just stays dead and nothing complains. This skill
 > is the **n²** layer (watch the watchdog) and the **n³** layer (watch the watcher of
 > the watchdog). It answers from artifacts — ledger mtimes, transcript turns, and
@@ -20,17 +20,30 @@ argument-hint: "[--fix] (no args = read-only audit; --fix offers the operator-ga
 The one rule: **silence is the failure mode.** A stalled watchdog and a healthy-with-
 nothing-to-do watchdog look identical from the outside. This pass distinguishes them.
 
-## Run it (one command)
+## Run it (one authoritative cohort command)
 
 ```powershell
-pwsh -NoProfile -File tools/watchdog_watchdog_audit.ps1        # human-readable verdict
-pwsh -NoProfile -File tools/watchdog_watchdog_audit.ps1 -Json  # machine verdict; exit 0/2/3 = GREEN/AMBER/RED
+fak session recover --json                         # preview only; writes a durable run witness, launches nothing
+# After reviewing every row and completing any named login:
+fak session recover --live --all --json            # all actionable exact sessions; add --limit N only to cap the wave
 ```
 
-That script performs Layers 0–3 below in one read-only pass and prints a
-GREEN/AMBER/RED verdict with the single deciding artifact and the one action. The
-sections below are the manual expansion — read them to interpret the verdict, triage
-a specific straggler, or when `fak`/the script isn't on the box. **This audit must
+The preview is the authority for the Claude transcript cohort and the Codex
+guard/host-resurrection cohort. Its versioned JSON retains probes, live rows, reset
+waiters, and identity-blocked rows instead of hiding them; only substantive actionable
+rows receive argv. Codex argv uses `codex exec --cd <exact cwd> resume <exact UUID>` and never a picker,
+`--last`, prefix, newest-row guess, or guard handle. Read the reported `witness_path`
+after a live run: a window/process alone remains `launched_unproven`; productive means
+the Claude assistant transcript or Codex thread/turn cursor advanced after launch.
+
+The scheduler/tower check is separate and remains read-only:
+
+```powershell
+pwsh -NoProfile -File tools/watchdog_watchdog_audit.ps1        # human-readable tower verdict
+pwsh -NoProfile -File tools/watchdog_watchdog_audit.ps1 -Json  # machine tower verdict; exit 0/2/3
+```
+
+The sections below expand both checks. **This audit must
 never share the failure mode it detects: run it as an agent `/loop` or an S4U task,
 never as an Interactive scheduled task** (that would die exactly the way the watchdog did).
 
@@ -43,6 +56,13 @@ never as an Interactive scheduled task** (that would die exactly the way the wat
 `tools/_registry` (fallback only). **The repo's `tools/_registry` is usually a stale
 copy** — its `sessions.json` may be fresh (the dispatcher writes it) while its
 `resume_ledger.jsonl` is days old. Always audit the resolved live dir.
+
+The same preview reads Codex's configured `state_5.sqlite` in read-only/query-only
+mode. That database's full thread UUIDs are the identity authority. A host-resurrection
+row joins only by a full UUID already in argv or the durable trace→UUID identity ledger,
+and is then verified back against `state_5.sqlite`. CWD, timestamps, ordering, prefixes,
+and "newest" are never identity evidence; a missing or conflicting exact identity is
+`identity_blocked`.
 
 ```powershell
 $reg = @("$env:FLEET_REG_DIR","$env:FLEET_STATE_DIR\registry","$env:LOCALAPPDATA\Fleet\registry","$env:TEMP\Fleet\registry") |
@@ -124,10 +144,17 @@ Get-ScheduledTask | Where-Object { $_.Principal.LogonType -eq 'Interactive' } |
   Where-Object { $_.Result -eq '0x800710E0' } | Format-Table -AutoSize
 ```
 
-## Layer 2 — was the response PRODUCTIVE? (not just "did it launch")
+## Layer 2 — was the cross-provider response PRODUCTIVE? (not just "did it launch")
 
-Launching a resume is cheap; **witnessing a real transcript turn after it** is the proof
-the session came back to life. The status ledger records both. Quantify today's work:
+Launching a resume is cheap. The durable `fak session recover` run witness carries each
+row's provider, category, action, identity provenance, argv, launch time, baseline/post
+cursors, `advanced`, and evidence source. The run witness is written before the first
+window opens and updated atomically after each launch and observation. Claude requires a real non-error assistant transcript record newer
+than launch; Codex requires a newer exact thread/turn cursor. A visible wrapper, idle
+shell, guard receipt, or process is liveness context only and can never set `advanced`.
+
+The automatic Claude watchdog's longer-horizon status ledger remains useful for drain
+capacity. Quantify today's automatic work:
 
 ```powershell
 $st = Join-Path $reg 'resume_watchdog_status.jsonl'; $today = Get-Content $st | Where-Object { $_ -match (Get-Date -Format 'yyyy-MM-dd') }
@@ -167,19 +194,17 @@ A record whose `count` keeps climbing while `last_depth` never falls is §7's si
 
 ## Layer 2b — triage each `launched_unproven` straggler
 
-For every session `--status` flags unproven, decide *stuck vs. just-not-witnessed-yet*
-by going to ground truth — the transcript and the process table:
+Re-run the same authority instead of hand-matching a Claude file or guessing a Codex
+thread:
 
 ```powershell
-$sid = '<uuid-from-status>'
-$t = Get-ChildItem "$env:USERPROFILE\.claude*\projects\*\$sid.jsonl" -EA SilentlyContinue | Sort LastWriteTime -Desc | Select -First 1
-"transcript {0}  ({1:n0} min idle)  last={2}" -f $t.FullName, ((Get-Date)-$t.LastWriteTime).TotalMinutes, (Get-Content $t.FullName -Tail 1).Substring(0,60)
-# a `last-prompt` tail + a dead resume pid + idle > unproven-minutes = the watchdog stalled before it could re-revive this one
+fak session recover --json
 ```
 
-If the tail is the injected re-entry prompt (`type:last-prompt`), the resume pid is gone,
-and it's been idle past the threshold, the straggler needs another tick the stalled
-watchdog can't give it — see remediation.
+Use the row's `reason`, `baseline_*`, `post_*`, `advanced`, and `progress_evidence`.
+`probe` is deliberately retained but never launched; `identity_blocked` requires the
+named login/exact-identity repair; `live` is left alone; a substantive row with
+`launched_unproven` has not recovered yet even if its wrapper is still visible.
 
 ## Layer 3 (n³) — who watches this audit?
 
@@ -208,8 +233,8 @@ transcript), and the one action. Do not soften a stall into "probably fine".
 
 ## Remediation — OPERATOR-GATED (has side effects; confirm first)
 
-The audit above is read-only. These act — they spawn real `claude --resume` processes
-and consume account quota, so **surface them and get explicit go-ahead; never run them
+The previews above are read-only. Live recovery spawns real Claude/Codex processes
+and consumes account quota, so **surface the preview and get explicit go-ahead; never run live
 as part of the audit**:
 
 1. **Fix the stall's ROOT CAUSE first** — if the audit shows down tasks with
@@ -223,11 +248,21 @@ as part of the audit**:
    ```
    Do **not** re-register to `powershell.exe`-direct as a "fix" — that changes the
    launcher, not the LogonType, and leaves the task Interactive and still failing.
-2. **Drain the stragglers** (one live tick; honors the per-tick cap + source governor).
-   Only meaningful once the task is S4U — otherwise the scheduled task can't tick and you
-   are hand-cranking it: `pwsh -NoProfile -File tools/fleet_resume_watchdog.ps1 -Live`
-3. **Close the reinstall regression** — most `register_*.ps1` installers still create
+2. **Resolve identity blockers first.** Complete the named Claude login; repair a Codex
+   exact-UUID join rather than selecting a nearby thread. Re-run the preview until the row
+   is substantive/actionable.
+3. **Drain visibly:** `fak session recover --live --all --json`. Inspect the durable
+   witness and require provider advancement, not merely a window or pid.
+4. **Close the reinstall regression** — most `register_*.ps1` installers still create
    Interactive (schtasks default), so a reinstall reintroduces the bug. `register_resume_watchdog.ps1`
    and `register_issue_dispatch.ps1` are already S4U; migrate the rest.
-4. Re-run this audit (`tools/watchdog_watchdog_audit.ps1`); expect GREEN (ledger fresh,
-   no down/latent task, backlog draining, resumes proven).
+5. Re-run `fak session recover --json` (no actionable crashed row remains), then the
+   tower audit (`tools/watchdog_watchdog_audit.ps1`) and expect GREEN.
+
+## Cross-provider host/login crash recovery
+
+For a host or login crash, use `fak session recover` as the authoritative cohort surface. It joins Claude transcripts, Codex `state_5.sqlite`, guard rows, the Fleet host-resurrection cohort, and OpenCode registry evidence. Keep the default dry run until every substantive row has an exact durable identity.
+
+A visible shell, exit code 0, thread timestamp growth, or `task_complete` is not recovery proof. Require a post-launch assistant message or successful tool call/output tied to the original identity. Inspect the transcript for terminal provider errors.
+
+Launch live work only with the explicit live switch so each substantive row has a visible wrapper window. Exclude semantic probes, close failed/probe wrappers after evidence is captured, and preserve active substantive sessions plus the operator terminal.

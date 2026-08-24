@@ -12,6 +12,10 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/guardsessions"
+	"github.com/anthony-chaudhary/fak/internal/hostresurrect"
+	"github.com/anthony-chaudhary/fak/internal/resume"
+	resumesweep "github.com/anthony-chaudhary/fak/internal/resume/sweep"
 	"github.com/anthony-chaudhary/fak/internal/sessiondiag"
 	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 	"github.com/anthony-chaudhary/fak/internal/sessionrecovery"
@@ -33,7 +37,9 @@ func (v threadFlags) Set(s string) error {
 var recoveryInventorySources = sessiondiag.ReadCodexInventorySources
 var recoveryInventoryRegistryPath = sessionregistry.DefaultPath
 
-var recoveryInventory = func(since time.Duration) (sessionrecovery.InventoryReport, error) {
+var recoveryInventory = collectRecoveryInventory
+
+func collectRecoveryInventory(since time.Duration) (sessionrecovery.InventoryReport, error) {
 	now := recoveryNow()
 	input, err := recoveryInventorySources("", since, now)
 	if err != nil {
@@ -55,8 +61,93 @@ var recoveryInventory = func(since time.Duration) (sessionrecovery.InventoryRepo
 	if err := json.Unmarshal(raw, &report); err != nil {
 		return report, fmt.Errorf("decode sessiondiag inventory: %w", err)
 	}
+	report = mergeClaudeRecoveryInventory(report, resolveFleetUserHome("", ""), since, now, liveResumeSIDs())
+	regDir := resolveSweepRegDir("")
+	cohort, cohortErr := hostresurrect.LoadCohort(hostresurrect.CohortPath(regDir))
+	if cohortErr != nil {
+		return report, fmt.Errorf("host-resurrection cohort: %w", cohortErr)
+	}
+	guardRows := guardsessions.Load(regDir)
+	guards := make([]sessionrecovery.HostEvidenceRow, 0, len(guardRows))
+	for _, row := range guardRows {
+		guards = append(guards, sessionrecovery.HostEvidenceRow{
+			Handle: row.Handle, TraceID: row.TraceID, ResumeHandle: row.ResumeHandle,
+			PID: row.PID, StartedAt: row.StartedAt, CWD: row.CWD, Command: append([]string(nil), row.Command...),
+		})
+	}
+	members := make([]sessionrecovery.HostCohortEntry, 0, len(cohort.Sessions))
+	for _, row := range cohort.Sessions {
+		members = append(members, sessionrecovery.HostCohortEntry{Handle: row.Handle, PID: row.PID, StartedAt: row.StartedAt})
+	}
+	_, uuidByTrace := resume.LoadIdentity(regDir)
+	report = sessionrecovery.MergeCodexHostCohort(report, guards, members, uuidByTrace)
 	return report, nil
 }
+
+func mergeClaudeRecoveryInventory(report sessionrecovery.InventoryReport, home string, since time.Duration, now time.Time, live map[string]bool) sessionrecovery.InventoryReport {
+	if strings.TrimSpace(home) == "" {
+		return report
+	}
+	paths, _ := filepath.Glob(filepath.Join(home, ".claude*", "projects", "*", "*.jsonl"))
+	bySID := map[string][]string{}
+	for _, path := range paths {
+		sid := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+		if len(sid) == 36 {
+			bySID[sid] = append(bySID[sid], path)
+		}
+	}
+	cutoff := now.Add(-since)
+	candidates := sweepCwdCandidates(home)
+	fallback, _ := os.Getwd()
+	for sid, copiesOnDisk := range bySID {
+		newest := time.Time{}
+		copies := make([]resumesweep.Copy, 0, len(copiesOnDisk))
+		for _, path := range copiesOnDisk {
+			if info, err := os.Stat(path); err == nil && info.ModTime().After(newest) {
+				newest = info.ModTime()
+			}
+			copies = append(copies, loadSweepCopy(path))
+		}
+		if newest.Before(cutoff) {
+			continue
+		}
+		classified := resumesweep.Classify(sid, copies, live, now)
+		if classified.Bucket == resumesweep.BucketOther {
+			continue
+		}
+		cwd := resumesweep.CwdForSlug(classified.Project, candidates, fallback)
+		cursor, cursorAt := resumesweep.LastAssistantCursor(copies)
+		session := sessionrecovery.Session{
+			Thread:   &sessionrecovery.Thread{ID: sid, Source: "claude_transcript", CWD: cwd},
+			Provider: sessionrecovery.ProviderClaude, Category: sessionrecovery.CategorySubstantive,
+			Action: sessionrecovery.ActionRecover, Reason: strings.ToLower(classified.Bucket),
+			Bucket: classified.Bucket, Cursor: cursor, CursorAt: cursorAt,
+		}
+		if cursor != "" || cursorAt != "" {
+			session.LatestTurn = &sessionrecovery.Turn{ID: cursor, Status: "inProgress", StartedAt: cursorAt}
+		}
+		switch {
+		case resumesweep.IsSemanticProbe(copies):
+			session.Category = sessionrecovery.CategoryProbe
+			session.Action = sessionrecovery.ActionExcludeProbe
+			session.Reason = "semantic_probe:" + strings.ToLower(resumesweep.FirstUserPrompt(copies))
+		case classified.Bucket == resumesweep.BucketLive:
+			session.Category = sessionrecovery.CategoryLive
+			session.Action = sessionrecovery.ActionLeaveLive
+			session.Reason = "live_claude_driver"
+		case classified.Bucket == resumesweep.BucketAuth:
+			session.Category = sessionrecovery.CategoryIdentityBlocked
+			session.Action = sessionrecovery.ActionLoginRequired
+			session.Reason = "claude_login_required"
+		case classified.Bucket == resumesweep.BucketLimitResetFuture:
+			session.Action = sessionrecovery.ActionWaitReset
+			session.Reason = "claude_reset_not_elapsed"
+		}
+		report.Sessions = append(report.Sessions, session)
+	}
+	return report
+}
+
 var recoveryJournalCrashes = func(path string, now time.Time) ([]sessionjournal.Classified, error) {
 	boot, _ := sessionjournal.BootTime(now)
 	sessions := sessionjournal.FoldEvents(sessionjournal.LoadFile(path))
@@ -71,8 +162,9 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 	fs.SetOutput(stderr)
 	since := fs.Duration("since", 24*time.Hour, "candidate evidence window")
 	limit := fs.Int("limit", 1, "maximum launches per wave")
-	apply := fs.Bool("apply", false, "write receipts and launch visible resumes")
-	all := fs.Bool("all", false, "with --apply, confirm every selected candidate instead of one explicit --thread")
+	liveMode := fs.Bool("live", false, "write receipts and launch one visible wrapper window per selected session")
+	apply := fs.Bool("apply", false, "deprecated alias for --live")
+	all := fs.Bool("all", false, "with --live, confirm every selected candidate instead of one explicit --thread")
 	cwd := fs.String("cwd", "", "explicit override for cwd_unknown candidates")
 	prompt := fs.String("prompt", "", "optional resume prompt passed as one exact argv element")
 	journal := fs.Bool("journal", true, "include crash candidates from the session journal")
@@ -87,12 +179,19 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	limitExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "limit" {
+			limitExplicit = true
+		}
+	})
 	if fs.NArg() != 0 || *since <= 0 || *limit <= 0 || *settle < 0 || *verifyTimeout < 0 || *pollInterval <= 0 {
-		fmt.Fprintln(stderr, "usage: fak session recover [--thread ID] [--since 24h] [--limit 1] [--cwd DIR] [--prompt TEXT] [--apply (--thread ID | --all)] [--verify-timeout 30s] [--poll-interval 500ms]")
+		fmt.Fprintln(stderr, "usage: fak session recover [--thread ID] [--since 24h] [--limit 1] [--cwd DIR] [--prompt TEXT] [--live (--thread ID | --all)] [--verify-timeout 30s] [--poll-interval 500ms]")
 		return 2
 	}
-	if *apply && len(threads) == 0 && !*all {
-		fmt.Fprintln(stderr, "fak session recover: --apply requires an explicit --thread ID or --all after reviewing the preview")
+	doLive := *liveMode || *apply
+	if doLive && len(threads) == 0 && !*all {
+		fmt.Fprintln(stderr, "fak session recover: --live requires an explicit --thread ID or --all after reviewing the preview")
 		return 2
 	}
 	if *all && len(threads) > 0 {
@@ -107,6 +206,10 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 		}
 		*receipts = filepath.Join(base, "fak", "session-recovery")
 	}
+	selectionLimit := *limit
+	if doLive && *all && !limitExplicit {
+		selectionLimit = int(^uint(0) >> 1)
+	}
 	before, err := recoveryInventory(*since)
 	if err != nil {
 		fmt.Fprintln(stderr, "fak session recover:", err)
@@ -117,53 +220,98 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, "fak session recover: resolve current executable:", exeErr)
 		return 2
 	}
-	requests := sessionrecovery.Select(before, sessionrecovery.Options{ManagerBin: managerPath, Threads: threads, Limit: *limit, CWDOverride: *cwd, Prompt: *prompt, ReceiptDir: *receipts})
+	requests := sessionrecovery.Select(before, sessionrecovery.Options{ManagerBin: managerPath, Threads: threads, Limit: selectionLimit, CWDOverride: *cwd, Prompt: *prompt, ReceiptDir: *receipts})
 	if *journal {
 		classified, journalErr := recoveryJournalCrashes(*journalPath, recoveryNow())
 		if journalErr != nil {
 			fmt.Fprintln(stderr, "fak session recover: session journal:", journalErr)
 			return 2
 		}
-		requests = sessionrecovery.MergeJournalCrashes(requests, classified, sessionrecovery.Options{ManagerBin: managerPath, Threads: threads, Limit: *limit, CWDOverride: *cwd, Prompt: *prompt, ReceiptDir: *receipts})
+		requests = sessionrecovery.MergeJournalCrashes(requests, classified, sessionrecovery.Options{ManagerBin: managerPath, Threads: threads, Limit: selectionLimit, CWDOverride: *cwd, Prompt: *prompt, ReceiptDir: *receipts})
 	}
 	mode := "preview"
+	if doLive {
+		mode = "live"
+	}
 	startedAt := recoveryNow()
 	summary := sessionrecovery.NewSummary(mode, before, requests, startedAt)
-	if *apply {
-		summary.Mode = "apply"
-		results := make([]sessionrecovery.Result, 0, len(requests))
+	summary.WitnessPath = sessionrecovery.SummaryPath(*receipts, startedAt)
+	if err := persistRecoverySummary(&summary); err != nil {
+		fmt.Fprintln(stderr, "fak session recover: write initial run witness:", err)
+		return 1
+	}
+	if doLive {
+		pending := make(map[int]time.Time)
+		requestByResult := make(map[int]int)
 		for i := range requests {
 			if requests[i].Status != "candidate" {
-				results = append(results, sessionRecoveryResult(requests[i]))
+				continue
+			}
+			resultIndex := recoveryResultIndex(summary.Results, requests[i].ThreadID)
+			if resultIndex < 0 {
 				continue
 			}
 			wrote, err := sessionrecovery.WriteReceipt(requests[i], recoveryNow())
 			if err != nil {
 				requests[i].Status = "receipt_failed"
 				requests[i].Reason = err.Error()
-				results = append(results, sessionRecoveryResult(requests[i]))
+				summary.Results[resultIndex] = sessionRecoveryResult(requests[i])
+				if err := persistRecoverySummary(&summary); err != nil {
+					fmt.Fprintln(stderr, "fak session recover: update run witness:", err)
+					return 1
+				}
 				continue
 			}
 			if !wrote {
 				requests[i].Status = "already_receipted"
-				results = append(results, sessionRecoveryResult(requests[i]))
+				summary.Results[resultIndex] = sessionRecoveryResult(requests[i])
+				if err := persistRecoverySummary(&summary); err != nil {
+					fmt.Fprintln(stderr, "fak session recover: update run witness:", err)
+					return 1
+				}
 				continue
 			}
+			intent := sessionRecoveryResult(requests[i])
+			intent.Status = "launch_intent"
+			intent.Reason = "receipt persisted before visible launch"
+			summary.Results[resultIndex] = intent
+			if err := persistRecoverySummary(&summary); err != nil {
+				fmt.Fprintln(stderr, "fak session recover: update run witness:", err)
+				return 1
+			}
+			launchedAt := recoveryNow()
 			if err := recoveryLaunch.Launch(requests[i]); err != nil {
 				requests[i].Status = "launch_failed"
 				requests[i].Reason = err.Error()
 				_ = sessionrecovery.FinalizeReceipt(requests[i], requests[i].Status, requests[i].Reason, recoveryNow())
-				results = append(results, sessionRecoveryResult(requests[i]))
+				summary.Results[resultIndex] = sessionRecoveryResult(requests[i])
+				if err := persistRecoverySummary(&summary); err != nil {
+					fmt.Fprintln(stderr, "fak session recover: update run witness:", err)
+					return 1
+				}
 				continue
 			}
 			requests[i].Status = "launched_unproven"
 			result := sessionRecoveryResult(requests[i])
-			deadline := recoveryNow().Add(*verifyTimeout)
-			if *settle > 0 {
-				recoverySleep(*settle)
+			result.LaunchedAt = launchedAt.UTC().Format(time.RFC3339Nano)
+			result.BaselineCursor = summary.Results[resultIndex].BaselineCursor
+			result.BaselineAt = summary.Results[resultIndex].BaselineAt
+			summary.Results[resultIndex] = result
+			pending[resultIndex] = launchedAt.Add(*verifyTimeout)
+			requestByResult[resultIndex] = i
+			if err := persistRecoverySummary(&summary); err != nil {
+				fmt.Fprintln(stderr, "fak session recover: update run witness:", err)
+				return 1
 			}
-			for {
-				after, inventoryErr := recoveryInventory(*since)
+		}
+		if *settle > 0 && len(pending) > 0 {
+			recoverySleep(*settle)
+		}
+		for len(pending) > 0 {
+			after, inventoryErr := recoveryInventory(*since)
+			observedAt := recoveryNow()
+			for resultIndex, deadline := range pending {
+				result := summary.Results[resultIndex]
 				if inventoryErr != nil {
 					result.Status = "verification_failed"
 					result.Reason = inventoryErr.Error()
@@ -171,31 +319,34 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 				} else {
 					result = sessionrecovery.Observe(before, after, result)
 				}
-				deadlineReached := !recoveryNow().Before(deadline) || *verifyTimeout == 0
-				if sessionrecovery.TerminalStatus(result.Status) && result.Status != "verification_failed" {
-					break
+				requestIndex := requestByResult[resultIndex]
+				requests[requestIndex].Status, requests[requestIndex].Reason = result.Status, result.Reason
+				deadlineReached := !observedAt.Before(deadline) || *verifyTimeout == 0
+				if (sessionrecovery.TerminalStatus(result.Status) && result.Status != "verification_failed") || deadlineReached {
+					if finalizeErr := sessionrecovery.FinalizeReceipt(requests[requestIndex], result.Status, result.Reason, recoveryNow()); finalizeErr != nil {
+						result.Status = "receipt_failed"
+						result.Reason = finalizeErr.Error()
+						result.Remediation = sessionrecovery.Remediation(result)
+					}
+					delete(pending, resultIndex)
 				}
-				if deadlineReached {
-					// An exact guarded Codex tree proves the interactive resume is alive.
-					// A later fresh turn upgrades active to productive; it is not required
-					// merely to keep a usable, waiting TUI from being reported failed.
-					break
+				summary.Results[resultIndex] = result
+				if err := persistRecoverySummary(&summary); err != nil {
+					fmt.Fprintln(stderr, "fak session recover: update run witness:", err)
+					return 1
 				}
+			}
+			if len(pending) > 0 {
 				recoverySleep(*pollInterval)
 			}
-			requests[i].Status, requests[i].Reason = result.Status, result.Reason
-			if finalizeErr := sessionrecovery.FinalizeReceipt(requests[i], requests[i].Status, requests[i].Reason, recoveryNow()); finalizeErr != nil {
-				result.Status = "receipt_failed"
-				result.Reason = finalizeErr.Error()
-				result.Remediation = sessionrecovery.Remediation(result)
-				requests[i].Status, requests[i].Reason = result.Status, result.Reason
-			}
-			results = append(results, result)
 		}
-		summary.Results = results
 	}
 	summary.FinishedAt = recoveryNow().UTC().Format(time.RFC3339Nano)
 	summary.Recount()
+	if err := sessionrecovery.WriteSummary(summary.WitnessPath, summary); err != nil {
+		fmt.Fprintln(stderr, "fak session recover: write run witness:", err)
+		return 1
+	}
 	if *jsonOutput {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -211,8 +362,23 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 	return 0
 }
 
+func recoveryResultIndex(results []sessionrecovery.Result, threadID string) int {
+	for i := range results {
+		if results[i].ThreadID == threadID {
+			return i
+		}
+	}
+	return -1
+}
+
+func persistRecoverySummary(summary *sessionrecovery.Summary) error {
+	summary.FinishedAt = recoveryNow().UTC().Format(time.RFC3339Nano)
+	summary.Recount()
+	return sessionrecovery.WriteSummary(summary.WitnessPath, *summary)
+}
+
 func sessionRecoveryResult(req sessionrecovery.Request) sessionrecovery.Result {
-	result := sessionrecovery.Result{ThreadID: req.ThreadID, CWD: req.CWD, Source: req.Source, Status: req.Status, Reason: req.Reason, ReceiptPath: req.ReceiptPath, Argv: append([]string(nil), req.Argv...)}
+	result := sessionrecovery.Result{ThreadID: req.ThreadID, CWD: req.CWD, Source: req.Source, Provider: req.Provider, Category: req.Category, Action: req.Action, Status: req.Status, Reason: req.Reason, ReceiptPath: req.ReceiptPath, Argv: append([]string(nil), req.Argv...), HostHandles: append([]string(nil), req.HostHandles...), IdentityProvenance: req.IdentityProvenance}
 	if req.Status == "candidate" {
 		result.SelectionReason = "crashed session has an in-progress turn and no live process tree"
 	}
@@ -222,15 +388,16 @@ func sessionRecoveryResult(req sessionrecovery.Request) sessionrecovery.Result {
 
 func renderRecoverySummary(w io.Writer, summary sessionrecovery.Summary) {
 	fmt.Fprintf(w, "SESSION RECOVERY %s\n", strings.ToUpper(summary.Mode))
+	fmt.Fprintf(w, "witness=%s\n", summary.WitnessPath)
 	fmt.Fprintf(w, "discovered=%d selected=%d launched=%d active=%d productive=%d completed=%d failed=%d unproven=%d exact_cardinality=%d\n", summary.Counts.Discovered, summary.Counts.Selected, summary.Counts.Launched, summary.Counts.Active, summary.Counts.Productive, summary.Counts.Completed, summary.Counts.Failed, summary.Counts.LaunchedUnproven, summary.Counts.ExactCardinality)
 	if len(summary.Results) == 0 {
 		fmt.Fprintln(w, "No crashed sessions need recovery.")
 		return
 	}
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "THREAD\tSTATUS\tTREES\tCWD")
+	fmt.Fprintln(tw, "THREAD\tPROVIDER\tCATEGORY\tSTATUS\tTREES\tCWD")
 	for _, result := range summary.Results {
-		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\n", result.ThreadID, result.Status, result.GuardedProcessTrees, result.CWD)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n", result.ThreadID, result.Provider, result.Category, result.Status, result.GuardedProcessTrees, result.CWD)
 		if result.Reason != "" {
 			fmt.Fprintf(tw, "\twhy: %s\t\t\n", result.Reason)
 		}

@@ -18,23 +18,54 @@ import (
 
 const ReceiptSchema = "fak-session-recovery-receipt/1"
 
+const (
+	ProviderClaude = "claude"
+	ProviderCodex  = "codex"
+
+	CategoryProbe           = "probe"
+	CategorySubstantive     = "substantive"
+	CategoryLive            = "live"
+	CategoryIdentityBlocked = "identity_blocked"
+
+	ActionRecover         = "recover"
+	ActionExcludeProbe    = "exclude_probe"
+	ActionLeaveLive       = "leave_live"
+	ActionLoginRequired   = "login_required"
+	ActionResolveIdentity = "resolve_identity"
+	ActionWaitReset       = "wait_reset"
+)
+
 type InventoryReport struct {
 	Sessions []Session `json:"sessions"`
 }
 type Session struct {
-	Thread       *Thread       `json:"thread,omitempty"`
-	LatestTurn   *Turn         `json:"latest_turn,omitempty"`
-	GuardReceipt *GuardReceipt `json:"guard_launch_receipt,omitempty"`
-	ProcessTrees []ProcessTree `json:"process_trees,omitempty"`
+	Thread             *Thread       `json:"thread,omitempty"`
+	LatestTurn         *Turn         `json:"latest_turn,omitempty"`
+	GuardReceipt       *GuardReceipt `json:"guard_launch_receipt,omitempty"`
+	ProcessTrees       []ProcessTree `json:"process_trees,omitempty"`
+	Provider           string        `json:"provider,omitempty"`
+	Category           string        `json:"category,omitempty"`
+	Action             string        `json:"action,omitempty"`
+	Reason             string        `json:"reason,omitempty"`
+	Bucket             string        `json:"bucket,omitempty"`
+	Cursor             string        `json:"progress_cursor,omitempty"`
+	CursorAt           string        `json:"progress_at,omitempty"`
+	HostHandle         string        `json:"host_handle,omitempty"`
+	HostHandles        []string      `json:"host_handles,omitempty"`
+	IdentityProvenance string        `json:"identity_provenance,omitempty"`
 }
 type Thread struct {
-	ID     string `json:"id"`
-	Source string `json:"source,omitempty"`
-	CWD    string `json:"cwd,omitempty"`
+	ID        string `json:"id"`
+	Source    string `json:"source,omitempty"`
+	CWD       string `json:"cwd,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
 }
 type Turn struct {
-	Status    string `json:"status,omitempty"`
-	StartedAt string `json:"started_at,omitempty"`
+	ID          string `json:"id,omitempty"`
+	Status      string `json:"status,omitempty"`
+	StartedAt   string `json:"started_at,omitempty"`
+	CompletedAt string `json:"completed_at,omitempty"`
 }
 type GuardReceipt struct {
 	RecordedAt string `json:"recorded_at,omitempty"`
@@ -46,25 +77,34 @@ type ProcessTree struct {
 }
 
 type Request struct {
-	ThreadID    string   `json:"thread_id"`
-	CWD         string   `json:"cwd,omitempty"`
-	Source      string   `json:"source,omitempty"`
-	Argv        []string `json:"argv"`
-	Status      string   `json:"status"`
-	Reason      string   `json:"reason,omitempty"`
-	ReceiptPath string   `json:"receipt_path,omitempty"`
-	Launched    bool     `json:"launched,omitempty"`
+	ThreadID           string   `json:"thread_id"`
+	CWD                string   `json:"cwd,omitempty"`
+	Source             string   `json:"source,omitempty"`
+	Provider           string   `json:"provider,omitempty"`
+	Category           string   `json:"category,omitempty"`
+	Action             string   `json:"action,omitempty"`
+	Argv               []string `json:"argv"`
+	Status             string   `json:"status"`
+	Reason             string   `json:"reason,omitempty"`
+	ReceiptPath        string   `json:"receipt_path,omitempty"`
+	Launched           bool     `json:"launched,omitempty"`
+	HostHandles        []string `json:"host_handles,omitempty"`
+	IdentityProvenance string   `json:"identity_provenance,omitempty"`
 }
 
 type Receipt struct {
-	Schema     string   `json:"schema"`
-	ThreadID   string   `json:"thread_id"`
-	CWD        string   `json:"cwd"`
-	Argv       []string `json:"argv"`
-	RecordedAt string   `json:"recorded_at"`
-	UpdatedAt  string   `json:"updated_at,omitempty"`
-	State      string   `json:"state"`
-	Reason     string   `json:"reason,omitempty"`
+	Schema             string   `json:"schema"`
+	ThreadID           string   `json:"thread_id"`
+	Provider           string   `json:"provider,omitempty"`
+	Category           string   `json:"category,omitempty"`
+	CWD                string   `json:"cwd"`
+	Argv               []string `json:"argv"`
+	RecordedAt         string   `json:"recorded_at"`
+	UpdatedAt          string   `json:"updated_at,omitempty"`
+	State              string   `json:"state"`
+	Reason             string   `json:"reason,omitempty"`
+	HostHandles        []string `json:"host_handles,omitempty"`
+	IdentityProvenance string   `json:"identity_provenance,omitempty"`
 }
 
 type Options struct {
@@ -97,10 +137,14 @@ func Select(report InventoryReport, opts Options) []Request {
 		}
 		return rows[i].Thread.ID < rows[j].Thread.ID
 	})
-	out := make([]Request, 0, opts.Limit)
+	// Limit is a logical launch cap, not an allocation request. In particular,
+	// --live --all uses an effectively unbounded limit while the cohort remains
+	// bounded by discovered rows and explicit IDs.
+	out := make([]Request, 0, len(rows)+len(opts.Threads))
+	selected := 0
 	found := make(map[string]bool, len(opts.Threads))
 	for _, row := range rows {
-		if len(out) >= opts.Limit || row.Thread == nil {
+		if row.Thread == nil {
 			continue
 		}
 		id := row.Thread.ID
@@ -116,9 +160,25 @@ func Select(report InventoryReport, opts Options) []Request {
 		if opts.CWDOverride != "" {
 			cwd = opts.CWDOverride
 		}
-		req := Request{ThreadID: id, CWD: cwd, Source: row.Thread.Source, Status: status, Reason: reason}
+		provider := normalizeProvider(row.Provider, row.Thread.Source)
+		category := row.Category
+		if category == "" {
+			category = CategorySubstantive
+		}
+		req := Request{ThreadID: id, CWD: cwd, Source: row.Thread.Source, Provider: provider, Category: category, Action: row.Action, Status: status, Reason: reason, HostHandles: append([]string(nil), row.HostHandles...), IdentityProvenance: row.IdentityProvenance}
 		if status != "candidate" {
-			if explicit {
+			// Unified cohort rows remain in the witness even when they are probes,
+			// live, waiting for a reset, or identity-blocked. Legacy Codex inventory
+			// keeps its historical broad-preview filtering.
+			if explicit || row.Provider != "" || row.HostHandle != "" || len(row.HostHandles) > 0 {
+				out = append(out, req)
+			}
+			continue
+		}
+		if selected >= opts.Limit {
+			if row.Provider != "" || row.HostHandle != "" || len(row.HostHandles) > 0 {
+				req.Status = "deferred"
+				req.Reason = "launch_limit"
 				out = append(out, req)
 			}
 			continue
@@ -129,12 +189,17 @@ func Select(report InventoryReport, opts Options) []Request {
 			out = append(out, req)
 			continue
 		}
-		req.Argv = codexResumeArgv(opts.ManagerBin, opts.CodexBin, id, cwd)
+		if provider == ProviderClaude {
+			req.Argv = claudeResumeArgv(opts.ManagerBin, id)
+		} else {
+			req.Argv = codexResumeArgv(opts.ManagerBin, opts.CodexBin, id, cwd)
+		}
 		if opts.Prompt != "" {
 			req.Argv = append(req.Argv, opts.Prompt)
 		}
 		req.ReceiptPath = filepath.Join(opts.ReceiptDir, receiptName(id, cwd, req.Argv)+".json")
 		out = append(out, req)
+		selected++
 	}
 	if len(opts.Threads) > 0 && len(out) < opts.Limit {
 		ids := make([]string, 0, len(opts.Threads))
@@ -155,14 +220,36 @@ func Select(report InventoryReport, opts Options) []Request {
 }
 
 func codexResumeArgv(managerBin, codexBin, threadID, cwd string) []string {
-	// Windows Terminal's startingDirectory and exec.Cmd.Dir establish the process CWD,
-	// but Codex owns the resumed agent's working root. Pin that root explicitly so a
-	// terminal-profile startup command or Codex's saved-session state cannot leave the
-	// recovered session in the launcher's directory and trigger another directory prompt.
-	return []string{managerBin, "guard", "--", codexBin, "resume", "--cd", cwd, threadID}
+	// Recovery waves must not open several interactive Codex TUIs. `exec resume`
+	// accepts the exact state_5 UUID and runs independently in its wrapper window.
+	// Keep --cd in provider argv as well as the launcher's starting directory:
+	// Codex itself must retain the recovered thread's workspace root.
+	return []string{managerBin, "guard", "--", codexBin, "exec", "--cd", cwd, "resume", threadID}
+}
+
+func claudeResumeArgv(managerBin, sessionID string) []string {
+	return []string{managerBin, "guard", "--", "claude", "--resume", sessionID}
 }
 
 func recoveryEligibility(row Session, explicit bool) (string, string) {
+	switch row.Action {
+	case ActionExcludeProbe:
+		return "probe", firstNonBlank(row.Reason, "semantic_probe")
+	case ActionLeaveLive:
+		return "live", firstNonBlank(row.Reason, "live_process_tree")
+	case ActionLoginRequired, ActionResolveIdentity:
+		return "identity_blocked", firstNonBlank(row.Reason, "login_required")
+	case ActionWaitReset:
+		return "waiting_reset", firstNonBlank(row.Reason, "reset_not_elapsed")
+	case ActionRecover:
+		if len(row.ProcessTrees) != 0 {
+			return "live", "live_process_tree"
+		}
+		return "candidate", row.Reason
+	}
+	if row.Category == CategoryIdentityBlocked {
+		return "identity_blocked", firstNonBlank(row.Reason, "exact_identity_unresolved")
+	}
 	if len(row.ProcessTrees) != 0 {
 		return "already_active", "live_process_tree"
 	}
@@ -191,53 +278,156 @@ func recoveryEligibility(row Session, explicit bool) (string, string) {
 	}
 }
 
+func normalizeProvider(provider, source string) string {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider != "" {
+		return provider
+	}
+	if strings.Contains(strings.ToLower(source), "claude") {
+		return ProviderClaude
+	}
+	return ProviderCodex
+}
+
+func firstNonBlank(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 // MergeJournalCrashes adds machine-reboot and dead-process candidates from the
 // durable session journal. Journal records are authoritative for cwd: unlike transcript
 // project slugs, the recorded path is reversible and survives a machine reboot.
 func MergeJournalCrashes(requests []Request, classified []sessionjournal.Classified, opts Options) []Request {
-	merged := make([]Request, 0, opts.Limit)
-	seen := make(map[string]bool, len(requests))
+	byID := make(map[string]Request, len(requests))
+	for _, req := range requests {
+		byID[req.ThreadID] = req
+	}
+	merged := make([]Request, 0, len(requests)+len(classified))
+	seen := make(map[string]bool, len(requests)+len(classified))
 	for _, row := range classified {
-		if len(merged) >= opts.Limit || row.Status != sessionjournal.StatusCrashed || seen[row.Session.ID] {
+		if row.Status != sessionjournal.StatusCrashed || seen[row.Session.ID] {
 			continue
 		}
 		if len(opts.Threads) > 0 && !opts.Threads[row.Session.ID] {
 			continue
 		}
-		cwd := row.Session.CWD
+		existing, hasExisting := byID[row.Session.ID]
+		cwd := strings.TrimSpace(row.Session.CWD)
 		if cwd == "" {
-			cwd = opts.CWDOverride
+			cwd = firstNonBlank(opts.CWDOverride, existing.CWD)
 		}
-		req := Request{ThreadID: row.Session.ID, CWD: cwd, Source: "session_journal", Status: "candidate", Reason: row.Reason}
-		if cwd == "" {
-			req.Status = "skipped"
-			req.Reason = "cwd_unknown"
-		} else {
-			managerBin := opts.ManagerBin
-			if managerBin == "" {
-				managerBin = "fak"
-			}
-			codexBin := opts.CodexBin
-			if codexBin == "" {
-				codexBin = "codex"
-			}
-			req.Argv = codexResumeArgv(managerBin, codexBin, row.Session.ID, cwd)
-			if opts.Prompt != "" {
-				req.Argv = append(req.Argv, opts.Prompt)
-			}
-			req.ReceiptPath = filepath.Join(opts.ReceiptDir, receiptName(req.ThreadID, req.CWD, req.Argv)+".json")
+		req := existing
+		if !hasExisting {
+			req = Request{ThreadID: row.Session.ID, Category: CategorySubstantive, Action: ActionRecover, Status: "candidate", Reason: row.Reason}
 		}
+		req.CWD = cwd
+		req.Source = "session_journal"
+		req.Provider = journalProvider(row.Session, existing)
+		prepareJournalRequest(&req, hasExisting, opts)
 		merged = append(merged, req)
 		seen[row.Session.ID] = true
 	}
 	for _, req := range requests {
-		if len(merged) >= opts.Limit || seen[req.ThreadID] {
+		if seen[req.ThreadID] {
 			continue
 		}
 		merged = append(merged, req)
 		seen[req.ThreadID] = true
 	}
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 1
+	}
+	launches := 0
+	for i := range merged {
+		if merged[i].Status != "candidate" {
+			continue
+		}
+		if launches >= limit {
+			merged[i].Status = "deferred"
+			merged[i].Reason = "launch_limit"
+			merged[i].Argv = nil
+			merged[i].ReceiptPath = ""
+			continue
+		}
+		launches++
+	}
 	return merged
+}
+
+func journalProvider(row sessionjournal.Session, existing Request) string {
+	if provider := strings.ToLower(strings.TrimSpace(existing.Provider)); provider != "" {
+		return provider
+	}
+	if provider := providerName(row.Agent); provider != "" {
+		return provider
+	}
+	for _, arg := range row.Argv {
+		if provider := providerName(arg); provider != "" {
+			return provider
+		}
+	}
+	// guard_sessionstart historically omitted Agent while recording Claude's
+	// session UUID. Defaulting that producer to Claude is safer than translating
+	// its ID into an unrelated Codex namespace.
+	return ProviderClaude
+}
+
+func providerName(value string) string {
+	base := strings.ToLower(filepath.Base(strings.ReplaceAll(strings.TrimSpace(value), `\`, "/")))
+	base = strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(base, ".exe"), ".cmd"), ".bat")
+	switch {
+	case base == ProviderClaude || strings.Contains(base, ProviderClaude):
+		return ProviderClaude
+	case base == ProviderCodex || strings.Contains(base, ProviderCodex):
+		return ProviderCodex
+	case base == "opencode" || strings.Contains(base, "opencode"):
+		return "opencode"
+	default:
+		return ""
+	}
+}
+
+func prepareJournalRequest(req *Request, hasStateRequest bool, opts Options) {
+	if req.Status != "candidate" {
+		return
+	}
+	if req.CWD == "" {
+		req.Status = "skipped"
+		req.Reason = "cwd_unknown"
+		return
+	}
+	managerBin := firstNonBlank(opts.ManagerBin, "fak")
+	codexBin := firstNonBlank(opts.CodexBin, "codex")
+	switch req.Provider {
+	case ProviderClaude:
+		req.Argv = claudeResumeArgv(managerBin, req.ThreadID)
+	case ProviderCodex:
+		if !hasStateRequest || !isUUID(req.ThreadID) {
+			req.Category = CategoryIdentityBlocked
+			req.Action = ActionResolveIdentity
+			req.Status = "identity_blocked"
+			req.Reason = "codex_journal_uuid_not_verified_in_state_5"
+			req.Argv = nil
+			return
+		}
+		req.Argv = codexResumeArgv(managerBin, codexBin, req.ThreadID, req.CWD)
+	default:
+		req.Category = CategoryIdentityBlocked
+		req.Action = ActionResolveIdentity
+		req.Status = "identity_blocked"
+		req.Reason = "exact_resume_provider_blocked:" + req.Provider
+		req.Argv = nil
+		return
+	}
+	if opts.Prompt != "" {
+		req.Argv = append(req.Argv, opts.Prompt)
+	}
+	req.ReceiptPath = filepath.Join(opts.ReceiptDir, receiptName(req.ThreadID, req.CWD, req.Argv)+".json")
 }
 
 func receiptName(id, cwd string, argv []string) string {
@@ -259,7 +449,7 @@ func WriteReceipt(req Request, now time.Time) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	encErr := json.NewEncoder(f).Encode(Receipt{Schema: ReceiptSchema, ThreadID: req.ThreadID, CWD: req.CWD, Argv: req.Argv, RecordedAt: now.UTC().Format(time.RFC3339Nano), State: "launch_intent"})
+	encErr := json.NewEncoder(f).Encode(Receipt{Schema: ReceiptSchema, ThreadID: req.ThreadID, Provider: req.Provider, Category: req.Category, HostHandles: append([]string(nil), req.HostHandles...), IdentityProvenance: req.IdentityProvenance, CWD: req.CWD, Argv: req.Argv, RecordedAt: now.UTC().Format(time.RFC3339Nano), State: "launch_intent"})
 	closeErr := f.Close()
 	if encErr != nil {
 		return false, encErr

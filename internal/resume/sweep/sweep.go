@@ -284,6 +284,55 @@ func CwdForSlug(project string, candidates []string, fallback string) string {
 	return fallback
 }
 
+// FirstUserPrompt returns the normalized first real user prompt from the
+// superset transcript copy. Probe classification keys on intent, not transcript
+// length: a health probe can accumulate many bookkeeping records before it
+// crashes, while a short real task can still be substantive.
+func FirstUserPrompt(copies []Copy) string {
+	idx := SupersetIndex(copies)
+	if idx < 0 {
+		return ""
+	}
+	for _, record := range copies[idx].Records {
+		if strings.EqualFold(strings.TrimSpace(record.Role), "user") && strings.TrimSpace(record.Text) != "" {
+			return strings.Join(strings.Fields(record.Text), " ")
+		}
+	}
+	return ""
+}
+
+// IsSemanticProbe identifies the deliberately tiny login/seat health exercises
+// emitted by the fleet. This closed semantic check is intentionally independent
+// of record count; high-record probes remain probes and low-record work remains
+// substantive.
+func IsSemanticProbe(copies []Copy) bool {
+	prompt := strings.ToLower(FirstUserPrompt(copies))
+	switch prompt {
+	case "say pong", "reply exactly login_ok":
+		return true
+	default:
+		return false
+	}
+}
+
+// LastAssistantCursor returns the newest real assistant record's stable cursor
+// and timestamp from the superset copy. The recovery witness snapshots this
+// pair before launch and requires it to advance afterward; a new window or idle
+// shell cannot manufacture either fact.
+func LastAssistantCursor(copies []Copy) (cursor, timestamp string) {
+	idx := SupersetIndex(copies)
+	if idx < 0 {
+		return "", ""
+	}
+	for _, record := range copies[idx].Records {
+		if !strings.EqualFold(strings.TrimSpace(record.Role), "assistant") || record.IsError || strings.TrimSpace(record.Text) == "" {
+			continue
+		}
+		cursor, timestamp = record.UUID, record.Timestamp
+	}
+	return cursor, timestamp
+}
+
 // clip returns a one-line, length-bounded evidence snippet (whitespace collapsed, then
 // truncated with a "…"), mirroring the Python _clip.
 func clip(text string, width int) string {

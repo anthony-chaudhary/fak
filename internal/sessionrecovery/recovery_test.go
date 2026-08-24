@@ -63,7 +63,7 @@ func TestSelectIgnoresInventoryRowsWithoutThreads(t *testing.T) {
 
 func TestSelectPreservesPromptAsOneArg(t *testing.T) {
 	got := Select(InventoryReport{Sessions: []Session{candidate(`C:\work\fak`)}}, Options{Limit: 1, Prompt: "continue the exact task", ReceiptDir: t.TempDir()})
-	want := []string{"fak", "guard", "--", "codex", "resume", "--cd", `C:\work\fak`, "t1", "continue the exact task"}
+	want := []string{"fak", "guard", "--", "codex", "exec", "--cd", `C:\work\fak`, "resume", "t1", "continue the exact task"}
 	if len(got) != 1 || !reflect.DeepEqual(got[0].Argv, want) {
 		t.Fatalf("argv=%q want %q", got[0].Argv, want)
 	}
@@ -163,9 +163,51 @@ func TestMergeJournalCrashesUsesRecordedCWDAndDeduplicates(t *testing.T) {
 	if got[0].ThreadID != "already" || got[0].CWD != `C:\authoritative` || got[0].Source != "session_journal" {
 		t.Fatalf("journal did not replace reconstructed cwd: %+v", got[0])
 	}
-	wantArgv := []string{"fak", "guard", "--", "codex", "resume", "--cd", `D:\repos\real tree`, "journal", "resume safely"}
-	if got[1].CWD != `D:\repos\real tree` || got[1].Source != "session_journal" || !reflect.DeepEqual(got[1].Argv, wantArgv) {
+	wantArgv := []string{"fak", "guard", "--", "claude", "--resume", "journal", "resume safely"}
+	if got[1].CWD != `D:\repos\real tree` || got[1].Source != "session_journal" || got[1].Provider != ProviderClaude || !reflect.DeepEqual(got[1].Argv, wantArgv) {
 		t.Fatalf("journal request=%+v", got[1])
+	}
+}
+
+func TestMergeJournalCrashesUsesCodexOnlyWithStateRequest(t *testing.T) {
+	const id = "94000001-0000-4000-8000-000000000001"
+	requests := []Request{{ThreadID: id, CWD: `C:\old`, Provider: ProviderCodex, Category: CategorySubstantive, Action: ActionRecover, Status: "candidate"}}
+	classified := []sessionjournal.Classified{{Session: sessionjournal.Session{ID: id, CWD: `D:\authoritative`, Agent: "codex"}, Status: sessionjournal.StatusCrashed, Reason: "MACHINE_REBOOT"}}
+	got := MergeJournalCrashes(requests, classified, Options{Limit: 1, ReceiptDir: t.TempDir()})
+	want := []string{"fak", "guard", "--", "codex", "exec", "--cd", `D:\authoritative`, "resume", id}
+	if len(got) != 1 || got[0].Provider != ProviderCodex || !reflect.DeepEqual(got[0].Argv, want) {
+		t.Fatalf("requests=%+v want=%q", got, want)
+	}
+
+	blocked := MergeJournalCrashes(nil, classified, Options{Limit: 1, ReceiptDir: t.TempDir()})
+	if len(blocked) != 1 || blocked[0].Status != "identity_blocked" || len(blocked[0].Argv) != 0 {
+		t.Fatalf("unverified Codex journal row became actionable: %+v", blocked)
+	}
+}
+
+func TestMergeJournalCrashesAccountsAllRowsAndLimitsOnlyCandidates(t *testing.T) {
+	requests := []Request{
+		{ThreadID: "probe", Provider: ProviderClaude, Category: CategoryProbe, Action: ActionExcludeProbe, Status: "probe"},
+		{ThreadID: "blocked", Provider: ProviderClaude, Category: CategoryIdentityBlocked, Action: ActionLoginRequired, Status: "identity_blocked"},
+		{ThreadID: "candidate-a", CWD: `C:\a`, Provider: ProviderClaude, Category: CategorySubstantive, Action: ActionRecover, Status: "candidate"},
+		{ThreadID: "candidate-b", CWD: `C:\b`, Provider: ProviderClaude, Category: CategorySubstantive, Action: ActionRecover, Status: "candidate"},
+	}
+	classified := []sessionjournal.Classified{{Session: sessionjournal.Session{ID: "journal-c", CWD: `C:\c`}, Status: sessionjournal.StatusCrashed, Reason: "MACHINE_REBOOT"}}
+	got := MergeJournalCrashes(requests, classified, Options{Limit: 2, ReceiptDir: t.TempDir()})
+	if len(got) != 5 {
+		t.Fatalf("cohort truncated: %+v", got)
+	}
+	candidates, deferred := 0, 0
+	for _, req := range got {
+		switch req.Status {
+		case "candidate":
+			candidates++
+		case "deferred":
+			deferred++
+		}
+	}
+	if candidates != 2 || deferred != 1 {
+		t.Fatalf("candidate cap counted non-actions: candidates=%d deferred=%d rows=%+v", candidates, deferred, got)
 	}
 }
 

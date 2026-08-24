@@ -223,3 +223,31 @@ func TestCwdForSlug(t *testing.T) {
 		t.Fatalf("fallback = %q", got)
 	}
 }
+
+func TestSemanticProbeUsesFirstPromptNotRecordCount(t *testing.T) {
+	records := []Record{rec("user", "  Reply   exactly LOGIN_OK  ", "u0", "2026-06-23T10:00:00Z", false)}
+	for i := 0; i < 40; i++ {
+		records = append(records, rec("assistant", "bookkeeping", "", "2026-06-23T10:01:00Z", false))
+	}
+	copies := []Copy{{Records: records}}
+	if !IsSemanticProbe(copies) {
+		t.Fatal("high-record LOGIN_OK health transcript must remain a semantic probe")
+	}
+	if got := FirstUserPrompt(copies); got != "Reply exactly LOGIN_OK" {
+		t.Fatalf("normalized first prompt = %q", got)
+	}
+	if IsSemanticProbe([]Copy{{Records: []Record{rec("user", "repair the login flow", "", "", false)}}}) {
+		t.Fatal("short substantive task must not be filtered by size")
+	}
+}
+
+func TestLastAssistantCursorExcludesErrorBanner(t *testing.T) {
+	copies := []Copy{{Records: []Record{
+		rec("assistant", "real progress", "a1", "2026-06-23T10:00:00Z", false),
+		rec("assistant", "API Error 529", "e1", "2026-06-23T10:01:00Z", true),
+	}}}
+	cursor, at := LastAssistantCursor(copies)
+	if cursor != "a1" || at != "2026-06-23T10:00:00Z" {
+		t.Fatalf("cursor=%q at=%q, want last real assistant turn", cursor, at)
+	}
+}
