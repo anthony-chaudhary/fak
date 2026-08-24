@@ -185,6 +185,11 @@
       "lane": "vcachecal",
       "command": "go test -v ./internal/vcachecal",
       "output_contains": "TestFitCalibrationMeasuresWriteMultipliersByTTL"
+    },
+    {
+      "lane": "usagelog",
+      "command": "go test -v ./internal/usagelog",
+      "output_contains": "TestParallelAppendsNeverGap"
     }
   ]
 }
