@@ -210,6 +210,11 @@
       "lane": "uiquality",
       "command": "go test -v ./internal/uiquality",
       "output_contains": "TestHelpCompletenessCatchesUndocumented"
+    },
+    {
+      "lane": "turntaxmeter",
+      "command": "go test -v ./internal/turntaxmeter",
+      "output_contains": "TestOverBudgetSpanReadsBackAsBreach"
     }
   ]
 }
