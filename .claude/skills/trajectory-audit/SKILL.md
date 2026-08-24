@@ -4,7 +4,7 @@ description: Audit recent Claude and Codex transcript JSONL with the first-class
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep, Glob, Bash
-argument-hint: "[--since 7d] [--jsonl OUT] [--md OUT] [--baseline PRIOR.jsonl]"
+argument-hint: "[--since 7d] [--user-contains TOPIC] [--jsonl OUT] [--md OUT] [--baseline PRIOR.jsonl]"
 output_root: none
 metadata:
   opencode: claude-only
@@ -19,6 +19,18 @@ fak trajectory audit --since 7d \
   --jsonl trajectory-audit-$(date +%Y%m%d).jsonl \
   --md trajectory-audit-$(date +%Y%m%d).md
 ```
+
+For a topical cohort, select only user-authored prompts; tool output and injected
+repository instructions cannot admit an unrelated session:
+
+```bash
+fak trajectory audit --since 4d --user-contains qwen \
+  --jsonl qwen-audit.jsonl --md qwen-audit.md
+```
+
+The report exposes discovered, matched, and scanned file counts so a topical
+claim retains its denominator. `--user-contains` is a case-insensitive literal,
+not a regular expression.
 
 The verb discovers both supported transcript homes by default:
 
@@ -43,6 +55,33 @@ An unknown or malformed usage shape is never estimated. The verb writes a
 `refusal` row and the markdown diagnostic, prints
 `TRAJECTORY_SCHEMA_REFUSED`, and exits non-zero. Treat that as a parser-version
 gap, not as zero usage.
+
+## Meta-process blocker triage
+
+For a topical cohort, rank these process signals before reading individual sessions:
+
+1. **Scope contamination** — compare matched with discovered files; use
+   `--user-contains`, never raw transcript grep, because tool output can echo a topic.
+2. **Token concentration** — `top_ten_token_fraction` shows whether a few runaway
+   sessions dominate the aggregate; inspect those bottleneck rows first.
+3. **Tool failure burden** — `tool_errors/tool_calls` measures execution friction.
+4. **Zero-usage launches** — `empty_usage_files` exposes starts that produced no
+   billable model progress.
+5. **Fragment duplication** — `duplicate_fragments` exposes one session ID spread
+   over multiple transcript files; do not count those as independent workers.
+6. **Repeated identical failures** — use `repeated_failures`; retry loops need a
+   changed hypothesis, not another identical call.
+7. **Mutation churn** — use `mutation_churn`; repeated writes to one target indicate
+   insufficient repro-first scoping.
+8. **Hook latency** — use `hook_p95_ms`; separate gate wait from model/kernel work.
+9. **Input amplification** — use `input_output_ratio`; large values warrant context
+   paging or a narrower worker packet.
+10. **Evidence refusal** — any `refused_records` means the parser found an unsupported
+    shape; fix coverage before making a broad efficiency claim.
+
+The first five now have explicit JSON summary fields. The remaining five preserve
+existing exact audit fields. Treat each as a hypothesis until the corresponding
+session rows or refusal rows identify the concrete cause.
 
 ## Baseline comparison
 
