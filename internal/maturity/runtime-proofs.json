@@ -130,6 +130,11 @@
       "lane": "verifierexposure",
       "command": "go test -v ./internal/verifierexposure",
       "output_contains": "TestFoldFailsClosedOnInventoryErrors"
+    },
+    {
+      "lane": "vdso",
+      "command": "go test -v ./internal/vdso -run TestRevoke",
+      "output_contains": "TestRevoke_Sound_RevokedNeverServed"
     }
   ]
 }
