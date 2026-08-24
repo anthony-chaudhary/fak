@@ -120,6 +120,11 @@
       "lane": "waiting",
       "command": "go test -v ./internal/waiting",
       "output_contains": "TestFoldPastDeadlineExpiresAndPrescribesTheSafeDefault"
+    },
+    {
+      "lane": "versionskew",
+      "command": "go test -v ./internal/versionskew",
+      "output_contains": "TestAssessStamp_gitAncestry"
     }
   ]
 }
