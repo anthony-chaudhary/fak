@@ -169,7 +169,7 @@ var (
 )
 
 const (
-	identityHeadLines = 40
+	identityHeadLines = 50
 	recoveryWindow    = 20
 	recipeMinChars    = 200
 	configMinChars    = 24
@@ -227,7 +227,7 @@ var (
 	bracketSlotRe = regexp.MustCompile(`<[^>]+>`)
 	envSlotRe     = regexp.MustCompile(`^[A-Z][A-Z0-9_]{2,}$`)
 	proofPolicyRe = regexp.MustCompile(`--policy\s+(\S+)`)
-	identityRe    = regexp.MustCompile(`(?i)\bfak\b[^.\n]{0,60}?\bis\b[^.\n]{0,80}?(kernel|firewall|gate|gateway|proxy|binary)`)
+	identityRe    = regexp.MustCompile(`(?i)\bfak\b[^.\n]{0,60}?\b(?:is\b[^.\n]{0,80}?(?:kernel|firewall|gate|gateway|proxy|binary)|(?:lets|helps|enables)\s+you\b[^.\n]{0,120}?(?:agent|context|model|tool|permission))`)
 	reasonRe      = regexp.MustCompile(`(?m)^\[reasons\.([A-Z][A-Z0-9_]+)\]`)
 	verbTokenRe   = regexp.MustCompile(`^([a-z][a-z0-9-]+)`)
 	inlineCodeRe  = regexp.MustCompile("`([^`]+)`")
@@ -798,7 +798,7 @@ func kpiLLMSMap(llmsPresent, llmsFullPresent bool) KPI {
 func kpiIdentityStatement(presentIn, missingFrom []string) KPI {
 	defects := []string{}
 	for _, doc := range missingFrom {
-		defects = append(defects, "no one-sentence 'fak is a/an <kernel/gate/binary/…>' identity near the top of "+doc+" — add a quotable one-liner")
+		defects = append(defects, "no plain-English statement of what fak is or does near the top of "+doc+" — add a quotable one-liner")
 	}
 	score := 100
 	var detail string

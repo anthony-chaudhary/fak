@@ -259,6 +259,21 @@ func TestFindIdentityRequiredInEveryDoc(t *testing.T) {
 	}
 }
 
+func TestFindIdentityRecognizesExistingFrontDoorLanguage(t *testing.T) {
+	texts := map[string]string{
+		"AGENTS.md": "## What this project is\n\n**fak** is an *agent kernel*: one Go binary.",
+		llmsFile:    "fak is an agent kernel.",
+		"README.md": "# fak — configure your agents\n\nfak lets you run your agents with a small configuration chosen for this task, while one boundary manages their context, models, tools, and record.",
+	}
+	if present, missing := findIdentity(texts); len(missing) != 0 || !sameSet(present, identityDocs) {
+		t.Fatalf("front-door identity present=%v missing=%v, want all present", present, missing)
+	}
+
+	texts["README.md"] = "# fak\n\nFast, safe, and flexible."
+	if _, missing := findIdentity(texts); !reflect.DeepEqual(missing, []string{"README.md"}) {
+		t.Fatalf("slogan-only README missing=%v, want [README.md]", missing)
+	}
+}
 func TestMissingGuardrailsDetectsGaps(t *testing.T) {
 	if got := missingGuardrails(goodAgents); len(got) != 0 {
 		t.Errorf("GOOD_AGENTS surfaces every rule, got missing %v", got)
