@@ -750,6 +750,7 @@ func accountsNext(stdout, stderr io.Writer, registryPath, homeDir, after string,
 		// the IDENTICAL explanation for the identical failure (and name the roomy anchor when the
 		// only reason there is nowhere to rotate is that you are already on the account with room).
 		printRotationNoCandidate(stderr, "fak accounts next", dec)
+		fmt.Fprint(stderr, codexNamedLaunchAlternatives(discoveredCodexHomes()))
 		printAccountFixSummary(stderr, fixes, "account fixes")
 		return 1
 	}
@@ -974,7 +975,7 @@ func accountsStatus(stdout, stderr io.Writer, registryPath, homeDir string, asJS
 		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
 		return 1
 	}
-	reg = reg.Refresh()
+	reg = appendDiscoveredCodexHomes(reg.Refresh())
 	report := loginReportWithCooldown(stderr, reg)
 	if probe {
 		// Live credential-identity confirmation: for each seat that serves creds, probe the

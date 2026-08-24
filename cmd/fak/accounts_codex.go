@@ -58,13 +58,16 @@ func appendDiscoveredCodexHomes(reg accounts.Registry) accounts.Registry {
 }
 
 func codexExplicitNameGuidance(homes []accounts.Home) string {
+	return "fak accounts launch: Codex requires an explicit --name; default/rotate remain Claude-registry semantics so a launch cannot silently cross CODEX_HOME\n" + codexNamedLaunchAlternatives(homes)
+}
+
+func codexNamedLaunchAlternatives(homes []accounts.Home) string {
 	var b strings.Builder
-	b.WriteString("fak accounts launch: Codex requires an explicit --name; default/rotate remain Claude-registry semantics so a launch cannot silently cross CODEX_HOME\n")
 	for _, home := range homes {
 		if !home.CanServe() {
 			continue
 		}
-		fmt.Fprintf(&b, "  ready seat %q: fak accounts launch --name %s --command codex\n", home.Name, home.Name)
+		fmt.Fprintf(&b, "  ready Codex seat %q (named child launch, not live-session rehome): fak accounts launch --name %s --command codex\n", home.Name, home.Name)
 	}
 	return b.String()
 }

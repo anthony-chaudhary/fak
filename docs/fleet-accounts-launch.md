@@ -38,3 +38,21 @@ fak fleet-accounts exec --product opencode --account nemo-tier3 \
 
 The override never permits a tier-3 seat to run tier-1 or tier-2 work. For hard engineering,
 the resolver must select a ready tier-1 product such as Codex or refuse the launch.
+
+## What “switch” means for Codex
+
+`fak accounts launch --name <seat> --command codex` starts a **new child Codex
+process** with that seat's `CODEX_HOME`. It does not change the invoking shell's
+environment and does not rehome the currently running Codex conversation. This
+child-local boundary is what allows two named Codex accounts to run concurrently.
+
+Codex selection is deliberately explicit-name only: `accounts next`, `--rotate`,
+and the active/default role are Claude-registry operations and never silently
+cross Codex homes. When no Claude rotation candidate exists, `accounts next`
+lists ready Codex homes as exact named-launch alternatives. `accounts list` and
+`accounts status` both include discovered Codex homes so those alternatives do
+not appear from an otherwise empty account view.
+
+Use `fak accounts rehome` only for a supported running guard session. It is a
+live-session operation and is not an alias for changing `CODEX_HOME` in an
+already-running Codex process.

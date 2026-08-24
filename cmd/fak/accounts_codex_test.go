@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,7 +106,7 @@ func TestCodexExplicitNameGuidanceListsOnlyReadyHomes(t *testing.T) {
 	got := codexExplicitNameGuidance(homes)
 	for _, want := range []string{
 		"Codex requires an explicit --name",
-		`ready seat "blue": fak accounts launch --name blue --command codex`,
+		`ready Codex seat "blue" (named child launch, not live-session rehome): fak accounts launch --name blue --command codex`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("guidance missing %q:\n%s", want, got)
@@ -113,5 +114,29 @@ func TestCodexExplicitNameGuidanceListsOnlyReadyHomes(t *testing.T) {
 	}
 	if strings.Contains(got, "red") {
 		t.Fatalf("guidance advertised disabled home:\n%s", got)
+	}
+}
+
+func TestRunAccountsStatusIncludesDiscoveredCodexHomes(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	ready := filepath.Join(home, ".codex-blue")
+	if err := os.MkdirAll(ready, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const token = "eyJhbGciOiJub25lIn0.eyJzdWIiOiJhY2N0LWJsdWUifQ.sig"
+	if err := os.WriteFile(filepath.Join(ready, "auth.json"), []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"`+token+`","account_id":"acct-blue"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FLEET_USER_HOME", home)
+	t.Setenv("FLEET_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Setenv("FLEET_REG_DIR", filepath.Join(root, "registry"))
+	t.Setenv("FLEET_POLICY_DIR", filepath.Join(root, "policy"))
+	var stdout, stderr bytes.Buffer
+	if rc := runAccounts(&stdout, &stderr, []string{"status", "--json", "--registry", filepath.Join(root, "accounts.json"), "--home", filepath.Join(root, "claude-home")}); rc != 0 {
+		t.Fatalf("status rc=%d stderr=%s", rc, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"name":"blue"`) || !strings.Contains(stdout.String(), `"can_serve":true`) {
+		t.Fatalf("status omitted ready Codex home:\n%s", stdout.String())
 	}
 }
