@@ -275,6 +275,11 @@
       "lane": "trajctl",
       "command": "go test -v ./internal/trajctl -run TestStatus",
       "output_contains": "TestStatusWorstFirstAndWitnessComposition"
+    },
+    {
+      "lane": "tracesink",
+      "command": "go test -v ./internal/tracesink",
+      "output_contains": "TestCaptureFidelity_ReplayReproducesLiveVerdictCounters"
     }
   ]
 }
