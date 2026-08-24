@@ -30,6 +30,11 @@
       "lane": "worktreewitness",
       "command": "go test -v ./internal/worktreewitness",
       "output_contains": "TestRun_DirtyWorktreeArchivesBeforeReap"
+    },
+    {
+      "lane": "worklog",
+      "command": "go test -v ./internal/worklog",
+      "output_contains": "TestBoundedRetentionAndGap"
     }
   ]
 }
