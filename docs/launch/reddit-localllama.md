@@ -104,3 +104,5 @@ Below is the corrected asset.
 Cut a poisoned tool result out of the middle of a live KV cache, left it bit-for-bit identical to a run that never saw it (max|Δ|=0). One Go binary, no Python/CUDA, runs offline.
 
 **Body:**
+
+<!-- Freshness review 2026-08-24: commands, links, channel constraints, and product claims rechecked against the current repository; publish only after a final live channel-rule check. -->
