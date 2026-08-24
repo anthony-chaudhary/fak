@@ -250,6 +250,11 @@
       "lane": "treedoctor",
       "command": "go test -v ./internal/treedoctor -run TestSweepScratch",
       "output_contains": "TestSweepScratchReapsOnlyGitignored"
+    },
+    {
+      "lane": "trajquery",
+      "command": "go test -v ./internal/trajquery",
+      "output_contains": "TestValidate_RejectsHiddenColumnProbe"
     }
   ]
 }
