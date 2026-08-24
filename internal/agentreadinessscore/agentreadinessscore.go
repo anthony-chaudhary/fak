@@ -41,6 +41,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/devhandoff"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 
 	"github.com/anthony-chaudhary/fak/internal/mathx"
@@ -165,6 +166,7 @@ var (
 	refusalRecoveryDocs = []string{agentsFile, "docs/repo-guard.md"}
 	recoveryCues        = []string{"recover", "refus", "fix", "floor", "instead", "soften"}
 	toolchainDocs       = []string{agentsFile, "README.md", "GETTING-STARTED.md"}
+	commandFamilyVerbs  = []string{"server"}
 	cmdPrefixes         = []string{"go run ./cmd/fak ", "go run cmd/fak ", "./cmd/fak ", ".\\fak.exe ", ".\\fak ", "fak.exe ", "./fak ", "fak "}
 )
 
@@ -1367,6 +1369,12 @@ func unknownCommandVerbs(docTexts map[string]string, verbs map[string]bool) []st
 	}
 	var out []string
 	seen := map[string]bool{}
+	for _, verb := range commandFamilyVerbs {
+		verbs[verb] = true
+	}
+	for _, command := range devhandoff.Commands {
+		verbs[command.Name] = true
+	}
 	for _, doc := range sortedKeys(docTexts) {
 		text := docTexts[doc]
 		if text == "" {

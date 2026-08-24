@@ -687,6 +687,13 @@ func TestCommandVerbsResolveKpi(t *testing.T) {
 	}
 }
 
+func TestUnknownCommandVerbsRecognizesFamiliesAndMovedCommands(t *testing.T) {
+	docs := map[string]string{"AGENTS.md": "`fak server status`\n`fak plan-audit`\n`fak frobnicate`"}
+	got := unknownCommandVerbs(docs, map[string]bool{"serve": true})
+	if !reflect.DeepEqual(got, []string{"AGENTS.md: fak frobnicate"}) {
+		t.Fatalf("unknown commands=%v, want only genuinely unknown verb", got)
+	}
+}
 func TestUnknownCommandVerbsAbstainsWithoutDispatch(t *testing.T) {
 	docs := map[string]string{"AGENTS.md": "Run `fak hooks pre-commit`."}
 	if got := unknownCommandVerbs(docs, map[string]bool{}); len(got) != 0 {
