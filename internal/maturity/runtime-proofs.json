@@ -140,6 +140,11 @@
       "lane": "vcachewarm",
       "command": "go test -v ./internal/vcachewarm",
       "output_contains": "TestFanoutGateHoldsRacingSiblingsUntilFirstContentDelta"
+    },
+    {
+      "lane": "vcachestar",
+      "command": "go test -v ./internal/vcachestar",
+      "output_contains": "TestFirstNaturalWarmFansSiblingsOnFirstStreamedDeltaNotHTTPStatus"
     }
   ]
 }
