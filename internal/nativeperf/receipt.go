@@ -1,0 +1,276 @@
+package nativeperf
+
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+	"sort"
+	"strings"
+)
+
+const ReceiptSchema = "fak-native-performance-receipt/v1"
+
+const (
+	RoleBaseline  = "baseline"
+	RoleCandidate = "candidate"
+)
+
+// ExperimentReceipt is the portable, scrubbed A/B evidence contract shared by
+// Metal and CUDA native-performance experiments.
+type ExperimentReceipt struct {
+	Schema            string             `json:"schema"`
+	Role              string             `json:"role"`
+	EnvelopeID        string             `json:"envelope_id"`
+	ChangedLeverID    string             `json:"changed_lever_id"`
+	Revision          string             `json:"revision"`
+	ArtifactSHA256    string             `json:"artifact_sha256"`
+	Machine           MachineIdentity    `json:"machine"`
+	Controls          ExperimentControls `json:"controls"`
+	UnchangedControls []string           `json:"unchanged_controls"`
+	ChangedAxes       []string           `json:"changed_axes"`
+	Repetitions       []Repetition       `json:"repetitions"`
+	Memory            MemoryMetrics      `json:"memory"`
+	Execution         ExecutionIdentity  `json:"execution"`
+	Commands          []string           `json:"commands"`
+	ProfilerArtifacts []ArtifactRef      `json:"profiler_artifacts"`
+}
+
+type MachineIdentity struct {
+	ScrubbedID string `json:"scrubbed_id"`
+	Platform   string `json:"platform"`
+	Backend    string `json:"backend"`
+}
+
+type ExperimentControls struct {
+	PromptTokens  int     `json:"prompt_tokens"`
+	DecodeTokens  int     `json:"decode_tokens"`
+	Batch         int     `json:"batch"`
+	ContextTokens int     `json:"context_tokens"`
+	Temperature   float64 `json:"temperature"`
+	Sampling      string  `json:"sampling"`
+	CacheState    string  `json:"cache_state"`
+	Warmups       int     `json:"warmups"`
+	Repetitions   int     `json:"repetitions"`
+}
+
+type Repetition struct {
+	EndToEndMilliseconds float64 `json:"end_to_end_milliseconds"`
+	TokensPerSecond      float64 `json:"tokens_per_second"`
+	TTFTMilliseconds     float64 `json:"ttft_milliseconds,omitempty"`
+	PrefillMilliseconds  float64 `json:"prefill_milliseconds,omitempty"`
+	DecodeMilliseconds   float64 `json:"decode_milliseconds,omitempty"`
+}
+
+type MemoryMetrics struct {
+	PeakBytes     uint64 `json:"peak_bytes"`
+	ResidentBytes uint64 `json:"resident_bytes"`
+}
+
+type ExecutionIdentity struct {
+	Engine        string `json:"engine"`
+	ForwardPath   string `json:"forward_path"`
+	FallbackCount int    `json:"fallback_count"`
+}
+
+type ArtifactRef struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+}
+
+type Comparison struct {
+	Schema                  string  `json:"schema"`
+	EnvelopeID              string  `json:"envelope_id"`
+	ChangedLeverID          string  `json:"changed_lever_id"`
+	BaselineRevision        string  `json:"baseline_revision"`
+	CandidateRevision       string  `json:"candidate_revision"`
+	BaselineMeanTokensPerS  float64 `json:"baseline_mean_tokens_per_second"`
+	CandidateMeanTokensPerS float64 `json:"candidate_mean_tokens_per_second"`
+	DeltaTokensPerS         float64 `json:"delta_tokens_per_second"`
+	DeltaPercent            float64 `json:"delta_percent"`
+}
+
+var requiredControlNames = []string{"artifact_sha256", "machine", "prompt_tokens", "decode_tokens", "batch", "context_tokens", "temperature", "sampling", "cache_state", "warmups", "repetitions", "execution_identity"}
+
+// BaselineTemplate returns a deterministic pre-change capture skeleton. Values
+// marked FILL must be replaced by the capture command before comparison.
+func BaselineTemplate(graph Graph, leverID string) (ExperimentReceipt, error) {
+	lever, envelope, err := findLeverEnvelope(graph, leverID)
+	if err != nil {
+		return ExperimentReceipt{}, err
+	}
+	reps := make([]Repetition, envelope.Repetitions)
+	return ExperimentReceipt{
+		Schema: ReceiptSchema, Role: RoleBaseline, EnvelopeID: envelope.ID, ChangedLeverID: lever.ID,
+		Revision: "FILL_COMMITTED_REVISION", ArtifactSHA256: envelope.ArtifactSHA256,
+		Machine:           MachineIdentity{ScrubbedID: "FILL_SCRUBBED_MACHINE_ID", Platform: lever.Applicability.Platform, Backend: envelope.Backend},
+		Controls:          ExperimentControls{PromptTokens: envelope.PromptTokens, DecodeTokens: envelope.DecodeTokens, Batch: 1, ContextTokens: envelope.PromptTokens + envelope.DecodeTokens, Temperature: float64(envelope.Temperature), Sampling: "greedy", CacheState: "cold", Warmups: 1, Repetitions: envelope.Repetitions},
+		UnchangedControls: append([]string(nil), requiredControlNames...), ChangedAxes: []string{}, Repetitions: reps,
+		Execution: ExecutionIdentity{Engine: "fak-native", ForwardPath: envelope.ForwardPath},
+		Commands:  []string{"FILL_SCRUBBED_CAPTURE_COMMAND"}, ProfilerArtifacts: []ArtifactRef{{Path: "FILL_RELATIVE_PROFILE_PATH", SHA256: strings.Repeat("0", 64)}},
+	}, nil
+}
+
+func DecodeReceipt(data []byte) (ExperimentReceipt, error) {
+	var r ExperimentReceipt
+	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&r); err != nil {
+		return r, fmt.Errorf("decode receipt: %w", err)
+	}
+	return r, nil
+}
+
+func ValidateReceipt(graph Graph, r ExperimentReceipt) error {
+	var f []string
+	if r.Schema != ReceiptSchema {
+		f = append(f, fmt.Sprintf("schema must be %q", ReceiptSchema))
+	}
+	if r.Role != RoleBaseline && r.Role != RoleCandidate {
+		f = append(f, "role must be baseline or candidate")
+	}
+	lever, env, err := findLeverEnvelope(graph, r.ChangedLeverID)
+	if err != nil {
+		f = append(f, err.Error())
+	} else {
+		if r.EnvelopeID != env.ID {
+			f = append(f, "changed lever does not belong to receipt envelope")
+		}
+		if r.Machine.Platform != lever.Applicability.Platform || r.Machine.Backend != env.Backend {
+			f = append(f, "machine platform/backend does not match envelope")
+		}
+		if r.ArtifactSHA256 != env.ArtifactSHA256 {
+			f = append(f, "artifact hash does not match envelope")
+		}
+	}
+	if strings.TrimSpace(r.Revision) == "" || strings.HasPrefix(r.Revision, "FILL_") {
+		f = append(f, "revision is missing")
+	}
+	if !scrubbed(r.Machine.ScrubbedID) {
+		f = append(f, "machine identity is empty or contains private path/host syntax")
+	}
+	if r.Execution.Engine != "fak-native" || strings.TrimSpace(r.Execution.ForwardPath) == "" {
+		f = append(f, "execution identity must name fak-native and a forward path")
+	}
+	if r.Execution.FallbackCount != 0 {
+		f = append(f, "fallback count must be zero")
+	}
+	if r.Controls.PromptTokens <= 0 || r.Controls.DecodeTokens <= 0 || r.Controls.Batch <= 0 || r.Controls.ContextTokens <= 0 || r.Controls.Warmups < 0 || r.Controls.Repetitions <= 0 {
+		f = append(f, "controls contain invalid dimensions")
+	}
+	if len(r.Repetitions) != r.Controls.Repetitions {
+		f = append(f, "repetition count does not match controls")
+	}
+	for i, rep := range r.Repetitions {
+		if !positive(rep.EndToEndMilliseconds) || !positive(rep.TokensPerSecond) {
+			f = append(f, fmt.Sprintf("repetition %d lacks positive end-to-end latency/tok/s", i))
+		}
+	}
+	if r.Memory.PeakBytes == 0 || r.Memory.ResidentBytes == 0 {
+		f = append(f, "peak and resident memory are required")
+	}
+	if !sameStrings(r.UnchangedControls, requiredControlNames) {
+		f = append(f, "unchanged_controls must contain the complete canonical control list")
+	}
+	wantAxes := []string{}
+	if r.Role == RoleCandidate {
+		wantAxes = []string{"lever:" + r.ChangedLeverID}
+	}
+	if !sameStrings(r.ChangedAxes, wantAxes) {
+		f = append(f, "changed_axes must declare exactly the candidate lever and no other axis")
+	}
+	if len(r.Commands) == 0 {
+		f = append(f, "at least one scrubbed command is required")
+	}
+	for _, command := range r.Commands {
+		if private(command) || strings.HasPrefix(command, "FILL_") {
+			f = append(f, "command contains private or placeholder details")
+		}
+	}
+	if len(r.ProfilerArtifacts) == 0 {
+		f = append(f, "at least one profiler artifact is required")
+	}
+	for _, a := range r.ProfilerArtifacts {
+		if private(a.Path) || strings.HasPrefix(a.Path, "FILL_") || !sha256(a.SHA256) {
+			f = append(f, "profiler artifact must use a relative scrubbed path and SHA-256")
+		}
+	}
+	if len(f) > 0 {
+		sort.Strings(f)
+		return fmt.Errorf("invalid native-performance receipt: %s", strings.Join(f, "; "))
+	}
+	return nil
+}
+
+func CompareReceipts(graph Graph, baseline, candidate ExperimentReceipt) (Comparison, error) {
+	if err := ValidateReceipt(graph, baseline); err != nil {
+		return Comparison{}, fmt.Errorf("baseline: %w", err)
+	}
+	if err := ValidateReceipt(graph, candidate); err != nil {
+		return Comparison{}, fmt.Errorf("candidate: %w", err)
+	}
+	if baseline.Role != RoleBaseline || candidate.Role != RoleCandidate {
+		return Comparison{}, fmt.Errorf("comparison requires baseline then candidate roles")
+	}
+	if baseline.EnvelopeID != candidate.EnvelopeID || baseline.ChangedLeverID != candidate.ChangedLeverID {
+		return Comparison{}, fmt.Errorf("receipts target different envelope or lever")
+	}
+	if baseline.ArtifactSHA256 != candidate.ArtifactSHA256 || baseline.Machine != candidate.Machine || baseline.Controls != candidate.Controls || baseline.Execution != candidate.Execution || !sameStrings(baseline.UnchangedControls, candidate.UnchangedControls) {
+		return Comparison{}, fmt.Errorf("receipts are incomparable: an undeclared control axis drifted")
+	}
+	b, c := meanTPS(baseline.Repetitions), meanTPS(candidate.Repetitions)
+	return Comparison{Schema: "fak-native-performance-comparison/v1", EnvelopeID: baseline.EnvelopeID, ChangedLeverID: baseline.ChangedLeverID, BaselineRevision: baseline.Revision, CandidateRevision: candidate.Revision, BaselineMeanTokensPerS: b, CandidateMeanTokensPerS: c, DeltaTokensPerS: c - b, DeltaPercent: (c - b) / b * 100}, nil
+}
+
+func findLeverEnvelope(graph Graph, leverID string) (Lever, Envelope, error) {
+	for _, l := range graph.Levers {
+		if l.ID == leverID {
+			for _, e := range graph.Envelopes {
+				if e.ID == l.Applicability.EnvelopeID {
+					return l, e, nil
+				}
+			}
+			return Lever{}, Envelope{}, fmt.Errorf("lever %q has no envelope", leverID)
+		}
+	}
+	return Lever{}, Envelope{}, fmt.Errorf("unknown lever %q", leverID)
+}
+func positive(v float64) bool { return v > 0 && !math.IsNaN(v) && !math.IsInf(v, 0) }
+func meanTPS(rs []Repetition) float64 {
+	var n float64
+	for _, r := range rs {
+		n += r.TokensPerSecond
+	}
+	return n / float64(len(rs))
+}
+func sha256(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, r := range s {
+		if !strings.ContainsRune("0123456789abcdef", r) {
+			return false
+		}
+	}
+	return true
+}
+func private(s string) bool {
+	l := strings.ToLower(s)
+	return strings.Contains(s, "\\") || strings.HasPrefix(s, "/") || strings.Contains(l, "/users/") || strings.Contains(l, "/home/") || strings.Contains(s, "@") || strings.Contains(l, "ssh ")
+}
+func scrubbed(s string) bool {
+	return strings.TrimSpace(s) != "" && !private(s) && !strings.Contains(s, ":")
+}
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	aa, bb := append([]string(nil), a...), append([]string(nil), b...)
+	sort.Strings(aa)
+	sort.Strings(bb)
+	for i := range aa {
+		if aa[i] != bb[i] {
+			return false
+		}
+	}
+	return true
+}

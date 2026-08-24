@@ -152,3 +152,27 @@ These sources shape graph structure rather than supply fak measurements:
   chunked prefill, and batching mechanisms.
 - llama.cpp Q8_1/DP4A MMVQ motivates #8635's CUDA lever, while execution remains
   fak-native; llama.cpp is explicitly selected only for benchmark or parity/reference diagnosis and is never an implicit fallback.
+
+
+## Baseline/candidate experiment receipts
+
+Use the versioned `fak-native-performance-receipt/v1` contract before changing a lever:
+
+```bash
+fak native-performance --baseline metal.command-buffer-amortization > baseline.json
+# Fill capture-only placeholders while running the pinned fak-native envelope.
+fak native-performance --compare baseline.json --candidate candidate.json
+```
+
+The same schema serves Metal and CUDA while envelope IDs keep their results separate. Each
+receipt pins revisions, artifact and scrubbed machine identity, backend, P/T/batch/context,
+sampling/cache/warmup/repetition controls, per-repetition end-to-end and stage metrics,
+peak/resident memory, commands, profiler artifact digests, execution identity, and fallback
+count. The candidate must declare exactly one `lever:<id>` changed axis; both arms carry the
+complete unchanged-control list. Comparison fails closed on control drift, missing repetitions,
+private path/host syntax, any fallback, or execution identity other than `fak-native`.
+
+The baseline command emits a deliberately incomplete template: `FILL_*` values and zero metrics
+cannot validate. This shifts the evidence contract before the edit without pretending a template
+is a measurement. Profiler paths must be relative and scrubbed; raw private logs remain in the
+private companion repository.

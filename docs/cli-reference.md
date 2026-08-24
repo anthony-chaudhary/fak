@@ -29,6 +29,8 @@ envelopes.
 ```bash
 fak native-performance
 fak native-performance --json
+fak native-performance --baseline metal.command-buffer-amortization > baseline.json
+fak native-performance --compare baseline.json --candidate candidate.json
 fak native-performance --next
 fak native-performance --dot
 ```
@@ -1339,3 +1341,11 @@ fak server down --dir DIR --json
 ```
 
 `init` records immutable model and executable identity. `up` starts only the declared executable and waits within its readiness deadline; `status` reports the typed lifecycle state; `down` signals only the process proven by the instance receipt. Each subcommand emits JSON. Run `fak server` with no subcommand for the live usage text.
+
+
+`--baseline LEVER` emits the versioned pre-change receipt template for that lever and pinned
+envelope. `--compare BASELINE --candidate CANDIDATE` validates both receipts and emits a
+deterministic JSON comparison. It refuses envelope/control drift, absent repetitions or native
+execution identity, nonzero fallback, private path/host details, and undeclared multi-axis
+changes. Templates contain `FILL_*` placeholders and are not benchmark evidence until capture
+fills every required field and validation succeeds.

@@ -23,11 +23,21 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	jsonOut := fs.Bool("json", false, "emit the committed native-performance graph as JSON")
 	nextOut := fs.Bool("next", false, "emit the first dependency-ready unwitnessed lever")
 	dotOut := fs.Bool("dot", false, "emit the lever graph as Graphviz DOT")
+	baselineLever := fs.String("baseline", "", "emit a pre-change baseline receipt template for LEVER")
+	compareBaseline := fs.String("compare", "", "compare baseline receipt FILE with --candidate FILE")
+	compareCandidate := fs.String("candidate", "", "candidate receipt FILE used with --compare")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if fs.NArg() != 0 || boolCount(*jsonOut, *nextOut, *dotOut) > 1 {
-		fmt.Fprintln(stderr, "usage: fak native-performance [--json | --next | --dot]")
+	modeCount := boolCount(*jsonOut, *nextOut, *dotOut)
+	if *baselineLever != "" {
+		modeCount++
+	}
+	if *compareBaseline != "" || *compareCandidate != "" {
+		modeCount++
+	}
+	if fs.NArg() != 0 || modeCount > 1 || ((*compareBaseline == "") != (*compareCandidate == "")) {
+		fmt.Fprintln(stderr, "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE]")
 		return 2
 	}
 
@@ -35,6 +45,42 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	if err := nativeperf.Validate(graph); err != nil {
 		fmt.Fprintf(stderr, "fak native-performance: %v\n", err)
 		return 1
+	}
+	if *baselineLever != "" {
+		receipt, err := nativeperf.BaselineTemplate(graph, *baselineLever)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak native-performance: baseline template: %v\n", err)
+			return 1
+		}
+		return encodeNativePerformanceJSON(stdout, stderr, receipt)
+	}
+	if *compareBaseline != "" {
+		baselineData, err := os.ReadFile(*compareBaseline)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak native-performance: read baseline: %v\n", err)
+			return 1
+		}
+		candidateData, err := os.ReadFile(*compareCandidate)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak native-performance: read candidate: %v\n", err)
+			return 1
+		}
+		baseline, err := nativeperf.DecodeReceipt(baselineData)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak native-performance: %v\n", err)
+			return 1
+		}
+		candidate, err := nativeperf.DecodeReceipt(candidateData)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak native-performance: %v\n", err)
+			return 1
+		}
+		comparison, err := nativeperf.CompareReceipts(graph, baseline, candidate)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak native-performance: compare: %v\n", err)
+			return 1
+		}
+		return encodeNativePerformanceJSON(stdout, stderr, comparison)
 	}
 	if *jsonOut {
 		enc := json.NewEncoder(stdout)
@@ -159,4 +205,14 @@ func renderNativePerformance(w io.Writer, graph nativeperf.Graph) {
 
 func formatThroughput(value float64) string {
 	return strconv.FormatFloat(value, 'f', -1, 64)
+}
+
+func encodeNativePerformanceJSON(stdout, stderr io.Writer, value any) int {
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(value); err != nil {
+		fmt.Fprintf(stderr, "fak native-performance: encode JSON: %v\n", err)
+		return 1
+	}
+	return 0
 }

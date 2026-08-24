@@ -12237,6 +12237,36 @@
           "category": "incidental",
           "reason": "Native-performance schema record separating projected lever effects from measurements; it is not a planning workflow concept.",
           "token": "PlanningEffect"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI flag variable for the candidate receipt path, not a planning-domain concept.",
+          "token": "compareCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local decoded candidate receipt bytes, not a planning-domain concept.",
+          "token": "candidateData"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed receipt-arm role constant, not a planning workflow concept.",
+          "token": "RoleCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Comparison output field for the candidate commit revision, not a planning workflow concept.",
+          "token": "CandidateRevision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Computed comparison metric field, not a planning workflow concept.",
+          "token": "CandidateMeanTokensPerS"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON spelling of a computed comparison metric, not a planning workflow concept.",
+          "token": "candidate_mean_tokens_per_second"
         }
       ],
       "exclude": [
@@ -12254,8 +12284,10 @@
         "BuildSweepPlan",
         "CandidateArm",
         "CandidateDecodeMicroseconds",
+        "CandidateMeanTokensPerS",
         "CandidateOutputNMSE",
         "CandidatePassed",
+        "CandidateRevision",
         "CandidateRuntimeSHA",
         "CandidateTaskAccuracy",
         "Candidates",
@@ -12310,6 +12342,7 @@
         "RefusalPlanContract",
         "RefusalPlanSchema",
         "RemoteDrainCandidate",
+        "RoleCandidate",
         "RunCodeToolsSelfcheck",
         "SetupSeconds",
         "SinkCandidate",
@@ -12339,6 +12372,7 @@
         "buildMainPlan",
         "buildreconciledissueplan",
         "bytes_per_candidate",
+        "candidateData",
         "candidateFingerprint",
         "candidateID",
         "candidateNote",
@@ -12346,10 +12380,12 @@
         "candidateRate",
         "candidateReport",
         "candidate_evaluations",
+        "candidate_mean_tokens_per_second",
         "candidate_requires_auth_relevance",
         "candidatemean",
         "candidates",
         "clonePlan",
+        "compareCandidate",
         "dedupCandidate",
         "defaultsCheckPlanner",
         "dispatchWaveExecutionPlanWithSize",
