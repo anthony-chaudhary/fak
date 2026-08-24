@@ -674,6 +674,29 @@ func dosReasonTokens(dosText string) []string {
 	return out
 }
 
+func queryBackedRefusalRecovery(tokens []string, dosText, recoveryText string) []string {
+	if !has(recoveryText, "dos man wedge", "--explain") || !has(recoveryText, "fak recover") {
+		return unmappedRefusalTokens(tokens, recoveryText)
+	}
+	unmapped := []string{}
+	for _, token := range tokens {
+		section := "[reasons." + token + "]"
+		start := strings.Index(dosText, section)
+		if start < 0 {
+			unmapped = append(unmapped, token)
+			continue
+		}
+		end := strings.Index(dosText[start+len(section):], "\n[reasons.")
+		block := dosText[start:]
+		if end >= 0 {
+			block = dosText[start : start+len(section)+end]
+		}
+		if !regexp.MustCompile(`(?m)^summary\s*=`).MatchString(block) || !regexp.MustCompile(`(?m)^fix\s*=`).MatchString(block) {
+			unmapped = append(unmapped, token)
+		}
+	}
+	return unmapped
+}
 func unmappedRefusalTokens(tokens []string, recoveryText string) []string {
 	if recoveryText == "" {
 		return append([]string{}, tokens...)
@@ -1061,7 +1084,7 @@ func kpiPlatformGuidanceConsistent(sellsMake, hasBridge bool) KPI {
 func kpiRefusalRecoveryMapped(unmapped []string, total int) KPI {
 	defects := []string{}
 	for _, t := range unmapped {
-		defects = append(defects, "refusal token an agent will see has no agent-facing recovery: "+t+" — add it to the refusal-recovery table in "+agentsFile+" (token → what it means → how to recover; lift the recovery from the dos.toml [reasons] block)")
+		defects = append(defects, "refusal token has no query-backed recovery: "+t+" — add summary/fix metadata to its dos.toml [reasons] block and keep the AGENTS.md query commands usable")
 	}
 	mapped := total - len(unmapped)
 	score := 100

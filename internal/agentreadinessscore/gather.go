@@ -125,7 +125,7 @@ func gather(root string) ([]KPI, map[string]int) {
 		}
 	}
 	recoveryText := strings.Join(recoveryParts, "\n")
-	unmappedReasons := unmappedRefusalTokens(reasonTokens, recoveryText)
+	unmappedReasons := queryBackedRefusalRecovery(reasonTokens, dosText, recoveryText)
 	qsFound, qsSignal := quickstartSignal(texts)
 	goModText := ""
 	if present(goModFile) {

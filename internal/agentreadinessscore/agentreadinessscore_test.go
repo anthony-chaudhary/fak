@@ -797,6 +797,20 @@ func TestUnmappedRefusalTokensRequiresNearbyRecoveryCue(t *testing.T) {
 	}
 }
 
+func TestQueryBackedRefusalRecoveryRequiresCommandsAndReasonMetadata(t *testing.T) {
+	tokens := []string{"OFF_TRUNK", "MISSING_FIX"}
+	dosText := "[reasons.OFF_TRUNK]\nsummary = \"wrong branch\"\nfix = \"return to main\"\n\n[reasons.MISSING_FIX]\nsummary = \"incomplete\"\n"
+	query := "Run `dos man wedge <TOKEN> --explain` or `fak recover <TOKEN>`."
+	if got := queryBackedRefusalRecovery(tokens, dosText, query); !reflect.DeepEqual(got, []string{"MISSING_FIX"}) {
+		t.Fatalf("query-backed gaps=%v, want [MISSING_FIX]", got)
+	}
+	if got := queryBackedRefusalRecovery([]string{"OFF_TRUNK"}, dosText, "OFF_TRUNK: recover on main"); len(got) != 0 {
+		t.Fatalf("inline fallback unexpectedly unmapped: %v", got)
+	}
+	if got := queryBackedRefusalRecovery([]string{"OFF_TRUNK"}, dosText, "see dos.toml"); !reflect.DeepEqual(got, []string{"OFF_TRUNK"}) {
+		t.Fatalf("broken query contract gaps=%v, want [OFF_TRUNK]", got)
+	}
+}
 func TestRefusalRecoveryMappedKpi(t *testing.T) {
 	clean := kpiRefusalRecoveryMapped(nil, 6)
 	if len(clean.Defects) != 0 || clean.Score != 100 || clean.Group != "build" {
