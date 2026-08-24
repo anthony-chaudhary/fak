@@ -50,6 +50,11 @@
       "lane": "workflow",
       "command": "go test -v ./internal/workflow",
       "output_contains": "TestResumeCorroboratedEffectfulStepIsSkipped"
+    },
+    {
+      "lane": "workerenvelope",
+      "command": "go test -v ./internal/workerenvelope",
+      "output_contains": "TestValidateBlockedAndNotYet"
     }
   ]
 }
