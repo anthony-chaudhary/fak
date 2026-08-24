@@ -290,6 +290,11 @@
       "lane": "tooltrend",
       "command": "go test -v ./internal/tooltrend",
       "output_contains": "TestFoldMoversFirstToLast"
+    },
+    {
+      "lane": "toolshape",
+      "command": "go test -v ./internal/toolshape",
+      "output_contains": "TestResultContractMutationSuite"
     }
   ]
 }
