@@ -25,6 +25,23 @@ Only inspect or modify another repository when the operator explicitly names
 that repository or the FAK task itself has a concrete, evidenced cross-repo
 dependency. If scope is ambiguous, stay in FAK.
 
+## Delegate real work; keep the coordinator context clean
+
+Use guarded headless agents or an equivalent isolated worker for every substantive
+unit of work. The primary agent is the coordinator: decompose the request, give each
+worker a bounded goal and distinct file set, preserve only decisions and compact
+evidence in the primary context, and independently witness worker results before
+landing or reporting them. Delegate investigation, implementation, tests, long command
+output, and independent review; do not pull their full transcripts into the coordinator.
+
+The primary agent may directly perform only lightweight coordination: inspect enough
+state to scope packets, launch and supervise workers, adjudicate conflicts, integrate
+witnessed results, and run the final completion audit. A trivial one-command answer or
+tiny edit may stay local when launching a worker would cost more than the work itself.
+Use FAK's managed launch, lane, lease, detached-worktree, landing, and witness surfaces;
+worker self-reports are not evidence, and delegation does not relax ownership of the
+final result.
+
 ## Native inference performance invariant
 
 For any native-inference or performance task, keep model execution **fak-native all the
@@ -151,6 +168,21 @@ The rule of thumb: reproduce the defect as a captured artifact *first*, then mak
 clean. If you cannot capture it, you cannot prove you fixed it — say `not yet` with the missing
 witness instead of claiming a fix.
 
+## Track work in GitHub before implementation
+
+Use a GitHub issue as the durable tracker for every substantive unit of work whenever
+reasonably possible. Before editing code or docs, changing configuration, or launching an
+implementation worker, search open and closed issues for duplicates, then claim the matching
+issue or create one that states the problem, intended outcome, and witness. Put the issue
+number in worker packets and keep discoveries, scope changes, and follow-ons reconciled there.
+
+Scoping, reproduction, and read-only triage may precede the issue when needed to write an
+honest ticket. Skip advance ticketing only when it would be unreasonable: the request needs no
+repository change, the change is truly trivial and tracking would cost more than the work, an
+urgent safety or outage response must start immediately, or GitHub is unavailable. For urgent
+or offline work, create or reconcile the issue as soon as the constraint clears and record why
+work began first. Do not use plans, TODOs, commit messages, or chat as substitutes when GitHub
+issue tracking is reasonably available.
 ## New work defaults: spine first, then fan out
 
 For every new unit, classify centrality (`Core`, `Enabling`, `Stewardship`, `Peripheral`), run
