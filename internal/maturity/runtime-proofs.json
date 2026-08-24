@@ -215,6 +215,11 @@
       "lane": "turntaxmeter",
       "command": "go test -v ./internal/turntaxmeter",
       "output_contains": "TestOverBudgetSpanReadsBackAsBreach"
+    },
+    {
+      "lane": "turnkind",
+      "command": "go test -v ./internal/turnkind",
+      "output_contains": "TestClassify"
     }
   ]
 }
