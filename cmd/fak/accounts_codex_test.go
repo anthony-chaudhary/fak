@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/accounts"
 )
 
 func TestCodexLaunchPosturePinsHomeInArgvAndChildEnv(t *testing.T) {
@@ -92,4 +94,24 @@ func envHasKey(env []string, key string) bool {
 		}
 	}
 	return false
+}
+
+func TestCodexExplicitNameGuidanceListsOnlyReadyHomes(t *testing.T) {
+	disabled := false
+	homes := []accounts.Home{
+		{Name: "blue", Dir: t.TempDir(), Identity: accounts.Identity{Exists: true, HasCreds: true}},
+		{Name: "red", Dir: t.TempDir(), Enabled: &disabled, Identity: accounts.Identity{Exists: true, HasCreds: true}},
+	}
+	got := codexExplicitNameGuidance(homes)
+	for _, want := range []string{
+		"Codex requires an explicit --name",
+		`ready seat "blue": fak accounts launch --name blue --command codex`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("guidance missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "red") {
+		t.Fatalf("guidance advertised disabled home:\n%s", got)
+	}
 }

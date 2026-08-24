@@ -309,11 +309,11 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		command = "claude"
 	}
 	if guardAgentBaseName(command) == "codex" {
+		reg = appendDiscoveredCodexHomes(reg)
 		if strings.TrimSpace(p.name) == "" || p.rotate {
-			fmt.Fprintln(stderr, "fak accounts launch: Codex requires an explicit --name; default/rotate remain Claude-registry semantics so a launch cannot silently cross CODEX_HOME")
+			fmt.Fprint(stderr, codexExplicitNameGuidance(reg.Homes))
 			return 2
 		}
-		reg = appendDiscoveredCodexHomes(reg)
 	}
 	fixes := accountFixSummary(p.registryPath, reg)
 
