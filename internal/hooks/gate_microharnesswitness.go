@@ -41,6 +41,6 @@ func gateMicroharnessWitness(d *StagedDiff) ([]Finding, error) {
 	return []Finding{{
 		Gate:   "MICROHARNESS_WITNESS",
 		File:   candidates[0],
-		Detail: fmt.Sprintf("bounded harness source changed without a staged test or `%s` receipt; run the focused proof and retain its witness", microharnessWitnessToken),
+		Detail: fmt.Sprintf("MICROHARNESS_UNWITNESSED: bounded harness source changed without a staged test or `%s` receipt; run the focused proof and retain its witness", microharnessWitnessToken),
 	}}, nil
 }

@@ -10,7 +10,7 @@ func TestMicroharnessWitnessPolarity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasFindingFor(got, "MICROHARNESS_WITNESS", "bounded harness source changed") {
+	if !hasFindingFor(got, "MICROHARNESS_WITNESS", "MICROHARNESS_UNWITNESSED") {
 		t.Fatalf("violating findings = %+v", got)
 	}
 

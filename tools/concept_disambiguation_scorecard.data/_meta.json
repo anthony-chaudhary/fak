@@ -6743,6 +6743,11 @@
           "category": "incidental",
           "reason": "CLI success marker emitted when a report is written, not a new witness or proof mechanism.",
           "token": "STATE_TRANSITION_WITNESS_WRITTEN"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed recovery reason emitted by the microharness witness advisory, not a distinct witness or proof mechanism.",
+          "token": "MICROHARNESS_UNWITNESSED"
         }
       ],
       "id": "witness-proof",
@@ -6762,6 +6767,7 @@
         "HonestyDoneNotWitnessed",
         "HonestyWrongWitness",
         "IngestResult",
+        "MICROHARNESS_UNWITNESSED",
         "MotifCatalogReproduceFixWitness",
         "NewTreeWitness",
         "OutcomeEvidence",
