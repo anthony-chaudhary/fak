@@ -60,7 +60,11 @@
       "lane": "witness",
       "command": "go test -v ./internal/witness",
       "output_contains": "TestExecutionWitnessPassesOnlyOnRedToGreenWithStablePassToPass"
+    },
+    {
+      "lane": "workerworktree",
+      "command": "go test -v ./internal/workerworktree -run TestInventory",
+      "output_contains": "TestInventoryLandReadyIsReadOnlyAndExact"
     }
   ]
 }
-
