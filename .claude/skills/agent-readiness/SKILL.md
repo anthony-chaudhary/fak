@@ -22,8 +22,9 @@ There are **two headline numbers**, because agent-readiness is two questions:
 
 - **friction-debt** (the BASELINE gate, lower = better, floor 0): the count of
   concrete, re-derivable defects that make the expected affordances missing or
-  broken. It **saturates** — drive it to zero and there is nothing left to fix. The
-  shipped tree is at **0 / grade A**; this pass keeps it there.
+  broken. Zero means the current metric version detects none in the current corpus;
+  keep discovering new failure classes rather than treating the ledger as complete. The
+  shipped tree currently reads **0 / grade A** for that named detector.
 - **experience-frontier** (the HEADLINE, higher = better, **unbounded**): the
   weighted count of real, working agent affordances the tree actually provides — an
   integration recipe an agent follows, a zero-setup harness config, a kernel refusal
@@ -68,7 +69,7 @@ Twenty KPIs, each 0–100, grouped by the step they gate. Retire worst-step-firs
 (the scorecard names the weakest step in `group_scores`). The **presence** KPIs ask
 *does the affordance exist*; the **paste-and-run / executable-truth** KPIs ask the
 question presence can't reach — *does an agent who pastes the docs actually succeed*
-(a saturated presence-only score reads 100 while a cold agent still trips on a stale
+(a bounded presence-only score can read 100 while a cold agent still trips on a stale
 `cd fleet/fak`, a `/path/to/…` placeholder, or a `fak <verb>` the binary never dispatches).
 
 | Step | KPI | The affordance to add when it's red |

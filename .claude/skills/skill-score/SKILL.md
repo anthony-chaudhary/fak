@@ -100,9 +100,10 @@ Regenerate the committed snapshot so the doc matches the tree (Bash `>` for UTF-
 go run ./cmd/fak skill-effectiveness-scorecard --markdown > docs/SKILL-EFFECTIVENESS-SCORECARD.md
 ```
 
-If a surface SATURATES (skill-debt 0, grade A), harden the bar
-per [`/score-2x`](../score-2x/SKILL.md) Step 4 — tighten `DESC_MIN_CHARS`, lower
-`CONTEXT_SOFT_MAX`, or promote a SOFT KPI to HARD — then re-pin the control pane.
+If the current metric version reports skill-debt 0 / grade A, audit discovery and
+extend the bar per [`/score-2x`](../score-2x/SKILL.md) Step 4 — tighten
+`DESC_MIN_CHARS`, lower `CONTEXT_SOFT_MAX`, or promote a SOFT KPI to HARD — then
+version and re-pin the control pane. Zero is a current observation, not a completed ledger.
 
 ## Step 4 — Commit ONLY the skill lane, by explicit path
 

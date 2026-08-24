@@ -55,9 +55,10 @@ structural reason the loop cannot optimise itself into dishonesty - do not weake
    belief-code bug to escalate (a bug in the lever's projection, never a claim swap); a
    REPROJECT routes an agent patch constrained to declared paths; a HARVEST files a goal-gated
    issue with the board row + corpus evidence. The pure loop never auto-lands these.
-7. **Trend + stop saturated** - `fak dojo-rsi trend` folds the committed
-   `docs/dojo/rsi-journal.jsonl` into the KEEP/REVERT/ESCALATE rollup. A freshly-touched cell
-   is marked saturated so a `fak dojo-rsi loop` stops rather than thrashing the same row.
+7. **Trend + cadence stop** - `fak dojo-rsi trend` folds the committed
+   `docs/dojo/rsi-journal.jsonl` into the KEEP/REVERT/ESCALATE rollup. A freshly touched cell
+   enters cooldown so `fak dojo-rsi loop` stops thrashing the same row; cooldown limits
+   repeated action, not the unbounded discovery ledger.
 8. **Commit only the dojo lane, by explicit path** - the claim literal (and its pinned-claim
    test, when an honest recalibration updates it), the lever/registry change, the doc, this
    skill. Never `git add -A`. End the subject with `(fak dojo)` or `(fak dojocal)`.
