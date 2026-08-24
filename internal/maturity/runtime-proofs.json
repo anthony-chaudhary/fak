@@ -155,6 +155,11 @@
       "lane": "vcachescore",
       "command": "go test -v ./internal/vcachescore",
       "output_contains": "TestDefaultReadinessPassesWithWitnessedPlanes"
+    },
+    {
+      "lane": "vcacheqa",
+      "command": "go test -v ./internal/vcacheqa",
+      "output_contains": "TestDogfood_RealGuardAuditJournalVerifies"
     }
   ]
 }
