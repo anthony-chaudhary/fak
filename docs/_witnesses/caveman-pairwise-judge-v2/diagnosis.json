@@ -1,0 +1,270 @@
+{
+  "schema": "caveman-pairwise-diagnosis/1",
+  "v1_receipt_sha256": "7b7f3801daf3f4be5e94aa0af50666eec9c25ed1cd265a7bb178db39aefbef87",
+  "count": 14,
+  "flips": [
+    {
+      "pair_id": "async-refactor/1/normal-vs-native_medium",
+      "comparison": "normal-vs-native_medium",
+      "classification": "output_truncation",
+      "verdicts": [
+        "missing",
+        "tie"
+      ],
+      "evidence": [
+        "Both responses correctly convert callback errors into rejected promises and preserve the original \"Not found\" behavior.",
+        "Both async functions resolve with rows[0] and show appropriate try/catch usage.",
+        "Response A wraps the callback API explicitly; Response B validly uses util.promisify and preserves db as the query method's this value.",
+        "Response B appropriately notes that a native promise-based database API is preferable when available."
+      ]
+    },
+    {
+      "pair_id": "docker-multi-stage/3/normal-vs-native_medium",
+      "comparison": "normal-vs-native_medium",
+      "classification": "tie_boundary_ambiguity",
+      "verdicts": [
+        "A",
+        "tie"
+      ],
+      "evidence": [
+        "Both responses provide valid multi-stage Node.js Alpine builds with separate compilation, production dependency, and non-root runtime stages.",
+        "Response A copies the complete build context after dependency installation, making it more robust for TypeScript projects that require configuration files, generated sources, schemas, or build-time assets beyond src and tsconfig files.",
+        "Response B copies only tsconfig*.json and src into its build stage; npm run build can therefore fail for projects whose build requires other project files, and this additional limitation is not stated among its assumptions.",
+        "Both use npm ci, install only production dependencies in the runtime dependency tree, copy compiled dist output, and recommend a .dockerignore.",
+        "Both use separate build, production-dependency, and Alpine runtime stages, compiling TypeScript before copying only dist and production dependencies into the final image.",
+        "Both use npm ci with a committed package-lock.json, omit development dependencies at runtime, and run as the non-root node user.",
+        "Response A adds a BuildKit npm cache mount and more selective build-context copies; Response B uses COPY . for broader compatibility with projects needing additional build files.",
+        "Both clearly state assumptions about dist output and the dist/index.js entry point and recommend an appropriate .dockerignore."
+      ]
+    },
+    {
+      "pair_id": "postgres-pool/3/normal-vs-native_medium",
+      "comparison": "normal-vs-native_medium",
+      "classification": "tie_boundary_ambiguity",
+      "verdicts": [
+        "A",
+        "tie"
+      ],
+      "evidence": [
+        "Both responses correctly configure pg.Pool with acquisition, idle, server-side statement, and client-side query timeouts, plus an idle-client error handler and graceful shutdown.",
+        "Response A handles rollback failure more robustly by calling client.release(rollbackError), destroying a potentially unusable connection instead of returning it to the pool.",
+        "Response B logs rollback failure but then unconditionally calls client.release() in finally, which can return a potentially broken client to the pool.",
+        "Response A also validates numeric environment variables with fallbacks, whereas Response B's direct Number(...) conversions can yield NaN for malformed values.",
+        "Both correctly configure pg.Pool with acquisition, idle, server-side statement, and client-side query timeouts.",
+        "Both attach the required pool error listener, parameterize SQL, release transaction clients in finally, and discuss safe pool sizing and retries.",
+        "B more defensively destroys a client when rollback fails; A more explicitly advises stopping HTTP request acceptance before pool.end().",
+        "Both provide complete, directly usable setup and graceful-shutdown examples without unjustified abstention."
+      ]
+    },
+    {
+      "pair_id": "race-condition-debug/1/normal-vs-native_medium",
+      "comparison": "normal-vs-native_medium",
+      "classification": "tie_boundary_ambiguity",
+      "verdicts": [
+        "tie",
+        "A"
+      ],
+      "evidence": [
+        "Both correctly identify the read-then-write race and fix it with atomic `UPDATE ... SET value = value + 1 ... RETURNING value`.",
+        "Both accurately explain PostgreSQL row-level serialization, handle missing rows, provide an atomic upsert, and require a unique or primary-key constraint.",
+        "Both correctly show that multi-statement work must use a transaction on one checked-out `pg` client.",
+        "A additionally mentions `SELECT ... FOR UPDATE`; B adds valid guidance on sequences, gaps, retries, and idempotency. These are useful but do not create a material quality difference.",
+        "Both correctly recommend atomic `UPDATE ... SET value = value + 1 RETURNING value`, which serializes concurrent updates to the same row.",
+        "Both correctly provide an atomic upsert and require a unique or primary-key constraint for `ON CONFLICT`.",
+        "A correctly emphasizes using one checked-out client for transactions and additionally covers sequences, gaps, and retry idempotency.",
+        "B defines the counter as `bigint` but converts the returned value with `Number(...)`; values beyond JavaScript's safe-integer range can lose precision and even make distinct database values appear identical.",
+        "A leaves PostgreSQL `bigint` values in the precision-preserving representation returned by `pg`."
+      ]
+    },
+    {
+      "pair_id": "react-rerender/1/normal-vs-native_medium",
+      "comparison": "normal-vs-native_medium",
+      "classification": "tie_boundary_ambiguity",
+      "verdicts": [
+        "B",
+        "tie"
+      ],
+      "evidence": [
+        "Response B more precisely explains that children normally render when their parent renders, regardless of apparent prop equality, and that object identity specifically affects React.memo's shallow comparison.",
+        "Response A's broad statement that React compares props by reference is potentially misleading for an unmemoized child, although it later correctly clarifies React.memo behavior.",
+        "Both responses correctly recommend React.memo with stable object identity via useMemo, passing primitives where practical, and accounting for arrays, functions, state, context, and StrictMode.",
+        "Both correctly explain that ordinary child components re-render with their parent and that newly created object props have unstable reference identity.",
+        "Both correctly combine React.memo with useMemo, while noting that useMemo alone does not prevent a child render.",
+        "Both offer sound alternatives such as passing primitives and address unstable arrays/functions and development Strict Mode behavior.",
+        "Response A is slightly more precise in stating that shallow prop comparison specifically matters with React.memo, while Response B supplies equivalent clarification later."
+      ]
+    },
+    {
+      "pair_id": "auth-middleware-fix/1/normal-vs-caveman",
+      "comparison": "normal-vs-caveman",
+      "classification": "tie_boundary_ambiguity",
+      "verdicts": [
+        "B",
+        "tie"
+      ],
+      "evidence": [
+        "Both correctly explain that JWT `exp` is in seconds while `Date.now()` is in milliseconds, and provide valid equivalent comparisons.",
+        "Both appropriately recommend `jwt.verify()` rather than `jwt.decode()` and show signature/expiry verification with an algorithm allowlist.",
+        "B is more complete: it also identifies the common token-issuance error of storing milliseconds in `exp`, checks related middleware pitfalls, and explains that `exp` is optional unless explicitly required.",
+        "A's statement that a direct unit-mismatched comparison means expired tokens may pass is directionally incomplete: with the shown rejection comparison, milliseconds versus seconds would generally make even unexpired tokens appear expired; the exact symptom depends on how the comparison or claim creation is implemented.",
+        "Both correctly identify the seconds-versus-milliseconds mismatch and use the correct rejection boundary: Date.now() >= payload.exp * 1000.",
+        "Both appropriately recommend jwt.verify() rather than jwt.decode(), with automatic expiration and signature validation.",
+        "Both provide safe Express middleware examples that return 401 responses for expired or invalid tokens.",
+        "Response A adds correct useful checks about millisecond-valued exp claims, ignoreExpiration, control flow after a 401, and requiring exp when application policy demands it; these additions do not create a material overall advantage."
+      ]
+    },
+    {
+      "pair_id": "auth-middleware-fix/3/normal-vs-caveman",
+      "comparison": "normal-vs-caveman",
+      "classification": "tie_boundary_ambiguity",
+      "verdicts": [
+        "B",
+        "tie"
+      ],
+      "evidence": [
+        "Both correctly identify the milliseconds-versus-seconds mismatch, use `>=`, and recommend `jwt.verify()` rather than `jwt.decode()`.",
+        "B more directly reconciles the reported symptom: an unconverted `Date.now()` would normally reject valid tokens, so expired tokens passing suggests a reversed comparison, missing `return`, unconditional `next()`, or disabled expiration checking.",
+        "B also provides the alternative millisecond conversion and calls out `ignoreExpiration`, algorithm restrictions, issuer, and audience validation.",
+        "Both correctly identify the seconds-versus-milliseconds mismatch and provide the correct manual comparison using Math.floor(Date.now() / 1000) and >= payload.exp.",
+        "Both appropriately recommend jwt.verify() rather than jwt.decode() and return 401 responses for expired or invalid tokens.",
+        "Response A adds useful hardening details such as restricting algorithms, checking issuer/audience, avoiding ignoreExpiration, and noting that a direct unit mismatch would normally reject valid tokens rather than let expired ones through.",
+        "Response B is slightly more concise but still fully answers what is wrong and how to fix it without a substantive quality deficit."
+      ]
+    },
+    {
+      "pair_id": "docker-multi-stage/1/normal-vs-caveman",
+      "comparison": "normal-vs-caveman",
+      "classification": "tie_boundary_ambiguity",
+      "verdicts": [
+        "tie",
+        "A"
+      ],
+      "evidence": [
+        "Both provide valid multi-stage Alpine-based Dockerfiles that install development dependencies for TypeScript compilation and copy only compiled output plus production dependencies into the runtime image.",
+        "A obtains production dependencies by pruning dev dependencies after the build; B installs them independently with `npm ci --omit=dev`. Both approaches are sound.",
+        "Both set `NODE_ENV=production`, run as the non-root `node` user, use lockfile-based installs, and include suitable `.dockerignore` guidance.",
+        "B omits the lockfile from the final image and mentions Alpine native-module compatibility, while A supports multiple `tsconfig` files; these are minor differences without a material overall quality advantage.",
+        "Both responses correctly use multi-stage Alpine-based Node images, install dev dependencies for TypeScript compilation, copy compiled output, and run as a non-root user.",
+        "A uses a dedicated production-dependency stage with `npm ci --omit=dev`, yielding a clean production install rather than installing and then pruning dependencies.",
+        "A omits `package-lock.json` from the runtime image, while B copies it despite it not being needed to run the application, making A marginally better aligned with minimizing final image size.",
+        "Both clearly state assumptions about the compiled entry point and provide an appropriate `.dockerignore`; A additionally notes Alpine native-module compatibility concerns."
+      ]
+    },
+    {
+      "pair_id": "error-boundary/1/normal-vs-caveman",
+      "comparison": "normal-vs-caveman",
+      "classification": "tie_boundary_ambiguity",
+      "verdicts": [
+        "A",
+        "tie"
+      ],
+      "evidence": [
+        "Both implementations correctly use getDerivedStateFromError and componentDidCatch, render a retry fallback, remount the child subtree, and log error details.",
+        "Response A provides a user-safe generic fallback, while Response B displays error.message directly, which can expose internal or sensitive implementation details.",
+        "Response A additionally supports an onRetry hook and includes stronger fallback accessibility with aria-live=\"assertive\".",
+        "Both accurately describe the main classes of errors that React error boundaries do and do not catch.",
+        "Both use getDerivedStateFromError and componentDidCatch to catch descendant render/lifecycle errors and store the failure in state.",
+        "Both provide an accessible fallback UI with a retry button that clears the error and remounts the child subtree via a changed key.",
+        "Both log the error and React component stack and support optional external error reporting through onError.",
+        "Both accurately state the major limitations of React error boundaries; B adds an optional onRetry hook, while A displays the error message, neither creating a material quality advantage."
+      ]
+    },
+    {
+      "pair_id": "error-boundary/3/normal-vs-caveman",
+      "comparison": "normal-vs-caveman",
+      "classification": "tie_boundary_ambiguity",
+      "verdicts": [
+        "tie",
+        "A"
+      ],
+      "evidence": [
+        "Both implementations use the standard class-component error-boundary APIs, render a default fallback with a Retry button, clear the error state on retry, and log error plus component-stack details.",
+        "Both correctly explain that boundaries catch descendant render, constructor, and lifecycle errors but not event-handler, asynchronous, SSR, or boundary-own errors.",
+        "Both provide TypeScript usage examples and support custom fallback and logging behavior.",
+        "B additionally guards against errors thrown by a custom logging callback, while A’s custom fallback API always receives the error and retry callback; these are minor, offsetting differences.",
+        "Both responses correctly use a class component with getDerivedStateFromError and componentDidCatch, provide a retry fallback, log error details, and remount children via a changed key.",
+        "Response A is more robust because it tracks hasError separately from the error object's truthiness and catches exceptions thrown by the optional reporting callback.",
+        "Response A also supports both default and custom fallbacks and clearly documents the categories of errors React boundaries do and do not catch.",
+        "Response B is otherwise correct, but an exception from logError can escape componentDidCatch and cause the boundary itself to fail."
+      ]
+    },
+    {
+      "pair_id": "git-rebase-merge/1/normal-vs-caveman",
+      "comparison": "normal-vs-caveman",
+      "classification": "tie_boundary_ambiguity",
+      "verdicts": [
+        "B",
+        "tie"
+      ],
+      "evidence": [
+        "Both responses accurately explain history preservation versus commit replay, shared-branch risks, conflict behavior, and appropriate use cases.",
+        "Response A’s merge diagram leaves `main` at `C` and `feature` at `E` after showing merge commit `M`, despite its command merging `feature` into `main`; the branch pointer should move to `M`.",
+        "Response B’s examples consistently match the branch on which each merge command runs and explicitly covers fast-forward behavior.",
+        "Both correctly recommend `--force-with-lease` and warn that it still does not eliminate disruption to collaborators.",
+        "Both accurately explain that merge preserves existing commits and branch topology, while rebase replays commits with new hashes to create a linear history.",
+        "Both provide appropriate guidance to merge shared history and rebase private or coordinated history, including the risks of force-pushing.",
+        "Response A more clearly covers fast-forward behavior, `--no-ff`, squash merging, and the limits of `--force-with-lease`.",
+        "Response B's merge diagram labels `main` at C after running `git switch main; git merge feature`; after a divergent merge, `main` should point to merge commit M, though the surrounding explanation is correct.",
+        "Both fully address when to use each operation and their collaboration, conflict-resolution, readability, and history tradeoffs."
+      ]
+    },
+    {
+      "pair_id": "postgres-pool/3/normal-vs-caveman",
+      "comparison": "normal-vs-caveman",
+      "classification": "tie_boundary_ambiguity",
+      "verdicts": [
+        "tie",
+        "A"
+      ],
+      "evidence": [
+        "Both correctly create and reuse a `pg` Pool with connection-acquisition, idle, server-side statement, and client-side query timeouts.",
+        "Both attach a pool-level `error` listener, parameterize SQL, release transaction clients in `finally`, attempt rollback, and close the pool during graceful shutdown.",
+        "A adds useful lock and idle-transaction timeouts plus a reusable transaction wrapper; B adds environment parsing, rollback-failure connection destruction, and a bounded shutdown procedure.",
+        "Both accurately explain per-process pool sizing and recommend validated TLS rather than disabling certificate verification in production.",
+        "Neither response contains a material factual, safety, or instruction-following defect.",
+        "A correctly states that the pool's `max` applies per Node.js process; B incorrectly describes `max` as the size across all application instances.",
+        "A handles rollback failure by calling `client.release(rollbackError)` so a potentially broken connection is destroyed; B logs the rollback failure and then releases that client normally.",
+        "Both responses provide usable `pg` pool configuration, server- and client-side query timeouts, idle-client error listeners, parameterized queries, transaction examples, and graceful shutdown guidance.",
+        "A more precisely explains that `connectionTimeoutMillis` also bounds waiting to acquire a pooled connection, whereas B describes it only as an establishment timeout."
+      ]
+    },
+    {
+      "pair_id": "race-condition-debug/1/normal-vs-caveman",
+      "comparison": "normal-vs-caveman",
+      "classification": "tie_boundary_ambiguity",
+      "verdicts": [
+        "tie",
+        "A"
+      ],
+      "evidence": [
+        "Both correctly identify the read-modify-write race and recommend atomic `UPDATE ... SET value = value + 1 RETURNING value`.",
+        "Both correctly explain PostgreSQL row-level serialization, handle missing rows, provide an atomic upsert, and note the required uniqueness constraint.",
+        "A gives a sound same-client transaction pattern; B also correctly shows `SELECT ... FOR UPDATE` and warns against reading the returned value from a lagging replica.",
+        "A converts a declared `bigint` counter to JavaScript `Number`, which can lose precision above `Number.MAX_SAFE_INTEGER`; B's locked read-modify-write example may concatenate rather than add if `pg` returns the counter as a string, as it does for `bigint`.",
+        "Both correctly replace the read-modify-write race with atomic `UPDATE ... SET value = value + 1 RETURNING value`.",
+        "Both correctly explain PostgreSQL row-level serialization and provide atomic upsert and transaction alternatives.",
+        "Response B defines the counter as `bigint` but converts the returned value with `Number(...)`; values beyond JavaScript's safe-integer range can lose precision and even make distinct increments appear identical.",
+        "Response A avoids that precision-loss conversion and additionally warns against reading the returned counter from a lagging replica."
+      ]
+    },
+    {
+      "pair_id": "react-rerender/2/normal-vs-caveman",
+      "comparison": "normal-vs-caveman",
+      "classification": "tie_boundary_ambiguity",
+      "verdicts": [
+        "B",
+        "tie"
+      ],
+      "evidence": [
+        "Both correctly identify that an inline object gets a new reference on each parent render and recommend combining React.memo with useMemo.",
+        "Response B more precisely explains that ordinary children re-render when the parent renders, while React.memo performs the shallow prop comparison; A's broad statement that React compares props by reference is less carefully qualified.",
+        "Response B correctly notes that useMemo alone does not prevent child rendering and offers passing primitives as an alternative.",
+        "Both correctly mention dependency arrays, context or own-state updates, and development Strict Mode behavior.",
+        "Both correctly identify that an inline object gets a new reference on each parent render.",
+        "Both correctly recommend combining a stable object via useMemo with React.memo to allow the child render to be skipped.",
+        "Both mention dependencies for memoized objects, parent and context updates, and development Strict Mode behavior.",
+        "Response A adds accurate nuance about shallow comparison, own-state updates, primitive props, and function references, but Response B still fully answers the question."
+      ]
+    }
+  ]
+}

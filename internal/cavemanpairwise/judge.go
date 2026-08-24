@@ -191,6 +191,14 @@ func ParseJudgment(s string) (*Judgment, error) {
 	return &j, nil
 }
 func (c Client) Judge(ctx context.Context, prompt, a, b string) (CallResult, error) {
+	return c.judge(ctx, SystemPrompt, Rubric, prompt, a, b)
+}
+
+func (c Client) JudgeV2(ctx context.Context, prompt, a, b string) (CallResult, error) {
+	return c.judge(ctx, SystemPromptV2, RubricV2, prompt, a, b)
+}
+
+func (c Client) judge(ctx context.Context, systemPrompt, rubric, prompt, a, b string) (CallResult, error) {
 	payload := map[string]any{"model": c.Model, "temperature": 0, "response_format": map[string]string{"type": "json_object"}, "messages": []map[string]string{{"role": "system", "content": SystemPrompt + "\nRUBRIC: " + Rubric}, {"role": "user", "content": "PROMPT:\n" + prompt + "\n\nRESPONSE A:\n" + a + "\n\nRESPONSE B:\n" + b}}}
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(c.BaseURL, "/")+"/chat/completions", bytes.NewReader(body))

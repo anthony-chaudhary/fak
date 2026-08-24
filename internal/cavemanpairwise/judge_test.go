@@ -222,3 +222,100 @@ func TestProviderRequestBlindsArmMetadata(t *testing.T) {
 		}
 	}
 }
+
+func TestDiagnoseV1AccountsForFrozenFlips(t *testing.T) {
+	b, err := os.ReadFile("../../docs/_witnesses/caveman-pairwise-judge/receipt.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := DiagnoseV1(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Count != 14 || len(d.Flips) != 14 {
+		t.Fatalf("count=%d flips=%d", d.Count, len(d.Flips))
+	}
+	seen := map[string]bool{}
+	for _, f := range d.Flips {
+		if f.PairID == "" || f.Comparison == "" || f.Classification == "" || len(f.Verdicts) != 2 {
+			t.Fatalf("incomplete diagnosis: %+v", f)
+		}
+		if seen[f.PairID] {
+			t.Fatalf("duplicate %s", f.PairID)
+		}
+		seen[f.PairID] = true
+	}
+	if d.Flips[0].Classification != "output_truncation" {
+		t.Fatalf("first classification=%s", d.Flips[0].Classification)
+	}
+	for _, f := range d.Flips[1:] {
+		if f.Classification != "tie_boundary_ambiguity" {
+			t.Fatalf("%s classification=%s", f.PairID, f.Classification)
+		}
+	}
+}
+
+func TestDiagnoseV1RejectsChangedReceipt(t *testing.T) {
+	b, err := os.ReadFile("../../docs/_witnesses/caveman-pairwise-judge/receipt.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b = append([]byte(nil), b...)
+	b[0] ^= 1
+	if _, err := DiagnoseV1(b); err == nil {
+		t.Fatal("changed receipt accepted")
+	}
+}
+
+func TestAggregateV2TieMarginAndConflict(t *testing.T) {
+	j := &Judgment{Scores: map[string]Scores{}}
+	for _, c := range Criteria {
+		j.Scores[c] = Scores{A: 4, B: 4}
+	}
+	j.Scores[Criteria[0]] = Scores{A: 4, B: 3}
+	if got := aggregateV2(j); got != "tie" {
+		t.Fatalf("margin one=%s", got)
+	}
+	j.Scores[Criteria[1]] = Scores{A: 4, B: 3}
+	if got := aggregateV2(j); got != "A" {
+		t.Fatalf("margin two=%s", got)
+	}
+	j.Scores[Criteria[2]] = Scores{A: 2, B: 4}
+	j.Scores[Criteria[3]] = Scores{A: 4, B: 3}
+	j.Scores[Criteria[4]] = Scores{A: 4, B: 3}
+	if got := aggregateV2(j); got != "uncertain" {
+		t.Fatalf("criterion conflict=%s", got)
+	}
+}
+
+func TestMajorityV2RequiresSameOrderRepeatability(t *testing.T) {
+	if got, stable := majorityV2([]string{"tie", "tie", "tie"}); got != "tie" || !stable {
+		t.Fatalf("got=%s stable=%v", got, stable)
+	}
+	if _, stable := majorityV2([]string{"A", "A", "tie"}); stable {
+		t.Fatal("non-repeatable group marked stable")
+	}
+}
+
+func TestRunV2DoesNotApplyWhenHeldOutCalibrationFails(t *testing.T) {
+	v1, err := os.ReadFile("../../docs/_witnesses/caveman-pairwise-judge/receipt.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := []byte(`{"schema":"held-out/2","cases":[{"ID":"one","Prompt":"p","A":"a","B":"b","Expected":"A"}]}`)
+	source := []byte(`{"Schema":"wrong"}`)
+	prompts := []byte(`{"version":1,"prompts":[]}`)
+	r, err := RunV2(context.Background(), Client{}, source, prompts, fixture, v1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Calibration.Pass || r.Application.Attempted || len(r.Application.Pairs) != 0 {
+		t.Fatalf("failed calibration leaked into application: %+v", r.Application)
+	}
+	if r.TokenEligible || r.TokenVerdict == "" {
+		t.Fatal("token suppression missing")
+	}
+	if r.PriorProtocol.ReceiptSHA256 != FrozenV1ReceiptSHA {
+		t.Fatal("v1 outcome not bound")
+	}
+}

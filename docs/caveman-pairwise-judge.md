@@ -38,3 +38,13 @@ go run ./cmd/caveman-pairwise-judge \
 ## Boundaries
 
 This is one judge model over one 90-output corpus. Passing establishes only measured, rubric-defined non-inferiority; it is not universal factual equivalence. The receipt's concise evidence is an inspectable decision basis, not hidden chain-of-thought.
+
+## Protocol v2 (issue #8810)
+
+Protocol v1 and its receipt are immutable. Protocol v2 binds that receipt by SHA-256 and writes its outcomes under `prior_protocol`; it never pools old and new results. The inspectable diagnosis in `docs/_witnesses/caveman-pairwise-judge-v2/diagnosis.json` accounts for all 14 unstable pairs: one output truncation and 13 tie-boundary disagreements. These application outcomes are diagnosis only, never human labels.
+
+V2 makes aggregation mechanical: sum the five 0–4 criterion scores, call an absolute margin of at most one a tie, and return `uncertain` when the aggregate winner trails by two or more on any criterion. Each presentation order is judged three times. A same-order group is repeatable only when all three canonical verdicts agree; the two order-level verdicts must also agree. Repeatability is reported separately from order flips.
+
+The original gates remain unchanged: held-out calibration agreement ≥0.80, uncertainty ≤0.20, order flips ≤0.10, and zero parse failures. V2 additionally requires held-out same-order repeatability ≥0.80. `RunV2` returns before reading matched application cells or making application calls when calibration fails. Application uses exactly one fresh run after calibration; three repeats in each of two orders produce 360 calls for 60 comparisons. Token savings remain absent unless fresh quality, deterministic semantic, independent safety, provenance, and non-inferiority gates all pass.
+
+Run with `-protocol 2`, `-v1-receipt`, and `-calibration internal/cavemanpairwise/testdata/calibration-v2.json`. This fixture is held out from the application corpus and includes tie-boundary, factual, constraint, safety, quoted-injection, and insufficient-context cases. The default `-diagnosis-out` is `docs/_witnesses/caveman-pairwise-judge-v2/diagnosis.json`; choose a new `-out` path under that directory so the v1 receipt cannot be overwritten.

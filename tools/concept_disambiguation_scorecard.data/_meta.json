@@ -3227,11 +3227,17 @@
           "category": "false-positive",
           "reason": "Decoded upstream receipt field, not a guard or gate implementation",
           "token": "SafetyGatePass"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Mechanical pairwise score aggregation helper, not a guard or gate primitive",
+          "token": "aggregateV2"
         }
       ],
       "exclude": [
         "SafetyGatePass",
         "aggregat",
+        "aggregateV2",
         "delegat",
         "deterministic_gates",
         "gateway",
