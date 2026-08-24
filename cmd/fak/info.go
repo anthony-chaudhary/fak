@@ -821,14 +821,20 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 			// cleanly. LIFO order on return: disable mouse + focus reporting, restore the cooked
 			// stdin, then (the existing) trailing newline if a frame is parked. Registered after
 			// `defer stop()` so it runs first.
-			defer func() {
-				writeMouseDisable(stdout)
-				writeFocusDisable(stdout)
+			restoreInfoInput, inputErr := prepareInfoTerminalInput(int(os.Stdin.Fd()))
+			if inputErr != nil {
 				_ = term.Restore(int(os.Stdin.Fd()), oldState)
-			}()
-			writeFocusEnable(stdout)
-			writeMouseEnable(stdout)
-			keyCh = startGuardInfoInputReader(os.Stdin, stop)
+			} else {
+				defer func() {
+					writeMouseDisable(stdout)
+					writeFocusDisable(stdout)
+					restoreInfoInput()
+					_ = term.Restore(int(os.Stdin.Fd()), oldState)
+				}()
+				writeFocusEnable(stdout)
+				writeMouseEnable(stdout)
+				keyCh = startGuardInfoInputReader(os.Stdin, stop)
+			}
 			// Seed the watcher with the geometry this overlay is ABOUT to paint at, so a startup
 			// measure that was already wrong (a pane sampled before its host finished laying the
 			// split out) fires a repaint on the first poll instead of being mistaken for the
