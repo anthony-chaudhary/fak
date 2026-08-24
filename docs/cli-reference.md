@@ -236,6 +236,19 @@ long completions are no longer truncated.) Full walkthrough (Tiers 0–2):
 > 1-shot kernel deletes. The `fak agent` verb still drives the **live** turn-count A/B
 > (real Gemini + local Qwen2.5, transcript-hashed) — see `LIVE-RESULTS.md`.
 
+### Live dashboards
+
+The default listener serves a lightweight live dashboard at [http://127.0.0.1:8080/](http://127.0.0.1:8080/). It polls `/healthz` and `/metrics` every five seconds and keeps its last good values through a failed refresh.
+
+**Rich dashboards are lazy.** Selecting one shows startup progress, reuses a healthy Grafana at `http://localhost:3000`, or starts the bundled `tools/grafana/docker-compose.yml` stack on demand. Once Grafana is ready, the same route redirects to the selected dashboard. No Docker or Grafana probe runs before the first click.
+
+Environment controls:
+
+- `FAK_GRAFANA_URL=https://grafana.example` reuses an existing HTTP(S) Grafana endpoint instead of Docker.
+- `FAK_GRAFANA_COMPOSE=/path/to/docker-compose.yml` selects a Compose bundle for on-demand startup.
+- `FAK_DASHBOARDS=off` disables only Rich dashboards; the lightweight live dashboard stays available.
+
+The gateway stops only a Compose stack it started itself. Missing Docker, missing bundle files, startup errors, readiness timeout, and unsafe URLs render an actionable failure page instead of silently changing behavior.
 ## Syscall subsystem check — useful, not the headline KPI (call-mix-independent)
 
 `fak bench --suite tau2-smoke` replays a frozen tool-call trace through the one

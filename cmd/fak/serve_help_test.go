@@ -12,7 +12,7 @@ func TestServeHelpDefaultsToCategories(t *testing.T) {
 	var out bytes.Buffer
 	printServeHelp(&out, fs, "")
 	got := out.String()
-	for _, want := range []string{"fak serve help <category>", "start", "native", "context", "help all"} {
+	for _, want := range []string{"fak serve help <category>", "start", "native", "context", "help all", "live dashboard at http://127.0.0.1:8080/", "Rich dashboards start on first click"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("compact help missing %q:\n%s", want, got)
 		}

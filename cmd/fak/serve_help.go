@@ -100,7 +100,7 @@ func printServeHelp(w io.Writer, fs *flag.FlagSet, topic string) {
 	fmt.Fprintln(w, "Usage: fak serve [flags]")
 	fmt.Fprintln(w, "       fak serve help <category>")
 	fmt.Fprintln(w, "       fak serve <category> --help")
-	fmt.Fprintln(w, "\nStart the model gateway. Help is grouped by operator task:")
+	fmt.Fprintln(w, "\nStart the model gateway. The default listener serves a live dashboard at http://127.0.0.1:8080/; Rich dashboards start on first click. Help is grouped by operator task:")
 	for _, category := range serveHelpCategories {
 		fmt.Fprintf(w, "  %-9s %s\n", category.name, category.summary)
 	}
