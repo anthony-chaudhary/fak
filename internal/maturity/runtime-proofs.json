@@ -225,6 +225,11 @@
       "lane": "turnbench",
       "command": "go test -v ./internal/turnbench -run TestPolicyReplay",
       "output_contains": "TestPolicyReplay_ConcurrentEqualsSerial"
+    },
+    {
+      "lane": "tuiplugin",
+      "command": "go test -v ./internal/tuiplugin",
+      "output_contains": "TestLookupRunnerExecutes"
     }
   ]
 }
