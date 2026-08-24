@@ -230,6 +230,11 @@
       "lane": "tuiplugin",
       "command": "go test -v ./internal/tuiplugin",
       "output_contains": "TestLookupRunnerExecutes"
+    },
+    {
+      "lane": "trunkbuildprobe",
+      "command": "go test -v ./internal/trunkbuildprobe",
+      "output_contains": "TestDiagnoseBuildBrokenCoherence"
     }
   ]
 }
