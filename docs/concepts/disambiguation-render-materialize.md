@@ -24,3 +24,9 @@ This map positions the current `render-materialize` coverage backlog. Each entry
 - **`renderundeclaredleafreason`** — the exact `render-materialize` symbol `renderundeclaredleafreason`; use this spelling for that operation rather than the undifferentiated family name.
 - **`surrender`** — the exact `render-materialize` symbol `surrender`; use this spelling for that operation rather than the undifferentiated family name.
 - **`testwaveunitneverrenderscompletevialeafderivation`** — the exact `render-materialize` symbol `testwaveunitneverrenderscompletevialeafderivation`; use this spelling for that operation rather than the undifferentiated family name.
+
+### Native performance graph vocabulary
+
+- **`renderChecklist`** — the exact `render-materialize` symbol `renderChecklist`; serializes the already validated native-performance graph as the human checklist/table; it does not execute, measure, or materialize model work.
+
+- **`renderNativePerformance`** — the exact `render-materialize` symbol `renderNativePerformance`; selects JSON or checklist serialization without executing or materializing inference.

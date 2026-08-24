@@ -793,6 +793,8 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdBenchmarks(args)
 	case "native-benchmarks":
 		cmdNativeBenchmarks(args)
+	case "native-performance":
+		cmdNativePerformance(args)
 	case "quantbench":
 		cmdQuantbench(args)
 	case "frontierswe":
@@ -1148,13 +1150,9 @@ func cmdAgent(argv []string) {
 	_ = fs.Parse(argv)
 
 	outputStyleExplicit := false
-	workProfileExplicit := false
 	fs.Visit(func(f *flag.Flag) {
-		switch f.Name {
-		case "output-style":
+		if f.Name == "output-style" {
 			outputStyleExplicit = true
-		case "work-profile":
-			workProfileExplicit = true
 		}
 	})
 	preference, err := resolveAgentOutputStylePreference(*outputStyle, outputStyleExplicit, *consoleConfig)
@@ -1168,18 +1166,17 @@ func cmdAgent(argv []string) {
 		os.Exit(2)
 	}
 	defer restoreStyle()
-	workPreference, err := resolveAgentWorkProfilePreference(*workProfile, workProfileExplicit)
+	work, err := resolveAgentWorkProfile(*workProfile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	restoreWork, err := applyAgentWorkProfile(workPreference.Profile)
+	restoreWork, err := applyAgentWorkProfile(work)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "agent: set --work-profile: %v\n", err)
 		os.Exit(2)
 	}
 	defer restoreWork()
-	printAgentProfileValue(os.Stderr, preference, workPreference)
 	applyPolicy(*policyPath)
 	loadedRoute, loadedAccounts, runOpts, err := loadAgentRouteOptionsWithAccounts(*routeManifest, *routeAccounts)
 	must(err)

@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **79** (clarity 23 + coverage 56) |
-| **Crystal-clear concepts (and climbing)** | **759** crystal of 2472 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2602 / 2658** (97.9% of the discovered confusable space) |
-| **Undrawn twin-pairs (drive to 0)** | **0** of 197 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **74** of 3435 indexed names |
+| **Disambiguation-debt (drive to 0)** | **86** (clarity 29 + coverage 57) |
+| **Crystal-clear concepts (and climbing)** | **762** crystal of 2475 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2602 / 2659** (97.9% of the discovered confusable space) |
+| **Undrawn twin-pairs (drive to 0)** | **1** of 198 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **74** of 3438 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 89.4/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 85.5/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2472 concepts - score 89.4/100 (grade B) - disambiguation-debt 79
+concept-disambiguation chart - 2475 concepts - score 85.5/100 (grade B) - disambiguation-debt 86
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ############................ 759
+  * crystal       ############................ 762
   o defined       ############################ 1713
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -53,13 +53,13 @@ clarity mix by family (each cell = one concept):
   plan             *****************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (306 concept(s); 65 crystal)
   policy-capability ************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (165 concept(s); 60 crystal)
   pool             ******oooooooooooooooooooooooooooooo (36 concept(s); 6 crystal)
-  render-materialize ***************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (180 concept(s); 27 crystal)
+  render-materialize *****************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (182 concept(s); 29 crystal)
   score-debt       *********oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (73 concept(s); 9 crystal)
   session-runtime  ****************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (226 concept(s); 64 crystal)
   support-maturity ***************************oooooooooooooooooooooo (49 concept(s); 27 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
-  witness-proof    ********************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (148 concept(s); 68 crystal)
+  witness-proof    *********************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (149 concept(s); 69 crystal)
 
 coverage by family (positioned / discovered):
   guard-gate       ###########################. 462/477
@@ -71,8 +71,8 @@ coverage by family (positioned / discovered):
   context-ctx      ############################ 227/231
   gateway-engine   ############################ 182/184
   pool             ###########################. 39/41
+  witness-proof    ############################ 156/158
   score-debt       ############################ 87/88
-  witness-proof    ############################ 156/157
   attention        ############################ 76/76
   cross-cluster    ............................ 0/0
   decision         ############################ 58/58
@@ -84,15 +84,15 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 97.9%  (2602/2658 confusable tokens positioned)
+namespace coverage  [###############################.] 97.9%  (2602/2659 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 196
   one-sided    #........................... 1
-  undrawn      ............................ 0
-  pairs separated   [################################] 197/197
+  undrawn      #........................... 1
+  pairs separated   [################################] 197/198
 
-name index: 3435 lookup name(s) -> 2472 concept(s), 74 ambiguous
+name index: 3438 lookup name(s) -> 2475 concept(s), 74 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -114,11 +114,11 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 
 | Separation metric | Value |
 |---|---|
-| Confusable name-pairs discovered | 197 |
-| **Separated from each other (drive to all)** | **197 / 197** (196 mutual, 1 one-sided) |
-| **Undrawn twin-pairs (drive to 0)** | **0** |
-| Entangled concepts (own twin undrawn) | 3 |
-| Boundaries drawn (mutual / total) | 1608 / 4439 |
+| Confusable name-pairs discovered | 198 |
+| **Separated from each other (drive to all)** | **197 / 198** (196 mutual, 1 one-sided) |
+| **Undrawn twin-pairs (drive to 0)** | **1** |
+| Entangled concepts (own twin undrawn) | 5 |
+| Boundaries drawn (mutual / total) | 1608 / 4440 |
 | Dangling `distinct_from` references (drive to 0) | 6 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3435 over 2472 concepts |
+| Lookup names indexed | 3438 over 2475 concepts |
 | Lookup names landing on several concepts | 74 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **2** |
-| Concepts carrying a contrast set | 2472 |
+| Concepts carrying a contrast set | 2474 |
 
 ## The concepts (best verdict first)
 
@@ -691,6 +691,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | pool | **PoolCap() (resolved worktree-pool cap)** - The resolver that reads PoolCapEnv and returns the effective per-lane idle-worktree cap, failing open to the default on anything unreadable so a typo'd knob can never mean unbounded. Both Prepare and Reap consult it, so the pool is on or off for the whole lifecycle rather than per call site. |
 | * | crystal | symbol | render-materialize | **RenderHealth (git-daily health readout)** - The one-call operator readout for the git-daily health card: it composes the graded card from HealthFacts and projects it through scorecard.Render as a terminal work-list keyed on HealthDebtKey. |
 | * | crystal | symbol | render-materialize | **RenderAuditClusterReport** - Renders the cross-model failure-clustering dogfood section from an already-folded AuditClusterResult: a correlation-not-causation fence, then sufficient clusters split from insufficient or confounded ones, then route-policy proposals. |
+| * | crystal | symbol | render-materialize | **renderChecklist** - Serializes the validated native-performance rung graph as the human checklist/table. |
+| * | crystal | symbol | render-materialize | **renderNativePerformance** - Renders the validated native-performance graph to the selected CLI output format. |
 | * | crystal | symbol | render-materialize | **render-materialize implementation surface for docrender** - `docrender` is the render-materialize symbol declared or used at `internal/docrender/doc.go:1` as `// Package docrender turns this repo's Markdown into a print-ready HTML page and,`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | render-materialize | **render-materialize implementation surface for materializeraw** - `materializeRaw` is the render-materialize symbol declared or used at `internal/contextq/contextq.go:382` as `materializeRaw(ctx, im, req, &res, frames, entries, selected, excluded)`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | render-materialize | **render-materialize implementation surface for renderings** - `renderings` is the render-materialize symbol declared or used at `internal/gateway/compaction_contract.go:30` as `// One source, two renderings, so they cannot disagree about what the boundary did.`. This row positions that concrete implementation surface, not merely the family label. |
@@ -835,6 +837,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | witness-proof | **WitnessToolDescriptors** - The conceptbench witness constant (WitnessToolDescriptors, bound to mcp.go toolDescriptors()) naming the ResolveTool referee surface a scenario grades against. |
 | * | crystal | symbol | witness-proof | **guardCompactionWitness (durable per-session compaction-health row)** - cmd/fak/guard_compaction_witness.go guardCompactionWitness: the durable per-session compaction-health row `fak guard` appends at session exit -- {schema, recorded_at, session, anchor_mode, fired, bailed, off, anchor_starved, solvency_forced, shed_tokens, budget, cache_read_at_fire, bail_reasons} folded from the one gateway.Server that guard constructs and tears down per launch, and pinned to the append-only JSONL .fak/nightrun/compaction-health.jsonl so 'did compaction fire for THAT session?' outlives the process that measured it. |
 | * | crystal | symbol | witness-proof | **q2_0_witness_test** - The stub-build (non-Apple-Silicon) test file q2_0_witness_test.go: it pins the ternary Q2_0 reference's math obligations -- bit layout, ternary code set, round-trip error bound, and ref-GEMV-vs-dense parity -- in every build that cannot execute the Metal kernel. |
+| * | crystal | symbol | witness-proof | **ClassWitnessed** - Evidence classification for observed throughput backed by named benchmark or issue evidence. |
 | * | crystal | symbol | witness-proof | **CollectiveWitnessed** - Input field on the #4801 ReservationEnvelope recording that a real NCCL collective smoke test passed across the exact reserved GPU ranks, before any artifact transfer begins. |
 | * | crystal | symbol | witness-proof | **ReservationCollectiveUnwitnessed** - The #4801 typed refusal verdict returned when every resource bar clears but no NCCL collective has been proven across the exact reserved ranks. |
 | * | crystal | symbol | witness-proof | **COLLECTIVE_WITNESS_MISSING** - The wire/JSON string value of the #4801 ReservationCollectiveUnwitnessed verdict, consumed by #4788 to gate the artifact transfer. |
@@ -2742,19 +2745,19 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| grounded | `grounded` | 0 | 7 | 7 ungrounded concept(s) |
+| grounded | `grounded` | 0 | 8 | 8 ungrounded concept(s) |
 | separation | `reference_resolves` | 16 | 6 | 6 dangling distinct_from reference(s) |
+| honesty | `clarity_consistent` | 10 | 5 | 5 verdict overclaim(s) |
 | well-formed | `well_formed` | 52 | 4 | 4 malformed field(s) |
-| honesty | `clarity_consistent` | 46 | 3 | 3 verdict overclaim(s) |
+| distinctness | `disambiguated` | 60 | 2 | 2 undisambiguated confusable concept(s) |
 | indexed | `index_resolves` | 64 | 2 | 2 unresolvable shared lookup name(s) |
+| separation | `pair_separated` | 80 | 1 | 1 confusable pair(s) with no line drawn |
 | separation | `pair_mutual` | 90 | 1 | 1 one-sided boundary on a confusable pair |
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2831/4439 boundaries drawn one-way only |
+| separation | `mutuality_soft` | 80 | 0 | 2832/4440 boundaries drawn one-way only |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
-| distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
-| separation | `pair_separated` | 100 | 0 | all 197 confusable name-pair(s) are separated |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -2770,8 +2773,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | context-ctx | 227 | 231 | 4 |
 | gateway-engine | 182 | 184 | 2 |
 | pool | 39 | 41 | 2 |
+| witness-proof | 156 | 158 | 2 |
 | score-debt | 87 | 88 | 1 |
-| witness-proof | 156 | 157 | 1 |
 | attention | 76 | 76 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | decision | 58 | 58 | 0 |

@@ -19,6 +19,25 @@ in-process, served from a local **tool vDSO** when possible, screened by a
 **pre-flight + grammar ladder** before it fires, and admitted through a
 **context-MMU** before tool results enter model context.
 
+## `native-performance`: query the raw-model hill climb
+
+`fak native-performance` renders the committed Qwen3.8-27B Q4_K_M Apple M3 Pro
+P32/T64 optimization graph as a human checklist/table. `--json` emits the same
+validated typed graph for agents and automation.
+
+```bash
+fak native-performance
+fak native-performance --json
+```
+
+Each rung reports dependency IDs, independent enabled state, present/partial/absent
+status, a provenance-labeled hypothetical floor/roof, a separate witnessed throughput
+or explicit `null`, the remaining gap, and its next GitHub issue. The command performs no model execution. Every performance rung remains fak-native; llama.cpp appears only as an explicitly selected parity/reference benchmark comparison. The current 3.3 tok/s fak-native
+witness and 6.966061 tok/s llama.cpp comparison remain separately classified and only
+approximately comparable until #8697 captures a joint matched receipt. Graph semantics,
+the update checklist, and source provenance are in
+[`NATIVE-PERFORMANCE-HILLCLIMB.md`](benchmarks/NATIVE-PERFORMANCE-HILLCLIMB.md).
+
 ## `dup cache-maintain`: bound the shared token-window cache
 
 `fak dup cache-maintain` runs the same nonblocking retention seam used after a

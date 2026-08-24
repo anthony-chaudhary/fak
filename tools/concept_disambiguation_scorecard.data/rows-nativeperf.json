@@ -1,0 +1,54 @@
+{
+  "rows": [
+    {
+      "id": "nativeperf-render-checklist",
+      "canonical": "renderChecklist",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "Serializes the validated native-performance rung graph as the human checklist/table.",
+      "distinction": "Renders committed metadata only; it does not execute, measure, or materialize model work.",
+      "distinct_from": [],
+      "aliases": [],
+      "grounding": "renderChecklist",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "nativeperf-class-witnessed",
+      "canonical": "ClassWitnessed",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "Evidence classification for observed throughput backed by named benchmark or issue evidence.",
+      "distinction": "Projected floors and roofs use ClassHypothesis and cannot use this witnessed class.",
+      "distinct_from": [],
+      "aliases": [],
+      "grounding": "ClassWitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "nativeperf-render-native-performance",
+      "canonical": "renderNativePerformance",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "Renders the validated native-performance graph to the selected CLI output format.",
+      "distinction": "Selects JSON or checklist serialization only; it does not execute or materialize inference.",
+      "distinct_from": [
+        "nativeperf-render-checklist"
+      ],
+      "aliases": [],
+      "grounding": "renderNativePerformance",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

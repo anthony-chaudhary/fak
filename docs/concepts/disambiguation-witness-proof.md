@@ -18,3 +18,7 @@ This map positions the current `witness-proof` coverage backlog. Each entry name
 - **`resolvewitnessfiles`** — the exact `witness-proof` symbol `resolvewitnessfiles`; use this spelling for that operation rather than the undifferentiated family name.
 - **`witnessschema`** — the exact `witness-proof` symbol `witnessschema`; use this spelling for that operation rather than the undifferentiated family name.
 - **`fakwitnessargkey`** — the exact `witness-proof` symbol `fakwitnessargkey`; use this spelling for that operation rather than the undifferentiated family name.
+
+### Native performance graph vocabulary
+
+- **`ClassWitnessed`** — the exact `witness-proof` symbol `ClassWitnessed`; marks an observed throughput value backed by the named benchmark receipt or issue evidence; projected floors and roofs remain `ClassHypothesis` and cannot use this class.
