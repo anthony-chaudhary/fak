@@ -3172,6 +3172,11 @@
           "category": "incidental",
           "reason": "Provider-specific runtime handoff; not a general guard or gate",
           "token": "TorchAODelegate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private staged-diff checker implementation; the operator concept is the NATIVE_FIRST pre-commit gate.",
+          "token": "checkNativeFirst"
         }
       ],
       "exclude": [
@@ -8298,6 +8303,11 @@
           "category": "incidental",
           "reason": "campaign ordering metadata, not a reusable policy capability",
           "token": "OrderPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Environment configuration spelling for the NATIVE_FIRST staged-diff gate, not a policy capability concept.",
+          "token": "NATIVEFIRST_HOOK_MODE"
         }
       ],
       "exclude": [
