@@ -135,6 +135,11 @@
       "lane": "vdso",
       "command": "go test -v ./internal/vdso -run TestRevoke",
       "output_contains": "TestRevoke_Sound_RevokedNeverServed"
+    },
+    {
+      "lane": "vcachewarm",
+      "command": "go test -v ./internal/vcachewarm",
+      "output_contains": "TestFanoutGateHoldsRacingSiblingsUntilFirstContentDelta"
     }
   ]
 }
