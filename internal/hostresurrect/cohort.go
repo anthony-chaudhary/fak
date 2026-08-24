@@ -27,16 +27,25 @@ func CohortPath(regDir string) string { return filepath.Join(regDir, CohortFileN
 
 // Capture keeps only rows whose current PID is independently alive. The caller
 // supplies the probe so fixture tests never depend on host process state.
-func Capture(rows []guardsessions.Row, capturedAt time.Time, alive func(int) bool) Cohort {
-	if alive == nil {
+func Capture(rows []guardsessions.Row, capturedAt time.Time, alive func(int) bool, started func(int) (time.Time, bool)) Cohort {
+	if alive == nil || started == nil {
 		return Cohort{}
 	}
 	live := guardsessions.LiveInteractive(rows)
 	out := Cohort{CapturedAt: capturedAt.UTC().Format(time.RFC3339Nano)}
 	for _, row := range live {
-		if row.PID > 0 && alive(row.PID) {
-			out.Sessions = append(out.Sessions, CohortEntry{Handle: row.Handle, PID: row.PID})
+		if row.PID <= 0 || !alive(row.PID) {
+			continue
 		}
+		processStarted, ok := started(row.PID)
+		rowStarted, err := time.Parse(time.RFC3339Nano, row.StartedAt)
+		if err != nil {
+			rowStarted, err = time.Parse(time.RFC3339, row.StartedAt)
+		}
+		if !ok || err != nil || processStarted.Before(rowStarted.Add(-time.Second)) {
+			continue
+		}
+		out.Sessions = append(out.Sessions, CohortEntry{Handle: row.Handle, PID: row.PID, StartedAt: row.StartedAt})
 	}
 	return out
 }

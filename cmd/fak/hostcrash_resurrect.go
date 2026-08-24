@@ -105,7 +105,7 @@ func resurrectHostCrashSessions(logPath, regDir string, signals []hostfault.Host
 }
 
 func refreshHostResurrectionCohort(regDir string, now time.Time) (hostresurrect.Cohort, error) {
-	cohort := hostresurrect.Capture(guardsessions.Load(regDir), now, processalive.Check)
+	cohort := hostresurrect.Capture(guardsessions.Load(regDir), now, processalive.Check, processalive.StartTime)
 	return cohort, hostresurrect.StoreCohort(hostresurrect.CohortPath(regDir), cohort)
 }
 

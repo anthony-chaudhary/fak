@@ -29,7 +29,7 @@ func TestResurrectHostCrashSessionsLaunchesOnceAndPersistsReceipt(t *testing.T) 
 		return 4242, nil
 	}
 	now := time.Date(2026, 7, 14, 20, 0, 0, 0, time.UTC)
-	if err := hostresurrect.StoreCohort(hostresurrect.CohortPath(dir), hostresurrect.Cohort{CapturedAt: now.UTC().Format(time.RFC3339Nano), Sessions: []hostresurrect.CohortEntry{{Handle: row.Handle, PID: row.PID}}}); err != nil {
+	if err := hostresurrect.StoreCohort(hostresurrect.CohortPath(dir), hostresurrect.Cohort{CapturedAt: now.UTC().Format(time.RFC3339Nano), Sessions: []hostresurrect.CohortEntry{{Handle: row.Handle, PID: row.PID, StartedAt: row.StartedAt}}}); err != nil {
 		t.Fatal(err)
 	}
 	got, _, err := resurrectHostCrashSessions(logPath, dir, []hostfault.HostCrashSignal{signal}, launch, now)
@@ -61,7 +61,7 @@ func TestResurrectHostCrashSessionsUsesPersistedPreCrashCohort(t *testing.T) {
 	if err := guardsessions.Record(dir, current); err != nil {
 		t.Fatal(err)
 	}
-	cohort := hostresurrect.Cohort{CapturedAt: now.Add(-time.Second).Format(time.RFC3339Nano), Sessions: []hostresurrect.CohortEntry{{Handle: current.Handle, PID: current.PID}}}
+	cohort := hostresurrect.Cohort{CapturedAt: now.Add(-time.Second).Format(time.RFC3339Nano), Sessions: []hostresurrect.CohortEntry{{Handle: current.Handle, PID: current.PID, StartedAt: current.StartedAt}}}
 	if err := hostresurrect.StoreCohort(hostresurrect.CohortPath(dir), cohort); err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestResurrectHostCrashSessionsHonorsGlobalLaunchRate(t *testing.T) {
 	row := guardsessions.NewInteractiveRow("trace", "claude", 1, dir, "", "", now, []string{"claude"})
 	_ = guardsessions.Record(dir, row)
 	sig := hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "new", Class: hostfault.HostCrashGeneric}
-	if err := hostresurrect.StoreCohort(hostresurrect.CohortPath(dir), hostresurrect.Cohort{CapturedAt: now.UTC().Format(time.RFC3339Nano), Sessions: []hostresurrect.CohortEntry{{Handle: row.Handle, PID: row.PID}}}); err != nil {
+	if err := hostresurrect.StoreCohort(hostresurrect.CohortPath(dir), hostresurrect.Cohort{CapturedAt: now.UTC().Format(time.RFC3339Nano), Sessions: []hostresurrect.CohortEntry{{Handle: row.Handle, PID: row.PID, StartedAt: row.StartedAt}}}); err != nil {
 		t.Fatal(err)
 	}
 	got, _, err := resurrectHostCrashSessions(logPath, dir, []hostfault.HostCrashSignal{sig}, func(hostresurrect.Request) (int, error) { t.Fatal("launch called above cap"); return 0, nil }, now)
@@ -111,7 +111,7 @@ func TestResurrectHostCrashSessionsFailedLaunchIsStillDeduped(t *testing.T) {
 	sig := hostfault.HostCrashSignal{Schema: hostfault.HostCrashSignalSchema, EventID: "evt-fail", Class: hostfault.HostCrashGeneric}
 	calls := 0
 	launcher := func(req hostresurrect.Request) (int, error) { calls++; return 0, errors.New("spawn failed") }
-	if err := hostresurrect.StoreCohort(hostresurrect.CohortPath(dir), hostresurrect.Cohort{CapturedAt: now.UTC().Format(time.RFC3339Nano), Sessions: []hostresurrect.CohortEntry{{Handle: row.Handle, PID: row.PID}}}); err != nil {
+	if err := hostresurrect.StoreCohort(hostresurrect.CohortPath(dir), hostresurrect.Cohort{CapturedAt: now.UTC().Format(time.RFC3339Nano), Sessions: []hostresurrect.CohortEntry{{Handle: row.Handle, PID: row.PID, StartedAt: row.StartedAt}}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := resurrectHostCrashSessions(filepath.Join(dir, "host.jsonl"), dir, []hostfault.HostCrashSignal{sig}, launcher, now); err == nil {

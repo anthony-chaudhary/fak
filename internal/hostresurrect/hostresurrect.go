@@ -36,8 +36,9 @@ type Cohort struct {
 }
 
 type CohortEntry struct {
-	Handle string `json:"handle"`
-	PID    int    `json:"pid"`
+	Handle    string `json:"handle"`
+	PID       int    `json:"pid"`
+	StartedAt string `json:"started_at"`
 }
 
 // Selection makes a relaunch wave auditable without exposing commands or
@@ -65,22 +66,22 @@ func Plan(signal hostfault.HostCrashSignal, rows []guardsessions.Row, cohort Coh
 	}
 	live := guardsessions.LiveInteractive(rows)
 	counts.Untombstoned = len(live)
-	members := make(map[string]int, len(cohort.Sessions))
+	members := make(map[string]CohortEntry, len(cohort.Sessions))
 	for _, entry := range cohort.Sessions {
 		if strings.TrimSpace(entry.Handle) != "" && entry.PID > 0 {
-			members[entry.Handle] = entry.PID
+			members[entry.Handle] = entry
 		}
 	}
 	// Prefer the newest witnessed sessions if a cohort itself exceeds the cap.
 	sort.SliceStable(live, func(i, j int) bool { return live[i].StartedAt > live[j].StartedAt })
 	out := make([]Request, 0, min(limit, len(live)))
 	for _, row := range live {
-		pid, ok := members[row.Handle]
+		entry, ok := members[row.Handle]
 		if !ok {
 			counts.ExcludedNotInCohort++
 			continue
 		}
-		if pid != row.PID {
+		if entry.PID != row.PID || entry.StartedAt != row.StartedAt {
 			counts.ExcludedPIDMismatch++
 			continue
 		}
