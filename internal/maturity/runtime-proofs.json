@@ -145,6 +145,11 @@
       "lane": "vcachestar",
       "command": "go test -v ./internal/vcachestar",
       "output_contains": "TestFirstNaturalWarmFansSiblingsOnFirstStreamedDeltaNotHTTPStatus"
+    },
+    {
+      "lane": "vcachesnapshot",
+      "command": "go test -v ./internal/vcachesnapshot",
+      "output_contains": "TestWriteConfiguredBoundsToDefaultWindow"
     }
   ]
 }
