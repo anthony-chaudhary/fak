@@ -25,6 +25,11 @@
       "lane": "worktype",
       "command": "go test -v ./internal/worktype",
       "output_contains": "TestClassifyDispatchPromptClosedRulesAndUnknown"
+    },
+    {
+      "lane": "worktreewitness",
+      "command": "go test -v ./internal/worktreewitness",
+      "output_contains": "TestRun_DirtyWorktreeArchivesBeforeReap"
     }
   ]
 }
