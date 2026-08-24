@@ -250,6 +250,16 @@ type acceptanceTrunk struct {
 	treeLoaded bool
 }
 
+// runBufferedCommand captures both output streams while leaving command construction,
+// process posture, timeouts, exit-code interpretation, and error wording to the caller.
+func runBufferedCommand(cmd *exec.Cmd) (string, string, error) {
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	return stdout.String(), stderr.String(), err
+}
+
 func newAcceptanceTrunk(root, ref string) *acceptanceTrunk {
 	if strings.TrimSpace(ref) == "" {
 		ref = closureaudit.DefaultRef
@@ -326,14 +336,12 @@ func (t *acceptanceTrunk) paths() ([]string, error) {
 	cmd := exec.CommandContext(ctx, "git", "ls-tree", "-r", "--name-only", t.ref)
 	cmd.Dir = t.root
 	configureDispatchHelperCommand(cmd)
-	var out, errBuf bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errBuf
-	if err := cmd.Run(); err != nil {
-		t.treeErr = fmt.Errorf("git ls-tree %s: %w: %s", t.ref, err, strings.TrimSpace(errBuf.String()))
+	out, errOut, err := runBufferedCommand(cmd)
+	if err != nil {
+		t.treeErr = fmt.Errorf("git ls-tree %s: %w: %s", t.ref, err, strings.TrimSpace(errOut))
 		return nil, t.treeErr
 	}
-	t.tree = splitAcceptanceLines(out.String())
+	t.tree = splitAcceptanceLines(out)
 	return t.tree, nil
 }
 
@@ -387,21 +395,18 @@ func (t *acceptanceTrunk) gitLines(args []string) ([]string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = t.root
 	configureDispatchHelperCommand(cmd)
-	var out, errBuf bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errBuf
-	err := cmd.Run()
+	out, errOut, err := runBufferedCommand(cmd)
 	if err != nil {
 		var ee *exec.ExitError
 		if !errors.As(err, &ee) || ee.ExitCode() != 1 {
-			return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args[:2], " "), err, strings.TrimSpace(errBuf.String()))
+			return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args[:2], " "), err, strings.TrimSpace(errOut))
 		}
 		return nil, nil // exit 1 = no match
 	}
 	prefix := t.ref + ":"
 	seen := map[string]bool{}
 	var files []string
-	for _, ln := range splitAcceptanceLines(out.String()) {
+	for _, ln := range splitAcceptanceLines(out) {
 		ln = strings.TrimPrefix(ln, prefix)
 		if ln == "" || seen[ln] {
 			continue

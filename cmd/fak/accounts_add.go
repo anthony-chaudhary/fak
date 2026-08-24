@@ -27,6 +27,14 @@ func saveAccountsRegistry(stderr io.Writer, path string, reg accounts.Registry) 
 	return true
 }
 
+func requireAccountsHome(stderr io.Writer, homeDir string) bool {
+	if homeDir != "" {
+		return true
+	}
+	fmt.Fprintln(stderr, "fak accounts: cannot resolve home dir")
+	return false
+}
+
 // addParams carries the resolved flags for `fak accounts add` from the dispatcher.
 type addParams struct {
 	name     string
@@ -137,8 +145,7 @@ func runAccountsAdd(stdout, stderr io.Writer, p addParams) int {
 		fmt.Fprintln(stderr, "usage: fak accounts add --name <name> [--reserved] [--chrome-profile P] [--no-login [--token -]] [--adopt [--from <seat|dir>] [--force]]")
 		return 2
 	}
-	if p.homeDir == "" {
-		fmt.Fprintln(stderr, "fak accounts: cannot resolve home dir")
+	if !requireAccountsHome(stderr, p.homeDir) {
 		return 1
 	}
 
@@ -1299,11 +1306,7 @@ func runAccountsSetRole(stdout, stderr io.Writer, p setRoleParams) int {
 		reg.Roles = map[string]string{}
 	}
 	reg.Roles[p.role] = p.name
-	if err := reg.Validate(); err != nil {
-		fmt.Fprintf(stderr, "fak accounts: %v\n", err)
-		return 1
-	}
-	if !saveAccountsRegistry(stderr, p.registryPath, reg) {
+	if !validateAndSaveAccounts(stderr, p.registryPath, reg, "fak accounts: %v\n") {
 		return 1
 	}
 	fmt.Fprintf(stdout, "registry: role %s -> %s\n", p.role, p.name)

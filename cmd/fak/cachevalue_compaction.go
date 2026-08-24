@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -65,12 +64,9 @@ func runCachevalueCompaction(stdout, stderr io.Writer, argv []string) int {
 	report := gatewayusageledger.FoldCompactionByPeriod(rows, *since, *by)
 
 	if *asJSON {
-		b, err := json.MarshalIndent(report, "", "  ")
-		if err != nil {
-			fmt.Fprintf(stderr, "fak cachevalue compaction: marshal: %v\n", err)
-			return 1
+		if rc := encodeJSONOrFailPrefixed(stdout, stderr, report, "fak cachevalue compaction: marshal"); rc != 0 {
+			return rc
 		}
-		fmt.Fprintln(stdout, string(b))
 		return 0
 	}
 	fmt.Fprint(stdout, gatewayusageledger.RenderCompaction(report))

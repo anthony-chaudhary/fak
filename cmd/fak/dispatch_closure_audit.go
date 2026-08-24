@@ -22,7 +22,6 @@ package main
 // command owns the native binding + witness-gated grade + coverage honesty.
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -212,13 +211,11 @@ func closureAuditReadCommitsGit(root string, maxCommits int) ([]closureaudit.Com
 	cmd := exec.CommandContext(ctx, "git", "log", fmt.Sprintf("-%d", maxCommits), pretty)
 	cmd.Dir = root
 	configureDispatchHelperCommand(cmd)
-	var out, errBuf bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errBuf
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("git log: %w: %s", err, strings.TrimSpace(errBuf.String()))
+	out, errOut, err := runBufferedCommand(cmd)
+	if err != nil {
+		return nil, fmt.Errorf("git log: %w: %s", err, strings.TrimSpace(errOut))
 	}
-	return parseClosureAuditLog(out.String()), nil
+	return parseClosureAuditLog(out), nil
 }
 
 // parseClosureAuditLog splits the %x1f/%x1e-delimited `git log` text into Commit

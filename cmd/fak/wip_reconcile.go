@@ -54,10 +54,10 @@ func runWipReconcile(stdout, stderr io.Writer, argv []string) int {
 	// the code in one place is what stops the printed command from drifting away from the
 	// command that exists. A positional token is safe to intercept here because the
 	// reconcile flag parse rejects positional arguments outright.
-	if len(argv) > 0 && !strings.HasPrefix(argv[0], "-") {
-		switch argv[0] {
+	if subcommand, args, ok := splitLeadingSubcommand(argv); ok {
+		switch subcommand {
 		case "adopt", "resume", "receipt":
-			return runWipReclaim(stdout, stderr, argv[0], argv[1:])
+			return runWipReclaim(stdout, stderr, subcommand, args)
 		}
 	}
 

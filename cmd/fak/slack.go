@@ -335,11 +335,7 @@ func runAuthChecks(reports []*surfaceReport, apiBase string) {
 // probeAuth runs a single auth.test against a token, returning a typed verdict (never an
 // error — a failed probe IS the answer the report wants).
 func probeAuth(token, apiBase string) *authReport {
-	var opts []scoreboard.Option
-	if apiBase != "" {
-		opts = append(opts, scoreboard.WithAPIBase(apiBase))
-	}
-	c, err := scoreboard.NewClient(token, opts...)
+	c, err := scoreboardClient(token, apiBase)
 	if err != nil {
 		return &authReport{OK: false, Err: err.Error()}
 	}

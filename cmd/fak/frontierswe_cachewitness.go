@@ -86,12 +86,9 @@ func runFrontiersweCacheWitness(stdout, stderr io.Writer, argv []string) int {
 
 	series := frontierswe.FoldCacheWitness(samplesIn)
 
-	jb, err := json.MarshalIndent(series, "", "  ")
-	if err != nil {
-		fmt.Fprintf(stderr, "fak frontierswe cache-witness: marshal: %v\n", err)
-		return 1
+	if rc := encodeJSONOrFailPrefixed(stdout, stderr, series, "fak frontierswe cache-witness: marshal"); rc != 0 {
+		return rc
 	}
-	fmt.Fprintln(stdout, string(jb))
 
 	if *out != "" {
 		if err := writeCacheWitnessJSONL(*out, series); err != nil {

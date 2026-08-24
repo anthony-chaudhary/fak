@@ -18,7 +18,6 @@ package main
 // stuck (see the issue's promotion evidence).
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -121,17 +120,15 @@ var followonIssueState = func(issue int) (state string, updatedAt time.Time, err
 	cmd, cancel := ghexec.CommandTimeout(context.Background(), ghexec.DefaultTimeout,
 		"issue", "view", strconv.Itoa(issue), "--json", "state,updatedAt")
 	defer cancel()
-	var out, errBuf bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errBuf
-	if err := cmd.Run(); err != nil {
-		return "", time.Time{}, fmt.Errorf("gh issue view %d: %w: %s", issue, err, strings.TrimSpace(errBuf.String()))
+	out, errOut, err := runBufferedCommand(cmd)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("gh issue view %d: %w: %s", issue, err, strings.TrimSpace(errOut))
 	}
 	var v struct {
 		State     string    `json:"state"`
 		UpdatedAt time.Time `json:"updatedAt"`
 	}
-	if err := json.Unmarshal(out.Bytes(), &v); err != nil {
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
 		return "", time.Time{}, fmt.Errorf("decode gh issue view %d: %w", issue, err)
 	}
 	return v.State, v.UpdatedAt, nil

@@ -299,11 +299,7 @@ func runTrajctlDeclare(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	path := trajctlLedgerPath(*ledger)
-	if err := trajctl.Append(path, trajctl.ObjectiveRecord(obj)); err != nil {
-		fmt.Fprintf(stderr, "fak trajctl declare: %v\n", err)
-		return 1
-	}
-	return trajctlEmitObjective(stdout, stderr, obj, "declared", *asJSON)
+	return finishTrajctlObjective(stdout, stderr, "declare", "declared", path, obj, *asJSON)
 }
 
 func runTrajctlClose(stdout, stderr io.Writer, argv []string) int {
@@ -355,11 +351,22 @@ func runTrajctlClose(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	obj.Status = newStatus
-	if err := trajctl.Append(path, trajctl.ObjectiveRecord(obj)); err != nil {
-		fmt.Fprintf(stderr, "fak trajctl close: %v\n", err)
+	return finishTrajctlObjective(stdout, stderr, "close", "closed", path, obj, *asJSON)
+}
+
+func finishTrajctlObjective(stdout, stderr io.Writer, action, state, path string, obj trajctl.Objective, asJSON bool) int {
+	if code := appendTrajctlObjective(stderr, action, path, obj); code != 0 {
 		return 1
 	}
-	return trajctlEmitObjective(stdout, stderr, obj, "closed", *asJSON)
+	return trajctlEmitObjective(stdout, stderr, obj, state, asJSON)
+}
+
+func appendTrajctlObjective(stderr io.Writer, action, path string, obj trajctl.Objective) int {
+	if err := trajctl.Append(path, trajctl.ObjectiveRecord(obj)); err != nil {
+		fmt.Fprintf(stderr, "fak trajctl %s: %v\n", action, err)
+		return 1
+	}
+	return 0
 }
 
 // trajctlStatusOpen is the synthetic list filter meaning active+paused --

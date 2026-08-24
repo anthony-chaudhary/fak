@@ -261,12 +261,7 @@ func runGardenDispatch(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak garden dispatch: %v\n", err)
 		return 1
 	}
-	walkPlan := gardenbundle.PlanWalk("issue", items, gardenbundle.WalkPolicy{
-		Budget:         *budget,
-		SkipFreshDays:  *skipFresh,
-		SkipInProgress: *skipActive,
-		DryRun:         true, // the walk fold itself always proposes; --apply governs the TICK below, not this fold
-	})
+	walkPlan := gardenbundle.PlanWalk("issue", items, gardenWalkPolicy(*budget, *skipFresh, *skipActive))
 	plan.Walked = walkPlan.Total
 
 	candidates := gardenDispatchCandidates(walkPlan)

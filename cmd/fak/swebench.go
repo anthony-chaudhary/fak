@@ -16,6 +16,17 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/swebench"
 )
 
+func writeContractArtifacts(out, md string, contract any, renderMarkdown func() string) {
+	if out != "" {
+		must(os.WriteFile(out, jsonIndent(contract), 0o644))
+	} else {
+		fmt.Println(string(jsonIndent(contract)))
+	}
+	if md != "" {
+		must(os.WriteFile(md, []byte(renderMarkdown()), 0o644))
+	}
+}
+
 // swebenchSampleDifficulty is the committed difficulty map `fak swebench describe`
 // falls back to when no --difficulty/--dataset (and no FAK_SWEBENCH_* env) is
 // given, so the advertised RUNNABLE-NOW entry point works with zero args and zero
@@ -299,28 +310,13 @@ func cmdSwebenchSmokeContract(argv []string) {
 		rawCmd = buildSwebenchRawOpusSmokeCommand(selected, *model, *rawOutput)
 	}
 	fakCommand := buildSwebenchFakSmokeCommand(diff, ds, *filter, *limit, *gateway, *model, *fakOutput)
-	contract := swebench.BuildOpusSmokeContract(swebench.OpusSmokeContractInput{
-		GeneratedAt:    time.Now().UTC().Format(time.RFC3339),
-		Dataset:        selected,
-		Source:         srcDesc,
-		Filter:         *filter,
-		Limit:          *limit,
-		Model:          *model,
-		RawCommand:     rawCmd,
-		FakCommand:     fakCommand,
-		RawOutputDir:   *rawOutput,
-		FakOutputDir:   *fakOutput,
-		MaxWorkers:     *maxWorkers,
-		EvalCapability: swebench.DetectEvalCapability(*python),
-	})
-	if *out != "" {
-		must(os.WriteFile(*out, jsonIndent(contract), 0o644))
-	} else {
-		fmt.Println(string(jsonIndent(contract)))
-	}
-	if *md != "" {
-		must(os.WriteFile(*md, []byte(swebench.RenderOpusSmokeContractMarkdown(contract)), 0o644))
-	}
+	contract, _ := swebenchContractGeneratedAt(&swebench.OpusSmokeContractInput{
+		RawCommand:   rawCmd,
+		FakCommand:   fakCommand,
+		RawOutputDir: *rawOutput,
+		FakOutputDir: *fakOutput,
+	}, nil, selected, srcDesc, *filter, *limit, *model, *maxWorkers, *python)
+	writeContractArtifacts(*out, *md, contract, func() string { return swebench.RenderOpusSmokeContractMarkdown(contract) })
 	fmt.Fprintf(os.Stderr, "\n== fak swebench smoke-contract ==\n")
 	fmt.Fprintf(os.Stderr, "status       : %s\n", contract.Status)
 	fmt.Fprintf(os.Stderr, "tasks        : %d\n", len(contract.TaskSelection.TaskIDs))
@@ -383,34 +379,19 @@ func cmdSwebenchDeepSWEContract(argv []string) {
 	selected := selectSwebenchSmokeTasks(d, *filter, *limit)
 	rawCommand := buildDeepSWERawFakRunCommand(diff, ds, *filter, *limit, *model, *rawBaseURL, *adapter, *adapterArgs, *rawOutput, *timeout, *maxSteps)
 	fakCommand := buildDeepSWERawFakRunCommand(diff, ds, *filter, *limit, *model, *fakBaseURL, *adapter, *adapterArgs, *fakOutput, *timeout, *maxSteps)
-	contract := swebench.BuildDeepSWERawFakContract(swebench.DeepSWERawFakContractInput{
-		GeneratedAt:    time.Now().UTC().Format(time.RFC3339),
-		Dataset:        selected,
-		Source:         srcDesc,
-		Filter:         *filter,
-		Limit:          *limit,
-		Model:          *model,
-		RawBaseURL:     *rawBaseURL,
-		FakBaseURL:     *fakBaseURL,
-		Adapter:        *adapter,
-		AdapterArgs:    *adapterArgs,
-		RawCommand:     rawCommand,
-		FakCommand:     fakCommand,
-		RawOutputDir:   *rawOutput,
-		FakOutputDir:   *fakOutput,
-		MaxSteps:       *maxSteps,
-		Timeout:        *timeout,
-		MaxWorkers:     *maxWorkers,
-		EvalCapability: swebench.DetectEvalCapability(*python),
-	})
-	if *out != "" {
-		must(os.WriteFile(*out, jsonIndent(contract), 0o644))
-	} else {
-		fmt.Println(string(jsonIndent(contract)))
-	}
-	if *md != "" {
-		must(os.WriteFile(*md, []byte(swebench.RenderDeepSWERawFakContractMarkdown(contract)), 0o644))
-	}
+	_, contract := swebenchContractGeneratedAt(nil, &swebench.DeepSWERawFakContractInput{
+		RawBaseURL:   *rawBaseURL,
+		FakBaseURL:   *fakBaseURL,
+		Adapter:      *adapter,
+		AdapterArgs:  *adapterArgs,
+		RawCommand:   rawCommand,
+		FakCommand:   fakCommand,
+		RawOutputDir: *rawOutput,
+		FakOutputDir: *fakOutput,
+		MaxSteps:     *maxSteps,
+		Timeout:      *timeout,
+	}, selected, srcDesc, *filter, *limit, *model, *maxWorkers, *python)
+	writeContractArtifacts(*out, *md, contract, func() string { return swebench.RenderDeepSWERawFakContractMarkdown(contract) })
 	fmt.Fprintf(os.Stderr, "\n== fak swebench deepswe-contract ==\n")
 	fmt.Fprintf(os.Stderr, "status       : %s\n", contract.Status)
 	fmt.Fprintf(os.Stderr, "tasks        : %d\n", len(contract.TaskSelection.TaskIDs))
@@ -419,6 +400,23 @@ func cmdSwebenchDeepSWEContract(argv []string) {
 	fmt.Fprintf(os.Stderr, "raw base     : %s\n", *rawBaseURL)
 	fmt.Fprintf(os.Stderr, "fak base     : %s\n", *fakBaseURL)
 	printSwebenchContractGraderTail(contract.OfficialGrader.Runnable, contract.OfficialGrader.Reason, *out, *md)
+}
+
+func swebenchContractGeneratedAt(opus *swebench.OpusSmokeContractInput, deep *swebench.DeepSWERawFakContractInput, dataset *swebench.Dataset, source, filter string, limit int, model string, maxWorkers int, python string) (swebench.OpusSmokeContract, swebench.DeepSWERawFakContract) {
+	common := swebench.OpusSmokeContractInput{
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339), Dataset: dataset, Source: source,
+		Filter: filter, Limit: limit, Model: model, MaxWorkers: maxWorkers,
+		EvalCapability: swebench.DetectEvalCapability(python),
+	}
+	if opus != nil {
+		common.RawCommand, common.FakCommand = opus.RawCommand, opus.FakCommand
+		common.RawOutputDir, common.FakOutputDir = opus.RawOutputDir, opus.FakOutputDir
+		return swebench.BuildOpusSmokeContract(common), swebench.DeepSWERawFakContract{}
+	}
+	deep.GeneratedAt, deep.Dataset, deep.Source = common.GeneratedAt, common.Dataset, common.Source
+	deep.Filter, deep.Limit, deep.Model = common.Filter, common.Limit, common.Model
+	deep.MaxWorkers, deep.EvalCapability = common.MaxWorkers, common.EvalCapability
+	return swebench.OpusSmokeContract{}, swebench.BuildDeepSWERawFakContract(*deep)
 }
 
 // resolveSwebenchContractSource applies the contract commands' shared source
@@ -646,14 +644,7 @@ func cmdSwebenchCompare(argv []string) {
 
 	c := swebench.BuildComparison(in)
 
-	if *out != "" {
-		must(os.WriteFile(*out, jsonIndent(c), 0o644))
-	} else {
-		fmt.Println(string(jsonIndent(c)))
-	}
-	if *md != "" {
-		must(os.WriteFile(*md, []byte(swebench.RenderMarkdown(c)), 0o644))
-	}
+	writeContractArtifacts(*out, *md, c, func() string { return swebench.RenderMarkdown(c) })
 
 	fmt.Fprintf(os.Stderr, "\n== fak swebench compare ==\nsource: %s\n", srcDesc)
 	for _, f := range c.Families {

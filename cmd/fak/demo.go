@@ -25,6 +25,17 @@ func cmdDemo(argv []string) {
 	os.Exit(runDemo(os.Stdout, os.Stderr, argv))
 }
 
+func emitResultOrError[T any](stdout, stderr io.Writer, label string, asJSON bool, result T, err error) (int, bool) {
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", label, err)
+		return 1, true
+	}
+	if asJSON {
+		return encodeJSONOrFail(stdout, stderr, result, label), true
+	}
+	return 0, false
+}
+
 func runDemo(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("demo", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -34,13 +45,8 @@ func runDemo(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	res, err := demo.Run(context.Background())
-	if err != nil {
-		fmt.Fprintf(stderr, "fak demo: %v\n", err)
-		return 1
-	}
-
-	if *asJSON {
-		return encodeJSONOrFail(stdout, stderr, res, "fak demo")
+	if code, done := emitResultOrError(stdout, stderr, "fak demo", *asJSON, res, err); done {
+		return code
 	}
 	res.RenderText(stdout)
 	return 0

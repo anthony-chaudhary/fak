@@ -27,11 +27,7 @@ type trajectoryPostState struct {
 }
 
 var trajectoryPost = func(token, apiBase, channel, text string) error {
-	var opts []scoreboard.Option
-	if apiBase != "" {
-		opts = append(opts, scoreboard.WithAPIBase(apiBase))
-	}
-	c, err := scoreboard.NewClient(token, opts...)
+	c, err := scoreboardClient(token, apiBase)
 	if err != nil {
 		return err
 	}

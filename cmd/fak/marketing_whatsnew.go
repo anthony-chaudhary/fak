@@ -80,12 +80,9 @@ func runMarketingWhatsNew(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	if *asJSON {
-		b, err := json.MarshalIndent(page, "", "  ")
-		if err != nil {
-			fmt.Fprintf(stderr, "fak marketing whats-new: %v\n", err)
-			return 1
+		if rc := encodeJSONOrFailPrefixed(stdout, stderr, page, "fak marketing whats-new"); rc != 0 {
+			return rc
 		}
-		fmt.Fprintln(stdout, string(b))
 		return 0
 	}
 	md := page.Markdown()

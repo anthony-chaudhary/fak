@@ -74,26 +74,16 @@ func runSessionBranch(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak session branch: load parent %q: %v\n", parentDir, err)
 		return 1
 	}
-	branchID := strings.TrimSpace(*id)
-	if branchID == "" {
-		branchID = parent.Meta.SessionID + "-branch"
-	}
+	target := newSessionChildTarget(*id, parent.Meta.SessionID, "branch", *toModel, *toHost, *reason)
 
-	meta, err := sessionimage.BranchDir(parentDir, branchDir, sessionimage.BranchOptions{
-		BranchID: branchID,
-		ToModel:  *toModel,
-		ToHost:   *toHost,
-		Reason:   *reason,
+	meta, code := runSessionBranchOperation(stderr, "branch", *registry, func() (sessionimage.Meta, sessionimage.Meta, error) {
+		meta, err := sessionimage.BranchDir(parentDir, branchDir, sessionimage.BranchOptions{
+			BranchID: target.id, ToModel: target.model, ToHost: target.host, Reason: target.reason,
+		})
+		return meta, meta, err
 	})
-	if err != nil {
-		fmt.Fprintf(stderr, "fak session branch: %v\n", err)
-		return 1
-	}
-
-	if reg := strings.TrimSpace(*registry); reg != "" {
-		if code := registerBranchDescriptor(stderr, pathutil.ExpandTilde(reg), meta); code != 0 {
-			return code
-		}
+	if code != 0 {
+		return code
 	}
 
 	if *asJSON {
@@ -124,4 +114,31 @@ func registerBranchDescriptor(stderr io.Writer, path string, meta sessionimage.M
 		return 1
 	}
 	return 0
+}
+
+func sessionChildID(explicit, parent, kind string) string {
+	if id := strings.TrimSpace(explicit); id != "" {
+		return id
+	}
+	return parent + "-" + kind
+}
+
+type sessionChildTarget struct{ id, model, host, reason string }
+
+func newSessionChildTarget(explicit, parent, kind, model, host, reason string) sessionChildTarget {
+	return sessionChildTarget{id: sessionChildID(explicit, parent, kind), model: model, host: host, reason: reason}
+}
+
+func runSessionBranchOperation[T any](stderr io.Writer, verb, registry string, operation func() (T, sessionimage.Meta, error)) (T, int) {
+	result, meta, err := operation()
+	if err != nil {
+		fmt.Fprintf(stderr, "fak session %s: %v\n", verb, err)
+		return result, 1
+	}
+	if reg := strings.TrimSpace(registry); reg != "" {
+		if code := registerBranchDescriptor(stderr, pathutil.ExpandTilde(reg), meta); code != 0 {
+			return result, code
+		}
+	}
+	return result, 0
 }

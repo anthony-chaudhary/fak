@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -86,11 +85,8 @@ fixtures (observed_at, not live) so this runs offline with no credentials.
 		return 0
 	}
 
-	out, err := json.MarshalIndent(reg, "", "  ")
-	if err != nil {
-		fmt.Fprintf(stderr, "fak bench-ingest: marshal registry: %v\n", err)
-		return 1
+	if rc := encodeJSONOrFailPrefixed(stdout, stderr, reg, "fak bench-ingest: marshal registry"); rc != 0 {
+		return rc
 	}
-	fmt.Fprintln(stdout, string(out))
 	return 0
 }

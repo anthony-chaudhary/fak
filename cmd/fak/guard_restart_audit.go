@@ -453,12 +453,9 @@ func runGuardRestartAudit(stdout, stderr io.Writer, argv []string) int {
 	}
 	rep := guardRestartAuditScan(dir, guardRestartSeedDirs(*seedDir, *scanTemp), *trace)
 	if *asJSON {
-		raw, err := json.MarshalIndent(rep, "", "  ")
-		if err != nil {
-			fmt.Fprintf(stderr, "fak guard restart-audit: %v\n", err)
-			return 1
+		if rc := encodeJSONOrFailPrefixed(stdout, stderr, rep, "fak guard restart-audit"); rc != 0 {
+			return rc
 		}
-		fmt.Fprintln(stdout, string(raw))
 		return 0
 	}
 	color := false

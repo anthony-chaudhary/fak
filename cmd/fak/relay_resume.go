@@ -64,12 +64,7 @@ func runRelayResume(stdin io.Reader, stdout, stderr io.Writer, argv []string) in
 	// --json` or `... --json baton.json`), matching the repo's positional-leading verb
 	// convention; flag.Parse stops at the first non-flag, so a leading positional must
 	// be peeled off before the parse. A bare "-" (stdin) counts as a positional too.
-	rest := argv
-	positional := ""
-	if len(rest) > 0 && (rest[0] == "-" || !strings.HasPrefix(rest[0], "-")) {
-		positional = rest[0]
-		rest = rest[1:]
-	}
+	rest, positional := relayLeadingPositional(argv, true)
 	if err := fs.Parse(rest); err != nil {
 		return 2
 	}
@@ -121,6 +116,13 @@ func runRelayResume(stdin io.Reader, stdout, stderr io.Writer, argv []string) in
 	}
 	printBaton(stdout, b)
 	return 0
+}
+
+func relayLeadingPositional(argv []string, acceptDash bool) ([]string, string) {
+	if len(argv) == 0 || (!acceptDash || argv[0] != "-") && strings.HasPrefix(argv[0], "-") {
+		return argv, ""
+	}
+	return argv[1:], argv[0]
 }
 
 // printBaton renders the human summary in the schema doc's stable field order. Every

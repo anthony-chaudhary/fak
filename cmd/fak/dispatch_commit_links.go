@@ -8,7 +8,6 @@ package main
 // rendering (#1812).
 
 import (
-	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -73,13 +72,11 @@ func runDispatchCommitLinks(stdout, stderr io.Writer, argv []string) int {
 func gitLogForCommitLinks(rng string) (string, error) {
 	cmd := exec.Command("git", "log", "--no-merges", "--format=%H"+commitLinkFieldSep+"%B"+commitLinkRecordSep, rng)
 	configureDispatchHelperCommand(cmd)
-	var out, errBuf bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errBuf
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("git log %s: %w: %s", rng, err, strings.TrimSpace(errBuf.String()))
+	out, errOut, err := runBufferedCommand(cmd)
+	if err != nil {
+		return "", fmt.Errorf("git log %s: %w: %s", rng, err, strings.TrimSpace(errOut))
 	}
-	return out.String(), nil
+	return out, nil
 }
 
 func readCommitLinkedIssueWitnesses(path string) ([]commitissuelink.CommitLinkedIssue, error) {

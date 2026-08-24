@@ -295,30 +295,28 @@ func runHarnessControlPacketReceipt(stdout, stderr io.Writer, argv []string) int
 	}
 	switch argv[0] {
 	case "start":
-		fs := flag.NewFlagSet("harness study control packet receipt start", flag.ContinueOnError)
-		fs.SetOutput(stderr)
-		dir := fs.String("dir", ".", "assigned packet directory")
-		participant := fs.String("participant-id", "", "anonymous participant ID")
-		pair := fs.String("pair-id", "", "anonymous pair ID")
-		order := fs.String("pair-order", "", "default-first or scratch-first")
-		if err := fs.Parse(argv[1:]); err != nil || fs.NArg() != 0 {
+		fs := harnessReceiptFlagSet("start", stderr)
+		dir := harnessReceiptStringFlag(fs, "dir", ".", "assigned packet directory")
+		participant := harnessReceiptStringFlag(fs, "participant-id", "", "anonymous participant ID")
+		pair := harnessReceiptStringFlag(fs, "pair-id", "", "anonymous pair ID")
+		order := harnessReceiptStringFlag(fs, "pair-order", "", "default-first or scratch-first")
+		if !parseHarnessReceiptFlags(fs, argv[1:], dir) {
 			return 2
 		}
-		*dir = pathutil.ExpandTilde(*dir)
-		r, err := harnesscontrolpacket.StartReceipt(harnesscontrolpacket.ReceiptStartOptions{Dir: *dir, ParticipantID: *participant, PairID: *pair, PairOrder: *order})
-		if err != nil {
-			fmt.Fprintf(stderr, "fak harness study control packet receipt start: %v\n", err)
+		r, ok := executeHarnessReceipt(stderr, "start", func() (harnesscontrolstudy.Receipt, error) {
+			return harnesscontrolpacket.StartReceipt(harnesscontrolpacket.ReceiptStartOptions{Dir: *dir, ParticipantID: *participant, PairID: *pair, PairOrder: *order})
+		})
+		if !ok {
 			return 1
 		}
 		fmt.Fprintf(stdout, "HARNESS CONTROL RECEIPT | STARTED\narm: %s\nposition: %d\nstarted: %s\nreceipt: %s\n", r.Arm, r.ArmPosition, r.StartedAt, filepath.Join(*dir, "receipt.json"))
 		return 0
 	case "finalize":
-		fs := flag.NewFlagSet("harness study control packet receipt finalize", flag.ContinueOnError)
-		fs.SetOutput(stderr)
-		dir := fs.String("dir", ".", "assigned packet directory")
-		artifact := fs.String("artifact", "", "final artifact to digest")
-		commands := fs.String("commands", "", "newline-delimited command transcript")
-		errorsPath := fs.String("errors", "", "optional newline-delimited errors")
+		fs := harnessReceiptFlagSet("finalize", stderr)
+		dir := harnessReceiptStringFlag(fs, "dir", ".", "assigned packet directory")
+		artifact := harnessReceiptStringFlag(fs, "artifact", "", "final artifact to digest")
+		commands := harnessReceiptStringFlag(fs, "commands", "", "newline-delimited command transcript")
+		errorsPath := harnessReceiptStringFlag(fs, "errors", "", "optional newline-delimited errors")
 		succeeded := fs.Bool("succeeded", false, "task outcomes succeeded")
 		verified := fs.Bool("verified", false, "independent verification succeeded")
 		help := fs.Int("help-requests", 0, "facilitator help requests")
@@ -326,15 +324,15 @@ func runHarnessControlPacketReceipt(stdout, stderr io.Writer, argv []string) int
 		inspect := fs.Bool("inspect-captured", false, "inspect evidence captured")
 		preview := fs.Bool("preview-captured", false, "preview evidence captured")
 		runtime := fs.Bool("runtime-verify-captured", false, "runtime verification evidence captured")
-		preference := fs.String("preference", "", "second-arm preference: default-control, scratch, or none")
-		reason := fs.String("preference-reason", "", "second-arm preference reason")
-		if err := fs.Parse(argv[1:]); err != nil || fs.NArg() != 0 {
+		preference := harnessReceiptStringFlag(fs, "preference", "", "second-arm preference: default-control, scratch, or none")
+		reason := harnessReceiptStringFlag(fs, "preference-reason", "", "second-arm preference reason")
+		if !parseHarnessReceiptFlags(fs, argv[1:], dir) {
 			return 2
 		}
-		*dir = pathutil.ExpandTilde(*dir)
-		r, err := harnesscontrolpacket.FinalizeReceipt(harnesscontrolpacket.ReceiptFinalizeOptions{Dir: *dir, ArtifactPath: *artifact, CommandsPath: *commands, ErrorsPath: *errorsPath, Succeeded: *succeeded, Verified: *verified, HelpRequests: *help, Confidence: *confidence, InspectCaptured: *inspect, PreviewCaptured: *preview, RuntimeVerifyCaptured: *runtime, Preference: *preference, PreferenceReason: *reason})
-		if err != nil {
-			fmt.Fprintf(stderr, "fak harness study control packet receipt finalize: %v\n", err)
+		r, ok := executeHarnessReceipt(stderr, "finalize", func() (harnesscontrolstudy.Receipt, error) {
+			return harnesscontrolpacket.FinalizeReceipt(harnesscontrolpacket.ReceiptFinalizeOptions{Dir: *dir, ArtifactPath: *artifact, CommandsPath: *commands, ErrorsPath: *errorsPath, Succeeded: *succeeded, Verified: *verified, HelpRequests: *help, Confidence: *confidence, InspectCaptured: *inspect, PreviewCaptured: *preview, RuntimeVerifyCaptured: *runtime, Preference: *preference, PreferenceReason: *reason})
+		})
+		if !ok {
 			return 1
 		}
 		fmt.Fprintf(stdout, "HARNESS CONTROL RECEIPT | FINALIZED\narm: %s\nelapsed_seconds: %.3f\nartifact: %s\nreceipt: %s\n", r.Arm, r.ElapsedSeconds, r.ArtifactDigest, filepath.Join(*dir, "receipt.json"))
@@ -343,4 +341,33 @@ func runHarnessControlPacketReceipt(stdout, stderr io.Writer, argv []string) int
 		fmt.Fprintln(stderr, "usage: fak harness study control packet receipt <start|finalize>")
 		return 2
 	}
+}
+
+func parseHarnessReceiptFlags(fs *flag.FlagSet, argv []string, dir *string) bool {
+	if err := fs.Parse(argv); err != nil || fs.NArg() != 0 {
+		return false
+	}
+	*dir = expandHarnessReceiptDir(*dir)
+	return true
+}
+
+func harnessReceiptFlagSet(action string, stderr io.Writer) *flag.FlagSet {
+	fs := flag.NewFlagSet("harness study control packet receipt "+action, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	return fs
+}
+
+func expandHarnessReceiptDir(dir string) string { return pathutil.ExpandTilde(dir) }
+
+func harnessReceiptStringFlag(fs *flag.FlagSet, name, value, usage string) *string {
+	return fs.String(name, value, usage)
+}
+
+func executeHarnessReceipt(stderr io.Writer, action string, execute func() (harnesscontrolstudy.Receipt, error)) (harnesscontrolstudy.Receipt, bool) {
+	receipt, err := execute()
+	if err != nil {
+		fmt.Fprintf(stderr, "fak harness study control packet receipt %s: %v\n", action, err)
+		return receipt, false
+	}
+	return receipt, true
 }

@@ -99,13 +99,11 @@ func parseGhIssueUnwitnessedInput(raw []byte) (unwitnessedclaim.Input, error) {
 func ghIssueViewJSON(issue int) ([]byte, error) {
 	cmd, cancel := ghexec.CommandTimeout(context.Background(), ghexec.DefaultTimeout, "issue", "view", fmt.Sprint(issue), "--json", "number,state,comments")
 	defer cancel()
-	var out, errBuf bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errBuf
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("gh issue view %d: %w: %s", issue, err, errBuf.String())
+	out, errOut, err := runBufferedCommand(cmd)
+	if err != nil {
+		return nil, fmt.Errorf("gh issue view %d: %w: %s", issue, err, errOut)
 	}
-	return out.Bytes(), nil
+	return []byte(out), nil
 }
 
 func ghPostIssueComment(issue int, body string) error {

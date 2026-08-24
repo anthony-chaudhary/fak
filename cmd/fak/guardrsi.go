@@ -334,35 +334,15 @@ func runGuardRSIScorecard(stdout, stderr io.Writer, argv []string) int {
 		root = repoRoot()
 	}
 	payload := guardrsi.BuildScorecard(root)
-	if *comparePath != "" {
-		base, ok := readCompareBase(stderr, "fak guard-rsi-scorecard", *comparePath)
-		if !ok {
-			return 2
-		}
-		fmt.Fprintln(stdout, scorecard.Compare(payload, base, guardrsi.DebtKey))
-		if payload.OK {
-			return 0
-		}
-		return 1
-	}
-	if *asJSON {
-		_ = encodeGuardRSIJSON(stdout, stderr, "fak guard-rsi-scorecard", payload)
-	} else if *asMarkdown {
-		fmt.Fprint(stdout, scorecard.Markdown(payload, scorecard.MarkdownDoc{
+	return emitScorecard(stdout, stderr, "fak guard-rsi-scorecard", guardrsi.DebtKey, payload,
+		*comparePath, *asJSON, *asMarkdown, scorecard.MarkdownDoc{
 			Title:       "fak guard RSI loop scorecard",
 			Description: "How mature and realized the RSI loop(s) for fak guard are, scored from the tree plus the real decision journal.",
 			Heading:     "fak guard RSI loop scorecard",
 			DebtKey:     guardrsi.DebtKey,
 			HeaderExtra: fmt.Sprintf(" - maturity value %v - realized value %v - %v real journal row(s)",
 				payload.Corpus["maturity_value"], payload.Corpus["realized_value"], payload.Corpus["audit_rows"]),
-		}))
-	} else {
-		fmt.Fprintln(stdout, scorecard.Render(payload, guardrsi.DebtKey))
-	}
-	if payload.OK {
-		return 0
-	}
-	return 1
+		})
 }
 
 func encodeGuardRSIJSON(stdout, stderr io.Writer, label string, v any) int {

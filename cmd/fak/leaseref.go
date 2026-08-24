@@ -835,11 +835,7 @@ func runLeaserefFence(stdout, stderr io.Writer, argv []string) int {
 	}
 	store := leaseref.NewInDir(*dir)
 	v, err := store.Fence(context.Background(), leaseref.Record{ID: *id, Holder: *holder, Generation: *gen}, time.Now())
-	if err != nil {
-		fmt.Fprintf(stderr, "fak leaseref fence: %v\n", err)
-		return 1
-	}
-	return emitLeaserefOutcome(stdout, stderr, v, v.OK, "fence")
+	return emitLeaserefResult(stdout, stderr, v, err, "fak leaseref fence", "fence", func(v leaseref.FenceVerdict) bool { return v.OK })
 }
 
 func runLeaserefRenew(stdout, stderr io.Writer, argv []string) int {

@@ -1021,13 +1021,7 @@ func usd(v float64) string {
 // upper uppercases an ASCII token for the header line (posture/strategy emphasis) without
 // pulling in strings just for this.
 func upper(s string) string {
-	b := []byte(s)
-	for i := range b {
-		if b[i] >= 'a' && b[i] <= 'z' {
-			b[i] -= 'a' - 'A'
-		}
-	}
-	return string(b)
+	return asciiUpper(s)
 }
 
 // runResumeHold is the operator WRITER half of the drive-state alignment: it records a durable

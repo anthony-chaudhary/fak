@@ -129,8 +129,7 @@ func runSteering(stdout, stderr io.Writer, mode string, argv []string) int {
 		if !fire {
 			fmt.Fprintf(stdout, "fak steering alert: no regression vs %s (%s); nothing posted\n", steeringBaselineRel, reason)
 			if *pin && isImprovement(snap, base) {
-				if err := writeSteeringBaseline(steeringBaselineRel, snap); err != nil {
-					fmt.Fprintf(stderr, "fak steering alert: --pin: %v\n", err)
+				if code := pinSteeringBaseline(stderr, "fak steering alert: --pin", snap); code != 0 {
 					return 1
 				}
 				fmt.Fprintf(stdout, "fak steering alert: ratcheted floor in %s (index %.1f, debt %d, signals %d)\n",
@@ -167,12 +166,19 @@ func runSteeringPin(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak steering pin: %v\n", err)
 		return 2
 	}
-	if err := writeSteeringBaseline(steeringBaselineRel, snap); err != nil {
-		fmt.Fprintf(stderr, "fak steering pin: %v\n", err)
+	if code := pinSteeringBaseline(stderr, "fak steering pin", snap); code != 0 {
 		return 1
 	}
 	fmt.Fprintf(stdout, "fak steering pin: pinned %s (index %.1f, debt %d, signals %d)\n",
 		steeringBaselineRel, snap.index, snap.debt, snap.softSignal)
+	return 0
+}
+
+func pinSteeringBaseline(stderr io.Writer, label string, snap steeringSnapshot) int {
+	if err := writeSteeringBaseline(steeringBaselineRel, snap); err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", label, err)
+		return 1
+	}
 	return 0
 }
 

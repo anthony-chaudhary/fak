@@ -888,30 +888,41 @@ func parseSharedGateCriterion(fields []string, msgPrefix string) (loopgate.Crite
 		if len(fields) == 2 {
 			c.Ref = fields[1]
 		}
-		return c, true, nil
+		return parsedGateCriterion(c)
 	case "verify":
-		if len(fields) != 3 {
-			return loopgate.Criterion{}, true, fmt.Errorf("%[1]sverify witness must be: %[1]sverify PLAN PHASE", msgPrefix)
+		if err := requireCriterionFields(fields, 3, "%[1]sverify witness must be: %[1]sverify PLAN PHASE", msgPrefix); err != nil {
+			return loopgate.Criterion{}, true, err
 		}
-		return loopgate.Criterion{Kind: loopgate.CriterionVerify, Plan: fields[1], Phase: fields[2]}, true, nil
+		return parsedGateCriterion(loopgate.Criterion{Kind: loopgate.CriterionVerify, Plan: fields[1], Phase: fields[2]})
 	case "test-witness":
-		if len(fields) != 3 {
-			return loopgate.Criterion{}, true, fmt.Errorf("%stest-witness criterion requires baseline and candidate outcomes", msgPrefix)
+		if err := requireCriterionFields(fields, 3, "%stest-witness criterion requires baseline and candidate outcomes", msgPrefix); err != nil {
+			return loopgate.Criterion{}, true, err
 		}
-		return loopgate.Criterion{Kind: loopgate.CriterionTestWitness, Baseline: fields[1], Candidate: fields[2]}, true, nil
+		return parsedGateCriterion(loopgate.Criterion{Kind: loopgate.CriterionTestWitness, Baseline: fields[1], Candidate: fields[2]})
 	case "citation-resolve":
 		if len(fields) < 2 {
 			return loopgate.Criterion{}, true, fmt.Errorf("%scitation-resolve criterion requires a subject citation", msgPrefix)
 		}
-		return loopgate.Criterion{Kind: loopgate.CriterionCitationResolve, Subject: strings.Join(fields[1:], " ")}, true, nil
+		return parsedGateCriterion(loopgate.Criterion{Kind: loopgate.CriterionCitationResolve, Subject: strings.Join(fields[1:], " ")})
 	case "witness":
 		if len(fields) < 3 {
 			return loopgate.Criterion{}, true, fmt.Errorf("%switness criterion requires source and subject", msgPrefix)
 		}
-		return loopgate.Criterion{Kind: loopgate.CriterionWitness, Source: fields[1], Subject: strings.Join(fields[2:], " ")}, true, nil
+		return parsedGateCriterion(loopgate.Criterion{Kind: loopgate.CriterionWitness, Source: fields[1], Subject: strings.Join(fields[2:], " ")})
 	default:
 		return loopgate.Criterion{}, false, nil
 	}
+}
+
+func parsedGateCriterion(criterion loopgate.Criterion) (loopgate.Criterion, bool, error) {
+	return criterion, true, nil
+}
+
+func requireCriterionFields(fields []string, count int, format, prefix string) error {
+	if len(fields) != count {
+		return fmt.Errorf(format, prefix)
+	}
+	return nil
 }
 
 func runDOSLoopGateWitness(ctx context.Context, req loopgate.Request) (loopgate.WitnessResult, error) {

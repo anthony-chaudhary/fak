@@ -155,11 +155,7 @@ func restoreInPlace(stdout, stderr io.Writer, p restoreParams, reg accounts.Regi
 	if reg.Homes[idx].Dir != "" {
 		reg.Homes[idx].Identity = accounts.DeriveIdentity(reg.Homes[idx].Dir)
 	}
-	if err := reg.Validate(); err != nil {
-		fmt.Fprintf(stderr, "fak accounts: restore would make registry invalid: %v\n", err)
-		return 1
-	}
-	if !saveAccountsRegistry(stderr, p.registryPath, reg) {
+	if !validateAndSaveAccounts(stderr, p.registryPath, reg, "fak accounts: restore would make registry invalid: %v\n") {
 		return 1
 	}
 	fmt.Fprintf(stdout, "registry: restored %s in place (dir unchanged: %s)\n", reg.Homes[idx].Name, reg.Homes[idx].Dir)

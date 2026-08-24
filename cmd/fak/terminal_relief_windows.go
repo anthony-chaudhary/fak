@@ -34,9 +34,7 @@ type terminalReliefSnapshot struct {
 }
 
 func newTerminalReliefBackgroundCommand(name string, args ...string) *exec.Cmd {
-	cmd := exec.Command(name, args...)
-	windowgate.ConfigureBackgroundCommand(cmd)
-	return cmd
+	return backgroundCommand(name, args...)
 }
 
 func newTerminalReliefDetachedCommand(argv []string) *exec.Cmd {

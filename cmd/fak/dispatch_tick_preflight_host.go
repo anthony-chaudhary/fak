@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"io"
 	"os"
 	"os/exec"
@@ -19,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
@@ -701,28 +702,8 @@ type dispatchCodexProcessRow struct {
 	Cmdline string `json:"cmdline"`
 }
 
-func dispatchAmbientCodexProcessCount() int {
-	return len(dispatchAmbientCodexPIDs())
-}
-
-func dispatchAmbientCodexPIDs() map[int]bool {
-	rows, err := dispatchProbeCodexProcessRows()
-	if err != nil {
-		return map[int]bool{}
-	}
-	return dispatchCodexProcessPIDs(rows)
-}
-
 func dispatchCodexProcessPIDs(rows []dispatchCodexProcessRow) map[int]bool {
 	return dispatchCodexProcessPIDsExcludingParents(rows, nil)
-}
-
-func dispatchAmbientCodexPIDsExcludingSidecarParents(sidecarPIDs map[int]bool) map[int]bool {
-	rows, err := dispatchProbeCodexProcessRows()
-	if err != nil {
-		return map[int]bool{}
-	}
-	return dispatchCodexProcessPIDsExcludingParents(rows, sidecarPIDs)
 }
 
 func dispatchCodexProcessPIDsExcludingParents(rows []dispatchCodexProcessRow, excludedParents map[int]bool) map[int]bool {

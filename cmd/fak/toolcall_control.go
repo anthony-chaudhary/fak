@@ -250,44 +250,18 @@ func toolcallOutcomeDeclaration(payload, toolInput json.RawMessage) toolcallcont
 		if len(raw) == 0 || json.Unmarshal(raw, &object) != nil {
 			return
 		}
-		if value, ok := object["fak_expected_negative"]; ok {
-			marker, typed := value.(bool)
-			if !typed {
-				invalid = true
-			} else {
-				expected = append(expected, marker)
-			}
-		}
-		if value, ok := object["fak_outcome_class"]; ok {
-			class, typed := value.(string)
-			if !typed || strings.TrimSpace(class) == "" {
-				invalid = true
-			} else {
-				classes = append(classes, toolcallcontrol.OutcomeClass(strings.ToLower(strings.TrimSpace(class))))
-			}
-		}
+		expectedValue, hasExpected := object["fak_expected_negative"]
+		classValue, hasClass := object["fak_outcome_class"]
+		invalid = appendToolcallOutcomeFields(&expected, &classes, expectedValue, hasExpected, classValue, hasClass) || invalid
 		if value, ok := object["fak_outcome"]; ok {
 			declaration, typed := value.(map[string]any)
 			if !typed {
 				invalid = true
 				return
 			}
-			if value, ok := declaration["expected_negative"]; ok {
-				marker, typed := value.(bool)
-				if !typed {
-					invalid = true
-				} else {
-					expected = append(expected, marker)
-				}
-			}
-			if value, ok := declaration["class"]; ok {
-				class, typed := value.(string)
-				if !typed || strings.TrimSpace(class) == "" {
-					invalid = true
-				} else {
-					classes = append(classes, toolcallcontrol.OutcomeClass(strings.ToLower(strings.TrimSpace(class))))
-				}
-			}
+			expectedValue, hasExpected := declaration["expected_negative"]
+			classValue, hasClass := declaration["class"]
+			invalid = appendToolcallOutcomeFields(&expected, &classes, expectedValue, hasExpected, classValue, hasClass) || invalid
 		}
 	}
 	collect(payload)
@@ -307,6 +281,38 @@ func toolcallOutcomeDeclaration(payload, toolInput json.RawMessage) toolcallcont
 		declaration.Class = class
 	}
 	return declaration
+}
+
+func toolcallExpectedNegative(value any) (bool, bool) {
+	marker, valid := value.(bool)
+	return marker, valid
+}
+
+func toolcallOutcomeClass(value any) (toolcallcontrol.OutcomeClass, bool) {
+	class, valid := value.(string)
+	class = strings.TrimSpace(class)
+	return toolcallcontrol.OutcomeClass(strings.ToLower(class)), valid && class != ""
+}
+
+func appendToolcallOutcomeFields(expected *[]bool, classes *[]toolcallcontrol.OutcomeClass, expectedValue any, hasExpected bool, classValue any, hasClass bool) bool {
+	invalid := false
+	if hasExpected {
+		marker, valid := toolcallExpectedNegative(expectedValue)
+		if valid {
+			*expected = append(*expected, marker)
+		} else {
+			invalid = true
+		}
+	}
+	if hasClass {
+		class, valid := toolcallOutcomeClass(classValue)
+		if valid {
+			*classes = append(*classes, class)
+		} else {
+			invalid = true
+		}
+	}
+	return invalid
 }
 
 func toolcallFileStem(session string) string {

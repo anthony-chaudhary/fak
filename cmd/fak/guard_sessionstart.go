@@ -228,20 +228,6 @@ func parseGuardProviderSessionStart(payload []byte) guardProviderSessionStart {
 	return guardProviderSessionStart{Source: strings.ToLower(strings.TrimSpace(in.Source)), SessionID: id}
 }
 
-// recordGuardSessionStartIdentity best-effort appends one uuid<->trace join row to the durable
-// resume_identity.jsonl store (the A1 fold's input, #4112) under the resolved fleet regDir, so
-// the resume watchdog can later resolve a crashed transcript UUID to its gateway trace long
-// after the TTL-GC'd descriptor registry has forgotten the pairing. Fail-open by the hook's
-// contract: a missing id (a resumed child has CLAUDE_CODE_SESSION_ID stripped, so the UUID is
-// blank) or any write error is a silent no-op — the identity join must never wedge a start.
-//
-// It RETURNS the driver pid it witnessed (0 when none was, including on the early no-join
-// return), so the sibling journal registration (#3787) can stamp the same witnessed pid without
-// paying a second process census — the census is the expensive part of this hook.
-func recordGuardSessionStartIdentity(traceID string) int {
-	return recordGuardSessionStartIdentityFor(traceID, os.Getenv("CLAUDE_CODE_SESSION_ID"))
-}
-
 func recordGuardSessionStartIdentityFor(traceID, sessionID string) int {
 	uuid := strings.TrimSpace(sessionID)
 	traceID = strings.TrimSpace(traceID)

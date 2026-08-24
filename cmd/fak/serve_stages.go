@@ -379,38 +379,16 @@ func (rt *serveRuntime) resolveSessionPlane(sf *serveFlags) {
 	if *sf.apiKeyEnv != "" {
 		apiKey = os.Getenv(*sf.apiKeyEnv)
 	}
-	engineCacheAdminKey, ok := resolveRequiredKey(*sf.engineCacheAdminKeyEnv, os.Getenv)
-	if !ok {
-		writeConfigBail(os.Stderr, configBail{
-			Verb:    "fak serve",
-			Reason:  bailKeyEnvUnset,
-			Summary: "refusing to send cache-reset requests with no admin auth: the named admin-key variable is empty",
-			Knobs: []bailKnob{
-				bailFlag("engine-cache-admin-key-env", *sf.engineCacheAdminKeyEnv),
-				bailEnv(*sf.engineCacheAdminKeyEnv, "").want("the engine-cache admin secret, or omit the flag"),
-			},
-			Bind: []string{"env=" + *sf.engineCacheAdminKeyEnv},
-		})
-		os.Exit(2)
-	}
+	engineCacheAdminKey := resolveServeRequiredKey(*sf.engineCacheAdminKeyEnv, "engine-cache-admin-key-env",
+		"refusing to send cache-reset requests with no admin auth: the named admin-key variable is empty",
+		"the engine-cache admin secret, or omit the flag")
 	if *sf.engineCacheIdleTimeout < 0 {
 		fmt.Fprintln(os.Stderr, "fak serve: --engine-cache-idle-timeout must be non-negative")
 		os.Exit(2)
 	}
-	requireKey, ok := resolveRequiredKey(*sf.requireKeyEnv, os.Getenv)
-	if !ok {
-		writeConfigBail(os.Stderr, configBail{
-			Verb:    "fak serve",
-			Reason:  bailKeyEnvUnset,
-			Summary: "refusing to start a network-facing gateway with no authentication: the named bearer variable is empty",
-			Knobs: []bailKnob{
-				bailFlag("require-key-env", *sf.requireKeyEnv),
-				bailEnv(*sf.requireKeyEnv, "").want("the bearer token callers must present, or omit the flag"),
-			},
-			Bind: []string{"env=" + *sf.requireKeyEnv},
-		})
-		os.Exit(2)
-	}
+	requireKey := resolveServeRequiredKey(*sf.requireKeyEnv, "require-key-env",
+		"refusing to start a network-facing gateway with no authentication: the named bearer variable is empty",
+		"the bearer token callers must present, or omit the flag")
 	if *sf.contextBudgetTokens < 0 {
 		writeConfigBail(os.Stderr, configBail{
 			Verb:    "fak serve",
@@ -692,4 +670,18 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 		must(err)
 	}
 	persistServeExitObservations("http")
+}
+
+func resolveServeRequiredKey(envName, flagName, summary, want string) string {
+	key, ok := resolveRequiredKey(envName, os.Getenv)
+	if ok {
+		return key
+	}
+	writeConfigBail(os.Stderr, configBail{
+		Verb: "fak serve", Reason: bailKeyEnvUnset, Summary: summary,
+		Knobs: []bailKnob{bailFlag(flagName, envName), bailEnv(envName, "").want(want)},
+		Bind:  []string{"env=" + envName},
+	})
+	os.Exit(2)
+	return ""
 }

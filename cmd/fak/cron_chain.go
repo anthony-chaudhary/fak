@@ -103,18 +103,9 @@ func runCronPrompt(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	now := time.Now().UTC()
-	if s := strings.TrimSpace(*at); s != "" {
-		t, err := time.Parse(time.RFC3339, s)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak cron prompt: --at %q is not RFC3339: %v\n", s, err)
-			return 2
-		}
-		now = t.UTC()
-	}
-	slotKey := strings.TrimSpace(*slot)
-	if slotKey == "" {
-		slotKey = cronFireSlot(now, *interval)
+	now, slotKey, ok := resolveCronTimeAndSlot(stderr, "fak cron prompt", *at, *slot, *interval)
+	if !ok {
+		return 2
 	}
 
 	var blocks []string

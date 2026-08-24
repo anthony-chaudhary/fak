@@ -216,14 +216,6 @@ func parseHookSource(payload []byte) string {
 	return strings.TrimSpace(p.Source)
 }
 
-// lookaheadLessonForCompact is the SessionStart(compact) pickup: if the hook payload's source is
-// "compact" AND a fresh look-ahead lesson exists at the CURRENT trunk base SHA, it returns the
-// rendered lesson for injection. Every other case (nil/blank stdin, non-compact source, git
-// unavailable, no fresh lesson) returns ("", false) — fail-open, inject nothing.
-func lookaheadLessonForCompact(stdin io.Reader) (string, bool) {
-	return lookaheadLessonForCompactPayload(readHookStdin(stdin))
-}
-
 func lookaheadLessonForCompactPayload(payload []byte) (string, bool) {
 	source := parseHookSource(payload)
 	cwd, err := os.Getwd()

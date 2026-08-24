@@ -100,12 +100,9 @@ func runSessionIndexLS(stdout, stderr io.Writer, regDir string, asJSON bool) int
 	rows := guardsessions.Load(regDir)
 	alive, aliveOK := sessionIndexAlivePIDs()
 	if asJSON {
-		projected := make([]sessionIndexJSONRow, 0, len(rows))
-		for _, r := range rows {
-			red := r
-			red.Bearer = "" // never print the read token in a listing
-			projected = append(projected, sessionIndexJSONRow{Row: red, State: sessionIndexState(r, alive, aliveOK)})
-		}
+		projected := projectRows(rows, func(r guardsessions.Row) sessionIndexJSONRow {
+			return sessionIndexJSONRow{Row: withoutPublishedBearer(r), State: sessionIndexState(r, alive, aliveOK)}
+		})
 		return encodeSessionListingJSON(stdout, stderr, "fak.session-ls.v1", regDir, projected, "fak session ls")
 	}
 	if len(rows) == 0 {

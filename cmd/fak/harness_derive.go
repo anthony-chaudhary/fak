@@ -49,21 +49,15 @@ func runHarnessDerive(stdout, stderr io.Writer, argv []string) int {
 		*receiptPath = *output + ".derive.json"
 	}
 	deltas := make([]harnessderive.Delta, 0, len(sets)+len(denies))
-	for _, raw := range sets {
-		capability, value, ok := strings.Cut(raw, "=")
-		if !ok || strings.TrimSpace(value) == "" {
-			fmt.Fprintf(stderr, "fak harness derive: --set %q must be kind:id=value\n", raw)
-			return 2
-		}
-		deltas = append(deltas, harnessderive.Delta{Capability: capability, Operation: "replace", Value: value})
+	deltas, err = appendHarnessDeriveDeltas(deltas, sets, "set")
+	if err != nil {
+		fmt.Fprintf(stderr, "fak harness derive: %v\n", err)
+		return 2
 	}
-	for _, raw := range denies.values() {
-		capability, value, ok := strings.Cut(raw, "=")
-		if !ok || strings.TrimSpace(value) == "" {
-			fmt.Fprintf(stderr, "fak harness derive: --deny %q must be policy:id=value\n", raw)
-			return 2
-		}
-		deltas = append(deltas, harnessderive.Delta{Capability: capability, Operation: "deny", Denies: []string{value}})
+	deltas, err = appendHarnessDeriveDeltas(deltas, denies.values(), "deny")
+	if err != nil {
+		fmt.Fprintf(stderr, "fak harness derive: %v\n", err)
+		return 2
 	}
 	result, err := harnessderive.Derive(*base, harnessderive.Request{Layer: *layer, Deltas: deltas})
 	if err != nil {
@@ -96,6 +90,25 @@ func runHarnessDerive(stdout, stderr io.Writer, argv []string) int {
 	fmt.Fprintf(stdout, "next: fak harness preview --current %s --candidate %s\n", *from, *output)
 	fmt.Fprintf(stdout, "inspect: fak harness inspect --lock %s\n", *output)
 	return 0
+}
+
+func appendHarnessDeriveDeltas(deltas []harnessderive.Delta, raws []string, operation string) ([]harnessderive.Delta, error) {
+	for _, raw := range raws {
+		capability, value, ok := strings.Cut(raw, "=")
+		if !ok || strings.TrimSpace(value) == "" {
+			shape := "kind:id=value"
+			if operation == "deny" {
+				shape = "policy:id=value"
+			}
+			return nil, fmt.Errorf("--%s %q must be %s", operation, raw, shape)
+		}
+		delta := harnessderive.Delta{Capability: capability, Operation: "replace", Value: value}
+		if operation == "deny" {
+			delta = harnessderive.Delta{Capability: capability, Operation: "deny", Denies: []string{value}}
+		}
+		deltas = append(deltas, delta)
+	}
+	return deltas, nil
 }
 
 func writeDerivedJSON(path string, value any) error {

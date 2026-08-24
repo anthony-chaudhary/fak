@@ -30,54 +30,35 @@ func runLearningObservation(stdout, stderr io.Writer, argv []string) int {
 		source := fs.String("source", "", "source provenance")
 		content := fs.String("content", "", "record content")
 		outcome := fs.String("outcome", "", "verdict outcome: kept or rejected")
-		if err := fs.Parse(argv[1:]); err != nil {
-			return 2
-		}
-		store, err := learningobservation.Load(*storePath)
-		if err != nil {
-			return learningObservationError(stderr, err)
+		store, code := parseLearningObservationStore(fs, argv[1:], *storePath, stderr)
+		if code != 0 {
+			return code
 		}
 		record, created, err := store.Add(learningobservation.Kind(*kind), *source, *content, learningobservation.Outcome(*outcome))
 		if err != nil {
 			return learningObservationError(stderr, err)
 		}
-		if created {
-			if err := store.Save(*storePath); err != nil {
-				return learningObservationError(stderr, err)
-			}
-		}
-		return writeLearningObservationJSON(stdout, map[string]any{"record": record, "created": created})
+		return finishLearningObservationMutation(stdout, stderr, store, *storePath, created, map[string]any{"record": record, "created": created})
 	}
 	if sub == "link" {
 		from := fs.String("from", "", "source record ID")
 		relation := fs.String("relation", "", "closed-enum relation")
 		to := fs.String("to", "", "target record ID")
-		if err := fs.Parse(argv[1:]); err != nil {
-			return 2
-		}
-		store, err := learningobservation.Load(*storePath)
-		if err != nil {
-			return learningObservationError(stderr, err)
+		store, code := parseLearningObservationStore(fs, argv[1:], *storePath, stderr)
+		if code != 0 {
+			return code
 		}
 		created, err := store.Link(*from, learningobservation.Relation(*relation), *to)
 		if err != nil {
 			return learningObservationError(stderr, err)
 		}
-		if created {
-			if err := store.Save(*storePath); err != nil {
-				return learningObservationError(stderr, err)
-			}
-		}
-		return writeLearningObservationJSON(stdout, map[string]any{"edge": learningobservation.Edge{From: *from, Relation: learningobservation.Relation(*relation), To: *to}, "created": created})
+		return finishLearningObservationMutation(stdout, stderr, store, *storePath, created, map[string]any{"edge": learningobservation.Edge{From: *from, Relation: learningobservation.Relation(*relation), To: *to}, "created": created})
 	}
 	if sub == "trace" {
 		candidate := fs.String("candidate", "", "candidate record ID")
-		if err := fs.Parse(argv[1:]); err != nil {
-			return 2
-		}
-		store, err := learningobservation.Load(*storePath)
-		if err != nil {
-			return learningObservationError(stderr, err)
+		store, code := parseLearningObservationStore(fs, argv[1:], *storePath, stderr)
+		if code != 0 {
+			return code
 		}
 		records, edges, err := store.Trace(*candidate)
 		if err != nil {
@@ -87,6 +68,26 @@ func runLearningObservation(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintf(stderr, "learning-observation: unknown subcommand %q\n", sub)
 	return 2
+}
+
+func parseLearningObservationStore(fs *flag.FlagSet, args []string, storePath string, stderr io.Writer) (*learningobservation.Store, int) {
+	if err := fs.Parse(args); err != nil {
+		return nil, 2
+	}
+	store, err := learningobservation.Load(storePath)
+	if err != nil {
+		return nil, learningObservationError(stderr, err)
+	}
+	return store, 0
+}
+
+func finishLearningObservationMutation(stdout, stderr io.Writer, store *learningobservation.Store, storePath string, created bool, value any) int {
+	if created {
+		if err := store.Save(storePath); err != nil {
+			return learningObservationError(stderr, err)
+		}
+	}
+	return writeLearningObservationJSON(stdout, value)
 }
 
 func defaultLearningObservationStorePath() string {

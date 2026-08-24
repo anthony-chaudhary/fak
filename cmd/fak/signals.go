@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -40,43 +39,12 @@ func signalsUsage() {
 }
 
 func loadSignalsConfig(path string) signals.Config {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fak signals: %v\n", err)
-		os.Exit(1)
-	}
-	var cfg signals.Config
-	if err := json.Unmarshal(b, &cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "fak signals: parsing %s: %v\n", path, err)
-		os.Exit(1)
-	}
-	return cfg
+	return loadJSONFileOrExit[signals.Config](path, "fak signals")
 }
 
 // loadItems reads a JSONL of signals.Item (one per line). Empty path => no items.
 func loadItems(path string) []signals.Item {
-	if path == "" {
-		return nil
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fak signals: %v\n", err)
-		os.Exit(1)
-	}
-	var items []signals.Item
-	for i, raw := range bytes.Split(b, []byte("\n")) {
-		line := bytes.TrimSpace(raw)
-		if len(line) == 0 {
-			continue
-		}
-		var it signals.Item
-		if err := json.Unmarshal(line, &it); err != nil {
-			fmt.Fprintf(os.Stderr, "fak signals: %s line %d: %v\n", path, i+1, err)
-			os.Exit(1)
-		}
-		items = append(items, it)
-	}
-	return items
+	return readJSONLCorpus[signals.Item](path, "fak signals")
 }
 
 func cmdSignalsValidate(args []string) {

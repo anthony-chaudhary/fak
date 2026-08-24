@@ -32,12 +32,8 @@ func runWipRemoteDrain(stdout, stderr io.Writer, argv []string) int {
 		return code
 	}
 	res, err := wipRemoteDrain(context.Background(), *repo, *remote, *apply, *allowPeer)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak wip remote-drain: %v\n", err)
-		return 1
-	}
-	if *asJSON {
-		return encodeJSONOrFail(stdout, stderr, res, "fak wip remote-drain")
+	if code, done := emitResultOrError(stdout, stderr, "fak wip remote-drain", *asJSON, res, err); done {
+		return code
 	}
 	fmt.Fprintf(stdout, "remote checkpoint drain: remote=%s apply=%v branch=%s\n", res.Remote, res.Applied, res.DefaultBranch)
 	for _, c := range res.Candidates {

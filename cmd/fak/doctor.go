@@ -161,16 +161,7 @@ func runDoctor(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 
 	rep := diagnose(input, answershape.Limits{MaxRepeat: *maxRepeat, MaxChars: *maxChars, NGram: *ngram})
 
-	if *asJSON {
-		b, _ := json.MarshalIndent(rep, "", "  ")
-		fmt.Fprintln(stdout, string(b))
-	} else {
-		writeDoctorHuman(stdout, rep)
-	}
-	if rep.Findings > 0 {
-		return 1
-	}
-	return 0
+	return renderJSONOrHuman(stdout, *asJSON, rep, writeDoctorHuman, rep.Findings > 0)
 }
 
 func writeBinaryDoctorHuman(w io.Writer, rep appversion.BinaryReport) {

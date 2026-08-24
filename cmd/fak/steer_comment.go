@@ -54,10 +54,7 @@ var steerCommentPost = ghSteerCommentPost
 // reasoning on a merely-mentioned issue is worse than not posting at all.
 func runSteerComment(stdout, stderr io.Writer, argv []string) int {
 	// The unit name may come before the flags or after them; accept both.
-	unitArg := ""
-	if len(argv) > 0 && !strings.HasPrefix(argv[0], "-") {
-		unitArg, argv = strings.TrimSpace(argv[0]), argv[1:]
-	}
+	unitArg, argv := splitSteerUnitArg(argv)
 	fs := flag.NewFlagSet("fak steer comment", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	note := fs.String("m", "", "the operator's note about this unit (required)")
@@ -68,30 +65,16 @@ func runSteerComment(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	const usage = `usage: fak steer comment <unit> -m "<note>" [--by WHO] [--base REF] [--head REF]`
-	if unitArg == "" && fs.NArg() == 1 {
-		unitArg = strings.TrimSpace(fs.Arg(0))
-	} else if fs.NArg() != 0 {
-		fmt.Fprintln(stderr, usage)
-		return 2
-	}
-	if unitArg == "" {
-		fmt.Fprintln(stderr, usage)
+	var ok bool
+	if unitArg, ok = finishSteerUnitArg(fs, unitArg, usage, stderr); !ok {
 		return 2
 	}
 
 	root := steerRoot()
-	view, err := buildSteerPRsView(root, *base, *head)
+	unit, view, err := resolveSteerUnit(root, *base, *head, unitArg)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak steer comment: %v\n", err)
 		return 1
-	}
-	units, _ := view["units"].([]steerpr.Unit)
-	var unit *steerpr.Unit
-	for i := range units {
-		if units[i].Leaf == unitArg {
-			unit = &units[i]
-			break
-		}
 	}
 	if unit == nil {
 		fmt.Fprintf(stderr, "fak steer comment: no forming unit %q in %s — see `fak steer prs` for the units forming now\n",
@@ -106,12 +89,7 @@ func runSteerComment(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
-	who := strings.TrimSpace(*by)
-	if who == "" {
-		// --get pins the invocation provably read-only for the architest
-		// steer-overlay floor (a bare `git config key value` would write).
-		who = strings.TrimSpace(releasePRPlanGit(root, "config", "--get", "user.name"))
-	}
+	who := steerActor(root, *by)
 	// The unit's closure-grade binding: the annotation lands on the intent's own
 	// ticket, anchored to the exact member SHA set the operator was reading.
 	rec, err := steerpr.NewComment(unit.Leaf, who, *note, steerpr.UnitSHAs(*unit), unit.Band, unit.Resolves[0], time.Now())
@@ -127,14 +105,10 @@ func runSteerComment(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	rec.Posted = strings.TrimSpace(posted)
-	if err := steerpr.AppendComment(steerpr.CommentLedgerPath(root), rec); err != nil {
-		fmt.Fprintf(stderr, "fak steer comment: append ledger row: %v\n", err)
-		return 1
-	}
-	// Echo the appended row verbatim: the on-disk record IS the outcome.
-	if err := writeIndentedJSON(stdout, rec); err != nil {
-		fmt.Fprintf(stderr, "fak steer comment: %v\n", err)
-		return 1
+	if code, done := appendAndWriteSteerRecord(stdout, stderr, "fak steer comment", rec, func() error {
+		return steerpr.AppendComment(steerpr.CommentLedgerPath(root), rec)
+	}); done {
+		return code
 	}
 	fmt.Fprintf(stdout, "commented on %s (%d commit(s), band %s) as %s — posted to %s anchored to %d member SHA(s); the band, the ack, and the landed commits are untouched: a comment annotates, it never steers\n",
 		unit.Leaf, len(unit.Commits), unit.Band, who, rec.Issue, len(rec.SHAs))

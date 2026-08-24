@@ -20,8 +20,6 @@ import (
 	"strings"
 	"text/template"
 	"time"
-
-	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // ── install ──────────────────────────────────────────────────────────────────
@@ -713,9 +711,7 @@ set "{{.RequireKeyEnv}}={{.GatewayKey}}"
 `
 
 func nodeHelperCommand(name string, args ...string) *exec.Cmd {
-	cmd := exec.Command(name, args...)
-	windowgate.ConfigureBackgroundCommand(cmd)
-	return cmd
+	return backgroundCommand(name, args...)
 }
 
 func nodeInstallWindows(stdout, stderr io.Writer, in nodeInstallParams) int {

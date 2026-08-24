@@ -59,6 +59,62 @@ var steerPRsTrajState = func(root string) trajctl.State {
 	return trajctl.Fold(trajctl.ReadLedgerFile(filepath.Join(root, trajctl.DefaultLedgerRel)))
 }
 
+func splitSteerUnitArg(argv []string) (string, []string) {
+	if len(argv) > 0 && !strings.HasPrefix(argv[0], "-") {
+		return strings.TrimSpace(argv[0]), argv[1:]
+	}
+	return "", argv
+}
+
+func finishSteerUnitArg(fs *flag.FlagSet, unitArg, usage string, stderr io.Writer) (string, bool) {
+	if unitArg == "" && fs.NArg() == 1 {
+		unitArg = strings.TrimSpace(fs.Arg(0))
+	} else if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, usage)
+		return "", false
+	}
+	if unitArg == "" {
+		fmt.Fprintln(stderr, usage)
+		return "", false
+	}
+	return unitArg, true
+}
+
+func steerActor(root, requested string) string {
+	who := strings.TrimSpace(requested)
+	if who == "" {
+		// --get pins the invocation provably read-only for the architest steer-overlay floor.
+		who = strings.TrimSpace(releasePRPlanGit(root, "config", "--get", "user.name"))
+	}
+	return who
+}
+
+func resolveSteerUnit(root, base, head, leaf string) (*steerpr.Unit, map[string]any, error) {
+	view, err := buildSteerPRsView(root, base, head)
+	if err != nil {
+		return nil, nil, err
+	}
+	units, _ := view["units"].([]steerpr.Unit)
+	for i := range units {
+		if units[i].Leaf == leaf {
+			return &units[i], view, nil
+		}
+	}
+	return nil, view, nil
+}
+
+func appendAndWriteSteerRecord[T any](stdout, stderr io.Writer, label string, rec T, appendRecord func() error) (int, bool) {
+	if err := appendRecord(); err != nil {
+		fmt.Fprintf(stderr, "%s: append ledger row: %v\n", label, err)
+		return 1, true
+	}
+	if err := writeIndentedJSON(stdout, rec); err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", label, err)
+		return 1, true
+	}
+	return 0, false
+}
+
 func cmdSteer(argv []string) { os.Exit(runSteer(os.Stdout, os.Stderr, argv)) }
 
 func runSteer(stdout, stderr io.Writer, argv []string) int {
@@ -194,10 +250,7 @@ func runSteerPRs(stdout, stderr io.Writer, argv []string) int {
 func runSteerAck(stdout, stderr io.Writer, argv []string) int {
 	// The unit name may come before the flags (`fak steer ack gateway --note x`)
 	// or after them; accept both.
-	unitArg := ""
-	if len(argv) > 0 && !strings.HasPrefix(argv[0], "-") {
-		unitArg, argv = strings.TrimSpace(argv[0]), argv[1:]
-	}
+	unitArg, argv := splitSteerUnitArg(argv)
 	fs := flag.NewFlagSet("fak steer ack", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	by := fs.String("by", "", "who looked (default: git config user.name; the row must be attributable)")
@@ -207,30 +260,17 @@ func runSteerAck(stdout, stderr io.Writer, argv []string) int {
 	if !parseFlags(fs, argv) {
 		return 2
 	}
-	if unitArg == "" && fs.NArg() == 1 {
-		unitArg = strings.TrimSpace(fs.Arg(0))
-	} else if fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "usage: fak steer ack <unit> [--by WHO] [--note TEXT] [--base REF] [--head REF]")
-		return 2
-	}
-	if unitArg == "" {
-		fmt.Fprintln(stderr, "usage: fak steer ack <unit> [--by WHO] [--note TEXT] [--base REF] [--head REF]")
+	const usage = "usage: fak steer ack <unit> [--by WHO] [--note TEXT] [--base REF] [--head REF]"
+	var ok bool
+	if unitArg, ok = finishSteerUnitArg(fs, unitArg, usage, stderr); !ok {
 		return 2
 	}
 
 	root := steerRoot()
-	view, err := buildSteerPRsView(root, *base, *head)
+	unit, view, err := resolveSteerUnit(root, *base, *head, unitArg)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak steer ack: %v\n", err)
 		return 1
-	}
-	units, _ := view["units"].([]steerpr.Unit)
-	var unit *steerpr.Unit
-	for i := range units {
-		if units[i].Leaf == unitArg {
-			unit = &units[i]
-			break
-		}
 	}
 	if unit == nil {
 		fmt.Fprintf(stderr, "fak steer ack: no forming unit %q in %s — see `fak steer prs` for the units forming now\n",
@@ -238,25 +278,16 @@ func runSteerAck(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
-	who := strings.TrimSpace(*by)
-	if who == "" {
-		// --get pins the invocation provably read-only for the architest
-		// steer-overlay floor (a bare `git config key value` would write).
-		who = strings.TrimSpace(releasePRPlanGit(root, "config", "--get", "user.name"))
-	}
+	who := steerActor(root, *by)
 	ack, err := steerpr.NewAck(unit.Leaf, who, steerpr.UnitSHAs(*unit), *note, time.Now())
 	if err != nil {
 		fmt.Fprintf(stderr, "fak steer ack: %v\n", err)
 		return 2
 	}
-	if err := steerpr.AppendAck(steerpr.AckLedgerPath(root), ack); err != nil {
-		fmt.Fprintf(stderr, "fak steer ack: append ledger row: %v\n", err)
-		return 1
-	}
-	// Echo the appended row verbatim: the on-disk record IS the outcome.
-	if err := writeIndentedJSON(stdout, ack); err != nil {
-		fmt.Fprintf(stderr, "fak steer ack: %v\n", err)
-		return 1
+	if code, done := appendAndWriteSteerRecord(stdout, stderr, "fak steer ack", ack, func() error {
+		return steerpr.AppendAck(steerpr.AckLedgerPath(root), ack)
+	}); done {
+		return code
 	}
 	fmt.Fprintf(stdout, "acked %s (%d commit(s), band %s) as %s — the machine band is untouched, and a new member commit invalidates this ack\n",
 		unit.Leaf, len(unit.Commits), unit.Band, who)
@@ -282,10 +313,7 @@ var steerRedirectFile = ghSteerRedirectFollowUp
 // implementation of the affordance regardless of how useful it seems.
 func runSteerRedirect(stdout, stderr io.Writer, argv []string) int {
 	// The unit name may come before the flags or after them; accept both.
-	unitArg := ""
-	if len(argv) > 0 && !strings.HasPrefix(argv[0], "-") {
-		unitArg, argv = strings.TrimSpace(argv[0]), argv[1:]
-	}
+	unitArg, argv := splitSteerUnitArg(argv)
 	fs := flag.NewFlagSet("fak steer redirect", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	note := fs.String("m", "", "the steer note: where the intent's next tick should aim (required)")
@@ -296,30 +324,16 @@ func runSteerRedirect(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	const usage = `usage: fak steer redirect <unit> -m "<steer note>" [--by WHO] [--base REF] [--head REF]`
-	if unitArg == "" && fs.NArg() == 1 {
-		unitArg = strings.TrimSpace(fs.Arg(0))
-	} else if fs.NArg() != 0 {
-		fmt.Fprintln(stderr, usage)
-		return 2
-	}
-	if unitArg == "" {
-		fmt.Fprintln(stderr, usage)
+	var ok bool
+	if unitArg, ok = finishSteerUnitArg(fs, unitArg, usage, stderr); !ok {
 		return 2
 	}
 
 	root := steerRoot()
-	view, err := buildSteerPRsView(root, *base, *head)
+	unit, view, err := resolveSteerUnit(root, *base, *head, unitArg)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak steer redirect: %v\n", err)
 		return 1
-	}
-	units, _ := view["units"].([]steerpr.Unit)
-	var unit *steerpr.Unit
-	for i := range units {
-		if units[i].Leaf == unitArg {
-			unit = &units[i]
-			break
-		}
 	}
 	if unit == nil {
 		fmt.Fprintf(stderr, "fak steer redirect: no forming unit %q in %s — see `fak steer prs` for the units forming now\n",
@@ -327,12 +341,7 @@ func runSteerRedirect(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
-	who := strings.TrimSpace(*by)
-	if who == "" {
-		// --get pins the invocation provably read-only for the architest
-		// steer-overlay floor (a bare `git config key value` would write).
-		who = strings.TrimSpace(releasePRPlanGit(root, "config", "--get", "user.name"))
-	}
+	who := steerActor(root, *by)
 	bound := ""
 	if len(unit.Resolves) > 0 {
 		// The unit's closure-grade binding: the follow-up reopens/annotates it
@@ -352,14 +361,10 @@ func runSteerRedirect(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	rec.FollowUp = strings.TrimSpace(followUp)
-	if err := steerpr.AppendRedirect(steerpr.RedirectLedgerPath(root), rec); err != nil {
-		fmt.Fprintf(stderr, "fak steer redirect: append ledger row: %v\n", err)
-		return 1
-	}
-	// Echo the appended row verbatim: the on-disk record IS the outcome.
-	if err := writeIndentedJSON(stdout, rec); err != nil {
-		fmt.Fprintf(stderr, "fak steer redirect: %v\n", err)
-		return 1
+	if code, done := appendAndWriteSteerRecord(stdout, stderr, "fak steer redirect", rec, func() error {
+		return steerpr.AppendRedirect(steerpr.RedirectLedgerPath(root), rec)
+	}); done {
+		return code
 	}
 	fmt.Fprintf(stdout, "redirected %s (%d commit(s), band %s) as %s — follow-up %s; the landed commits are untouched: a redirect re-aims the next tick, never the merge\n",
 		unit.Leaf, len(unit.Commits), unit.Band, who, rec.FollowUp)

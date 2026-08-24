@@ -52,8 +52,7 @@ func seatDirs(reg accounts.Registry, only string) (map[string]string, error) {
 }
 
 func runAccountsBackup(stdout, stderr io.Writer, p backupParams) int {
-	if p.homeDir == "" {
-		fmt.Fprintln(stderr, "fak accounts: cannot resolve home dir")
+	if !requireAccountsHome(stderr, p.homeDir) {
 		return 1
 	}
 	reg, err := loadOrDiscover(p.registryPath, p.homeDir)
@@ -153,8 +152,7 @@ func runAccountsRestoreCredential(stdout, stderr io.Writer, p restoreCredParams)
 		fmt.Fprintln(stderr, "usage: fak accounts restore-credential --name <seat> [--at <stamp|sha>] [--file <blob>]")
 		return 2
 	}
-	if p.homeDir == "" {
-		fmt.Fprintln(stderr, "fak accounts: cannot resolve home dir")
+	if !requireAccountsHome(stderr, p.homeDir) {
 		return 1
 	}
 	reg, err := loadOrDiscover(p.registryPath, p.homeDir)

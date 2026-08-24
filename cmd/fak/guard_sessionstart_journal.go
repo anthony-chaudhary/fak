@@ -42,17 +42,6 @@ const (
 	guardSessionJournalAgent = "claude"
 )
 
-// recordGuardSessionStartJournal appends one boot-stamped `open` row for this session to the
-// crash-survivable journal. driverPID is the pid the identity join already witnessed (0 when
-// none was) — a pid is recorded only when it was WITNESSED, matching that store's contract,
-// because a wrong pid is strictly worse than none for a later liveness fold.
-//
-// Best-effort at every step, per the hook's contract: an off knob, an unidentifiable session,
-// or a write error all return silently.
-func recordGuardSessionStartJournal(traceID string, driverPID int) {
-	recordGuardSessionStartJournalFor(traceID, os.Getenv("CLAUDE_CODE_SESSION_ID"), guardSessionJournalAgent, driverPID)
-}
-
 func recordGuardSessionStartJournalFor(traceID, sessionID, agent string, driverPID int) {
 	if strings.EqualFold(strings.TrimSpace(os.Getenv(guardSessionJournalEnvMode)), guardSessionJournalModeOff) {
 		return

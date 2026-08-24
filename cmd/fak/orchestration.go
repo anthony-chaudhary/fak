@@ -51,12 +51,7 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
-	profilesExplicit := false
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "output-profile" || f.Name == "work-profile" {
-			profilesExplicit = true
-		}
-	})
+	profilesExplicit := profilesWereExplicit(fs)
 	output := syspromptmmu.DescribeStyle(*outputProfile)
 	if !output.Known {
 		fmt.Fprintf(stderr, "fak orchestration plan: invalid --output-profile %q\n", *outputProfile)

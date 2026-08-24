@@ -178,3 +178,36 @@ func TestNativePerformanceCompareReceipts(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 }
+
+func TestNativePerformanceProfileClassifyAndNext(t *testing.T) {
+	graph := nativeperf.ActiveGraph()
+	envelope := graph.Envelopes[0]
+	profile := nativeperf.ProfileBundle{Schema: nativeperf.ProfileSchema, EnvelopeID: envelope.ID, Execution: nativeperf.ExecutionIdentity{Engine: "fak-native", ForwardPath: envelope.ForwardPath}, Metal: &nativeperf.MetalCounters{CommandBuffers: 40, Encoders: 40, DispatchMilliseconds: 40, WaitMilliseconds: 1, ResidentBytes: 100, WorkingSetBytes: 100}, Attributions: []nativeperf.DispatchAttribution{{Name: "projection", Layer: 1, LeverID: "metal.command-buffer-amortization", Count: 40}}}
+	for i, name := range nativeperf.RequiredPhases {
+		profile.Phases = append(profile.Phases, nativeperf.ProfilePhase{Name: name, StartMilliseconds: float64(i * 10), DurationMilliseconds: 10})
+	}
+	data, _ := json.Marshal(profile)
+	path := t.TempDir() + "/profile.json"
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runNativePerformance(&stdout, &stderr, []string{"--profile", path}); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	var class nativeperf.BottleneckClassification
+	if err := json.Unmarshal(stdout.Bytes(), &class); err != nil {
+		t.Fatal(err)
+	}
+	if class.Class != "launch-bound" || class.RecommendedLeverID != "metal.command-buffer-amortization" {
+		t.Fatalf("class=%+v", class)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := runNativePerformance(&stdout, &stderr, []string{"--profile-next", path}); code != 0 {
+		t.Fatalf("next exit=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "metal.command-buffer-amortization") {
+		t.Fatalf("next=%s", stdout.String())
+	}
+}

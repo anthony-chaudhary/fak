@@ -481,6 +481,20 @@ func serveKeyPrincipals(specs []string, lookupEnv func(string) string, stderr io
 	return keyPrincipals, true
 }
 
+func loadServeRouteFile[T any](flagName, path, want string, load func(string) (T, error)) *T {
+	loaded, err := load(path)
+	if err != nil {
+		writeConfigBail(os.Stderr, configBail{
+			Verb: "fak serve", Reason: bailRouteManifestInvalid,
+			Summary: fmt.Sprintf("--%s did not load: %v", flagName, err),
+			Knobs:   []bailKnob{bailFlag(flagName, path), bailFile(path, "did not load").want(want)},
+			Bind:    []string{"path=" + path},
+		})
+		os.Exit(1)
+	}
+	return &loaded
+}
+
 // buildGateway loads the optional model-routing policy, constructs the gateway
 // server from the resolved planes, and arms the admission controller for a pure
 // in-kernel serve.
@@ -493,21 +507,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 	// security boundary). gateway.New also re-validates the loaded manifest.
 	var routeMan *modelroute.Manifest
 	if *sf.routeManifest != "" {
-		loaded, err := modelroute.LoadManifest(*sf.routeManifest)
-		if err != nil {
-			writeConfigBail(os.Stderr, configBail{
-				Verb:    "fak serve",
-				Reason:  bailRouteManifestInvalid,
-				Summary: fmt.Sprintf("--route-manifest did not load: %v", err),
-				Knobs: []bailKnob{
-					bailFlag("route-manifest", *sf.routeManifest),
-					bailFile(*sf.routeManifest, "did not load").want("a modelroute manifest whose every plan member resolves"),
-				},
-				Bind: []string{"path=" + *sf.routeManifest},
-			})
-			os.Exit(1)
-		}
-		routeMan = &loaded
+		routeMan = loadServeRouteFile("route-manifest", *sf.routeManifest, "a modelroute manifest whose every plan member resolves", modelroute.LoadManifest)
 		startupMessages = append(startupMessages, gateway.StartupMessage{Source: "serve", Kind: "route-manifest", Level: "info", Text: "model-routing policy loaded from " + *sf.routeManifest})
 	}
 
@@ -519,21 +519,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 	// env-var NAMES, never secrets.
 	var routeRoster *modelroute.Roster
 	if *sf.routeAccounts != "" {
-		loaded, err := modelroute.LoadRoster(*sf.routeAccounts)
-		if err != nil {
-			writeConfigBail(os.Stderr, configBail{
-				Verb:    "fak serve",
-				Reason:  bailRouteManifestInvalid,
-				Summary: fmt.Sprintf("--route-accounts did not load: %v", err),
-				Knobs: []bailKnob{
-					bailFlag("route-accounts", *sf.routeAccounts),
-					bailFile(*sf.routeAccounts, "did not load").want("a fak-accounts/v1 roster carrying env var NAMES, never secrets"),
-				},
-				Bind: []string{"path=" + *sf.routeAccounts},
-			})
-			os.Exit(1)
-		}
-		routeRoster = &loaded
+		routeRoster = loadServeRouteFile("route-accounts", *sf.routeAccounts, "a fak-accounts/v1 roster carrying env var NAMES, never secrets", modelroute.LoadRoster)
 		startupMessages = append(startupMessages, gateway.StartupMessage{Source: "serve", Kind: "route-accounts", Level: "info", Text: "model-account roster loaded from " + *sf.routeAccounts})
 	}
 

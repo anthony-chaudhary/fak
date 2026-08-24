@@ -28,12 +28,7 @@ func cmdConformance(argv []string) {
 			os.Exit(2)
 		}
 		packet := conformance.ProbeEndpointPair(context.Background(), conformance.DefaultEndpointClient(), *localEndpoint, *managedEndpoint)
-		b, err := json.MarshalIndent(packet, "", "  ")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "fak conformance: %v\n", err)
-			os.Exit(2)
-		}
-		os.Stdout.Write(append(b, '\n'))
+		writeConformanceJSON(packet)
 		if packet.Verdict != "PASS" {
 			os.Exit(1)
 		}
@@ -43,13 +38,7 @@ func cmdConformance(argv []string) {
 	rep := conformance.Run()
 
 	if *asJSON {
-		b, err := json.MarshalIndent(rep, "", "  ")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "fak conformance: %v\n", err)
-			os.Exit(2)
-		}
-		os.Stdout.Write(b)
-		os.Stdout.Write([]byte("\n"))
+		writeConformanceJSON(rep)
 	} else {
 		fmt.Print(conformance.Render(rep))
 	}
@@ -57,4 +46,13 @@ func cmdConformance(argv []string) {
 	if !rep.Pass {
 		os.Exit(1)
 	}
+}
+
+func writeConformanceJSON(value any) {
+	b, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak conformance: %v\n", err)
+		os.Exit(2)
+	}
+	os.Stdout.Write(append(b, '\n'))
 }

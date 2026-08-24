@@ -78,11 +78,7 @@ func runTestQuality(stdout, stderr io.Writer, argv []string) int {
 			// --all deliberately never consulted the floor, so this report says
 			// "unratcheted" rather than reporting New: 0. Reusing "not growing" here
 			// would let `--all --json` masquerade as a passing ratchet run.
-			return emitTestQualityJSON(stdout, stderr, testQualityReport{
-				Schema: testQualityJSONSchema, Root: r, Files: len(files),
-				Total: len(findings), New: 0, CountsByCode: counts,
-				Verdict: verdictUnratcheted, Findings: nonNilFindings(findings),
-			}, 0)
+			return emitTestQualityScanJSON(stdout, stderr, r, files, findings, findings, 0, counts, verdictUnratcheted, 0)
 		}
 		for _, f := range findings {
 			fmt.Fprintln(stdout, f)
@@ -116,11 +112,7 @@ func runTestQuality(stdout, stderr io.Writer, argv []string) int {
 		// disagreed with the text run about whether the class grew would make the
 		// machine-read gate the LOOSER of the two, which is the direction that goes
 		// unnoticed.
-		return emitTestQualityJSON(stdout, stderr, testQualityReport{
-			Schema: testQualityJSONSchema, Root: r, Files: len(files),
-			Total: len(findings), New: len(fresh), CountsByCode: counts,
-			Verdict: verdict, Slack: slack, Findings: nonNilFindings(fresh),
-		}, code)
+		return emitTestQualityScanJSON(stdout, stderr, r, files, findings, fresh, len(fresh), counts, verdict, code, slack)
 	}
 
 	if len(slack) > 0 {
@@ -218,4 +210,15 @@ func nonNilFindings(f []testquality.Finding) []testquality.Finding {
 		return []testquality.Finding{}
 	}
 	return f
+}
+
+func emitTestQualityScanJSON(stdout, stderr io.Writer, root string, files []string, all, reported []testquality.Finding, newCount int, counts map[string]int, verdict string, code int, slack ...map[string]int) int {
+	report := testQualityReport{
+		Schema: testQualityJSONSchema, Root: root, Files: len(files), Total: len(all), New: newCount,
+		CountsByCode: counts, Verdict: verdict, Findings: nonNilFindings(reported),
+	}
+	if len(slack) != 0 {
+		report.Slack = slack[0]
+	}
+	return emitTestQualityJSON(stdout, stderr, report, code)
 }

@@ -101,8 +101,7 @@ const defaultRefreshTimeout = 90 * time.Second
 func refreshBackupRoot(homeDir string) string { return accounts.BackupRoot(homeDir) }
 
 func runAccountsRefresh(stdout, stderr io.Writer, p refreshParams) int {
-	if p.homeDir == "" {
-		fmt.Fprintln(stderr, "fak accounts: cannot resolve home dir")
+	if !requireAccountsHome(stderr, p.homeDir) {
 		return 1
 	}
 	reg, err := loadOrDiscover(p.registryPath, p.homeDir)

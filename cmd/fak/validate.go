@@ -197,9 +197,8 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 	}
 	phase = recorder.start("resolve_ref")
 	tip, err := gitRevParseWithin(ctx, r, *ref)
-	phase.finish(err)
-	if ctx.Err() != nil {
-		return finishValidateTimeout(stdout, &res, &recorder, "resolve_ref", *asJSON)
+	if code, timedOut := finishValidatePhaseOrTimeout(stdout, &res, &recorder, phase, "resolve_ref", err, *asJSON); timedOut {
+		return code
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "fak validate: cannot resolve ref %q: %v\n", *ref, err)
@@ -208,9 +207,8 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 	res.Tip = tip
 	phase = recorder.start("normalize_mine")
 	paths, err := normalizeMinePathsWithin(ctx, r, mine)
-	phase.finish(err)
-	if ctx.Err() != nil {
-		return finishValidateTimeout(stdout, &res, &recorder, "normalize_mine", *asJSON)
+	if code, timedOut := finishValidatePhaseOrTimeout(stdout, &res, &recorder, phase, "normalize_mine", err, *asJSON); timedOut {
+		return code
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "fak validate: %v\n", err)
@@ -260,9 +258,8 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 	if hasDeletedMinePath(r, paths) {
 		phase = recorder.start("base_graph")
 		baseFileToPkg, baseEdges, _, err = validateGoListGraphWithin(ctx, dir, wslWorkspace)
-		phase.finish(err)
-		if ctx.Err() != nil {
-			return finishValidateTimeout(stdout, &res, &recorder, "base_graph", *asJSON)
+		if code, timedOut := finishValidatePhaseOrTimeout(stdout, &res, &recorder, phase, "base_graph", err, *asJSON); timedOut {
+			return code
 		}
 		// Preserve the old fail-toward-running behavior: the post-overlay graph remains the
 		// authoritative error, while a base graph failure merely loses deletion coverage.
@@ -283,9 +280,8 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 	} else {
 		err = overlayMinePathsWithin(ctx, r, dir, paths, checked)
 	}
-	phase.finish(err)
-	if ctx.Err() != nil {
-		return finishValidateTimeout(stdout, &res, &recorder, "overlay", *asJSON)
+	if code, timedOut := finishValidatePhaseOrTimeout(stdout, &res, &recorder, phase, "overlay", err, *asJSON); timedOut {
+		return code
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "fak validate: cannot overlay owned paths: %v\n", err)
@@ -299,9 +295,7 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 			return finishValidateTimeout(stdout, &res, &recorder, "gofmt", *asJSON)
 		}
 		if ferr != nil {
-			phase.finish(ferr)
-			res.OK = false
-			res.Failures = append(res.Failures, ciPreflightFailure{Step: "gofmt", Detail: ferr.Error()})
+			recordValidateFailure(&res, phase, "gofmt", ferr.Error(), ferr)
 		} else if len(files) > 0 {
 			phase.finishAs("failed", "owned Go files are not gofmt-clean")
 			res.OK = false
@@ -353,9 +347,7 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 				return finishValidateTimeout(stdout, &res, &recorder, "build", *asJSON)
 			}
 			if !ok {
-				phase.finishAs("failed", "affected package build failed")
-				res.OK = false
-				res.Failures = append(res.Failures, ciPreflightFailure{Step: "build", Detail: detail})
+				recordValidateFailure(&res, phase, "build", detail, errors.New("affected package build failed"))
 			} else {
 				phase.finish(nil)
 			}
@@ -367,9 +359,7 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 				return finishValidateTimeout(stdout, &res, &recorder, "vet", *asJSON)
 			}
 			if !ok {
-				phase.finishAs("failed", "affected package vet failed")
-				res.OK = false
-				res.Failures = append(res.Failures, ciPreflightFailure{Step: "vet", Detail: detail})
+				recordValidateFailure(&res, phase, "vet", detail, errors.New("affected package vet failed"))
 			} else {
 				phase.finish(nil)
 			}
@@ -397,9 +387,7 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 				return finishValidateTimeout(stdout, &res, &recorder, "test", *asJSON)
 			}
 			if !ok {
-				phase.finishAs("failed", "affected tests failed")
-				res.OK = false
-				res.Failures = append(res.Failures, ciPreflightFailure{Step: "test", Detail: detail})
+				recordValidateFailure(&res, phase, "test", detail, errors.New("affected tests failed"))
 			} else {
 				phase.finish(nil)
 			}
@@ -1144,12 +1132,7 @@ func renderValidate(w io.Writer, res validateResult) {
 		return
 	}
 	if res.OK {
-		if res.Runner != "" {
-			fmt.Fprintf(w, "runner: %s\n", res.Runner)
-		}
-		if res.TestScope != "" {
-			fmt.Fprintf(w, "tests: %s (%s)\n", res.TestScope, res.TestRun)
-		}
+		writeValidateTestContext(w, res)
 		if res.Mode == "test-only" {
 			fmt.Fprintf(w, "OK: committed tip %s + %d owned path(s) affected-test clean (isolated test-only mode)\n", short(res.Tip), len(res.Mine))
 		} else {
@@ -1157,12 +1140,7 @@ func renderValidate(w io.Writer, res validateResult) {
 		}
 		return
 	}
-	if res.Runner != "" {
-		fmt.Fprintf(w, "runner: %s\n", res.Runner)
-	}
-	if res.TestScope != "" {
-		fmt.Fprintf(w, "tests: %s (%s)\n", res.TestScope, res.TestRun)
-	}
+	writeValidateTestContext(w, res)
 	fmt.Fprintf(w, "RED: committed tip %s + owned delta failed\n", short(res.Tip))
 	for _, f := range res.Failures {
 		fmt.Fprintf(w, "  %s", f.Step)
@@ -1174,6 +1152,29 @@ func renderValidate(w io.Writer, res validateResult) {
 		}
 		fmt.Fprintln(w)
 	}
+}
+
+func writeValidateTestContext(w io.Writer, res validateResult) {
+	if res.Runner != "" {
+		fmt.Fprintf(w, "runner: %s\n", res.Runner)
+	}
+	if res.TestScope != "" {
+		fmt.Fprintf(w, "tests: %s (%s)\n", res.TestScope, res.TestRun)
+	}
+}
+
+func recordValidateFailure(res *validateResult, phase validateActivePhase, step, detail string, cause error) {
+	phase.finishAs("failed", cause.Error())
+	res.OK = false
+	res.Failures = append(res.Failures, ciPreflightFailure{Step: step, Detail: detail})
+}
+
+func finishValidatePhaseOrTimeout(stdout io.Writer, res *validateResult, recorder *validateRecorder, phase validateActivePhase, name string, err error, asJSON bool) (int, bool) {
+	phase.finish(err)
+	if recorder.ctx.Err() == nil {
+		return 0, false
+	}
+	return finishValidateTimeout(stdout, res, recorder, name, asJSON), true
 }
 
 func validateTimeoutPhase(res validateResult) string {

@@ -26,6 +26,8 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	baselineLever := fs.String("baseline", "", "emit a pre-change baseline receipt template for LEVER")
 	compareBaseline := fs.String("compare", "", "compare baseline receipt FILE with --candidate FILE")
 	compareCandidate := fs.String("candidate", "", "candidate receipt FILE used with --compare")
+	profilePath := fs.String("profile", "", "validate and classify native profile FILE")
+	profileNextPath := fs.String("profile-next", "", "select next lever from native profile FILE")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -36,8 +38,14 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	if *compareBaseline != "" || *compareCandidate != "" {
 		modeCount++
 	}
+	if *profilePath != "" {
+		modeCount++
+	}
+	if *profileNextPath != "" {
+		modeCount++
+	}
 	if fs.NArg() != 0 || modeCount > 1 || ((*compareBaseline == "") != (*compareCandidate == "")) {
-		fmt.Fprintln(stderr, "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE]")
+		fmt.Fprintln(stderr, "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE]")
 		return 2
 	}
 
@@ -45,6 +53,39 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	if err := nativeperf.Validate(graph); err != nil {
 		fmt.Fprintf(stderr, "fak native-performance: %v\n", err)
 		return 1
+	}
+	if *profilePath != "" || *profileNextPath != "" {
+		path := *profilePath
+		if path == "" {
+			path = *profileNextPath
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak native-performance: read profile: %v\n", err)
+			return 1
+		}
+		profile, err := nativeperf.DecodeProfile(data)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak native-performance: %v\n", err)
+			return 1
+		}
+		if *profileNextPath != "" {
+			lever, classification, err := nativeperf.NextLeverFromProfile(graph, profile)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak native-performance: profile next: %v\n", err)
+				return 1
+			}
+			return encodeNativePerformanceJSON(stdout, stderr, struct {
+				Classification nativeperf.BottleneckClassification `json:"classification"`
+				Lever          nativeperf.Lever                    `json:"lever"`
+			}{classification, *lever})
+		}
+		classification, err := nativeperf.ClassifyProfile(graph, profile)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak native-performance: classify profile: %v\n", err)
+			return 1
+		}
+		return encodeNativePerformanceJSON(stdout, stderr, classification)
 	}
 	if *baselineLever != "" {
 		receipt, err := nativeperf.BaselineTemplate(graph, *baselineLever)

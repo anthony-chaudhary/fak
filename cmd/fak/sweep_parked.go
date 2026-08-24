@@ -32,9 +32,7 @@ type sweepParkedItem struct {
 
 func collectSweepParked(root string) sweepParkedSummary {
 	var out sweepParkedSummary
-	if raw, err := gitOutput(root, "stash", "list", "--format=%gd%x09%s"); err != nil {
-		out.Diagnostics = append(out.Diagnostics, "stash inventory: "+err.Error())
-	} else {
+	if raw, ok := sweepParkedGitOutput(root, &out, "stash inventory", "stash", "list", "--format=%gd%x09%s"); ok {
 		for _, line := range nonemptyLines(raw) {
 			name, summary, _ := strings.Cut(line, "\t")
 			paths := 0
@@ -44,9 +42,7 @@ func collectSweepParked(root string) sweepParkedSummary {
 			out.Stashes = append(out.Stashes, sweepParkedItem{Kind: "stash", Name: name, Summary: summary, Paths: paths})
 		}
 	}
-	if raw, err := gitOutput(root, "for-each-ref", "--format=%(refname)%09%(objectname:short)%09%(subject)", "refs/heads", "refs/remotes"); err != nil {
-		out.Diagnostics = append(out.Diagnostics, "ref inventory: "+err.Error())
-	} else {
+	if raw, ok := sweepParkedGitOutput(root, &out, "ref inventory", "for-each-ref", "--format=%(refname)%09%(objectname:short)%09%(subject)", "refs/heads", "refs/remotes"); ok {
 		for _, line := range nonemptyLines(raw) {
 			parts := strings.SplitN(line, "\t", 3)
 			if len(parts) < 2 || parts[0] == "refs/heads/main" || strings.HasSuffix(parts[0], "/HEAD") || strings.HasSuffix(parts[0], "/main") {
@@ -70,9 +66,7 @@ func collectSweepParked(root string) sweepParkedSummary {
 			checkpointDecisions[decision.Session] = decision
 		}
 	}
-	if raw, err := gitOutput(root, "for-each-ref", "--format=%(refname)%09%(objectname:short)%09%(subject)", "refs/fak/wip"); err != nil {
-		out.Diagnostics = append(out.Diagnostics, "WIP checkpoint inventory: "+err.Error())
-	} else {
+	if raw, ok := sweepParkedGitOutput(root, &out, "WIP checkpoint inventory", "for-each-ref", "--format=%(refname)%09%(objectname:short)%09%(subject)", "refs/fak/wip"); ok {
 		for _, line := range nonemptyLines(raw) {
 			parts := strings.SplitN(line, "\t", 3)
 			if len(parts) < 2 {
@@ -93,9 +87,7 @@ func collectSweepParked(root string) sweepParkedSummary {
 			out.Checkpoints = append(out.Checkpoints, item)
 		}
 	}
-	if raw, err := gitOutput(root, "worktree", "list", "--porcelain"); err != nil {
-		out.Diagnostics = append(out.Diagnostics, "worktree inventory: "+err.Error())
-	} else {
+	if raw, ok := sweepParkedGitOutput(root, &out, "worktree inventory", "worktree", "list", "--porcelain"); ok {
 		blocks := strings.Split(strings.TrimSpace(raw), "\n\n")
 		for i, block := range blocks {
 			if i == 0 || strings.TrimSpace(block) == "" {
@@ -118,6 +110,16 @@ func collectSweepParked(root string) sweepParkedSummary {
 	out.Count = len(out.Stashes) + len(out.Refs) + len(out.Checkpoints) + len(out.Worktrees)
 	return out
 }
+
+func sweepParkedGitOutput(root string, out *sweepParkedSummary, diagnostic string, args ...string) (string, bool) {
+	raw, err := gitOutput(root, args...)
+	if err != nil {
+		out.Diagnostics = append(out.Diagnostics, diagnostic+": "+err.Error())
+		return "", false
+	}
+	return raw, true
+}
+
 func nonemptyLines(raw string) []string {
 	var lines []string
 	for _, line := range strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n") {

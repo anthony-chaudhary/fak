@@ -20,6 +20,18 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agentreadinessscore"
 )
 
+func emitScorecardComparison(stdout, stderr io.Writer, label, path string, exitCode int, compare func(map[string]any) string) (int, bool) {
+	if path == "" {
+		return 0, false
+	}
+	base, ok := readCompareBase(stderr, label, path)
+	if !ok {
+		return 2, true
+	}
+	fmt.Fprintln(stdout, compare(base))
+	return exitCode, true
+}
+
 func cmdAgentReadinessScore(argv []string) {
 	os.Exit(runAgentReadinessScore(os.Stdout, os.Stderr, argv))
 }
@@ -47,16 +59,10 @@ func runAgentReadinessScore(stdout, stderr io.Writer, argv []string) int {
 		root = repoRoot()
 	}
 	payload := agentreadinessscore.Build(root)
-	if *comparePath != "" {
-		base, ok := readCompareBase(stderr, "fak score agent-readiness", *comparePath)
-		if !ok {
-			return 2
-		}
-		fmt.Fprintln(stdout, agentreadinessscore.Compare(payload, base))
-		if payload.OK {
-			return 0
-		}
-		return 1
+	if code, done := emitScorecardComparison(stdout, stderr, "fak score agent-readiness", *comparePath, okExit(payload.OK), func(base map[string]any) string {
+		return agentreadinessscore.Compare(payload, base)
+	}); done {
+		return code
 	}
 	if *asJSON {
 		if err := writeIndentedJSON(stdout, payload); err != nil {

@@ -66,8 +66,6 @@ var recoveryLaunch sessionrecovery.Launcher = sessionrecovery.VisibleLauncher{}
 var recoveryNow = time.Now
 var recoverySleep = time.Sleep
 
-func cmdSessionRecover(args []string) { os.Exit(runSessionRecover(os.Stdout, os.Stderr, args)) }
-
 func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("session recover", flag.ContinueOnError)
 	fs.SetOutput(stderr)

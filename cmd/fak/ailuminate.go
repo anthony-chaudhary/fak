@@ -81,14 +81,7 @@ func cmdAILuminateContract(argv []string) {
 		HarnessCommit:               *harnessCommit,
 	})
 
-	if *out != "" {
-		must(os.WriteFile(*out, jsonIndent(contract), 0o644))
-	} else {
-		fmt.Println(string(jsonIndent(contract)))
-	}
-	if *md != "" {
-		must(os.WriteFile(*md, []byte(ailuminate.RenderMarkdown(contract)), 0o644))
-	}
+	writeContractArtifacts(*out, *md, contract, func() string { return ailuminate.RenderMarkdown(contract) })
 
 	fmt.Fprintf(os.Stderr, "\n== fak ailuminate contract ==\n")
 	fmt.Fprintf(os.Stderr, "status         : %s\n", contract.Status)

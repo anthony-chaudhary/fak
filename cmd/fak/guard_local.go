@@ -152,38 +152,49 @@ func guardPickLocalModel(models []string) string {
 // parseOllamaTags extracts model names from an Ollama GET /api/tags body:
 // {"models":[{"name":"qwen2.5-coder:7b", ...}, ...]}.
 func parseOllamaTags(body []byte) []string {
-	var doc struct {
-		Models []struct {
-			Name string `json:"name"`
-		} `json:"models"`
-	}
+	var doc ollamaTagsDocument
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return nil
 	}
-	out := make([]string, 0, len(doc.Models))
+	raw := make([]string, 0, len(doc.Models))
 	for _, m := range doc.Models {
-		if n := strings.TrimSpace(m.Name); n != "" {
-			out = append(out, n)
-		}
+		raw = append(raw, m.Name)
 	}
-	return out
+	return nonEmptyTrimmed(raw)
 }
 
 // parseOpenAIModels extracts ids from an OpenAI GET /v1/models body:
 // {"data":[{"id":"...", "object":"model"}, ...]}.
 func parseOpenAIModels(body []byte) []string {
-	var doc struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
+	var doc openAIModelsDocument
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return nil
 	}
-	out := make([]string, 0, len(doc.Data))
+	raw := make([]string, 0, len(doc.Data))
 	for _, m := range doc.Data {
-		if id := strings.TrimSpace(m.ID); id != "" {
-			out = append(out, id)
+		raw = append(raw, m.ID)
+	}
+	return nonEmptyTrimmed(raw)
+}
+
+type ollamaTagsDocument struct {
+	Models []modelListingEntry `json:"models"`
+}
+
+type openAIModelsDocument struct {
+	Data []modelListingEntry `json:"data"`
+}
+
+type modelListingEntry struct {
+	Name string `json:"name"`
+	ID   string `json:"id"`
+}
+
+func nonEmptyTrimmed(raw []string) []string {
+	out := make([]string, 0, len(raw))
+	for _, value := range raw {
+		if value = strings.TrimSpace(value); value != "" {
+			out = append(out, value)
 		}
 	}
 	return out

@@ -34,14 +34,7 @@ func preflightServeBackendForward(path string, be compute.Backend) (serveBackend
 		if err := json.Unmarshal(raw, &cfg); err != nil {
 			return serveBackendForwardPreflight{}, fmt.Errorf("safetensors config: %w", err)
 		}
-		if err := fakmodel.ValidateBackendForwardConfig(cfg, be); err != nil {
-			return serveBackendForwardPreflight{}, err
-		}
-		if be == nil || !cfg.IsQwen35Hybrid() {
-			return serveBackendForwardPreflight{}, nil
-		}
-		gdn := be.(fakmodel.Qwen35GDNBackend)
-		return serveBackendForwardPreflight{Backend: be.Name(), Forward: fakmodel.ForwardQwen35GDN, Path: gdn.Qwen35GDNPath()}, nil
+		return validatedBackendForwardPreflight(cfg, be)
 	}
 	return preflightServeBackendForwardWith(path, be, ggufload.OpenWeights)
 }
@@ -71,18 +64,26 @@ func preflightServeBackendForwardWith(
 		return serveBackendForwardPreflight{}, fmt.Errorf("gguf: close header-only weight source: %w", closeErr)
 	}
 
+	return validatedBackendForwardPreflight(cfg, be)
+}
+
+func validatedBackendForwardPreflight(cfg fakmodel.Config, be compute.Backend) (serveBackendForwardPreflight, error) {
 	if err := fakmodel.ValidateBackendForwardConfig(cfg, be); err != nil {
 		return serveBackendForwardPreflight{}, err
 	}
+	return qwen35BackendForwardPreflight(cfg, be), nil
+}
+
+func qwen35BackendForwardPreflight(cfg fakmodel.Config, be compute.Backend) serveBackendForwardPreflight {
 	if be == nil || !cfg.IsQwen35Hybrid() {
-		return serveBackendForwardPreflight{}, nil
+		return serveBackendForwardPreflight{}
 	}
-	gdn := be.(fakmodel.Qwen35GDNBackend) // validated structurally, including the exact path above
+	gdn := be.(fakmodel.Qwen35GDNBackend) // validated structurally before this helper is called
 	return serveBackendForwardPreflight{
 		Backend: be.Name(),
 		Forward: fakmodel.ForwardQwen35GDN,
 		Path:    gdn.Qwen35GDNPath(),
-	}, nil
+	}
 }
 
 func serveBackendForwardPreflightMessage(result serveBackendForwardPreflight) gateway.StartupMessage {

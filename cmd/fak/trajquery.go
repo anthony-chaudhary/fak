@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -42,42 +41,11 @@ func trajQueryUsage() {
 }
 
 func loadView(path string) trajquery.View {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fak trajquery: %v\n", err)
-		os.Exit(1)
-	}
-	var v trajquery.View
-	if err := json.Unmarshal(b, &v); err != nil {
-		fmt.Fprintf(os.Stderr, "fak trajquery: parsing view %s: %v\n", path, err)
-		os.Exit(1)
-	}
-	return v
+	return loadJSONFileOrExit[trajquery.View](path, "fak trajquery")
 }
 
 func loadRowCorpus(path string) []trajquery.Row {
-	if path == "" {
-		return nil
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fak trajquery: %v\n", err)
-		os.Exit(1)
-	}
-	var rows []trajquery.Row
-	for i, raw := range bytes.Split(b, []byte("\n")) {
-		line := bytes.TrimSpace(raw)
-		if len(line) == 0 {
-			continue
-		}
-		var r trajquery.Row
-		if err := json.Unmarshal(line, &r); err != nil {
-			fmt.Fprintf(os.Stderr, "fak trajquery: %s line %d: %v\n", path, i+1, err)
-			os.Exit(1)
-		}
-		rows = append(rows, r)
-	}
-	return rows
+	return readJSONLCorpus[trajquery.Row](path, "fak trajquery")
 }
 
 func cmdTrajQueryValidate(args []string) {

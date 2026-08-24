@@ -524,8 +524,7 @@ func cmdGuardAllow(argv []string) {
 		}
 		if *remove {
 			before := len(ov.Allow) + len(ov.AllowPrefix)
-			ov.Allow = guardAllowSubtract(ov.Allow, names)
-			ov.AllowPrefix = guardAllowSubtract(ov.AllowPrefix, names)
+			guardAllowRemove(&ov, names)
 			if err := saveGuardAllowOverlay(path, ov); err != nil {
 				fmt.Fprintln(os.Stderr, "fak guard allow:", err)
 				os.Exit(1)
@@ -557,6 +556,11 @@ func cmdGuardAllow(argv []string) {
 		fmt.Println("  Takes effect on the next `fak guard` launch (or POST /v1/fak/policy/reload on a running gateway).")
 		printGuardAllowOverlay(os.Stdout, path, ov)
 	}
+}
+
+func guardAllowRemove(ov *guardAllowOverlay, names []string) {
+	ov.Allow = guardAllowSubtract(ov.Allow, names)
+	ov.AllowPrefix = guardAllowSubtract(ov.AllowPrefix, names)
 }
 
 // guardAllowBlockedTool is one DEFAULT_DENY'd tool name and how many times the guarded

@@ -292,14 +292,9 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 		return dispatchTickOptions{}, false, 2
 	}
 
-	root := *workspace
-	if root == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			fmt.Fprintf(stderr, "fak dispatch tick: getwd: %v\n", err)
-			return dispatchTickOptions{}, false, 1
-		}
-		root = wd
+	root, ok := resolveCommandWorkspace(stderr, "fak dispatch tick", *workspace)
+	if !ok {
+		return dispatchTickOptions{}, false, 1
 	}
 	explicitBackend := false
 	fs.Visit(func(f *flag.Flag) {

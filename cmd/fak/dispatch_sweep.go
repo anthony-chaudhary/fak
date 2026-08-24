@@ -183,12 +183,9 @@ func runDispatchSweep(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *asJSON {
-		b, err := json.MarshalIndent(rec, "", "  ")
-		if err != nil {
-			fmt.Fprintf(stderr, "fak dispatch sweep: marshal: %v\n", err)
-			return 1
+		if rc := encodeJSONOrFailPrefixed(stdout, stderr, rec, "fak dispatch sweep: marshal"); rc != 0 {
+			return rc
 		}
-		fmt.Fprintln(stdout, string(b))
 	} else {
 		fmt.Fprint(stdout, renderSweepCard(rec))
 	}

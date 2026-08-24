@@ -219,12 +219,7 @@ func probeDispatchAutoBuild(ctx context.Context, root string) (dispatchAutoBuild
 }
 
 func firstDispatchAutoNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return "unknown build failure"
+	return firstTrimmedOr("unknown build failure", values...)
 }
 
 type dispatchAutoBacklogResult struct {

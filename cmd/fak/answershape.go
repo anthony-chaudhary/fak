@@ -9,7 +9,6 @@ package main
 // pipeline gate. `fak doctor` wraps it into an operator recommendation.
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -48,16 +47,7 @@ func runAnswerShape(stdin io.Reader, stdout, stderr io.Writer, argv []string) in
 		MaxRepeat: *maxRepeat, MaxChars: *maxChars, NGram: *ngram,
 	})
 
-	if *asJSON {
-		b, _ := json.MarshalIndent(rep, "", "  ")
-		fmt.Fprintln(stdout, string(b))
-	} else {
-		writeShapeHuman(stdout, rep)
-	}
-	if rep.Degenerate {
-		return 1
-	}
-	return 0
+	return renderJSONOrHuman(stdout, *asJSON, rep, writeShapeHuman, rep.Degenerate)
 }
 
 // readShapeInput resolves the text to check from the flags: an explicit --file, a

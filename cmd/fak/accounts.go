@@ -288,18 +288,17 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	registryPath, homeDir, gateDir, dosView, jobView := c.registryPath, c.homeDir, c.gateDir, c.dosView, c.jobView
 	asJSON, listAll, asEnv, pin, dryRun, write := c.asJSON, c.listAll, c.asEnv, c.pin, c.dryRun, c.write
 	checkDiff := c.checkDiff
-	addName, addReserved, addChrome, addNoLogin, addToken := c.addName, c.addReserved, c.addChrome, c.addNoLogin, c.addToken
-	addSuffix, addNoSync, addAdopt, addFrom, addForce := c.addSuffix, c.addNoSync, c.addAdopt, c.addFrom, c.addForce
+	addName, addChrome, addNoLogin, addToken := c.addName, c.addChrome, c.addNoLogin, c.addToken
+	addNoSync, addAdopt, addForce := c.addNoSync, c.addAdopt, c.addForce
 	addAPIKeyEnv, addBaseURL, addEnv := c.addAPIKeyEnv, c.addBaseURL, c.addEnv
 	addProbeIdentity, addNoProbeIdentity, probeIdent := c.addProbeIdentity, c.addNoProbeIdentity, c.probeIdent
-	addNoDivorce, refreshTimeout, refreshAckLogout := c.addNoDivorce, c.refreshTimeout, c.refreshAckLogout
+	refreshTimeout, refreshAckLogout := c.refreshTimeout, c.refreshAckLogout
 	rmRehome, rmReason, rehomeAddr, rehomeKey, rmArchive := c.rmRehome, c.rmReason, c.rehomeAddr, c.rehomeKey, c.rmArchive
 	rmByAccount, rmTerminal := c.rmByAccount, c.rmTerminal
 	roleFlag, launchGuard, launchSkipPerms, launchCommand := c.roleFlag, c.launchGuard, c.launchSkipPerms, c.launchCommand
 	launchUltracode, launchModel, launchFallbackModel, launchManagedCache := c.launchUltracode, c.launchModel, c.launchFallbackModel, c.launchManagedCache
 	rotateFlag, afterSeat, noHeadroom, cooldownClear := c.rotateFlag, c.afterSeat, c.noHeadroom, c.cooldownClear
 	positional, lead := c.positional, c.lead
-
 	switch sub {
 	case "list":
 		reg, err := loadOrDiscover(*registryPath, *homeDir)
@@ -396,50 +395,22 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 		// setup-token` interactively for a BRAND-NEW login; `--adopt` copies an EXISTING
 		// login's bundle from a source seat (default ~/.claude) so the account you are already
 		// logged into becomes a rotation seat with no setup-token and no hand-scripting.
-		return runAccountsAdd(stdout, stderr, addParams{
-			name:            *addName,
-			reserved:        *addReserved,
-			chrome:          *addChrome,
-			baseURL:         *addBaseURL,
-			extraEnv:        *addEnv,
-			noLogin:         *addNoLogin,
-			token:           *addToken,
-			suffix:          *addSuffix,
-			noSync:          *addNoSync,
-			adopt:           *addAdopt,
-			from:            *addFrom,
-			force:           *addForce,
-			apiKeyEnv:       *addAPIKeyEnv,
-			probeIdentity:   *addProbeIdentity,
-			noProbeIdentity: *addNoProbeIdentity,
-			noDivorce:       *addNoDivorce,
-			probeURL:        enrollProfileURL(),
-			dryRun:          *dryRun,
-			homeDir:         *homeDir,
-			registryPath:    *registryPath,
-			dosView:         *dosView,
-			jobView:         *jobView,
-		})
+		p := commonAccountsAddParams(c)
+		p.chrome, p.baseURL, p.extraEnv = *addChrome, *addBaseURL, *addEnv
+		p.noLogin, p.token, p.adopt = *addNoLogin, *addToken, *addAdopt
+		p.apiKeyEnv, p.probeIdentity, p.noProbeIdentity = *addAPIKeyEnv, *addProbeIdentity, *addNoProbeIdentity
+		return runAccountsAdd(stdout, stderr, p)
 
 	case "enroll-current":
 		// Promote the login the CURRENT session is using into a first-class rotation seat, with
 		// an always-on credential-identity probe so the seat is enrolled as the account its live
 		// credential actually serves — not whatever the source dir's .claude.json metadata claims
 		// (which lies after a /login into a shared dir rewrote only .credentials.json).
+		p := commonAccountsAddParams(c)
 		return runAccountsEnrollCurrent(stdout, stderr, enrollParams{
-			name:         *addName,
-			from:         *addFrom,
-			reserved:     *addReserved,
-			force:        *addForce,
-			suffix:       *addSuffix,
-			noSync:       *addNoSync,
-			noDivorce:    *addNoDivorce,
-			probeURL:     enrollProfileURL(),
-			dryRun:       *dryRun,
-			homeDir:      *homeDir,
-			registryPath: *registryPath,
-			dosView:      *dosView,
-			jobView:      *jobView,
+			name: p.name, from: p.from, reserved: p.reserved, force: p.force,
+			suffix: p.suffix, noSync: p.noSync, noDivorce: p.noDivorce, probeURL: p.probeURL,
+			dryRun: p.dryRun, homeDir: p.homeDir, registryPath: p.registryPath, dosView: p.dosView, jobView: p.jobView,
 		})
 
 	case "remove":
@@ -1241,4 +1212,12 @@ func copyTree(src, dst string) (int, error) {
 		return nil
 	})
 	return count, err
+}
+
+func commonAccountsAddParams(c accountsCmd) addParams {
+	return addParams{
+		name: *c.addName, reserved: *c.addReserved, suffix: *c.addSuffix, noSync: *c.addNoSync,
+		from: *c.addFrom, force: *c.addForce, noDivorce: *c.addNoDivorce, probeURL: enrollProfileURL(),
+		dryRun: *c.dryRun, homeDir: *c.homeDir, registryPath: *c.registryPath, dosView: *c.dosView, jobView: *c.jobView,
+	}
 }

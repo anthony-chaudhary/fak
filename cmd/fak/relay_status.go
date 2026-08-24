@@ -14,7 +14,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -51,12 +50,7 @@ func runRelayStatus(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit the folded per-leg view as a canonical JSON array instead of the human summary")
 	// A bare positional relay id is accepted in either order (`fak relay status RID --json`
 	// or `... --json RID`), matching the repo's positional-leading verb convention.
-	rest := argv
-	positional := ""
-	if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
-		positional = rest[0]
-		rest = rest[1:]
-	}
+	rest, positional := relayLeadingPositional(argv, false)
 	if err := fs.Parse(rest); err != nil {
 		return 2
 	}
@@ -112,12 +106,9 @@ func runRelayStatus(stdout, stderr io.Writer, argv []string) int {
 	sort.SliceStable(legs, func(i, j int) bool { return legs[i].Leg < legs[j].Leg })
 
 	if *asJSON {
-		out, err := json.MarshalIndent(legs, "", "  ")
-		if err != nil {
-			fmt.Fprintf(stderr, "fak relay status: %v\n", err)
-			return 1
+		if rc := encodeJSONOrFailPrefixed(stdout, stderr, legs, "fak relay status"); rc != 0 {
+			return rc
 		}
-		fmt.Fprintln(stdout, string(out))
 		return 0
 	}
 	printRelayStatus(stdout, relayID, legs)

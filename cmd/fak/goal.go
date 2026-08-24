@@ -63,11 +63,9 @@ func runGoal(stdout, stderr io.Writer, args []string) int {
 				rels = append(rels, goalregistry.Relation{Kind: x.kind, GoalID: x.id})
 			}
 		}
-		g, err := s.Create(*title, *summary, p, rels)
-		if err != nil {
-			return fail(err)
-		}
-		_ = enc.Encode(g)
+		return writeGoalMutation(enc, fail, func() (goalregistry.Goal, error) {
+			return s.Create(*title, *summary, p, rels)
+		})
 	case "show":
 		if err := requireID(); err != nil {
 			return fail(err)
@@ -95,29 +93,23 @@ func runGoal(stdout, stderr io.Writer, args []string) int {
 		if err := requireID(); err != nil {
 			return fail(err)
 		}
-		g, err := s.Update(*id, *title, *summary, goalregistry.Lifecycle(*lifecycle))
-		if err != nil {
-			return fail(err)
-		}
-		_ = enc.Encode(g)
+		return writeGoalMutation(enc, fail, func() (goalregistry.Goal, error) {
+			return s.Update(*id, *title, *summary, goalregistry.Lifecycle(*lifecycle))
+		})
 	case "transition":
 		if err := requireID(); err != nil {
 			return fail(err)
 		}
-		g, err := s.Transition(*id, goalregistry.Lifecycle(*lifecycle), goalregistry.OutcomeEvidence{Class: goalregistry.EvidenceClass(*evidenceClass), Author: *evidenceAuthor, Reference: *evidenceRef})
-		if err != nil {
-			return fail(err)
-		}
-		_ = enc.Encode(g)
+		return writeGoalMutation(enc, fail, func() (goalregistry.Goal, error) {
+			return s.Transition(*id, goalregistry.Lifecycle(*lifecycle), goalregistry.OutcomeEvidence{Class: goalregistry.EvidenceClass(*evidenceClass), Author: *evidenceAuthor, Reference: *evidenceRef})
+		})
 	case "reopen":
 		if err := requireID(); err != nil {
 			return fail(err)
 		}
-		g, err := s.Reopen(*id, *evidenceAuthor, *evidenceRef)
-		if err != nil {
-			return fail(err)
-		}
-		_ = enc.Encode(g)
+		return writeGoalMutation(enc, fail, func() (goalregistry.Goal, error) {
+			return s.Reopen(*id, *evidenceAuthor, *evidenceRef)
+		})
 	case "bind":
 		if err := requireID(); err != nil {
 			return fail(err)
@@ -213,5 +205,14 @@ func runGoal(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stderr, "fak goal: unknown subcommand %q\n", args[0])
 		return 2
 	}
+	return 0
+}
+
+func writeGoalMutation(enc *json.Encoder, fail func(error) int, mutate func() (goalregistry.Goal, error)) int {
+	goal, err := mutate()
+	if err != nil {
+		return fail(err)
+	}
+	_ = enc.Encode(goal)
 	return 0
 }

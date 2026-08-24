@@ -79,13 +79,10 @@ func runMilestoneScorecard(stdout, stderr io.Writer, argv []string) int {
 		return runMilestoneRatchet(stdout, stderr, payload, *pin, *ratchet, *allowRegress, *asJSON)
 	}
 
-	if *comparePath != "" {
-		base, ok := readCompareBase(stderr, "fak milestone-scorecard", *comparePath)
-		if !ok {
-			return 2
-		}
-		fmt.Fprintln(stdout, scorecard.Compare(payload, base, milestonereport.DebtKey))
-		return okExit(payload.OK)
+	if code, done := emitScorecardComparison(stdout, stderr, "fak milestone-scorecard", *comparePath, okExit(payload.OK), func(base map[string]any) string {
+		return scorecard.Compare(payload, base, milestonereport.DebtKey)
+	}); done {
+		return code
 	}
 	if *asJSON {
 		if err := writeIndentedJSON(stdout, payload); err != nil {

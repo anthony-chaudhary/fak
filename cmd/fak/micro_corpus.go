@@ -104,8 +104,7 @@ func cmdMicroCorpus(args []string) {
 	applyMeasuredAblations(&report)
 	if *markdown != "" {
 		if err := os.WriteFile(*markdown, []byte(formatMicroCorpusReport(report)), 0o644); err != nil {
-			fmt.Fprintf(os.Stderr, "fak micro corpus: write Markdown: %v\n", err)
-			os.Exit(2)
+			exitf(2, "fak micro corpus: write Markdown: %v\n", err)
 		}
 	}
 	if *jsonOut {

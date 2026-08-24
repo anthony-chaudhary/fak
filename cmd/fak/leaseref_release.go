@@ -54,9 +54,5 @@ func runLeaserefRelease(stdout, stderr io.Writer, argv []string) int {
 		}, "release")
 	}
 	v, err := store.ReleaseFenced(context.Background(), *id, *holder, *gen, time.Now())
-	if err != nil {
-		fmt.Fprintf(stderr, "fak leaseref release: %v\n", err)
-		return 1
-	}
-	return emitLeaserefOutcome(stdout, stderr, v, v.OK, "release")
+	return emitLeaserefResult(stdout, stderr, v, err, "fak leaseref release", "release", func(v leaseref.FenceVerdict) bool { return v.OK })
 }

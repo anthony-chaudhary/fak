@@ -72,33 +72,13 @@ func runGuardAccuracy(stdout, stderr io.Writer, argv []string) int {
 
 	payload := guardaccuracy.BuildScorecardWithComplaints(root, rows, complaints)
 
-	if *comparePath != "" {
-		base, ok := readCompareBase(stderr, "fak guard-accuracy", *comparePath)
-		if !ok {
-			return 2
-		}
-		fmt.Fprintln(stdout, scorecard.Compare(payload, base, guardaccuracy.DebtKey))
-		if payload.OK {
-			return 0
-		}
-		return 1
-	}
-	if *asJSON {
-		_ = encodeJSONOrFail(stdout, stderr, payload, "fak guard-accuracy")
-	} else if *asMarkdown {
-		fmt.Fprint(stdout, scorecard.Markdown(payload, scorecard.MarkdownDoc{
+	return emitScorecard(stdout, stderr, "fak guard-accuracy", guardaccuracy.DebtKey, payload,
+		*comparePath, *asJSON, *asMarkdown, scorecard.MarkdownDoc{
 			Title:       "fak guard accuracy scorecard",
 			Description: "How well-tuned the guard reversibility classifier is, scored by folding a labeled command corpus through the real classifier: false-positive rate (benign escalated) and false-negative rate (dangerous let through).",
 			Heading:     "fak guard accuracy scorecard",
 			DebtKey:     guardaccuracy.DebtKey,
 			HeaderExtra: fmt.Sprintf(" - fp rate %v - fn rate %v - %v corpus row(s)",
 				payload.Corpus["fp_rate"], payload.Corpus["fn_rate"], payload.Corpus["total_rows"]),
-		}))
-	} else {
-		fmt.Fprintln(stdout, scorecard.Render(payload, guardaccuracy.DebtKey))
-	}
-	if payload.OK {
-		return 0
-	}
-	return 1
+		})
 }

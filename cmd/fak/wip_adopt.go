@@ -379,15 +379,10 @@ func wipAdoptAttempt(ctx context.Context, repo string, opts wipAdoptOptions) (wi
 	if opts.raceHook != nil {
 		opts.raceHook()
 	}
-	receiptOID, won, err := wipWriteReceipt(ctx, repo, next, curOID, hasReceipt)
-	if err != nil {
-		return res, 1, err
-	}
-	if !won {
-		res.Verdict = wipReasonAdoptLostRace
-		res.Reason = fmt.Sprintf("a concurrent successor claimed %s between this bid's read and its write — nothing was materialized", opts.Session)
-		res.Receipt = nil
-		return res, 3, nil
+	receiptOID, code, err := wipAdvanceReceipt(ctx, repo, next, curOID, hasReceipt, &res,
+		fmt.Sprintf("a concurrent successor claimed %s between this bid's read and its write — nothing was materialized", opts.Session), true)
+	if code != 0 || err != nil {
+		return res, code, err
 	}
 	res.Receipt = &next
 
@@ -403,16 +398,10 @@ func wipAdoptAttempt(ctx context.Context, repo string, opts wipAdoptOptions) (wi
 
 	next = wiprecon.MarkPhase(next, wiprecon.PhaseMaterialized, now, wiprecon.EventMaterialized,
 		fmt.Sprintf("%d file(s) verified into %s", mat.Verified, target))
-	receiptOID, won, err = wipWriteReceipt(ctx, repo, next, receiptOID, true)
-	if err != nil {
-		return res, 1, err
-	}
-	if !won {
-		// Someone displaced this claim while it was writing bytes. The bytes are in an
-		// isolated target, so nothing shared was hurt; report it as the race it is.
-		res.Verdict = wipReasonAdoptLostRace
-		res.Reason = fmt.Sprintf("the %s adoption receipt moved while this successor materialized; its target %s is left in place for inspection", opts.Session, target)
-		return res, 3, nil
+	receiptOID, code, err = wipAdvanceReceipt(ctx, repo, next, receiptOID, true, &res,
+		fmt.Sprintf("the %s adoption receipt moved while this successor materialized; its target %s is left in place for inspection", opts.Session, target), false)
+	if code != 0 || err != nil {
+		return res, code, err
 	}
 	res.Receipt = &next
 
@@ -442,6 +431,21 @@ func wipAdoptAttempt(ctx context.Context, repo string, opts wipAdoptOptions) (wi
 	}
 	res.Receipt = &next
 	return res, 0, nil
+}
+
+func wipAdvanceReceipt(ctx context.Context, repo string, next wiprecon.Receipt, oldOID string, had bool, res *wipAdoptResult, lostReason string, clearReceipt bool) (string, int, error) {
+	oid, won, err := wipWriteReceipt(ctx, repo, next, oldOID, had)
+	if err != nil {
+		return oid, 1, err
+	}
+	if won {
+		return oid, 0, nil
+	}
+	res.Verdict, res.Reason = wipReasonAdoptLostRace, lostReason
+	if clearReceipt {
+		res.Receipt = nil
+	}
+	return oid, 3, nil
 }
 
 // wipAdoptAction classifies ONE checkpoint with the same three facts wipReconcileAt folds
@@ -545,31 +549,13 @@ func wipAdoptSuccessorDefault() string {
 func wipAdoptResolveTarget(ctx context.Context, repo string, opts wipAdoptOptions, rec wiprecon.Receipt) (string, string, int, error) {
 	switch {
 	case opts.Into != "":
-		abs, err := filepath.Abs(opts.Into)
-		if err != nil {
-			return "", "", 1, err
-		}
-		inside, err := wipAdoptInsideTree(ctx, repo, abs)
-		if err != nil {
-			return "", "", 1, err
-		}
-		if inside {
-			return "", "", 3, fmt.Errorf("--into %s resolves inside this repo's working tree; a recovered stranger's delta written there would land on concurrent peers' edits — pick a directory outside the tree", abs)
-		}
-		return abs, "worker", 0, nil
+		return wipAdoptExternalTarget(ctx, repo, opts.Into, "worker", func(abs string) error {
+			return fmt.Errorf("--into %s resolves inside this repo's working tree; a recovered stranger's delta written there would land on concurrent peers' edits — pick a directory outside the tree", abs)
+		})
 	case opts.PatchOut != "":
-		abs, err := filepath.Abs(opts.PatchOut)
-		if err != nil {
-			return "", "", 1, err
-		}
-		inside, err := wipAdoptInsideTree(ctx, repo, abs)
-		if err != nil {
-			return "", "", 1, err
-		}
-		if inside {
-			return "", "", 3, fmt.Errorf("--patch-out %s resolves inside this repo's working tree, where an unignored patch file becomes a peer's dirty path — pick a path outside the tree", abs)
-		}
-		return abs, "patch", 0, nil
+		return wipAdoptExternalTarget(ctx, repo, opts.PatchOut, "patch", func(abs string) error {
+			return fmt.Errorf("--patch-out %s resolves inside this repo's working tree, where an unignored patch file becomes a peer's dirty path — pick a path outside the tree", abs)
+		})
 	case rec.Target != "":
 		kind := "patch"
 		if !strings.HasSuffix(rec.Target, ".patch") {
@@ -582,6 +568,21 @@ func wipAdoptResolveTarget(ctx context.Context, repo string, opts wipAdoptOption
 		return "", "", 1, err
 	}
 	return filepath.Join(strings.TrimSpace(gd), "fak-adopt", rec.Session+".patch"), "patch", 0, nil
+}
+
+func wipAdoptExternalTarget(ctx context.Context, repo, target, kind string, insideError func(string) error) (string, string, int, error) {
+	abs, err := filepath.Abs(target)
+	if err != nil {
+		return "", "", 1, err
+	}
+	inside, err := wipAdoptInsideTree(ctx, repo, abs)
+	if err != nil {
+		return "", "", 1, err
+	}
+	if inside {
+		return "", "", 3, insideError(abs)
+	}
+	return abs, kind, 0, nil
 }
 
 // wipAdoptInsideTree reports whether an absolute path lies at or under this repo's working

@@ -254,10 +254,7 @@ func buildSessionInventory(local []session.Descriptor, fleet []leaseref.SessionD
 	seen := make(map[string]bool, len(local)+len(fleet))
 
 	for _, d := range local {
-		id := strings.TrimSpace(d.ID)
-		if id == "" {
-			id = strings.TrimSpace(d.Trace)
-		}
+		id := sessionDescriptorID(d)
 		if id == "" {
 			continue
 		}

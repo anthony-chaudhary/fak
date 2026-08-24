@@ -259,9 +259,8 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak sessions codex-loop: use only one of --path or --session")
 		return 2
 	}
-	resolved, err := resolveCodexLoopSessionPath(*codexHome, *sessionID, *path)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak sessions codex-loop: %v\n", err)
+	resolved, ok := resolveCodexLoopSessionPathReported(stderr, *codexHome, *sessionID, *path, "fak sessions codex-loop: %v\n")
+	if !ok {
 		return 2
 	}
 	fh, err := os.Open(resolved)
@@ -518,12 +517,7 @@ func bindCodexGuardWitness(d *codexLoopDiagnosis, codexHome, sessionID string) {
 }
 
 func codexLoopFirstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
+	return firstTrimmedOr("", values...)
 }
 
 func codexLoopHookOverrideInstruction() string {
@@ -531,6 +525,26 @@ func codexLoopHookOverrideInstruction() string {
 		return "set `$env:" + codexLoopHookOverrideEnv + "=1` in PowerShell"
 	}
 	return "prefix the Codex command with `" + codexLoopHookOverrideEnv + "=1`"
+}
+
+func resolveCodexLoopSessionPathReported(stderr io.Writer, codexHome, sessionID, path, format string) (string, bool) {
+	resolved, err := resolveCodexLoopSessionPath(codexHome, sessionID, path)
+	if err != nil {
+		fmt.Fprintf(stderr, format, err)
+		return "", false
+	}
+	return resolved, true
+}
+
+func emitCodexWorkflowDefault(stdout, stderr io.Writer, in *codexLoopHookInput, codexHome, sessionID string) int {
+	in.SessionID = sessionID
+	if output, ok := codexWorkflowDefaultOutput(*in, codexHome); ok {
+		if err := json.NewEncoder(stdout).Encode(output); err != nil {
+			fmt.Fprintf(stderr, "fak sessions codex-loop-hook: encode workflow default: %v\n", err)
+			return 1
+		}
+	}
+	return 0
 }
 
 func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, argv []string, diagnose func(io.Reader, string) (codexLoopDiagnosis, error)) int {
@@ -557,23 +571,15 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 		if err := writeCodexGuardWitness(*codexHome, sessionID); err != nil {
 			fmt.Fprintf(stderr, "fak sessions codex-loop-hook: persist guard witness: %v (allowing turn)\n", err)
 		}
-		in.SessionID = sessionID
-		if output, ok := codexWorkflowDefaultOutput(in, *codexHome); ok {
-			if err := json.NewEncoder(stdout).Encode(output); err != nil {
-				fmt.Fprintf(stderr, "fak sessions codex-loop-hook: encode workflow default: %v\n", err)
-				return 1
-			}
-		}
-		return 0
+		return emitCodexWorkflowDefault(stdout, stderr, &in, *codexHome, sessionID)
 	}
 	if sessionID == "" {
 		fmt.Fprintln(stderr, "fak sessions codex-loop-hook: hook payload and CODEX_THREAD_ID have no session identifier (allowing turn; recovery: relaunch with `fak codex` or set CODEX_THREAD_ID)")
 		return 0
 	}
 
-	resolved, err := resolveCodexLoopSessionPath(*codexHome, sessionID, "")
-	if err != nil {
-		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: %v (allowing turn; recovery: verify --codex-home/CODEX_HOME and relaunch with `fak codex`)\n", err)
+	resolved, ok := resolveCodexLoopSessionPathReported(stderr, *codexHome, sessionID, "", "fak sessions codex-loop-hook: %v (allowing turn; recovery: verify --codex-home/CODEX_HOME and relaunch with `fak codex`)\n")
+	if !ok {
 		return 0
 	}
 	fh, err := os.Open(resolved)
@@ -612,14 +618,7 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: close %s: %v\n", resolved, closeErr)
 	}
 	if !codexLoopDiagnosisUnguarded(d) {
-		in.SessionID = sessionID
-		if output, ok := codexWorkflowDefaultOutput(in, *codexHome); ok {
-			if err := json.NewEncoder(stdout).Encode(output); err != nil {
-				fmt.Fprintf(stderr, "fak sessions codex-loop-hook: encode workflow default: %v\n", err)
-				return 1
-			}
-		}
-		return 0
+		return emitCodexWorkflowDefault(stdout, stderr, &in, *codexHome, sessionID)
 	}
 
 	reason := codexLoopDiagnosisGateReason(d, "unguarded") +

@@ -116,9 +116,11 @@ func cmdMicroBench(args []string) {
 		asChild   = fs.Bool("as-child", false, "internal: run as ONE idle baseline child (report own RSS, park until stdin closes)")
 	)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: fak microbench [flags]")
-		fmt.Fprintln(os.Stderr, "  measure per-agent RSS + CPU density of the in-process microagent host (#2008)")
-		fmt.Fprintln(os.Stderr, "  vs the guarded-CLI ~2-OS-processes-per-agent baseline — mock engine, no spend")
+		writeUsageLines(os.Stderr,
+			"usage: fak microbench [flags]",
+			"  measure per-agent RSS + CPU density of the in-process microagent host (#2008)",
+			"  vs the guarded-CLI ~2-OS-processes-per-agent baseline — mock engine, no spend",
+		)
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -167,8 +169,7 @@ func cmdMicroBench(args []string) {
 
 	if *outPath != "" {
 		if err := microbenchAppendJSONL(*outPath, rows); err != nil {
-			fmt.Fprintf(os.Stderr, "fak microbench: write %s: %v\n", *outPath, err)
-			os.Exit(1)
+			exitf(1, "fak microbench: write %s: %v\n", *outPath, err)
 		}
 	}
 	if *jsonOut {

@@ -154,10 +154,9 @@ func runGuardSessions(stdout, stderr io.Writer, argv []string) int {
 
 	if *asJSON {
 		_, uuidByTrace := resume.LoadIdentity(regDir)
-		projected := make([]guardSessionJSONRow, 0, len(rows))
-		for _, row := range rows {
-			projected = append(projected, guardSessionJSONRow{Row: withoutPublishedBearer(row), TranscriptUUID: uuidByTrace[row.TraceID]})
-		}
+		projected := projectRows(rows, func(row guardsessions.Row) guardSessionJSONRow {
+			return guardSessionJSONRow{Row: withoutPublishedBearer(row), TranscriptUUID: uuidByTrace[row.TraceID]}
+		})
 		return encodeSessionListingJSON(stdout, stderr, "fak.guard-sessions.v1", regDir, projected, "fak guard sessions")
 	}
 	if len(rows) == 0 {

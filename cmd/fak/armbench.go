@@ -32,12 +32,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/anthony-chaudhary/fak/internal/stringlist"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/stringlist"
 
 	"github.com/anthony-chaudhary/fak/internal/armbench"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -498,26 +499,16 @@ func emitReport(stdout, stderr io.Writer, run *armbench.Run, asJSON bool, note s
 }
 
 func loadManifest(stderr io.Writer, path string) (*armbench.Manifest, int) {
-	if path == "" {
-		fmt.Fprintln(stderr, "fak armbench: --manifest is required")
-		return nil, 2
-	}
-	blob, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Fprintln(stderr, "fak armbench:", err)
-		return nil, 1
-	}
-	m, err := armbench.UnmarshalManifest(blob)
-	if err != nil {
-		fmt.Fprintf(stderr, "refused (%s): %s\n", refusalReason(err), err)
-		return nil, 3
-	}
-	return m, 0
+	return loadArmbenchFile(stderr, path, "--manifest is required", armbench.UnmarshalManifest)
 }
 
 func loadRun(stderr io.Writer, path string) (*armbench.Run, int) {
+	return loadArmbenchFile(stderr, path, "a run ledger path is required", armbench.UnmarshalRun)
+}
+
+func loadArmbenchFile[T any](stderr io.Writer, path, required string, unmarshal func([]byte) (*T, error)) (*T, int) {
 	if path == "" {
-		fmt.Fprintln(stderr, "fak armbench: a run ledger path is required")
+		fmt.Fprintln(stderr, "fak armbench:", required)
 		return nil, 2
 	}
 	blob, err := os.ReadFile(path)
@@ -525,12 +516,12 @@ func loadRun(stderr io.Writer, path string) (*armbench.Run, int) {
 		fmt.Fprintln(stderr, "fak armbench:", err)
 		return nil, 1
 	}
-	run, err := armbench.UnmarshalRun(blob)
+	value, err := unmarshal(blob)
 	if err != nil {
 		fmt.Fprintf(stderr, "refused (%s): %s\n", refusalReason(err), err)
 		return nil, 3
 	}
-	return run, 0
+	return value, 0
 }
 
 // refusalReason surfaces the closed-vocabulary token when there is one, so the

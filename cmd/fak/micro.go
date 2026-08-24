@@ -155,13 +155,15 @@ func cmdMicro(args []string) {
 		traceOut    = fs.String("trace-out", "", "write per-agent structured traces to a JSONL file for a later `fak micro trace <id> --trace-in` readout (#2031)")
 	)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: fak micro [host] [flags]")
-		fmt.Fprintln(os.Stderr, "  fak micro              run ONE microagent end-to-end on the Mock engine")
-		fmt.Fprintln(os.Stderr, "  fak micro --selfcheck  prove kernel -> session gateway -> scheduler -> two microagents offline")
-		fmt.Fprintln(os.Stderr, "  fak micro host         boot the in-process host (M2) and run a small fleet")
-		fmt.Fprintln(os.Stderr, "  fak micro trace <id>   print ONE microagent's structured timeline (legs, tokens, seat, verdicts)")
-		fmt.Fprintln(os.Stderr, "  add --dry-run to print the resolved plan (backends, seats, caps) without spending")
-		fmt.Fprintln(os.Stderr, "  add --trace-out <file> to persist per-agent traces for a later `fak micro trace <id> --trace-in`")
+		writeUsageLines(os.Stderr,
+			"usage: fak micro [host] [flags]",
+			"  fak micro              run ONE microagent end-to-end on the Mock engine",
+			"  fak micro --selfcheck  prove kernel -> session gateway -> scheduler -> two microagents offline",
+			"  fak micro host         boot the in-process host (M2) and run a small fleet",
+			"  fak micro trace <id>   print ONE microagent's structured timeline (legs, tokens, seat, verdicts)",
+			"  add --dry-run to print the resolved plan (backends, seats, caps) without spending",
+			"  add --trace-out <file> to persist per-agent traces for a later `fak micro trace <id> --trace-in`",
+		)
 		fmt.Fprintln(os.Stderr, "\nconfig precedence: flags > env (FAK_MICRO_*) > file (--config) > defaults\nflags:")
 		fs.PrintDefaults()
 	}

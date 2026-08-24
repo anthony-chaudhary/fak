@@ -465,6 +465,18 @@ func renderParityCanary(p parityPayload) string {
 	return head + "\n  " + strings.Join(marks, "  ") + "\n  " + p.Interpretation
 }
 
+func resolveCommandWorkspace(stderr io.Writer, label, workspace string) (string, bool) {
+	if workspace != "" {
+		return workspace, true
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: getwd: %v\n", label, err)
+		return "", false
+	}
+	return wd, true
+}
+
 // runDispatchParityCanary is the CLI entry: exit 0 iff PARITY_PROVEN, else 1;
 // usage errors exit 2. Mirrors dispatch_parity_canary.main.
 func runDispatchParityCanary(stdout, stderr io.Writer, argv []string) int {
@@ -489,14 +501,9 @@ func runDispatchParityCanary(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	root := *workspace
-	if root == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			fmt.Fprintf(stderr, "fak dispatch parity-canary: getwd: %v\n", err)
-			return 1
-		}
-		root = wd
+	root, ok := resolveCommandWorkspace(stderr, "fak dispatch parity-canary", *workspace)
+	if !ok {
+		return 1
 	}
 
 	// Match the Python's issue: int | None semantics faithfully: the #N-bound rung

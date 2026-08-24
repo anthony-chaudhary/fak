@@ -287,48 +287,31 @@ func stdinUses(paths ...string) int {
 	return n
 }
 
+func loadOperatorBriefReport[T any](path string, stdin io.Reader, wantSchema string, schemaOf func(T) string) (T, error) {
+	var report T
+	if err := loadBriefJSON(path, stdin, &report); err != nil {
+		return report, err
+	}
+	if schema := schemaOf(report); schema != "" && schema != wantSchema {
+		return report, fmt.Errorf("schema %q, want %q", schema, wantSchema)
+	}
+	return report, nil
+}
+
 func loadCadenceBriefReport(path string, stdin io.Reader) (cadencereport.Report, error) {
-	var r cadencereport.Report
-	if err := loadBriefJSON(path, stdin, &r); err != nil {
-		return r, err
-	}
-	if r.Schema != "" && r.Schema != cadencereport.Schema {
-		return r, fmt.Errorf("schema %q, want %q", r.Schema, cadencereport.Schema)
-	}
-	return r, nil
+	return loadOperatorBriefReport(path, stdin, cadencereport.Schema, func(r cadencereport.Report) string { return r.Schema })
 }
 
 func loadProgramBriefReport(path string, stdin io.Reader) (programreport.Report, error) {
-	var r programreport.Report
-	if err := loadBriefJSON(path, stdin, &r); err != nil {
-		return r, err
-	}
-	if r.Schema != "" && r.Schema != programreport.Schema {
-		return r, fmt.Errorf("schema %q, want %q", r.Schema, programreport.Schema)
-	}
-	return r, nil
+	return loadOperatorBriefReport(path, stdin, programreport.Schema, func(r programreport.Report) string { return r.Schema })
 }
 
 func loadMilestoneBriefReport(path string, stdin io.Reader) (milestonereport.Report, error) {
-	var r milestonereport.Report
-	if err := loadBriefJSON(path, stdin, &r); err != nil {
-		return r, err
-	}
-	if r.Schema != "" && r.Schema != milestonereport.Schema {
-		return r, fmt.Errorf("schema %q, want %q", r.Schema, milestonereport.Schema)
-	}
-	return r, nil
+	return loadOperatorBriefReport(path, stdin, milestonereport.Schema, func(r milestonereport.Report) string { return r.Schema })
 }
 
 func loadHeavinessBriefReport(path string, stdin io.Reader) (scorecard.Payload, error) {
-	var r scorecard.Payload
-	if err := loadBriefJSON(path, stdin, &r); err != nil {
-		return r, err
-	}
-	if r.Schema != "" && r.Schema != heavinessscore.Schema {
-		return r, fmt.Errorf("schema %q, want %q", r.Schema, heavinessscore.Schema)
-	}
-	return r, nil
+	return loadOperatorBriefReport(path, stdin, heavinessscore.Schema, func(r scorecard.Payload) string { return r.Schema })
 }
 
 func loadDebtWitnesses(path string, stdin io.Reader) ([]operatorbrief.DebtWitnessRecord, error) {

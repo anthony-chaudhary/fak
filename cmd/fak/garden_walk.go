@@ -112,12 +112,7 @@ func runGardenWalk(stdout, stderr io.Writer, argv []string) int {
 	// PROPOSE-ONLY: DryRun is always on for the issues source (the gardener emits the
 	// command; the operator or a future witness-gated rung runs it). The Perform/!DryRun
 	// path is exercised by the pure planner tests and reserved for that rung.
-	plan := gardenbundle.PlanWalk("issue", items, gardenbundle.WalkPolicy{
-		Budget:         *budget,
-		SkipFreshDays:  *skipFresh,
-		SkipInProgress: *skipActive,
-		DryRun:         true,
-	})
+	plan := gardenbundle.PlanWalk("issue", items, gardenWalkPolicy(*budget, *skipFresh, *skipActive))
 	plan.Source = srcLabel
 
 	witnessGardenWalk(ledgerPath, plan)

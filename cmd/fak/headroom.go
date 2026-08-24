@@ -108,12 +108,9 @@ func runHeadroomStatus(stdout, stderr io.Writer, argv []string) int {
 	defer cancel()
 	report := headroom.BuildStatus(ctx)
 	if *asJSON {
-		b, err := json.MarshalIndent(report, "", "  ")
-		if err != nil {
-			fmt.Fprintf(stderr, "fak headroom: %v\n", err)
-			return 1
+		if rc := encodeJSONOrFailPrefixed(stdout, stderr, report, "fak headroom"); rc != 0 {
+			return rc
 		}
-		fmt.Fprintln(stdout, string(b))
 		return 0
 	}
 
@@ -240,12 +237,9 @@ func runHeadroomBench(stdout, stderr io.Writer, argv []string) int {
 
 	report := headroom.RunBench(comp, inputs)
 	if *asJSON {
-		b, err := json.MarshalIndent(report, "", "  ")
-		if err != nil {
-			fmt.Fprintf(stderr, "fak headroom: %v\n", err)
-			return 1
+		if rc := encodeJSONOrFailPrefixed(stdout, stderr, report, "fak headroom"); rc != 0 {
+			return rc
 		}
-		fmt.Fprintln(stdout, string(b))
 		return 0
 	}
 	fmt.Fprint(stdout, report.Render())

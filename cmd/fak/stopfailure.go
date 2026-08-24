@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -206,13 +205,7 @@ func parseStopFailureNow(value string, stderr io.Writer) (time.Time, bool) {
 }
 
 func writeStopFailureJSON(stdout, stderr io.Writer, v any) int {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		fmt.Fprintf(stderr, "fak stopfailure: marshal JSON: %v\n", err)
-		return 1
-	}
-	fmt.Fprintln(stdout, string(b))
-	return 0
+	return emitPrefixedJSON(stdout, stderr, v, "fak stopfailure: marshal JSON")
 }
 
 func printStopFailurePlan(w io.Writer, plan stopfailure.Plan) {

@@ -610,10 +610,7 @@ func (s fleetMetricsSources) liveInventory(now time.Time) (sessionInventory, map
 
 	byID := make(map[string]session.Descriptor, len(local))
 	for _, d := range local {
-		id := strings.TrimSpace(d.ID)
-		if id == "" {
-			id = strings.TrimSpace(d.Trace)
-		}
+		id := sessionDescriptorID(d)
 		if id != "" {
 			byID[id] = d
 		}
@@ -629,10 +626,14 @@ func (s fleetMetricsSources) stderrOrDiscard() io.Writer {
 }
 
 func (s fleetMetricsSources) note(format string, args ...any) {
-	if s.stderr == nil {
+	writeMetricsNote(s.stderr, "fak fleet metrics: ", format, args...)
+}
+
+func writeMetricsNote(stderr io.Writer, prefix, format string, args ...any) {
+	if stderr == nil {
 		return
 	}
-	fmt.Fprintf(s.stderr, "fak fleet metrics: "+format+"\n", args...)
+	fmt.Fprintf(stderr, prefix+format+"\n", args...)
 }
 
 // ---- live tier -----------------------------------------------------------------

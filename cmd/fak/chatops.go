@@ -49,11 +49,9 @@ func cmdChatOps(argv []string) {
 	botUser := fs.String("bot-user", "", "the door's own Slack user id, for the @mention gate + self-loop fence (default: $FAK_CHATOPS_BOT_USER / .env.slack.local)")
 	admins := fs.String("admins", "", "comma-separated allowlist of Slack user ids permitted to command the door (default: $FAK_CHATOPS_ADMINS / .env.slack.local). EMPTY ⇒ the door refuses everyone (fail-closed).")
 	audit := fs.String("audit", "", "append one JSONL row per handled message to this file (empty ⇒ no journal)")
-	interval := fs.Duration("interval", 3*time.Second, "poll interval between conversations.history fetches")
-	prime := fs.Bool("prime", true, "on start, skip the existing channel backlog and only answer messages posted after launch (pass --prime=false to answer the visible history too)")
-	once := fs.Bool("once", false, "run a single poll and exit (smoke test) instead of looping")
-	dryRun := fs.Bool("dry-run", false, "print the resolved config + the verb registry and exit without connecting")
-	_ = fs.Parse(argv)
+	interval, prime, once, dryRun := parseChatPollingFlags(fs, argv,
+		"on start, skip the existing channel backlog and only answer messages posted after launch (pass --prime=false to answer the visible history too)",
+		"print the resolved config + the verb registry and exit without connecting")
 
 	tok := *token
 	if tok == "" {
@@ -111,6 +109,15 @@ func cmdChatOps(argv []string) {
 		ch, len(chatops.Grammar()), len(adminList))
 
 	runSlackPollLifecycle(ctx, door, "fak chatops", "handled", *prime, *once, *interval)
+}
+
+func parseChatPollingFlags(fs *flag.FlagSet, argv []string, primeHelp, dryRunHelp string) (*time.Duration, *bool, *bool, *bool) {
+	interval := fs.Duration("interval", 3*time.Second, "poll interval between conversations.history fetches")
+	prime := fs.Bool("prime", true, primeHelp)
+	once := fs.Bool("once", false, "run a single poll and exit (smoke test) instead of looping")
+	dryRun := fs.Bool("dry-run", false, dryRunHelp)
+	_ = fs.Parse(argv)
+	return interval, prime, once, dryRun
 }
 
 // --- config resolution (flags → env → .env.slack.local) ------------------------------

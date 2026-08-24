@@ -42,11 +42,9 @@ func cmdChatRelay(argv []string) {
 	maxTokens := fs.Int("max-tokens", 512, "max_tokens for each completion")
 	temperature := fs.Float64("temperature", 0, "sampling temperature (0 = greedy)")
 	apiKeyEnv := fs.String("api-key-env", "", "env var holding a bearer token to send to the serve (for a --require-key-env serve)")
-	interval := fs.Duration("interval", 3*time.Second, "poll interval between conversations.history fetches")
-	prime := fs.Bool("prime", true, "on start, skip the existing channel backlog and only answer messages posted after launch (pass --prime=false to answer the latest backlog too — handy with --once)")
-	once := fs.Bool("once", false, "run a single poll and exit (smoke test) instead of looping")
-	dryRun := fs.Bool("dry-run", false, "print the resolved config and exit without connecting")
-	_ = fs.Parse(argv)
+	interval, prime, once, dryRun := parseChatPollingFlags(fs, argv,
+		"on start, skip the existing channel backlog and only answer messages posted after launch (pass --prime=false to answer the latest backlog too — handy with --once)",
+		"print the resolved config and exit without connecting")
 
 	tok := *token
 	if tok == "" {

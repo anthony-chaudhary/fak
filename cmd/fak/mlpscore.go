@@ -62,13 +62,17 @@ func runMLPScore(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
+	compareExit := 0
+	if *check && !score.Lovable {
+		compareExit = 1
+	}
+	if code, done := emitScorecardComparison(stdout, stderr, "fak mlp-score", *comparePath, compareExit, func(base map[string]any) string {
+		return scorecard.Compare(mlpscore.KernelPayload(score), base, mlpscore.DebtKey)
+	}); done {
+		return code
+	}
+
 	switch {
-	case *comparePath != "":
-		base, ok := readCompareBase(stderr, "fak mlp-score", *comparePath)
-		if !ok {
-			return 2
-		}
-		fmt.Fprintln(stdout, scorecard.Compare(mlpscore.KernelPayload(score), base, mlpscore.DebtKey))
 	case *asJSON:
 		if err := writeIndentedJSONNoEscape(stdout, score); err != nil {
 			fmt.Fprintf(stderr, "fak mlp-score: encode json: %v\n", err)

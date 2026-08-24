@@ -79,29 +79,16 @@ func runSessionFork(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak session fork: load parent %q: %v\n", parentDir, err)
 		return 1
 	}
-	forkID := strings.TrimSpace(*id)
-	if forkID == "" {
-		forkID = parent.Meta.SessionID + "-fork"
-	}
+	target := newSessionChildTarget(*id, parent.Meta.SessionID, "fork", *toModel, *toHost, *reason)
 
-	res, err := sessionimage.ForkDir(parentDir, checkpointDir, forkDir, sessionimage.ForkOptions{
-		ForkID:  forkID,
-		ToModel: *toModel,
-		ToHost:  *toHost,
-		Reason:  *reason,
+	res, code := runSessionBranchOperation(stderr, "fork", *registry, func() (sessionimage.ForkResult, sessionimage.Meta, error) {
+		res, err := sessionimage.ForkDir(parentDir, checkpointDir, forkDir, sessionimage.ForkOptions{
+			ForkID: target.id, ToModel: target.model, ToHost: target.host, Reason: target.reason,
+		})
+		return res, res.Fork, err
 	})
-	if err != nil {
-		fmt.Fprintf(stderr, "fak session fork: %v\n", err)
-		return 1
-	}
-
-	// The fork is a NEW durable descriptor (new id, parent_id link) — register it into the C1
-	// registry when asked, reusing the branch verb's registrar so the two lifecycle forks agree
-	// on the descriptor shape.
-	if reg := strings.TrimSpace(*registry); reg != "" {
-		if code := registerBranchDescriptor(stderr, pathutil.ExpandTilde(reg), res.Fork); code != 0 {
-			return code
-		}
+	if code != 0 {
+		return code
 	}
 
 	if *asJSON {

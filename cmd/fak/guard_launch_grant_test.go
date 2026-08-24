@@ -150,6 +150,7 @@ func TestGuardLaunchGrantCLIHelperProcess(t *testing.T) {
 		"--replay-trace", os.Getenv("GUARD_LAUNCH_GRANT_FIXTURE"),
 		"--audit", "off",
 	})
+	t.Fatal("guard helper returned instead of exiting")
 }
 
 func TestGuardLaunchGrantCLIReplayCapturesGrantAndHardDeny(t *testing.T) {

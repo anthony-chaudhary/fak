@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -48,12 +47,9 @@ func runCachevalueShapes(stdout, stderr io.Writer, argv []string) int {
 		report := cachevaluereport.FoldShapeTrend(rows, time.Now().UTC())
 		report.Since = *since
 		if *asJSON {
-			b, err := json.MarshalIndent(report, "", "  ")
-			if err != nil {
-				fmt.Fprintf(stderr, "fak cachevalue shapes: marshal: %v\n", err)
-				return 1
+			if rc := encodeJSONOrFailPrefixed(stdout, stderr, report, "fak cachevalue shapes: marshal"); rc != 0 {
+				return rc
 			}
-			fmt.Fprintln(stdout, string(b))
 			return 0
 		}
 		fmt.Fprint(stdout, cachevaluereport.RenderShapeTrend(report))
@@ -64,12 +60,9 @@ func runCachevalueShapes(stdout, stderr io.Writer, argv []string) int {
 	report.Since = *since
 
 	if *asJSON {
-		b, err := json.MarshalIndent(report, "", "  ")
-		if err != nil {
-			fmt.Fprintf(stderr, "fak cachevalue shapes: marshal: %v\n", err)
-			return 1
+		if rc := encodeJSONOrFailPrefixed(stdout, stderr, report, "fak cachevalue shapes: marshal"); rc != 0 {
+			return rc
 		}
-		fmt.Fprintln(stdout, string(b))
 		return 0
 	}
 	fmt.Fprint(stdout, cachevaluereport.RenderShapes(report))

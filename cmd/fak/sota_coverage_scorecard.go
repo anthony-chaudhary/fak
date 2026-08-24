@@ -42,13 +42,17 @@ func runSOTACoverageScorecard(stdout, stderr io.Writer, argv []string) int {
 	}
 	payload := sotacoverage.Collect(root, *today)
 
+	compareExit := 0
+	if *check && !payload.OK {
+		compareExit = 1
+	}
+	if code, done := emitScorecardComparison(stdout, stderr, "sota-coverage-scorecard", *comparePath, compareExit, func(base map[string]any) string {
+		return scorecard.Compare(payload, base, sotacoverage.DebtKey)
+	}); done {
+		return code
+	}
+
 	switch {
-	case *comparePath != "":
-		base, ok := readCompareBase(stderr, "sota-coverage-scorecard", *comparePath)
-		if !ok {
-			return 2
-		}
-		fmt.Fprintln(stdout, scorecard.Compare(payload, base, sotacoverage.DebtKey))
 	case *asJSON:
 		if err := writeIndentedJSONNoEscape(stdout, payload); err != nil {
 			fmt.Fprintf(stderr, "sota-coverage-scorecard: encode json: %v\n", err)

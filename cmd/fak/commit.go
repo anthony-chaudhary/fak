@@ -150,8 +150,8 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	// local commit first). It needs a message but tolerates zero paths (the lane match is then
 	// skipped with a note).
 	if *preview {
-		message, code := assembleMessage(stdin(), msg.Joined(), *msgFile, stderr)
-		if code != 0 {
+		message, code, ok := resolveCommitMessage(msg, *msgFile, stderr)
+		if !ok {
 			return code
 		}
 		root := resolveRoot(*dir)
@@ -163,8 +163,8 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	message, code := assembleMessage(stdin(), msg.Joined(), *msgFile, stderr)
-	if code != 0 {
+	message, code, ok := resolveCommitMessage(msg, *msgFile, stderr)
+	if !ok {
 		return code
 	}
 	root := resolveRoot(*dir)
@@ -364,22 +364,13 @@ func runCommitSubmit(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak commit submit: at least one --path (or a path after --) is required")
 		return 2
 	}
-	subject, code := assembleMessage(stdin(), msg.Joined(), *msgFile, stderr)
-	if code != 0 {
+	subject, code, ok := resolveCommitMessage(msg, *msgFile, stderr)
+	if !ok {
 		return code
 	}
-	root := resolveRoot(*dir)
-	if *queueDir == "" {
-		*queueDir = commitintent.DefaultQueueDir(root)
-	}
-	baseSHA := strings.TrimSpace(*base)
-	if baseSHA == "" {
-		var err error
-		baseSHA, err = commitSubmitHeadSHA(root)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak commit submit: resolve base sha: %v\n", err)
-			return 1
-		}
+	_, baseSHA, code := resolveCommitQueueBase(stderr, "submit", *dir, queueDir, *base)
+	if code != 0 {
+		return code
 	}
 	intentID := strings.TrimSpace(*id)
 	if intentID == "" {
@@ -448,18 +439,9 @@ func runCommitDrain(stdout, stderr io.Writer, argv []string) int {
 	}
 	*dir = pathutil.ExpandTilde(*dir)
 	*queueDir = pathutil.ExpandTilde(*queueDir)
-	root := resolveRoot(*dir)
-	if *queueDir == "" {
-		*queueDir = commitintent.DefaultQueueDir(root)
-	}
-	baseSHA := strings.TrimSpace(*base)
-	if baseSHA == "" {
-		var err error
-		baseSHA, err = commitSubmitHeadSHA(root)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak commit drain: resolve base sha: %v\n", err)
-			return 1
-		}
+	root, baseSHA, code := resolveCommitQueueBase(stderr, "drain", *dir, queueDir, *base)
+	if code != 0 {
+		return code
 	}
 
 	store := commitintent.Store{Dir: *queueDir}
@@ -689,6 +671,29 @@ func waitForCommitLane(dir string, timeout time.Duration) (bool, safecommit.Lock
 
 // stdin is overridable in tests; defaults to os.Stdin.
 var stdin = func() io.Reader { return os.Stdin }
+
+func resolveCommitMessage(msg messageList, file string, stderr io.Writer) (string, int, bool) {
+	message, code := assembleMessage(stdin(), msg.Joined(), file, stderr)
+	return message, code, code == 0
+}
+
+func resolveCommitQueueBase(stderr io.Writer, action, dir string, queueDir *string, base string) (string, string, int) {
+	root := resolveRoot(dir)
+	if *queueDir == "" {
+		*queueDir = commitintent.DefaultQueueDir(root)
+	}
+	baseSHA := strings.TrimSpace(base)
+	if baseSHA != "" {
+		return root, baseSHA, 0
+	}
+	var err error
+	baseSHA, err = commitSubmitHeadSHA(root)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak commit %s: resolve base sha: %v\n", action, err)
+		return "", "", 1
+	}
+	return root, baseSHA, 0
+}
 
 // assembleMessage resolves the commit message from exactly one source: -m, -F <file>
 // (or -F - for stdin). Returns (message, 0) on success or ("", exitCode) on a usage error.

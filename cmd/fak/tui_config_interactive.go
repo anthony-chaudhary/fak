@@ -160,31 +160,40 @@ func (s *tuiConfigInteraction) press(key rune) (bool, error) {
 		s.pending = values[next]
 		s.message = "pending " + tuiConfigSettingRef(s.current()) + "=" + s.pending
 	case 's':
-		ref := tuiConfigSettingRef(s.current())
-		report, err := mutateTUIConfig(s.path, tuiConfigMutation{SetDefaults: []string{ref + "=" + s.pending}}, s.at)
-		if err != nil {
-			return false, fmt.Errorf("save %s: %w", ref, err)
+		if err := s.applyCurrent("save"); err != nil {
+			return false, err
 		}
-		s.report = report
-		s.refreshSettings()
-		s.pending = s.current().Effective
-		s.message = "saved " + ref + "=" + s.pending
 	case 'r':
-		ref := tuiConfigSettingRef(s.current())
-		report, err := mutateTUIConfig(s.path, tuiConfigMutation{UnsetDefaults: []string{ref}}, s.at)
-		if err != nil {
-			return false, fmt.Errorf("reset %s: %w", ref, err)
+		if err := s.applyCurrent("reset"); err != nil {
+			return false, err
 		}
-		s.report = report
-		s.refreshSettings()
-		s.pending = s.current().Effective
-		s.message = "reset " + ref + " to built-in"
 	case '\r', '\n':
 		return false, nil
 	default:
 		s.message = fmt.Sprintf("ignored key %q", string(key))
 	}
 	return false, nil
+}
+
+func (s *tuiConfigInteraction) applyCurrent(action string) error {
+	ref := tuiConfigSettingRef(s.current())
+	mutation := tuiConfigMutation{SetDefaults: []string{ref + "=" + s.pending}}
+	if action == "reset" {
+		mutation = tuiConfigMutation{UnsetDefaults: []string{ref}}
+	}
+	report, err := mutateTUIConfig(s.path, mutation, s.at)
+	if err != nil {
+		return fmt.Errorf("%s %s: %w", action, ref, err)
+	}
+	s.report = report
+	s.refreshSettings()
+	s.pending = s.current().Effective
+	if action == "reset" {
+		s.message = "reset " + ref + " to built-in"
+	} else {
+		s.message = "saved " + ref + "=" + s.pending
+	}
+	return nil
 }
 
 func tuiConfigInteractiveValues(setting tuiConfigSetting) []string {

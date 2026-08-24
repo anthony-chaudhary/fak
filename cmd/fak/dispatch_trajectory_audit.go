@@ -207,10 +207,10 @@ func dispatchTrajectoryRecommendations(rep dispatchTrajectoryAuditReport) []disp
 	}
 	out := []dispatchTrajectoryRecommendation{}
 	if rep.NoCommit > 0 {
-		out = append(out, dispatchTrajectoryRecommendation{ID: "admit_for_yield", Evidence: fmt.Sprintf("%d/%d trajectories ended without a witnessed commit", rep.NoCommit, rep.Sessions), Action: "Refill in small disjoint tranches and stop admitting a backend/lane when its recent witnessed-ship yield falls below the operator threshold."})
+		out = appendTrajectoryRecommendation(out, "admit_for_yield", fmt.Sprintf("%d/%d trajectories ended without a witnessed commit", rep.NoCommit, rep.Sessions), "Refill in small disjoint tranches and stop admitting a backend/lane when its recent witnessed-ship yield falls below the operator threshold.")
 	}
 	if row := counts["commit_lock_contention"]; row.Sessions > 0 {
-		out = append(out, dispatchTrajectoryRecommendation{ID: "serialize_epilogues", Evidence: fmt.Sprintf("%d sessions hit commit-lock contention (%d events)", row.Sessions, row.Events), Action: "Keep implementation parallel, but queue commit/push/close epilogues through one controller instead of making every worker poll the shared commit lock."})
+		out = appendTrajectoryRecommendation(out, "serialize_epilogues", fmt.Sprintf("%d sessions hit commit-lock contention (%d events)", row.Sessions, row.Events), "Keep implementation parallel, but queue commit/push/close epilogues through one controller instead of making every worker poll the shared commit lock.")
 	}
 	if row := counts["peer_wip_interference"]; row.Sessions > 0 {
 		out = append(out, dispatchTrajectoryRecommendation{ID: "validate_owned_paths", Evidence: fmt.Sprintf("%d sessions encountered peer-WIP interference", row.Sessions), Action: "Generate each worker's exact fak validate --mine command from its declared lease tree and treat full live-tree CI as observational, not the worker's completion gate."})
@@ -222,6 +222,10 @@ func dispatchTrajectoryRecommendations(rep dispatchTrajectoryAuditReport) []disp
 		out = append(out, dispatchTrajectoryRecommendation{ID: "durable_worker_fuel", Evidence: fmt.Sprintf("%d sessions launched without stdin fuel", row.Sessions), Action: "Persist rendered issue fuel before spawn and restart from that artifact, never from an already-consumed stdin stream."})
 	}
 	return out
+}
+
+func appendTrajectoryRecommendation(out []dispatchTrajectoryRecommendation, id, evidence, action string) []dispatchTrajectoryRecommendation {
+	return append(out, dispatchTrajectoryRecommendation{ID: id, Evidence: evidence, Action: action})
 }
 
 func renderDispatchTrajectoryAudit(w io.Writer, rep dispatchTrajectoryAuditReport) {

@@ -607,18 +607,6 @@ func guardEffectivePolicyDigest(policyBytes []byte, allow guardAllowOverlay, den
 	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
-func guardCurrentEffectivePolicyDigest(policyBytes []byte) string {
-	allow, _, err := loadGuardAllowOverlayLayers()
-	if err != nil {
-		allow = guardAllowOverlay{Version: guardAllowOverlayVersion}
-	}
-	deny, err := loadGuardDenyOverlay(guardDenyOverlayPath())
-	if err != nil {
-		deny = guardDenyOverlay{Version: guardDenyOverlayVersion}
-	}
-	return guardEffectivePolicyDigest(policyBytes, allow, deny)
-}
-
 func guardAuditPathHash(root string) string {
 	abs, err := filepath.Abs(root)
 	if err == nil {

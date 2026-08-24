@@ -63,8 +63,7 @@ func runAccountsEnrollCurrent(stdout, stderr io.Writer, p enrollParams) int {
 		fmt.Fprintln(stderr, "usage: fak accounts enroll-current --name <seat> [--from <seat|dir>] [--reserved] [--force]")
 		return 2
 	}
-	if p.homeDir == "" {
-		fmt.Fprintln(stderr, "fak accounts: cannot resolve home dir")
+	if !requireAccountsHome(stderr, p.homeDir) {
 		return 1
 	}
 	src := currentSessionDir(p.homeDir, p.from)

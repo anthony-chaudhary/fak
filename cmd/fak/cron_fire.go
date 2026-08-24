@@ -22,13 +22,14 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/anthony-chaudhary/fak/internal/exclusivefile"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/exclusivefile"
 
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
@@ -95,18 +96,9 @@ func runCronFire(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	fireAt := time.Now().UTC()
-	if s := strings.TrimSpace(*at); s != "" {
-		t, err := time.Parse(time.RFC3339, s)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak cron fire: --at %q is not RFC3339: %v\n", s, err)
-			return 2
-		}
-		fireAt = t.UTC()
-	}
-	slotKey := strings.TrimSpace(*slot)
-	if slotKey == "" {
-		slotKey = cronFireSlot(fireAt, *interval)
+	fireAt, slotKey, ok := resolveCronTimeAndSlot(stderr, "fak cron fire", *at, *slot, *interval)
+	if !ok {
+		return 2
 	}
 
 	// The dup-tick lock makes the ledger read-modify-write atomic across concurrent

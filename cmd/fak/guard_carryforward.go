@@ -39,6 +39,18 @@ type guardRefusalCarryForwardFile struct {
 	Refusals      []guardRefusalCarry `json:"refusals"`
 }
 
+func guardReadPriorAuditEntries(auditPath string) (string, []os.DirEntry, bool) {
+	dir := guardPriorAuditDir(auditPath)
+	if dir == "" {
+		return "", nil, false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", nil, false
+	}
+	return dir, entries, true
+}
+
 func guardReadRefusalCarryForward(auditPath, traceID, root string) []guardRefusalCarry {
 	path := guardRefusalCarryForwardPath(auditPath)
 	if path == "" {
@@ -90,12 +102,8 @@ func guardLoadRefusalCarryForwardFile(path, traceID, root string) ([]guardRefusa
 }
 
 func guardReadLatestRefusalCarryForwardSidecar(auditPath, traceID, root string) ([]guardRefusalCarry, bool) {
-	dir := guardPriorAuditDir(auditPath)
-	if dir == "" {
-		return nil, false
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
+	dir, entries, ok := guardReadPriorAuditEntries(auditPath)
+	if !ok {
 		return nil, false
 	}
 	current := filepath.Clean(guardRefusalCarryForwardPath(auditPath))
@@ -137,12 +145,8 @@ func guardReadLatestRefusalCarryForwardSidecar(auditPath, traceID, root string) 
 }
 
 func guardReadLatestRefusalCarryForwardJournal(auditPath, traceID, root string) ([]guardRefusalCarry, bool) {
-	dir := guardPriorAuditDir(auditPath)
-	if dir == "" {
-		return nil, false
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
+	dir, entries, ok := guardReadPriorAuditEntries(auditPath)
+	if !ok {
 		return nil, false
 	}
 	current := filepath.Clean(auditPath)

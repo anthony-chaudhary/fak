@@ -172,10 +172,7 @@ func (s cachevalueMetricsSources) loadAblationReports() []ablate.Report {
 }
 
 func (s cachevalueMetricsSources) note(format string, args ...any) {
-	if s.stderr == nil {
-		return
-	}
-	fmt.Fprintf(s.stderr, "fak cachevalue metrics: "+format+"\n", args...)
+	writeMetricsNote(s.stderr, "fak cachevalue metrics: ", format, args...)
 }
 
 // cachevalueMetricsMux builds the HTTP surface: /metrics re-folds the ledgers per scrape

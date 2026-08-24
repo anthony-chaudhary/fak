@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -95,12 +94,9 @@ func runWIPLifecycle(args []string, stdout, stderr io.Writer) int {
 }
 
 func emitWIPLifecycle(stdout, stderr io.Writer, receipt wiplifecycle.Receipt) int {
-	b, err := json.MarshalIndent(receipt, "", "  ")
-	if err != nil {
-		fmt.Fprintf(stderr, "fak wip lifecycle: %v\n", err)
-		return 1
+	if rc := encodeJSONOrFailPrefixed(stdout, stderr, receipt, "fak wip lifecycle"); rc != 0 {
+		return rc
 	}
-	fmt.Fprintln(stdout, string(b))
 	return 0
 }
 

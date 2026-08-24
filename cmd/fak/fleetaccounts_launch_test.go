@@ -98,6 +98,7 @@ func TestFleetLaunchHelperProcess(t *testing.T) {
 	}
 	_, _ = os.Stdout.WriteString(`{"type":"item.completed","item":{"type":"agent_message","text":"FAK_OK"}}` + "\n")
 	os.Exit(0)
+	t.Fatal("helper process returned after os.Exit")
 }
 
 func TestOverlayFleetLaunchEnvIsCaseInsensitive(t *testing.T) {

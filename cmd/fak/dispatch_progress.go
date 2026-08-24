@@ -665,21 +665,8 @@ func dispatchProgressSaveBaseline(runsDir string, openNow int) error {
 }
 
 func dispatchProgressFoldClosedHistory(runsDir string) int {
-	path := filepath.Join(runsDir, dispatchProgressLogName)
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return 0
-	}
 	total := 0
-	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var rec map[string]any
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			continue
-		}
+	for _, rec := range dispatchProgressReadRows(runsDir) {
 		total += dispatchMapInt(rec, "closed_now")
 	}
 	return total
@@ -757,21 +744,8 @@ type dispatchProgressCloseSample struct {
 }
 
 func dispatchProgressCloseSamples(runsDir string, since, until time.Time) []dispatchProgressCloseSample {
-	path := filepath.Join(runsDir, dispatchProgressLogName)
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
 	var out []dispatchProgressCloseSample
-	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var rec map[string]any
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			continue
-		}
+	for _, rec := range dispatchProgressReadRows(runsDir) {
 		closed := dispatchMapInt(rec, "closed_now")
 		if closed <= 0 {
 			continue

@@ -108,12 +108,10 @@ type replayReport struct {
 func runAuditReplay(stdout, stderr io.Writer, path string, asJSON bool) int {
 	// Segment-aware (#6488): a determinism claim over a rotated journal's live
 	// segment would silently exclude every call adjudicated before the cut.
-	rows, err := journal.ReadAllSegments(path)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak audit replay: %v\n", err)
+	rows, ok := readAuditRows(stderr, "replay", path)
+	if !ok {
 		return 2
 	}
-	rows = journal.WithoutCutAnchors(rows)
 	rep := replayRows(path, rows)
 
 	if asJSON {

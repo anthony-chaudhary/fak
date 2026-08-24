@@ -58,13 +58,10 @@ func runTokenDefaultsScorecard(stdout, stderr io.Writer, argv []string) int {
 	if *effectiveness {
 		return writeTokenEffectivenessReport(stdout, stderr, p, *asJSON)
 	}
-	if *comparePath != "" {
-		base, ok := readCompareBase(stderr, "fak token-defaults-scorecard", *comparePath)
-		if !ok {
-			return 2
-		}
-		fmt.Fprintln(stdout, compareTokenDefaults(c, base))
-		return okExit(p["ok"].(bool))
+	if code, done := emitScorecardComparison(stdout, stderr, "fak token-defaults-scorecard", *comparePath, okExit(p["ok"].(bool)), func(base map[string]any) string {
+		return compareTokenDefaults(c, base)
+	}); done {
+		return code
 	}
 	if *asJSON {
 		if err := writeIndentedJSON(stdout, p); err != nil {

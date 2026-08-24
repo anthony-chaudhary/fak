@@ -33,22 +33,29 @@ import (
 
 func cmdSessionJournal(argv []string) { os.Exit(runSessionJournal(os.Stdout, os.Stderr, argv)) }
 
+func splitLeadingSubcommand(argv []string) (string, []string, bool) {
+	if len(argv) == 0 || strings.HasPrefix(argv[0], "-") {
+		return "", argv, false
+	}
+	return argv[0], argv[1:], true
+}
+
 func runSessionJournal(stdout, stderr io.Writer, argv []string) int {
-	if len(argv) > 0 && !strings.HasPrefix(argv[0], "-") {
-		switch argv[0] {
+	if subcommand, args, ok := splitLeadingSubcommand(argv); ok {
+		switch subcommand {
 		case "report", "ls", "status":
-			return runSessionJournalReport(stdout, stderr, argv[1:])
+			return runSessionJournalReport(stdout, stderr, args)
 		case "open":
-			return runSessionJournalWrite(stdout, stderr, sessionjournal.KindOpen, argv[1:])
+			return runSessionJournalWrite(stdout, stderr, sessionjournal.KindOpen, args)
 		case "beat":
-			return runSessionJournalWrite(stdout, stderr, sessionjournal.KindBeat, argv[1:])
+			return runSessionJournalWrite(stdout, stderr, sessionjournal.KindBeat, args)
 		case "close":
-			return runSessionJournalWrite(stdout, stderr, sessionjournal.KindClose, argv[1:])
+			return runSessionJournalWrite(stdout, stderr, sessionjournal.KindClose, args)
 		case "help":
 			sessionJournalUsage(stdout)
 			return 0
 		default:
-			fmt.Fprintf(stderr, "fak sessionjournal: unknown subcommand %q\n", argv[0])
+			fmt.Fprintf(stderr, "fak sessionjournal: unknown subcommand %q\n", subcommand)
 			sessionJournalUsage(stderr)
 			return 2
 		}

@@ -379,12 +379,8 @@ func runWipCheckpoint(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	res, err := wipCheckpointScoped(context.Background(), *repo, sess, *buildable, time.Now().Unix(), scope)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak wip checkpoint: %v\n", err)
-		return 1
-	}
-	if *asJSON {
-		return encodeJSONOrFail(stdout, stderr, res, "fak wip checkpoint")
+	if code, done := emitResultOrError(stdout, stderr, "fak wip checkpoint", *asJSON, res, err); done {
+		return code
 	}
 	if res.Clean {
 		fmt.Fprintf(stdout, "clean: nothing to checkpoint for session %s\n", sess)
@@ -946,12 +942,8 @@ func runWipReap(stdout, stderr io.Writer, argv []string) int {
 		return runWipCensus(context.Background(), stdout, stderr, *repo, *asJSON)
 	}
 	res, err := wipReap(context.Background(), *repo, *dryRun)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak wip reap: %v\n", err)
-		return 1
-	}
-	if *asJSON {
-		return encodeJSONOrFail(stdout, stderr, res, "fak wip reap")
+	if code, done := emitResultOrError(stdout, stderr, "fak wip reap", *asJSON, res, err); done {
+		return code
 	}
 	if len(res.Reaped) == 0 {
 		fmt.Fprintln(stdout, "no checkpoints to reap")

@@ -316,26 +316,31 @@ func ensureTrailer(msg, lane string) string {
 // of stat-cache/CRLF ghosts whose normalized blob is unchanged; presenting those as WIP makes the
 // commit queue both slower and misleading.
 func gitStatusDirty(ctx context.Context, root string) ([]dirtyEntry, error) {
-	out, code, err := gitRunner(ctx, root, "status", "--porcelain=v1", "-z", "--no-renames")
+	out, err := runSweepGit(ctx, root, "status", "status", "--porcelain=v1", "-z", "--no-renames")
 	if err != nil {
 		return nil, err
-	}
-	if code != 0 {
-		return nil, fmt.Errorf("git status exited %d: %s", code, strings.TrimSpace(out))
 	}
 	entries := parsePorcelainZ(out)
 	if !hasWorktreeTracked(entries) {
 		return annotateDirtyAges(root, entries, time.Now()), nil
 	}
 
-	diffOut, code, err := gitRunner(ctx, root, "-c", "core.safecrlf=false", "diff", "--name-only", "-z", "--no-renames", "--")
+	diffOut, err := runSweepGit(ctx, root, "diff", "-c", "core.safecrlf=false", "diff", "--name-only", "-z", "--no-renames", "--")
 	if err != nil {
 		return nil, err
 	}
-	if code != 0 {
-		return nil, fmt.Errorf("git diff exited %d: %s", code, strings.TrimSpace(diffOut))
-	}
 	return annotateDirtyAges(root, filterContentDirty(entries, parseNULPaths(diffOut)), time.Now()), nil
+}
+
+func runSweepGit(ctx context.Context, root, operation string, args ...string) (string, error) {
+	out, code, err := gitRunner(ctx, root, args...)
+	if err != nil {
+		return "", err
+	}
+	if code != 0 {
+		return "", fmt.Errorf("git %s exited %d: %s", operation, code, strings.TrimSpace(out))
+	}
+	return out, nil
 }
 
 func hasWorktreeTracked(entries []dirtyEntry) bool {

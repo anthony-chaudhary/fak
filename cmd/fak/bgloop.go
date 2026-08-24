@@ -219,12 +219,9 @@ func renderBgloopTable(w io.Writer, resp gateway.BgloopsResponse) {
 }
 
 func emitBgloopJSON(stdout, stderr io.Writer, resp gateway.BgloopsResponse) int {
-	b, err := json.MarshalIndent(resp, "", "  ")
-	if err != nil {
-		fmt.Fprintf(stderr, "fak bgloop: %v\n", err)
-		return 1
+	if rc := encodeJSONOrFailPrefixed(stdout, stderr, resp, "fak bgloop"); rc != 0 {
+		return rc
 	}
-	fmt.Fprintln(stdout, string(b))
 	return 0
 }
 

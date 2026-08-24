@@ -256,18 +256,14 @@ func postureCodeTools(opts launchPostureOptions, workspace string) launchPosture
 		return m
 	}
 	if opts.entrypoint == "agent" {
-		info, err := os.Stat(workspace)
-		if err != nil || !info.IsDir() {
-			m.State, m.Reason, m.Action = "inert", "the selected workspace is not a readable directory", "pass --workspace with an existing repository directory"
+		if markUnreadableWorkspace(&m, workspace) {
 			return m
 		}
 		m.State, m.Reason, m.Disable = "active", "the owned agent loop arms bounded repository tools at the selected workspace", "--code-tools=false"
 		return m
 	}
 	if opts.entrypoint == "serve" && opts.native {
-		info, err := os.Stat(workspace)
-		if err != nil || !info.IsDir() {
-			m.State, m.Reason, m.Action = "inert", "the selected workspace is not a readable directory", "pass --workspace with an existing repository directory"
+		if markUnreadableWorkspace(&m, workspace) {
 			return m
 		}
 		m.State, m.Reason = "active", "native serve arms the bounded catalog at the selected workspace"
@@ -279,6 +275,19 @@ func postureCodeTools(opts launchPostureOptions, workspace string) launchPosture
 	}
 	m.State, m.Reason, m.Action = "unsupported", "this entrypoint does not own the native coding-tool catalog", "use fak serve --native in this workspace or verify the wrapped harness tool catalog"
 	return m
+}
+
+func markUnreadableWorkspace(m *launchPostureMechanism, workspace string) bool {
+	if isReadableWorkspace(workspace) {
+		return false
+	}
+	m.State, m.Reason, m.Action = "inert", "the selected workspace is not a readable directory", "pass --workspace with an existing repository directory"
+	return true
+}
+
+func isReadableWorkspace(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func containsAllTools(have []string, want ...string) bool {

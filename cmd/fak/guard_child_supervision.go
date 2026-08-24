@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -21,6 +22,24 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
+
+func guardRecordWireRetry(j *journal.Journal, stderr io.Writer, agentName, traceID string, runErr error, state *os.ProcessState, started time.Time, retries int) {
+	appendGuardChildExitWitness(j, agentName, traceID, runErr, state, started)
+	guardEmitRestartHop(j, stderr, agentName, traceID, guardWireRetryHop(traceID, agentName, retries))
+	time.Sleep(guardCrashRestartDelay(retries))
+}
+
+func guardRecordCrashRestart(j *journal.Journal, stderr io.Writer, agentName, traceID string, runErr error, state *os.ProcessState, started time.Time, retries int) {
+	appendGuardChildExitWitness(j, agentName, traceID, runErr, state, started)
+	guardEmitRestartHop(j, stderr, agentName, traceID, guardCrashRestartHop(traceID, agentName, retries))
+}
+
+func guardAdoptRecoveredCommand(command *[]string, next []string, ok bool) bool {
+	if ok {
+		*command = next
+	}
+	return ok
+}
 
 // guardGoalParked answers "is THIS account still walled off this goal?" — never
 // the account-blind "is this lane parked?" it used to answer. Every branch below
@@ -133,9 +152,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		}
 		if next, ok := guardMaybeRetryTransientWireCrash(runErr, child.ProcessState, command, agentName, wireErrors.Consume(time.Now()), wireRetries, wireLimit, true, nil); ok {
 			wireRetries++
-			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, runErr, child.ProcessState, childStarted)
-			guardEmitRestartHop(auditJournal, os.Stderr, agentName, guardTraceID, guardWireRetryHop(guardTraceID, agentName, wireRetries))
-			time.Sleep(guardCrashRestartDelay(wireRetries))
+			guardRecordWireRetry(auditJournal, os.Stderr, agentName, guardTraceID, runErr, child.ProcessState, childStarted, wireRetries)
 			command = next
 			continue
 		}
@@ -143,8 +160,8 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			command, injected = nextCommand, nextInjected
 			continue
 		}
-		if next, ok := guardMaybeRecoverCapCrash(runErr, command, agentName, childStarted, quiet, 0, nil, nil, os.Stderr); ok {
-			command = next
+		next, recovered := guardMaybeRecoverCapCrash(runErr, command, agentName, childStarted, quiet, 0, nil, nil, os.Stderr)
+		if guardAdoptRecoveredCommand(&command, next, recovered) {
 			continue
 		}
 		if class, code, ok := guardMaybeRestartOnCrash(runErr, child.ProcessState, crashRestarts, crashLimit); ok {
@@ -159,8 +176,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			}
 			guardReportCrashRestart(os.Stderr, agentName, class, code, crashRestarts, crashLimit, command)
 			time.Sleep(guardCrashRestartDelay(crashRestarts))
-			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, runErr, child.ProcessState, childStarted)
-			guardEmitRestartHop(auditJournal, os.Stderr, agentName, guardTraceID, guardCrashRestartHop(guardTraceID, agentName, crashRestarts))
+			guardRecordCrashRestart(auditJournal, os.Stderr, agentName, guardTraceID, runErr, child.ProcessState, childStarted, crashRestarts)
 			command = guardRestartRelaunchCommand(command, agentName)
 			continue
 		}
@@ -306,9 +322,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			}
 			if next, ok := guardMaybeRetryTransientWireCrash(runErr, child.ProcessState, command, agentName, wireErrors.Consume(time.Now()), wireRetries, wireLimit, true, nil); ok {
 				wireRetries++
-				appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, runErr, child.ProcessState, childStarted)
-				guardEmitRestartHop(auditJournal, restarter.stderr, agentName, guardTraceID, guardWireRetryHop(guardTraceID, agentName, wireRetries))
-				time.Sleep(guardCrashRestartDelay(wireRetries))
+				guardRecordWireRetry(auditJournal, restarter.stderr, agentName, guardTraceID, runErr, child.ProcessState, childStarted, wireRetries)
 				command = next
 				continue
 			}
@@ -316,7 +330,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				command, injected = nextCommand, nextInjected
 				continue
 			}
-			if next, ok := guardMaybeRecoverCapCrash(runErr, command, agentName, childStarted, quiet, func() time.Duration {
+			next, recovered := guardMaybeRecoverCapCrash(runErr, command, agentName, childStarted, quiet, func() time.Duration {
 				v := serveSessions.QueryTimeBudget(guardTraceID, time.Now())
 				if !v.Bounded {
 					return 0
@@ -325,8 +339,8 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 					return -1
 				}
 				return v.Remaining
-			}(), nil, nil, os.Stderr); ok {
-				command = next
+			}(), nil, nil, os.Stderr)
+			if guardAdoptRecoveredCommand(&command, next, recovered) {
 				continue
 			}
 			if class, code, ok := guardMaybeRestartOnCrash(runErr, child.ProcessState, crashRestarts, crashLimit); ok {
@@ -340,8 +354,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				}
 				guardReportCrashRestart(restarter.stderr, agentName, class, code, crashRestarts, crashLimit, command)
 				time.Sleep(guardCrashRestartDelay(crashRestarts))
-				appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, runErr, child.ProcessState, childStarted)
-				guardEmitRestartHop(auditJournal, restarter.stderr, agentName, guardTraceID, guardCrashRestartHop(guardTraceID, agentName, crashRestarts))
+				guardRecordCrashRestart(auditJournal, restarter.stderr, agentName, guardTraceID, runErr, child.ProcessState, childStarted, crashRestarts)
 				command = guardRestartRelaunchCommand(command, agentName)
 				continue
 			}

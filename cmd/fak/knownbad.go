@@ -65,12 +65,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 
 	"github.com/anthony-chaudhary/fak/internal/blastlease"
 	"github.com/anthony-chaudhary/fak/internal/blastradius"
@@ -1089,13 +1090,7 @@ func readKnownBadLedger(path string) ([]knownbad.Record, error) {
 // knownBadEmitJSON marshals v as indented JSON to stdout; a marshal failure is a
 // rc-1 error on stderr.
 func knownBadEmitJSON(stdout, stderr io.Writer, v any) int {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		fmt.Fprintf(stderr, "fak knownbad: json: %v\n", err)
-		return 1
-	}
-	fmt.Fprintln(stdout, string(b))
-	return 0
+	return emitPrefixedJSON(stdout, stderr, v, "fak knownbad: json")
 }
 
 // knownBadFleetObsRel is the repo-relative fleet-observation feed the gateway appends to
