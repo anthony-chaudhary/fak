@@ -20,6 +20,11 @@ The recursion is valuable only while four quantities remain bounded together: **
 - **Today:** a monolithic planner reasons across every concern, or a fleet returns prose whose budgets and provenance are weakly coupled.
 - **Better because:** narrow children work in disposable contexts and return typed, independently checked receipts that compose deterministically.
 - **Witness:** `go run ./cmd/microharnessdemo -selfcheck` runs 1-, 2-, and 3-turn children, admits descendants only in a second host wave, and shows `full child transcripts in root=false`.
+- **Outcome counters:** pass `-ledger <path>` to append privacy-safe invocation rows, then query weekly completed/failed and live/fixture counts with `-fold-usage`. A captured fixture readout is:
+  ```json
+  [{"week":"2026-W35","invocations":1,"completed":1,"failed":0,"live":0,"fixture":1,"prompt_tokens":0,"completion_tokens":0}]
+  ```
+  Reproduce it with `go run ./cmd/microharnessdemo -selfcheck -ledger <temp.jsonl>` followed by `go run ./cmd/microharnessdemo -fold-usage -ledger <temp.jsonl>`.
 
 ## What shipped as the smallest spine
 
