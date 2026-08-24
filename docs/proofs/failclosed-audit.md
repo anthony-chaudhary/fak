@@ -134,6 +134,7 @@ cross-checked against the live registry in code.
 | CONCEPT_FRESHNESS | block | fail-open | concept docs must not go stale against code |
 | PROVENANCE_LABEL | block | fail-open | witnessed / observed / modeled labelling |
 | HARDWARE_TELL | block | fail-open | no local-hardware blocker as a terminal answer |
+| NATIVE_FIRST | block | fail-open | commit-boundary native-inference substitution guard |
 | BARE_COMMIT_SWEEP | warn | fail-open | advisory by design (#3615); closes the raw-git bypass |
 | E2E_OVER_MOCKS | warn | fail-open | advisory by design (#2901); asks for a witnessed run |
 | DESKTOP_POPUP_REGRESSION | block | fail-open | candidate-index Go/Python/PowerShell helpers must suppress background console windows |
@@ -141,6 +142,7 @@ cross-checked against the live registry in code.
 | GIT_HYGIENE_BYPASS | warn | fail-open | advisory by design (#5588); flags ad-hoc git-lock removal / object maintenance outside the owning packages |
 | TRUST_WIDENING | warn | fail-open | advisory; flags a widened trust boundary |
 | PRIOR_ART | warn | fail-open | advisory; prints the SOTA reference to cite |
+| MICROHARNESS_WITNESS | warn | fail-open | advisory; nudges bounded harness changes toward a staged test or typed receipt |
 | UNTIERED_LEAF | warn | fail-open | advisory by design (#3614); staged twin of TIER_DECLARED |
 | GOFMT | warn | fail-open | advisory; commit-boundary twin of make ci gofmt-check |
 | DUPLICATION | warn | fail-open | advisory; in-process twin of fak dup guard --staged |
@@ -255,6 +257,7 @@ above.
 | MAINTENANCE_INCIDENT | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
 | MESSAGE_RACE | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | MICROCONTEXT_LEDGER_REFUSED | refusal | floor-absent | no enforcing floor declared — vocabulary-only |
+| MICROHARNESS_UNWITNESSED | advisory | floor-absent | advisory recovery vocabulary; no enforcing floor declared |
 | MODEL_TOON_UNFIT | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | NET_TOKENS_NONPOSITIVE | refusal | floor-declared | `Floor:` cite in the dos.toml block |
 | NEVER_AMEND_SHARED | refusal | floor-declared | `Floor:` cite in the dos.toml block |

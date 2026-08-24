@@ -128,6 +128,7 @@ func PreCommitGates() []Gate {
 		// to hard-enforce it, or ALLOW_NO_PRIOR_ART=1 to skip it once. It runs LAST.
 		{Name: "TRUST_WIDENING", ModeEnv: "FLEET_TRUST_WIDENING_GUARD", DefaultMode: "warn", EscapeEnv: "FLEET_ALLOW_TRUST_WIDENING", Check: gateTrustWidening},
 		{Name: "PRIOR_ART", ModeEnv: "FLEET_PRIORART_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_NO_PRIOR_ART", Check: gatePriorArt},
+		{Name: "MICROHARNESS_WITNESS", ModeEnv: "FLEET_MICROHARNESS_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_NO_MICROHARNESS_WITNESS", Check: gateMicroharnessWitness},
 		// UNTIERED_LEAF is ADVISORY (issue #3614): DefaultMode "warn" so it never reds a shared
 		// trunk out of the box. It is the STAGED, commit-boundary twin of the whole-tree
 		// TIER_DECLARED hygiene gate — it fires when THIS commit adds a new internal/<leaf>/ non-test
