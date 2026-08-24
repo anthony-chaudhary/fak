@@ -26,7 +26,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
 	"github.com/anthony-chaudhary/fak/internal/l3kv"
-	"github.com/anthony-chaudhary/fak/internal/llamacppinterop"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -67,7 +66,8 @@ type serveRuntime struct {
 	toolPlugins     []toolplugin.Plugin
 	toolPreferences toolplugin.PreferenceLayers
 	srv             *gateway.Server
-	llamaProcess    *llamacppinterop.Process
+	qwen38Deps      *qwen38RuntimeDependencies
+	llamaProcess    qwen38ChildProcess
 }
 
 func newServeStartupMessage(source, kind, level, text string) gateway.StartupMessage {
