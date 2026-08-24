@@ -1616,6 +1616,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="with --apply-labels, actually WRITE the class:* labels to "
                          "GitHub (create the labels + `gh issue edit`). The only "
                          "outward-facing action this tool takes; operator-gated.")
+    ap.add_argument("--label-change-limit", type=int, default=0,
+                    help="apply at most N deterministic class-label changes (0 = unlimited)")
     args = ap.parse_args(argv)
     if args.apply_labels_write and not args.apply_labels:
         ap.error("--apply-labels-write requires --apply-labels")
