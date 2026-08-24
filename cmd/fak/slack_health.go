@@ -22,6 +22,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -70,7 +71,10 @@ var surfaceFreshnessBudget = map[string]time.Duration{
 // historyProbeLimit is how many recent messages the staleness probe fetches. Any message
 // counts as channel activity, so we take the newest ts across the small page (one is enough
 // in practice; a few tolerate a trailing join/edit event without an extra round-trip).
-const historyProbeLimit = 5
+const (
+	historyProbeLimit         = 5
+	defaultHealthProbeTimeout = 3 * time.Second
+)
 
 // historyReader is the narrow `conversations.history` capability the staleness probe needs.
 // chatrelay.HTTPSlack is the live implementation; a test injects an in-memory fake.
@@ -80,6 +84,8 @@ type historyReader interface {
 
 // newHealthHistoryReader builds the live reader for a surface's token. It is a package var
 // so a test can substitute an in-memory reader with no network.
+var healthProbeTimeout = defaultHealthProbeTimeout
+
 var newHealthHistoryReader = func(token, apiBase string) historyReader {
 	return &chatrelay.HTTPSlack{Token: token, APIBase: apiBase}
 }
@@ -197,11 +203,11 @@ func foldSlackHealth(reports []*surfaceReport, apiBase string, now time.Time) []
 // witness), which the caller maps to STALE.
 func lastPostAge(r *surfaceReport, apiBase string, now time.Time) (time.Duration, error) {
 	reader := newHealthHistoryReader(r.tokenValue, apiBase)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), healthProbeTimeout)
 	defer cancel()
 	msgs, err := reader.History(ctx, r.Channel, "", historyProbeLimit)
 	if err != nil {
-		return 0, err
+		return 0, classifyHealthProbeError(err)
 	}
 	var newest float64
 	for _, m := range msgs {
@@ -218,6 +224,19 @@ func lastPostAge(r *surfaceReport, apiBase string, now time.Time) (time.Duration
 		age = 0 // clock skew: a future ts is fresh, not negative
 	}
 	return age, nil
+}
+
+func classifyHealthProbeError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("history probe timed out after %s: %w", healthProbeTimeout, err)
+	}
+	if errors.Is(err, context.Canceled) {
+		return fmt.Errorf("history probe canceled: %w", err)
+	}
+	return err
 }
 
 // parseSlackTS parses a Slack message ts ("1719600000.000100") as epoch seconds. A

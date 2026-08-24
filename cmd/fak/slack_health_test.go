@@ -33,16 +33,17 @@ func slackTS(at time.Time) string {
 // whose ts the test controls per channel). It is the witness that the staleness verdict
 // comes from a REAL conversations.history read, not a self-report.
 type healthHub struct {
-	srv         *httptest.Server
-	historyTS   map[string]string // channel -> ts of its newest message ("" => empty channel)
-	historyErr  map[string]string // channel -> slack error code (e.g. "not_in_channel")
-	authOK      bool
-	historyHits int
+	srv          *httptest.Server
+	historyTS    map[string]string // channel -> ts of its newest message ("" => empty channel)
+	historyErr   map[string]string // channel -> slack error code (e.g. "not_in_channel")
+	authOK       bool
+	historyHits  int
+	historyDelay map[string]time.Duration
 }
 
 func newHealthHub(t *testing.T) *healthHub {
 	t.Helper()
-	h := &healthHub{historyTS: map[string]string{}, historyErr: map[string]string{}, authOK: true}
+	h := &healthHub{historyTS: map[string]string{}, historyErr: map[string]string{}, historyDelay: map[string]time.Duration{}, authOK: true}
 	h.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -55,6 +56,9 @@ func newHealthHub(t *testing.T) *healthHub {
 		case strings.HasSuffix(r.URL.Path, "conversations.history"):
 			h.historyHits++
 			ch := r.URL.Query().Get("channel")
+			if delay := h.historyDelay[ch]; delay > 0 {
+				time.Sleep(delay)
+			}
 			if code, bad := h.historyErr[ch]; bad {
 				_, _ = w.Write([]byte(`{"ok":false,"error":"` + code + `"}`))
 				return
@@ -272,3 +276,32 @@ func TestHealthExit(t *testing.T) {
 
 // compile-time check that the live reader satisfies the narrow probe interface.
 var _ historyReader = (*chatrelay.HTTPSlack)(nil)
+
+func TestSlackHealthTimeoutIsPerSurfaceAndPreservesEvidence(t *testing.T) {
+	t.Setenv("FAK_SLACK_HEALTH_DISABLE_OUTBOX", "1")
+	h := newHealthHub(t)
+	now := time.Now().UTC()
+	h.historyTS["slow"] = slackTS(now)
+	h.historyDelay["slow"] = 100 * time.Millisecond
+	h.historyTS["fresh"] = slackTS(now.Add(-time.Minute))
+
+	oldTimeout := healthProbeTimeout
+	healthProbeTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { healthProbeTimeout = oldTimeout })
+
+	reports := []*surfaceReport{
+		{Name: "scoreboard", Ready: true, Auth: &authReport{OK: true}, Channel: "slow", tokenValue: "token"},
+		{Name: "bench", Ready: true, Auth: &authReport{OK: true}, Channel: "fresh", tokenValue: "token"},
+	}
+	started := time.Now()
+	got := foldSlackHealth(reports, h.base(), now)
+	if elapsed := time.Since(started); elapsed > 80*time.Millisecond {
+		t.Fatalf("health fold exceeded bounded per-surface budget: %s", elapsed)
+	}
+	if slow := healthByName(got, "scoreboard"); slow == nil || slow.Verdict != verdictStale || !strings.Contains(slow.Detail, "history probe timed out after 20ms") {
+		t.Fatalf("slow = %#v, want typed timeout", slow)
+	}
+	if fresh := healthByName(got, "bench"); fresh == nil || fresh.Verdict != verdictOK {
+		t.Fatalf("fresh = %#v, want preserved OK evidence after timeout", fresh)
+	}
+}
