@@ -200,6 +200,21 @@ _INSTALL_CTX_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A bare release number remains valid history, but a line that labels one value
+# as the current/repository version is an authority claim and must agree with
+# VERSION exactly.  Historical captures may retain their original version when
+# the same line explicitly scopes the value as history.
+_CURRENT_VERSION_CTX_RE = re.compile(
+    r"(?:\b(?:current|latest)(?:\s+(?:fak|app|application|repository|release|binary))?\s+version\b|"
+    r"\bversion\s*(?::|\s+is\b)|\bcurrently\b)",
+    re.IGNORECASE,
+)
+_HISTORICAL_VERSION_CTX_RE = re.compile(
+    r"\b(?:history|historical|historically|snapshot|captured?|as[- ]of|at the time|"
+    r"then-current|version-at-run-time|prior|previous|old(?:er)?|legacy|changelog|release notes?)\b",
+    re.IGNORECASE,
+)
+
 # Same jargon list the README auditor uses — expert terms that stumble a
 # 6th-grade reader on the first screen if they appear with no nearby gloss.
 JARGON_TERMS = [
@@ -236,11 +251,17 @@ def kpi_freshness(text: str, version: str | None) -> dict[str, Any]:
     defects: list[str] = []
     soft: list[str] = []
     cur = _parse_version(version or "")
-    stale_versions: set[str] = set()
+    stale_install_versions: set[str] = set()
+    mismatched_current_versions: set[str] = set()
     if cur is not None:
         cur_major, cur_minor, _ = cur
         for line in text.splitlines():
-            if not _INSTALL_CTX_RE.search(line):
+            install_context = _INSTALL_CTX_RE.search(line) is not None
+            current_context = (
+                _CURRENT_VERSION_CTX_RE.search(line) is not None
+                and _HISTORICAL_VERSION_CTX_RE.search(line) is None
+            )
+            if not install_context and not current_context:
                 continue  # history/changelog mention, not install advice
             for m in _VERSION_RE.finditer(line):
                 # Skip dotted-quad IPs like 0.0.0.0:8080 — the match is followed
@@ -249,17 +270,26 @@ def kpi_freshness(text: str, version: str | None) -> dict[str, Any]:
                 if tail[:1] == "." and tail[1:2].isdigit():
                     continue
                 major, minor = int(m.group(1)), int(m.group(2))
-                if major == cur_major and (major, minor) < (cur_major, cur_minor):
-                    stale_versions.add(m.group(0))
-    for v in sorted(stale_versions):
+                if current_context:
+                    patch = int(m.group(3)) if m.group(3) is not None else None
+                    if patch is None or (major, minor, patch) != cur:
+                        mismatched_current_versions.add(m.group(0))
+                elif major == cur_major and (major, minor) < (cur_major, cur_minor):
+                    stale_install_versions.add(m.group(0))
+    for v in sorted(stale_install_versions):
         defects.append(f"stale install pin {v} (VERSION is {version.strip()})")
+    for v in sorted(mismatched_current_versions):
+        defects.append(
+            f"current-version declaration {v} disagrees with VERSION {version.strip()}"
+        )
     placeholders = sorted({m.group(0).lower() for m in PLACEHOLDER_RE.finditer(text)})
     for ph in placeholders:
         defects.append(f"unresolved placeholder: {ph!r}")
-    score = 100 - 20 * len(stale_versions) - 12 * len(placeholders)
+    version_defects = len(stale_install_versions) + len(mismatched_current_versions)
+    score = 100 - 20 * version_defects - 12 * len(placeholders)
     return {
         "kpi": "freshness", "score": _clamp(score),
-        "detail": ("no stale pin or placeholder" if not defects
+        "detail": ("no version drift or placeholder" if not defects
                    else f"{len(defects)} freshness defect(s)"),
         "defects": defects, "soft": soft,
     }

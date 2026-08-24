@@ -1,22 +1,24 @@
-# STATUS — fak v0.2.1: proven with DOS concepts
+# STATUS — historical 2026-06-18 snapshot (fak v0.2.1-era evidence)
 
+> **Historical snapshot, not current authority.** This page records evidence as it stood on
+> 2026-06-18; it does not declare the repository's current release or operational status.
+> Current product standing lives in [`docs/PRODUCT-STATUS.md`](docs/PRODUCT-STATUS.md), current
+> version identity in [`VERSION`](VERSION), and benchmark authority in
+> [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md).
+>
 > The deliverable's whole point: this status is **not a self-report**. Every line
 > below is closed by a witness the author did not write — a `go` exit code, a
 > benchmark field, a git tag, or the DOS truth syscall reading git ancestry.
->
-> **Product standing** (which concepts a person can pick up and use today, and what's
-> next): [`docs/PRODUCT-STATUS.md`](docs/PRODUCT-STATUS.md) — 10 durable products, 100%
-> concept-catalog coverage, cross-checked against the tree by `tools/product_scorecard.py`.
 
 ## 0. 2026-06-18 benchmark/status refresh
 
-The benchmark front door is now
+The benchmark front door for this snapshot was
 [`../VISUALS-benchmarking-status-2026-06-18.md`](docs/notes/VISUALS-benchmarking-status-2026-06-18.md):
-it collects the refreshed plot deck plus the current overall read. The plots were
+it collects the refreshed plot deck plus the overall read captured on that date. The plots were
 regenerated from checked-in CSV/JSON with `tools/fanout_plot.py`,
 `tools/fleet_heatmap.py`, `tools/fleet_compare.py`, and `tools/fleet_eraser.py`.
 
-Current benchmark read:
+Benchmark read captured on 2026-06-18:
 
 - **Fleet sweep:** the read-fleet 50x50 corner deletes 2,344/2,500 calls, with
   **+370** cross-agent turns over isolated worlds; no-share controls are exactly
@@ -60,8 +62,8 @@ the *subject* grammar — the commit messages don't use this workspace's ship-st
 grammar — but the diff witness proves they are real code commits, not empty/README
 stamps. The honest distinction the truth syscall is built to make.)
 
-**The v0.2.x line (tags `v0.2.0`, `v0.2.1`) does NOT have DOS witness verification — the truth syscall itself surfaces this caveat, recorded here rather than hidden.** Running `dos verify fak
-v0.2.0` / `v0.2.1` against this repo today returns **`shipped:false, source:none`**:
+**The v0.2.x line (tags `v0.2.0`, `v0.2.1`) does NOT have DOS witness verification — the truth syscall itself surfaces this caveat, recorded here rather than hidden.** In the 2026-06-18 snapshot, running `dos verify fak
+v0.2.0` / `v0.2.1` returned **`shipped:false, source:none`**:
 the ship oracle finds the tagged commits (`a8b10c3`, `3c2a1eb`) but **demotes** them as
 *release-bump* commits — the `/release` skill stamps the version on its own commit,
 which carries no ship-stamp grammar and touches only `VERSION` + release notes (#399).
@@ -74,7 +76,7 @@ refused to credit a version-bump commit as a code ship is doing precisely its jo
 
 ## 2. Syscall subsystem check — useful, not the product KPI
 
-`fak bench --suite tau2-smoke` → current `report.json`:
+`fak bench --suite tau2-smoke` → the snapshot's `report.json`:
 
 ```
 in-process adjudication p50 : 2,427 ns

@@ -81,17 +81,20 @@ known-good `vX.Y.Z` tag and promote a new stable anchor once the substrate is he
 
 Stable versions are git tags of the form `vX.Y.Z`, cut only by the CI-gated release cadence
 (it waits for a green build before it tags), so a tag is a version that passed every gate.
-The current tags are `v0.30.0`, `v0.31.0`, `v0.32.0`. To run a previous tag:
+List the published tags instead of relying on a hard-coded current-version claim, then choose
+the known-good tag your incident procedure names:
 
 ```bash
 git fetch --tags
+git tag --list 'v*' --sort=-version:refname
 git checkout v0.31.0        # check out the tag to run the last known-good build
 go build ./cmd/fak          # rebuild from that tree
 ```
 
 The single source of truth for "what version is this" is the repo-root `VERSION` file
-(currently `0.32.0`); `fak version` prints it via `internal/appversion`. After a downgrade,
-`VERSION` reflects the tag you checked out, so benchmark artifacts and `fak version` agree.
+for a checkout; `fak version` prints the version resolved by `internal/appversion`. After a
+downgrade, `VERSION` reflects the tag you checked out, so benchmark artifacts and `fak version`
+agree.
 To return to the tip, `git checkout main`.
 
 ## 4. Pin a stable version (no auto-upgrade)
@@ -138,7 +141,7 @@ back:
   Re-pin only **down**, after a real recovery — never up to hide a regression. The `main-kpi-baseline`
   and `scorecard_baseline` files are the committed floors a `git revert` of a bad re-pin restores.
 
-- **The garden bundle + its brake.** `tools/garden_bundle.py --check` (`make garden-check`) folds
+- **The garden bundle + its brake.** `fak garden --check` (`make garden-check`) folds
   the read-only gardening passes — the scorecard ratchet above plus the fresh-status rollup — into
   one verdict, and a scheduled host tick (`tools/register_control_pane_tick.sh --mode garden`) runs
   it on a daily cadence through the loop ledger. It is read-only (it never commits), so the rollback

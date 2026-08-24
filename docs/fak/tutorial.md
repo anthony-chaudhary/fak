@@ -19,8 +19,10 @@ fak run --trace testdata/tau2/tau2-smoke.json     # the rest of the page explain
 **Audience:** you have never run `fak` before. By the end of this page you will have
 watched the kernel *deny a destructive tool call*, *wall off a prompt-injection*, and
 *serve a model behind an HTTP gate*. It all runs on your own machine, with **no API key,
-no GPU, no cloud bill**. Every command below was run on a clean build, and **every output
-block is the real, unedited terminal output**. What you see here is what you will see.
+no GPU, no cloud bill**. Every command below was run on a clean v0.30.0 build, and **every
+  output block is the real, unedited terminal output from that historical capture**. Current
+  releases can print different version numbers or details while preserving the demonstrated
+  behavior.
 
 - **Time:** ~15 minutes for Parts 1–2 (zero downloads). Part 3 (chat with a real model)
   adds a model download. Parts 4–6 add a model server you point fak at, the Claude Code
@@ -85,7 +87,8 @@ go build -o fak ./cmd/fak          # Windows: build with -o fak.exe (see the Win
 > from git-bash / PowerShell — cmd.exe passes the single quotes through literally, so there use
 > `--args "{""_positional"":[""alice""]}"` instead.
 
-Either way, `fak version` prints the version and you're ready:
+Either way, `fak version` prints the version of the binary you installed. The output below is
+the historical v0.30.0 capture used for this walkthrough, not the current-version authority:
 
 ```
 0.30.0
@@ -769,5 +772,6 @@ summary: submits=12 vdso_hits=6 engine_calls=6 denies=0 transforms=0 quarantines
 ---
 
 *Every command and output block on this page was captured from a clean build of `fak`
-v0.30.0. If a command prints something different for you, that's a doc bug — please
-[open an issue](https://github.com/anthony-chaudhary/fak/issues).*
+v0.30.0 and is retained as a historical walkthrough. Current releases may print different
+version numbers or incidental details; report a doc bug only when the documented behavior no
+longer holds.*

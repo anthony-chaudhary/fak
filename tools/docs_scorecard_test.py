@@ -34,6 +34,23 @@ def test_freshness_flags_install_pin_behind_version() -> None:
     assert c["score"] < 100 and any("0.29.0" in d for d in c["defects"]), c
 
 
+def test_freshness_flags_explicit_current_version_declaration() -> None:
+    text = "- **Version:** **0.29.0** ([`VERSION`](VERSION) is authoritative)."
+    c = dsc.kpi_freshness(text, "0.30.0\n")
+    assert c["score"] < 100, c
+    assert any("current-version declaration 0.29.0" in d for d in c["defects"]), c
+
+
+def test_freshness_accepts_matching_current_version_declaration() -> None:
+    c = dsc.kpi_freshness("The current version is v0.30.0.", "0.30.0")
+    assert not c["defects"], c
+
+
+def test_freshness_ignores_explicit_historical_version_declaration() -> None:
+    c = dsc.kpi_freshness("Historical snapshot — Version: 0.29.0.", "0.30.0")
+    assert not c["defects"], c
+
+
 def test_freshness_ignores_historical_version_mention() -> None:
     # A changelog/status mention is HISTORY, not an install pin → no defect.
     c = dsc.kpi_freshness("In v0.2.1 we shipped the gateway; v0.1.0 had the gate.",
