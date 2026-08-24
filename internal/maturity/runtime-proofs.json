@@ -285,6 +285,11 @@
       "lane": "toon",
       "command": "go test -v ./internal/toon",
       "output_contains": "TestDecideNeverFiresAtALoss"
+    },
+    {
+      "lane": "tooltrend",
+      "command": "go test -v ./internal/tooltrend",
+      "output_contains": "TestFoldMoversFirstToLast"
     }
   ]
 }
