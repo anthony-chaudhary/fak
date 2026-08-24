@@ -140,3 +140,25 @@ func TestRunAccountsStatusIncludesDiscoveredCodexHomes(t *testing.T) {
 		t.Fatalf("status omitted ready Codex home:\n%s", stdout.String())
 	}
 }
+
+func TestCodexLaunchAlternativesExcludeRegistryNameCollisions(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	for _, name := range []string{"default", "blue"} {
+		dir := filepath.Join(home, ".codex-"+name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "auth.json"), []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"eyJhbGciOiJub25lIn0.eyJzdWIiOiJhY2N0LQ.sig","account_id":"acct"}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("FLEET_USER_HOME", home)
+	t.Setenv("FLEET_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Setenv("FLEET_REG_DIR", filepath.Join(root, "registry"))
+	t.Setenv("FLEET_POLICY_DIR", filepath.Join(root, "policy"))
+	got := codexLaunchAlternatives(accounts.Registry{Homes: []accounts.Home{{Name: "default"}}})
+	if len(got) != 1 || got[0].Name != "blue" {
+		t.Fatalf("alternatives = %+v, want only blue", got)
+	}
+}

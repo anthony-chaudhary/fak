@@ -45,16 +45,26 @@ func discoveredCodexHomes() []accounts.Home {
 }
 
 func appendDiscoveredCodexHomes(reg accounts.Registry) accounts.Registry {
+	reg.Homes = append(reg.Homes, codexLaunchAlternatives(reg)...)
+	return reg
+}
+
+// codexLaunchAlternatives returns only discovered Codex homes whose names are not
+// already owned by the persisted registry. A colliding alias such as "default"
+// must not be advertised: appendDiscoveredCodexHomes would skip it too, so showing
+// it as launchable would make next disagree with list/status again.
+func codexLaunchAlternatives(reg accounts.Registry) []accounts.Home {
 	seen := make(map[string]bool, len(reg.Homes))
 	for _, h := range reg.Homes {
 		seen[h.Name] = true
 	}
+	var out []accounts.Home
 	for _, h := range discoveredCodexHomes() {
 		if !seen[h.Name] {
-			reg.Homes = append(reg.Homes, h)
+			out = append(out, h)
 		}
 	}
-	return reg
+	return out
 }
 
 func codexExplicitNameGuidance(homes []accounts.Home) string {

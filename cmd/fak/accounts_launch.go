@@ -309,9 +309,10 @@ func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
 		command = "claude"
 	}
 	if guardAgentBaseName(command) == "codex" {
-		reg = appendDiscoveredCodexHomes(reg)
+		codexHomes := codexLaunchAlternatives(reg)
+		reg.Homes = append(reg.Homes, codexHomes...)
 		if strings.TrimSpace(p.name) == "" || p.rotate {
-			fmt.Fprint(stderr, codexExplicitNameGuidance(reg.Homes))
+			fmt.Fprint(stderr, codexExplicitNameGuidance(codexHomes))
 			return 2
 		}
 	}

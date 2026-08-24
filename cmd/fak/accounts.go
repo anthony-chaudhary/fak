@@ -750,7 +750,7 @@ func accountsNext(stdout, stderr io.Writer, registryPath, homeDir, after string,
 		// the IDENTICAL explanation for the identical failure (and name the roomy anchor when the
 		// only reason there is nowhere to rotate is that you are already on the account with room).
 		printRotationNoCandidate(stderr, "fak accounts next", dec)
-		fmt.Fprint(stderr, codexNamedLaunchAlternatives(discoveredCodexHomes()))
+		fmt.Fprint(stderr, codexNamedLaunchAlternatives(codexLaunchAlternatives(reg)))
 		printAccountFixSummary(stderr, fixes, "account fixes")
 		return 1
 	}
