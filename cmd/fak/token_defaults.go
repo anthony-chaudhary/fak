@@ -48,12 +48,16 @@ func runTokenDefaultsScorecard(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit machine-readable scorecard JSON")
 	asMarkdown := fs.Bool("markdown", false, "emit markdown")
 	comparePath := fs.String("compare", "", "compare against a prior --json payload")
+	effectiveness := fs.Bool("effectiveness", false, "audit effectiveness-witness coverage for every default saver")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
 	p := collectTokenDefaultsScorecard(repoRoot())
 	c := p["corpus"].(map[string]any)
 
+	if *effectiveness {
+		return writeTokenEffectivenessReport(stdout, stderr, p, *asJSON)
+	}
 	if *comparePath != "" {
 		base, ok := readCompareBase(stderr, "fak token-defaults-scorecard", *comparePath)
 		if !ok {

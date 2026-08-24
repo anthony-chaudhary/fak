@@ -35,3 +35,19 @@ Interpret `ready/not_observed` as **not yet proven to have saved anything in thi
 not as a win. A `bypassed` state is an intentional safe bailout: fak kept the original
 request/tool surface and paid the token cost rather than risking a missing capability or
 an ambiguous rewrite.
+
+## Audit effectiveness coverage
+
+Use the defaults scorecard's effectiveness view to see how every default saver is
+measured and how to restore its control arm:
+
+```bash
+fak token-defaults-scorecard --effectiveness
+fak token-defaults-scorecard --effectiveness --json
+```
+
+The table is source-derived from the same nine-saver roster as the defaults scorecard.
+It names the correct witness class for each mechanism: same-trace `fak ablate`, exact-byte
+A/B, live receipt, or suite benchmark. A newly added default saver without an effect
+metric, witness, and control becomes audit `debt` instead of inheriting a
+"proven" claim from merely being configured or regression-locked.

@@ -67,7 +67,7 @@ universal workload claim.
 | Model ladder and acceptance | Separates candidate selection from measured acceptance so a cheaper route is not called a win merely because it is cheaper. | [model operations](model-production-readiness-inventory.md) |
 <a id="savings-observability"></a>
 
-| Token/cache observability | Makes savings visible during operation rather than leaving optimization buried in internal counters. | `fak info --once`; `fak ps`; `fak help ablate` |
+| Token/cache observability | Makes savings visible during operation and audits which default savers have captured effect witnesses instead of counting configured/ready as wins. | `fak info --once`; `fak token-defaults-scorecard --effectiveness`; [token-saving observability](serving/token-savings-observability.md) |
 
 <a id="capability-floor"></a>
 
