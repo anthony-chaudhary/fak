@@ -800,9 +800,9 @@ Every run appends a witnessed run-end to the loop ledger (walked / attention / a
 skipped), so `fak loop health` shows the walk living. `--register` installs the durable
 `garden-item-walk` loop unit (6 h cadence) the same way the stale-work tick registers itself.
 
-### Fan a shipped spine out into its follow-on backlog — `fak issue fanout`
+### Fan a shipped spine out into its follow-on backlog — `fak-dev issue fanout`
 
-`fak issue fanout` ([#2510](https://github.com/anthony-chaudhary/fak/issues/2510),
+`fak-dev issue fanout` ([#2510](https://github.com/anthony-chaudhary/fak/issues/2510),
 spine `5b8f0bd1`, `internal/issuefanout`) is the **spine-first** producer that *fills* the
 backlog the garden → dispatch boundary below *drains*: it expands one shipped working spine
 into its contract-ready follow-on issues across the fan-out area taxonomy
@@ -811,11 +811,11 @@ printing the candidate set and touching nothing — and only files when asked. T
 the one `fak issue` prints, so the reference and `--help` read the same truth:
 
 ```
-fak issue fanout   --title T --leaf L --spine REF [--parent REF]
+fak-dev issue fanout --title T --leaf L --spine REF [--parent REF]
                    [--paths p1,p2] [--areas a1,a2] [--max N] [--json]
 ```
 
-The planning flags, exactly as `fak issue fanout --help` describes them:
+The planning flags, exactly as `fak-dev issue fanout --help` describes them:
 
 - `--title` — human name of the shipped spine.
 - `--leaf` — owning leaf/lane (stamps keys, lane, default paths).
@@ -824,7 +824,7 @@ The planning flags, exactly as `fak issue fanout --help` describes them:
 - `--paths` — comma-separated file trees (default `internal/<leaf>/`).
 - `--areas` — comma-separated area filter (`qa,dogfood,product,observability,integration,docs,release`).
 - `--max` — cap candidates (`0` = full taxonomy; floor `3`).
-- `--json` — emit the machine-readable fan-out plan (feed to `fak issue cohort --from-plan`).
+- `--json` — emit the machine-readable fan-out plan (feed to `fak-dev issue cohort --from-plan`).
 
 The project-work sizing flags stamp the epic-rollup fields on every generated candidate.
 `--parent-issue` and `--parent-baseline-points` together switch sizing on: supply both and each
