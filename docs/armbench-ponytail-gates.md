@@ -18,7 +18,7 @@ fak armbench ponytail-gates --checkout $env:TEMP\ponytail-2ed6c52-6687 `
   --out docs/_witnesses/armbench-ponytail-gates-live-final-2026-08-14.json
 ```
 
-Dry-run exit 3 is intentional: required provider cells are `not_run`. Live exit 3 means at least one arm/category gate failed. `--replay <prior.json>` re-scores every captured trial independently with the pinned graders and calls the provider only for missing/failed prior cells.
+Dry-run exit 3 is intentional: required provider cells are `not_run`. Live exit 3 means at least one arm/category gate failed. `--replay <prior.json>` requires a complete, error-free prior cell set for every provider scenario, benchmark arm, and requested trial. It fails before account resolution when any required cell is missing or errored, then re-scores every captured trial independently with the pinned graders; replay never fills gaps with provider calls or mixes replayed and fresh output.
 
 ## Inventory and judging
 

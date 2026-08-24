@@ -1,6 +1,7 @@
 package armbench
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -171,19 +172,88 @@ func TestPonytailDecisionAssessmentFailClosed(t *testing.T) {
 	}
 }
 
-func TestPonytailReplayPreservesEveryTrial(t *testing.T) {
-	cells := []GateCell{
-		{ScenarioID: "up.behavior.hardware-calibration.trial-01", Arm: "baseline", Output: "one"},
-		{ScenarioID: "up.behavior.hardware-calibration.trial-02", Arm: "baseline", Output: "two"},
-	}
-	replay := indexPriorCells(cells)
-	if len(replay) != 2 {
-		t.Fatalf("replay cells collapsed: %+v", replay)
-	}
-	for trial, want := range []string{"one", "two"} {
-		got, ok := replay[trialCellIdentity("up.behavior.hardware-calibration", "baseline", trial+1)]
-		if !ok || got.Output != want {
-			t.Fatalf("trial %d replay = %+v, %v; want %q", trial+1, got, ok, want)
+func TestValidatePonytailReplayRejectsMissingCell(t *testing.T) {
+	cells := ponytailReplayCellsForTest(2)
+	missingKey := trialCellIdentity("up.behavior.hardware-calibration", "ponytail", 2)
+	for i, cell := range cells {
+		if trialCellIdentity(cell.ScenarioID, cell.Arm, 0) == missingKey {
+			cells = append(cells[:i], cells[i+1:]...)
+			break
 		}
 	}
+
+	_, err := validatePonytailReplay(ponytailReplayScenariosForTest(), cells, 2)
+	if err == nil {
+		t.Fatal("missing replay cell was accepted")
+	}
+	for _, want := range []string{`scenario="up.behavior.hardware-calibration"`, `arm="ponytail"`, "trial=2"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not identify %q", err, want)
+		}
+	}
+}
+
+func TestValidatePonytailReplayRejectsErroredCell(t *testing.T) {
+	cells := ponytailReplayCellsForTest(2)
+	erroredKey := trialCellIdentity("up.behavior.hardware-calibration", ponytailNativeMediumArm, 1)
+	for i := range cells {
+		if trialCellIdentity(cells[i].ScenarioID, cells[i].Arm, 0) == erroredKey {
+			cells[i].Error = "provider timeout"
+			break
+		}
+	}
+
+	_, err := validatePonytailReplay(ponytailReplayScenariosForTest(), cells, 2)
+	if err == nil {
+		t.Fatal("errored replay cell was accepted")
+	}
+	for _, want := range []string{`scenario="up.behavior.hardware-calibration"`, `arm="native_medium"`, "trial=1", "provider timeout"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not identify %q", err, want)
+		}
+	}
+}
+
+func TestValidatePonytailReplayAcceptsCompleteTrials(t *testing.T) {
+	for _, trials := range []int{1, 2} {
+		t.Run(fmt.Sprintf("trials-%d", trials), func(t *testing.T) {
+			replay, err := validatePonytailReplay(ponytailReplayScenariosForTest(), ponytailReplayCellsForTest(trials), trials)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(replay) != trials*len(ponytailBenchmarkArms) {
+				t.Fatalf("replay cells collapsed: %+v", replay)
+			}
+			for trial := 1; trial <= trials; trial++ {
+				for _, arm := range ponytailBenchmarkArms {
+					got, ok := replay[replayCellIdentity("up.behavior.hardware-calibration", arm, trial, trials)]
+					want := fmt.Sprintf("%s trial %d", arm, trial)
+					if !ok || got.Output != want {
+						t.Fatalf("trial %d arm %s replay = %+v, %v; want %q", trial, arm, got, ok, want)
+					}
+				}
+			}
+		})
+	}
+}
+
+func ponytailReplayScenariosForTest() []GateScenario {
+	return []GateScenario{
+		{ID: "up.behavior.hardware-calibration", RequiresProvider: true},
+		{ID: "up.correctness-regression.fenced-email-passes", RequiresProvider: false},
+	}
+}
+
+func ponytailReplayCellsForTest(trials int) []GateCell {
+	var cells []GateCell
+	for trial := 1; trial <= trials; trial++ {
+		for _, arm := range ponytailBenchmarkArms {
+			scenarioID := "up.behavior.hardware-calibration"
+			if trials > 1 {
+				scenarioID = fmt.Sprintf("%s.trial-%02d", scenarioID, trial)
+			}
+			cells = append(cells, GateCell{ScenarioID: scenarioID, Arm: arm, Output: fmt.Sprintf("%s trial %d", arm, trial)})
+		}
+	}
+	return cells
 }

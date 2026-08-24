@@ -250,7 +250,10 @@ func RunPonytailGates(ctx context.Context, o PonytailGateOptions) (PonytailGateR
 			if readErr = json.Unmarshal(b, &prior); readErr != nil {
 				return PonytailGateReport{}, readErr
 			}
-			replay = indexPriorCells(prior.Cells)
+			replay, readErr = validatePonytailReplay(scenarios, prior.Cells, o.Trials)
+			if readErr != nil {
+				return PonytailGateReport{}, readErr
+			}
 			r.Assumptions = append(r.Assumptions, "provider outputs replayed from "+o.Replay+"; no provider call repeated")
 		}
 		if strings.TrimSpace(o.Account) == "" {
@@ -271,12 +274,7 @@ func RunPonytailGates(ctx context.Context, o PonytailGateOptions) (PonytailGateR
 					var output string
 					var callErr error
 					if replay != nil {
-						prior, ok := replay[trialCellIdentity(s.ID, arm, trial)]
-						if ok && prior.Error == "" {
-							output = prior.Output
-						} else {
-							output, callErr = callGateProvider(ctx, o, configDir, arm, s.Task)
-						}
+						output = replay[replayCellIdentity(s.ID, arm, trial, o.Trials)].Output
 					} else {
 						output, callErr = callGateProvider(ctx, o, configDir, arm, s.Task)
 					}
@@ -313,6 +311,34 @@ func indexPriorCells(cells []GateCell) map[string]GateCell {
 		replay[trialCellIdentity(cell.ScenarioID, cell.Arm, 0)] = cell
 	}
 	return replay
+}
+
+func validatePonytailReplay(scenarios []GateScenario, cells []GateCell, trials int) (map[string]GateCell, error) {
+	replay := indexPriorCells(cells)
+	for trial := 1; trial <= trials; trial++ {
+		for _, scenario := range scenarios {
+			if !scenario.RequiresProvider {
+				continue
+			}
+			for _, arm := range ponytailBenchmarkArms {
+				cell, ok := replay[replayCellIdentity(scenario.ID, arm, trial, trials)]
+				if !ok {
+					return nil, fmt.Errorf("replay missing required provider cell scenario=%q arm=%q trial=%d", scenario.ID, arm, trial)
+				}
+				if cell.Error != "" {
+					return nil, fmt.Errorf("replay required provider cell scenario=%q arm=%q trial=%d has error: %s", scenario.ID, arm, trial, cell.Error)
+				}
+			}
+		}
+	}
+	return replay, nil
+}
+
+func replayCellIdentity(scenarioID, arm string, trial, trials int) string {
+	if trials == 1 {
+		trial = 0
+	}
+	return trialCellIdentity(scenarioID, arm, trial)
 }
 
 func trialCellIdentity(scenarioID, arm string, trial int) string {
