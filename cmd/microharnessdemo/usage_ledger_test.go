@@ -64,3 +64,17 @@ func splitNonemptyLines(s string) []string {
 	}
 	return out
 }
+func TestUsageScoreGradesNamedEvidence(t *testing.T) {
+	score := scoreUsage([]weeklyUsage{{Week: "2026-W35", Invocations: 3, Completed: 3}})
+	if score.Grade != "A" || score.Invocations != 3 || len(score.Evidence) < 4 {
+		t.Fatalf("score = %#v", score)
+	}
+	mixed := scoreUsage([]weeklyUsage{{Invocations: 3, Completed: 2, Failed: 1}})
+	if mixed.Grade != "B" {
+		t.Fatalf("mixed score = %#v", mixed)
+	}
+	empty := scoreUsage(nil)
+	if empty.Grade != "F" {
+		t.Fatalf("empty score = %#v", empty)
+	}
+}

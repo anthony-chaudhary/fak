@@ -24,7 +24,7 @@ The recursion is valuable only while four quantities remain bounded together: **
   ```json
   [{"week":"2026-W35","invocations":1,"completed":1,"failed":0,"live":0,"fixture":1,"prompt_tokens":0,"completion_tokens":0}]
   ```
-  Reproduce it with `go run ./cmd/microharnessdemo -selfcheck -ledger <temp.jsonl>` followed by `go run ./cmd/microharnessdemo -fold-usage -ledger <temp.jsonl>`.
+  Reproduce it with `go run ./cmd/microharnessdemo -selfcheck -ledger <temp.jsonl>` followed by `go run ./cmd/microharnessdemo -fold-usage -ledger <temp.jsonl>`. The adoption-health scorecard uses the same ledger: `go run ./cmd/microharnessdemo -score-usage -ledger <temp.jsonl>` emits a grade plus named invocation, completion, and failure evidence.
 
 ## What shipped as the smallest spine
 

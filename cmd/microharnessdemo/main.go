@@ -476,18 +476,23 @@ func main() {
 	goal := flag.String("goal", "Build a local coding harness that can edit this repository and prove its work.", "harness-building goal")
 	ledger := flag.String("ledger", "", "usage JSONL path (default: user config directory; use off to disable)")
 	foldUsage := flag.Bool("fold-usage", false, "print weekly usage counts and exit")
+	scoreUsageFlag := flag.Bool("score-usage", false, "grade adoption health from the usage ledger and exit")
 	flag.Parse()
 	ledgerPath := strings.TrimSpace(*ledger)
 	if ledgerPath == "" {
 		ledgerPath, _ = defaultUsageLedgerPath()
 	}
-	if *foldUsage {
+	if *foldUsage || *scoreUsageFlag {
 		rows, err := foldWeeklyUsage(ledgerPath)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "FAIL:", err)
 			os.Exit(1)
 		}
-		_ = json.NewEncoder(os.Stdout).Encode(rows)
+		if *scoreUsageFlag {
+			_ = json.NewEncoder(os.Stdout).Encode(scoreUsage(rows))
+		} else {
+			_ = json.NewEncoder(os.Stdout).Encode(rows)
+		}
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)

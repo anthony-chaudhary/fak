@@ -25,6 +25,14 @@ type usageRow struct {
 	CompletionTokens int       `json:"completion_tokens"`
 }
 
+type usageScore struct {
+	Grade       string        `json:"grade"`
+	Evidence    []string      `json:"evidence"`
+	Weeks       []weeklyUsage `json:"weeks"`
+	Invocations int           `json:"invocations"`
+	Completed   int           `json:"completed"`
+	Failed      int           `json:"failed"`
+}
 type weeklyUsage struct {
 	Week             string `json:"week"`
 	Invocations      int    `json:"invocations"`
@@ -123,4 +131,30 @@ func foldWeeklyUsage(path string) ([]weeklyUsage, error) {
 		out = append(out, *byWeek[key])
 	}
 	return out, nil
+}
+func scoreUsage(weeks []weeklyUsage) usageScore {
+	score := usageScore{Grade: "F", Weeks: weeks}
+	for _, week := range weeks {
+		score.Invocations += week.Invocations
+		score.Completed += week.Completed
+		score.Failed += week.Failed
+	}
+	score.Evidence = []string{
+		fmt.Sprintf("invocations=%d", score.Invocations),
+		fmt.Sprintf("completed=%d", score.Completed),
+		fmt.Sprintf("failed=%d", score.Failed),
+	}
+	switch {
+	case score.Invocations == 0:
+		score.Evidence = append(score.Evidence, "no adoption evidence")
+	case score.Failed == 0 && score.Completed == score.Invocations:
+		score.Grade = "A"
+		score.Evidence = append(score.Evidence, "all recorded invocations completed")
+	case score.Completed > score.Failed:
+		score.Grade = "B"
+		score.Evidence = append(score.Evidence, "more completions than failures")
+	default:
+		score.Evidence = append(score.Evidence, "failures meet or exceed completions")
+	}
+	return score
 }
