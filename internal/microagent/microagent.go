@@ -230,10 +230,14 @@ func (h *Host) Sessions() *session.Table { return h.sessions }
 // terminal-state machine). On acceptance the agent's session entry exists and
 // is Running.
 func (h *Host) Spawn(id string, m Microagent) error {
-	return h.spawn(id, m, h.rootCaps)
+	return h.spawnWithParent(h.ctx, id, m, h.rootCaps)
 }
 
 func (h *Host) spawn(id string, m Microagent, capabilities CapabilityEnvelope) error {
+	return h.spawnWithParent(h.ctx, id, m, capabilities)
+}
+
+func (h *Host) spawnWithParent(parent context.Context, id string, m Microagent, capabilities CapabilityEnvelope) error {
 	if m == nil {
 		return ErrNilAgent
 	}
@@ -255,7 +259,10 @@ func (h *Host) spawn(id string, m Microagent, capabilities CapabilityEnvelope) e
 		h.sessions.Reset(id)
 		return ErrDraining
 	}
-	ctx, cancel := context.WithCancel(h.ctx)
+	if parent == nil {
+		parent = h.ctx
+	}
+	ctx, cancel := context.WithCancel(parent)
 	ctx = withStepEnvelope(ctx, capabilities)
 	j := &job{id: id, m: m, ctx: ctx, cancel: cancel}
 	select {
@@ -301,7 +308,7 @@ func (h *Host) RequestChild(request SpawnRequest, child Microagent) error {
 	if err := h.spawnBudget.Admit(request); err != nil {
 		return err
 	}
-	if err := h.spawn(request.ChildID, child, granted); err != nil {
+	if err := h.spawnWithParent(request.Context, request.ChildID, child, granted); err != nil {
 		h.spawnBudget.release(request)
 		return err
 	}

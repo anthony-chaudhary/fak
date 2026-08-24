@@ -1,6 +1,7 @@
 package microagent
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -58,6 +59,8 @@ type SpawnRequest struct {
 	Depth        int
 	Budget       LineageBudget
 	Capabilities CapabilityEnvelope
+	// Context carries the parent cancellation/deadline. Nil uses the host root context.
+	Context context.Context
 }
 
 var (
