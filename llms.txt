@@ -89,6 +89,7 @@ Runtime behavior is authoritative in code and tests. Documentation describes the
 | Explain or evaluate fak | [`README.md`](README.md) | [`docs/repro-packet.md`](docs/repro-packet.md) |
 | Modify code or docs | [`AGENTS.md`](AGENTS.md) | The owning package tests and [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | Integrate a client or managed runtime | [`docs/explainers/agent-runtime.md`](docs/explainers/agent-runtime.md) | [`docs/integrations/`](docs/integrations/) and the selected mode's quickstart and API/config authority |
+| Build a bounded microagent-derived harness | [`docs/research/microagents-to-harnesses-2026-08-18.md`](docs/research/microagents-to-harnesses-2026-08-18.md) | Run `go run ./cmd/microharnessdemo -selfcheck`; descendants remain host-admitted and the root receives compact receipts, not child transcripts |
 | Deploy or operate | [`docs/fak/deployment-guide.md`](docs/fak/deployment-guide.md) | [`docs/fak/server-config.md`](docs/fak/server-config.md) and [`docs/fak/api-reference.md`](docs/fak/api-reference.md) |
 | Assess readiness or cut a release | [`.claude/skills/release/SKILL.md`](.claude/skills/release/SKILL.md) | Run `fak release readiness --json`, then use the skill's guarded ship and verification path |
 | Assess a claim | [`CLAIMS.md`](CLAIMS.md) | [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) and the cited witness |
