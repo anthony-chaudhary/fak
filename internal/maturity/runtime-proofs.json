@@ -280,6 +280,11 @@
       "lane": "tracesink",
       "command": "go test -v ./internal/tracesink",
       "output_contains": "TestCaptureFidelity_ReplayReproducesLiveVerdictCounters"
+    },
+    {
+      "lane": "toon",
+      "command": "go test -v ./internal/toon",
+      "output_contains": "TestDecideNeverFiresAtALoss"
     }
   ]
 }
