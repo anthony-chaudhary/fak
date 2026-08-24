@@ -65,6 +65,11 @@
       "lane": "workerworktree",
       "command": "go test -v ./internal/workerworktree -run TestInventory",
       "output_contains": "TestInventoryLandReadyIsReadOnlyAndExact"
+    },
+    {
+      "lane": "wirescreen",
+      "command": "go test -v ./internal/wirescreen -run TestRedactJSONLeaves",
+      "output_contains": "TestRedactJSONLeavesNestedResult"
     }
   ]
 }
