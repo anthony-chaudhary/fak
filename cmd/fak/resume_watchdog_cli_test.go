@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/resume"
+	"github.com/anthony-chaudhary/fak/internal/resumebackoff"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/trajctl"
 )
@@ -49,6 +50,43 @@ func TestRwTerminalSignalTaxonomy(t *testing.T) {
 	}
 	if o := resume.ClassifyOutcome(rwTerminalSignal("all done, shipped and green")); o != resume.OutcomeProgressed {
 		t.Fatalf("clean turn outcome = %s, want progressed", o)
+	}
+}
+
+func TestResumeWatchdogStormSignatureKeepsUnrelatedSessionsIndependent(t *testing.T) {
+	now := time.Unix(1_000, 0)
+	base := resume.WatchdogPlanRow{CWD: `C:\work\fak`, Disp: "STOPPED_APIERR"}
+	history := make([]resumebackoff.Event, 0, 5)
+	for i := 0; i < 5; i++ {
+		row := base
+		row.Session = fmt.Sprintf("codex-session-%d", i)
+		history = append(history, resumebackoff.Event{
+			Session: row.Session, Signature: rwResumeStormSignature(row), At: now.Add(-time.Duration(i) * time.Second),
+		})
+	}
+	candidate := base
+	candidate.Session = "codex-session-5"
+	decision := resumebackoff.Decide(resumebackoff.Input{
+		Session: candidate.Session, Signature: rwResumeStormSignature(candidate), Now: now, History: history,
+	})
+	if !decision.Eligible || decision.Parked || decision.Reason != "" {
+		t.Fatalf("unrelated sixth session inherited the cohort storm: %+v", decision)
+	}
+}
+
+func TestResumeWatchdogStormSignatureBacksOffRepeatedLogicalSession(t *testing.T) {
+	now := time.Unix(1_000, 0)
+	row := resume.WatchdogPlanRow{Session: "codex-session-repeat", CWD: `C:\work\fak`, Disp: "STOPPED_APIERR"}
+	signature := rwResumeStormSignature(row)
+	history := []resumebackoff.Event{
+		{Session: row.Session, Signature: signature, At: now.Add(-90 * time.Second)},
+		{Session: row.Session, Signature: signature, At: now.Add(-30 * time.Second)},
+	}
+	decision := resumebackoff.Decide(resumebackoff.Input{
+		Session: row.Session, Signature: rwResumeStormSignature(row), Now: now, History: history,
+	})
+	if decision.Eligible || decision.Reason != resumebackoff.ReasonBackoff || decision.Repeat != 2 {
+		t.Fatalf("repeated crashes for one logical session escaped containment: %+v", decision)
 	}
 }
 

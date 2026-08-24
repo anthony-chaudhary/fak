@@ -340,7 +340,7 @@ func runResumeWatchdogTick(stdout, stderr io.Writer, argv []string) int {
 			note("  SKIP %s â€” %s", sid8, d.Reason)
 			continue
 		}
-		signature := knownbad.Signature(firstString(p.Disp, "resume_crash"), []string{p.CWD}, "")
+		signature := rwResumeStormSignature(p)
 		backoff := resumebackoff.Decide(resumebackoff.Input{Session: p.Session, Signature: signature, Now: time.Now().UTC(), History: backoffHistory})
 		if !backoff.Eligible {
 			note("  SKIP %s â€” %s repeat=%d next=%s", sid8, backoff.Reason, backoff.Repeat, backoff.NextEligible.Format(time.RFC3339))
@@ -816,6 +816,14 @@ func rwReDeathEvidence(home, sid string, scan *rwProcScan, now time.Time, lastLa
 		}
 	}
 	return ev
+}
+
+func rwResumeStormSignature(p resume.WatchdogPlanRow) string {
+	// Disposition and CWD describe a recovery cohort, not one crashing workload.
+	// Include the transcript UUID so repeats of the same logical session retain a
+	// stable backoff key without parking unrelated sessions sharing a repository.
+	return knownbad.Signature(firstString(p.Disp, "resume_crash"), []string{p.CWD},
+		"resume-session:"+strings.TrimSpace(p.Session))
 }
 
 // rwTerminalSignal classifies a transcript's terminal-turn text into the closed
