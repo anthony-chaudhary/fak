@@ -59,7 +59,12 @@ func RunCodexHookRecurrence(stdout, stderr io.Writer, args []string) int {
 		*home = filepath.Join(h, ".codex")
 	}
 	now := time.Now().UTC()
-	c, e := buildHookCensus(*home, *home, *workspace, os.Getenv("CODEX_THREAD_ID"), *observations, *since, now)
+	p, e := inspectCodexHookProfile(*home, *workspace, "")
+	if e != nil {
+		fmt.Fprintf(stderr, "codex-hook-gate: profile: %v\n", e)
+		return 1
+	}
+	c, e := buildHookCensus(*home, *home, *workspace, os.Getenv("CODEX_THREAD_ID"), *observations, p, *since, now)
 	if e != nil {
 		fmt.Fprintf(stderr, "codex-hook-gate: census: %v\n", e)
 		return 1
@@ -70,11 +75,6 @@ func RunCodexHookRecurrence(stdout, stderr io.Writer, args []string) int {
 			return 1
 		}
 		finalizeCensusVerdict(&c)
-	}
-	p, e := inspectCodexHookProfile(*home, *workspace, "")
-	if e != nil {
-		fmt.Fprintf(stderr, "codex-hook-gate: profile: %v\n", e)
-		return 1
 	}
 	outcomes, e := queryCodexToolErrorsForThread(filepath.Join(*home, "logs_2.sqlite"), now.Add(-*since), os.Getenv("CODEX_THREAD_ID"))
 	if e != nil {
@@ -119,13 +119,14 @@ func evaluateHookRecurrence(c hookCensusReport, p hookProfileReport, o codexTool
 	if c.DispatchedCalls == 0 {
 		g.Reasons = append(g.Reasons, "DENOMINATOR_ZERO")
 	}
-	if c.PreToolUse.Unknown > 0 || c.PostToolUse.Unknown > 0 || c.Stop.Unknown > 0 || c.StopFailure.Unknown > 0 || c.SubagentStop.Unknown > 0 {
+	postToolObserved := c.PostToolUseStatus != "intentionally_disabled"
+	if c.PreToolUse.Unknown > 0 || (postToolObserved && c.PostToolUse.Unknown > 0) || c.Stop.Unknown > 0 || c.StopFailure.Unknown > 0 || c.SubagentStop.Unknown > 0 {
 		g.Reasons = append(g.Reasons, "UNKNOWN_LIFECYCLE_ROWS")
 	}
 	if c.Stop.InvalidJSON > 0 || c.StopFailure.InvalidJSON > 0 || c.SubagentStop.InvalidJSON > 0 {
 		g.Reasons = append(g.Reasons, "STOP_INVALID_JSON")
 	}
-	if c.PreToolUse.Disabled > 0 || c.PostToolUse.Disabled > 0 {
+	if c.PreToolUse.Disabled > 0 || (postToolObserved && c.PostToolUse.Disabled > 0) {
 		g.Reasons = append(g.Reasons, "EXPECTED_PHASE_DISABLED")
 	}
 	if failures > maxFailures {
@@ -155,7 +156,7 @@ func expectedStopHooks(p hookProfileReport) int {
 func writeHookRecurrence(w io.Writer, g recurrenceReport) {
 	fmt.Fprintf(w, "Codex hook recurrence gate: %s\nwindow=%s unexpected=%d/%d max=%d hook-failures=%d/%d max=%d telemetry-fresh=%t\n", g.Verdict, g.Window, g.UnexpectedNumerator, g.UnexpectedDenominator, g.Thresholds.MaxUnexpectedOutcomes, g.Census.PreToolUse.Failed+g.Census.PostToolUse.Failed, g.Census.DispatchedCalls, g.Thresholds.MaxHookFailures, g.Census.TelemetryFresh)
 	fmt.Fprintf(w, "pre: attempted=%d succeeded=%d failed=%d skipped=%d disabled=%d unknown=%d denominator=%d\n", g.Census.PreToolUse.Attempted, g.Census.PreToolUse.Succeeded, g.Census.PreToolUse.Failed, g.Census.PreToolUse.Skipped, g.Census.PreToolUse.Disabled, g.Census.PreToolUse.Unknown, g.Census.PreToolUse.Denominator)
-	fmt.Fprintf(w, "post: attempted=%d succeeded=%d failed=%d skipped=%d disabled=%d unknown=%d denominator=%d\n", g.Census.PostToolUse.Attempted, g.Census.PostToolUse.Succeeded, g.Census.PostToolUse.Failed, g.Census.PostToolUse.Skipped, g.Census.PostToolUse.Disabled, g.Census.PostToolUse.Unknown, g.Census.PostToolUse.Denominator)
+	fmt.Fprintf(w, "post: requirement=%s status=%s attempted=%d succeeded=%d failed=%d skipped=%d disabled=%d unknown=%d denominator=%d\n", g.Census.PostToolUseRequirement, g.Census.PostToolUseStatus, g.Census.PostToolUse.Attempted, g.Census.PostToolUse.Succeeded, g.Census.PostToolUse.Failed, g.Census.PostToolUse.Skipped, g.Census.PostToolUse.Disabled, g.Census.PostToolUse.Unknown, g.Census.PostToolUse.Denominator)
 	if len(g.TopCauses) > 0 {
 		fmt.Fprintf(w, "top causes: %s\n", strings.Join(g.TopCauses, "; "))
 	}
