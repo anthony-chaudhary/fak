@@ -60,7 +60,7 @@ func TestResurrectHostCrashSessionsUsesPersistedPreCrashCohort(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	current := guardsessions.NewInteractiveRow("current", "codex", 4242, dir, "", "", now, []string{"codex"})
+	current := guardsessions.NewInteractiveRow("current", "codex", 4242, dir, "", "", now, []string{"codex", "resume", "11111111-1111-4111-8111-111111111111"})
 	current.HostRecovery = true
 	if err := guardsessions.Record(dir, current); err != nil {
 		t.Fatal(err)
@@ -136,7 +136,7 @@ func TestResurrectHostCrashSessionsFailedLaunchIsStillDeduped(t *testing.T) {
 func TestResurrectHostCrashSessionsDryRunDoesNotReserve(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 8, 23, 20, 0, 0, 0, time.UTC)
-	row := guardsessions.NewInteractiveRow("trace", "codex", 41, dir, "", "", now.Add(-time.Minute), []string{"codex", "resume", "session-1"})
+	row := guardsessions.NewInteractiveRow("trace", "codex", 41, dir, "", "", now.Add(-time.Minute), []string{"codex", "resume", "22222222-2222-4222-8222-222222222222"})
 	row.HostRecovery = true
 	if err := guardsessions.Record(dir, row); err != nil {
 		t.Fatal(err)
