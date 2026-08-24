@@ -275,6 +275,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Top-50 documentation refresh audit — 2026-08-24](docs/notes/TOP-50-DOC-REFRESH-AUDIT-2026-08-24.md) -- auto-indexed dated note.
 - [Live dashboard dogfood — 2026-08-23](docs/notes/LIVE-DASHBOARD-DOGFOOD-2026-08-23.md) -- auto-indexed dated note.
 - [KV capacity normalization dogfood — 2026-08-23](docs/notes/KV-CAPACITY-NORMALIZATION-DOGFOOD-2026-08-23.md) — two committed metric dialects normalize to matching token, byte, and occupancy values.
 - [Authoritative ultracode accounting dogfood — 2026-08-23](docs/notes/ULTRACODE-ACCOUNTING-DOGFOOD-2026-08-23.md) — the live repository pair returns a typed ABSTAIN and binds receipt gaps to #8559 and #5971.
