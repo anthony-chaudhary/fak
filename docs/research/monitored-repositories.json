@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-25T20:40:56Z",
+  "updated_at": "2026-08-25T21:18:01Z",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -364,13 +364,89 @@
     {
       "repository": "vllm-project/speculators",
       "url": "https://github.com/vllm-project/speculators",
-      "status": "candidate",
+      "status": "studied",
       "priority": 27,
       "why": "Unified speculative-decoding algorithm library for vLLM, directly relevant to DFlash/DSpark/MTP candidate selection and the native Qwen3.8 speculation roadmap. No existing fak issue matched this exact source identity in the bounded dedupe scan.",
       "last_checked": "2026-08-25",
       "checked_revision": "0faffeb3bd547b4451a978d7aaf26a2f01b83d62",
       "stars_at_check": 762,
-      "last_push_at_check": "2026-08-25T20:38:13Z"
+      "last_push_at_check": "2026-08-25T20:59:51Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-SPECULATORS-2026-08-25.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/vllm-project-speculators.json",
+        "indexed_revision": "0faffeb3bd547b4451a978d7aaf26a2f01b83d62",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh issue list --repo vllm-project/speculators --state all --limit 20 --json number,title,state,createdAt,updatedAt,labels,url",
+              "gh pr list --repo vllm-project/speculators --state all --limit 20 --json number,title,state,mergedAt,updatedAt,url,labels",
+              "gh pr view 1038 --repo vllm-project/speculators --json number,title,state,mergedAt,body,url,files,commits",
+              "gh release list --repo vllm-project/speculators --limit 20",
+              "gh api graphql repository discussions first 10"
+            ],
+            "note": "Recent issues, PRs, merged loading fix, releases, tags, and discussions checked on 2026-08-25."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "go run ./cmd/fak capabilities 'DSpark confidence head cumulative acceptance product dynamic draft length thresholding per-position accept probability'",
+              "go run ./cmd/fak-dev index docs 'DSpark confidence head cumulative acceptance product dynamic draft length thresholding per-position accept probability'",
+              "go run ./cmd/fak-dev index leaves 'DSpark confidence head cumulative acceptance product dynamic draft length thresholding per-position accept probability'",
+              "go run ./cmd/fak capabilities 'P-EAGLE parallel multi-token prediction COD sampling multi-depth speculative drafter one forward'",
+              "go run ./cmd/fak-dev index docs 'P-EAGLE parallel multi-token prediction COD sampling multi-depth speculative drafter one forward'",
+              "go run ./cmd/fak-dev index leaves 'P-EAGLE parallel multi-token prediction COD sampling multi-depth speculative drafter one forward'",
+              "go run ./cmd/fak capabilities 'checkpoint tensor alias final norm wrong alias speculative acceptance regression shortest suffix resolver'"
+            ],
+            "note": "Self-query found per-position acceptance and broad speculation docs, but no calibrated DSpark controller, P-EAGLE-shaped draft witness, or speculator alias-drift canary."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-SPECULATORS-2026-08-25.md#candidate-matrix"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/8938",
+              "https://github.com/anthony-chaudhary/fak/issues/8939",
+              "https://github.com/anthony-chaudhary/fak/issues/8940",
+              "https://github.com/anthony-chaudhary/fak/issues/3197#issuecomment-5416891936",
+              "https://github.com/anthony-chaudhary/fak/issues/8923#issuecomment-5416891900"
+            ]
+          }
+        ],
+        "subsystem_count": 10,
+        "candidate_count": 7,
+        "filed_issue_count": 3,
+        "issue_refs": [
+          "#8938",
+          "#8939",
+          "#8940",
+          "#3197",
+          "#8923",
+          "#8258",
+          "#5154",
+          "#4202"
+        ],
+        "completeness_critic": "exhaustive local map plus README/docs/source/tests/license read; recent open and closed issues, PRs including #1038, releases, tags, and discussions checked; no material source class left only asserted"
+      }
     },
     {
       "repository": "NVIDIA/kvpress",

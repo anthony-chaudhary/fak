@@ -1,8 +1,8 @@
 # Performance borrow map: current agentic and model-runtime practice
 
 - **Date:** 2026-08-25
-- **Status:** source queue refreshed; live issue read-back succeeded; live issue creation still blocked by invalid `gh` credentials
-- **Companions:** [related-system inventory contract](CONCEPT-RELATED-SYSTEM-INVENTORY-2026-08-25.md), [monitored repository registry](../research/monitored-repositories.json), [mini-sglang study](CONCEPT-STUDY-MINI-SGLANG-2026-08-22.md), [InferenceX study](BORROW-BENCHMARK-SERVING-METRICS-INFERENCEX-STUDY-2026-07-13.md)
+- **Status:** source queue refreshed; live issue read-back succeeded; Speculators deep study filed three follow-on tickets
+- **Companions:** [related-system inventory contract](CONCEPT-RELATED-SYSTEM-INVENTORY-2026-08-25.md), [monitored repository registry](../research/monitored-repositories.json), [Speculators study](CONCEPT-STUDY-SPECULATORS-2026-08-25.md), [mini-sglang study](CONCEPT-STUDY-MINI-SGLANG-2026-08-22.md), [InferenceX study](BORROW-BENCHMARK-SERVING-METRICS-INFERENCEX-STUDY-2026-07-13.md)
 
 ## Verdict
 
@@ -11,6 +11,7 @@ The current field says the next performance work should be evidence-first and so
 - [#8923](https://github.com/anthony-chaudhary/fak/issues/8923) forces the next Qwen3.8 baseline wave through a measured borrowed hot path instead of unprofiled custom kernels.
 - [#8819](https://github.com/anthony-chaudhary/fak/issues/8819) and [#8848](https://github.com/anthony-chaudhary/fak/issues/8848) provide the profile and cross-node experiment matrix that should choose the hot path.
 - [#8918](https://github.com/anthony-chaudhary/fak/issues/8918), [#8924](https://github.com/anthony-chaudhary/fak/issues/8924), and [#8925](https://github.com/anthony-chaudhary/fak/issues/8925) make repository discovery itself measurable, so agents find the right prior art without repeated broad scans.
+- [#8938](https://github.com/anthony-chaudhary/fak/issues/8938), [#8939](https://github.com/anthony-chaudhary/fak/issues/8939), and [#8940](https://github.com/anthony-chaudhary/fak/issues/8940) are the first Speculators-derived follow-ons: calibrated DSpark depth control, P-EAGLE parallel-depth witness, and speculator alias-drift rejection.
 - [#8774](https://github.com/anthony-chaudhary/fak/issues/8774) and [#8775](https://github.com/anthony-chaudhary/fak/issues/8775) carry the agentic-serving metric borrows from InferenceX: backend lifecycle joins and full-response interactivity.
 
 The source registry now adds current exact revisions for the fast-moving model-serving and agentic-process repos that should feed those issues. None of these rows proves a FAK gap by itself. Each row is a queue item for a `study-repo` pass with inventory map, self-query witness, candidate matrix, license disposition, and issue dedupe.
@@ -25,7 +26,7 @@ Observed at `2026-08-25T20:40:56Z` via GitHub REST API and commit read-back.
 | [sgl-project/sglang](https://github.com/sgl-project/sglang/commit/edff717ef0106b4413b371bf7a05a5193ffeee85) | `edff717ef0106b4413b371bf7a05a5193ffeee85` | 2026-08-25 | Apache-2.0 | RadixAttention, HiCache/disaggregation, scheduler policy, and request-state concurrency. Current commit snapshots mutable rooms before iterating outside a lock, a useful reminder that throughput work must not outrun state correctness. |
 | [LMCache/LMCache](https://github.com/LMCache/LMCache/commit/23cca67908e17b193eb8fab08ba1beb0115881cd) | `23cca67908e17b193eb8fab08ba1beb0115881cd` | 2026-08-25 | Apache-2.0 | KV transfer registration, external KV lifecycle, and vLLM/Dynamo integration. Current commit fixes missing-registration GPU transfers, which maps to FAK's route-by-reference and KV ownership honesty. |
 | [NVIDIA/Model-Optimizer](https://github.com/NVIDIA/Model-Optimizer/commit/73d778422388f0e849ecb180375d34ac445711ca) | `73d778422388f0e849ecb180375d34ac445711ca` | 2026-08-24 | Apache-2.0 | Quantization, distillation, pruning, and speculative-decoding export paths into serving engines. Candidate support evidence for Qwen3.8 quant and borrowed-hot-path planning under #8923. |
-| [vllm-project/speculators](https://github.com/vllm-project/speculators/commit/0faffeb3bd547b4451a978d7aaf26a2f01b83d62) | `0faffeb3bd547b4451a978d7aaf26a2f01b83d62` | 2026-08-25 | Apache-2.0 | Speculative-decoding algorithm library for vLLM. Relevant to DFlash/DSpark/MTP candidate selection and acceptance telemetry. No direct FAK issue matched this exact source identity in the bounded dedupe scan. |
+| [vllm-project/speculators](https://github.com/vllm-project/speculators/commit/0faffeb3bd547b4451a978d7aaf26a2f01b83d62) | `0faffeb3bd547b4451a978d7aaf26a2f01b83d62` | 2026-08-25 | Apache-2.0 | Speculative-decoding algorithm library for vLLM. Deep study filed #8938 for DSpark confidence-depth control, #8939 for P-EAGLE parallel-depth draft witnessing, and #8940 for speculator checkpoint alias-drift rejection. |
 | [NVIDIA/kvpress](https://github.com/NVIDIA/kvpress/commit/161705a68f64df329c88a6da5f20300a89aa7542) | `161705a68f64df329c88a6da5f20300a89aa7542` | 2026-08-18 | Apache-2.0 | KV-cache compression with an entropy-gated chunk compressor. Existing lead: [#5328](https://github.com/anthony-chaudhary/fak/issues/5328). |
 | [novitalabs/pegaflow](https://github.com/novitalabs/pegaflow/commit/d3ed31a7a4ee9bc7cdc5f112f0a1eb26efe63675) | `d3ed31a7a4ee9bc7cdc5f112f0a1eb26efe63675` | 2026-08-17 | Apache-2.0 | KV storage with GPU offload, SSD caching, and cross-node sharing for vLLM/SGLang. Candidate for external-engine KV ownership and cache-tier comparisons. |
 | [jundot/omlx](https://github.com/jundot/omlx/commit/90ecf1c26dbed875e6ced82c4faa6e9250037f2d) | `90ecf1c26dbed875e6ced82c4faa6e9250037f2d` | 2026-08-25 | Apache-2.0 | Apple-Silicon continuous batching and SSD caching. Candidate for Mac/Qwen3.8 resident-decode refresh after deduping against the DFlash2 oMLX fork note. |
@@ -56,12 +57,13 @@ Live issue read-back through the public GitHub REST API found these relevant tic
 - Qwen/native performance: [#8923](https://github.com/anthony-chaudhary/fak/issues/8923), [#8819](https://github.com/anthony-chaudhary/fak/issues/8819), [#8848](https://github.com/anthony-chaudhary/fak/issues/8848).
 - Agentic-serving metrics: [#8774](https://github.com/anthony-chaudhary/fak/issues/8774), [#8775](https://github.com/anthony-chaudhary/fak/issues/8775).
 - Existing source-specific leads: [#5328](https://github.com/anthony-chaudhary/fak/issues/5328) for KVPress and [#4199](https://github.com/anthony-chaudhary/fak/issues/4199) for the previous mlx-dspark controller borrow.
+- Speculators follow-ons: [#8938](https://github.com/anthony-chaudhary/fak/issues/8938), [#8939](https://github.com/anthony-chaudhary/fak/issues/8939), and [#8940](https://github.com/anthony-chaudhary/fak/issues/8940), cross-linked from [#3197](https://github.com/anthony-chaudhary/fak/issues/3197#issuecomment-5416891936) and [#8923](https://github.com/anthony-chaudhary/fak/issues/8923#issuecomment-5416891900).
 
-No live issue creation was attempted after `gh auth status` reported an invalid keyring token. The issue-creation path should be retried with `gh` only after authentication is repaired. Until then, the registry rows plus this note are the issue-ready source queue, and the existing live tickets above are the dispatchable work.
+The initial `gh` issue-creation path was blocked by an invalid keyring token, then succeeded after the credential path recovered. The durable state is the live issue read-back above plus the source-pinned study note; the stale auth failure is not a current blocker.
 
 ## Next Study Queue
 
-1. Start with `vllm-project/speculators` under #8923 if #8819/#8848 show speculative decode or acceptance control as the dominant lever.
+1. Work `vllm-project/speculators` through #8938, #8939, and #8940 when #8923 chooses speculative decode or acceptance control as the dominant lever.
 2. Study `NVIDIA/Model-Optimizer` only after the chosen Qwen3.8 hot path needs quant/export evidence; otherwise keep it as a watch row.
 3. Study `novitalabs/pegaflow` and refresh `LMCache/LMCache` together only if the next KV work requires external-engine transfer/offload ownership, not for native-kernel work.
 4. Study `jundot/omlx` or refresh `ARahim3/mlx-dspark` only for Apple-Silicon Qwen3.8 or consumer-device speculative serving.
