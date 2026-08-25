@@ -153,7 +153,7 @@ func TestSelectTwentySessionCohort(t *testing.T) {
 func TestMergeJournalCrashesUsesRecordedCWDAndDeduplicates(t *testing.T) {
 	classified := []sessionjournal.Classified{
 		{Session: sessionjournal.Session{ID: "already", CWD: `C:\authoritative`}, Status: sessionjournal.StatusCrashed, Reason: "MACHINE_REBOOT"},
-		{Session: sessionjournal.Session{ID: "journal", CWD: `D:\repos\real tree`}, Status: sessionjournal.StatusCrashed, Reason: "MACHINE_REBOOT"},
+		{Session: sessionjournal.Session{ID: "journal", CWD: `D:\repos\real tree`, Agent: "claude"}, Status: sessionjournal.StatusCrashed, Reason: "MACHINE_REBOOT"},
 		{Session: sessionjournal.Session{ID: "live", CWD: `D:\repos\live`}, Status: sessionjournal.StatusLive},
 	}
 	got := MergeJournalCrashes([]Request{{ThreadID: "already", CWD: `C:\slug-recovered`}}, classified, Options{Limit: 3, Prompt: "resume safely", ReceiptDir: t.TempDir()})
@@ -192,7 +192,7 @@ func TestMergeJournalCrashesAccountsAllRowsAndLimitsOnlyCandidates(t *testing.T)
 		{ThreadID: "candidate-a", CWD: `C:\a`, Provider: ProviderClaude, Category: CategorySubstantive, Action: ActionRecover, Status: "candidate"},
 		{ThreadID: "candidate-b", CWD: `C:\b`, Provider: ProviderClaude, Category: CategorySubstantive, Action: ActionRecover, Status: "candidate"},
 	}
-	classified := []sessionjournal.Classified{{Session: sessionjournal.Session{ID: "journal-c", CWD: `C:\c`}, Status: sessionjournal.StatusCrashed, Reason: "MACHINE_REBOOT"}}
+	classified := []sessionjournal.Classified{{Session: sessionjournal.Session{ID: "journal-c", CWD: `C:\c`, Agent: "claude"}, Status: sessionjournal.StatusCrashed, Reason: "MACHINE_REBOOT"}}
 	got := MergeJournalCrashes(requests, classified, Options{Limit: 2, ReceiptDir: t.TempDir()})
 	if len(got) != 5 {
 		t.Fatalf("cohort truncated: %+v", got)
@@ -216,5 +216,60 @@ func TestVisibleLauncherRefusesMissingCommandBeforeTerminalSpawn(t *testing.T) {
 	err := launcher.Launch(Request{CWD: t.TempDir(), Argv: []string{"definitely-missing-session-recovery-command"}})
 	if err == nil || !strings.Contains(err.Error(), "resolve") {
 		t.Fatalf("err=%v want command-resolution refusal", err)
+	}
+}
+
+func TestSelectUsesRecordedHarnessAndLogsProvenance(t *testing.T) {
+	report := InventoryReport{Sessions: []Session{{
+		Thread:  &Thread{ID: "0198ec3d-6d66-7c82-a700-cedf64660a44", Source: "session_registration", CWD: `C:\work\fak`},
+		Harness: ProviderCodex, HarnessSource: "session_registration", Category: CategorySubstantive, Action: ActionRecover,
+	}}}
+	got := Select(report, Options{Limit: 1, ReceiptDir: t.TempDir(), ManagerBin: "fak", CodexBin: "codex"})
+	if len(got) != 1 {
+		t.Fatalf("requests=%d", len(got))
+	}
+	if got[0].Harness != ProviderCodex || got[0].HarnessSource != "session_registration" || got[0].Provider != ProviderCodex {
+		t.Fatalf("identity not preserved: %+v", got[0])
+	}
+	if strings.Contains(strings.Join(got[0].Argv, " "), "claude") || !strings.Contains(strings.Join(got[0].Argv, " "), "codex") {
+		t.Fatalf("wrong harness argv: %q", got[0].Argv)
+	}
+}
+
+func TestSelectFailsClosedWhenHarnessUnknown(t *testing.T) {
+	report := InventoryReport{Sessions: []Session{{
+		Thread:   &Thread{ID: "0198ec3d-6d66-7c82-a700-cedf64660a44", Source: "session_registration", CWD: `C:\work\fak`},
+		Category: CategorySubstantive, Action: ActionRecover,
+	}}}
+	got := Select(report, Options{Limit: 1, ReceiptDir: t.TempDir()})
+	if len(got) != 1 || got[0].Status != "identity_blocked" || got[0].Reason != "harness_identity_unavailable" || len(got[0].Argv) != 0 {
+		t.Fatalf("unknown harness must fail closed: %+v", got)
+	}
+}
+
+func TestMergeJournalCrashesDoesNotDefaultMissingAgentToClaude(t *testing.T) {
+	id := "0198ec3d-6d66-7c82-a700-cedf64660a44"
+	classified := []sessionjournal.Classified{{Status: sessionjournal.StatusCrashed, Reason: "process_dead", Session: sessionjournal.Session{ID: id, CWD: `C:\work\fak`}}}
+	got := MergeJournalCrashes(nil, classified, Options{Limit: 1, ReceiptDir: t.TempDir()})
+	if len(got) != 1 || got[0].Status != "identity_blocked" || got[0].Provider != "" || got[0].Harness != "" || len(got[0].Argv) != 0 {
+		t.Fatalf("missing journal harness must not cross-launch: %+v", got)
+	}
+}
+
+func TestWriteReceiptPersistsHarnessIdentity(t *testing.T) {
+	req := Request{ThreadID: "0198ec3d-6d66-7c82-a700-cedf64660a44", CWD: `C:\work\fak`, Provider: ProviderCodex, Harness: ProviderCodex, HarnessSource: "session_registration", Category: CategorySubstantive, Status: "candidate", Argv: []string{"fak", "guard", "--", "codex"}, ReceiptPath: filepath.Join(t.TempDir(), "receipt.json")}
+	if wrote, err := WriteReceipt(req, time.Now()); err != nil || !wrote {
+		t.Fatalf("wrote=%v err=%v", wrote, err)
+	}
+	b, err := os.ReadFile(req.ReceiptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Receipt
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Harness != ProviderCodex || got.HarnessSource != "session_registration" {
+		t.Fatalf("receipt identity=%+v", got)
 	}
 }
