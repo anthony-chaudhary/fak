@@ -1,0 +1,30 @@
+{
+  "schema": "fak-native-performance-profile/v1",
+  "envelope_id": "qwen38-27b-q4k-a100-p1-decode",
+  "execution": {
+    "engine": "fak-native",
+    "forward_path": "cuda/q4k-p1-decode",
+    "fallback_count": 0
+  },
+  "phases": [
+    {"name": "load-setup", "start_milliseconds": 0, "duration_milliseconds": 8},
+    {"name": "prefill", "start_milliseconds": 8, "duration_milliseconds": 4},
+    {"name": "first-token", "start_milliseconds": 12, "duration_milliseconds": 3},
+    {"name": "steady-decode", "start_milliseconds": 15, "duration_milliseconds": 40},
+    {"name": "verification", "start_milliseconds": 55, "duration_milliseconds": 4},
+    {"name": "teardown", "start_milliseconds": 59, "duration_milliseconds": 2}
+  ],
+  "cuda": {
+    "launches": 24,
+    "occupancy_percent": 58,
+    "achieved_bandwidth_gbs": 800,
+    "peak_bandwidth_gbs": 1000,
+    "achieved_compute_tflops": 18,
+    "peak_compute_tflops": 100,
+    "synchronization_milliseconds": 4
+  },
+  "attributions": [
+    {"name": "q4k-mmvq", "layer": 0, "lever_id": "cuda.q8_1-activation-quant", "count": 12},
+    {"name": "q4k-mmvq", "layer": 1, "lever_id": "cuda.q8_1-activation-quant", "count": 12}
+  ]
+}

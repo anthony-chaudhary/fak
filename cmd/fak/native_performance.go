@@ -31,6 +31,10 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) {
+		set[f.Name] = true
+	})
 	modeCount := boolCount(*jsonOut, *nextOut, *dotOut)
 	if *baselineLever != "" {
 		modeCount++
@@ -38,13 +42,13 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	if *compareBaseline != "" || *compareCandidate != "" {
 		modeCount++
 	}
-	if *profilePath != "" {
+	if set["profile"] {
 		modeCount++
 	}
-	if *profileNextPath != "" {
+	if set["profile-next"] {
 		modeCount++
 	}
-	if fs.NArg() != 0 || modeCount > 1 || ((*compareBaseline == "") != (*compareCandidate == "")) {
+	if fs.NArg() != 0 || modeCount > 1 || ((*compareBaseline == "") != (*compareCandidate == "")) || (set["profile"] && *profilePath == "") || (set["profile-next"] && *profileNextPath == "") {
 		fmt.Fprintln(stderr, "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE]")
 		return 2
 	}
@@ -54,9 +58,9 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stderr, "fak native-performance: %v\n", err)
 		return 1
 	}
-	if *profilePath != "" || *profileNextPath != "" {
+	if set["profile"] || set["profile-next"] {
 		path := *profilePath
-		if path == "" {
+		if set["profile-next"] {
 			path = *profileNextPath
 		}
 		data, err := os.ReadFile(path)
@@ -78,7 +82,8 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 			return encodeNativePerformanceJSON(stdout, stderr, struct {
 				Classification nativeperf.BottleneckClassification `json:"classification"`
 				Lever          nativeperf.Lever                    `json:"lever"`
-			}{classification, *lever})
+				Override       *nativeperf.SelectionOverride       `json:"selection_override,omitempty"`
+			}{classification, *lever, profile.Override})
 		}
 		classification, err := nativeperf.ClassifyProfile(graph, profile)
 		if err != nil {
