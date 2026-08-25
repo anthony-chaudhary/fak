@@ -835,3 +835,148 @@ front page.
 - [Native harness live-model and dogfood readout (2026-08-22)](docs/notes/NATIVE-HARNESS-DOGFOOD-2026-08-22.md) — real-model bounded microharness witness, weekly usage ledger, and measured HOLD on default promotion.
 
 2026-08-24 | docs/notes/TURN-AVOIDANCE-FIRST-CLASS-2026-08-24.md | Whole-model-turn avoidance taxonomy, field evidence, replay accounting boundary, and additive rollback contract (#8791, #8796).
+
+## Extended documentation index
+
+These reader-facing references complement the curated paths above. They are grouped by area so operational notes and subsystem details remain directly discoverable.
+
+### docs
+
+- [PII CONTEXT](docs/PII-CONTEXT.md)
+- [armbench caveman factorial](docs/armbench-caveman-factorial.md)
+- [armbench caveman native](docs/armbench-caveman-native.md)
+- [armbench caveman passthrough](docs/armbench-caveman-passthrough.md)
+- [armbench ponytail gates](docs/armbench-ponytail-gates.md)
+- [armbench ponytail managed](docs/armbench-ponytail-managed.md)
+- [armbench ponytail promptfoo](docs/armbench-ponytail-promptfoo.md)
+- [armbench](docs/armbench.md)
+- [caveman pairwise judge](docs/caveman-pairwise-judge.md)
+- [dev pattern boundary](docs/dev-pattern-boundary.md)
+- [dev status checkpoints](docs/dev-status-checkpoints.md)
+- [forest lifecycle envelope](docs/forest-lifecycle-envelope.md)
+- [github pages publishing](docs/github-pages-publishing.md)
+- [harness pack gallery](docs/harness-pack-gallery.md)
+- [harness protocol](docs/harness-protocol.md)
+- [harness web demo](docs/harness-web-demo.md)
+- [latest model eval policy](docs/latest-model-eval-policy.md)
+- [manage](docs/manage.md)
+- [on demand releases](docs/on-demand-releases.md)
+- [perf fak startup](docs/perf-fak-startup.md)
+- [ponytail default medium audit](docs/ponytail-default-medium-audit.md)
+- [portability adapter sdk](docs/portability-adapter-sdk.md)
+- [portability continuity](docs/portability-continuity.md)
+- [process forest adapters](docs/process-forest-adapters.md)
+- [process forest identity](docs/process-forest-identity.md)
+- [quantization support](docs/quantization-support.md)
+
+### docs / _witnesses
+
+- [agent default code tools non fak 2026 08 19](docs/_witnesses/agent-default-code-tools-non-fak-2026-08-19.md)
+- [SKILL](docs/_witnesses/armbench-caveman-native/inputs/SKILL.md)
+- [defaults selfcheck non fak 2026 08 19](docs/_witnesses/defaults-selfcheck-non-fak-2026-08-19.md)
+- [dispatch thread pressure 2026 08 14](docs/_witnesses/dispatch-thread-pressure-2026-08-14.md)
+- [end to end value chain selfcheck 2026 08 13](docs/_witnesses/end-to-end-value-chain-selfcheck-2026-08-13.md)
+- [fleet res rollup 2026 08 13](docs/_witnesses/fleet-res-rollup-2026-08-13.md)
+- [guard codex default profiles non fak 2026 08 18](docs/_witnesses/guard-codex-default-profiles-non-fak-2026-08-18.md)
+- [LIVE FAK L4 2026 08 15](docs/_witnesses/harness-web-demo/LIVE-FAK-L4-2026-08-15.md)
+- [LIVE NATIVE PROBE 2026 08 15](docs/_witnesses/harness-web-demo/LIVE-NATIVE-PROBE-2026-08-15.md)
+- [SHIPPED FAK LAUNCH 2026 08 15](docs/_witnesses/harness-web-demo/SHIPPED-FAK-LAUNCH-2026-08-15.md)
+- [trajectory audit 2026 08 21](docs/_witnesses/issue-8494/trajectory-audit-2026-08-21.md)
+- [launch posture cross wire non fak 2026 08 19](docs/_witnesses/launch-posture-cross-wire-non-fak-2026-08-19.md)
+- [launch posture missing vcache calibration 2026 08 18](docs/_witnesses/launch-posture-missing-vcache-calibration-2026-08-18.md)
+- [manage parity 2026 08 13](docs/_witnesses/manage-parity-2026-08-13.md)
+- [manage parity hooks 2026 08 14](docs/_witnesses/manage-parity-hooks-2026-08-14.md)
+- [managed tool search compat 2026 08 13](docs/_witnesses/managed-tool-search-compat-2026-08-13.md)
+- [micro paired value 2026 08 13](docs/_witnesses/micro-paired-value-2026-08-13.md)
+- [openai decoded context view default non fak 2026 08 18](docs/_witnesses/openai-decoded-context-view-default-non-fak-2026-08-18.md)
+- [openai stale read elision non fak 2026 08 18](docs/_witnesses/openai-stale-read-elision-non-fak-2026-08-18.md)
+- [vcache calibrated steering non fak 2026 08 18](docs/_witnesses/vcache-calibrated-steering-non-fak-2026-08-18.md)
+- [vcache calibrated ttl tier non fak 2026 08 18](docs/_witnesses/vcache-calibrated-ttl-tier-non-fak-2026-08-18.md)
+- [vcache calibrated write pricing 2026 08 19](docs/_witnesses/vcache-calibrated-write-pricing-2026-08-19.md)
+- [vcache forced mismatch demotion 2026 08 19](docs/_witnesses/vcache-forced-mismatch-demotion-2026-08-19.md)
+- [vcache provider calibration live 2026 08 18](docs/_witnesses/vcache-provider-calibration-live-2026-08-18.md)
+- [wip ownership seam 2026 08 13](docs/_witnesses/wip-ownership-seam-2026-08-13.md)
+
+### docs / concepts
+
+- [disambiguation attention](docs/concepts/disambiguation-attention.md)
+- [disambiguation cache](docs/concepts/disambiguation-cache.md)
+- [disambiguation context ctx](docs/concepts/disambiguation-context-ctx.md)
+- [disambiguation decision](docs/concepts/disambiguation-decision.md)
+- [disambiguation evict](docs/concepts/disambiguation-evict.md)
+- [disambiguation gateway engine](docs/concepts/disambiguation-gateway-engine.md)
+- [disambiguation guard gate](docs/concepts/disambiguation-guard-gate.md)
+- [disambiguation layout](docs/concepts/disambiguation-layout.md)
+- [disambiguation loop](docs/concepts/disambiguation-loop.md)
+- [disambiguation plan](docs/concepts/disambiguation-plan.md)
+- [disambiguation policy capability](docs/concepts/disambiguation-policy-capability.md)
+- [disambiguation render materialize](docs/concepts/disambiguation-render-materialize.md)
+- [disambiguation score debt](docs/concepts/disambiguation-score-debt.md)
+- [disambiguation session runtime](docs/concepts/disambiguation-session-runtime.md)
+- [disambiguation support maturity](docs/concepts/disambiguation-support-maturity.md)
+- [disambiguation witness proof](docs/concepts/disambiguation-witness-proof.md)
+
+### docs / decisions
+
+- [tool result budget policy v1](docs/decisions/tool-result-budget-policy-v1.md)
+
+### docs / generated
+
+- [canonical terms](docs/generated/disambiguation/canonical-terms.md)
+- [contrast index](docs/generated/disambiguation/contrast-index.md)
+
+### docs / integrations
+
+- [codex mcp warning](docs/integrations/codex-mcp-warning.md)
+- [dos decisions](docs/integrations/dos-decisions.md)
+- [harness classification](docs/integrations/harness-classification.md)
+- [harness composition](docs/integrations/harness-composition.md)
+- [harness derive](docs/integrations/harness-derive.md)
+- [harness discovery](docs/integrations/harness-discovery.md)
+- [harness inspect](docs/integrations/harness-inspect.md)
+- [harness lock launch](docs/integrations/harness-lock-launch.md)
+- [harness mix](docs/integrations/harness-mix.md)
+- [harness override](docs/integrations/harness-override.md)
+- [harness preview](docs/integrations/harness-preview.md)
+- [harness resolution](docs/integrations/harness-resolution.md)
+- [harness stack resolution](docs/integrations/harness-stack-resolution.md)
+- [harness verify run](docs/integrations/harness-verify-run.md)
+- [independent server](docs/integrations/independent-server.md)
+- [llmlingua](docs/integrations/llmlingua.md)
+- [native harness dynamic instructions](docs/integrations/native-harness-dynamic-instructions.md)
+- [project assets](docs/integrations/project-assets.md)
+- [session new](docs/integrations/session-new.md)
+- [sol reasoning routing](docs/integrations/sol-reasoning-routing.md)
+
+### docs / observability
+
+- [session history index](docs/observability/session-history-index.md)
+
+### docs / operator
+
+- [wip inventory](docs/operator/wip-inventory.md)
+
+### docs / portability
+
+- [acceptance lab](docs/portability/acceptance-lab.md)
+- [managed agent object inventory](docs/portability/managed-agent-object-inventory.md)
+- [oci profile](docs/portability/oci-profile.md)
+- [organization collections](docs/portability/organization-collections.md)
+- [personal continuity](docs/portability/personal-continuity.md)
+- [public registry](docs/portability/public-registry.md)
+
+### docs / research
+
+- [agent customization index](docs/research/agent-customization-index.md)
+- [agent skill portability 2026 08 14](docs/research/agent-skill-portability-2026-08-14.md)
+- [agent zero study 2026 08 18](docs/research/agent-zero-study-2026-08-18.md)
+- [managed context cognitive load baseline 2026 08 13](docs/research/managed-context-cognitive-load-baseline-2026-08-13.md)
+- [micro context s5 controlled kernel](docs/research/micro-context-s5-controlled-kernel.md)
+- [microcontext natural traffic 2026 08 16](docs/research/microcontext-natural-traffic-2026-08-16.md)
+- [mirage study 2026 08 17](docs/research/mirage-study-2026-08-17.md)
+- [monitored repositories](docs/research/monitored-repositories.md)
+- [native harness dependency management 2026 08 15](docs/research/native-harness-dependency-management-2026-08-15.md)
+- [openrouter study 2026 08 18](docs/research/openrouter-study-2026-08-18.md)
+- [attention vq](docs/research/quantization/attention-vq.md)
+- [codebookmeta](docs/research/quantization/codebookmeta.md)
+
