@@ -13,7 +13,7 @@ The second spine adds the missing producer: `fak study-inventory` walks a local 
 
 The monitor now reads a registry row's JSON `map_path` and refuses unreadable, wrong-schema, wrong-repo, wrong-revision, or mismatched subsystem-count maps, so inventory metadata cannot pass by assertion alone.
 
-The next hardening pass makes the denominator harder to fake: a map file must carry positive totals, a non-empty completeness critic, and one source-class status row for every required class. Local tree classes can clear through `covered` or `checked_absent` map rows; partial or external classes need explicit `source_evidence` rows. A registry row can no longer clear full forge/process coverage by listing `open_closed_issues_prs_discussions`, `fak_selfquery_witness`, `candidate_matrix`, or `issue_tracking` without evidence.
+The next hardening pass makes the denominator harder to fake: a map file must carry positive totals equal to its subsystem aggregates, a non-empty completeness critic, and one source-class status row for every required class. Local tree classes clear through `covered` rows with path evidence or `checked_absent` rows from the full walk. Forge history stays `partial` or `external_required`, and process classes stay `external_required`; they need traceable `source_evidence` rows. A registry row can no longer clear full forge/process coverage by listing `open_closed_issues_prs_discussions`, `fak_selfquery_witness`, `candidate_matrix`, or `issue_tracking` without evidence, and forge evidence must cover issues, pull requests, and discussions.
 
 The first live readout is intentionally red: `fak-study-inventory-report/1` now reports `ok=false` with 39 blockers across the current registry. That gives the backlog a concrete denominator instead of an instruction to "study harder."
 
@@ -71,7 +71,7 @@ Do not build a full Sourcegraph/Glean clone in this issue. The root spine is the
 
 ## Acceptance
 
-`fak study-monitor --inventory-check --json` emits `fak-study-inventory-report/1`, defaults candidate/studied rows to exhaustive, exits nonzero on missing maps, and names the exact missing source classes. `fak study-inventory` emits `fak-study-inventory-map/1` from a pinned local checkout and explicitly distinguishes local tree coverage from source classes that require forge/API or study-pass artifacts. The map file itself is now part of the proof: missing source-class status rows, empty totals, empty completeness critics, or bare registry claims for partial/external classes are blockers.
+`fak study-monitor --inventory-check --json` emits `fak-study-inventory-report/1`, defaults candidate/studied rows to exhaustive, exits nonzero on missing maps, and names the exact missing source classes. `fak study-inventory` emits `fak-study-inventory-map/1` from a pinned local checkout and explicitly distinguishes local tree coverage from source classes that require forge/API or study-pass artifacts. The map file itself is now part of the proof: missing source-class status rows, contradictory or empty totals, covered rows without path evidence, invalid class dispositions, empty completeness critics, or bare registry claims for partial/external classes are blockers.
 
 ## Witness / proof
 

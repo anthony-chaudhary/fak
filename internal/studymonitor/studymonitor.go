@@ -151,12 +151,31 @@ func (r Registry) Validate() error {
 			if mode != "" && mode != InventoryModeStandard && mode != InventoryModeExhaustive {
 				return fmt.Errorf("%s: unsupported inventory mode %q", prefix, repo.Inventory.Mode)
 			}
+			for j, class := range repo.Inventory.SourceClasses {
+				if !isRequiredInventorySourceClass(strings.TrimSpace(class)) {
+					return fmt.Errorf("%s.inventory.source_classes[%d]: unsupported source class %q", prefix, j, class)
+				}
+			}
+			seenEvidence := map[string]bool{}
 			for j, evidence := range repo.Inventory.SourceEvidence {
 				if !isRequiredInventorySourceClass(evidence.Class) {
 					return fmt.Errorf("%s.inventory.source_evidence[%d]: unsupported source class %q", prefix, j, evidence.Class)
 				}
-				if len(normalizedUnique(evidence.Evidence)) == 0 {
+				if seenEvidence[evidence.Class] {
+					return fmt.Errorf("%s.inventory.source_evidence[%d]: duplicate source class %q", prefix, j, evidence.Class)
+				}
+				seenEvidence[evidence.Class] = true
+				refs := normalizedUnique(evidence.Evidence)
+				if len(refs) == 0 {
 					return fmt.Errorf("%s.inventory.source_evidence[%d]: evidence is required", prefix, j)
+				}
+				for k, ref := range refs {
+					if !isTraceableInventoryEvidence(ref) {
+						return fmt.Errorf("%s.inventory.source_evidence[%d].evidence[%d]: expected a durable path, URL, issue reference, or replayable command", prefix, j, k)
+					}
+				}
+				if missing := missingInventoryEvidenceFacets(evidence.Class, refs); len(missing) > 0 {
+					return fmt.Errorf("%s.inventory.source_evidence[%d]: missing evidence facets: %s", prefix, j, strings.Join(missing, ","))
 				}
 			}
 		}
@@ -182,7 +201,7 @@ func BuildReport(path string, registry Registry, now time.Time, dueDays int) Rep
 }
 
 func BuildInventoryReport(registry Registry) InventoryReport {
-	return buildInventoryReport(registry, "")
+	return buildInventoryReport(registry, ".")
 }
 
 func BuildInventoryReportWithMapFiles(registry Registry, repoRoot string) InventoryReport {
@@ -238,6 +257,7 @@ func validateInventoryMapFile(row *InventoryRow, repo Repository, repoRoot strin
 	if report.Totals.Files <= 0 {
 		addInventoryRowReason(row, "inventory map totals.files must be positive")
 	}
+	validateInventoryMapTotals(row, report)
 	if strings.TrimSpace(report.CompletenessNote) == "" {
 		addInventoryRowReason(row, "inventory map completeness_critic is required")
 	}
@@ -246,6 +266,29 @@ func validateInventoryMapFile(row *InventoryRow, repo Repository, repoRoot strin
 		addInventoryRowReason(row, "subsystem_count does not match inventory map subsystem rows")
 	}
 	return &report
+}
+
+func validateInventoryMapTotals(row *InventoryRow, report InventoryMap) {
+	var sum InventoryMapTotals
+	for i, subsystem := range report.Subsystems {
+		if strings.TrimSpace(subsystem.Path) == "" {
+			addInventoryRowReason(row, fmt.Sprintf("inventory map subsystem[%d] path is required", i))
+		}
+		if subsystem.Files < 0 || subsystem.Directories < 0 || subsystem.Bytes < 0 ||
+			subsystem.RuntimeFiles < 0 || subsystem.TestFiles < 0 || subsystem.DocsFiles < 0 || subsystem.TextLines < 0 {
+			addInventoryRowReason(row, fmt.Sprintf("inventory map subsystem[%d] has negative totals", i))
+		}
+		sum.Files += subsystem.Files
+		sum.Directories += subsystem.Directories
+		sum.Bytes += subsystem.Bytes
+		sum.RuntimeFiles += subsystem.RuntimeFiles
+		sum.TestFiles += subsystem.TestFiles
+		sum.DocsFiles += subsystem.DocsFiles
+		sum.TextLines += subsystem.TextLines
+	}
+	if report.Totals != sum {
+		addInventoryRowReason(row, "inventory map totals do not match subsystem aggregates")
+	}
 }
 
 func validateInventoryMapSourceClasses(row *InventoryRow, report InventoryMap) {
@@ -264,16 +307,38 @@ func validateInventoryMapSourceClasses(row *InventoryRow, report InventoryMap) {
 		if !isRequiredInventorySourceClass(name) {
 			addInventoryRowReason(row, "inventory map has unsupported source class status: "+name)
 		}
-		switch strings.TrimSpace(class.Status) {
+		status := strings.TrimSpace(class.Status)
+		switch status {
 		case InventoryClassCovered, InventoryClassPartial, InventoryClassCheckedAbsent, InventoryClassExternalRequired:
 		default:
 			addInventoryRowReason(row, "inventory map source class "+name+" has unsupported status "+class.Status)
+		}
+		if isRequiredInventorySourceClass(name) && !inventoryMapDispositionAllowed(name, status) {
+			addInventoryRowReason(row, "inventory map source class "+name+" cannot use status "+status)
+		}
+		if (status == InventoryClassCovered && name != "completeness_critic") || status == InventoryClassPartial {
+			if len(normalizedUnique(class.Evidence)) == 0 {
+				addInventoryRowReason(row, "inventory map source class "+name+" requires local path evidence for status "+status)
+			}
 		}
 	}
 	for _, required := range RequiredInventorySourceClasses {
 		if !seen[required] {
 			addInventoryRowReason(row, "inventory map missing source class status: "+required)
 		}
+	}
+}
+
+func inventoryMapDispositionAllowed(class, status string) bool {
+	switch class {
+	case "open_closed_issues_prs_discussions":
+		return status == InventoryClassPartial || status == InventoryClassExternalRequired
+	case "fak_selfquery_witness", "candidate_matrix", "issue_tracking":
+		return status == InventoryClassExternalRequired
+	case "completeness_critic":
+		return status == InventoryClassCovered
+	default:
+		return status == InventoryClassCovered || status == InventoryClassCheckedAbsent
 	}
 }
 
@@ -405,6 +470,59 @@ func inventoryEvidenceSatisfiesSourceClass(evidence []InventorySourceEvidence, c
 		}
 	}
 	return false
+}
+
+func isTraceableInventoryEvidence(value string) bool {
+	value = strings.TrimSpace(value)
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "gh:") {
+		return true
+	}
+	if strings.HasPrefix(value, "#") && len(value) > 1 {
+		for _, r := range value[1:] {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+		return true
+	}
+	for _, prefix := range []string{"gh ", "go run ", "fak ", "dos ", "git ", "./"} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return !strings.ContainsAny(value, " \t\r\n") && strings.Contains(value, "/")
+}
+
+func missingInventoryEvidenceFacets(class string, evidence []string) []string {
+	joined := strings.ToLower(strings.Join(evidence, "\n"))
+	switch class {
+	case "open_closed_issues_prs_discussions":
+		var missing []string
+		if !strings.Contains(joined, "issue") {
+			missing = append(missing, "issues")
+		}
+		if !strings.Contains(joined, "pr ") && !strings.Contains(joined, "pull") && !strings.Contains(joined, "/pr/") {
+			missing = append(missing, "pull_requests")
+		}
+		if !strings.Contains(joined, "discussion") {
+			missing = append(missing, "discussions")
+		}
+		return missing
+	case "fak_selfquery_witness":
+		if !strings.Contains(joined, "fak ") && !strings.Contains(joined, "self-query") && !strings.Contains(joined, "selfquery") {
+			return []string{"fak_self_query"}
+		}
+	case "candidate_matrix":
+		if !strings.Contains(joined, "candidate") || !strings.Contains(joined, "matrix") {
+			return []string{"candidate_matrix"}
+		}
+	case "issue_tracking":
+		if !strings.Contains(joined, "/issues/") && !strings.Contains(joined, "#") {
+			return []string{"issue_reference"}
+		}
+	}
+	return nil
 }
 
 func effectiveInventoryMode(repo Repository) string {
