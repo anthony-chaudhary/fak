@@ -61,6 +61,9 @@ func collectMemorySnapshot(rootPID int) (MemorySnapshot, bool, string) {
 	for pid := range owned {
 		h, openErr := syscall.OpenProcess(processQueryLimitedInformation|processVMRead, false, uint32(pid))
 		if openErr != nil {
+			if processExitedDuringSnapshot(openErr) {
+				continue
+			}
 			return s, true, fmt.Sprintf("OpenProcess pid %d: %v", pid, openErr)
 		}
 		var counters processMemoryCountersCommit
@@ -98,4 +101,11 @@ func hostPhysicalMemoryBytes() (uint64, string) {
 		return 0, fmt.Sprintf("GetPerformanceInfo: %v", callErr)
 	}
 	return uint64(perf.PhysicalTotal) * uint64(perf.PageSize), ""
+}
+
+// processExitedDuringSnapshot recognizes the Windows result for a PID that vanished
+// after enumeration. Other errors remain fatal so the resource guard never mistakes
+// denied or broken telemetry for a safe process tree.
+func processExitedDuringSnapshot(err error) bool {
+	return err == syscall.Errno(87)
 }

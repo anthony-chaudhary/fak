@@ -3,7 +3,9 @@
 package procguard
 
 import (
+	"errors"
 	"os"
+	"syscall"
 	"testing"
 )
 
@@ -26,5 +28,17 @@ func TestCollectCommitSnapshotOwnProcess(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("own PID missing or has zero commit: %+v", s.Processes)
+	}
+}
+
+func TestProcessExitedDuringSnapshot(t *testing.T) {
+	if !processExitedDuringSnapshot(syscall.Errno(87)) {
+		t.Fatal("a vanished Windows PID must not abort child resource monitoring")
+	}
+	if processExitedDuringSnapshot(syscall.ERROR_ACCESS_DENIED) {
+		t.Fatal("access-denied telemetry must remain fail-closed")
+	}
+	if processExitedDuringSnapshot(errors.New("other monitor failure")) {
+		t.Fatal("unknown telemetry failures must remain fail-closed")
 	}
 }
