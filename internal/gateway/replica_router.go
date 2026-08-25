@@ -59,6 +59,9 @@ type ReplicaRouter struct {
 	// the candidate set is the admissible subset, and the load function is each
 	// admissible worker's live in-flight count.
 	policy PickPolicy
+
+	// Hedge is default-off and applies only to buffered Complete calls.
+	Hedge *HedgePolicy
 }
 
 // NewReplicaRouter builds a static, in-process planner fleet. It is intentionally
@@ -169,12 +172,46 @@ func (r *ReplicaRouter) Replicas() []ReplicaInfo {
 	return out
 }
 
+func (r *ReplicaRouter) pickDistinctReplica(primary string) (PlannerReplica, bool) {
+	admit, err := r.admitSet()
+	if err != nil {
+		return PlannerReplica{}, false
+	}
+	for _, candidate := range r.replicas {
+		if candidate.Name == primary {
+			continue
+		}
+		if admit != nil {
+			if _, ok := admit[candidate.Name]; !ok {
+				continue
+			}
+		}
+		return candidate, true
+	}
+	return PlannerReplica{}, false
+}
 func (r *ReplicaRouter) Complete(ctx context.Context, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
 	repl, err := r.pickForMessages(messages)
 	if err != nil {
 		return nil, err
 	}
-	return repl.Planner.Complete(ctx, messages, tools, opts...)
+	if r.Hedge == nil {
+		return repl.Planner.Complete(ctx, messages, tools, opts...)
+	}
+	if reason := hedgeIneligibility(r.Hedge, len(r.replicas), tools, opts); reason != "" {
+		r.observeHedgeAbstention(repl, reason)
+		return repl.Planner.Complete(ctx, messages, tools, opts...)
+	}
+	alternate, ok := r.pickDistinctReplica(repl.Name)
+	if !ok {
+		r.observeHedgeAbstention(repl, "no_distinct_admissible_replica")
+		return repl.Planner.Complete(ctx, messages, tools, opts...)
+	}
+	if alternate.Planner.Model() != repl.Planner.Model() {
+		r.observeHedgeAbstention(repl, "model_contract_mismatch")
+		return repl.Planner.Complete(ctx, messages, tools, opts...)
+	}
+	return r.completeHedged(ctx, repl, alternate, messages, tools, opts...)
 }
 
 func (r *ReplicaRouter) StreamingSupported() bool {
