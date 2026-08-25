@@ -349,6 +349,9 @@ type Session struct {
 	// time.Now calls.
 	PhaseProfiler *PhaseProfiler
 
+	// qwen35DecodeGraph is an opt-in per-session production-orchestrator trace.
+	qwen35DecodeGraph *qwen35DecodeGraphRecorder
+
 	// q4kExpertStats is opt-in readback for resident-Q4_K MoE decode. It records how many
 	// routed experts the Q4_K session saw, and how many actually took the Metal Q6_K-down
 	// fused path. The counters are session-local; generation already owns a Session serially.
@@ -521,7 +524,10 @@ func (s *Session) head(xf []float32) []float32 {
 // through all layers against the cache, appending this position's K/V, and returns
 // the post-final-norm hidden vector (NOT yet projected to logits). This is the single
 // shared code path for prefill and decode; the head is applied by the caller.
-func (s *Session) tokenHidden(id, pos int) []float32 {
+func (s *Session) tokenHidden(id, pos int) (out []float32) {
+	finishGraph := s.beginQwen35DecodeGraph(pos)
+	aborted := true
+	defer func() { finishGraph(aborted) }()
 	if s.Quant {
 		return s.tokenHiddenQ(id, pos)
 	}
@@ -547,7 +553,9 @@ func (s *Session) tokenHidden(id, pos int) []float32 {
 	if tap != nil {
 		tap.writeMeta(cfg, H, pos)
 	}
-	return m.finalNorm(x)
+	out = m.finalNorm(x)
+	aborted = false
+	return out
 }
 
 // blockStep is the single-position decoder block: pre-attn norm, q/k/v, RoPE, cache
@@ -590,6 +598,7 @@ func (s *Session) blockStep(l, qpos int, x, cos, sin []float32, mat matKernel) [
 		return x
 	}
 	if cfg.isLinearAttnLayer(l) {
+		s.recordQwen35LayerGraph(l, true)
 		out := runBlock(func(xn []float32) []float32 {
 			return s.linearAttnStep(l, xn, mat)
 		})
@@ -599,6 +608,8 @@ func (s *Session) blockStep(l, qpos int, x, cos, sin []float32, mat matKernel) [
 		}
 		return out
 	}
+
+	s.recordQwen35LayerGraph(l, false)
 
 	// attnBody runs attention on an already-normalized input and returns the raw
 	// output-projection result (pre residual/post-norm). It appends THIS position's
